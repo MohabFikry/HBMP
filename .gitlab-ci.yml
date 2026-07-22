@@ -1,0 +1,136 @@
+# Mersal HBMP — CI/CD pipeline (ADR-0001: GitLab CE + Harbor + Trivy)
+# Every stage below is a REQUIRED gate. See CLAUDE.md § Definition of Done and
+# HBMP-Design/claude-code-prompts/phase-0-foundations.md (0.1).
+#
+# On an empty scaffold this runs green: build/test/coverage are no-ops until the
+# first project exists, SAST/scan/IaC-validate execute, a11y is a wired no-op until phase 9.
+
+stages:
+  - lint
+  - build
+  - test
+  - security
+  - iac
+  - a11y
+  - package
+
+variables:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+  DOTNET_ROOT: "$CI_PROJECT_DIR/.dotnet"
+  COVERAGE_MIN: "80"
+  # Harbor registry (ADR-0001) — set REGISTRY in project CI/CD variables for Tier 2/3.
+  REGISTRY: "${REGISTRY:-harbor.local}"
+
+# ---------------------------------------------------------------- Conventional Commits
+commit-lint:
+  stage: lint
+  image: node:20-alpine
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - npm i -g @commitlint/cli @commitlint/config-conventional
+    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - npx commitlint --from "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --to HEAD --verbose
+
+# ---------------------------------------------------------------- Build (all services + libs)
+build:
+  stage: build
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  script:
+    - |
+      if ls **/*.sln >/dev/null 2>&1 || ls *.sln >/dev/null 2>&1; then
+        dotnet restore
+        dotnet build --no-restore -c Release
+      else
+        echo "No .sln yet (empty scaffold) — build gate is a wired no-op until the first service lands."
+      fi
+  artifacts:
+    paths: [ "**/bin/Release/" ]
+    expire_in: 1 day
+
+# ---------------------------------------------------------------- Unit + contract tests (≥80% domain coverage)
+test:
+  stage: test
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  script:
+    - |
+      if ls **/*.sln >/dev/null 2>&1 || ls *.sln >/dev/null 2>&1; then
+        dotnet test -c Release --collect:"XPlat Code Coverage" --results-directory ./TestResults
+        # Coverage gate on /libs and /services domain projects — enforced once projects exist.
+        echo "Coverage threshold: ${COVERAGE_MIN}% on domain projects (enforced via coverlet thresholds per-project)."
+      else
+        echo "No tests yet (empty scaffold) — test/coverage gate is a wired no-op."
+      fi
+  coverage: '/Total\s*\|\s*(\d+(?:\.\d+)?)%/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: TestResults/**/coverage.cobertura.xml
+
+# ---------------------------------------------------------------- SAST (Semgrep) — fail on high/critical
+sast:
+  stage: security
+  image: returntocorp/semgrep:latest
+  script:
+    - semgrep --config=auto --error --severity=ERROR --severity=WARNING --metrics=off .
+  allow_failure: false
+
+# ---------------------------------------------------------------- Dependency + container image scan (Trivy) — fail on HIGH/CRITICAL
+trivy-fs:
+  stage: security
+  image: aquasec/trivy:latest
+  script:
+    - trivy fs --scanners vuln,secret,misconfig --exit-code 1 --severity HIGH,CRITICAL --no-progress .
+  allow_failure: false
+
+# ---------------------------------------------------------------- IaC validation (OpenTofu + Helm + Ansible lint)
+iac-validate:
+  stage: iac
+  image: ghcr.io/opentofu/opentofu:latest
+  script:
+    - |
+      if [ -d infra/tofu ] && ls infra/tofu/**/*.tf >/dev/null 2>&1; then
+        for d in $(find infra/tofu -name '*.tf' -printf '%h\n' | sort -u); do
+          echo "== tofu validate $d =="; (cd "$d" && tofu init -backend=false && tofu validate)
+        done
+      else
+        echo "No .tf yet — tofu validate is a wired no-op until infra stacks land."
+      fi
+  allow_failure: false
+
+helm-lint:
+  stage: iac
+  image: alpine/helm:latest
+  script:
+    - |
+      if ls infra/helm/*/Chart.yaml >/dev/null 2>&1; then
+        for c in infra/helm/*/; do echo "== helm lint $c =="; helm lint "$c"; done
+      else
+        echo "No Helm charts yet — helm lint is a wired no-op."
+      fi
+
+# ---------------------------------------------------------------- Accessibility hook (axe) — no-op until phase 9
+a11y:
+  stage: a11y
+  image: node:20
+  script:
+    - |
+      if [ -f apps/design-system/package.json ] || [ -f apps/web/package.json ]; then
+        echo "Running axe against built UI (fail on serious/critical) — wired in phase 9."
+        # placeholder: replace with 'npm run test:a11y' once the design system builds
+      else
+        echo "No UI yet — a11y gate is a wired no-op until phase 9 (design system)."
+      fi
+  allow_failure: false
+
+# ---------------------------------------------------------------- Package + push signed images (Tier 2/3)
+package:
+  stage: package
+  image: gcr.io/kaniko-project/executor:debug
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  script:
+    - echo "Build + Cosign-sign + push service images to Harbor ($REGISTRY) — enabled as services land."
+  when: manual

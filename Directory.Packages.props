@@ -1,0 +1,71 @@
+<Project>
+
+  <!--
+    Central Package Management for the Mersal HBMP monorepo.
+    Every project references packages WITHOUT a Version="" attribute;
+    the single source of truth for versions lives here.
+    See CLAUDE.md § Repository layout and 0C-OPEN-SOURCE-STACK.md.
+  -->
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup Label="ASP.NET Core / hosting">
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="8.0.8" />
+    <PackageVersion Include="Swashbuckle.AspNetCore" Version="6.7.3" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.8" />
+  </ItemGroup>
+
+  <ItemGroup Label="Data — EF Core + Npgsql (PostgreSQL)">
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="8.0.8" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.8" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="8.0.8" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.4" />
+    <PackageVersion Include="Npgsql" Version="8.0.3" />
+    <PackageVersion Include="Dapper" Version="2.1.35" />
+  </ItemGroup>
+
+  <ItemGroup Label="Messaging / events (RabbitMQ + NATS)">
+    <PackageVersion Include="RabbitMQ.Client" Version="6.8.1" />
+    <PackageVersion Include="NATS.Client.Core" Version="2.5.0" />
+    <PackageVersion Include="NATS.Client.JetStream" Version="2.5.0" />
+    <PackageVersion Include="CloudNative.CloudEvents" Version="2.8.0" />
+    <PackageVersion Include="CloudNative.CloudEvents.SystemTextJson" Version="2.8.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Cache / search / storage">
+    <PackageVersion Include="StackExchange.Redis" Version="2.8.0" />
+    <PackageVersion Include="OpenSearch.Client" Version="1.7.1" />
+    <PackageVersion Include="AWSSDK.S3" Version="3.7.404.5" />
+  </ItemGroup>
+
+  <ItemGroup Label="Observability (OpenTelemetry → LGTM)">
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.9.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.9.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.9.0" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.9.0" />
+    <PackageVersion Include="Serilog.AspNetCore" Version="8.0.2" />
+    <PackageVersion Include="Serilog.Sinks.Grafana.Loki" Version="8.3.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Validation / utility">
+    <PackageVersion Include="FluentValidation" Version="11.9.2" />
+    <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="11.9.2" />
+    <PackageVersion Include="UUIDNext" Version="4.1.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Testing">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.11.0" />
+    <PackageVersion Include="xunit" Version="2.9.0" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageVersion Include="FluentAssertions" Version="6.12.0" />
+    <PackageVersion Include="NSubstitute" Version="5.1.0" />
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="3.10.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.8" />
+    <PackageVersion Include="coverlet.collector" Version="6.0.2" />
+    <PackageVersion Include="PactNet" Version="4.5.0" />
+  </ItemGroup>
+
+</Project>

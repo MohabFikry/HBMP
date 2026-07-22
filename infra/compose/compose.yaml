@@ -1,0 +1,264 @@
+# Mersal HBMP — Tier 1 (single-server) Docker Compose starter
+# Open-source, on-prem-first, cloud-ready stack (see ../../0C-OPEN-SOURCE-STACK.md).
+# This stands up the INFRASTRUCTURE the platform runs on. Application services
+# (identity/patient/policy/... + web) are added as they are built — a template is at the bottom.
+#
+# ⚠️ STARTER, NOT PRODUCTION-HARDENED. Before real data:
+#   - move every secret out of .env into OpenBao; enable TLS at the edge (Traefik + Let's Encrypt + ModSecurity/OWASP CRS)
+#   - turn OpenSearch security ON; run Keycloak in production mode; run OpenBao as a real server (not -dev)
+#   - enable LUKS full-disk encryption on the host; wire pgBackRest + restic offsite backups
+# See README.md and phase-11-hardening-and-nfr.md.
+
+name: mersal-hbmp
+
+x-restart: &restart
+  restart: unless-stopped
+
+networks:
+  hbmp:
+    driver: bridge
+
+volumes:
+  pgdata:
+  miniodata:
+  rabbitmqdata:
+  opensearchdata:
+  grafanadata:
+  prometheusdata:
+  lokidata:
+  baodata:
+
+services:
+  # ---------------------------------------------------------------- PostgreSQL
+  postgres:
+    image: postgres:16
+    <<: *restart
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./config/postgres-init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [hbmp]
+
+  # ---------------------------------------------------------------- Keycloak (identity, MFA)
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    <<: *restart
+    command: start-dev --http-port=8080
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: ${POSTGRES_USER}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_HEALTH_ENABLED: "true"
+    ports: ["8080:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [hbmp]
+
+  # ---------------------------------------------------------------- Kong API gateway (DB-less)
+  kong:
+    image: kong:3.7
+    <<: *restart
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
+      KONG_ADMIN_LISTEN: 127.0.0.1:8001
+      KONG_LOG_LEVEL: notice
+    ports:
+      - "8000:8000"          # public API proxy
+      - "127.0.0.1:8001:8001" # admin — localhost only
+    volumes:
+      - ./config/kong.yml:/etc/kong/kong.yml:ro
+    networks: [hbmp]
+
+  # ---------------------------------------------------------------- MinIO (S3 object storage + WORM)
+  minio:
+    image: minio/minio:latest
+    <<: *restart
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "9000:9000"  # S3 API
+      - "9001:9001"  # console
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [hbmp]
+
+  # ---------------------------------------------------------------- RabbitMQ (command queues)
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    <<: *restart
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # management UI
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    networks: [hbmp]
+
+  # ---------------------------------------------------------------- NATS JetStream (event stream)
+  nats:
+    image: nats:2.10
+    <<: *restart
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"  # client
+      - "8222:8222"  # monitoring
+    networks: [hbmp]
+
+  # ---------------------------------------------------------------- Valkey (cache)
+  valkey:
+    image: valkey/valkey:8
+    <<: *restart
+    command: ["valkey-server", "--requirepass", "${VALKEY_PASSWORD}", "--save", "60", "1"]
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-a", "${VALKEY_PASSWORD}", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [hbmp]
+
+  # ---------------------------------------------------------------- OpenSearch (search)
+  opensearch:
+    image: opensearchproject/opensearch:2.15.0
+    <<: *restart
+    environment:
+      discovery.type: single-node
+      bootstrap.memory_lock: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_ADMIN_PASSWORD}
+      # STARTER ONLY: disable the security plugin for first boot. TURN THIS OFF (=false) before real data.
+      DISABLE_SECURITY_PLUGIN: "${OPENSEARCH_DISABLE_SECURITY:-true}"
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    ports: ["9200:9200"]
+    volumes:
+      - opensearchdata:/usr/share/opensearch/data
+    networks: [hbmp]
+
+  # ---------------------------------------------------------------- OpenBao (secrets / KMS)
+  # STARTER: dev mode (in-memory, root token). Replace with a real server + unseal for production.
+  openbao:
+    image: openbao/openbao:latest
+    <<: *restart
+    cap_add: ["IPC_LOCK"]
+    command: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: ${OPENBAO_ROOT_TOKEN}
+      BAO_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    ports: ["8200:8200"]
+    volumes:
+      - baodata:/openbao/file
+    networks: [hbmp]
+
+  # ---------------------------------------------------------------- ClamAV (upload malware scan)
+  clamav:
+    image: clamav/clamav:latest
+    <<: *restart
+    ports: ["3310:3310"]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/clamdcheck.sh"]
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 120s
+    networks: [hbmp]
+
+  # ---------------------------------------------------------------- Observability: Prometheus / Grafana / Loki / Tempo
+  prometheus:
+    image: prom/prometheus:latest
+    <<: *restart
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    ports: ["9090:9090"]
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheusdata:/prometheus
+    networks: [hbmp]
+
+  loki:
+    image: grafana/loki:3.1.0
+    <<: *restart
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    ports: ["3100:3100"]
+    volumes:
+      - lokidata:/loki
+    networks: [hbmp]
+
+  tempo:
+    image: grafana/tempo:latest
+    <<: *restart
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    ports:
+      - "3200:3200"   # tempo query
+      - "4317:4317"   # OTLP gRPC (services send traces here)
+    volumes:
+      - ./config/tempo.yaml:/etc/tempo/tempo.yaml:ro
+    networks: [hbmp]
+
+  grafana:
+    image: grafana/grafana:latest
+    <<: *restart
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports: ["3000:3000"]
+    volumes:
+      - grafanadata:/var/lib/grafana
+      - ./config/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    depends_on: [prometheus, loki, tempo]
+    networks: [hbmp]
+
+  # ================================================================ APPLICATION SERVICES (template)
+  # Add each .NET service as it is built. Example — copy per service:
+  #
+  # patient-service:
+  #   image: harbor.local/mersal/patient-service:${TAG:-latest}
+  #   <<: *restart
+  #   environment:
+  #     ConnectionStrings__Db: "Host=postgres;Database=patient;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+  #     Auth__Authority: "http://keycloak:8080/realms/mersal"
+  #     Messaging__Rabbit: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
+  #     Events__Nats: "nats://nats:4222"
+  #     Cache__Valkey: "valkey:6379,password=${VALKEY_PASSWORD}"
+  #     Search__OpenSearch: "http://opensearch:9200"
+  #     Storage__S3Endpoint: "http://minio:9000"
+  #     Secrets__OpenBao: "http://openbao:8200"
+  #     Otel__Endpoint: "http://tempo:4317"
+  #   depends_on:
+  #     postgres: { condition: service_healthy }
+  #     keycloak: { condition: service_started }
+  #   networks: [hbmp]
+  #
+  # web:  # React portals (served behind Kong/Traefik)
+  #   image: harbor.local/mersal/web:${TAG:-latest}
+  #   <<: *restart
+  #   networks: [hbmp]

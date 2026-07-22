@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en" dir="ltr" data-theme="light">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Mersal HBMP — Multi-screen prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Cairo:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --font-latin:"Inter",-apple-system,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+  --font-arabic:"Cairo","Noto Sans Arabic",system-ui,sans-serif;
+  --font-mono:"SF Mono","JetBrains Mono",ui-monospace,monospace;
+  --r-sm:8px;--r-md:12px;--r-lg:16px;--r-pill:999px;
+  --sp2:8px;--sp3:12px;--sp4:16px;--sp5:20px;--sp6:24px;--sp8:32px;
+  --dur:200ms;--ease:cubic-bezier(.2,.8,.2,1);
+  --glass-blur:blur(20px) saturate(1.2);
+  --elev-1:0 1px 2px rgba(16,38,43,.06),0 1px 1px rgba(16,38,43,.04);
+  --elev-2:0 8px 26px rgba(16,38,43,.12);
+  --elev-3:0 18px 50px rgba(16,38,43,.24);
+}
+html[data-theme="light"]{
+  --surface-0:#EEF5F5;--surface-1:#FFFFFF;--surface-2:#F7FBFB;
+  --text-1:#12262B;--text-2:#4A5A61;--text-3:#6B7C82;
+  --accent:#007A7A;--accent-press:#005C5C;--accent-tint:#E1F1F1;
+  --brand:#00ACAC;--gold:#B57A00;--border:#D7E3E3;--border-strong:#B9CCCC;--focus:#007A7A;
+  --glass-bg:rgba(255,255,255,0.72);--glass-brd:rgba(255,255,255,0.6);--scrim:rgba(8,30,32,.35);
+  --st-ok-bg:#E4F2EA;--st-ok-fg:#1E7A46;--st-info-bg:#E4EDF9;--st-info-fg:#1F5FA6;
+  --st-part-bg:#F6ECD9;--st-part-fg:#8A5A00;--st-warn-bg:#F7E7D6;--st-warn-fg:#9C4E00;
+  --st-bad-bg:#F8E1DF;--st-bad-fg:#B3261E;--st-neu-bg:#E7ECEE;--st-neu-fg:#41525A;
+}
+html[data-theme="dark"]{
+  --surface-0:#04282A;--surface-1:#063437;--surface-2:#0A3E41;
+  --text-1:#EAF5F4;--text-2:#A9C4C4;--text-3:#7FA0A0;
+  --accent:#5FD3D3;--accent-press:#86E3E3;--accent-tint:#0E4649;
+  --brand:#00ACAC;--gold:#EBC169;--border:#12484B;--border-strong:#1C5A5E;--focus:#5FD3D3;
+  --glass-bg:rgba(6,40,42,0.60);--glass-brd:rgba(120,200,200,0.18);--scrim:rgba(0,0,0,.5);
+  --st-ok-bg:#123A28;--st-ok-fg:#7FE0A6;--st-info-bg:#12304F;--st-info-fg:#9FC8F7;
+  --st-part-bg:#3B2F12;--st-part-fg:#EBC169;--st-warn-bg:#432A12;--st-warn-fg:#F2B27A;
+  --st-bad-bg:#43201D;--st-bad-fg:#F5A29B;--st-neu-bg:#123033;--st-neu-fg:#B9D2D2;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font-family:var(--font-latin);background:var(--surface-0);color:var(--text-1);font-size:15px;line-height:1.55;
+  -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-variant-numeric:tabular-nums;
+  letter-spacing:-.005em;font-feature-settings:"cv05","cv08","ss01","tnum";text-rendering:optimizeLegibility}
+html[lang="ar"] body{font-family:var(--font-arabic);letter-spacing:0}
+.mono{font-family:var(--font-mono);font-weight:500;letter-spacing:0;font-feature-settings:"tnum"}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px;border-radius:6px}
+button{font:inherit;color:inherit;cursor:pointer}
+h1,h2,h3{margin:0;letter-spacing:-.021em;text-wrap:balance;line-height:1.18}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.skip{position:absolute;left:12px;top:-48px;background:var(--accent);color:#fff;padding:10px 14px;border-radius:var(--r-sm);z-index:60;transition:top var(--dur)}
+.skip:focus{top:12px}
+.app{display:grid;grid-template-columns:250px 1fr;grid-template-rows:60px 1fr;min-height:100vh}
+header.bar{grid-column:1/3;position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:var(--sp4);padding:0 var(--sp5);
+  background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);
+  border-bottom:1px solid var(--border);box-shadow:inset 0 1px 0 var(--glass-brd)}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){header.bar,nav.rail,.glass{background:var(--surface-1)}}
+.brand{display:flex;align-items:center;gap:11px;font-weight:600}
+.brand .logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--brand),#0A6E70);display:grid;place-items:center;color:#fff;font-weight:600;box-shadow:var(--elev-1);overflow:hidden}
+.brand .logo img{width:27px;height:auto;display:block}
+.brand .wordmark{font-weight:600;letter-spacing:-.012em;font-size:15.5px}
+.brand small{color:var(--text-2);font-weight:500}
+.search{flex:1;max-width:420px;margin-inline:auto;position:relative}
+.search input{width:100%;height:40px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-1);color:var(--text-1);padding:0 16px 0 40px}
+html[dir="rtl"] .search input{padding:0 40px 0 16px}
+.search svg{position:absolute;inset-inline-start:14px;top:11px;width:18px;height:18px;color:var(--text-3)}
+.actions{display:flex;align-items:center;gap:var(--sp2)}
+.iconbtn{width:44px;height:44px;border-radius:var(--r-md);border:1px solid transparent;background:transparent;display:grid;place-items:center;color:var(--text-2)}
+.iconbtn:hover{background:var(--accent-tint);color:var(--accent)}
+.iconbtn svg{width:20px;height:20px}
+.avatar{width:34px;height:34px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:600}
+nav.rail{grid-row:2;position:sticky;top:60px;align-self:start;height:calc(100vh - 60px);padding:var(--sp4) var(--sp3);overflow:auto;
+  background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border-inline-end:1px solid var(--border)}
+.rail .grp{color:var(--text-3);font-size:12px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;padding:var(--sp4) var(--sp3) var(--sp2)}
+.rail button.navi{width:100%;display:flex;align-items:center;gap:10px;padding:11px var(--sp3);border-radius:var(--r-md);border:0;background:transparent;color:var(--text-2);font-weight:500;min-height:44px;position:relative;text-align:start}
+.rail button.navi svg{width:19px;height:19px;flex:none}
+.rail button.navi:hover{background:var(--accent-tint);color:var(--accent)}
+.rail button.navi[aria-current="page"]{background:var(--accent-tint);color:var(--accent);font-weight:600}
+.rail button.navi[aria-current="page"]::before{content:"";position:absolute;inset-inline-start:0;top:8px;bottom:8px;width:4px;border-radius:4px;background:var(--accent)}
+main{grid-row:2;min-width:0;padding:var(--sp6)}
+.pagehead{display:flex;align-items:flex-end;gap:var(--sp4);flex-wrap:wrap;margin-bottom:var(--sp5)}
+.pagehead .role{font-size:12px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:var(--accent)}
+.pagehead h1{font-size:26px;font-weight:600}
+.pagehead p{margin:2px 0 0;color:var(--text-2)}
+.spacer{flex:1}
+.muted{color:var(--text-2)}
+.card{background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--elev-1)}
+.glass{background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--elev-2),inset 0 1px 0 var(--glass-brd)}
+.btn{min-height:44px;padding:0 16px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--surface-1);color:var(--text-1);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.btn svg{width:17px;height:17px}
+.btn:hover{border-color:var(--border-strong)}
+.btn.primary{background:var(--accent);color:#fff;border-color:transparent}
+.btn.primary:hover{background:var(--accent-press)}
+.btn.danger{color:var(--st-bad-fg);border-color:var(--st-bad-fg)}
+.btn.warn{color:var(--st-warn-fg);border-color:var(--st-warn-fg)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding:4px 10px;border-radius:var(--r-pill);border:1.5px solid transparent;white-space:nowrap}
+.chip svg{width:14px;height:14px}
+.chip.ok{background:var(--st-ok-bg);color:var(--st-ok-fg)}
+.chip.info{background:var(--st-info-bg);color:var(--st-info-fg);border-style:dashed;border-color:currentColor}
+.chip.part{background:var(--st-part-bg);color:var(--st-part-fg)}
+.chip.warn{background:transparent;color:var(--st-warn-fg);border-color:currentColor}
+.chip.bad{background:var(--st-bad-bg);color:var(--st-bad-fg);border-radius:7px}
+.chip.neu{background:transparent;color:var(--st-neu-fg);border-color:var(--border)}
+/* Reception */
+.recgrid{display:grid;grid-template-columns:1fr 360px;gap:var(--sp5);align-items:start}
+.reclist{padding:var(--sp2)}
+.reclist .item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:var(--r-md);border:1px solid transparent;cursor:pointer;min-height:56px;width:100%;background:transparent;text-align:start}
+.reclist .item:hover{background:var(--surface-2)}
+.reclist .item[aria-selected="true"]{background:var(--accent-tint);border-color:var(--accent)}
+.ini{width:38px;height:38px;border-radius:50%;background:var(--surface-2);border:1px solid var(--border);display:grid;place-items:center;font-weight:600;color:var(--text-2);font-size:13px}
+.rescard{padding:var(--sp5)}
+.rescard .top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:6px 0;font-size:14px;border-bottom:1px solid var(--border)}
+.kv:last-child{border-bottom:0}
+.kv span:first-child{color:var(--text-2)}
+.kv span:last-child{font-weight:500;text-align:end}
+.lim{margin:8px 0}
+.lim .lab{display:flex;justify-content:space-between;font-size:13px;color:var(--text-2);margin-bottom:4px}
+.lim .bar{height:8px;border-radius:5px;background:var(--surface-2);overflow:hidden;border:1px solid var(--border)}
+.lim .bar i{display:block;height:100%;background:var(--accent)}
+.mn{margin-top:var(--sp4);font-size:12.5px;color:var(--text-3);display:flex;gap:6px;align-items:center}
+/* Doctor */
+.docgrid{display:grid;grid-template-columns:1fr;gap:var(--sp5)}
+.pstrip{display:flex;gap:16px;align-items:center;padding:var(--sp4) var(--sp5);flex-wrap:wrap}
+.pstrip .ini{width:48px;height:48px;font-size:16px}
+.pstrip .meta b{font-size:17px}
+.pstrip .meta small{color:var(--text-3);display:block}
+.pstrip .flags{display:flex;gap:8px;margin-inline-start:auto;flex-wrap:wrap}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);padding:0 var(--sp5)}
+.tab{border:0;background:transparent;color:var(--text-2);padding:12px 12px;font-weight:600;border-bottom:2px solid transparent;min-height:44px}
+.tab[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent)}
+.tabpane{padding:var(--sp5)}
+.soap{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp4)}
+.soap label{font-weight:500;font-size:14px;display:block}
+textarea,input.txt,select.txt{width:100%;margin-top:6px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--surface-1);color:var(--text-1);padding:10px 12px;font:inherit}
+textarea{min-height:80px;resize:vertical}
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.pilltag{display:inline-flex;align-items:center;gap:6px;background:var(--accent-tint);color:var(--accent);border-radius:var(--r-pill);padding:5px 12px;font-weight:500;font-size:13px}
+.vit{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:var(--sp3)}
+.vit .v{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-md);padding:12px}
+.vit .v small{color:var(--text-3)}
+.vit .v b{font-size:20px;display:block;margin-top:2px}
+.rowbtns{display:flex;gap:10px;flex-wrap:wrap;margin-top:var(--sp4)}
+/* Dashboard */
+.kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:var(--sp4);margin-bottom:var(--sp5)}
+.kpi{padding:var(--sp5)}
+.kpi .lab{color:var(--text-2);font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px}
+.kpi .val{font-size:30px;font-weight:600;margin-top:6px}
+.kpi .delta{font-size:12.5px;font-weight:600;margin-top:2px;display:inline-flex;gap:4px;align-items:center}
+.up{color:var(--st-ok-fg)}.down{color:var(--st-bad-fg)}
+.dash2{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp5)}
+.chartwrap{padding:var(--sp5)}
+.chartwrap h3{font-size:16px;margin-bottom:12px}
+.dtable{width:100%;border-collapse:collapse;margin-top:12px;font-size:14px}
+.dtable th,.dtable td{text-align:start;padding:8px 10px;border-bottom:1px solid var(--border)}
+.wl{width:100%;border-collapse:separate;border-spacing:0}
+.wl th{position:sticky;top:60px;background:var(--surface-2);text-align:start;font-size:13px;font-weight:600;color:var(--text-2);padding:12px 16px;border-bottom:1px solid var(--border);z-index:5;white-space:nowrap}
+.wl td{padding:14px 16px;border-bottom:1px solid var(--border);vertical-align:middle}
+.wl tbody tr:last-child td{border-bottom:0}
+.row{cursor:pointer}
+.row:hover{background:var(--surface-2)}
+.row[aria-selected="true"]{background:var(--accent-tint)}
+.row[aria-selected="true"] td:first-child{box-shadow:inset 4px 0 0 var(--accent)}
+html[dir="rtl"] .row[aria-selected="true"] td:first-child{box-shadow:inset -4px 0 0 var(--accent)}
+.row:focus-visible{outline:3px solid var(--focus);outline-offset:-3px}
+.apgrid{display:grid;grid-template-columns:1fr 380px;gap:var(--sp5);align-items:start}
+.panel{position:sticky;top:76px;padding:var(--sp5)}
+.block{background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r-md);padding:14px;margin-top:var(--sp4)}
+.block h3{font-size:12px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-3);margin-bottom:8px}
+.actions-row{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp2);margin-top:var(--sp4)}
+.err{color:var(--st-bad-fg);font-size:13px;margin-top:6px;display:none;align-items:center;gap:6px}
+.err.show{display:flex}
+#toast{position:fixed;inset-inline:0;bottom:24px;display:flex;justify-content:center;pointer-events:none;z-index:70}
+#toast .t{background:var(--surface-1);border:1px solid var(--border);box-shadow:var(--elev-3);border-radius:var(--r-pill);padding:12px 18px;display:none;align-items:center;gap:10px;font-weight:500;max-width:90vw}
+#toast .t.show{display:inline-flex}
+#toast .t svg{width:18px;height:18px;color:var(--st-ok-fg)}
+@media (max-width:1080px){.recgrid,.apgrid,.dash2,.soap{grid-template-columns:1fr}.panel{position:static}}
+@media (max-width:760px){.app{grid-template-columns:1fr}nav.rail{display:none}header.bar{grid-column:1}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="app">
+  <header class="bar">
+    <div class="brand"><span class="logo"><img src="https://mersal-ngo.org/images/logo_W.png" alt="Mersal" onerror="this.replaceWith(document.createTextNode('م'))"></span><span class="wordmark" data-i="appname">Mersal HBMP</span></div>
+    <div class="search" role="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+      <input type="search" id="globalSearch" aria-label="Search" placeholder="Search"/>
+    </div>
+    <div class="actions">
+      <button class="iconbtn" id="langBtn" aria-label="Switch to Arabic" title="EN / ع"><b style="font-size:14px">ع</b></button>
+      <button class="iconbtn" id="themeBtn" aria-label="Switch color theme" title="Light / dark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg></button>
+      <div class="avatar" aria-label="Signed in">MK</div>
+    </div>
+  </header>
+  <nav class="rail" aria-label="Screens" id="rail">
+    <div class="grp" data-i="g_access">Patient access</div>
+    <button class="navi" data-s="reception"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/></svg><span data-i="s_reception">Reception · Eligibility</span></button>
+    <div class="grp" data-i="g_clinical">Clinical</div>
+    <button class="navi" data-s="doctor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 2v4M16 2v4M4 9h16M6 4h12a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/><path d="M12 12v4M10 14h4"/></svg><span data-i="s_doctor">Doctor · Consultation</span></button>
+    <div class="grp" data-i="g_approvals">Approvals</div>
+    <button class="navi" data-s="approvals"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span data-i="s_approvals">Approval worklist</span></button>
+    <div class="grp" data-i="g_insights">Insights</div>
+    <button class="navi" data-s="dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg><span data-i="s_dashboard">Executive dashboard</span></button>
+  </nav>
+  <main id="main" tabindex="-1"><div id="view"></div></main>
+</div>
+<div id="toast" aria-live="assertive"><div class="t" id="toastT"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg><span id="toastMsg"></span></div></div>
+
+<script>
+const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
+function svg(p,cls){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="${cls||''}" aria-hidden="true">${p}</svg>`;}
+const IC={ok:'<path d="M20 6 9 17l-5-5"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+ half:'<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none"/>',
+ tri:'<path d="M12 2 2 20h20L12 2Z"/><path d="M12 9v4M12 17h.01"/>',x:'<path d="M18 6 6 18M6 6l12 12"/>',
+ info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',doc:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
+ plus:'<path d="M12 5v14M5 12h14"/>',flask:'<path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/>',pill:'<path d="M10.5 20.5 4 14a4.9 4.9 0 0 1 7-7l6.5 6.5a4.9 4.9 0 0 1-7 7Z"/><path d="m8.5 8.5 7 7"/>'};
+function chip(kind,label){return `<span class="chip ${kind}">${svg({ok:IC.ok,info:IC.clock,part:IC.half,warn:IC.tri,bad:IC.x,neu:IC.info}[kind]||IC.info)}${label}</span>`;}
+function stKind(s){return ({ok:'ok',susp:'bad',exp:'bad',blk:'bad',info:'info',warn:'warn',part:'part',bad:'bad',neu:'neu'})[s]||'neu';}
+
+const T={en:{
+ appname:"Mersal HBMP",g_access:"Patient access",g_clinical:"Clinical",g_approvals:"Approvals",g_insights:"Insights",
+ s_reception:"Reception · Eligibility",s_doctor:"Doctor · Consultation",s_approvals:"Approval worklist",s_dashboard:"Executive dashboard",
+ search:"Search",
+ rec_role:"Reception",rec_title:"Eligibility check",rec_sub:"Search a beneficiary, then view minimum-necessary eligibility. No clinical data here.",
+ rec_ph:"Search by name, member no, ID, phone…",coverage:"Coverage",remaining:"Remaining limits",lastvisit:"Last visit",member:"Member",agesex:"Age / sex",policy:"Policy",
+ mn_note:"Reception sees eligibility, coverage and a visit summary only — never the EMR.",startvisit:"Start visit",
+ doc_role:"Doctor",doc_title:"Consultation",doc_sub:"Encounter workspace — treating clinician only.",
+ t_soap:"SOAP note",t_vitals:"Vitals",t_orders:"Orders & prescriptions",
+ subjective:"Subjective",objective:"Objective",assessment:"Assessment",plan:"Plan",dxlab:"Add diagnosis (ICD-10)",add:"Add",allergies:"Allergies",
+ neworder:"New lab / imaging order",newrx:"New prescription",refer:"Refer",saveenc:"Save encounter",
+ ap_role:"Medical approval",ap_title:"Approval worklist",ap_sub:"Review authorization requests and record decisions.",
+ c_auth:"Authorization",c_ben:"Beneficiary",c_svc:"Service",c_tat:"In queue",c_status:"Status",
+ ctx:"Clinical context (EMR)",supp:"Supporting documents",rationale:"Clinical rationale / note",need:"A rationale is required to reject or request info.",
+ approve:"Approve",partial:"Partial",reject:"Reject",reqinfo:"Request info",pick:"Select a request to review it.",reviewer:"Reviewer: Dr. Reviewer",
+ dx:"Diagnosis",req:"Requested",cost:"Est. cost",polrem:"Policy remaining",decided:"Decision recorded and audited",
+ db_role:"Leadership",db_title:"Operations dashboard",db_sub:"Live operational and approval KPIs.",
+ k_visits:"Visits today",k_tat:"Avg approval TAT",k_pending:"Pending approvals",k_noshow:"No-show rate",k_util:"Provider utilization",
+ chart_title:"Authorizations by service (this week)",showtable:"Show data table",hidetable:"Hide data table",
+ st:{ok:"Eligible",info:"Under review",part:"Partial",warn:"Emergency",bad:"Rejected",neu:"Info requested",exp:"Expired",susp:"Suspended",approved:"Approved"}
+},ar:{
+ appname:"مرسال HBMP",g_access:"وصول المستفيد",g_clinical:"سريري",g_approvals:"الموافقات",g_insights:"مؤشرات",
+ s_reception:"الاستقبال · الأهلية",s_doctor:"الطبيب · الكشف",s_approvals:"قائمة الموافقات",s_dashboard:"لوحة القيادة",
+ search:"بحث",
+ rec_role:"الاستقبال",rec_title:"التحقق من الأهلية",rec_sub:"ابحث عن مستفيد ثم اعرض الحد الأدنى من بيانات الأهلية. لا بيانات سريرية هنا.",
+ rec_ph:"ابحث بالاسم أو رقم العضو أو الهوية أو الهاتف…",coverage:"التغطية",remaining:"الحدود المتبقية",lastvisit:"آخر زيارة",member:"العضو",agesex:"العمر / النوع",policy:"الوثيقة",
+ mn_note:"يرى الاستقبال الأهلية والتغطية وملخص الزيارات فقط — وليس السجل الطبي.",startvisit:"بدء زيارة",
+ doc_role:"الطبيب",doc_title:"الكشف",doc_sub:"مساحة عمل اللقاء — للطبيب المعالج فقط.",
+ t_soap:"ملاحظة SOAP",t_vitals:"العلامات الحيوية",t_orders:"الطلبات والوصفات",
+ subjective:"الشكوى",objective:"الفحص",assessment:"التقييم",plan:"الخطة",dxlab:"أضف تشخيصًا (ICD-10)",add:"أضف",allergies:"الحساسية",
+ neworder:"طلب مختبر / أشعة",newrx:"وصفة جديدة",refer:"إحالة",saveenc:"حفظ اللقاء",
+ ap_role:"الموافقة الطبية",ap_title:"قائمة الموافقات",ap_sub:"راجع طلبات التفويض وسجّل القرارات.",
+ c_auth:"التفويض",c_ben:"المستفيد",c_svc:"الخدمة",c_tat:"بالانتظار",c_status:"الحالة",
+ ctx:"السياق السريري (السجل)",supp:"المستندات الداعمة",rationale:"المبرر السريري / ملاحظة",need:"المبرر مطلوب للرفض أو طلب معلومات.",
+ approve:"موافقة",partial:"جزئي",reject:"رفض",reqinfo:"طلب معلومات",pick:"اختر طلبًا لمراجعته.",reviewer:"المراجع: د. المراجع",
+ dx:"التشخيص",req:"المطلوب",cost:"التكلفة التقديرية",polrem:"المتبقي بالوثيقة",decided:"تم تسجيل القرار وتدقيقه",
+ db_role:"القيادة",db_title:"لوحة العمليات",db_sub:"مؤشرات التشغيل والموافقات لحظيًا.",
+ k_visits:"زيارات اليوم",k_tat:"متوسط زمن الموافقة",k_pending:"موافقات معلّقة",k_noshow:"نسبة عدم الحضور",k_util:"استغلال مقدمي الخدمة",
+ chart_title:"التفويضات حسب الخدمة (هذا الأسبوع)",showtable:"إظهار الجدول",hidetable:"إخفاء الجدول",
+ st:{ok:"مؤهل",info:"قيد المراجعة",part:"جزئي",warn:"طارئ",bad:"مرفوض",neu:"طلب معلومات",exp:"منتهٍ",susp:"موقوف",approved:"مقبول"}
+}};
+
+/* ---------- data ---------- */
+const MEMBERS=[
+ {ini:"AH",name:"Ahmed H.",mno:"MRS-M-4820117",age:"41 / M",st:"ok",policy:"Standard care",cov:78,lims:[["Lab",6200,9000],["Imaging",12000,18000],["Pharmacy",1400,4000]],last:"MRI lumbar — 12 May 2026"},
+ {ini:"SD",name:"Sara D.",mno:"MRS-M-1129384",age:"29 / F",st:"ok",policy:"Standard care",cov:54,lims:[["Lab",3100,9000],["Imaging",5900,12700],["Pharmacy",900,4000]],last:"Consult — 2 Jul 2026"},
+ {ini:"YK",name:"Yusuf K.",mno:"MRS-M-7740233",age:"58 / M",st:"susp",policy:"Oncology program",cov:20,lims:[["Drug",92000,140000],["Lab",4000,9000]],last:"Chemo cycle 3 — 18 Jun 2026"},
+ {ini:"NF",name:"Nour F.",mno:"MRS-M-2210876",age:"34 / F",st:"exp",policy:"Standard care",cov:0,lims:[["Lab",0,9000]],last:"Surgery consult — 9 Jan 2026"}
+];
+const APPROVALS=[
+ {id:"AUTH-2026-0K7F2",ini:"AH",mno:"MRS-M-4820117",age:"41 / M",svc:"MRI — Lumbar spine",type:"Imaging",dx:"Chronic LBP, radiculopathy",cost:"EGP 6,400",pol:"EGP 18,200",tat:14,max:24,st:"info",docs:["Referral note.pdf","Prior X-ray.pdf"]},
+ {id:"AUTH-2026-0K7G9",ini:"MS",mno:"MRS-M-3391044",age:"7 / F",svc:"CT — Brain w/ contrast",type:"Imaging",dx:"Post-trauma, r/o bleed",cost:"EGP 5,100",pol:"EGP 22,000",tat:2,max:6,st:"warn",docs:["ER triage.pdf"]},
+ {id:"AUTH-2026-0K7H1",ini:"YK",mno:"MRS-M-7740233",age:"58 / M",svc:"Trastuzumab — 6 cycles",type:"High-cost drug",dx:"HER2+ carcinoma",cost:"EGP 92,000",pol:"EGP 140,000",tat:33,max:48,st:"info",docs:["Oncology plan.pdf","Pathology.pdf"]},
+ {id:"AUTH-2026-0K7L0",ini:"SD",mno:"MRS-M-1129384",age:"29 / F",svc:"MRI — Brain",type:"Imaging",dx:"Refractory headache",cost:"EGP 5,900",pol:"EGP 12,700",tat:41,max:24,st:"info",docs:["Neurology note.pdf"]}
+];
+const PATIENT={ini:"AH",name:"Ahmed H.",mno:"MRS-M-4820117",age:"41 / M",allergies:["Penicillin"],dx:["M54.5 Low back pain"],
+ vitals:[["BP","128/82","mmHg"],["HR","76","bpm"],["Temp","36.8","°C"],["SpO₂","98","%"],["Weight","81","kg"],["BMI","26.4",""]]};
+const KPI=[["k_visits","148","up","+12%"],["k_tat","6.2h","up","−0.8h"],["k_pending","4","down","+1"],["k_noshow","7.4%","up","−1.1%"],["k_util","82%","up","+3%"]];
+const CHART=[["MRI",9],["CT",6],["Lab panel",14],["High-cost drug",4],["Surgery",3]];
+
+let lang="en",screen="reception",apSel=null,recSel=0,docTab="soap",showTbl=false;
+
+/* ---------- screens ---------- */
+function head(role,title,sub){const t=T[lang];return `<div class="pagehead"><div><div class="role">${role}</div><h1>${title}</h1><p>${sub}</p></div></div>`;}
+
+function scrReception(){const t=T[lang];
+ const list=MEMBERS.map((m,i)=>`<button class="item" data-i2="${i}" aria-selected="${i===recSel}">
+   <span class="ini" aria-hidden="true">${m.ini}</span>
+   <span style="flex:1"><b>${m.name}</b><br><small class="muted mono">${m.mno} · ${m.age}</small></span>
+   ${chip(stKind(m.st),t.st[m.st])}</button>`).join("");
+ return head(t.rec_role,t.rec_title,t.rec_sub)+`
+ <div class="recgrid">
+  <section class="card reclist" aria-label="Beneficiary results">
+    <div style="padding:8px 8px 0"><div class="search" style="max-width:none;margin:6px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg><input type="search" aria-label="${t.rec_ph}" placeholder="${t.rec_ph}"></div></div>
+    ${list}
+  </section>
+  <aside id="recCard"></aside>
+ </div>`;}
+function recCard(){const t=T[lang];const m=MEMBERS[recSel];
+ const lims=m.lims.map(([c,u,tot])=>{const p=Math.round((1-u/tot)*100);return `<div class="lim"><div class="lab"><span>${c}</span><span>${(tot-u).toLocaleString()} / ${tot.toLocaleString()}</span></div><div class="bar"><i style="width:${p}%"></i></div></div>`;}).join("");
+ const eligible=m.st==="ok";
+ $("#recCard").innerHTML=`<div class="glass rescard">
+   <div class="top"><div><b style="font-size:18px">${m.name}</b><div class="muted mono">${m.mno}</div></div>${chip(stKind(m.st),t.st[m.st])}</div>
+   <div style="margin-top:14px">
+     <div class="kv"><span>${t.member}</span><span class="mono">${m.mno}</span></div>
+     <div class="kv"><span>${t.agesex}</span><span>${m.age}</span></div>
+     <div class="kv"><span>${t.policy}</span><span>${m.policy}</span></div>
+     <div class="kv"><span>${t.coverage}</span><span>${m.cov}%</span></div>
+     <div class="kv"><span>${t.lastvisit}</span><span>${m.last}</span></div>
+   </div>
+   <h3 style="font-size:13px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-3);margin:16px 0 6px">${t.remaining}</h3>
+   ${lims}
+   <button class="btn primary" style="width:100%;margin-top:16px" ${eligible?'':'disabled'} id="startVisit">${svg(IC.plus)}${t.startvisit}</button>
+   <div class="mn">${svg(IC.info)}${t.mn_note}</div>
+ </div>`;
+ const b=$("#startVisit"); if(b)b.onclick=()=>toast(`${m.name} — visit created`);
+}
+
+function scrDoctor(){const t=T[lang];const p=PATIENT;
+ const panes={
+  soap:`<div class="soap">
+     <div><label>${t.subjective}</label><textarea>Lower back pain 3 weeks, radiating to left leg.</textarea></div>
+     <div><label>${t.objective}</label><textarea>SLR positive left at 45°. No red flags.</textarea></div>
+     <div><label>${t.assessment}</label><textarea>Lumbar radiculopathy.</textarea></div>
+     <div><label>${t.plan}</label><textarea>MRI lumbar (auth), analgesia, physio.</textarea></div>
+     <div style="grid-column:1/3">
+       <label for="dxin">${t.dxlab}</label>
+       <div style="display:flex;gap:8px;margin-top:6px"><input class="txt" id="dxin" placeholder="e.g. M54.5" style="margin-top:0"><button class="btn" id="dxadd">${svg(IC.plus)}${t.add}</button></div>
+       <div class="pills" id="dxpills">${p.dx.map(d=>`<span class="pilltag">${d}</span>`).join("")}</div>
+     </div>
+   </div>`,
+  vitals:`<div class="vit">${p.vitals.map(([k,v,u])=>`<div class="v"><small>${k}</small><b>${v} <span style="font-size:13px;color:var(--text-3)">${u}</span></b></div>`).join("")}</div>`,
+  orders:`<div class="rowbtns">
+     <button class="btn" id="ordBtn">${svg(IC.flask)}${t.neworder}</button>
+     <button class="btn" id="rxBtn">${svg(IC.pill)}${t.newrx}</button>
+     <button class="btn" id="refBtn">${svg('<path d="M7 17 17 7M7 7h10v10"/>')}${t.refer}</button>
+   </div>
+   <p class="muted" style="margin-top:14px">Orders you create become available to authorized providers; high-cost items route to approvals first.</p>`
+ };
+ return head(t.doc_role,t.doc_title,t.doc_sub)+`
+  <div class="docgrid">
+   <section class="card">
+     <div class="pstrip">
+       <span class="ini" aria-hidden="true">${p.ini}</span>
+       <div class="meta"><b>${p.name}</b><small class="mono">${p.mno} · ${p.age}</small></div>
+       <div class="flags">${chip('bad','⚠ '+t.allergies+': '+p.allergies.join(", "))}</div>
+     </div>
+     <div class="tabs" role="tablist" aria-label="${t.doc_title}">
+       <button class="tab" role="tab" data-t="soap" aria-selected="${docTab==='soap'}">${t.t_soap}</button>
+       <button class="tab" role="tab" data-t="vitals" aria-selected="${docTab==='vitals'}">${t.t_vitals}</button>
+       <button class="tab" role="tab" data-t="orders" aria-selected="${docTab==='orders'}">${t.t_orders}</button>
+     </div>
+     <div class="tabpane" role="tabpanel">${panes[docTab]}</div>
+   </section>
+   <div style="display:flex;justify-content:flex-end"><button class="btn primary" id="saveEnc">${svg(IC.ok)}${t.saveenc}</button></div>
+  </div>`;}
+
+function scrApprovals(){const t=T[lang];
+ const rows=APPROVALS.map(d=>{const p=Math.min(d.tat/d.max,1);const col=p>=1?'var(--st-bad-fg)':p>=.7?'var(--st-warn-fg)':'var(--st-ok-fg)';
+   return `<tr class="row" tabindex="0" data-id="${d.id}" aria-selected="${apSel===d.id}" aria-label="${d.id}, ${d.mno}, ${d.svc}">
+     <td><span class="mono">${d.id}</span></td>
+     <td><b>${d.mno}</b><br><small class="muted">${d.age}</small></td>
+     <td>${d.svc}<br><small class="muted">${d.type}</small></td>
+     <td><span style="display:inline-flex;align-items:center;gap:8px"><span style="width:52px;height:6px;border-radius:4px;background:var(--surface-2);border:1px solid var(--border);overflow:hidden;display:inline-block"><i style="display:block;height:100%;width:${Math.round(p*100)}%;background:${col}"></i></span>${d.tat}h${p>=1?' ⚑':''}</span></td>
+     <td>${chip(d.st,t.st[d.st])}</td></tr>`;}).join("");
+ return head(t.ap_role,t.ap_title,t.ap_sub)+`
+  <div class="apgrid">
+   <section class="card" style="overflow:hidden"><table class="wl">
+     <thead><tr><th>${t.c_auth}</th><th>${t.c_ben}</th><th>${t.c_svc}</th><th>${t.c_tat}</th><th>${t.c_status}</th></tr></thead>
+     <tbody id="apbody">${rows}</tbody></table></section>
+   <aside class="glass panel" id="appanel" aria-live="polite"></aside>
+  </div>`;}
+function apCard(){const t=T[lang];
+ if(!apSel){$("#appanel").innerHTML=`<p class="muted">${t.pick}</p>`;return;}
+ const d=APPROVALS.find(x=>x.id===apSel);const done=["ok","part","bad"].includes(d.st)&&d._decided;
+ $("#appanel").innerHTML=`
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px"><div><h2 style="font-size:18px">${d.svc}</h2><div class="muted mono">${d.id}</div></div>${chip(d.st,t.st[d.st])}</div>
+  <div class="block"><h3>${t.ctx}</h3>
+   <div class="kv"><span>${t.member}</span><span class="mono">${d.mno}</span></div>
+   <div class="kv"><span>${t.agesex}</span><span>${d.age}</span></div>
+   <div class="kv"><span>${t.dx}</span><span>${d.dx}</span></div>
+   <div class="kv"><span>${t.cost}</span><span>${d.cost}</span></div>
+   <div class="kv"><span>${t.polrem}</span><span>${d.pol}</span></div></div>
+  <div class="block"><h3>${t.supp}</h3><div style="display:flex;flex-direction:column;gap:6px">${d.docs.map(n=>`<a href="#" onclick="return false" style="display:flex;gap:8px;align-items:center;color:var(--accent);text-decoration:none;font-weight:500;padding:6px 4px">${svg(IC.doc)}${n}</a>`).join("")}</div></div>
+  <label style="display:block;margin-top:16px;font-weight:500;font-size:14px" for="ratio">${t.rationale}</label>
+  <textarea id="ratio" ${done?'disabled':''}></textarea>
+  <div class="err" id="ratErr">${svg(IC.x)}<span>${t.need}</span></div>
+  <div class="actions-row">
+   <button class="btn primary" style="grid-column:1/3" data-act="ok" ${done?'disabled':''}>${svg(IC.ok)}${t.approve}</button>
+   <button class="btn" data-act="part" ${done?'disabled':''}>${svg(IC.half)}${t.partial}</button>
+   <button class="btn danger" data-act="bad" ${done?'disabled':''}>${svg(IC.x)}${t.reject}</button>
+   <button class="btn warn" style="grid-column:1/3" data-act="neu" ${done?'disabled':''}>${svg(IC.info)}${t.reqinfo}</button>
+  </div>
+  <div class="mn">${svg(IC.clock)}${t.reviewer}</div>`;
+ $$("#appanel .btn").forEach(b=>b.onclick=()=>{
+   const act=b.dataset.act;if((act==="bad"||act==="neu")&&!$("#ratio").value.trim()){$("#ratErr").classList.add("show");$("#ratio").focus();return;}
+   d.st=act;d._decided=(act==="ok"||act==="part"||act==="bad");renderApBody();apCard();toast(`${d.id} — ${t.st[act]}`);
+ });
+}
+function renderApBody(){const b=$("#apbody");if(b){const s=scrApprovals();const tmp=document.createElement("div");tmp.innerHTML=s;b.innerHTML=tmp.querySelector("#apbody").innerHTML;wireApRows();}}
+function wireApRows(){$$("#apbody .row").forEach(tr=>{
+  tr.onclick=()=>{apSel=tr.dataset.id;$$("#apbody .row").forEach(r=>r.setAttribute("aria-selected",r.dataset.id===apSel));apCard();};
+  tr.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();tr.click();}
+   if(e.key==="ArrowDown"){e.preventDefault();(tr.nextElementSibling||$("#apbody").firstElementChild).focus();}
+   if(e.key==="ArrowUp"){e.preventDefault();(tr.previousElementSibling||$("#apbody").lastElementChild).focus();}};});
+}
+
+function scrDashboard(){const t=T[lang];
+ const kpis=KPI.map(([k,v,dir,delta])=>`<div class="card kpi"><div class="lab">${v&&''}${t[k]}</div><div class="val">${v}</div><div class="delta ${dir}">${dir==='up'?'▲':'▼'} ${delta}</div></div>`).join("");
+ const max=Math.max(...CHART.map(c=>c[1]));const W=440,H=200,pad=30,bw=W/CHART.length*0.5;
+ const bars=CHART.map((c,i)=>{const x=pad+i*((W-pad)/CHART.length)+8;const h=(c[1]/max)*(H-pad-20);const y=H-pad-h;
+   return `<g><rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="5" fill="var(--accent)"></rect>
+     <text x="${x+bw/2}" y="${y-6}" text-anchor="middle" font-size="12" fill="var(--text-2)" font-weight="600">${c[1]}</text>
+     <text x="${x+bw/2}" y="${H-pad+16}" text-anchor="middle" font-size="11" fill="var(--text-3)">${c[0]}</text></g>`;}).join("");
+ const table=`<table class="dtable"><caption class="sr-only">${t.chart_title}</caption><thead><tr><th>Service</th><th>Authorizations</th></tr></thead><tbody>${CHART.map(c=>`<tr><td>${c[0]}</td><td>${c[1]}</td></tr>`).join("")}</tbody></table>`;
+ return head(t.db_role,t.db_title,t.db_sub)+`
+  <div class="kpis">${kpis}</div>
+  <div class="dash2">
+   <section class="card chartwrap">
+     <div style="display:flex;justify-content:space-between;align-items:center"><h3>${t.chart_title}</h3>
+       <button class="btn" id="tblBtn" aria-expanded="${showTbl}">${showTbl?t.hidetable:t.showtable}</button></div>
+     <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${t.chart_title}" style="width:100%;height:auto;margin-top:8px">
+       <line x1="${pad}" y1="${H-pad}" x2="${W}" y2="${H-pad}" stroke="var(--border)"></line>${bars}</svg>
+     <div id="tblBox" ${showTbl?'':'hidden'}>${table}</div>
+   </section>
+   <section class="card chartwrap"><h3>${t.k_util}</h3>
+     ${[["Al-Shifa Lab",88],["Nile Imaging",74],["Mersal Pharmacy",91],["City Clinic",63]].map(([n,p])=>`<div class="lim"><div class="lab"><span>${n}</span><span>${p}%</span></div><div class="bar"><i style="width:${p}%"></i></div></div>`).join("")}
+     <p class="muted" style="margin-top:12px">Every chart has an accessible data-table alternative and text summary.</p>
+   </section>
+  </div>`;}
+
+/* ---------- router ---------- */
+const SCREENS={reception:scrReception,doctor:scrDoctor,approvals:scrApprovals,dashboard:scrDashboard};
+function setScreen(name){
+ screen=name;
+ $$("#rail .navi").forEach(b=>b.setAttribute("aria-current",b.dataset.s===name?"page":"false"));
+ $("#view").innerHTML=SCREENS[name]();
+ $("#main").focus({preventScroll:true});
+ if(name==="reception"){recCard();$$(".reclist .item").forEach(it=>it.onclick=()=>{recSel=+it.dataset.i2;$$(".reclist .item").forEach(x=>x.setAttribute("aria-selected",x===it));recCard();});}
+ if(name==="approvals"){wireApRows();apCard();}
+ if(name==="doctor"){wireDoctor();}
+ if(name==="dashboard"){const tb=$("#tblBtn");if(tb)tb.onclick=()=>{showTbl=!showTbl;const box=$("#tblBox");box.hidden=!showTbl;tb.setAttribute("aria-expanded",showTbl);tb.textContent=showTbl?T[lang].hidetable:T[lang].showtable;};}
+}
+function wireDoctor(){const t=T[lang];
+ $$(".tab").forEach(tb=>tb.onclick=()=>{docTab=tb.dataset.t;setScreen("doctor");});
+ const sa=$("#saveEnc");if(sa)sa.onclick=()=>toast("Encounter saved");
+ const da=$("#dxadd");if(da)da.onclick=()=>{const v=$("#dxin").value.trim();if(v){const s=document.createElement("span");s.className="pilltag";s.textContent=v;$("#dxpills").appendChild(s);$("#dxin").value="";}};
+ ["ordBtn","rxBtn","refBtn"].forEach(id=>{const b=$("#"+id);if(b)b.onclick=()=>toast(({ordBtn:"Investigation order created",rxBtn:"Prescription created",refBtn:"Referral created"})[id]);});
+}
+function toast(m){const el=$("#toastT");$("#toastMsg").textContent=m;el.classList.add("show");clearTimeout(toast._t);toast._t=setTimeout(()=>el.classList.remove("show"),2400);}
+
+/* ---------- chrome / toggles ---------- */
+function applyLang(){const t=T[lang];document.documentElement.lang=lang;document.documentElement.dir=lang==="ar"?"rtl":"ltr";
+ $$("[data-i]").forEach(el=>{const k=el.dataset.i;if(t[k]!=null)el.textContent=t[k];});
+ const gs=$("#globalSearch");gs.placeholder=t.search;gs.setAttribute("aria-label",t.search);
+ $("#langBtn").setAttribute("aria-label",lang==="ar"?"Switch to English":"Switch to Arabic");
+ setScreen(screen);}
+function setTheme(m){document.documentElement.dataset.theme=m;try{localStorage.setItem("mersal-theme",m)}catch(e){}}
+$("#themeBtn").onclick=()=>setTheme(document.documentElement.dataset.theme==="dark"?"light":"dark");
+$("#langBtn").onclick=()=>{lang=lang==="en"?"ar":"en";try{localStorage.setItem("mersal-lang",lang)}catch(e){}applyLang();};
+$$("#rail .navi").forEach(b=>b.onclick=()=>setScreen(b.dataset.s));
+try{const sm=localStorage.getItem("mersal-theme");if(sm)setTheme(sm);else if(matchMedia("(prefers-color-scheme:dark)").matches)setTheme("dark");
+ const sl=localStorage.getItem("mersal-lang");if(sl)lang=sl;}catch(e){}
+applyLang();
+</script>
+</body>
+</html>

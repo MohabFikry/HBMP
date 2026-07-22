@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: infra
+    static_configs:
+      - targets:
+          - "rabbitmq:15692"   # RabbitMQ prometheus plugin (enable if needed)
+          - "nats:8222"
+          - "minio:9000"
+        labels: { tier: "1" }
+
+  # As .NET services expose /metrics (OpenTelemetry/Prometheus exporter), add them here:
+  # - job_name: services
+  #   metrics_path: /metrics
+  #   static_configs:
+  #     - targets: ["patient-service:8080", "orders-service:8080", "approvals-service:8080"]

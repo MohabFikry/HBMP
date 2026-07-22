@@ -1,0 +1,66 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+*.nupkg
+.vs/
+project.lock.json
+TestResults/
+coverage/
+*.trx
+*.coverage
+*.cobertura.xml
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+*.local
+.eslintcache
+playwright-report/
+.playwright/
+
+# Env & secrets — NEVER commit plaintext secrets (use OpenBao + SOPS)
+.env
+*.env
+!*.env.example
+!.env.example
+*.pem
+*.key
+!*.pub
+.secrets/
+!*.sops.yaml
+
+# IaC state — never commit (remote backend per ADR-0002)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+tofu.plan
+*.tfplan
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+
+# Local tool installs
+/.dotnet/
+/dotnet-install.sh
+
+# Logs & scratch
+*.log
+/tmp/
+/scratch/
+
+# Windows/WSL metadata
+*:Zone.Identifier
+*Zone.Identifier

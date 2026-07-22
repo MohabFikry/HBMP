@@ -1,0 +1,29 @@
+_format_version: "3.0"
+# Kong DB-less declarative config (Tier 1 starter).
+# As services come online, add them here and route the public API through Kong,
+# with JWT validation (against Keycloak), rate limiting, and correlation IDs.
+#
+# Example once patient-service exists:
+#
+# services:
+#   - name: patient-service
+#     url: http://patient-service:8080
+#     routes:
+#       - name: patient-routes
+#         paths: ["/api/v1/beneficiaries"]
+#     plugins:
+#       - name: jwt                 # validate Keycloak-issued tokens
+#       - name: rate-limiting
+#         config: { minute: 600, policy: local }
+#       - name: correlation-id
+#         config: { header_name: X-Correlation-Id, generator: uuid }
+#
+services: []
+routes: []
+plugins:
+  # Global correlation IDs on every request (audit trace).
+  - name: correlation-id
+    config:
+      header_name: X-Correlation-Id
+      generator: uuid
+      echo_downstream: true

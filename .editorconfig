@@ -1,0 +1,43 @@
+# Mersal HBMP — editor & code-style conventions (CLAUDE.md § Naming & conventions)
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+[*.{cs,csx}]
+indent_size = 4
+# Language conventions
+dotnet_sort_system_directives_first = true
+dotnet_style_qualification_for_field = false:warning
+dotnet_style_qualification_for_property = false:warning
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_prefer_braces = true:warning
+dotnet_style_readonly_field = true:warning
+# Nullable / safety — surfaces as build errors via TreatWarningsAsErrors
+dotnet_diagnostic.CS8600.severity = error
+dotnet_diagnostic.CS8602.severity = error
+dotnet_diagnostic.CS8618.severity = error
+# Records for DTOs, Result<T> over exceptions — enforced by review, not analyzer
+
+[*.{csproj,props,targets}]
+indent_size = 2
+
+[*.{json,yml,yaml}]
+indent_size = 2
+
+[*.{ts,tsx,js,jsx,css,scss}]
+indent_size = 2
+
+[*.{md,mdx}]
+trim_trailing_whitespace = false
+
+[*.sql]
+indent_size = 2
+
+[Makefile]
+indent_style = tab

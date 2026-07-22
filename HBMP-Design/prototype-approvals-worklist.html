@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en" dir="ltr" data-theme="light" data-density="comfortable">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Mersal HBMP — Approval Worklist (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Cairo:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --font-latin:"Inter",-apple-system,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+  --font-arabic:"Cairo","Noto Sans Arabic",system-ui,sans-serif;
+  --font-mono:"SF Mono","JetBrains Mono",ui-monospace,monospace;
+  --r-sm:8px; --r-md:12px; --r-lg:16px; --r-pill:999px;
+  --sp1:4px;--sp2:8px;--sp3:12px;--sp4:16px;--sp5:20px;--sp6:24px;--sp8:32px;
+  --dur:200ms; --ease:cubic-bezier(.2,.8,.2,1);
+  --glass-blur:blur(20px) saturate(1.2);
+  --elev-1:0 1px 2px rgba(16,38,43,.06),0 1px 1px rgba(16,38,43,.04);
+  --elev-2:0 8px 26px rgba(16,38,43,.12);
+  --elev-3:0 18px 50px rgba(16,38,43,.24);
+}
+html[data-theme="light"]{
+  --surface-0:#EEF5F5; --surface-1:#FFFFFF; --surface-2:#F7FBFB;
+  --text-1:#12262B; --text-2:#4A5A61; --text-3:#6B7C82;
+  --accent:#007A7A; --accent-press:#005C5C; --accent-tint:#E1F1F1;
+  --brand:#00ACAC; --gold:#EDA827; --border:#D7E3E3; --border-strong:#B9CCCC;
+  --focus:#007A7A;
+  --glass-bg:rgba(255,255,255,0.72); --glass-brd:rgba(255,255,255,0.6);
+  --scrim:rgba(8,30,32,.35);
+  --st-approved-bg:#E4F2EA;--st-approved-fg:#1E7A46;
+  --st-review-bg:#E4EDF9;--st-review-fg:#1F5FA6;
+  --st-partial-bg:#F6ECD9;--st-partial-fg:#8A5A00;
+  --st-emerg-bg:#F7E7D6;--st-emerg-fg:#9C4E00;
+  --st-reject-bg:#F8E1DF;--st-reject-fg:#B3261E;
+  --st-info-bg:#E7ECEE;--st-info-fg:#41525A;
+}
+html[data-theme="dark"]{
+  --surface-0:#04282A; --surface-1:#063437; --surface-2:#0A3E41;
+  --text-1:#EAF5F4; --text-2:#A9C4C4; --text-3:#7FA0A0;
+  --accent:#5FD3D3; --accent-press:#86E3E3; --accent-tint:#0E4649;
+  --brand:#00ACAC; --gold:#EDA827; --border:#12484B; --border-strong:#1C5A5E;
+  --focus:#5FD3D3;
+  --glass-bg:rgba(6,40,42,0.60); --glass-brd:rgba(120,200,200,0.18);
+  --scrim:rgba(0,0,0,.5);
+  --st-approved-bg:#123A28;--st-approved-fg:#7FE0A6;
+  --st-review-bg:#12304F;--st-review-fg:#9FC8F7;
+  --st-partial-bg:#3B2F12;--st-partial-fg:#EBC169;
+  --st-emerg-bg:#432A12;--st-emerg-fg:#F2B27A;
+  --st-reject-bg:#43201D;--st-reject-fg:#F5A29B;
+  --st-info-bg:#123033;--st-info-fg:#B9D2D2;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  font-family:var(--font-latin); background:var(--surface-0); color:var(--text-1);
+  font-size:15px; line-height:1.55; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+  font-variant-numeric:tabular-nums; letter-spacing:-.005em;
+  font-feature-settings:"cv05","cv08","ss01","tnum"; text-rendering:optimizeLegibility;
+}
+html[lang="ar"] body{font-family:var(--font-arabic);letter-spacing:0}
+h1,h2,h3{letter-spacing:-.021em;text-wrap:balance}
+.mono{font-family:var(--font-mono); font-weight:500; letter-spacing:0; font-feature-settings:"tnum"}
+:focus-visible{outline:3px solid var(--focus); outline-offset:2px; border-radius:6px}
+button{font:inherit;color:inherit;cursor:pointer}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.skip{position:absolute;left:12px;top:-48px;background:var(--accent);color:#fff;padding:10px 14px;border-radius:var(--r-sm);z-index:60;transition:top var(--dur)}
+.skip:focus{top:12px}
+
+/* ---------- App shell ---------- */
+.app{display:grid;grid-template-columns:248px 1fr;grid-template-rows:60px 1fr;min-height:100vh}
+header.bar{
+  grid-column:1/3;position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:var(--sp4);
+  padding:0 var(--sp5);
+  background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);
+  border-bottom:1px solid var(--border);box-shadow:inset 0 1px 0 var(--glass-brd)
+}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  header.bar,nav.rail,.panel{background:var(--surface-1)}
+}
+.brand{display:flex;align-items:center;gap:11px;font-weight:600}
+.brand .logo{width:38px;height:38px;border-radius:11px;background:
+  linear-gradient(135deg,var(--brand),#0A6E70);display:grid;place-items:center;color:#fff;font-weight:600;box-shadow:var(--elev-1);overflow:hidden}
+.brand .logo img{width:27px;height:auto;display:block}
+.brand .wordmark{font-weight:600;letter-spacing:-.012em;font-size:15.5px}
+.brand small{color:var(--text-2);font-weight:500}
+.bar .search{flex:1;max-width:420px;margin-inline:auto;position:relative}
+.bar .search input{
+  width:100%;height:40px;border-radius:var(--r-pill);border:1px solid var(--border);
+  background:var(--surface-1);color:var(--text-1);padding:0 16px 0 40px
+}
+html[dir="rtl"] .bar .search input{padding:0 40px 0 16px}
+.bar .search svg{position:absolute;inset-inline-start:14px;top:11px;width:18px;height:18px;color:var(--text-3)}
+.bar .actions{display:flex;align-items:center;gap:var(--sp2)}
+.iconbtn{width:44px;height:44px;border-radius:var(--r-md);border:1px solid transparent;background:transparent;
+  display:grid;place-items:center;color:var(--text-2)}
+.iconbtn:hover{background:var(--accent-tint);color:var(--accent)}
+.iconbtn svg{width:20px;height:20px}
+.avatar{width:34px;height:34px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:600}
+
+/* ---------- Nav rail (glass) ---------- */
+nav.rail{
+  grid-row:2;position:sticky;top:60px;align-self:start;height:calc(100vh - 60px);
+  padding:var(--sp4) var(--sp3);
+  background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);
+  border-inline-end:1px solid var(--border)
+}
+.rail .grp{color:var(--text-3);font-size:12px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;
+  padding:var(--sp3) var(--sp3) var(--sp2)}
+.rail a{display:flex;align-items:center;gap:10px;padding:11px var(--sp3);border-radius:var(--r-md);
+  color:var(--text-2);text-decoration:none;font-weight:500;min-height:44px;position:relative}
+.rail a svg{width:19px;height:19px;flex:none}
+.rail a:hover{background:var(--accent-tint);color:var(--accent)}
+.rail a[aria-current="page"]{background:var(--accent-tint);color:var(--accent);font-weight:600}
+.rail a[aria-current="page"]::before{content:"";position:absolute;inset-inline-start:0;top:8px;bottom:8px;width:4px;
+  border-radius:4px;background:var(--accent)}
+.rail .count{margin-inline-start:auto;background:var(--surface-2);border:1px solid var(--border);
+  color:var(--text-2);font-size:12px;font-weight:600;border-radius:var(--r-pill);padding:1px 8px}
+
+/* ---------- Main ---------- */
+main{grid-row:2;min-width:0;padding:var(--sp6);display:grid;grid-template-columns:1fr 380px;gap:var(--sp5);align-items:start}
+.pagehead{grid-column:1/3;display:flex;align-items:flex-end;gap:var(--sp4);flex-wrap:wrap;margin-bottom:var(--sp2)}
+.pagehead h1{font-size:26px;font-weight:600;margin:0}
+.pagehead p{margin:2px 0 0;color:var(--text-2)}
+.seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-pill);padding:3px;gap:2px}
+.seg button{border:0;background:transparent;color:var(--text-2);padding:8px 14px;border-radius:var(--r-pill);
+  font-weight:500;min-height:38px}
+.seg button[aria-pressed="true"]{background:var(--surface-1);color:var(--accent);box-shadow:var(--elev-1);font-weight:600}
+.toolbar{grid-column:1/3;display:flex;align-items:center;gap:var(--sp3);flex-wrap:wrap;margin-bottom:var(--sp2)}
+.spacer{flex:1}
+.muted{color:var(--text-2)}
+
+/* ---------- Worklist ---------- */
+.card{background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--elev-1);overflow:hidden}
+.wl{width:100%;border-collapse:separate;border-spacing:0}
+.wl thead th{
+  position:sticky;top:60px;background:var(--surface-2);text-align:start;font-size:13px;font-weight:600;color:var(--text-2);
+  padding:12px 16px;border-bottom:1px solid var(--border);z-index:5;white-space:nowrap
+}
+.wl tbody tr{border-bottom:1px solid var(--border)}
+.wl tbody tr:last-child{border-bottom:0}
+.row{cursor:pointer}
+.row td{padding:14px 16px;vertical-align:middle}
+.row:hover{background:var(--surface-2)}
+.row[aria-selected="true"]{background:var(--accent-tint)}
+.row[aria-selected="true"] td:first-child{box-shadow:inset 4px 0 0 var(--accent)}
+html[dir="rtl"] .row[aria-selected="true"] td:first-child{box-shadow:inset -4px 0 0 var(--accent)}
+.row:focus-visible{outline:3px solid var(--focus);outline-offset:-3px}
+.who{display:flex;align-items:center;gap:10px}
+.who .ini{width:34px;height:34px;border-radius:50%;background:var(--surface-2);border:1px solid var(--border);
+  display:grid;place-items:center;font-weight:600;color:var(--text-2);font-size:13px}
+.who b{font-weight:600}
+.who small{color:var(--text-3);display:block;font-size:12.5px}
+.svc{font-weight:500}
+.svc small{display:block;color:var(--text-3);font-weight:400;font-size:12.5px}
+.tat{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2)}
+.tat .bar{width:52px;height:6px;border-radius:4px;background:var(--surface-2);overflow:hidden;border:1px solid var(--border)}
+.tat .bar i{display:block;height:100%}
+
+/* ---------- Status chip: hue + icon + shape + text ---------- */
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;
+  padding:4px 10px;border-radius:var(--r-pill);border:1.5px solid transparent;white-space:nowrap}
+.chip svg{width:14px;height:14px}
+.chip.approved{background:var(--st-approved-bg);color:var(--st-approved-fg)}
+.chip.review{background:var(--st-review-bg);color:var(--st-review-fg);border-style:dashed;border-color:currentColor}
+.chip.partial{background:var(--st-partial-bg);color:var(--st-partial-fg)}
+.chip.emerg{background:transparent;color:var(--st-emerg-fg);border-color:currentColor}
+.chip.reject{background:var(--st-reject-bg);color:var(--st-reject-fg);border-radius:7px}/* square = stop */
+.chip.info{background:var(--st-info-bg);color:var(--st-info-fg);border-color:var(--border);background:transparent}
+
+/* ---------- Decision panel (glass level-2) ---------- */
+.panel{position:sticky;top:76px;border-radius:var(--r-lg);border:1px solid var(--border);
+  background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);
+  box-shadow:var(--elev-2),inset 0 1px 0 var(--glass-brd);padding:var(--sp5)}
+.panel h2{font-size:18px;margin:0 0 2px}
+.panel .authno{color:var(--text-2)}
+.block{background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r-md);padding:14px 14px;margin-top:var(--sp4)}
+.block h3{font-size:13px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-3);margin:0 0 8px;font-weight:600}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:5px 0;font-size:14px}
+.kv span:first-child{color:var(--text-2)}
+.kv span:last-child{font-weight:500;text-align:end}
+.doclist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.doclist a{display:flex;align-items:center;gap:8px;color:var(--accent);text-decoration:none;font-weight:500;padding:6px 8px;border-radius:var(--r-sm)}
+.doclist a:hover{background:var(--accent-tint)}
+.doclist svg{width:16px;height:16px}
+label.fld{display:block;margin-top:var(--sp4);font-weight:500;font-size:14px}
+textarea{width:100%;margin-top:6px;min-height:76px;border-radius:var(--r-md);border:1px solid var(--border);
+  background:var(--surface-1);color:var(--text-1);padding:10px 12px;font:inherit;resize:vertical}
+.err{color:var(--st-reject-fg);font-size:13px;margin-top:6px;display:none;align-items:center;gap:6px}
+.err.show{display:flex}
+.actions-row{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp2);margin-top:var(--sp4)}
+.btn{min-height:46px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--surface-1);
+  color:var(--text-1);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.btn svg{width:17px;height:17px}
+.btn:hover{border-color:var(--border-strong)}
+.btn.primary{grid-column:1/3;background:var(--accent);color:#fff;border-color:transparent}
+.btn.primary:hover{background:var(--accent-press)}
+.btn.danger{color:var(--st-reject-fg);border-color:var(--st-reject-fg)}
+.btn.warn{color:var(--st-emerg-fg);border-color:var(--st-emerg-fg)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.decided{margin-top:var(--sp4);padding:12px 14px;border-radius:var(--r-md);background:var(--accent-tint);
+  color:var(--accent);font-weight:600;display:none;align-items:center;gap:8px}
+.decided.show{display:flex}
+.metaline{margin-top:var(--sp4);color:var(--text-3);font-size:12.5px;display:flex;align-items:center;gap:6px}
+
+/* ---------- Toast ---------- */
+#toast{position:fixed;inset-inline:0;bottom:24px;display:flex;justify-content:center;pointer-events:none;z-index:70}
+#toast .t{background:var(--surface-1);border:1px solid var(--border);box-shadow:var(--elev-3);border-radius:var(--r-pill);
+  padding:12px 18px;display:none;align-items:center;gap:10px;font-weight:500;max-width:90vw}
+#toast .t.show{display:inline-flex}
+#toast .t svg{width:18px;height:18px;color:var(--st-approved-fg)}
+
+@media (max-width:1080px){
+  main{grid-template-columns:1fr}
+  .panel{position:static;order:-1}
+  .pagehead,.toolbar{grid-column:1}
+}
+@media (max-width:720px){
+  .app{grid-template-columns:1fr}
+  nav.rail{display:none}
+  header.bar{grid-column:1}
+  .wl thead{display:none}
+  .row{display:grid;grid-template-columns:1fr auto;gap:6px;padding:12px 14px}
+  .row td{padding:2px 0}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to worklist</a>
+
+<div class="app">
+  <header class="bar">
+    <div class="brand"><span class="logo"><img src="https://mersal-ngo.org/images/logo_W.png" alt="Mersal" onerror="this.replaceWith(document.createTextNode('م'))"></span>
+      <span class="wordmark" data-i="appname">Mersal HBMP</span> <small data-i="portal">· Approvals</small></div>
+    <div class="search" role="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+      <input type="search" aria-label="Search authorizations" data-ph="Search auth no, member, service…" placeholder="Search auth no, member, service…"/>
+    </div>
+    <div class="actions">
+      <button class="iconbtn" id="langBtn" aria-label="Switch to Arabic" title="EN / ع"><b style="font-size:14px">ع</b></button>
+      <button class="iconbtn" id="themeBtn" aria-label="Switch color theme" title="Light / dark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg></button>
+      <button class="iconbtn" aria-label="Notifications">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></button>
+      <div class="avatar" title="Dr. Reviewer" aria-label="Signed in as Dr. Reviewer">DR</div>
+    </div>
+  </header>
+
+  <nav class="rail" aria-label="Approvals navigation">
+    <div class="grp" data-i="navgrp">Medical approval</div>
+    <a href="#" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      <span data-i="nav_worklist">Worklist</span><span class="count" id="navCount">6</span></a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span data-i="nav_review">Under review</span></a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span data-i="nav_decisions">Decisions</span></a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span data-i="nav_manual">Manual authorization</span></a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2 2 20h20L12 2Z"/><path d="M12 9v4M12 17h.01"/></svg><span data-i="nav_emerg">Emergency</span></a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg><span data-i="nav_sla">SLA / TAT board</span></a>
+  </nav>
+
+  <main id="main" tabindex="-1">
+    <div class="pagehead">
+      <div><h1 data-i="title">Approval worklist</h1>
+        <p data-i="subtitle">Review authorization requests and record decisions. Minimum-necessary data shown.</p></div>
+    </div>
+    <div class="toolbar">
+      <div class="seg" role="group" aria-label="Filter by status">
+        <button data-f="all" aria-pressed="true" data-i="f_all">All</button>
+        <button data-f="review" aria-pressed="false" data-i="f_review">Under review</button>
+        <button data-f="emerg" aria-pressed="false" data-i="f_emerg">Emergency</button>
+        <button data-f="info" aria-pressed="false" data-i="f_info">Info requested</button>
+      </div>
+      <div class="spacer"></div>
+      <span class="muted" id="countLbl">6 requests</span>
+    </div>
+
+    <section class="card" aria-label="Authorization worklist">
+      <table class="wl">
+        <thead><tr>
+          <th data-i="c_auth">Authorization</th>
+          <th data-i="c_ben">Beneficiary</th>
+          <th data-i="c_svc">Service requested</th>
+          <th data-i="c_tat">Time in queue</th>
+          <th data-i="c_status">Status</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </section>
+
+    <aside class="panel" id="panel" aria-live="polite" aria-label="Decision panel"></aside>
+  </main>
+</div>
+
+<div id="toast" aria-live="assertive"><div class="t" id="toastT"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg><span id="toastMsg"></span></div></div>
+
+<script>
+const ICON={
+ approved:'<path d="M20 6 9 17l-5-5"/>',
+ review:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+ partial:'<circle cx="12" cy="12" r="9"/><path d="M12 3v18" /><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none"/>',
+ emerg:'<path d="M12 2 2 20h20L12 2Z"/><path d="M12 9v4M12 17h.01"/>',
+ reject:'<path d="M18 6 6 18M6 6l12 12"/>',
+ info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>'
+};
+const T={
+ en:{appname:"Mersal HBMP",portal:"· Approvals",navgrp:"Medical approval",nav_worklist:"Worklist",nav_review:"Under review",
+   nav_decisions:"Decisions",nav_manual:"Manual authorization",nav_emerg:"Emergency",nav_sla:"SLA / TAT board",
+   title:"Approval worklist",subtitle:"Review authorization requests and record decisions. Minimum-necessary data shown.",
+   f_all:"All",f_review:"Under review",f_emerg:"Emergency",f_info:"Info requested",
+   c_auth:"Authorization",c_ben:"Beneficiary",c_svc:"Service requested",c_tat:"Time in queue",c_status:"Status",
+   ph:"Search auth no, member, service…",requests:"requests",
+   st:{review:"Under review",emerg:"Emergency",info:"Info requested",approved:"Approved",partial:"Partial",reject:"Rejected"},
+   ctx:"Clinical context (EMR)",supp:"Supporting documents",rationale:"Clinical rationale / decision note",
+   need:"A rationale is required to reject or request info.",
+   approve:"Approve",partial:"Partial",reject:"Reject",reqinfo:"Request info",
+   reviewer:"Reviewer: Dr. Reviewer",pick:"Select a request from the worklist to review it.",
+   dx:"Diagnosis",req:"Requested service",cost:"Est. cost",pol:"Policy remaining",member:"Member",agesex:"Age / sex",
+   decided:"Decision recorded and audited"},
+ ar:{appname:"مرسال HBMP",portal:"· الموافقات",navgrp:"الموافقة الطبية",nav_worklist:"قائمة العمل",nav_review:"قيد المراجعة",
+   nav_decisions:"القرارات",nav_manual:"تفويض يدوي",nav_emerg:"طارئ",nav_sla:"لوحة زمن الاستجابة",
+   title:"قائمة الموافقات",subtitle:"راجع طلبات التفويض وسجّل القرارات. تُعرض الحدّ الأدنى من البيانات.",
+   f_all:"الكل",f_review:"قيد المراجعة",f_emerg:"طارئ",f_info:"طلب معلومات",
+   c_auth:"التفويض",c_ben:"المستفيد",c_svc:"الخدمة المطلوبة",c_tat:"مدة الانتظار",c_status:"الحالة",
+   ph:"ابحث برقم التفويض أو العضو أو الخدمة…",requests:"طلبات",
+   st:{review:"قيد المراجعة",emerg:"طارئ",info:"طلب معلومات",approved:"مقبول",partial:"جزئي",reject:"مرفوض"},
+   ctx:"السياق السريري (السجل)",supp:"المستندات الداعمة",rationale:"المبرر السريري / ملاحظة القرار",
+   need:"المبرر مطلوب للرفض أو طلب معلومات.",
+   approve:"موافقة",partial:"جزئي",reject:"رفض",reqinfo:"طلب معلومات",
+   reviewer:"المراجع: د. المراجع",pick:"اختر طلبًا من القائمة لمراجعته.",
+   dx:"التشخيص",req:"الخدمة المطلوبة",cost:"التكلفة التقديرية",pol:"المتبقي بالوثيقة",member:"العضو",agesex:"العمر / النوع",
+   decided:"تم تسجيل القرار وتدقيقه"}
+};
+const DATA=[
+ {id:"AUTH-2026-0K7F2",ini:"AH",member:"MRS-M-4820117",age:"41 / M",svc:"MRI — Lumbar spine",type:"Imaging",dx:"Chronic low-back pain, radiculopathy",cost:"EGP 6,400",pol:"EGP 18,200",tat:14,tatMax:24,status:"review",docs:["Referral note.pdf","Prior X-ray report.pdf"]},
+ {id:"AUTH-2026-0K7G9",ini:"MS",member:"MRS-M-3391044",age:"7 / F",svc:"CT — Brain w/ contrast",type:"Imaging",dx:"Post-trauma, r/o hemorrhage",cost:"EGP 5,100",pol:"EGP 22,000",tat:2,tatMax:6,status:"emerg",docs:["ER triage note.pdf"]},
+ {id:"AUTH-2026-0K7H1",ini:"YK",member:"MRS-M-7740233",age:"58 / M",svc:"Trastuzumab — 6 cycles",type:"High-cost drug",dx:"HER2+ carcinoma",cost:"EGP 92,000",pol:"EGP 140,000",tat:33,tatMax:48,status:"review",docs:["Oncology plan.pdf","Pathology.pdf","Prev auth.pdf"]},
+ {id:"AUTH-2026-0K7J5",ini:"NF",member:"MRS-M-2210876",age:"34 / F",svc:"Laparoscopic cholecystectomy",type:"Surgery",dx:"Symptomatic cholelithiasis",cost:"EGP 28,500",pol:"EGP 60,000",tat:20,tatMax:24,status:"info",docs:["Ultrasound.pdf"]},
+ {id:"AUTH-2026-0K7K8",ini:"RA",member:"MRS-M-5567901",age:"66 / M",svc:"Echocardiogram + Holter",type:"Investigation",dx:"Palpitations, r/o arrhythmia",cost:"EGP 3,200",pol:"EGP 9,400",tat:5,tatMax:24,status:"review",docs:["ECG strip.pdf","Cardiology referral.pdf"]},
+ {id:"AUTH-2026-0K7L0",ini:"SD",member:"MRS-M-1129384",age:"29 / F",svc:"MRI — Brain",type:"Imaging",dx:"Refractory headache",cost:"EGP 5,900",pol:"EGP 12,700",tat:41,tatMax:24,status:"review",docs:["Neurology note.pdf"]}
+];
+let lang="en", sel=null, filter="all";
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+
+function svg(paths,cls){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="${cls||''}" aria-hidden="true">${paths}</svg>`;}
+function chip(st){const L=T[lang].st;const map={review:'review',emerg:'emerg',info:'info',approved:'approved',partial:'partial',reject:'reject'};
+  const icn={review:ICON.review,emerg:ICON.emerg,info:ICON.info,approved:ICON.approved,partial:ICON.partial,reject:ICON.reject}[st];
+  return `<span class="chip ${map[st]}">${svg(icn)}${L[st]}</span>`;}
+function tatColor(p){return p>=1?'var(--st-reject-fg)':p>=.7?'var(--st-emerg-fg)':'var(--st-approved-fg)';}
+
+function renderTable(){
+  const tb=$("#tbody"); tb.innerHTML="";
+  const rows=DATA.filter(d=>filter==="all"?true:d.status===filter);
+  rows.forEach((d,i)=>{
+    const p=Math.min(d.tat/d.tatMax,1);
+    const tr=document.createElement("tr");
+    tr.className="row"; tr.tabIndex=0;
+    tr.setAttribute("aria-label", d.id+", "+d.member+", "+d.svc);
+    tr.setAttribute("aria-selected", sel===d.id?"true":"false");
+    tr.dataset.id=d.id;
+    tr.innerHTML=`
+      <td><span class="mono">${d.id}</span></td>
+      <td><div class="who"><span class="ini" aria-hidden="true">${d.ini}</span>
+        <span><b>${d.member}</b><small>${d.age}</small></span></div></td>
+      <td><div class="svc">${d.svc}<small>${d.type}</small></div></td>
+      <td><div class="tat"><span class="bar"><i style="width:${Math.round(p*100)}%;background:${tatColor(p)}"></i></span>${d.tat}h${p>=1?' ⚑':''}</div></td>
+      <td>${chip(d.status)}</td>`;
+    tr.addEventListener("click",()=>select(d.id));
+    tr.addEventListener("keydown",e=>{
+      if(e.key==="Enter"||e.key===" "){e.preventDefault();select(d.id);}
+      if(e.key==="ArrowDown"){e.preventDefault();(tr.nextElementSibling||tb.firstElementChild).focus();}
+      if(e.key==="ArrowUp"){e.preventDefault();(tr.previousElementSibling||tb.lastElementChild).focus();}
+    });
+    tb.appendChild(tr);
+  });
+  $("#countLbl").textContent=`${rows.length} ${T[lang].requests}`;
+  $("#navCount").textContent=DATA.filter(d=>d.status!=="approved"&&d.status!=="reject"&&d.status!=="partial").length;
+}
+
+function select(id){
+  sel=id; $$(".row").forEach(r=>r.setAttribute("aria-selected", r.dataset.id===id?"true":"false"));
+  const d=DATA.find(x=>x.id===id); const t=T[lang];
+  const decided=["approved","partial","reject"].includes(d.status);
+  $("#panel").innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+      <div><h2>${d.svc}</h2><div class="authno mono">${d.id}</div></div>${chip(d.status)}</div>
+    <div class="block"><h3>${t.ctx}</h3>
+      <div class="kv"><span>${t.member}</span><span class="mono">${d.member}</span></div>
+      <div class="kv"><span>${t.agesex}</span><span>${d.age}</span></div>
+      <div class="kv"><span>${t.dx}</span><span>${d.dx}</span></div>
+      <div class="kv"><span>${t.req}</span><span>${d.svc}</span></div>
+      <div class="kv"><span>${t.cost}</span><span>${d.cost}</span></div>
+      <div class="kv"><span>${t.pol}</span><span>${d.pol}</span></div>
+    </div>
+    <div class="block"><h3>${t.supp}</h3>
+      <ul class="doclist">${d.docs.map(n=>`<li><a href="#" onclick="return false">${svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>')}${n}</a></li>`).join("")}</ul></div>
+    <label class="fld" for="ratio">${t.rationale}</label>
+    <textarea id="ratio" ${decided?'disabled':''} placeholder=""></textarea>
+    <div class="err" id="ratErr">${svg(ICON.reject)}<span>${t.need}</span></div>
+    <div class="actions-row">
+      <button class="btn primary" data-act="approved" ${decided?'disabled':''}>${svg(ICON.approved)}${t.approve}</button>
+      <button class="btn" data-act="partial" ${decided?'disabled':''}>${svg('<path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="9"/>')}${t.partial}</button>
+      <button class="btn danger" data-act="reject" ${decided?'disabled':''}>${svg(ICON.reject)}${t.reject}</button>
+      <button class="btn warn" data-act="info" ${decided?'disabled':''}>${svg(ICON.info)}${t.reqinfo}</button>
+    </div>
+    <div class="decided ${decided?'show':''}" role="status">${svg(ICON.approved)}${t.decided}</div>
+    <div class="metaline">${svg('<circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/>')}${t.reviewer} · ${new Date().toLocaleDateString(lang==="ar"?"ar-EG":"en-GB")}</div>`;
+  $$("#panel .btn").forEach(b=>b.addEventListener("click",()=>decide(d,b.dataset.act)));
+}
+
+function decide(d,act){
+  const needs=(act==="reject"||act==="info");
+  const note=$("#ratio").value.trim();
+  if(needs && !note){$("#ratErr").classList.add("show");$("#ratio").focus();return;}
+  d.status = act==="approved"?"approved":act==="partial"?"partial":act==="info"?"info":"reject";
+  const L=T[lang].st; const msg={approved:L.approved,partial:L.partial,info:L.info,reject:L.reject}[d.status];
+  renderTable(); select(d.id);
+  toast(`${d.id} — ${msg}`);
+}
+function toast(m){const el=$("#toastT");$("#toastMsg").textContent=m;el.classList.add("show");
+  clearTimeout(toast._t);toast._t=setTimeout(()=>el.classList.remove("show"),2600);}
+
+function applyLang(){
+  const t=T[lang]; document.documentElement.lang=lang; document.documentElement.dir=lang==="ar"?"rtl":"ltr";
+  $$("[data-i]").forEach(el=>{const k=el.dataset.i; if(t[k]!=null) el.textContent=t[k];});
+  const s=$(".search input"); s.placeholder=t.ph; s.setAttribute("aria-label",t.ph);
+  $("#langBtn").setAttribute("aria-label", lang==="ar"?"Switch to English":"Switch to Arabic");
+  renderTable(); if(sel) select(sel); else $("#panel").innerHTML=`<p class="muted">${t.pick}</p>`;
+}
+
+/* filters */
+$$(".seg button").forEach(b=>b.addEventListener("click",()=>{
+  filter=b.dataset.f; $$(".seg button").forEach(x=>x.setAttribute("aria-pressed", x===b?"true":"false")); renderTable();
+}));
+/* theme + lang toggles (persist best-effort) */
+function setTheme(m){document.documentElement.dataset.theme=m; try{localStorage.setItem("mersal-theme",m)}catch(e){}}
+$("#themeBtn").addEventListener("click",()=>setTheme(document.documentElement.dataset.theme==="dark"?"light":"dark"));
+$("#langBtn").addEventListener("click",()=>{lang=lang==="en"?"ar":"en"; try{localStorage.setItem("mersal-lang",lang)}catch(e){} applyLang();});
+try{const sm=localStorage.getItem("mersal-theme"); if(sm)setTheme(sm); else if(matchMedia("(prefers-color-scheme:dark)").matches)setTheme("dark");
+    const sl=localStorage.getItem("mersal-lang"); if(sl)lang=sl;}catch(e){}
+applyLang();
+</script>
+</body>
+</html>

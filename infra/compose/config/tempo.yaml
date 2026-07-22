@@ -1,0 +1,18 @@
+# Grafana Tempo (traces) — minimal single-binary config for Tier 1.
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317   # services send OTLP traces here
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/traces
+    wal:
+      path: /var/tempo/wal
