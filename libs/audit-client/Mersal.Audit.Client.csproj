@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- TargetFramework/Nullable/ImplicitUsings from Directory.Build.props. -->
+  <PropertyGroup>
+    <RootNamespace>Mersal.Audit.Client</RootNamespace>
+    <AssemblyName>Mersal.Audit.Client</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!-- Closes the 0.2 IAuthEventSink stub by mapping auth events into the audit trail. -->
+  <ItemGroup>
+    <ProjectReference Include="../auth/Mersal.Auth.csproj" />
+  </ItemGroup>
+
+  <!-- Tests/ is its own project; keep it out of the library compile glob. -->
+  <ItemGroup>
+    <Compile Remove="Tests/**/*.cs" />
+    <None Remove="Tests/**/*" />
+  </ItemGroup>
+
+</Project>

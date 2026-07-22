@@ -23,12 +23,22 @@
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
 
+    <!-- Supply-chain audit ON; fail the build on HIGH/CRITICAL advisories to match the CI Trivy
+         gate (moderate/low surface as warnings, tracked but non-blocking). -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>high</NuGetAuditLevel>
+
     <!-- Central Package Management (versions live in Directory.Packages.props). -->
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
 
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- CS1591 (missing XML doc). Pedantic perf/style analyzers we deliberately opt out of:
+         CA1848 (LoggerMessage delegate boilerplate), CA1859 (concrete type micro-perf),
+         CA1725 (param name must match base), CA1716 (identifier vs VB keyword). Security &
+         correctness analyzers stay ON and remain errors. -->
+    <NoWarn>$(NoWarn);CS1591;CA1848;CA1859;CA1725;CA1716</NoWarn>
   </PropertyGroup>
 
   <!-- Test projects opt into coverage collection and relax analyzer rules that fight

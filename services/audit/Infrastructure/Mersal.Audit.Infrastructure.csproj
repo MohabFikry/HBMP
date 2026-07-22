@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Mersal.Audit.Infrastructure</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Domain/Mersal.Audit.Domain.csproj" />
+  </ItemGroup>
+  <!-- Shared framework provides Hosting/Options/Logging/DI abstractions (BackgroundService etc.). -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="RabbitMQ.Client" />
+    <PackageReference Include="AWSSDK.S3" />
+  </ItemGroup>
+  <!-- Ship the SQL migrations next to the assembly so SqlFileMigrator can find them. -->
+  <ItemGroup>
+    <None Update="Migrations/*.sql" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

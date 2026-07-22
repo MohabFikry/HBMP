@@ -11,7 +11,7 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 |---|-------|-----------|--------|-----------|
 | 0 | Foundations | 0.1 Monorepo scaffold, CI/CD, dev IaC | ☑ | cac74b3 |
 | 0 | Foundations | 0.2 Identity & access (Keycloak, MFA) + `libs/auth` | ☑ | (0.2) |
-| 0 | Foundations | 0.3 Audit spine: `audit-service` + `libs/audit-client` | ☐ | |
+| 0 | Foundations | 0.3 Audit spine: `audit-service` + `libs/audit-client` | ☑ | (0.3) |
 | 0 | Foundations | 0.4 AuthZ engine: `libs/authz` (RBAC+ABAC, row+field) | ☐ | |
 | 0 | Foundations | 0.5 Service template + Kong gateway + `libs/events` + observability | ☐ | |
 | 0b | Master Data | 0b.1 `masterdata-service` schema + read/search APIs | ☐ | |

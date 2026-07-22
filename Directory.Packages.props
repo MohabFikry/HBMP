@@ -42,10 +42,10 @@
   </ItemGroup>
 
   <ItemGroup Label="Observability (OpenTelemetry → LGTM)">
-    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.9.0" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.9.0" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.9.0" />
-    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.9.0" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.10.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.10.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.10.0" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.10.0" />
     <PackageVersion Include="Serilog.AspNetCore" Version="8.0.2" />
     <PackageVersion Include="Serilog.Sinks.Grafana.Loki" Version="8.3.0" />
   </ItemGroup>
@@ -54,6 +54,13 @@
     <PackageVersion Include="FluentValidation" Version="11.9.2" />
     <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="11.9.2" />
     <PackageVersion Include="UUIDNext" Version="4.1.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Transitive security pins (patched versions for known advisories)">
+    <!-- GHSA-8g4q-xg66-9fp4 (System.Text.Json) — pull in the patched build transitively. -->
+    <PackageVersion Include="System.Text.Json" Version="8.0.5" />
+    <!-- GHSA-qj66-m88j-hmgj (Microsoft.Extensions.Caching.Memory). -->
+    <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="8.0.1" />
   </ItemGroup>
 
   <ItemGroup Label="Testing">
