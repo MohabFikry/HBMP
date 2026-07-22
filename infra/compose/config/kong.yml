@@ -1,29 +1,38 @@
 _format_version: "3.0"
-# Kong DB-less declarative config (Tier 1 starter).
-# As services come online, add them here and route the public API through Kong,
-# with JWT validation (against Keycloak), rate limiting, and correlation IDs.
-#
-# Example once patient-service exists:
-#
-# services:
-#   - name: patient-service
-#     url: http://patient-service:8080
-#     routes:
-#       - name: patient-routes
-#         paths: ["/api/v1/beneficiaries"]
-#     plugins:
-#       - name: jwt                 # validate Keycloak-issued tokens
-#       - name: rate-limiting
-#         config: { minute: 600, policy: local }
-#       - name: correlation-id
-#         config: { header_name: X-Correlation-Id, generator: uuid }
-#
-services: []
+# Kong DB-less declarative config (Tier 1). Public API is fronted by Traefik/NGINX + ModSecurity
+# (OWASP CRS) + TLS at the edge (ADR-0004); Kong does routing, coarse JWT validation against
+# Keycloak, rate limiting, and correlation-id propagation. Services ALSO validate tokens fully
+# (defense in depth, libs/auth). Add each service's routes as it comes online.
+
+services:
+  # --- hello-service: the phase-0.5 vertical slice ---
+  - name: hello-service
+    url: http://hello-service:8080
+    routes:
+      - name: hello-routes
+        paths: ["/api/v1/hello", "/health/live"]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config: { minute: 600, policy: local }
+      # Coarse JWT validation at the gateway. Kong OSS `jwt` plugin verifies the signature against
+      # a registered consumer credential holding the Keycloak realm's RS256 public key. Provision it
+      # after first boot (the realm's public key is at /realms/mersal). Services still fully validate.
+      # - name: jwt
+      #   config: { claims_to_verify: ["exp"], key_claim_name: "iss" }
+
+  # --- audit-service: internal only; NOT exposed publicly (read API reached in-cluster / admin) ---
+  # (no public route — the audit read API is reached via the internal network / admin ingress)
+
 routes: []
+
 plugins:
-  # Global correlation IDs on every request (audit trace).
+  # Global correlation IDs (W3C-style) on every request — propagated to services + audit trail.
   - name: correlation-id
     config:
       header_name: X-Correlation-Id
       generator: uuid
       echo_downstream: true
+  # Basic global rate limit as a safety net (per-route limits override).
+  - name: rate-limiting
+    config: { minute: 1200, policy: local }

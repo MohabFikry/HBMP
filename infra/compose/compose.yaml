@@ -241,28 +241,55 @@ services:
     depends_on: [prometheus, loki, tempo]
     networks: [hbmp]
 
-  # ================================================================ APPLICATION SERVICES (template)
-  # Add each .NET service as it is built. Example — copy per service:
-  #
-  # patient-service:
-  #   image: harbor.local/mersal/patient-service:${TAG:-latest}
-  #   <<: *restart
-  #   environment:
-  #     ConnectionStrings__Db: "Host=postgres;Database=patient;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
-  #     Auth__Authority: "http://keycloak:8080/realms/mersal"
-  #     Messaging__Rabbit: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
-  #     Events__Nats: "nats://nats:4222"
-  #     Cache__Valkey: "valkey:6379,password=${VALKEY_PASSWORD}"
-  #     Search__OpenSearch: "http://opensearch:9200"
-  #     Storage__S3Endpoint: "http://minio:9000"
-  #     Secrets__OpenBao: "http://openbao:8200"
-  #     Otel__Endpoint: "http://tempo:4317"
-  #   depends_on:
-  #     postgres: { condition: service_healthy }
-  #     keycloak: { condition: service_started }
-  #   networks: [hbmp]
-  #
-  # web:  # React portals (served behind Kong/Traefik)
-  #   image: harbor.local/mersal/web:${TAG:-latest}
+  # ================================================================ APPLICATION SERVICES
+  # Built from source for Tier 1 (context = repo root). In Tier 2/3 these become Harbor images
+  # deployed by Helm. Add each service here as it is built (patient/policy/emr/... to come).
+
+  # --- audit-service (0.3): the audit spine. Internal only (no public Kong route). ---
+  audit-service:
+    build:
+      context: ../..
+      dockerfile: services/audit/Dockerfile
+    <<: *restart
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Audit: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Auth__Authority: "http://keycloak:8080/realms/mersal"
+      Auth__Audience: "hbmp-api"
+      Auth__RequireHttpsMetadata: "false"
+      Messaging__Uri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
+      Messaging__Queue: "audit.events"
+      Worm__Endpoint: "http://minio:9000"
+      Worm__AccessKey: "${MINIO_ROOT_USER}"
+      Worm__SecretKey: "${MINIO_ROOT_PASSWORD}"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      minio: { condition: service_healthy }
+      keycloak: { condition: service_started }
+    networks: [hbmp]
+
+  # --- hello-service (0.5): the vertical-slice proof (auth+authz+audit+events+OTel). ---
+  hello-service:
+    build:
+      context: ../..
+      dockerfile: services/hello/Dockerfile
+    <<: *restart
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Auth__Authority: "http://keycloak:8080/realms/mersal"
+      Auth__Audience: "hbmp-api"
+      Auth__RequireHttpsMetadata: "false"
+      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    ports: ["8090:8080"]   # also reachable via Kong at :8000/api/v1/hello
+    depends_on:
+      keycloak: { condition: service_started }
+      rabbitmq: { condition: service_healthy }
+    networks: [hbmp]
+
+  # web:  # React portals (phase 9) — served behind Kong/Traefik
+  #   build: { context: ../.., dockerfile: apps/web/Dockerfile }
   #   <<: *restart
   #   networks: [hbmp]
