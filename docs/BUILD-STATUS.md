@@ -17,7 +17,7 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 0b | Master Data | 0b.1 `masterdata-service` schema + read/search APIs | ☑ | (0b) |
 | 0b | Master Data | 0b.2 Loaders: ingest real ICD-10/CPT/ATC drugs | ☑ | (0b) |
 | 0b | Master Data | 0b.3 Interactions/allergens seed + validation endpoints | ◐ | (0b) |
-| 1 | Registration | 1.1 `patient-service` | ☐ | |
+| 1 | Registration | 1.1 `patient-service` | ☑ | (1.1) |
 | 1 | Registration | 1.2 `policy-service` | ☐ | |
 | 1 | Registration | 1.3 `document-service` integration | ☐ | |
 | 1 | Registration | 1.4 Registration workflow + activation | ☐ | |
