@@ -289,6 +289,25 @@ services:
       rabbitmq: { condition: service_healthy }
     networks: [hbmp]
 
+  # --- masterdata-service (0b): reference data (ICD/CPT/ATC/drugs) + validation APIs. ---
+  masterdata-service:
+    build:
+      context: ../..
+      dockerfile: services/masterdata/Dockerfile
+    <<: *restart
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__MasterData: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Auth__Authority: "http://keycloak:8080/realms/mersal"
+      Auth__Audience: "hbmp-api"
+      Auth__RequireHttpsMetadata: "false"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    ports: ["8091:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      keycloak: { condition: service_started }
+    networks: [hbmp]
+
   # web:  # React portals (phase 9) — served behind Kong/Traefik
   #   build: { context: ../.., dockerfile: apps/web/Dockerfile }
   #   <<: *restart
