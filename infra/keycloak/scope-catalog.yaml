@@ -1,0 +1,40 @@
+# HBMP OAuth2 scope catalog — role → scopes (source-controlled).
+# The authoritative mapping enforced at the gateway (Kong, coarse) AND each service
+# (libs/auth ScopeRequirement, fine). Keep in sync with infra/keycloak/realm-mersal.json
+# and the permission matrix (HBMP-Design/11-permission-matrix.md).
+#
+# Scopes are minted as Keycloak client scopes and requested by hbmp-web per role.
+# Services gate endpoints with [Authorize(Policy = HbmpPolicies.Scope("<scope>"))].
+# Protected scopes additionally require MFA (Auth:ProtectedScopeRequiresMfa=true).
+
+version: 1
+
+scopes:
+  reception:read:   { description: "Reception min-necessary eligibility search", mfa: true }
+  orders:read:      { description: "Read investigation orders / provider queue", mfa: true }
+  orders:consume:   { description: "Atomic idempotent consume of an order line", mfa: true }
+  pharmacy:read:    { description: "Read dispensable prescriptions", mfa: true }
+  pharmacy:dispense:{ description: "Dispense a prescription line", mfa: true }
+  auth:review:      { description: "Open authorization clinical review (PHI, purpose PUR)", mfa: true }
+  auth:decide:      { description: "Approve / partial / reject / request-info", mfa: true }
+  auth:emergency:   { description: "Emergency approval — break-glass", mfa: true }
+  auth:override:    { description: "Director override — break-glass", mfa: true }
+  auth:manual:      { description: "Manual authorization (no provider submission)", mfa: true }
+  finance:read:     { description: "Finance utilization/settlement reads (NO diagnoses)", mfa: true }
+
+roles:
+  reception:        [reception:read]
+  doctor:           [orders:read, orders:consume, pharmacy:read]   # + EMR scopes added in phase 4
+  nurse:            [reception:read]
+  lab_tech:         [orders:read, orders:consume]
+  imaging_tech:     [orders:read, orders:consume]
+  pharmacist:       [pharmacy:read, pharmacy:dispense]
+  medical_approval: [auth:review, auth:decide, auth:manual]
+  medical_director: [auth:review, auth:decide, auth:emergency, auth:override, auth:manual]
+  case_manager:     []          # case-assignment ABAC scopes added in phase 10
+  finance:          [finance:read]
+  network_team:     []          # provider metadata scopes added in phase 2b
+  provider_admin:   [orders:read]
+  beneficiary_mgmt: [reception:read]
+  org_admin:        []          # admin scopes added in phase 8b
+  super_admin:      []          # global; PHI only via break-glass (phase 8b)

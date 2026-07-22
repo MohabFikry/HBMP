@@ -31,10 +31,13 @@
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
-  <!-- Test projects opt into coverage collection and relax a few analyzer rules. -->
+  <!-- Test projects opt into coverage collection and relax analyzer rules that fight
+       idiomatic xUnit style (underscored Method_Scenario_Expectation names, inline arrays,
+       and micro-perf rules that don't matter in tests). -->
   <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('Tests'))">
     <IsPackable>false</IsPackable>
     <CollectCoverage>true</CollectCoverage>
+    <NoWarn>$(NoWarn);CA1707;CA1861;CA1859;CA1515;CA2007;CA1861;CA1305;CA1822;CA1861</NoWarn>
   </PropertyGroup>
 
 </Project>

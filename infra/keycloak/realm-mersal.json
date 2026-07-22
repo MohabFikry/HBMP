@@ -1,0 +1,276 @@
+{
+  "realm": "mersal",
+  "displayName": "Mersal HBMP",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "failureFactor": 5,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "offlineSessionIdleTimeout": 2592000,
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA256",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "otpPolicyLookAheadWindow": 1,
+  "webAuthnPolicyRpEntityName": "Mersal HBMP",
+  "requiredActions": [
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": true,
+      "priority": 10
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "reception",
+        "description": "Reception \u2014 eligibility + check-in, no EMR"
+      },
+      {
+        "name": "doctor",
+        "description": "Treating clinician \u2014 EMR, orders, prescriptions (treating-relationship)"
+      },
+      {
+        "name": "nurse",
+        "description": "Nursing \u2014 vitals + care, scoped clinical"
+      },
+      {
+        "name": "lab_tech",
+        "description": "Laboratory technician \u2014 order queue + consume, no prescriptions"
+      },
+      {
+        "name": "imaging_tech",
+        "description": "Imaging technician \u2014 order queue + consume, no prescriptions"
+      },
+      {
+        "name": "pharmacist",
+        "description": "Pharmacy \u2014 dispensing, no investigation results"
+      },
+      {
+        "name": "medical_approval",
+        "description": "Medical Approval reviewer \u2014 authorizations, clinical review under purpose"
+      },
+      {
+        "name": "medical_director",
+        "description": "Medical Director \u2014 emergency approval + override authority"
+      },
+      {
+        "name": "case_manager",
+        "description": "Case Manager \u2014 assigned beneficiary-360, coordination summary"
+      },
+      {
+        "name": "finance",
+        "description": "Finance \u2014 utilization/settlements/exports, NEVER diagnoses"
+      },
+      {
+        "name": "network_team",
+        "description": "Provider Network Team \u2014 provider metadata onboarding, no PHI"
+      },
+      {
+        "name": "provider_admin",
+        "description": "Provider Admin \u2014 own provider only, no self-elevation"
+      },
+      {
+        "name": "beneficiary_mgmt",
+        "description": "Registration/Beneficiary Management officer"
+      },
+      {
+        "name": "org_admin",
+        "description": "Org Admin \u2014 tenant-scoped user/role/config admin, not content"
+      },
+      {
+        "name": "super_admin",
+        "description": "Super Admin \u2014 global config; PHI only via break-glass"
+      }
+    ]
+  },
+  "clientScopes": [
+    {
+      "name": "orders:read",
+      "protocol": "openid-connect",
+      "description": "Read investigation orders",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "orders:consume",
+      "protocol": "openid-connect",
+      "description": "Consume an order line (atomic, idempotent)",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "pharmacy:read",
+      "protocol": "openid-connect",
+      "description": "Read dispensable prescriptions",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "pharmacy:dispense",
+      "protocol": "openid-connect",
+      "description": "Dispense a prescription line",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "auth:review",
+      "protocol": "openid-connect",
+      "description": "Open authorization clinical review",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "auth:decide",
+      "protocol": "openid-connect",
+      "description": "Decide an authorization",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "auth:emergency",
+      "protocol": "openid-connect",
+      "description": "Emergency approval (break-glass)",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "auth:override",
+      "protocol": "openid-connect",
+      "description": "Director override (break-glass)",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "reception:read",
+      "protocol": "openid-connect",
+      "description": "Reception min-necessary search",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "finance:read",
+      "protocol": "openid-connect",
+      "description": "Finance read (no diagnoses)",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "hbmp-api",
+      "name": "HBMP API (resource server)",
+      "description": "Bearer-only resource server. Services validate tokens for this audience.",
+      "protocol": "openid-connect",
+      "bearerOnly": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocolMappers": [
+        {
+          "name": "audience-hbmp-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "hbmp-api",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "tenant_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "provider_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "provider_id",
+            "claim.name": "provider_id",
+            "jsonType.label": "String",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "hbmp-web",
+      "name": "HBMP Web (React portals)",
+      "description": "Public SPA using Authorization Code + PKCE (S256). Lands users on their role portal.",
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      },
+      "redirectUris": [
+        "http://localhost:5173/*",
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:5173",
+        "http://localhost:3000"
+      ],
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles"
+      ],
+      "optionalClientScopes": [
+        "orders:read",
+        "orders:consume",
+        "pharmacy:read",
+        "pharmacy:dispense",
+        "auth:review",
+        "auth:decide",
+        "auth:emergency",
+        "auth:override",
+        "reception:read",
+        "finance:read"
+      ]
+    }
+  ]
+}
