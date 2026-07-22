@@ -20,7 +20,8 @@ public sealed class MasterDataDbContext(DbContextOptions<MasterDataDbContext> op
     {
         b.HasDefaultSchema(Schema);
 
-        b.Entity<IcdCode>(e => { e.ToTable("icd_code"); e.HasKey(x => x.Code); e.HasIndex(x => x.Chapter); e.HasIndex(x => x.IsBillable); });
+        b.Entity<IcdCode>(e => { e.ToTable("icd_code"); e.HasKey(x => x.Code); e.HasIndex(x => x.Chapter); e.HasIndex(x => x.IsBillable);
+            e.Property(x => x.Icd11Map).HasColumnName("icd11_map"); }); // snake convention renders digits oddly here
         b.Entity<CptCode>(e => { e.ToTable("cpt_code"); e.HasKey(x => x.Code); e.HasIndex(x => x.Category); });
         b.Entity<LoincCode>(e => { e.ToTable("loinc_code"); e.HasKey(x => x.Code); });
         b.Entity<AtcClass>(e => { e.ToTable("atc_class"); e.HasKey(x => x.AtcCode); e.HasIndex(x => x.Level); });

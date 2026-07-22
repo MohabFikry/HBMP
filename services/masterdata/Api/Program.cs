@@ -11,7 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddDbContext<MasterDataDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("MasterData")
-                ?? "Host=postgres;Database=hbmp;Username=hbmp;Password=hbmp"));
+                ?? "Host=postgres;Database=hbmp;Username=hbmp;Password=hbmp").UseSnakeCaseNamingConvention());
 
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(r => r.AddService("masterdata-service"))

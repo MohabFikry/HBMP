@@ -37,7 +37,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: postgres
-    ports: ["5432:5432"]
+    ports: ["55432:5432"]  # 55432 on host (local PG16 owns 5432); services use hostname "postgres"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./config/postgres-init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro

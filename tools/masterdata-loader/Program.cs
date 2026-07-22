@@ -45,7 +45,7 @@ if (!dryRun)
         Console.Error.WriteLine("No --connection (or MASTERDATA_DB) provided for DB upsert. Use --dry-run to parse only.");
         return 2;
     }
-    var options = new DbContextOptionsBuilder<MasterDataDbContext>().UseNpgsql(connection).Options;
+    var options = new DbContextOptionsBuilder<MasterDataDbContext>().UseNpgsql(connection).UseSnakeCaseNamingConvention().Options;
     await using var db = new MasterDataDbContext(options);
     var migrationsDir = Path.Combine(AppContext.BaseDirectory, "Migrations");
     await DbUpsert.ApplyMigrationAsync(db, migrationsDir, default);

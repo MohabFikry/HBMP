@@ -5,6 +5,8 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 ## Dependency order
 `0 → 0b → 1 → 2 → 2b → 3 → 4 → 5,6 (parallel) → 7 → 8 → 10`; `8b` + `9` run continuously from R0/R1; `11` gates go-live; `12` after 11; `13` after core.
 
+## ⇒ New here? Read docs/HANDOFF.md first (full continuation guide).
+
 ## Progress
 
 | # | Phase | Sub-prompt | Status | PR/commit |
@@ -19,7 +21,7 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 0b | Master Data | 0b.3 Interactions/allergens seed + validation endpoints | ◐ | (0b) |
 | 1 | Registration | 1.1 `patient-service` | ☑ | (1.1) |
 | 1 | Registration | 1.2 `policy-service` | ☑ | (1.2) |
-| 1 | Registration | 1.3 `document-service` integration | ☐ | |
+| 1 | Registration | 1.3 `document-service` integration | ◐ | WIP: Domain+Infra done, Api+Tests TODO |
 | 1 | Registration | 1.4 Registration workflow + activation | ☐ | |
 | 2 | Eligibility | 2.1 `eligibility-service` + cache | ☐ | |
 | 2 | Eligibility | 2.2 Reception search (min-necessary) | ☐ | |
