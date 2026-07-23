@@ -1,0 +1,155 @@
+using Mersal.Audit.Client;
+using Mersal.Auth;
+using Mersal.Auth.Authorization;
+using Mersal.Events;
+using Mersal.Provider.Domain;
+using Mersal.Provider.Infrastructure;
+using Microsoft.EntityFrameworkCore;
+
+namespace Mersal.Provider.Api;
+
+/// <summary>The Network Team onboarding workflow (2b.2, FR-NET-003/004/007): guarded activation,
+/// provider-user provisioning with SoD, dual-controlled termination, de-provisioning on suspend/terminate,
+/// and credential-expiry reminders. Every step writes a hash-chained audit_event with actor + justification.</summary>
+public static class OnboardingEndpoints
+{
+    public static void MapOnboarding(this WebApplication app)
+    {
+        var write = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("provider:write"));
+
+        // --- Activate: guarded by contract + valid mandatory credentials + primary location (FR-NET-004) ---
+        write.MapPost("/providers/{id:guid}/activate", async (Guid id, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        {
+            var (p, tenant) = await Load(db, id, me, ct);
+            if (p is null) return Results.NotFound();
+
+            var readiness = ReadinessOf(p, Today(clock));
+            var guard = OnboardingWorkflow.GuardActivation(readiness);
+            if (!guard.Allowed)
+            {
+                await audit.EmitAsync(Draft(p, AuditAction.StateChange, me, tenant, outcome: "activation-blocked", reason: guard.Reason), ct);
+                return Results.Problem(statusCode: 422, title: "cannot activate provider", detail: guard.Reason);
+            }
+
+            p.Status = ProviderStatus.Active;
+            p.OnboardingState = OnboardingState.Activated;
+            p.UpdatedAt = clock.GetUtcNow();
+            await db.SaveChangesAsync(ct);
+            await audit.EmitAsync(Draft(p, AuditAction.StateChange, me, tenant, outcome: "Activated"), ct);
+            await outbox.EnqueueAsync("ProviderStatusChanged", "provider.events", new { providerId = p.ProviderId, status = "Active", onboardingState = "Activated", tenantId = tenant }, ct);
+            return Results.Ok(new { p.ProviderId, status = p.Status.ToString(), onboardingState = p.OnboardingState.ToString(), routable = true });
+        });
+
+        // --- Suspend: stop routing + revoke all provider users (FR-IAM-010) --------------------------------
+        write.MapPost("/providers/{id:guid}/suspend", async (Guid id, StateChange req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.Reason)) return Results.Problem(statusCode: 400, title: "a reason is required");
+            var (p, tenant) = await Load(db, id, me, ct);
+            if (p is null) return Results.NotFound();
+
+            p.Status = ProviderStatus.Suspended;
+            p.OnboardingState = OnboardingState.Suspended;
+            p.UpdatedAt = clock.GetUtcNow();
+            var revoked = await RevokeUsers(db, id, clock, ct);
+            await db.SaveChangesAsync(ct);
+            await audit.EmitAsync(Draft(p, AuditAction.StateChange, me, tenant, outcome: "Suspended", reason: req.Reason), ct);
+            await outbox.EnqueueAsync("ProviderStatusChanged", "provider.events", new { providerId = p.ProviderId, status = "Suspended", tenantId = tenant }, ct);
+            await outbox.EnqueueAsync("ProviderUsersRevoked", "provider.events", new { providerId = p.ProviderId, count = revoked, reason = "provider-suspended", tenantId = tenant }, ct);
+            return Results.Ok(new { p.ProviderId, status = p.Status.ToString(), usersRevoked = revoked });
+        });
+
+        // --- Terminate: dual-controlled (second approver must differ from actor) ---------------------------
+        write.MapPost("/providers/{id:guid}/terminate", async (Guid id, StateChange req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.Reason)) return Results.Problem(statusCode: 400, title: "a reason is required");
+            var actor = me.Principal?.Subject;
+            if (string.IsNullOrWhiteSpace(req.SecondApproverSubject) || string.Equals(req.SecondApproverSubject, actor, StringComparison.Ordinal))
+                return Results.Problem(statusCode: 422, title: "terminate is dual-controlled", detail: "a distinct second approver is required");
+
+            var (p, tenant) = await Load(db, id, me, ct);
+            if (p is null) return Results.NotFound();
+
+            p.Status = ProviderStatus.Terminated;
+            p.OnboardingState = OnboardingState.Terminated;
+            p.UpdatedAt = clock.GetUtcNow();
+            var revoked = await RevokeUsers(db, id, clock, ct);
+            await db.SaveChangesAsync(ct);
+            await audit.EmitAsync(Draft(p, AuditAction.StateChange, me, tenant, outcome: "Terminated", reason: $"{req.Reason} (2nd approver: {req.SecondApproverSubject})"), ct);
+            await outbox.EnqueueAsync("ProviderStatusChanged", "provider.events", new { providerId = p.ProviderId, status = "Terminated", tenantId = tenant }, ct);
+            await outbox.EnqueueAsync("ProviderUsersRevoked", "provider.events", new { providerId = p.ProviderId, count = revoked, reason = "provider-terminated", tenantId = tenant }, ct);
+            return Results.Ok(new { p.ProviderId, status = p.Status.ToString(), usersRevoked = revoked });
+        });
+
+        // --- Provision a provider-scoped user (SoD: no self-elevation / no clinical / no cross-provider) ----
+        write.MapPost("/providers/{id:guid}/users", async (Guid id, ProvisionUser req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        {
+            var (p, tenant) = await Load(db, id, me, ct);
+            if (p is null) return Results.NotFound();
+
+            var actorRoles = me.Principal?.Roles ?? new HashSet<string>();
+            var sod = ProviderUserRules.CanProvision(actorRoles, req.Role);
+            if (!sod.Allowed)
+            {
+                await audit.EmitAsync(new AuditEventDraft { EntityType = "provider_user", EntityId = req.SubjectRef, Action = AuditAction.Grant, ActorUserId = me.Principal?.Subject, TenantId = tenant, ProviderId = id.ToString(), DecisionOutcome = "Deny", DecisionReasonCode = "sod", Severity = AuditSeverity.Warning }, ct);
+                return Results.Problem(statusCode: 403, title: "provisioning denied", detail: sod.Reason);
+            }
+
+            var user = new ProviderUser
+            {
+                UserId = Guid.NewGuid(), ProviderId = id, TenantId = tenant!, SubjectRef = req.SubjectRef,
+                Role = req.Role, Status = ProviderUserStatus.Active, CreatedAt = clock.GetUtcNow(),
+            };
+            db.Users.Add(user);
+            try { await db.SaveChangesAsync(ct); }
+            catch (DbUpdateException) { return Results.Problem(statusCode: 409, title: "a user with this subject already exists in the tenant"); }
+            await audit.EmitAsync(new AuditEventDraft { EntityType = "provider_user", EntityId = user.UserId.ToString(), Action = AuditAction.Create, ActorUserId = me.Principal?.Subject, TenantId = tenant, ProviderId = id.ToString(), DecisionOutcome = "provisioned" }, ct);
+            // identity-service (Keycloak) provisioning is driven off this event (deferred sync).
+            await outbox.EnqueueAsync("ProviderUserProvisioned", "provider.events", new { userId = user.UserId, providerId = id, user.SubjectRef, user.Role, tenantId = tenant }, ct);
+            return Results.Created($"/api/v1/providers/{id}/users/{user.UserId}", new { user.UserId, user.Role });
+        });
+
+        // --- Credential-expiry reminder sweep → ProviderCredentialExpiring (FR-NET-007) --------------------
+        write.MapPost("/providers/credentials/reminder-run", async (ProviderDbContext db, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, int? windowDays, CancellationToken ct) =>
+        {
+            var tenant = me.Principal?.TenantId;
+            var today = Today(clock);
+            var window = windowDays ?? 30;
+            var creds = await db.Credentials.AsNoTracking().Where(c => c.TenantId == tenant && !c.IsDeleted && c.ValidTo != null).ToListAsync(ct);
+            var due = creds.Where(c => CredentialRules.ExpiryReminderDue(c, today, window)).ToList();
+            foreach (var c in due)
+                await outbox.EnqueueAsync("ProviderCredentialExpiring", "provider.events", new { credentialId = c.CredentialId, providerId = c.ProviderId, c.CredentialType, validTo = c.ValidTo, tenantId = tenant }, ct);
+            return Results.Ok(new { evaluated = creds.Count, remindersEmitted = due.Count, windowDays = window });
+        });
+    }
+
+    private static DateOnly Today(TimeProvider clock) => DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+
+    private static async Task<(Domain.Provider? provider, string? tenant)> Load(ProviderDbContext db, Guid id, IHbmpPrincipalAccessor me, CancellationToken ct)
+    {
+        var tenant = me.Principal?.TenantId;
+        var p = await db.Providers
+            .Include(x => x.Locations).Include(x => x.Credentials).Include(x => x.Contracts)
+            .FirstOrDefaultAsync(x => x.ProviderId == id && x.TenantId == tenant && !x.IsDeleted, ct);
+        return (p, tenant);
+    }
+
+    private static OnboardingWorkflow.Readiness ReadinessOf(Domain.Provider p, DateOnly on) => new(
+        HasPrimaryLocation: p.Locations.Any(l => l.IsPrimary && !l.IsDeleted),
+        HasMandatoryCredentials: p.Credentials.Any(c => c.IsMandatory && !c.IsDeleted),
+        MandatoryCredentialsValid: CredentialRules.MandatoryCredentialsSatisfied(p.Credentials, on),
+        HasActiveContract: p.Contracts.Any(c => ContractRules.InEffect(c, on)));
+
+    private static async Task<int> RevokeUsers(ProviderDbContext db, Guid providerId, TimeProvider clock, CancellationToken ct)
+    {
+        var users = await db.Users.Where(u => u.ProviderId == providerId && u.Status == ProviderUserStatus.Active).ToListAsync(ct);
+        foreach (var u in users) { u.Status = ProviderUserStatus.Revoked; u.RevokedAt = clock.GetUtcNow(); }
+        return users.Count;
+    }
+
+    private static AuditEventDraft Draft(Domain.Provider p, AuditAction action, IHbmpPrincipalAccessor me, string? tenant, string? outcome = null, string? reason = null) => new()
+    {
+        EntityType = "provider", EntityId = p.ProviderId.ToString(), Action = action,
+        ActorUserId = me.Principal?.Subject, TenantId = tenant, ProviderId = p.ProviderId.ToString(),
+        DecisionOutcome = outcome, DecisionReasonCode = reason,
+    };
+}

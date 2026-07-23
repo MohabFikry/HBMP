@@ -210,6 +210,9 @@ read.MapGet("/providers/{id:guid}/capabilities", async (Guid id, ProviderDbConte
     return Results.Ok(new { p.ProviderId, status = p.Status.ToString(), routable = p.Status == ProviderStatus.Active, capabilities = caps });
 });
 
+// 2b.2 — Network Team onboarding workflow (activate/suspend/terminate, user provisioning, reminders).
+app.MapOnboarding();
+
 app.Run();
 
 public partial class Program;

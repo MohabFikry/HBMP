@@ -37,8 +37,26 @@ Network Team writes (`provider:write`), Provider Admin / Network Team read (`pro
 - `GET /providers/{id}/capabilities` — derived routable catalog (Active provider + in-effect contract only);
   `agreed_price` masked unless the caller holds `provider:finance`.
 
-Events (outbox → `provider.events`): `ProviderCreated`, `ContractActivated` (+ `ProviderStatusChanged`,
-`ProviderCredentialExpiring` in 2b.2). Every mutation writes a hash-chained `audit_event`.
+### Onboarding workflow (2b.2 — Network Team, FR-NET-003/004/007)
+
+Explicit, auditable state machine `Draft → DocumentsCollected → Credentialed → Contracted → Activated`
+(+ `Suspended`/`Terminated`), guards in `OnboardingWorkflow`:
+
+- `POST /providers/{id}/activate` — **blocked (422)** unless a primary location, valid mandatory
+  credentials, and an active contract are all present; on success → routable, `ProviderStatusChanged`.
+- `POST /providers/{id}/users` — provision a **provider-scoped** account (`provider_user`, stamped with
+  this `provider_id`). **SoD** (`ProviderUserRules`): only Network Team / Provider Admin; a Provider Admin
+  cannot self-grant admin; clinical roles are never provisioned here → `ProviderUserProvisioned`.
+- `POST /providers/{id}/suspend` — reason required; stops routing + **revokes all provider users**
+  (`ProviderUsersRevoked`, FR-IAM-010).
+- `POST /providers/{id}/terminate` — **dual-controlled** (a distinct second approver) + reason; revokes users.
+- `POST /providers/credentials/reminder-run?windowDays=30` — emits `ProviderCredentialExpiring` for
+  credentials lapsing within the window.
+
+Events (outbox → `provider.events`): `ProviderCreated`, `ContractActivated`, `ProviderStatusChanged`,
+`ProviderUserProvisioned`, `ProviderUsersRevoked`, `ProviderCredentialExpiring`. Every mutation writes a
+hash-chained `audit_event` with actor + justification. Network Team touches provider **metadata only** —
+no beneficiary PHI is reachable from this service.
 
 ## Data
 

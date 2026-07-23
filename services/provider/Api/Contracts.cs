@@ -20,3 +20,11 @@ public sealed record ProviderView(
     string Status, string OnboardingState);
 
 public sealed record CapabilityView(string ServiceType, string CodeSystem, string Code, decimal? AgreedPrice, string? CurrencyCode);
+
+// --- 2b.2 onboarding ---------------------------------------------------------------------------
+public sealed record ProvisionUser(string SubjectRef, string Role);
+
+/// <summary>Suspend/terminate carry a mandatory reason (audited). Terminate is dual-controlled: the
+/// second approver must differ from the acting user (SoD).</summary>
+public sealed record StateChange(string Reason, string? SecondApproverSubject);
+

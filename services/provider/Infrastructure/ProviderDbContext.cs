@@ -13,6 +13,7 @@ public sealed class ProviderDbContext(DbContextOptions<ProviderDbContext> option
     public DbSet<ProviderContract> Contracts => Set<ProviderContract>();
     public DbSet<ContractServiceLine> ServiceLines => Set<ContractServiceLine>();
     public DbSet<ProviderCredential> Credentials => Set<ProviderCredential>();
+    public DbSet<ProviderUser> Users => Set<ProviderUser>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -95,6 +96,21 @@ public sealed class ProviderDbContext(DbContextOptions<ProviderDbContext> option
             e.Property(x => x.DocumentId).HasColumnName("document_id");
             e.Property(x => x.IsMandatory).HasColumnName("is_mandatory");
             e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
+        });
+
+        b.Entity<ProviderUser>(e =>
+        {
+            e.ToTable("provider_user");
+            e.HasKey(x => x.UserId);
+            e.Property(x => x.ProviderId).HasColumnName("provider_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id").IsRequired();
+            e.Property(x => x.SubjectRef).HasColumnName("subject_ref").IsRequired();
+            e.Property(x => x.Role).HasColumnName("role").IsRequired();
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.RevokedAt).HasColumnName("revoked_at");
+            e.HasIndex(x => x.ProviderId);
+            e.HasIndex(x => new { x.TenantId, x.SubjectRef }).IsUnique();
         });
     }
 }
