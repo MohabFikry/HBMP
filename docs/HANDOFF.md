@@ -2,7 +2,7 @@
 
 **Purpose:** everything a new engineer/LLM needs to continue building the Mersal HBMP exactly as started. Pairs with `docs/BUILD-STATUS.md` (the phase-by-phase checklist) and the prompt library at `HBMP-Design/claude-code-prompts/00-MASTER-PROMPT-LIST.md`.
 
-Last updated: 2026-07-22.
+Last updated: 2026-07-23.
 
 ---
 
@@ -92,7 +92,9 @@ app.UseAuthentication(); app.UseAuthorization();
 Then: add 4 projects to `HbmpPlatform.sln`, add a Dockerfile, a compose entry, a service README, and tick `docs/BUILD-STATUS.md`. Schema migrations are hand-authored SQL under `Infrastructure/Migrations/*.sql` (partition/grants/RLS/triggers need raw SQL); apply on dev startup or via a small runner.
 
 ## 9. IMMEDIATE next tasks (in order)
-> **UPDATE 2026-07-23: Phase 1 is now COMPLETE** (1.1 patient, 1.2 policy, 1.3 document, 1.4 registration→activation — all committed, 128 tests green, activation proven live: register→approve→MRS-M-2026-000001 + BeneficiaryActivated). **Next is Phase 2** (eligibility-service + reception min-necessary search + visit gating) per phase-2-eligibility-reception.md. The 1.3/1.4 sub-sections below are DONE; keep them for reference.
+> **UPDATE 2026-07-23: Phase 2 is now COMPLETE** (2.1 eligibility-service `df91758`, 2.2 reception search `4d930ce`, 2.3 emr visit-gating stub `15ea73e` — all committed, **169 tests green**). New services: `eligibility` (:8095 — decision engine {Eligible|Ineligible|NeedsAuthorization} from member status + coverage + remaining limits; Valkey cache keyed (beneficiaryId,category) TTL 15m + in-memory fallback; `EventConsumer`/`ProjectionUpdater` consume `patient.events`+`policy.events` idempotently and invalidate; min-necessary reception search `GET /reception/search` with an authz reflection test proving no EMR leak; `GET /eligibility/members/{id}/status` for the gate) and `emr` (:8096 — `POST /encounters` status-gated: Active→ENC-* shell + clinician queue + EncounterStarted/ApptCheckedIn, else 422 guidance, idempotent). Enriched patient `BeneficiaryRegistered`/`Activated` + policy `CoverageChanged` payloads with min-necessary fields; **turned on the outbox relay** in patient/policy/eligibility/emr (also fixes audit delivery in dev) with a **lazy/resilient** `RabbitMqEventPublisher` (unreachable broker degrades, no startup crash). **Before a live demo, apply the two new migrations** to host Postgres (:55432): `services/eligibility/Infrastructure/Migrations/0001_eligibility.sql` and `services/emr/Infrastructure/Migrations/0001_emr.sql`. **Next is Phase 2b** (provider network + isolation) per `phase-2b-provider-network.md`. The Phase-1 sub-sections below are historical reference.
+>
+> **UPDATE 2026-07-23 (earlier): Phase 1 COMPLETE** (1.1 patient, 1.2 policy, 1.3 document, 1.4 registration→activation — 128 tests green, activation proven live: register→approve→MRS-M-2026-000001 + BeneficiaryActivated). The 1.3/1.4 sub-sections below are DONE; keep them for reference.
 
 ### 9a. FINISH Phase 1.3 — document-service (started, uncommitted)
 Prompt: `HBMP-Design/claude-code-prompts/phase-1-registration-policy.md` §1.3 (US-002). Design: `15-database-erd.md §12`.
