@@ -92,6 +92,8 @@ app.UseAuthentication(); app.UseAuthorization();
 Then: add 4 projects to `HbmpPlatform.sln`, add a Dockerfile, a compose entry, a service README, and tick `docs/BUILD-STATUS.md`. Schema migrations are hand-authored SQL under `Infrastructure/Migrations/*.sql` (partition/grants/RLS/triggers need raw SQL); apply on dev startup or via a small runner.
 
 ## 9. IMMEDIATE next tasks (in order)
+> **UPDATE 2026-07-23: Phase 1 is now COMPLETE** (1.1 patient, 1.2 policy, 1.3 document, 1.4 registration→activation — all committed, 128 tests green, activation proven live: register→approve→MRS-M-2026-000001 + BeneficiaryActivated). **Next is Phase 2** (eligibility-service + reception min-necessary search + visit gating) per phase-2-eligibility-reception.md. The 1.3/1.4 sub-sections below are DONE; keep them for reference.
+
 ### 9a. FINISH Phase 1.3 — document-service (started, uncommitted)
 Prompt: `HBMP-Design/claude-code-prompts/phase-1-registration-policy.md` §1.3 (US-002). Design: `15-database-erd.md §12`.
 - **Infrastructure:** `ClamAvScanner : IMalwareScanner` (TCP to ClamAV `clamd` on `clamav:3310`, INSTREAM; fail-closed), `MinioBlobStore : IBlobStore` (AWSSDK.S3 → MinIO, private bucket `beneficiary-documents`), `DependencyInjection.AddDocumentInfrastructure` (DbContext + scanner + blob store).
