@@ -25,6 +25,9 @@ builder.Services.AddOpenTelemetry()
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
 
 builder.Services.AddProblemDetails();
+// Accept string enum values (e.g. identifier "type":"UNHCRNo") in request/response JSON.
+builder.Services.ConfigureHttpJsonOptions(o =>
+    o.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
