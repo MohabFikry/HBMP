@@ -47,6 +47,7 @@ public static class DependencyInjection
                         ?? "Host=postgres;Database=hbmp;Username=hbmp;Password=hbmp")
              .UseSnakeCaseNamingConvention());
         services.AddScoped<EncounterNoIssuer>();
+        services.AddScoped<AppointmentBookingService>();
         return services;
     }
 }

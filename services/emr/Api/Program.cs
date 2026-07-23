@@ -126,6 +126,8 @@ v1.MapGet("/queue", async (EmrDbContext db, CancellationToken ct) =>
     return Results.Ok(items.Select(QueueItemResponse.From));
 }).RequireAuthorization();
 
+app.MapAppointments();
+
 app.Run();
 
 public partial class Program;
