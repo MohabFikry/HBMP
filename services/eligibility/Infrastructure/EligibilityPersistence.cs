@@ -32,6 +32,11 @@ public static class DependencyInjection
 
         services.AddScoped<EligibilityChecker>();
         services.AddScoped<ProjectionUpdater>();
+
+        // Reception search backend. Postgres-over-projections is the default (always in sync, reads the
+        // min-necessary projections directly). A search cluster can be swapped in behind IReceptionIndex
+        // without touching the endpoint or the min-necessary boundary.
+        services.AddScoped<IReceptionIndex, PostgresReceptionIndex>();
         return services;
     }
 }

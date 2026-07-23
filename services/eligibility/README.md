@@ -41,8 +41,31 @@ Every check is an audited **PHI read** (`libs/audit-client`).
 Migration `Infrastructure/Migrations/0001_eligibility.sql` — `member_projection`, `coverage_projection`,
 `eligibility_snapshot`, `processed_event`. Apply with `psql` against the service database.
 
+## Reception search (2.2, US-010)
+
+```
+GET /api/v1/reception/search?q=<NationalID | Passport | Card | Policy | Phone | name>
+     scope: reception:search
+→ 200 { query, count, results[ ReceptionResultCard ], emptyStateHint? }
+```
+
+`ReceptionResultCard` is a **minimum-necessary** projection (11-permission-matrix): identity (memberNo,
+display name, status + **non-color status semantics**), active coverage categories, remaining limits, and a
+**visit-history summary** (count + last-visit date/type only). It carries **no** diagnoses, notes, orders,
+prescriptions, results, or vitals — the type cannot represent EMR data, so it cannot leak via query
+manipulation. Projection happens server-side. Every search is an audited PHI read.
+
+**Search backend.** `IReceptionIndex` is backed by `PostgresReceptionIndex` (default) which reads the
+min-necessary projections directly (always in sync, well under the 2 s p95 target via identifier indexes).
+A dedicated search cluster (OpenSearch) is a drop-in behind the same interface — the min-necessary boundary
+and the endpoint are unchanged. The projections deliberately contain **only** min-necessary columns, so no
+index configuration can widen what reception sees.
+
 ## Tests
 
 - `EligibilityEngineTests` — the decision matrix across the three inputs (Eligible / Ineligible per bad
   status / no-or-expired coverage / NeedsAuthorization for gated + exhausted / binding-limit selection).
 - `EligibilityCacheTests` — cache hit / miss / TTL expiry / scoped invalidation.
+- `ReceptionSearchTests` — lookup by each identifier type + empty state + card composition.
+- `ReceptionMinNecessaryTests` — **authorization test** proving the reception card/document carry no
+  EMR/clinical field (reflection over the full type graph against an EMR-term denylist).

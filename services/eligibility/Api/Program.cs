@@ -63,6 +63,32 @@ v1.MapPost("/check", async (
     return Results.Ok(EligibilityCheckResponse.From(outcome.Result, outcome.ExpiresAt, outcome.FromCache));
 });
 
+// ================================================================ RECEPTION SEARCH (2.2, US-010)
+// Reception may confirm eligibility fast WITHOUT ever seeing clinical/EMR data. The result card is a
+// server-side min-necessary projection — EMR fields are absent by construction (11-permission-matrix).
+var reception = app.MapGroup("/api/v1/reception").RequireAuthorization(HbmpPolicies.Scope("reception:search"));
+
+reception.MapGet("/search", async (
+    string? q, IReceptionIndex index, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(q))
+        return Results.Problem(statusCode: 400, title: "q is required (NationalID / Passport / Card / Policy / Phone / name)");
+
+    var hits = await index.SearchAsync(q, limit: 25, ct);
+    var cards = hits.Select(ReceptionResultCard.From).ToList();
+
+    // Every reception search is an audited PHI read.
+    await audit.EmitAsync(new AuditEventDraft
+    {
+        EntityType = "reception_search", EntityId = q,
+        Action = AuditAction.Read, ActorUserId = me.Principal?.Subject,
+        DecisionOutcome = $"{cards.Count} match(es)", FieldClasses = ["identity", "coverage"],
+    }, ct);
+
+    var hint = cards.Count == 0 ? "No match — try another identifier (Passport / Card / Policy / Phone) or register the beneficiary." : null;
+    return Results.Ok(new ReceptionSearchResponse(q, cards.Count, cards, hint));
+});
+
 app.Run();
 
 public partial class Program;

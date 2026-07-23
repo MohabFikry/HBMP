@@ -8,6 +8,7 @@
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Eligibility.Domain.csproj" />
     <ProjectReference Include="../Infrastructure/Mersal.Eligibility.Infrastructure.csproj" />
+    <ProjectReference Include="../Api/Mersal.Eligibility.Api.csproj" />
   </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
 </Project>
