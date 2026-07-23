@@ -5,6 +5,7 @@ using Mersal.Authz;
 using Mersal.Eligibility.Api;
 using Mersal.Eligibility.Infrastructure;
 using Mersal.Events;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -61,6 +62,16 @@ v1.MapPost("/check", async (
     }, ct);
 
     return Results.Ok(EligibilityCheckResponse.From(outcome.Result, outcome.ExpiresAt, outcome.FromCache));
+});
+
+// Lightweight member-status read for visit gating (2.3): emr-service reads this before creating a visit.
+v1.MapGet("/members/{beneficiaryId:guid}/status", async (
+    Guid beneficiaryId, EligibilityDbContext db, CancellationToken ct) =>
+{
+    var m = await db.Members.AsNoTracking().FirstOrDefaultAsync(x => x.BeneficiaryId == beneficiaryId, ct);
+    return m is null
+        ? Results.NotFound(new { beneficiaryId })
+        : Results.Ok(new { beneficiaryId, status = m.Status, memberNo = m.MemberNo });
 });
 
 // ================================================================ RECEPTION SEARCH (2.2, US-010)

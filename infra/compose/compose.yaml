@@ -393,6 +393,26 @@ services:
       valkey: { condition: service_healthy }
     networks: [hbmp]
 
+  # --- emr-service (2.3): status-driven visit gating + encounter/queue stub. ---
+  emr-service:
+    build: { context: ../.., dockerfile: services/emr/Dockerfile }
+    <<: *restart
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Emr: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Auth__Authority: "http://keycloak:8080/realms/mersal"
+      Auth__Audience: "hbmp-api"
+      Auth__RequireHttpsMetadata: "false"
+      Eligibility__BaseUrl: "http://eligibility-service:8080"
+      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    ports: ["8096:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      keycloak: { condition: service_started }
+      eligibility-service: { condition: service_started }
+    networks: [hbmp]
+
   # web:  # React portals (phase 9) — served behind Kong/Traefik
   #   build: { context: ../.., dockerfile: apps/web/Dockerfile }
   #   <<: *restart
