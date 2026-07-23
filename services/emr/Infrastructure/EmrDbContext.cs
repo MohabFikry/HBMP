@@ -57,6 +57,12 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             e.HasIndex(x => new { x.ProviderId, x.LocationId, x.Status });
         });
 
+        b.Entity<ProcessedRequest>(e =>
+        {
+            e.ToTable("processed_request");
+            e.HasKey(x => x.IdempotencyKey);
+        });
+
         b.Entity<Encounter>(e =>
         {
             e.ToTable("encounter");

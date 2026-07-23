@@ -29,7 +29,7 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 2b | Provider Network | 2b.1 `provider-service` | ☑ | (2b.1) |
 | 2b | Provider Network | 2b.2 Onboarding workflow | ☑ | (2b.2) |
 | 2b | Provider Network | 2b.3 Provider isolation (ABAC PO + RLS) | ☑ | (2b.3) |
-| 3 | Appointments | 3.1 Appointment domain + slot booking | ☐ | |
+| 3 | Appointments | 3.1 Appointment domain + slot booking | ☑ | a39b647 |
 | 3 | Appointments | 3.2 Reschedule/cancel/no-show | ☐ | |
 | 3 | Appointments | 3.3 Queue + reminders hook | ☐ | |
 | 4 | Clinical EMR | 4.1 `emr-service` + treating-relationship ABAC | ☐ | |

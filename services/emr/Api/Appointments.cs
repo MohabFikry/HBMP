@@ -168,11 +168,154 @@ public static class AppointmentsModule
             return Results.Created($"/api/v1/appointments/{booked.AppointmentId}", AppointmentResponse.From(booked));
         });
 
-        read.MapGet("/appointments/{id:guid}", async (Guid id, EmrDbContext db, CancellationToken ct) =>
+        read.MapGet("/appointments/{id:guid}", async (Guid id, HttpResponse resp, EmrDbContext db, CancellationToken ct) =>
         {
             var a = await db.Appointments.AsNoTracking().FirstOrDefaultAsync(x => x.AppointmentId == id, ct);
-            return a is null ? Results.NotFound() : Results.Ok(AppointmentResponse.From(a));
+            if (a is null) return Results.NotFound();
+            resp.Headers.ETag = $"\"{a.RowVersion}\"";   // clients echo this back as If-Match on transitions
+            return Results.Ok(AppointmentResponse.From(a));
         });
+
+        // POST /appointments/{id}/reschedule — atomic release-old + book-new (US-021).
+        write.MapPost("/appointments/{id:guid}/reschedule", async (
+            Guid id, RescheduleRequest req, HttpRequest http, EmrDbContext db, AppointmentTransitionService transitions,
+            IdempotencyStore idem, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock,
+            CancellationToken ct) =>
+        {
+            var (replay, key) = await CheckIdempotency(http, idem, db, ct);
+            if (replay is not null) return replay;
+
+            var result = await transitions.RescheduleAsync(id, req.NewSlotId, IfMatch(http), clock.GetUtcNow(), ct);
+            var problem = MapFailure(result.Outcome);
+            if (problem is not null) return await AuditAndReturn(problem, audit, me, "ApptRescheduleDenied", id, result.Outcome, ct);
+
+            var appt = result.Appointment!;
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "appointment", EntityId = id.ToString(), Action = AuditAction.StateChange,
+                ActorUserId = me.Principal?.Subject, DecisionOutcome = "ApptRescheduled",
+                AfterState = $"{{\"slotId\":\"{appt.SlotId}\"}}",
+            }, ct);
+            await outbox.EnqueueAsync("ApptRescheduled", "emr.events",
+                new { appointmentId = id, newSlotId = appt.SlotId, scheduledStart = appt.ScheduledStart }, ct);
+            await Record(idem, key, "reschedule", id, 200, db, ct);
+            return Results.Ok(AppointmentResponse.From(appt));
+        });
+
+        // POST /appointments/{id}/cancel — release slot + reason; promote waitlist (US-021).
+        write.MapPost("/appointments/{id:guid}/cancel", async (
+            Guid id, CancelRequest req, HttpRequest http, EmrDbContext db, AppointmentTransitionService transitions,
+            IdempotencyStore idem, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock,
+            CancellationToken ct) =>
+        {
+            var (replay, key) = await CheckIdempotency(http, idem, db, ct);
+            if (replay is not null) return replay;
+
+            var result = await transitions.CancelAsync(id, req.Reason, IfMatch(http), clock.GetUtcNow(), ct);
+            var problem = MapFailure(result.Outcome);
+            if (problem is not null) return await AuditAndReturn(problem, audit, me, "ApptCancelDenied", id, result.Outcome, ct);
+
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "appointment", EntityId = id.ToString(), Action = AuditAction.StateChange,
+                ActorUserId = me.Principal?.Subject, DecisionOutcome = "ApptCancelled", DecisionReasonCode = req.Reason,
+            }, ct);
+            await outbox.EnqueueAsync("ApptCancelled", "emr.events", new { appointmentId = id, reason = req.Reason }, ct);
+            await PromotionSideEffects(result, outbox, ct);
+            await Record(idem, key, "cancel", id, 200, db, ct);
+            return Results.Ok(AppointmentResponse.From(result.Appointment!));
+        });
+
+        // POST /appointments/{id}/no-show — guarded; reporting flag + backfill (US-022).
+        write.MapPost("/appointments/{id:guid}/no-show", async (
+            Guid id, HttpRequest http, EmrDbContext db, AppointmentTransitionService transitions,
+            IdempotencyStore idem, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock,
+            CancellationToken ct) =>
+        {
+            var (replay, key) = await CheckIdempotency(http, idem, db, ct);
+            if (replay is not null) return replay;
+
+            var result = await transitions.NoShowAsync(id, IfMatch(http), clock.GetUtcNow(), NoShowGrace, ct);
+            var problem = MapFailure(result.Outcome);
+            if (problem is not null) return await AuditAndReturn(problem, audit, me, "ApptNoShowDenied", id, result.Outcome, ct);
+
+            var appt = result.Appointment!;
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "appointment", EntityId = id.ToString(), Action = AuditAction.StateChange,
+                ActorUserId = me.Principal?.Subject, DecisionOutcome = "ApptNoShow",
+            }, ct);
+            await outbox.EnqueueAsync("ApptNoShow", "emr.events",
+                new { appointmentId = id, beneficiaryId = appt.BeneficiaryId, noShowCount = result.NoShowCount }, ct);
+            await PromotionSideEffects(result, outbox, ct);
+            // Repeat no-shows → Case Manager follow-up (05 X3).
+            if (result.NoShowCount >= RepeatNoShowThreshold)
+                await outbox.EnqueueAsync("BeneficiaryNoShowThresholdReached", "emr.events",
+                    new { beneficiaryId = appt.BeneficiaryId, noShowCount = result.NoShowCount }, ct);
+            await Record(idem, key, "no-show", id, 200, db, ct);
+            return Results.Ok(AppointmentResponse.From(appt));
+        });
+    }
+
+    private const int RepeatNoShowThreshold = 3;
+    private static readonly TimeSpan NoShowGrace = TimeSpan.FromMinutes(15);
+
+    private static uint? IfMatch(HttpRequest http)
+    {
+        var raw = http.Headers.IfMatch.ToString().Trim().Trim('"');
+        return uint.TryParse(raw, out var v) ? v : null;
+    }
+
+    // Idempotency: a seen key replays the prior outcome (re-fetch + 200) instead of re-applying.
+    private static async Task<(IResult? Replay, string? Key)> CheckIdempotency(
+        HttpRequest http, IdempotencyStore idem, EmrDbContext db, CancellationToken ct)
+    {
+        var key = http.Headers["Idempotency-Key"].ToString();
+        if (string.IsNullOrWhiteSpace(key)) return (null, null);
+        var prior = await idem.FindAsync(key, ct);
+        if (prior is null) return (null, key);
+        if (prior.AppointmentId is { } aid)
+        {
+            var a = await db.Appointments.AsNoTracking().FirstOrDefaultAsync(x => x.AppointmentId == aid, ct);
+            if (a is not null) return (Results.Ok(AppointmentResponse.From(a)), key);
+        }
+        return (Results.StatusCode(prior.StatusCode), key);
+    }
+
+    private static async Task Record(IdempotencyStore idem, string? key, string op, Guid id, int status, EmrDbContext db, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(key)) await idem.RecordAsync(key, op, id, status, ct);
+    }
+
+    private static async Task PromotionSideEffects(TransitionResult result, IOutbox outbox, CancellationToken ct)
+    {
+        if (result.Promoted is { } w)
+            await outbox.EnqueueAsync("ApptWaitlistPromoted", "emr.events",
+                new { waitlistId = w.WaitlistId, beneficiaryId = w.BeneficiaryId, providerId = w.ProviderId }, ct);
+    }
+
+    private static IResult? MapFailure(TransitionOutcome outcome) => outcome switch
+    {
+        TransitionOutcome.Ok => null,
+        TransitionOutcome.NotFound => Results.NotFound(),
+        TransitionOutcome.IllegalTransition => Results.Problem(statusCode: 409, title: "Transition not allowed",
+            type: "urn:hbmp:transition-denied", detail: "The appointment is not in a state that allows this action."),
+        TransitionOutcome.SlotTaken => Results.Problem(statusCode: 409, title: "Slot already booked", type: "urn:hbmp:slot-taken"),
+        TransitionOutcome.SlotNotFound => Results.Problem(statusCode: 404, title: "Slot not found", type: "urn:hbmp:slot-not-found"),
+        TransitionOutcome.PreconditionFailed => Results.Problem(statusCode: 412, title: "Version mismatch",
+            type: "urn:hbmp:precondition-failed", detail: "The appointment changed since you last read it; re-fetch and retry."),
+        _ => Results.Problem(statusCode: 400),
+    };
+
+    private static async Task<IResult> AuditAndReturn(
+        IResult problem, IAuditClient audit, IHbmpPrincipalAccessor me, string outcome, Guid id, TransitionOutcome reason, CancellationToken ct)
+    {
+        await audit.EmitAsync(new AuditEventDraft
+        {
+            EntityType = "appointment", EntityId = id.ToString(), Action = AuditAction.Decision,
+            ActorUserId = me.Principal?.Subject, DecisionOutcome = outcome, DecisionReasonCode = reason.ToString(),
+        }, ct);
+        return problem;
     }
 
     private static async Task<HashSet<Guid>> ActiveHeldSlotIds(EmrDbContext db, CancellationToken ct)

@@ -59,3 +59,10 @@ public sealed record WaitlistResponse(Guid WaitlistId, string Status, int Priori
 {
     public static WaitlistResponse From(WaitlistEntry w) => new(w.WaitlistId, w.Status.ToString(), w.PriorityScore);
 }
+
+// ---- Phase 3.2 transitions ----
+
+/// <summary>Reschedule an appointment onto a different slot (releases the old one atomically).</summary>
+public sealed record RescheduleRequest(Guid NewSlotId);
+
+public sealed record CancelRequest(string? Reason);

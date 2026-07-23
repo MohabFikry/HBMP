@@ -47,6 +47,24 @@ the next available slots. Proven by `AppointmentBookingConcurrencyTests` (12 par
 success). When no slot is free, the caller is offered the next slots or (with `joinWaitlistIfFull`) a
 `202` waitlist entry (`ApptWaitlisted`).
 
+### Transitions (Phase 3.2 — US-021/US-022)
+
+All mutating endpoints accept `Idempotency-Key` (replays are no-ops via `emr.processed_request`) and honor
+`If-Match` (the `ETag` returned by `GET /appointments/{id}` is the row's `xmin`; a stale value → **412**).
+Illegal moves are rejected as an audited **409** `TransitionDenied` per the §6 transition table. "Releasing"
+a slot is implicit — it is simply no longer held once the appointment leaves an active status (or moves off
+it), because `ux_appointment_active_slot` only counts `Booked`/`CheckedIn`.
+
+- `POST /api/v1/appointments/{id}/reschedule { newSlotId }` — **atomic**: the new slot is acquired
+  concurrency-safely and the old slot released in ONE transaction (never both held or both free). Emits
+  `ApptRescheduled`.
+- `POST /api/v1/appointments/{id}/cancel { reason }` — → `Cancelled`, slot released, reason recorded; a
+  freed slot **promotes the waitlist** (`ApptWaitlistPromoted`). Emits `ApptCancelled`.
+- `POST /api/v1/appointments/{id}/no-show` — guarded (window passed **and** still `Booked`, never once
+  `CheckedIn`): → `NoShow`, sets the `no_show` reporting flag, frees the slot for **backfill** (waitlist
+  promotion), and when the beneficiary's no-show tally reaches the threshold emits
+  `BeneficiaryNoShowThresholdReached` for **Case Manager** follow-up (05 X3). Emits `ApptNoShow`.
+
 ## Data
 
 - `Infrastructure/Migrations/0001_emr.sql` — `encounter` (unique `encounter_no`, partial-unique
@@ -54,6 +72,7 @@ success). When no slot is free, the caller is offered the next slots or (with `j
 - `Infrastructure/Migrations/0002_appointments.sql` — `provider_availability`, `appointment_slot`,
   `appointment` (+ `appointment_history` twin trigger; partial-unique active-slot and idempotency indexes;
   status/type/linkage CHECKs), `waitlist_entry`.
+- `Infrastructure/Migrations/0003_appointment_transitions.sql` — `processed_request` idempotency ledger.
 
 Apply in order with `psql`.
 
@@ -67,6 +86,9 @@ Apply in order with `psql`.
   weekday matching across a range, bad-input rejection.
 - `AppointmentBookingConcurrencyTests` — **no-double-book** proof: parallel bookings at one slot yield
   exactly one success (env-gated `EMR_TEST_DB`; runs green against the live PG).
+- `AppointmentTransitionTests` — reschedule atomicity (old freed + new held), cancel release + waitlist
+  promotion, no-show guard + reporting flag + backfill, illegal-transition refusal, stale-If-Match `412`,
+  and idempotency-ledger replay (env-gated `EMR_TEST_DB`).
 
 Endpoint wiring (gate → 422 / create + queue, booking 409/waitlist, idempotent replay, audit, events) is
 exercised against the live stack.

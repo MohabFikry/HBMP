@@ -48,6 +48,8 @@ public static class DependencyInjection
              .UseSnakeCaseNamingConvention());
         services.AddScoped<EncounterNoIssuer>();
         services.AddScoped<AppointmentBookingService>();
+        services.AddScoped<AppointmentTransitionService>();
+        services.AddScoped<IdempotencyStore>();
         return services;
     }
 }
