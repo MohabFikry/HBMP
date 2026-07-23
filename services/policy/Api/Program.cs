@@ -17,6 +17,7 @@ builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("policy-service");
 builder.Services.AddHbmpAuthorization();
 builder.Services.AddHbmpEvents(builder.Configuration, useInMemory: true);
+builder.Services.AddHbmpOutboxRelay();   // relay staged events (incl. audit) to RabbitMQ
 builder.Services.AddPolicyInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("policy-service"))
@@ -56,7 +57,8 @@ v1.MapPost("/policies", async (CreatePolicy req, PolicyDbContext db, IAuditClien
 // Create a coverage (+ its limits) for a beneficiary → CoverageChanged + CoverageLimitChanged.
 v1.MapPost("/policies/{policyId:guid}/coverages", async (Guid policyId, CreateCoverage req, PolicyDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
-    if (!await db.Policies.AnyAsync(x => x.PolicyId == policyId, ct)) return Results.NotFound(new { policyId });
+    var policy = await db.Policies.FirstOrDefaultAsync(x => x.PolicyId == policyId, ct);
+    if (policy is null) return Results.NotFound(new { policyId });
     var cat = await db.BenefitCategories.FirstOrDefaultAsync(c => c.Code == req.BenefitCategoryCode, ct);
     if (cat is null) return Results.Problem(statusCode: 400, title: $"unknown benefit category '{req.BenefitCategoryCode}'");
 
@@ -78,7 +80,13 @@ v1.MapPost("/policies/{policyId:guid}/coverages", async (Guid policyId, CreateCo
     await db.SaveChangesAsync(ct);
 
     await audit.EmitAsync(new AuditEventDraft { EntityType = "coverage", EntityId = cov.CoverageId.ToString(), Action = AuditAction.Create, ActorUserId = me.Principal?.Subject, FieldClasses = ["coverage"] }, ct);
-    await outbox.EnqueueAsync("CoverageChanged", "policy.events", new { coverageId = cov.CoverageId, beneficiaryId = cov.BeneficiaryId, category = cat.Code, status = cov.Status.ToString() }, ct);
+    await outbox.EnqueueAsync("CoverageChanged", "policy.events", new
+    {
+        coverageId = cov.CoverageId, beneficiaryId = cov.BeneficiaryId, category = cat.Code,
+        status = cov.Status.ToString(), policyNo = policy.PolicyNo,
+        effectiveFrom = cov.EffectiveFrom, effectiveTo = cov.EffectiveTo,
+        limits = cov.Limits.Select(l => new { limitType = l.LimitType.ToString(), l.LimitValue, l.ConsumedValue }),
+    }, ct);
     foreach (var l in cov.Limits)
         await outbox.EnqueueAsync("CoverageLimitChanged", "policy.events", new { coverageLimitId = l.CoverageLimitId, cov.CoverageId, l.LimitType, l.LimitValue, remaining = l.Remaining }, ct);
 

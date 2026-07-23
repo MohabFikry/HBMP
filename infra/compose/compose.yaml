@@ -372,6 +372,27 @@ services:
       clamav: { condition: service_started }
     networks: [hbmp]
 
+  # --- eligibility-service (2.1): decision engine + cache + event-driven invalidation. ---
+  eligibility-service:
+    build: { context: ../.., dockerfile: services/eligibility/Dockerfile }
+    <<: *restart
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Eligibility: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Auth__Authority: "http://keycloak:8080/realms/mersal"
+      Auth__Audience: "hbmp-api"
+      Auth__RequireHttpsMetadata: "false"
+      Cache__Valkey: "valkey:6379,password=${VALKEY_PASSWORD}"
+      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    ports: ["8095:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      keycloak: { condition: service_started }
+      rabbitmq: { condition: service_started }
+      valkey: { condition: service_healthy }
+    networks: [hbmp]
+
   # web:  # React portals (phase 9) — served behind Kong/Traefik
   #   build: { context: ../.., dockerfile: apps/web/Dockerfile }
   #   <<: *restart

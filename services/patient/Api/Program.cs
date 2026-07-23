@@ -16,6 +16,7 @@ builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("patient-service");
 builder.Services.AddHbmpAuthorization();
 builder.Services.AddHbmpEvents(builder.Configuration, useInMemory: true);
+builder.Services.AddHbmpOutboxRelay();   // relay staged events (incl. audit) to RabbitMQ
 builder.Services.AddPatientInfrastructure(builder.Configuration);
 builder.Services.AddScoped<BeneficiaryRegistrar>();
 builder.Services.AddSingleton(TimeProvider.System);
@@ -74,7 +75,16 @@ v1.MapPost("", async (
                 Action = AuditAction.Create, ActorUserId = actor, FieldClasses = ["identity", "pii"],
             }, ct);
             await outbox.EnqueueAsync("BeneficiaryRegistered", "patient.events",
-                new { beneficiaryId = created.Beneficiary.BeneficiaryId, status = "Pending" }, ct);
+                new
+                {
+                    beneficiaryId = created.Beneficiary.BeneficiaryId,
+                    status = "Pending",
+                    givenName = created.Beneficiary.GivenName,
+                    familyName = created.Beneficiary.FamilyName,
+                    primaryPhone = created.Beneficiary.Contacts.FirstOrDefault(c => c.IsPrimary)?.Value
+                                   ?? created.Beneficiary.Contacts.FirstOrDefault()?.Value,
+                    identifiers = created.Beneficiary.Identifiers.Select(i => new { type = i.IdentifierType.ToString(), value = i.IdentifierValue }),
+                }, ct);
 
             return Results.Created($"/api/v1/beneficiaries/{created.Beneficiary.BeneficiaryId}",
                 BeneficiaryDto.From(created.Beneficiary));
@@ -178,7 +188,7 @@ reg.MapPost("/{id:guid}/decision", async (Guid id, DecisionRequest req, PatientD
         });
         await db.SaveChangesAsync(ct);
         await audit.EmitAsync(new AuditEventDraft { EntityType = "beneficiary", EntityId = beneficiary.BeneficiaryId.ToString(), Action = AuditAction.StateChange, ActorUserId = actor, DecisionOutcome = "Activated", AfterState = $"{{\"memberNo\":\"{memberNo}\"}}" }, ct);
-        await outbox.EnqueueAsync("BeneficiaryActivated", "patient.events", new { beneficiaryId = beneficiary.BeneficiaryId, memberNo }, ct);
+        await outbox.EnqueueAsync("BeneficiaryActivated", "patient.events", new { beneficiaryId = beneficiary.BeneficiaryId, memberNo, givenName = beneficiary.GivenName, familyName = beneficiary.FamilyName }, ct);
         return Results.Ok(new { r.RegistrationId, status = r.Status.ToString(), beneficiary.BeneficiaryId, memberNo });
     }
 

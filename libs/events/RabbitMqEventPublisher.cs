@@ -13,38 +13,52 @@ public sealed class EventsOptions
 }
 
 /// <summary>Publishes a relayed outbox message to a durable RabbitMQ queue (ordered domain events).</summary>
-public sealed class RabbitMqEventPublisher : IEventPublisher, IDisposable
+public sealed class RabbitMqEventPublisher(IOptions<EventsOptions> options) : IEventPublisher, IDisposable
 {
-    private readonly IConnection _connection;
-    private readonly IModel _channel;
+    private readonly ConnectionFactory _factory = new() { Uri = new Uri(options.Value.RabbitUri) };
+    private readonly object _gate = new();
+    private IConnection? _connection;
+    private IModel? _channel;
 
-    public RabbitMqEventPublisher(IOptions<EventsOptions> options)
+    // Connect lazily on first publish (and reconnect if dropped) so an unreachable broker degrades
+    // gracefully — the relay marks the message failed and retries — instead of crashing startup.
+    private IModel Channel()
     {
-        var factory = new ConnectionFactory { Uri = new Uri(options.Value.RabbitUri) };
-        _connection = factory.CreateConnection("hbmp-outbox-relay");
-        _channel = _connection.CreateModel();
+        lock (_gate)
+        {
+            if (_channel is { IsOpen: true }) return _channel;
+            _channel?.Dispose();
+            if (_connection is not { IsOpen: true })
+            {
+                _connection?.Dispose();
+                _connection = _factory.CreateConnection("hbmp-outbox-relay");
+            }
+            _channel = _connection!.CreateModel();
+            return _channel;
+        }
     }
 
     public Task PublishAsync(OutboxMessage message, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(message);
-        _channel.QueueDeclare(message.Destination, durable: true, exclusive: false, autoDelete: false);
+        var channel = Channel();
+        channel.QueueDeclare(message.Destination, durable: true, exclusive: false, autoDelete: false);
 
-        var props = _channel.CreateBasicProperties();
+        var props = channel.CreateBasicProperties();
         props.MessageId = message.EventId.ToString();
         props.Type = message.EventType;
         props.CorrelationId = message.CorrelationId;
         props.ContentType = "application/json";
         props.Persistent = true;
 
-        _channel.BasicPublish(exchange: "", routingKey: message.Destination,
+        channel.BasicPublish(exchange: "", routingKey: message.Destination,
             basicProperties: props, body: Encoding.UTF8.GetBytes(message.Payload));
         return Task.CompletedTask;
     }
 
     public void Dispose()
     {
-        _channel.Dispose();
-        _connection.Dispose();
+        _channel?.Dispose();
+        _connection?.Dispose();
     }
 }
