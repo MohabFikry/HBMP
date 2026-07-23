@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>Mersal.Provider.Infrastructure</RootNamespace></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../Domain/Mersal.Provider.Domain.csproj" /></ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="EFCore.NamingConventions" />
+  </ItemGroup>
+  <ItemGroup><None Update="Migrations/*.sql" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
+</Project>

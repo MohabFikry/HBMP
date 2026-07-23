@@ -26,7 +26,7 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 2 | Eligibility | 2.1 `eligibility-service` + cache | ☑ | df91758 |
 | 2 | Eligibility | 2.2 Reception search (min-necessary) | ☑ | 4d930ce |
 | 2 | Eligibility | 2.3 Visit gating + encounter stub | ☑ | 15ea73e |
-| 2b | Provider Network | 2b.1 `provider-service` | ☐ | |
+| 2b | Provider Network | 2b.1 `provider-service` | ☑ | (2b.1) |
 | 2b | Provider Network | 2b.2 Onboarding workflow | ☐ | |
 | 2b | Provider Network | 2b.3 Provider isolation (ABAC PO + RLS) | ☐ | |
 | 3 | Appointments | 3.1 Appointment domain + slot booking | ☐ | |
