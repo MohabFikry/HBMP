@@ -38,7 +38,8 @@ public static class DependencyInjection
     {
         services.AddDbContext<PatientDbContext>(o =>
             o.UseNpgsql(config.GetConnectionString("Patient")
-                        ?? "Host=postgres;Database=hbmp;Username=hbmp;Password=hbmp"));
+                        ?? "Host=postgres;Database=hbmp;Username=hbmp;Password=hbmp")
+             .UseSnakeCaseNamingConvention());
         services.AddScoped<IIdentifierLookup, IdentifierLookup>();
         services.AddScoped<MemberNoIssuer>();
         return services;

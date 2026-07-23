@@ -10,7 +10,7 @@ public static class DependencyInjection
     public static IServiceCollection AddPolicyInfrastructure(this IServiceCollection services, IConfiguration config)
     {
         services.AddDbContext<PolicyDbContext>(o =>
-            o.UseNpgsql(config.GetConnectionString("Policy") ?? "Host=postgres;Database=hbmp;Username=hbmp;Password=hbmp"));
+            o.UseNpgsql(config.GetConnectionString("Policy") ?? "Host=postgres;Database=hbmp;Username=hbmp;Password=hbmp").UseSnakeCaseNamingConvention());
         return services;
     }
 }
