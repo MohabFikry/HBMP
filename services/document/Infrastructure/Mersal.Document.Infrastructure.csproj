@@ -6,6 +6,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="EFCore.NamingConventions" />
     <PackageReference Include="AWSSDK.S3" />
   </ItemGroup>
   <ItemGroup><None Update="Migrations/*.sql" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
