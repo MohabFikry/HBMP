@@ -8,6 +8,7 @@ using Mersal.Provider.Domain;
 using Mersal.Provider.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using ProviderEntity = Mersal.Provider.Domain.Provider;
@@ -22,6 +23,7 @@ builder.Services.AddHbmpEvents(builder.Configuration, useInMemory: true);
 builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddProviderInfrastructure(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ProviderAccessGuard>();
 builder.Services.AddSingleton(TimeProvider.System);
 
 // masterdata-backed code validation for CPT/LOINC service-line codes.
@@ -39,6 +41,27 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseAuthentication();
 app.UseAuthorization();
+
+// Provider isolation, layers 1 & 4: reject provider-scoped tokens with no provider_id on provider routes,
+// and bind the RLS session GUCs (tenant_id / provider_id) for this request's DB connections.
+app.Use(async (ctx, next) =>
+{
+    var principal = ctx.RequestServices.GetRequiredService<IHbmpPrincipalAccessor>().Principal;
+    if (principal is not null && ctx.Request.Path.StartsWithSegments("/api/v1"))
+    {
+        if (ProviderAccessGuard.TokenMissingProviderId(principal))
+        {
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await ctx.Response.WriteAsJsonAsync(new { title = "provider-scoped token is missing a provider_id claim" });
+            return;
+        }
+        var rls = ctx.RequestServices.GetRequiredService<Mersal.Provider.Infrastructure.RlsContext>();
+        rls.TenantId = principal.TenantId ?? "";
+        rls.ProviderId = principal.ProviderId ?? "";
+    }
+    await next();
+});
+
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "provider-service" })).AllowAnonymous();
@@ -78,17 +101,25 @@ write.MapPost("/providers", async (CreateProvider req, ProviderDbContext db, IAu
 // --- List / get (tenant-scoped) ----------------------------------------------------------------
 read.MapGet("/providers", async (ProviderDbContext db, IHbmpPrincipalAccessor me, string? status, CancellationToken ct) =>
 {
-    var tenant = me.Principal?.TenantId;
+    var principal = me.Principal;
+    var tenant = principal?.TenantId;
     var q = db.Providers.AsNoTracking().Where(p => p.TenantId == tenant && !p.IsDeleted);
+    // Provider-scoped callers list ONLY their own provider (ABAC PO on a collection; RLS also enforces it).
+    if (principal is not null && ProviderAccessGuard.IsProviderScoped(principal))
+        q = q.Where(p => p.ProviderId.ToString() == principal.ProviderId);
     if (status is not null && Enum.TryParse<ProviderStatus>(status, out var s)) q = q.Where(p => p.Status == s);
     return Results.Ok((await q.ToListAsync(ct)).Select(ToView));
 });
 
-read.MapGet("/providers/{id:guid}", async (Guid id, ProviderDbContext db, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+read.MapGet("/providers/{id:guid}", async (Guid id, ProviderDbContext db, ProviderAccessGuard guard, IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
     var tenant = me.Principal?.TenantId;
     var p = await db.Providers.AsNoTracking().FirstOrDefaultAsync(x => x.ProviderId == id && x.TenantId == tenant && !x.IsDeleted, ct);
-    return p is null ? Results.NotFound() : Results.Ok(ToView(p));
+    if (p is null) return Results.NotFound();
+    // ABAC provider-ownership: a provider user reading another provider is denied AND audited.
+    var decision = await guard.AuthorizeAsync(me.Require(), p.TenantId, p.ProviderId.ToString(), ct);
+    if (!decision.IsAllowed) return Results.Problem(statusCode: 403, title: "provider access denied", detail: decision.ReasonCode);
+    return Results.Ok(ToView(p));
 });
 
 // --- Add location (primary rule enforced by partial-unique index) ------------------------------
@@ -212,6 +243,8 @@ read.MapGet("/providers/{id:guid}/capabilities", async (Guid id, ProviderDbConte
 
 // 2b.2 — Network Team onboarding workflow (activate/suspend/terminate, user provisioning, reminders).
 app.MapOnboarding();
+// 2b.3 — provider-scoped performance metrics + network roll-up.
+app.MapMetrics();
 
 app.Run();
 

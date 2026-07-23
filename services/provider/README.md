@@ -58,16 +58,51 @@ Events (outbox → `provider.events`): `ProviderCreated`, `ContractActivated`, `
 hash-chained `audit_event` with actor + justification. Network Team touches provider **metadata only** —
 no beneficiary PHI is reachable from this service.
 
+### Isolation enforcement (2b.3 — the security core)
+
+Defense-in-depth, each layer denying independently:
+
+1. **Token** — provider-scoped tokens (`provider_admin`/`lab_tech`/`imaging_tech`/`pharmacist`) **must**
+   carry a `provider_id` claim; a provider token without one is rejected `403` on every `/api/v1` route
+   (`ProviderAccessGuard.TokenMissingProviderId`).
+2. **RBAC** — coarse `provider:read` / `provider:write` scope at the route (gateway + service).
+3. **ABAC provider-ownership** — reads of a specific provider run through the platform authorization engine
+   with the reusable `ProviderPolicies` bundle: a provider user acting on another provider is denied **and
+   audited**. The same bundle is imported by orders (phase 5) / pharmacy (phase 6) so their queues are
+   provider-scoped by the identical rule.
+4. **PostgreSQL RLS** (`0003_rls.sql`) — `ENABLE` + **`FORCE ROW LEVEL SECURITY`** on every provider table
+   with a `tenant_id` + `provider_id` predicate bound from session GUCs (`app.tenant_id` / `app.provider_id`,
+   set per request by `RlsConnectionInterceptor` via `set_config`). A buggy query still returns zero foreign
+   rows. **The app MUST connect as a non-superuser, `NOBYPASSRLS` role** (`hbmp_app`, `0004_app_role.sql`) —
+   a superuser silently bypasses every policy.
+5. **Minimum-necessary projection** — the only beneficiary shape crossing to a provider is
+   `ProviderBoundaryPatient` (id ref, member no, initials, sex, age, ordered service+code) — never
+   diagnoses/notes/prescriptions/results/contact PII. A reflection test fails the build if a forbidden term
+   is ever added.
+
+Every denied cross-provider attempt emits a high-severity `audit_event`. **Performance metrics**
+(`GET /providers/{id}/metrics`) are provider-scoped (own numbers only); the network roll-up (`GET /metrics`)
+is Network-Team-only. Order throughput / turnaround fields are populated by phase 5/6 fulfillment events.
+
 ## Data
 
-Migration `Infrastructure/Migrations/0001_provider_schema.sql` (needs the `btree_gist` extension for the
-contract-overlap exclusion). RLS predicates arrive in `0002` (2b.3). Apply with `psql`.
+Migrations under `Infrastructure/Migrations/` (apply in order with `psql`):
+`0001_provider_schema.sql` (needs `btree_gist` for the contract-overlap exclusion), `0002_onboarding.sql`,
+`0003_rls.sql`, `0004_app_role.sql` (provisions `hbmp_app`; ops sets its password out of band and points
+`ConnectionStrings__Provider` at it).
 
 ## Tests
 
 - `ProviderRulesTests` — contract overlap, in-effect window, capability derivation (only Active provider +
   in-effect contract), credential expiry/validity, mandatory-credential activation gate.
 - `OnboardingWorkflowTests` — the onboarding state machine's forward guards and blocked transitions.
+- `ProviderUserRulesTests` — provisioning SoD (no self-elevation, no clinical, role allow-list).
+- `ProviderIsolationTests` — **ABAC** isolation: provider A denied every read of provider B (audited),
+  allowed on own; cross-tenant denied; **PO-reuse** proof (a downstream service importing the bundle gets
+  the same deny).
+- `MinNecessaryTests` — reflection over `ProviderBoundaryPatient` (no clinical/PII field can exist).
+- `RlsIsolationTests` — **RLS** isolation proven at the datastore, independently of ABAC (env-gated:
+  `PROVIDER_TEST_DB_OWNER` + `PROVIDER_TEST_DB_APP`; the app conn string must be the `NOBYPASSRLS` role).
 
 Endpoint wiring (CRUD, capabilities, masterdata validation, overlap 409, price masking) is exercised
-against the live stack; ABAC + RLS isolation tests land in **2b.3**.
+against the live stack.
