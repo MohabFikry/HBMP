@@ -14,3 +14,8 @@ public sealed record BeneficiaryDto(
 }
 
 public sealed record IdentifierDto(string Type, string Value, bool IsPrimary);
+
+public sealed record CreateRegistration(Guid BeneficiaryId);
+public sealed record PatchRegistration(bool? DocumentsVerified, bool? CoverageBound, string? Notes);
+public sealed record DecisionRequest(string Decision, string? Notes);
+public sealed record StatusChange(string ToStatus, string? Reason);

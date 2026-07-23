@@ -23,12 +23,21 @@ public sealed class MemberNoIssuer(PatientDbContext db)
 {
     public async Task<string> NextAsync(int year, CancellationToken ct = default)
     {
-        // Atomic increment; row-locks the year counter.
-        var seq = await db.Database.SqlQuery<int>(
-            $@"INSERT INTO patient.member_no_seq(year, last_value) VALUES ({year}, 1)
-               ON CONFLICT (year) DO UPDATE SET last_value = patient.member_no_seq.last_value + 1
-               RETURNING last_value").FirstAsync(ct);
-        return MemberNo.Format(year, seq);
+        // Atomic upsert + increment via raw ADO (INSERT…RETURNING is non-composable, so no EF SqlQuery).
+        var conn = db.Database.GetDbConnection();
+        var opened = false;
+        if (conn.State != System.Data.ConnectionState.Open) { await conn.OpenAsync(ct); opened = true; }
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"INSERT INTO patient.member_no_seq(year, last_value) VALUES (@y, 1)
+                                ON CONFLICT (year) DO UPDATE SET last_value = patient.member_no_seq.last_value + 1
+                                RETURNING last_value;";
+            var p = cmd.CreateParameter(); p.ParameterName = "y"; p.Value = year; cmd.Parameters.Add(p);
+            var seq = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct), System.Globalization.CultureInfo.InvariantCulture);
+            return MemberNo.Format(year, seq);
+        }
+        finally { if (opened) await conn.CloseAsync(); }
     }
 }
 

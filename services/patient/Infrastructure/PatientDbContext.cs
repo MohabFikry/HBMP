@@ -13,10 +13,19 @@ public sealed class PatientDbContext(DbContextOptions<PatientDbContext> options)
     public DbSet<Contact> Contacts => Set<Contact>();
     public DbSet<FamilyGroup> FamilyGroups => Set<FamilyGroup>();
     public DbSet<DependentLink> DependentLinks => Set<DependentLink>();
+    public DbSet<Registration> Registrations => Set<Registration>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.HasDefaultSchema(Schema);
+
+        b.Entity<Registration>(e =>
+        {
+            e.ToTable("registration");
+            e.HasKey(x => x.RegistrationId);
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.RowVersion).IsConcurrencyToken();
+        });
 
         b.Entity<Beneficiary>(e =>
         {
