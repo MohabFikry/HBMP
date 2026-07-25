@@ -26,6 +26,8 @@ const LabQueue = lazy(() => import("./LabQueue").then((m) => ({ default: m.LabQu
 // Lab/imaging result upload (Phase 5.3) — one chunk, parameterised by capability.
 const ResultUpload = lazy(() => import("./ResultUpload").then((m) => ({ default: m.ResultUpload })));
 const PharmacyDispense = lazy(() => import("./PharmacyDispense").then((m) => ({ default: m.PharmacyDispense })));
+// Pharmacy substitutions (Phase 6.3) — formulary lookup of policy-approved alternatives.
+const Substitutions = lazy(() => import("./Substitutions").then((m) => ({ default: m.Substitutions })));
 const ApprovalsWorklist = lazy(() => import("./ApprovalsWorklist").then((m) => ({ default: m.ApprovalsWorklist })));
 const ExecutiveDashboard = lazy(() => import("./ExecutiveDashboard").then((m) => ({ default: m.ExecutiveDashboard })));
 // Case-manager portal (Phase 10.3) — one chunk for the two case screens.
@@ -71,6 +73,8 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/imaging/result": () => <ResultUpload kind="imaging" />,
   // 4. Pharmacy — dispense (queue + partial dispense).
   "/pharmacy/queue": () => <PharmacyDispense />,
+  "/pharmacy/dispense": () => <PharmacyDispense />,
+  "/pharmacy/substitutions": () => <Substitutions />,
   // 5. Approvals — worklist + decision (US-060).
   "/approvals/worklist": () => <ApprovalsWorklist />,
   // 6. Executive dashboard (US-073) — director scope.

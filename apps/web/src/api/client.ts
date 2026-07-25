@@ -6,6 +6,7 @@ import type {
   Beneficiary360,
   BreakGlassGrant,
   CheckInResult,
+  DrugRef,
   CaseListItem,
   ConsumeRequest,
   ConsumeResult,
@@ -85,6 +86,9 @@ export interface ApiClient {
   // Pharmacy — dispense (Phase 6)
   pharmacyQueue(): Promise<Prescription[]>;
   dispense(req: DispenseRequest): Promise<DispenseResult>;
+  /** Formulary lookup for substitutions (US-052): search drugs, then list a drug's approved alternatives. */
+  searchDrugs(query: string): Promise<DrugRef[]>;
+  drugAlternatives(drugId: string): Promise<DrugRef[]>;
 
   // Approvals — worklist + decision (Phase 7)
   approvalWorklist(): Promise<ApprovalItem[]>;

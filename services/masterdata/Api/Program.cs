@@ -126,6 +126,24 @@ v1.MapGet("/drugs/by-id/{id:guid}/exists", async (Guid id, MasterDataDbContext d
 v1.MapGet("/allergens/{id:guid}/exists", async (Guid id, MasterDataDbContext db, CancellationToken ct) =>
     Results.Ok(new { id, exists = await db.Allergens.AsNoTracking().AnyAsync(x => x.AllergenId == id, ct) }));
 
+// Policy-approved alternatives for a drug (phase 6.3 formulary): the other drugs in the SAME ATC-5 class
+// (same therapeutic substance) — a clinically-sound generic-substitution set from real master data. Returns
+// both the id list (consumed by the pharmacy formulary service) and drug details (for the pharmacist UI).
+v1.MapGet("/drugs/by-id/{id:guid}/alternatives", async (Guid id, MasterDataDbContext db, CancellationToken ct) =>
+{
+    var self = await db.Drugs.AsNoTracking().FirstOrDefaultAsync(x => x.DrugId == id, ct);
+    if (self is null || string.IsNullOrWhiteSpace(self.AtcCode))
+        return Results.Ok(new { alternatives = Array.Empty<Guid>(), drugs = Array.Empty<object>() });
+    var alts = await db.Drugs.AsNoTracking()
+        .Where(x => x.AtcCode == self.AtcCode && x.DrugId != id)
+        .OrderBy(x => x.Name).Take(8).ToListAsync(ct);
+    return Results.Ok(new
+    {
+        alternatives = alts.Select(x => x.DrugId),
+        drugs = alts.Select(x => new { x.DrugId, x.Name, x.NameAr, x.AtcCode, x.Form, x.Strength }),
+    });
+});
+
 // Highest-severity interaction among a set of drug codes (order-insensitive).
 v1.MapPost("/drug-interactions/check", async (DrugCheckRequest req, MasterDataDbContext db, CancellationToken ct) =>
 {

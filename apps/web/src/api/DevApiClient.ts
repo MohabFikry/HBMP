@@ -32,6 +32,7 @@ import {
   zVitalsResult,
   zResultTask,
   zResultUpload,
+  zDrugRef,
   type VitalInput,
   zExportResult,
   zFinancialSummary,
@@ -328,6 +329,24 @@ export class DevApiClient implements ApiClient {
   uploadResult(orderId: string, lineId: string, resultValue: string) {
     void resultValue;
     return this.gate(() => ok(zResultUpload, { orderId, lineId, uploaded: true }));
+  }
+
+  searchDrugs(query: string) {
+    const all = [
+      { drugId: "d-amox-500", name: loc("Amoxicillin 500mg caps", "أموكسيسيلين 500مجم"), atcCode: "J01CA04", form: "Capsule", strength: "500mg" },
+      { drugId: "d-amox-250", name: loc("Amoxicillin 250mg caps", "أموكسيسيلين 250مجم"), atcCode: "J01CA04", form: "Capsule", strength: "250mg" },
+      { drugId: "d-metf-500", name: loc("Metformin 500mg", "ميتفورمين 500مجم"), atcCode: "A10BA02", form: "Tablet", strength: "500mg" },
+    ].filter((d) => d.name.en.toLowerCase().includes(query.toLowerCase()));
+    return this.gate(() => ok(z.array(zDrugRef), all), []);
+  }
+  drugAlternatives(drugId: string) {
+    const alts = drugId.startsWith("d-amox")
+      ? [
+          { drugId: "d-amox-250", name: loc("Amoxicillin 250mg caps", "أموكسيسيلين 250مجم"), atcCode: "J01CA04", form: "Capsule", strength: "250mg" },
+          { drugId: "d-amox-susp", name: loc("Amoxicillin 125mg/5ml susp", "أموكسيسيلين شراب"), atcCode: "J01CA04", form: "Suspension", strength: "125mg/5ml" },
+        ]
+      : [];
+    return this.gate(() => ok(z.array(zDrugRef), alts), []);
   }
 
   // ---- Pharmacy ----------------------------------------------------------

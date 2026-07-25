@@ -25,6 +25,7 @@ import {
   zVitalsResult,
   zResultTask,
   zResultUpload,
+  zDrugRef,
   zPatientListItem,
   zPlaceOrderResult,
   zPrescribeResult,
@@ -528,6 +529,33 @@ export class HttpApiClient implements ApiClient {
         })),
       });
     });
+  }
+  // Formulary substitutions (Phase 6.3, US-052) — master data is reference-only (auth, no scope). Search drugs
+  // by name, then list a drug's policy-approved alternatives (same ATC-5 substance). Bilingual name from AR
+  // where master data has it, else the EN name echoed (no machine translation).
+  async searchDrugs(query: string) {
+    const r = (await getRaw(`/drugs?q=${encodeURIComponent(query)}&pageSize=20`)) as any;
+    return ((r?.items ?? []) as any[]).map((d: any) =>
+      parseOr(zDrugRef, {
+        drugId: d.drugId,
+        name: { en: String(d.name ?? ""), ar: String(d.nameAr ?? d.name ?? "") },
+        atcCode: d.atcCode ?? undefined,
+        form: d.form ?? undefined,
+        strength: d.strength ?? undefined,
+      }),
+    );
+  }
+  async drugAlternatives(drugId: string) {
+    const r = (await getRaw(`/drugs/by-id/${encodeURIComponent(drugId)}/alternatives`)) as any;
+    return ((r?.drugs ?? []) as any[]).map((d: any) =>
+      parseOr(zDrugRef, {
+        drugId: d.drugId,
+        name: { en: String(d.name ?? ""), ar: String(d.nameAr ?? d.name ?? "") },
+        atcCode: d.atcCode ?? undefined,
+        form: d.form ?? undefined,
+        strength: d.strength ?? undefined,
+      }),
+    );
   }
   async dispense(req: DispenseRequest) {
     const expiry = new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().slice(0, 10);
