@@ -433,6 +433,158 @@ services:
       rabbitmq: { condition: service_started }
     networks: [hbmp]
 
+  # --- orders-service (4.2/5): investigation orders + CPT/LOINC + lab/imaging fulfillment. ---
+  orders-service:
+    build: { context: ../.., dockerfile: services/orders/Dockerfile }
+    <<: *restart
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Orders: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Auth__Authority: "http://keycloak:8080/realms/mersal"
+      Auth__Audience: "hbmp-api"
+      Auth__RequireHttpsMetadata: "false"
+      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    ports: ["8098:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      keycloak: { condition: service_started }
+      rabbitmq: { condition: service_started }
+    networks: [hbmp]
+
+  # --- pharmacy-service (4.3/6): e-prescriptions + dispensing (batch/expiry/substitution). ---
+  pharmacy-service:
+    build: { context: ../.., dockerfile: services/pharmacy/Dockerfile }
+    <<: *restart
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Pharmacy: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Auth__Authority: "http://keycloak:8080/realms/mersal"
+      Auth__Audience: "hbmp-api"
+      Auth__RequireHttpsMetadata: "false"
+      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    ports: ["8099:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      keycloak: { condition: service_started }
+      rabbitmq: { condition: service_started }
+    networks: [hbmp]
+
+  # --- approvals-service (7): authorization worklist, decisions, break-glass, SLA/TAT. ---
+  approvals-service:
+    build: { context: ../.., dockerfile: services/approvals/Dockerfile }
+    <<: *restart
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Approvals: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Auth__Authority: "http://keycloak:8080/realms/mersal"
+      Auth__Audience: "hbmp-api"
+      Auth__RequireHttpsMetadata: "false"
+      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    ports: ["8100:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      keycloak: { condition: service_started }
+      rabbitmq: { condition: service_started }
+    networks: [hbmp]
+
+  # --- notification-service (8.1): event-driven bilingual fan-out (in-app + email live). ---
+  notification-service:
+    build: { context: ../.., dockerfile: services/notification/Dockerfile }
+    <<: *restart
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Notification: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Auth__Authority: "http://keycloak:8080/realms/mersal"
+      Auth__Audience: "hbmp-api"
+      Auth__RequireHttpsMetadata: "false"
+      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    ports: ["8101:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      keycloak: { condition: service_started }
+      rabbitmq: { condition: service_started }
+    networks: [hbmp]
+
+  # --- reporting-service (8.2/8.3): event-projected read-model + executive dashboard. ---
+  reporting-service:
+    build: { context: ../.., dockerfile: services/reporting/Dockerfile }
+    <<: *restart
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Reporting: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Auth__Authority: "http://keycloak:8080/realms/mersal"
+      Auth__Audience: "hbmp-api"
+      Auth__RequireHttpsMetadata: "false"
+      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    ports: ["8102:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      keycloak: { condition: service_started }
+      rabbitmq: { condition: service_started }
+    networks: [hbmp]
+
+  # --- admin-service (8b): user/role admin + SoD + governance + break-glass + tenants. ---
+  admin-service:
+    build: { context: ../.., dockerfile: services/admin/Dockerfile }
+    <<: *restart
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Admin: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Auth__Authority: "http://keycloak:8080/realms/mersal"
+      Auth__Audience: "hbmp-api"
+      Auth__RequireHttpsMetadata: "false"
+      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    ports: ["8103:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      keycloak: { condition: service_started }
+      rabbitmq: { condition: service_started }
+    networks: [hbmp]
+
+  # --- case-service (10.1): case management + case-assignment ABAC + beneficiary-360. ---
+  case-service:
+    build: { context: ../.., dockerfile: services/case/Dockerfile }
+    <<: *restart
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Case: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Auth__Authority: "http://keycloak:8080/realms/mersal"
+      Auth__Audience: "hbmp-api"
+      Auth__RequireHttpsMetadata: "false"
+      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    ports: ["8104:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      keycloak: { condition: service_started }
+      rabbitmq: { condition: service_started }
+    networks: [hbmp]
+
+  # --- finance-service (10.2): utilization/settlement read-model (finance ≠ diagnosis). ---
+  finance-service:
+    build: { context: ../.., dockerfile: services/finance/Dockerfile }
+    <<: *restart
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Finance: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Auth__Authority: "http://keycloak:8080/realms/mersal"
+      Auth__Audience: "hbmp-api"
+      Auth__RequireHttpsMetadata: "false"
+      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    ports: ["8105:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      keycloak: { condition: service_started }
+      rabbitmq: { condition: service_started }
+    networks: [hbmp]
+
   # web:  # React portals (phase 9) — served behind Kong/Traefik
   #   build: { context: ../.., dockerfile: apps/web/Dockerfile }
   #   <<: *restart
