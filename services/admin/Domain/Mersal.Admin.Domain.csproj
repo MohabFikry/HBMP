@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>Mersal.Admin.Domain</RootNamespace></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
+  </ItemGroup>
+</Project>
