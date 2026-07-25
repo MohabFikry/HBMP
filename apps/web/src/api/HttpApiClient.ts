@@ -1,6 +1,11 @@
 import {
+  zAccessReviewCampaign,
   zApprovalItem,
   zApprovalReview,
+  zBreakGlassGrant,
+  zRoleBinding,
+  zSodConflict,
+  zTenantSummary,
   zConsumeResult,
   zDecisionResult,
   zDispenseResult,
@@ -85,6 +90,16 @@ const notificationChip = (s: unknown): { kind: "ok" | "info" | "warn" | "bad" | 
   if (k.includes("approv")) return { kind: "ok", label: { en: raw, ar: "معتمد" } };
   if (k.includes("reject") || k.includes("fail")) return { kind: "bad", label: { en: raw, ar: "مرفوض" } };
   return { kind: "info", label: { en: raw, ar: "معلومة" } };
+};
+/** Map a break-glass grant status → a non-color StatusKind chip (active = attention, expired/revoked = neutral). */
+const breakGlassChip = (s: unknown): { kind: "ok" | "info" | "warn" | "bad" | "neu"; label: { en: string; ar: string } } => {
+  const raw = String(s ?? "");
+  const k = raw.toLowerCase();
+  if (k === "active") return { kind: "warn", label: { en: "Active", ar: "نشط" } };
+  if (k === "requested") return { kind: "info", label: { en: "Requested", ar: "مطلوب" } };
+  if (k === "approved") return { kind: "info", label: { en: "Approved", ar: "معتمد" } };
+  if (k === "rejected" || k === "revoked") return { kind: "bad", label: { en: raw, ar: "ملغى" } };
+  return { kind: "neu", label: { en: raw || "Expired", ar: "منتهٍ" } };
 };
 /** Map a case/approval priority string → the zCasePriority enum. */
 const casePriority = (p: unknown): "low" | "normal" | "high" | "urgent" =>
@@ -723,5 +738,69 @@ export class HttpApiClient implements ApiClient {
   async markNotificationRead(id: string) {
     const r = (await postRaw(`/notifications/${encodeURIComponent(id)}/read`, {})) as any;
     return parseOr(zMarkReadResult, { id: r?.notificationId ?? id, read: true });
+  }
+
+  // Admin / platform governance (Phase 8b). Every read is admin-role gated + audited server-side. Subject ids are
+  // masked to a short token here (the admin manages access, not identities). Statuses render as non-color chips.
+  async accessMatrix() {
+    const r = (await getRaw(`/admin/access-matrix`)) as any[];
+    return (Array.isArray(r) ? r : []).map((b: any) =>
+      parseOr(zRoleBinding, {
+        id: b.bindingId ?? b.id,
+        subjectToken: `•••${String(b.subjectUserId ?? "").replace(/-/g, "").slice(-4)}`,
+        role: String(b.role ?? ""),
+        scope: String(b.scope ?? "Tenant"),
+        tier: String(b.tier ?? ""),
+        status: { kind: "ok", label: loc("Active") },
+        grantedAt: b.grantedAt ?? new Date().toISOString(),
+        reviewDueAt: b.reviewDueAt ?? undefined,
+      }),
+    );
+  }
+  async adminTenants() {
+    const r = (await getRaw(`/admin/tenants`)) as any[];
+    return (Array.isArray(r) ? r : []).map((tn: any) =>
+      parseOr(zTenantSummary, {
+        id: tn.tenantId ?? tn.id,
+        name: String(tn.name ?? ""),
+        status: tn.active === false
+          ? { kind: "neu" as const, label: loc("Inactive") }
+          : { kind: "ok" as const, label: loc("Active") },
+        createdAt: tn.createdAt ?? undefined,
+      }),
+    );
+  }
+  async sodMatrix() {
+    const r = (await getRaw(`/admin/sod-matrix`)) as any[];
+    return (Array.isArray(r) ? r : []).map((c: any) =>
+      parseOr(zSodConflict, { roleA: String(c.tokenA ?? ""), roleB: String(c.tokenB ?? ""), reason: String(c.reason ?? "") }),
+    );
+  }
+  async accessReviewCampaigns() {
+    const r = (await getRaw(`/admin/dashboards/access-review`)) as any[];
+    return (Array.isArray(r) ? r : []).map((c: any) =>
+      parseOr(zAccessReviewCampaign, {
+        id: c.campaignId ?? c.id,
+        name: String(c.name ?? ""),
+        status: String(c.status ?? "").toLowerCase() === "open"
+          ? { kind: "info" as const, label: loc("Open") }
+          : { kind: "neu" as const, label: loc("Closed") },
+        minTier: c.minTier ?? undefined,
+        dueAt: c.dueAt ?? undefined,
+      }),
+    );
+  }
+  async breakGlassGrants() {
+    const r = (await getRaw(`/admin/dashboards/break-glass`)) as any[];
+    return (Array.isArray(r) ? r : []).map((g: any) =>
+      parseOr(zBreakGlassGrant, {
+        id: g.grantId ?? g.id,
+        requesterToken: `•••${String(g.requester ?? g.requesterUserId ?? "").replace(/-/g, "").slice(-4)}`,
+        reasonCode: String(g.reasonCode ?? ""),
+        status: breakGlassChip(g.status),
+        requestedAt: g.requestedAt ?? new Date().toISOString(),
+        expiresAt: g.expiresAt ?? undefined,
+      }),
+    );
   }
 }

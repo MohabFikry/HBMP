@@ -26,7 +26,8 @@ export const OIDC = {
    * still denies by role. Keycloak only issues the scopes the user's client is permitted.
    */
   scope:
-    "openid appointment:read appointment:write audit:read auth:decide auth:emergency auth:ingest " +
+    "openid admin:read admin:write admin:break-glass " +
+    "appointment:read appointment:write audit:read auth:decide auth:emergency auth:ingest " +
     "auth:manual auth:override auth:read auth:review case:manage case:read case:write document:write " +
     "eligibility:check emr:read emr:write encounter:write finance:approve finance:export finance:project " +
     "finance:read finance:write hello:read notification:ingest notification:read orders:consume " +

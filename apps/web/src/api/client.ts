@@ -1,7 +1,9 @@
 import type {
+  AccessReviewCampaign,
   ApprovalItem,
   ApprovalReview,
   Beneficiary360,
+  BreakGlassGrant,
   CaseListItem,
   ConsumeRequest,
   ConsumeResult,
@@ -22,6 +24,9 @@ import type {
   MarkReadResult,
   Notification,
   PatientListItem,
+  RoleBinding,
+  SodConflict,
+  TenantSummary,
   PlaceOrderRequest,
   PlaceOrderResult,
   PrescribeRequest,
@@ -81,6 +86,13 @@ export interface ApiClient {
   // Notifications — the caller's own in-app inbox (Phase 8.1). Self-service, cross-portal.
   notifications(unreadOnly?: boolean): Promise<Notification[]>;
   markNotificationRead(id: string): Promise<MarkReadResult>;
+
+  // Admin / platform governance (Phase 8b) — WHO can access, not content. Admin-role gated on the server.
+  accessMatrix(): Promise<RoleBinding[]>;
+  adminTenants(): Promise<TenantSummary[]>;
+  sodMatrix(): Promise<SodConflict[]>;
+  accessReviewCampaigns(): Promise<AccessReviewCampaign[]>;
+  breakGlassGrants(): Promise<BreakGlassGrant[]>;
 }
 
 /**

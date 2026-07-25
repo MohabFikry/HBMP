@@ -20,6 +20,11 @@ import {
   zEscalation,
   zNotification,
   zMarkReadResult,
+  zRoleBinding,
+  zTenantSummary,
+  zSodConflict,
+  zAccessReviewCampaign,
+  zBreakGlassGrant,
   zExportResult,
   zFinancialSummary,
   zSettlement,
@@ -679,5 +684,45 @@ export class DevApiClient implements ApiClient {
   }
   markNotificationRead(id: string) {
     return this.gate(() => ok(zMarkReadResult, { id, read: true }));
+  }
+
+  // ---- Admin / platform governance (Phase 8b) — WHO can access, not content ------------------------------
+  accessMatrix() {
+    return this.gate(
+      () =>
+        ok(z.array(zRoleBinding), [
+          { id: "RB-1", subjectToken: "•••8a91", role: "doctor", scope: "Tenant", tier: "T4", status: { kind: "ok", label: loc("Active", "نشط") }, grantedAt: "2026-06-25T09:00:00Z", reviewDueAt: "2026-09-25T09:00:00Z" },
+          { id: "RB-2", subjectToken: "•••1c07", role: "finance", scope: "Tenant", tier: "T2", status: { kind: "ok", label: loc("Active", "نشط") }, grantedAt: "2026-06-25T09:00:00Z" },
+        ]),
+      [],
+    );
+  }
+  adminTenants() {
+    return this.gate(
+      () => ok(z.array(zTenantSummary), [{ id: "T-1", name: "Mersal Foundation", status: { kind: "ok", label: loc("Active", "نشط") }, createdAt: "2026-01-01T00:00:00Z" }]),
+      [],
+    );
+  }
+  sodMatrix() {
+    return this.gate(
+      () =>
+        ok(z.array(zSodConflict), [
+          { roleA: "doctor", roleB: "medical_approval", reason: "Self-approval of own clinical request" },
+          { roleA: "finance", roleB: "finance", reason: "Initiator must not release own payment" },
+        ]),
+      [],
+    );
+  }
+  accessReviewCampaigns() {
+    return this.gate(
+      () => ok(z.array(zAccessReviewCampaign), [{ id: "CAMP-1", name: "Q3 2026 high-sensitivity access recertification", status: { kind: "info", label: loc("Open", "مفتوحة") }, minTier: "T3", dueAt: "2026-08-05T00:00:00Z" }]),
+      [],
+    );
+  }
+  breakGlassGrants() {
+    return this.gate(
+      () => ok(z.array(zBreakGlassGrant), [{ id: "BG-1", requesterToken: "•••8a91", reasonCode: "EmergencyCare", status: { kind: "neu", label: loc("Expired", "منتهٍ") }, requestedAt: "2026-07-20T02:00:00Z", expiresAt: "2026-07-20T03:00:00Z" }]),
+      [],
+    );
   }
 }

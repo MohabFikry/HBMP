@@ -24,6 +24,12 @@ const FinanceSummaries = lazy(() => import("./FinancePortal").then((m) => ({ def
 const FinanceExports = lazy(() => import("./FinancePortal").then((m) => ({ default: m.FinanceExports })));
 // Cross-cutting inbox (Phase 8.1) — one chunk, mounted under every portal's `/…/notifications` route.
 const Notifications = lazy(() => import("./Notifications").then((m) => ({ default: m.Notifications })));
+// Admin / platform governance (Phase 8b) — one chunk, mounted under both the org-admin (/admin) and
+// super-admin (/platform) portal bases which share section paths.
+const AdminUsers = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminUsers })));
+const AdminPolicies = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminPolicies })));
+const AdminTenants = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminTenants })));
+const AdminGovernance = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminGovernance })));
 
 export const SCREENS: Record<string, () => ReactNode> = {
   // 1. Reception — eligibility (also surfaced in the beneficiary-management portal).
@@ -51,9 +57,20 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/finance/exports": () => <FinanceExports />,
 };
 
+// Admin sections are shared by the org-admin (/admin/*) and super-admin (/platform/*) portals; map by the
+// trailing section rather than enumerating both bases.
+const ADMIN_SECTIONS: Record<string, () => ReactNode> = {
+  users: () => <AdminUsers />,
+  policies: () => <AdminPolicies />,
+  tenants: () => <AdminTenants />,
+  audit: () => <AdminGovernance />,
+};
+
 export function screenFor(fullPath: string): (() => ReactNode) | undefined {
   // The notifications inbox is the same screen under every portal base (/reception/notifications,
   // /clinician/notifications, …) — map them all to one component rather than enumerating each.
   if (fullPath.endsWith("/notifications")) return () => <Notifications />;
+  const admin = fullPath.match(/^\/(?:admin|platform)\/([a-z-]+)$/);
+  if (admin && ADMIN_SECTIONS[admin[1]]) return ADMIN_SECTIONS[admin[1]];
   return SCREENS[fullPath];
 }
