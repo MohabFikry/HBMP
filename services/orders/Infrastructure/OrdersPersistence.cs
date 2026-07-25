@@ -26,6 +26,14 @@ public interface ITreatingRelationshipClient
     Task<bool> TreatsAsync(Guid beneficiaryId, string? bearerToken, CancellationToken ct = default);
 }
 
+/// <summary>Stores a result report in document-service (Blob, CMK, malware-scanned) and returns the blob ref to
+/// pin on the fulfillment row (phase 5.3). The HTTP implementation lives in the Api layer; tests inject a fake.
+/// Returns null when the store fails — a result may not be recorded without a durable, scanned report.</summary>
+public interface IReportDocumentClient
+{
+    Task<Guid?> StoreReportAsync(Guid beneficiaryId, string fileName, string contentType, byte[] content, string? bearerToken, CancellationToken ct = default);
+}
+
 /// <summary>Issues the next monotonic Order No for a year (atomic upsert on order_seq).</summary>
 public sealed class OrderNoIssuer(OrdersDbContext db)
 {
@@ -57,6 +65,7 @@ public static class DependencyInjection
                         ?? "Host=postgres;Database=hbmp;Username=hbmp;Password=hbmp")
              .UseSnakeCaseNamingConvention());
         services.AddScoped<OrderNoIssuer>();
+        services.AddScoped<ConsumeExecutor>();
 
         // Routing policy from configuration (Orders:Routing) — gated types/codes + high-cost threshold. Read
         // manually (no config-binder dependency): arrays via GetChildren, threshold parsed invariantly.

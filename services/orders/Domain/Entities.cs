@@ -40,6 +40,27 @@ public sealed class OrderLine
     public decimal QuantityOrdered { get; set; }
     public decimal QuantityConsumed { get; set; }        // accumulator, 0 ≤ consumed ≤ ordered (phase 5)
     public OrderLineStatus Status { get; set; } = OrderLineStatus.Active;
+    public uint RowVersion { get; set; }                 // xmin — optimistic-concurrency guard on consume (phase 5)
+
+    public decimal QuantityRemaining => QuantityOrdered - QuantityConsumed;
+}
+
+/// <summary>Append-only consume record (22-data-dictionary §7.3). One immutable row per consumed line: it is the
+/// duplicate-proof anchor — <see cref="IdempotencyKey"/> is UNIQUE so a replayed key is rejected by the DB, and the
+/// row can carry a result blob ref (phase 5.3). Never updated (except the one-time result attachment) or deleted;
+/// full history lives in audit_event.</summary>
+public sealed class OrderFulfillment
+{
+    public Guid FulfillmentId { get; set; }
+    public Guid OrderLineId { get; set; }
+    public Guid PerformingProviderId { get; set; }
+    public decimal Quantity { get; set; }
+    public string IdempotencyKey { get; set; } = default!;   // UNIQUE — dedup guarantee
+    public Guid? ResultDocumentId { get; set; }              // phase 5.3 result blob ref
+    public string? ResultValue { get; set; }                 // phase 5.3 structured result summary
+    public DateTimeOffset? ResultUploadedAt { get; set; }
+    public DateTimeOffset ConsumedAt { get; set; }
+    public Guid ConsumedBy { get; set; }
 }
 
 /// <summary>Business-key formatter for orders (0A §3): <c>ORD-YYYY-NNNNNN</c>.</summary>

@@ -8,6 +8,7 @@ namespace Mersal.Orders.Tests;
 /// <summary>Phase 4.2 order persistence at the datastore (env-gated <c>ORDERS_TEST_DB</c>): an order + lines
 /// round-trip with the routed status, the order-number issuer is monotonic, and the consume accumulator's
 /// invariant (0 ≤ consumed ≤ ordered) is enforced by the DB. Self-cleans by beneficiary scope tag.</summary>
+[Collection("orders-db")]
 public class OrdersIntegrationTests
 {
     private static readonly string? Db = Environment.GetEnvironmentVariable("ORDERS_TEST_DB");

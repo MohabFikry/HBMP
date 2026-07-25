@@ -10,6 +10,7 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
 
     public DbSet<InvestigationOrder> Orders => Set<InvestigationOrder>();
     public DbSet<OrderLine> OrderLines => Set<OrderLine>();
+    public DbSet<OrderFulfillment> Fulfillments => Set<OrderFulfillment>();
     public DbSet<ProcessedRequest> ProcessedRequests => Set<ProcessedRequest>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -35,7 +36,20 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
             e.HasKey(x => x.OrderLineId);
             e.Property(x => x.CodeSystem).HasConversion<string>().HasColumnName("code_system");
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            // xmin optimistic-concurrency guard: the consume UPDATE only applies when the line hasn't moved,
+            // so exactly one racer wins under parallel consume (23 §2 atomic-consume guard).
+            e.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
+            e.Ignore(x => x.QuantityRemaining);
             e.HasIndex(x => x.OrderId);
+        });
+
+        b.Entity<OrderFulfillment>(e =>
+        {
+            e.ToTable("order_fulfillment");
+            e.HasKey(x => x.FulfillmentId);
+            e.Property(x => x.IdempotencyKey).HasMaxLength(80);
+            e.HasIndex(x => x.IdempotencyKey).IsUnique();
+            e.HasIndex(x => x.OrderLineId);
         });
 
         b.Entity<ProcessedRequest>(e =>
