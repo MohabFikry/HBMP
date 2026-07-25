@@ -32,7 +32,7 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 3 | Appointments | 3.1 Appointment domain + slot booking | ☑ | a39b647 |
 | 3 | Appointments | 3.2 Reschedule/cancel/no-show | ☑ | 19c0669 |
 | 3 | Appointments | 3.3 Queue + reminders hook | ☑ | (3.3) |
-| 4 | Clinical EMR | 4.1 `emr-service` + treating-relationship ABAC | ☐ | |
+| 4 | Clinical EMR | 4.1 `emr-service` + treating-relationship ABAC | ☑ | (4.1) |
 | 4 | Clinical EMR | 4.2 `orders-service` + approval routing | ☐ | |
 | 4 | Clinical EMR | 4.3 `pharmacy-service` Rx + referral creation | ☐ | |
 | 5 | Lab/Imaging | 5.1 Provider order queue + search | ☐ | |

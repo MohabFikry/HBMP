@@ -14,11 +14,18 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("emr-service");
-builder.Services.AddHbmpAuthorization();
+// EMR authorizes with the clinical overlay: treating-relationship on all clinical resources (phase 4.1).
+builder.Services.AddHbmpAuthorization(EmrPolicies.Bundle());
 builder.Services.AddHbmpEvents(builder.Configuration, useInMemory: true);
 builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddEmrInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddMemoryCache();
+builder.Services.AddScoped<ClinicalGate>();
+
+// Clinical code validation against masterdata-service (fail-closed on writes).
+builder.Services.AddHttpClient<IClinicalCodeValidator, HttpClinicalCodeValidator>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["MasterData:BaseUrl"] ?? "http://masterdata-service:8080"));
 
 // Reminder channels: in-app live now; SMS/WhatsApp stubs behind the same interface (3.3).
 builder.Services.AddScoped<IReminderChannel, InAppReminderChannel>();
@@ -134,6 +141,7 @@ v1.MapGet("/queue", async (EmrDbContext db, CancellationToken ct) =>
 
 app.MapAppointments();
 app.MapQueue();
+app.MapClinical();
 
 app.Run();
 

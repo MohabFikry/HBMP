@@ -84,6 +84,34 @@ no provider integration this phase. `ReminderDispatcher` selects by the benefici
 **falls back to in-app**. A reminder fires on booking; `POST /api/v1/appointments/reminders/run?withinMinutes`
 sweeps imminent bookings for upcoming reminders.
 
+## Clinical documentation (Phase 4.1 — US-030/US-031, 22-data-dictionary §6.3–6.7)
+
+The clinician's consultation slice. Every endpoint is gated by the **treating-relationship** rule and every
+mutation is audited; clinical codes are validated against **masterdata-service** (fail-closed on writes).
+
+**Treating-relationship (US-030).** Access is decided by `ClinicalGate`, which combines the two halves the
+guardrail requires: the **row-level** query `ITreatingRelationship` (does the caller own/provide on an encounter
+for this beneficiary?) feeds the **policy-level** ABAC condition in the shared authorization engine
+(`EmrPolicies` bundle, `libs/authz`). A non-treating clinician gets **403** and the engine writes the attempted-
+PHI-access audit event. The **medical-approval** team reads for oversight (distinct `emr:read-oversight` action,
+no treating relationship needed); reception / labs / pharmacy / finance have **no** clinical rule → default-deny.
+
+- `GET /api/v1/encounters/{id}/clinical` (`emr:read`) — the full record (encounter + notes + diagnoses + vitals
+  + allergies + medication history) for a treating clinician or the approval team.
+- `POST /api/v1/encounters/{id}/notes` (`emr:write`) — create a SOAP/Progress/Nursing note (author = caller).
+  `PUT …/notes/{noteId}` edits an **unsigned** note (author only). `POST …/notes/{noteId}/sign` **locks** it
+  (immutable thereafter → **409** on edit). `POST …/notes/{noteId}/addendum` is the ONLY correction path after
+  signing (a new note linked via `addendum_of_note_id`).
+- `POST …/diagnoses` — ICD-10 validated vs masterdata; unknown code → **422** problem+json.
+- `POST …/vitals` — per-type plausible-range validation (`VitalRange`) + optional LOINC.
+- `POST /api/v1/beneficiaries/{id}/allergies` — allergen validated vs masterdata.
+- `POST /api/v1/beneficiaries/{id}/medication-history` — drug validated vs masterdata.
+- `GET /api/v1/encounters/{id}/fhir` — FHIR R4 **read projection** (Bundle of Encounter / Condition /
+  Observation / AllergyIntolerance / MedicationStatement) over the canonical tables — interop only, not a fork.
+
+Clinical rows are **soft-deletable** (`is_deleted`); there is no hard delete. masterdata gained by-id existence
+checks `GET /drugs/by-id/{id}/exists` and `GET /allergens/{id}/exists` for drug/allergen validation.
+
 ## Data
 
 - `Infrastructure/Migrations/0001_emr.sql` — `encounter` (unique `encounter_no`, partial-unique
@@ -94,6 +122,8 @@ sweeps imminent bookings for upcoming reminders.
 - `Infrastructure/Migrations/0003_appointment_transitions.sql` — `processed_request` idempotency ledger.
 - `Infrastructure/Migrations/0004_queue.sql` — `appointment_queue` (partial-unique active ticket per
   appointment).
+- `Infrastructure/Migrations/0005_clinical.sql` — `emr_note`, `diagnosis`, `vital`, `allergy`,
+  `medication_history` (canonical-enum CHECKs; `is_deleted` soft delete; addendum self-FK on notes).
 
 Apply in order with `psql`.
 

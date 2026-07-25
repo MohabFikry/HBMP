@@ -119,6 +119,13 @@ v1.MapGet("/drugs/resolve", async (string code, MasterDataDbContext db, Cancella
         ? Results.Ok(new { d.DrugCode, d.Name, d.Form, d.Strength, d.AtcCode })
         : Results.NotFound(new { code, resolved = false }));
 
+// By-id existence checks the EMR uses to validate drug_id / allergen_id references (phase 4 medication
+// history & allergies). Return allow/deny only — no clinical payload.
+v1.MapGet("/drugs/by-id/{id:guid}/exists", async (Guid id, MasterDataDbContext db, CancellationToken ct) =>
+    Results.Ok(new { id, exists = await db.Drugs.AsNoTracking().AnyAsync(x => x.DrugId == id, ct) }));
+v1.MapGet("/allergens/{id:guid}/exists", async (Guid id, MasterDataDbContext db, CancellationToken ct) =>
+    Results.Ok(new { id, exists = await db.Allergens.AsNoTracking().AnyAsync(x => x.AllergenId == id, ct) }));
+
 // Highest-severity interaction among a set of drug codes (order-insensitive).
 v1.MapPost("/drug-interactions/check", async (DrugCheckRequest req, MasterDataDbContext db, CancellationToken ct) =>
 {

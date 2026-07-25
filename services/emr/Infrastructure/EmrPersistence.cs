@@ -50,6 +50,7 @@ public static class DependencyInjection
         services.AddScoped<AppointmentBookingService>();
         services.AddScoped<AppointmentTransitionService>();
         services.AddScoped<IdempotencyStore>();
+        services.AddScoped<ITreatingRelationship, TreatingRelationship>();
         return services;
     }
 }

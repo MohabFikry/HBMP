@@ -10,6 +10,8 @@
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Emr.Domain.csproj" />
     <ProjectReference Include="../Infrastructure/Mersal.Emr.Infrastructure.csproj" />
+    <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
+    <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" />
   </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
 </Project>

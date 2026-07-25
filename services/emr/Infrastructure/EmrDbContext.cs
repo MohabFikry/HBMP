@@ -14,6 +14,11 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
     public DbSet<AppointmentSlot> AppointmentSlots => Set<AppointmentSlot>();
     public DbSet<ProviderAvailability> ProviderAvailabilities => Set<ProviderAvailability>();
     public DbSet<WaitlistEntry> WaitlistEntries => Set<WaitlistEntry>();
+    public DbSet<EmrNote> Notes => Set<EmrNote>();
+    public DbSet<Diagnosis> Diagnoses => Set<Diagnosis>();
+    public DbSet<Vital> Vitals => Set<Vital>();
+    public DbSet<Allergy> Allergies => Set<Allergy>();
+    public DbSet<MedicationHistory> MedicationHistories => Set<MedicationHistory>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -88,6 +93,49 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             e.HasKey(x => x.QueueEntryId);
             e.Property(x => x.State).HasConversion<string>().HasColumnName("state");
             e.HasIndex(x => x.EncounterId);
+        });
+
+        b.Entity<EmrNote>(e =>
+        {
+            e.ToTable("emr_note");
+            e.HasKey(x => x.NoteId);
+            e.Property(x => x.NoteType).HasConversion<string>().HasColumnName("note_type");
+            e.HasIndex(x => x.EncounterId);
+        });
+
+        b.Entity<Diagnosis>(e =>
+        {
+            e.ToTable("diagnosis");
+            e.HasKey(x => x.DiagnosisId);
+            e.Property(x => x.DiagnosisRank).HasConversion<string>().HasColumnName("diagnosis_rank");
+            e.Property(x => x.ClinicalStatus).HasConversion<string>().HasColumnName("clinical_status");
+            e.HasIndex(x => x.EncounterId);
+        });
+
+        b.Entity<Vital>(e =>
+        {
+            e.ToTable("vital");
+            e.HasKey(x => x.VitalId);
+            e.Property(x => x.VitalType).HasConversion<string>().HasColumnName("vital_type");
+            e.HasIndex(x => x.EncounterId);
+        });
+
+        b.Entity<Allergy>(e =>
+        {
+            e.ToTable("allergy");
+            e.HasKey(x => x.AllergyId);
+            e.Property(x => x.Severity).HasConversion<string>().HasColumnName("severity");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.HasIndex(x => x.BeneficiaryId);
+        });
+
+        b.Entity<MedicationHistory>(e =>
+        {
+            e.ToTable("medication_history");
+            e.HasKey(x => x.MedHistoryId);
+            e.Property(x => x.Source).HasConversion<string>().HasColumnName("source");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.HasIndex(x => x.BeneficiaryId);
         });
     }
 }
