@@ -14,6 +14,16 @@ import { useAuth } from "../auth/AuthProvider";
 import { useApi } from "../api/ApiProvider";
 import { portalForRole, type Localized, type Section } from "../portals/catalog";
 import { L } from "../i18n/strings";
+import { NotificationPane } from "./NotificationPane";
+import { UserPane } from "./UserPane";
+
+/** Two-letter initials for the app-bar avatar placeholder. */
+function initials(name: string): string {
+  const p = name.trim().split(/\s+/).filter(Boolean);
+  if (p.length === 0) return "?";
+  if (p.length === 1) return p[0].slice(0, 2).toUpperCase();
+  return (p[0][0] + p[p.length - 1][0]).toUpperCase();
+}
 
 function useLocalized() {
   const { lang } = useTheme();
@@ -25,7 +35,7 @@ function useLocalized() {
  * notification-service row-filters by recipient == caller, so it is inherently min-necessary). Re-reads on
  * every route change so the badge clears promptly after the Notifications screen marks items read.
  */
-function useUnreadCount(enabled: boolean): number {
+function useUnreadCount(enabled: boolean, refreshToken: number): number {
   const api = useApi();
   const location = useLocation();
   const [count, setCount] = useState(0);
@@ -43,7 +53,7 @@ function useUnreadCount(enabled: boolean): number {
       live = false;
       clearInterval(timer);
     };
-  }, [api, enabled, location.pathname]);
+  }, [api, enabled, location.pathname, refreshToken]);
   return count;
 }
 
@@ -54,7 +64,7 @@ function useUnreadCount(enabled: boolean): number {
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const { session, can, logout, timeoutWarning, keepAlive } = useAuth();
-  const { theme, lang, toggleTheme, toggleLang } = useTheme();
+  const { lang } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
   const tr = useLocalized();
@@ -66,7 +76,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     [portal, can],
   );
   const canNotify = !!portal && can("notification.read");
-  const unread = useUnreadCount(canNotify);
+  const [paneOpen, setPaneOpen] = useState(false);
+  const [userPaneOpen, setUserPaneOpen] = useState(false);
+  const [notifyRefresh, setNotifyRefresh] = useState(0);
+  const unread = useUnreadCount(canNotify, notifyRefresh);
+  const bellRef = useRef<HTMLButtonElement | null>(null);
+  const avatarRef = useRef<HTMLButtonElement | null>(null);
 
   const homePath = portal && accessible[0] ? `/${portal.base}/${accessible[0].path}` : "/";
   const primaryQueuePath = homePath;
@@ -117,16 +132,19 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="app-grid">
       <header className="mrs-glass app-bar" role="banner">
-        <Logo variant="mark" wordmark="HBMP" />
+        <Logo variant="lockup" height={48} />
         <div className="app-search">
           <SearchField aria-label={L.search[lang]} placeholder={L.search[lang]} ref={searchRef} />
         </div>
         <div className="app-actions">
           {canNotify && (
             <button
+              ref={bellRef}
               type="button"
               className="app-bell"
-              onClick={() => navigate(`/${portal.base}/notifications`)}
+              aria-haspopup="dialog"
+              aria-expanded={paneOpen}
+              onClick={() => setPaneOpen((v) => !v)}
               aria-label={
                 unread > 0
                   ? `${L.notifications[lang]} — ${unread} ${L.notificationsUnread[lang]}`
@@ -141,23 +159,17 @@ export function AppShell({ children }: { children: ReactNode }) {
               )}
             </button>
           )}
-          <Button variant="ghost" onClick={toggleLang} aria-label={L.language[lang]}>
-            {lang === "en" ? "ع" : "EN"}
-          </Button>
-          <Button
-            variant="ghost"
-            leadingIcon={<Icon name="moon" />}
-            onClick={toggleTheme}
-            aria-label={L.theme[lang]}
+          <button
+            ref={avatarRef}
+            type="button"
+            className="app-avatar"
+            aria-haspopup="dialog"
+            aria-expanded={userPaneOpen}
+            onClick={() => setUserPaneOpen((v) => !v)}
+            aria-label={`${L.accountOpen[lang]} — ${session.displayName}`}
           >
-            <span className="sr-only">{theme === "dark" ? L.light[lang] : L.dark[lang]}</span>
-          </Button>
-          <span className="app-user" aria-label={L.signedInAs[lang]}>
-            {session.displayName}
-          </span>
-          <Button variant="secondary" size="sm" onClick={() => void logout("user")}>
-            {L.signOut[lang]}
-          </Button>
+            <span aria-hidden="true">{initials(session.displayName)}</span>
+          </button>
         </div>
       </header>
 
@@ -180,6 +192,31 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
         {children}
       </main>
+
+      {canNotify && (
+        <NotificationPane
+          open={paneOpen}
+          onClose={() => {
+            setPaneOpen(false);
+            bellRef.current?.focus();
+          }}
+          portalBase={portal.base}
+          sections={accessible}
+          onNavigate={(fullPath) => navigate(fullPath)}
+          onChanged={() => setNotifyRefresh((n) => n + 1)}
+        />
+      )}
+
+      <UserPane
+        open={userPaneOpen}
+        onClose={() => {
+          setUserPaneOpen(false);
+          avatarRef.current?.focus();
+        }}
+        displayName={session.displayName}
+        roleLabel={portal.eyebrow}
+        onSignOut={() => void logout("user")}
+      />
 
       <Modal
         open={timeoutWarning}

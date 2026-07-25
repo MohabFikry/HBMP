@@ -1,8 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Mersal favicon: teal brand tile + gold Arabic "م" (matches the official Mersal Foundation mark). -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#16808D"/>
-  <text x="32" y="46" text-anchor="middle"
-        font-family="Cairo, 'Noto Sans Arabic', system-ui, sans-serif" font-weight="700"
-        font-size="44" fill="#E0A106">م</text>
+<!--
+  Mersal Foundation favicon: the official logo lockup (gold Arabic مرسال over teal "Mersal" with
+  "FOUNDATION" beneath) on a white rounded tile so it stays legible against both light and dark
+  browser tab bars. Geometry reproduced from apps/design-system/src/assets/mersal-logo.svg.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Mersal Foundation">
+  <title>Mersal Foundation</title>
+  <rect width="64" height="64" rx="12" fill="#ffffff"/>
+  <g transform="translate(0.5,13) scale(0.176)">
+    <text x="180" y="78" text-anchor="middle" direction="rtl"
+          font-family="Cairo, 'Noto Sans Arabic', system-ui, sans-serif" font-weight="600"
+          font-size="82" fill="#E0A106" letter-spacing="-1">مرسال</text>
+    <text x="180" y="150" text-anchor="middle"
+          font-family="Inter, 'Segoe UI', system-ui, sans-serif" font-weight="600"
+          font-size="88" fill="#16808D" letter-spacing="-3">Mersal</text>
+    <text x="180" y="182" text-anchor="middle"
+          font-family="Inter, 'Segoe UI', system-ui, sans-serif" font-weight="500"
+          font-size="22" fill="#566E76" letter-spacing="14">FOUNDATION</text>
+  </g>
 </svg>
