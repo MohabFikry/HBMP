@@ -39,6 +39,9 @@ if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "eligibility-service" })).AllowAnonymous();
 
+// Coordination coverage summary (10.1) — the fail-closed spine of the case-service beneficiary-360 view.
+app.MapCoordination();
+
 var v1 = app.MapGroup("/api/v1/eligibility").RequireAuthorization(HbmpPolicies.Scope("eligibility:check"));
 
 // POST /eligibility/check — cache-first decision; every check is an audited PHI read.

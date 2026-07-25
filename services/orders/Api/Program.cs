@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Authz;
@@ -33,6 +34,9 @@ builder.Services.AddHttpClient<IReportDocumentClient, HttpReportDocumentClient>(
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("orders-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
 
+// Accept enum names (e.g. "Lab", "LOINC") in request bodies — matching the string enums we already emit on
+// responses. JsonStringEnumConverter still accepts numeric values too, so this is backward compatible.
+builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

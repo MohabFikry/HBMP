@@ -220,6 +220,31 @@ public static class Cases
     // --- Escalations ---------------------------------------------------------------------------------------
     private static void MapEscalations(RouteGroupBuilder v1)
     {
+        // Cross-case escalations worklist — every open escalation on the caller's ACTIVE assignments (the same
+        // ABAC anchor as My Cases: a manager sees escalations only for cases assigned to them). Literal segment,
+        // so it never collides with the `/{id:guid}/escalations` per-case route.
+        v1.MapGet("/escalations", async (CaseDeps deps, CancellationToken ct, string? status) =>
+        {
+            var denied = await deps.Gate.CheckAsync(CasePolicies.ReadList, null, "list-escalations", ct);
+            if (denied is not null) return denied;
+            if (!Guid.TryParse(deps.Subject, out var mgr)) return Results.Ok(Array.Empty<EscalationListItem>());
+
+            var assigned = await deps.Assignments.ActiveCaseIdsForAsync(mgr, ct);
+            var ids = assigned.Select(Guid.Parse).ToList();
+            if (ids.Count == 0) return Results.Ok(Array.Empty<EscalationListItem>());
+
+            var q = from e in deps.Db.Escalations.AsNoTracking()
+                    join c in deps.Db.Cases.AsNoTracking() on e.CaseId equals c.CaseId
+                    where ids.Contains(e.CaseId)
+                    orderby e.RaisedAt descending
+                    select new { e, c.CaseNo, c.BeneficiaryId };
+            var rows = await q.Take(200).ToListAsync(ct);
+            var items = rows
+                .Where(r => !TryEscStatus(status, out var want) || r.e.Status == want)
+                .Select(r => EscalationListItem.From(r.e, r.CaseNo, r.BeneficiaryId)).ToList();
+            return Results.Ok(items);
+        }).RequireAuthorization(HbmpPolicies.Scope("case:read"));
+
         v1.MapGet("/{id:guid}/escalations", async (Guid id, CaseDeps deps, CancellationToken ct) =>
         {
             var denied = await deps.Gate.CheckAsync(CasePolicies.Read, id, "list-escalations", ct);
@@ -289,6 +314,12 @@ public static class Cases
         });
 
     private static bool TryStatus(string? status, out CaseStatus parsed)
+    {
+        parsed = default;
+        return !string.IsNullOrWhiteSpace(status) && Enum.TryParse(status, true, out parsed);
+    }
+
+    private static bool TryEscStatus(string? status, out EscalationStatus parsed)
     {
         parsed = default;
         return !string.IsNullOrWhiteSpace(status) && Enum.TryParse(status, true, out parsed);

@@ -31,7 +31,7 @@ import {
   type PrescribeRequest,
 } from "@mersal/contracts";
 import type { ApiClient } from "./client";
-import { getJson, postJson, getRaw, postRaw, parseOr } from "./http";
+import { getRaw, postRaw, parseOr } from "./http";
 
 /** Wrap a plain service string as the bilingual shape the portal contracts use (same text both langs). */
 const loc = (s: unknown) => ({ en: String(s ?? ""), ar: String(s ?? "") });
@@ -66,6 +66,19 @@ const encounterStatus = (s: unknown) => {
   };
   return map[k] ?? map.InProgress;
 };
+/** Map a coverage/eligibility status string → a resolved bilingual StatusKind chip for coordination views. */
+const coverageChip = (s: unknown): { kind: "ok" | "warn" | "bad" | "neu"; label: { en: string; ar: string } } => {
+  const k = String(s ?? "").toLowerCase();
+  if (k === "active") return { kind: "ok", label: { en: "Active", ar: "نشط" } };
+  if (k === "blocked" || k === "expired" || k === "lapsed") return { kind: "bad", label: { en: k[0].toUpperCase() + k.slice(1), ar: "منتهٍ" } };
+  if (k === "none") return { kind: "neu", label: { en: "None", ar: "لا يوجد" } };
+  return { kind: "warn", label: { en: "Review", ar: "قيد المراجعة" } };
+};
+/** Map a case/approval priority string → the zCasePriority enum. */
+const casePriority = (p: unknown): "low" | "normal" | "high" | "urgent" =>
+  ({ low: "low", normal: "normal", routine: "normal", high: "high", urgent: "urgent", emergency: "urgent" })[
+    String(p ?? "normal").toLowerCase()
+  ] as any ?? "normal";
 /** Map an orders CodeSystem to the zCoded system enum (LOCAL has no clinical code space → fall back to LOINC). */
 const codeSystem = (s: unknown): "CPT" | "LOINC" | "ICD-10" | "ATC" | "RxNorm" =>
   ({ CPT: "CPT", LOINC: "LOINC", LOCAL: "LOINC" })[String(s ?? "LOINC")] as any ?? "LOINC";
@@ -82,6 +95,8 @@ const orderStatus = (s: unknown) => {
 };
 /** orderId → first available order-line id, cached from the queue so consume can target a concrete line. */
 const orderLineByOrderId = new Map<string, string>();
+/** encounterId → raw beneficiaryId, cached from getEncounter so doctor write actions can address orders/pharmacy. */
+const encounterBeneficiary = new Map<string, string>();
 /** Map a pharmacy prescription/line status → a resolved bilingual StatusKind for the dispensing queue. */
 const rxStatus = (s: unknown) => {
   const k = String(s ?? "Approved");
@@ -221,6 +236,9 @@ export class HttpApiClient implements ApiClient {
   async getEncounter(encounterId: string) {
     const r = (await getRaw(`/encounters/${encodeURIComponent(encounterId)}/clinical`)) as any;
     const e = r?.encounter ?? {};
+    // Cache the raw beneficiaryId so downstream write actions (place order / prescribe) can address the
+    // orders/pharmacy services, which key on the beneficiary — the doctor UI itself only ever shows the mask.
+    if (e.beneficiaryId) encounterBeneficiary.set(encounterId, String(e.beneficiaryId));
     const note = (r?.notes ?? [])[0] ?? {};
     const vitals: any[] = r?.vitals ?? [];
     const v = (type: string) => vitals.find((x) => String(x.vitalType) === type)?.valueNum ?? null;
@@ -256,11 +274,53 @@ export class HttpApiClient implements ApiClient {
       })),
     });
   }
-  placeOrder(req: PlaceOrderRequest) {
-    return postJson(`/orders`, req, zPlaceOrderResult);
+  // Place an investigation order (US-032). The real endpoint is /investigation-orders and it (a) requires an
+  // Idempotency-Key and (b) keys on the beneficiary — which the doctor UI never shows, so we recover it from the
+  // encounter cache populated by getEncounter. Order lines validate their CPT/LOINC code against master data.
+  async placeOrder(req: PlaceOrderRequest) {
+    const beneficiaryId = encounterBeneficiary.get(req.encounterId) ?? req.encounterId;
+    const idem = `ord:${req.encounterId}:${req.test.system}:${req.test.code}`;
+    const body = {
+      beneficiaryId,
+      encounterId: req.encounterId,
+      orderType: req.kind === "imaging" ? "Imaging" : "Lab",
+      expiresAt: new Date(Date.now() + 30 * 864e5).toISOString(),
+      lines: [{
+        codeSystem: req.test.system === "CPT" ? "CPT" : "LOINC",
+        code: req.test.code,
+        description: req.test.label?.en ?? req.test.code,
+        quantityOrdered: 1,
+      }],
+    };
+    const r = (await postRaw(`/investigation-orders`, body, idem)) as any;
+    return parseOr(zPlaceOrderResult, {
+      orderId: r?.orderId ?? r?.OrderId ?? "",
+      status: orderStatus(r?.status),
+      requiresApproval: String(r?.status ?? "").toLowerCase() === "pendingapproval",
+    });
   }
-  prescribe(req: PrescribeRequest) {
-    return postJson(`/prescriptions`, req, zPrescribeResult);
+  // Write an e-prescription (US-033). Keyed on beneficiary (from the encounter cache) + Idempotency-Key. The
+  // prescription line references a master-data drug id; the coded drug's `code` carries that reference.
+  async prescribe(req: PrescribeRequest) {
+    const beneficiaryId = encounterBeneficiary.get(req.encounterId) ?? req.encounterId;
+    const idem = `rx:${req.encounterId}:${req.drug.code}`;
+    const body = {
+      beneficiaryId,
+      encounterId: req.encounterId,
+      lines: [{
+        drugId: req.drug.code,
+        dose: req.dose,
+        route: "Oral",
+        frequency: "Daily",
+        quantityPrescribed: req.quantity,
+        refillsAllowed: 0,
+      }],
+    };
+    const r = (await postRaw(`/prescriptions`, body, idem)) as any;
+    return parseOr(zPrescribeResult, {
+      prescriptionId: r?.prescriptionId ?? r?.PrescriptionId ?? "",
+      status: rxStatus(r?.status),
+    });
   }
 
   // Lab / Imaging (Phase 5, US-040) — the orders service exposes ONE capability-filtered provider queue at
@@ -478,8 +538,55 @@ export class HttpApiClient implements ApiClient {
       }),
     );
   }
-  beneficiary360(caseId: string) {
-    return getJson(`/cases/${encodeURIComponent(caseId)}/beneficiary-360`, zBeneficiary360);
+  // The case-service assembles a coordination view (coverage/care-plan/appointment+approval STATUS + a clinical
+  // SUMMARY where diagnoses are coord-visible but notes/rx/results are masked counts). Adapt its DTO — plain
+  // strings + numeric limits — to the bilingual + StatusKind contract; the masked counts pass through unchanged.
+  async beneficiary360(caseId: string) {
+    const b = (await getRaw(`/cases/${encodeURIComponent(caseId)}/beneficiary-360`)) as any;
+    const maskedCount = (m: any) => ({ count: Number(m?.count ?? 0), summaryOnly: true as const });
+    return parseOr(zBeneficiary360, {
+      caseId: b.caseId ?? caseId,
+      caseNo: b.caseNo ?? "",
+      beneficiary: {
+        id: b.beneficiary?.beneficiaryId ?? b.beneficiary?.id ?? caseId,
+        token: b.beneficiary?.maskedMemberId ?? b.beneficiary?.displayName ?? "•••",
+      },
+      coverage: {
+        status: coverageChip(b.coverage?.status),
+        planName: loc(b.coverage?.policyName ?? "—"),
+        coverageCategory: loc(b.coverage?.coverageCategory ?? "—"),
+        annualCap: b.coverage?.annualLimit != null ? money(b.coverage.annualLimit) : undefined,
+        remaining: b.coverage?.remainingLimit != null ? money(b.coverage.remainingLimit) : undefined,
+      },
+      carePlan: {
+        status: loc(b.carePlan?.status ?? "None"),
+        goals: (b.carePlan?.goals ?? []).map((g: unknown) => loc(g)),
+        reviewDue: b.carePlan?.reviewDue ?? undefined,
+      },
+      appointments: (b.appointments ?? []).map((a: any) => ({
+        id: a.appointmentId ?? a.id,
+        clinic: loc(a.clinic ?? "—"),
+        when: a.when,
+        status: coverageChip(a.status),
+      })),
+      openApprovals: (b.openApprovals ?? []).map((a: any) => ({
+        authNo: a.authNo ?? "—",
+        status: coverageChip(a.status),
+        priority: casePriority(a.priority),
+        decidedAt: a.decidedAt ?? undefined,
+      })),
+      clinical: {
+        activeDiagnoses: (b.clinical?.activeDiagnoses ?? []).map((d: any) => ({
+          system: (["ICD-10", "CPT", "LOINC", "ATC", "RxNorm"].includes(d.system) ? d.system : "ICD-10") as
+            | "ICD-10" | "CPT" | "LOINC" | "ATC" | "RxNorm",
+          code: d.code ?? "",
+          label: loc(d.display ?? d.label ?? d.code ?? ""),
+        })),
+        notes: maskedCount(b.clinical?.notes),
+        prescriptions: maskedCount(b.clinical?.prescriptions),
+        results: maskedCount(b.clinical?.results),
+      },
+    });
   }
   async caseTasks(caseId: string) {
     const r = (await getRaw(`/cases/${encodeURIComponent(caseId)}/tasks`)) as any;

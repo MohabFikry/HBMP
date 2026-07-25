@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Authz;
@@ -41,6 +42,8 @@ builder.Services.AddHttpClient<ITreatingRelationshipClient, HttpTreatingRelation
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("pharmacy-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
 
+// Accept enum names in request bodies (matches the string enums we emit on responses); numeric values still work.
+builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

@@ -67,3 +67,14 @@ public sealed record EscalationView(
     public static EscalationView From(Escalation e) =>
         new(e.EscalationId, e.CaseId, e.RaisedToRole, e.Reason, e.Status.ToString(), e.RaisedAt, e.ResolvedAt);
 }
+
+/// <summary>Cross-case escalation worklist row: the escalation plus its case number and a MASKED beneficiary token
+/// (min-necessary — the escalations board never shows a beneficiary name).</summary>
+public sealed record EscalationListItem(
+    Guid EscalationId, Guid CaseId, string CaseNo, string BeneficiaryToken, string RaisedToRole,
+    string Reason, string Status, DateTimeOffset RaisedAt, DateTimeOffset? ResolvedAt)
+{
+    public static EscalationListItem From(Escalation e, string caseNo, Guid beneficiaryId) =>
+        new(e.EscalationId, e.CaseId, caseNo, "•••" + beneficiaryId.ToString("N")[^4..], e.RaisedToRole,
+            e.Reason, e.Status.ToString(), e.RaisedAt, e.ResolvedAt);
+}
