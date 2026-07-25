@@ -44,6 +44,8 @@ public sealed class Authorization
     public DateTimeOffset? DecidedAt { get; set; }
     public int? TatSeconds { get; set; }                        // decided_at − submitted_at, persisted for reporting
     public bool SlaBreached { get; set; }
+    public bool RetrospectiveReviewRequired { get; set; }       // set by a break-glass decision (7.3)
+    public bool RetrospectiveReviewed { get; set; }
     public string? IdempotencyKey { get; set; }
     public string? CreatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; }

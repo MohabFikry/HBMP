@@ -150,6 +150,8 @@ public static class Decisions
         auth.DecidedAt = now;
         auth.TatSeconds = DecisionRules.TatSeconds(auth.SubmittedAt, now);
         auth.SlaBreached = DecisionRules.SlaBreached(auth.SlaDueAt, now);
+        // A break-glass decision (emergency / override / manual) is flagged for post-hoc retrospective review.
+        if (breakGlass) auth.RetrospectiveReviewRequired = true;
         auth.UpdatedAt = now;
 
         await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);

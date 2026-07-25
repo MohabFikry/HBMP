@@ -100,6 +100,22 @@ public sealed record DecisionView(
         a.TatSeconds, a.SlaBreached, d.DecidedAt);
 }
 
+// ---- Break-glass (phase 7.3) ----
+
+public sealed record EmergencyApproveRequest(string Justification);
+public sealed record OverrideRequest(string Justification);
+
+/// <summary>Create-and-decide a manual authorization (no provider submission). The beneficiary is resolved by the
+/// reviewer via the existing min-necessary member search; the decision must be Approved or PartiallyApproved.</summary>
+public sealed record ManualAuthorizationRequest(
+    Guid BeneficiaryId,
+    IReadOnlyList<string> ServiceCodes,
+    string? RequestedScope,
+    AuthDecision Decision,
+    IReadOnlyList<string>? ApprovedScope,
+    string Justification,
+    string? Rationale);
+
 /// <summary>Tiny JSON helper for the <c>service_codes</c> jsonb string array (avoids a serializer dependency in
 /// the projection path; the codes are simple tokens).</summary>
 internal static class Codes
