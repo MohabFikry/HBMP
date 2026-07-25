@@ -25,7 +25,7 @@ public static class QueueEndpoints
             var denied = await gate.AuthorizeQueueAsync(ct);
             if (denied is not null) return denied;
 
-            var caps = ProviderCapability.ForRoles(me.Principal!.Roles).Select(t => t.ToString()).ToHashSet();
+            var caps = ProviderCapability.ForRoles(me.Principal!.Roles).ToHashSet();
             var (p, ps) = Page(page, pageSize);
 
             var items = await AvailableOrders(db, caps)
@@ -48,7 +48,7 @@ public static class QueueEndpoints
                 return Results.Problem(statusCode: 400, title: "search requires patientIdentifier or orderNo",
                     type: "urn:hbmp:search-criteria-required");
 
-            var caps = ProviderCapability.ForRoles(me.Principal!.Roles).Select(t => t.ToString()).ToHashSet();
+            var caps = ProviderCapability.ForRoles(me.Principal!.Roles).ToHashSet();
             var q = AvailableOrders(db, caps);
 
             if (!string.IsNullOrWhiteSpace(orderNo))
@@ -66,9 +66,9 @@ public static class QueueEndpoints
 
     /// <summary>Orders the caller may fulfil: type ∈ their capability, order still open, with ≥1 available line.
     /// The projection to available lines happens in <see cref="QueueItemResponse.From"/>.</summary>
-    private static IQueryable<InvestigationOrder> AvailableOrders(OrdersDbContext db, HashSet<string> capabilities) =>
+    private static IQueryable<InvestigationOrder> AvailableOrders(OrdersDbContext db, HashSet<OrderType> capabilities) =>
         db.Orders.AsNoTracking().Include(o => o.Lines)
-            .Where(o => capabilities.Contains(o.OrderType.ToString()))
+            .Where(o => capabilities.Contains(o.OrderType))
             .Where(o => o.Status == OrderStatus.Active || o.Status == OrderStatus.PartiallyUsed)
             .Where(o => o.Lines.Any(l => l.Status == OrderLineStatus.Active || l.Status == OrderLineStatus.PartiallyUsed));
 

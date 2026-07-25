@@ -65,6 +65,22 @@ const encounterStatus = (s: unknown) => {
   };
   return map[k] ?? map.InProgress;
 };
+/** Map an orders CodeSystem to the zCoded system enum (LOCAL has no clinical code space → fall back to LOINC). */
+const codeSystem = (s: unknown): "CPT" | "LOINC" | "ICD-10" | "ATC" | "RxNorm" =>
+  ({ CPT: "CPT", LOINC: "LOINC", LOCAL: "LOINC" })[String(s ?? "LOINC")] as any ?? "LOINC";
+/** Map an orders/order-line status → a resolved bilingual StatusKind for the fulfillment queue. */
+const orderStatus = (s: unknown) => {
+  const k = String(s ?? "Active");
+  const map: Record<string, { kind: "ok" | "info" | "part" | "neu"; label: { en: string; ar: string } }> = {
+    Active: { kind: "info", label: { en: "Active", ar: "نشط" } },
+    PartiallyUsed: { kind: "part", label: { en: "Partially used", ar: "مُستخدم جزئياً" } },
+    Completed: { kind: "ok", label: { en: "Completed", ar: "مكتمل" } },
+    Cancelled: { kind: "neu", label: { en: "Cancelled", ar: "ملغى" } },
+  };
+  return map[k] ?? map.Active;
+};
+/** orderId → first available order-line id, cached from the queue so consume can target a concrete line. */
+const orderLineByOrderId = new Map<string, string>();
 
 /**
  * Last reception search cards, keyed by beneficiaryId. The reception service returns ONE min-necessary card that
@@ -191,11 +207,47 @@ export class HttpApiClient implements ApiClient {
     return postJson(`/prescriptions`, req, zPrescribeResult);
   }
 
-  labQueue(kind: "lab" | "imaging") {
-    return getJson(`/${kind}/queue`, z.array(zLabOrder));
+  // Lab / Imaging (Phase 5, US-040) — the orders service exposes ONE capability-filtered provider queue at
+  // /investigation-orders/queue (a lab_tech sees Lab orders, an imaging_tech Imaging — by role, not URL). We
+  // flatten each order to one row using its first available line as the `test`, cache that line id so consume
+  // can target it, and default priority to routine (the fulfillment queue does not carry a clinical priority).
+  async labQueue(kind: "lab" | "imaging") {
+    const r = (await getRaw(`/investigation-orders/queue?page=1&pageSize=50`)) as any[];
+    return (r ?? [])
+      .filter((o: any) => String(o.orderType ?? "").toLowerCase() === kind)
+      .map((o: any) => {
+        const lines: any[] = o.lines ?? [];
+        const line = lines[0] ?? {};
+        if (line.orderLineId) orderLineByOrderId.set(String(o.orderId), String(line.orderLineId));
+        const remaining = lines.reduce((acc, l) => acc + Math.max(0, Math.round(Number(l.quantityRemaining ?? 1))), 0);
+        return parseOr(zLabOrder, {
+          id: o.orderId,
+          kind,
+          test: { system: codeSystem(line.codeSystem), code: line.code ?? "—", label: loc(line.description ?? line.code ?? "") },
+          patient: { id: o.beneficiaryId, token: caseToken({ beneficiaryId: o.beneficiaryId }) },
+          priority: "routine",
+          status: orderStatus(o.status),
+          placedAt: o.requestedAt ?? new Date().toISOString(),
+          panelsTotal: Math.max(1, remaining),
+          panelsDone: 0,
+        });
+      });
   }
-  consume(req: ConsumeRequest) {
-    return postJson(`/orders/${encodeURIComponent(req.orderId)}/consume`, req, zConsumeResult, req.idempotencyKey);
+  async consume(req: ConsumeRequest) {
+    const orderLineId = orderLineByOrderId.get(String(req.orderId));
+    const body = { lines: orderLineId ? [{ orderLineId, quantity: req.panels }] : [] };
+    const r = (await postRaw(`/investigation-orders/${encodeURIComponent(req.orderId)}/consume`, body, req.idempotencyKey)) as any;
+    const lines: any[] = r?.lines ?? [];
+    const total = lines.reduce((acc, l) => acc + Math.round(Number(l.quantityOrdered ?? l.quantityRemaining ?? 1)), 0);
+    const done = lines.reduce((acc, l) => acc + Math.round(Number(l.quantityConsumed ?? 0)), 0);
+    return parseOr(zConsumeResult, {
+      orderId: r?.orderId ?? req.orderId,
+      fulfillmentId: (r?.fulfillments ?? [])[0]?.fulfillmentId ?? req.idempotencyKey,
+      status: orderStatus(r?.orderStatus),
+      panelsDone: done,
+      panelsTotal: Math.max(1, total),
+      replayed: !!r?.replayed,
+    });
   }
 
   pharmacyQueue() {
