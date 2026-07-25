@@ -43,3 +43,15 @@ VALUES
      now() - interval '2 day', true, now() - interval '2 day', now() - interval '2 day', now() - interval '2 day' + interval '60 minute',
      now() - interval '2 day', true)
 ON CONFLICT (grant_id) DO UPDATE SET status = EXCLUDED.status;
+
+-- Governance read surface (Phase 8b.2): master-data versions + typed system-config in force, so the
+-- Admin/Platform "Master data" and "System config" screens render real rows. Superuser bypasses RLS.
+DELETE FROM admin.master_data_version WHERE version_id IN ('ad100000-0000-4000-8000-000000000001','ad100000-0000-4000-8000-000000000002');
+INSERT INTO admin.master_data_version (version_id, system, code, version_no, attributes, retired, effective_from, changed_by, rationale, created_at) VALUES
+  ('ad100000-0000-4000-8000-000000000001', 'Icd10', 'E11.9', 2, '{"display":"Type 2 diabetes mellitus without complications"}', false, now() - interval '180 days', 'seed', 'Annual ICD-10 refresh', now()),
+  ('ad100000-0000-4000-8000-000000000002', 'Atc',   'A10BA02', 1, '{"display":"Metformin"}', false, now() - interval '180 days', 'seed', 'Initial formulary load', now());
+
+DELETE FROM admin.system_config WHERE config_id IN ('cf100000-0000-4000-8000-000000000001','cf100000-0000-4000-8000-000000000002');
+INSERT INTO admin.system_config (config_id, tenant_id, key, value_type, value, version_no, effective_from, updated_by, updated_at) VALUES
+  ('cf100000-0000-4000-8000-000000000001', '*', 'session.timeout_minutes', 'Duration', '15', 1, now() - interval '90 days', 'seed', now()),
+  ('cf100000-0000-4000-8000-000000000002', '11111111-1111-1111-1111-111111111111', 'approvals.sla_hours', 'Whole', '24', 3, now() - interval '30 days', 'seed', now());

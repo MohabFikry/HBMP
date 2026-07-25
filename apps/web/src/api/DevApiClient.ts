@@ -26,6 +26,8 @@ import {
   zAccessReviewCampaign,
   zAppointmentRow,
   zBreakGlassGrant,
+  zMasterDataVersion,
+  zSystemConfigEntry,
   zCheckInResult,
   zOrderRow,
   zRxRow,
@@ -891,6 +893,24 @@ export class DevApiClient implements ApiClient {
   breakGlassGrants() {
     return this.gate(
       () => ok(z.array(zBreakGlassGrant), [{ id: "BG-1", requesterToken: "•••8a91", reasonCode: "EmergencyCare", status: { kind: "neu", label: loc("Expired", "منتهٍ") }, requestedAt: "2026-07-20T02:00:00Z", expiresAt: "2026-07-20T03:00:00Z" }]),
+      [],
+    );
+  }
+  adminMasterData() {
+    return this.gate(
+      () => ok(z.array(zMasterDataVersion), [
+        { id: "MDV-1", system: "ICD10", code: "E11.9", versionNo: 2, retired: false, effectiveFrom: "2026-01-01T00:00:00Z", rationale: "Annual ICD refresh" },
+        { id: "MDV-2", system: "ATC", code: "A10BA02", versionNo: 1, retired: false, effectiveFrom: "2026-01-01T00:00:00Z", rationale: "Initial load" },
+      ]),
+      [],
+    );
+  }
+  adminSystemConfig() {
+    return this.gate(
+      () => ok(z.array(zSystemConfigEntry), [
+        { id: "CFG-1", tenantId: "*", key: "session.timeout_minutes", type: "Duration", value: "15", versionNo: 1 },
+        { id: "CFG-2", tenantId: "11111111-1111-1111-1111-111111111111", key: "approvals.sla_hours", type: "Whole", value: "24", versionNo: 3 },
+      ]),
       [],
     );
   }

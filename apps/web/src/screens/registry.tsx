@@ -52,6 +52,8 @@ const AdminUsers = lazy(() => import("./AdminConsole").then((m) => ({ default: m
 const AdminPolicies = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminPolicies })));
 const AdminTenants = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminTenants })));
 const AdminGovernance = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminGovernance })));
+const AdminMasterData = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminMasterData })));
+const AdminConfig = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminConfig })));
 
 export const SCREENS: Record<string, () => ReactNode> = {
   // 1. Reception — eligibility (also surfaced in the beneficiary-management portal).
@@ -109,6 +111,8 @@ const ADMIN_SECTIONS: Record<string, () => ReactNode> = {
   policies: () => <AdminPolicies />,
   tenants: () => <AdminTenants />,
   audit: () => <AdminGovernance />,
+  "master-data": () => <AdminMasterData />,
+  config: () => <AdminConfig />,
 };
 
 export function screenFor(fullPath: string): (() => ReactNode) | undefined {

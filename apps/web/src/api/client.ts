@@ -10,7 +10,9 @@ import type {
   EmergencyResult,
   ManualAuthInput,
   ManualAuthResult,
+  MasterDataVersion,
   ReportView,
+  SystemConfigEntry,
   TatSummary,
   CaseListItem,
   ConsumeRequest,
@@ -131,6 +133,8 @@ export interface ApiClient {
   sodMatrix(): Promise<SodConflict[]>;
   accessReviewCampaigns(): Promise<AccessReviewCampaign[]>;
   breakGlassGrants(): Promise<BreakGlassGrant[]>;
+  adminMasterData(): Promise<MasterDataVersion[]>;
+  adminSystemConfig(): Promise<SystemConfigEntry[]>;
 }
 
 /**

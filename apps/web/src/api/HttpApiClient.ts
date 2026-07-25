@@ -4,6 +4,8 @@ import {
   zApprovalItem,
   zApprovalReview,
   zBreakGlassGrant,
+  zMasterDataVersion,
+  zSystemConfigEntry,
   zCheckInResult,
   zRoleBinding,
   zSodConflict,
@@ -1055,6 +1057,35 @@ export class HttpApiClient implements ApiClient {
         status: breakGlassChip(g.status),
         requestedAt: g.requestedAt ?? new Date().toISOString(),
         expiresAt: g.expiresAt ?? undefined,
+      }),
+    );
+  }
+  // Governance reads (Phase 8b.2) — the master-data versions + typed system-config currently in force. Reference
+  // configuration, not PHI; every admin read is audited server-side.
+  async adminMasterData() {
+    const r = (await getRaw(`/admin/master-data`)) as any[];
+    return (Array.isArray(r) ? r : []).map((v: any) =>
+      parseOr(zMasterDataVersion, {
+        id: v.versionId ?? v.id,
+        system: String(v.system ?? ""),
+        code: String(v.code ?? ""),
+        versionNo: Number(v.versionNo ?? 0),
+        retired: Boolean(v.retired),
+        effectiveFrom: v.effectiveFrom ?? new Date().toISOString(),
+        rationale: v.rationale ?? undefined,
+      }),
+    );
+  }
+  async adminSystemConfig() {
+    const r = (await getRaw(`/admin/system-config`)) as any[];
+    return (Array.isArray(r) ? r : []).map((c: any) =>
+      parseOr(zSystemConfigEntry, {
+        id: c.configId ?? c.id,
+        tenantId: String(c.tenantId ?? "*"),
+        key: String(c.key ?? ""),
+        type: String(c.type ?? ""),
+        value: String(c.value ?? ""),
+        versionNo: Number(c.versionNo ?? 0),
       }),
     );
   }

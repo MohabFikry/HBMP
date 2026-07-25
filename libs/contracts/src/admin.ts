@@ -58,3 +58,26 @@ export const zBreakGlassGrant = z.object({
   expiresAt: zInstant.optional(),
 });
 export type BreakGlassGrant = z.infer<typeof zBreakGlassGrant>;
+
+/** A master-data version currently in force (effective-dated governance read, FR-MDM-007). */
+export const zMasterDataVersion = z.object({
+  id: zId,
+  system: z.string(),
+  code: z.string(),
+  versionNo: z.number().int(),
+  retired: z.boolean(),
+  effectiveFrom: zInstant,
+  rationale: z.string().optional(),
+});
+export type MasterDataVersion = z.infer<typeof zMasterDataVersion>;
+
+/** A typed system-config entry currently in force (effective-dated, per-tenant or platform "*"). */
+export const zSystemConfigEntry = z.object({
+  id: zId,
+  tenantId: z.string(),
+  key: z.string(),
+  type: z.string(),
+  value: z.string(),
+  versionNo: z.number().int(),
+});
+export type SystemConfigEntry = z.infer<typeof zSystemConfigEntry>;

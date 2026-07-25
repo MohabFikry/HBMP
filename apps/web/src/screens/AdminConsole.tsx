@@ -4,8 +4,10 @@ import type {
   AccessReviewCampaign,
   BreakGlassGrant,
   Localized,
+  MasterDataVersion,
   RoleBinding,
   SodConflict,
+  SystemConfigEntry,
   TenantSummary,
 } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -46,6 +48,21 @@ const S = {
   reasonCode: { en: "Reason", ar: "السبب" },
   requested: { en: "Requested", ar: "وقت الطلب" },
   expires: { en: "Expires", ar: "ينتهي" },
+
+  mdTitle: { en: "Master data", ar: "البيانات المرجعية" },
+  mdEmpty: { en: "No master-data versions in force.", ar: "لا توجد إصدارات بيانات مرجعية فعّالة." },
+  system: { en: "System", ar: "النظام" },
+  code: { en: "Code", ar: "الرمز" },
+  version: { en: "Version", ar: "الإصدار" },
+  effective: { en: "Effective from", ar: "ساري من" },
+  retired: { en: "Retired", ar: "متقاعد" },
+  cfgTitle: { en: "System config", ar: "إعدادات النظام" },
+  cfgEmpty: { en: "No configuration entries.", ar: "لا توجد إعدادات." },
+  scope2: { en: "Scope", ar: "النطاق" },
+  key: { en: "Key", ar: "المفتاح" },
+  type: { en: "Type", ar: "النوع" },
+  value: { en: "Value", ar: "القيمة" },
+  platform: { en: "Platform", ar: "المنصة" },
 } satisfies Record<string, Localized>;
 
 const dt = (s?: string) => (s ? new Date(s).toLocaleDateString() : "—");
@@ -157,6 +174,54 @@ export function AdminGovernance() {
           </AsyncSection>
         </Card>
       </div>
+    </>
+  );
+}
+
+/** Master data — the effective-dated code-system versions currently in force (governance read, FR-MDM-007). */
+export function AdminMasterData() {
+  const api = useApi();
+  const t = useLoc();
+  const state = useAsync<MasterDataVersion[]>(() => api.adminMasterData(), []);
+  const cols: Column<MasterDataVersion>[] = [
+    { key: "system", header: t(S.system), cell: (r) => <span className="tnum">{r.system}</span> },
+    { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.code}</span> },
+    { key: "version", header: t(S.version), cell: (r) => <span className="tnum">v{r.versionNo}</span> },
+    { key: "retired", header: t(S.retired), cell: (r) => <StatusChip kind={r.retired ? "warn" : "ok"} label={r.retired ? t(S.retired) : "—"} /> },
+    { key: "effective", header: t(S.effective), cell: (r) => <span className="tnum">{dt(r.effectiveFrom)}</span> },
+  ];
+  return (
+    <>
+      <PageHeader title={t(S.mdTitle)} />
+      <Card as="section" style={{ padding: "var(--sp3)" }}>
+        <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.mdEmpty}>
+          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.mdTitle)} />}
+        </AsyncSection>
+      </Card>
+    </>
+  );
+}
+
+/** System config — the typed, effective-dated configuration entries in force (platform "*" or per-tenant). */
+export function AdminConfig() {
+  const api = useApi();
+  const t = useLoc();
+  const state = useAsync<SystemConfigEntry[]>(() => api.adminSystemConfig(), []);
+  const cols: Column<SystemConfigEntry>[] = [
+    { key: "scope", header: t(S.scope2), cell: (r) => (r.tenantId === "*" ? <StatusChip kind="info" label={t(S.platform)} /> : <span className="tnum muted">{r.tenantId.slice(0, 8)}</span>) },
+    { key: "key", header: t(S.key), cell: (r) => <span className="tnum">{r.key}</span> },
+    { key: "type", header: t(S.type), cell: (r) => <StatusChip kind="neu" label={r.type} /> },
+    { key: "value", header: t(S.value), cell: (r) => <span className="tnum">{r.value}</span> },
+    { key: "version", header: t(S.version), cell: (r) => <span className="tnum">v{r.versionNo}</span> },
+  ];
+  return (
+    <>
+      <PageHeader title={t(S.cfgTitle)} />
+      <Card as="section" style={{ padding: "var(--sp3)" }}>
+        <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.cfgEmpty}>
+          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.cfgTitle)} />}
+        </AsyncSection>
+      </Card>
     </>
   );
 }

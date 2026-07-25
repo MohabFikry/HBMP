@@ -1,5 +1,7 @@
 using Mersal.Admin.Domain;
+using Mersal.Admin.Infrastructure;
 using Mersal.Authz;
+using Microsoft.EntityFrameworkCore;
 
 namespace Mersal.Admin.Api;
 
@@ -51,6 +53,32 @@ public static class GovernanceEndpoints
 
             var v = await svc.ResolveAsOfAsync(sys, code, at, ct);
             return v is null ? Results.NotFound() : Results.Ok(new { v.VersionId, v.VersionNo, v.AttributesJson, v.EffectiveFrom, v.EffectiveTo });
+        });
+
+        // List the master-data versions currently in force (effective_to IS NULL) — the governance read surface.
+        g.MapGet("/master-data", async (AdminGate gate, AdminDbContext db, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(AdminPolicies.ReadAccess, ct);
+            if (denied is not null) return denied;
+            var rows = await db.MasterDataVersions.AsNoTracking()
+                .Where(v => v.EffectiveTo == null)
+                .OrderBy(v => v.System).ThenBy(v => v.Code).Take(500)
+                .Select(v => new { v.VersionId, system = v.System.ToString(), v.Code, v.VersionNo, v.Retired, v.EffectiveFrom, v.Rationale })
+                .ToListAsync(ct);
+            return Results.Ok(rows);
+        });
+
+        // List the system-config entries currently in force for the caller's scope — the config read surface.
+        g.MapGet("/system-config", async (AdminGate gate, AdminDbContext db, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(AdminPolicies.ReadAccess, ct);
+            if (denied is not null) return denied;
+            var rows = await db.SystemConfigs.AsNoTracking()
+                .Where(c => c.EffectiveTo == null)
+                .OrderBy(c => c.TenantId).ThenBy(c => c.Key).Take(500)
+                .Select(c => new { c.ConfigId, c.TenantId, c.Key, type = c.ValueType.ToString(), c.Value, c.VersionNo, c.EffectiveFrom })
+                .ToListAsync(ct);
+            return Results.Ok(rows);
         });
 
         // Notification template — linted (PHI-safe + AR/EN parity) before save.
