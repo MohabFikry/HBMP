@@ -8,6 +8,8 @@ export const L = {
   light: { en: "Light theme", ar: "سمة فاتحة" },
   dark: { en: "Dark theme", ar: "سمة داكنة" },
   signedInAs: { en: "Signed in as", ar: "مسجّل الدخول باسم" },
+  notifications: { en: "Notifications", ar: "الإشعارات" },
+  notificationsUnread: { en: "unread notifications", ar: "إشعارات غير مقروءة" },
   signOut: { en: "Sign out", ar: "تسجيل الخروج" },
   breadcrumb: { en: "Breadcrumb", ar: "مسار التنقل" },
   staySignedIn: { en: "Stay signed in", ar: "البقاء مسجلاً" },

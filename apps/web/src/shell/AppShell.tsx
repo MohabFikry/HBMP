@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   Button,
@@ -11,12 +11,40 @@ import {
   type NavItem,
 } from "@mersal/design-system";
 import { useAuth } from "../auth/AuthProvider";
+import { useApi } from "../api/ApiProvider";
 import { portalForRole, type Localized, type Section } from "../portals/catalog";
 import { L } from "../i18n/strings";
 
 function useLocalized() {
   const { lang } = useTheme();
   return (l: Localized) => l[lang];
+}
+
+/**
+ * Unread-notification count for the top-bar bell badge. Polls the caller's own inbox (the
+ * notification-service row-filters by recipient == caller, so it is inherently min-necessary). Re-reads on
+ * every route change so the badge clears promptly after the Notifications screen marks items read.
+ */
+function useUnreadCount(enabled: boolean): number {
+  const api = useApi();
+  const location = useLocation();
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    let live = true;
+    const load = () =>
+      api
+        .notifications(true)
+        .then((n) => live && setCount(n.length))
+        .catch(() => live && setCount(0));
+    load();
+    const timer = setInterval(load, 60_000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [api, enabled, location.pathname]);
+  return count;
 }
 
 /**
@@ -37,6 +65,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     () => (portal ? portal.sections.filter((s) => can(s.permission)) : []),
     [portal, can],
   );
+  const canNotify = !!portal && can("notification.read");
+  const unread = useUnreadCount(canNotify);
 
   const homePath = portal && accessible[0] ? `/${portal.base}/${accessible[0].path}` : "/";
   const primaryQueuePath = homePath;
@@ -92,6 +122,25 @@ export function AppShell({ children }: { children: ReactNode }) {
           <SearchField aria-label={L.search[lang]} placeholder={L.search[lang]} ref={searchRef} />
         </div>
         <div className="app-actions">
+          {canNotify && (
+            <button
+              type="button"
+              className="app-bell"
+              onClick={() => navigate(`/${portal.base}/notifications`)}
+              aria-label={
+                unread > 0
+                  ? `${L.notifications[lang]} — ${unread} ${L.notificationsUnread[lang]}`
+                  : L.notifications[lang]
+              }
+            >
+              <Icon name="bell" />
+              {unread > 0 && (
+                <span className="app-bell-badge" aria-hidden="true">
+                  {unread > 9 ? "9+" : unread}
+                </span>
+              )}
+            </button>
+          )}
           <Button variant="ghost" onClick={toggleLang} aria-label={L.language[lang]}>
             {lang === "en" ? "ع" : "EN"}
           </Button>
