@@ -44,9 +44,9 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 7 | Approvals | 7.1 `approvals-service` + worklist + review | ☑ | 15ba511 |
 | 7 | Approvals | 7.2 Decisions + downstream effects | ☑ | a098550 |
 | 7 | Approvals | 7.3 Break-glass + SLA/TAT | ☑ | d13a4d5 |
-| 8 | Notify+Reporting | 8.1 `notification-service` | ☑ | (8.1) |
-| 8 | Notify+Reporting | 8.2 `reporting-service` KPI read-models | ☑ | (8.2) |
-| 8 | Notify+Reporting | 8.3 Executive dashboard contracts | ☑ | (8.3) |
+| 8 | Notify+Reporting | 8.1 `notification-service` | ☑ | 35604d3 |
+| 8 | Notify+Reporting | 8.2 `reporting-service` KPI read-models | ☑ | 4768621 |
+| 8 | Notify+Reporting | 8.3 Executive dashboard contracts | ☑ | 4768621 |
 | 8b | Admin Platform | 8b.1 User/role admin + SoD + access review | ☐ | |
 | 8b | Admin Platform | 8b.2 Master-data/template/config admin | ☐ | |
 | 8b | Admin Platform | 8b.3 Tenant/provider + break-glass governance | ☐ | |
