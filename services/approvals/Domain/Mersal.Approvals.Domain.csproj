@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>Mersal.Approvals.Domain</RootNamespace></PropertyGroup>
+</Project>
