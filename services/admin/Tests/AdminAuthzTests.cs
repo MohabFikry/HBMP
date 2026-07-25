@@ -88,6 +88,32 @@ public class AdminAuthzTests
     }
 
     [Fact]
+    public async Task Tenant_administration_is_super_admin_only()
+    {
+        var sup = await Engine().EvaluateAsync(new AuthzRequest(
+            Principal("super_admin", "t0", "admin:write"), AdminPolicies.ManageTenant, Res(null)));
+        var org = await Engine().EvaluateAsync(new AuthzRequest(
+            Principal("org_admin", "t0", "admin:write"), AdminPolicies.ManageTenant, Res("t0")));
+        sup.IsAllowed.Should().BeTrue();
+        org.IsAllowed.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Break_glass_request_and_approval_are_distinct_authorized_tiers()
+    {
+        // A doctor may REQUEST break-glass but not APPROVE it; a medical director may do both.
+        var docReq = await Engine().EvaluateAsync(new AuthzRequest(
+            Principal("doctor", "t0", "admin:break-glass"), AdminPolicies.BreakGlassRequest, Res("t0")));
+        var docApprove = await Engine().EvaluateAsync(new AuthzRequest(
+            Principal("doctor", "t0", "admin:break-glass"), AdminPolicies.BreakGlassApprove, Res("t0")));
+        var dirApprove = await Engine().EvaluateAsync(new AuthzRequest(
+            Principal("medical_director", "t0", "admin:break-glass"), AdminPolicies.BreakGlassApprove, Res("t0")));
+        docReq.IsAllowed.Should().BeTrue();
+        docApprove.IsAllowed.Should().BeFalse();
+        dirApprove.IsAllowed.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task Reading_the_access_matrix_is_a_sensitive_audited_allow()
     {
         var d = await Engine().EvaluateAsync(new AuthzRequest(

@@ -21,6 +21,9 @@ public sealed class AdminDbContext(DbContextOptions<AdminDbContext> options) : D
     public DbSet<MasterDataVersion> MasterDataVersions => Set<MasterDataVersion>();
     public DbSet<NotificationTemplateVersion> TemplateVersions => Set<NotificationTemplateVersion>();
     public DbSet<SystemConfig> SystemConfigs => Set<SystemConfig>();
+    public DbSet<BreakGlassGrantRecord> BreakGlassGrants => Set<BreakGlassGrantRecord>();
+    public DbSet<BreakGlassAccess> BreakGlassAccesses => Set<BreakGlassAccess>();
+    public DbSet<Tenant> Tenants => Set<Tenant>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -115,6 +118,30 @@ public sealed class AdminDbContext(DbContextOptions<AdminDbContext> options) : D
             e.Property(x => x.ValueType).HasConversion<string>().HasColumnName("value_type");
             e.HasIndex(x => new { x.TenantId, x.Key });
             e.HasIndex(x => new { x.TenantId, x.Key, x.VersionNo }).IsUnique();
+        });
+
+        b.Entity<BreakGlassGrantRecord>(e =>
+        {
+            e.ToTable("break_glass_grant");
+            e.HasKey(x => x.GrantId);
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.ScopedResourceTypesJson).HasColumnType("jsonb").HasColumnName("scoped_resource_types");
+            e.Property(x => x.ScopedResourceIdsJson).HasColumnType("jsonb").HasColumnName("scoped_resource_ids");
+            e.HasIndex(x => new { x.TenantId, x.Status });
+            e.HasIndex(x => x.RequesterUserId);
+        });
+
+        b.Entity<BreakGlassAccess>(e =>
+        {
+            e.ToTable("break_glass_access");
+            e.HasKey(x => x.AccessId);
+            e.HasIndex(x => x.GrantId);
+        });
+
+        b.Entity<Tenant>(e =>
+        {
+            e.ToTable("tenant");
+            e.HasKey(x => x.TenantId);
         });
     }
 }

@@ -62,6 +62,23 @@ mutated.
 - **System configuration** (`PUT /system-config`) — typed (`Text/Whole/Number/Boolean/Duration`), validated, and
   effective-dated; tenant-scoped or platform-level (`tenant_id = "*"`). A malformed value is rejected before store.
 
+## Tenant / provider governance, break-glass & dashboards (phase 8b.3)
+
+- **Tenant administration** (`PUT/GET /tenants`) — Super Admin manages platform tenants (Mersal = tenant 0; future
+  orgs/donors); every domain row carries `tenant_id` and RLS prevents cross-tenant leakage (FR-IAM-008). Provider
+  metadata stays owned by phase-2b provider-service; this is the platform-admin oversight view, not a second store.
+- **Break-glass** (`/break-glass`, FR-IAM-009 / `18-security-model §11`) — the full flow: **request** (mandatory
+  reason code + justification + scoped resource types/ids) → **dual-control approve** (approver ≠ requester —
+  a self-approval is rejected `409` and audited) → **step-up MFA activate** (requester + `stepUpSatisfied`, else
+  denied) → **scoped, auto-expiring window** → **access** (in-scope `200`; out-of-scope `403` — **no field-deny
+  bypass beyond scope**) → **sweep auto-expiry**. Every access emits a **HIGH-severity** `break_glass` audit event
+  (loud audit + Security/DPO alert seam) and is surfaced for mandatory post-hoc review. An active grant maps to the
+  runtime `libs/authz/BreakGlassGrant` a downstream engine consults (live cross-service wiring deferred to the bus).
+- **Governance dashboards** (`/dashboards/break-glass|access-review|sod-violations`) — read-only, **tenant-scoped**
+  (a tenant admin sees only their tenant; Super Admin passes the tenant it inspects), and **viewing is itself
+  audited** (`19-audit-strategy §7`). The SoD dashboard re-evaluates a tenant's active bindings against the §7
+  matrix to surface any latent conflict (defense in depth).
+
 ## Authorization (`libs/authz/AdminPolicies`, v8b.1)
 
 Org Admin + Super Admin only; every action is `Sensitive` → the allow is audited. Org Admin is pinned to its own
@@ -96,4 +113,10 @@ widening Org Admin. `admin:propose-policy` is Super-Admin only.
   the **old** one (FR-MDM-007); a PHI-in-SMS template save is rejected + audited; a config change is typed +
   versioned (one in-force row).
 
-Serialized via the `admin-db` collection. Total: 56 admin tests; full solution 532 green.
+- `BreakGlassPolicyTests` (pure) — dual control (no self-approval), scope check (out-of-scope + empty-scope
+  fail-closed, id-scoping), bounded window, live-only-while-active.
+- `BreakGlassIntegrationTests` (env-gated) — full lifecycle (request → dual-approve → step-up → in-scope access →
+  auto-expire); self-approval rejected; out-of-scope access denied; every access is a HIGH-severity break_glass
+  event; dashboards are tenant-scoped and audit their own reads; the SoD dashboard surfaces a latent conflict.
+
+Serialized via the `admin-db` collection. Total: 67 admin tests; full solution 543 green.

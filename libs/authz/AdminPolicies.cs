@@ -36,6 +36,16 @@ public static class AdminPolicies
     /// <summary>Manage tenant/platform system configuration (typed, validated, effective-dated).</summary>
     public const string EditConfig = "admin:edit-config";
 
+    // ---- Phase 8b.3 tenant/provider governance, break-glass, dashboards ----
+    /// <summary>Manage tenants + platform-wide config (Super Admin only — FR-IAM-008).</summary>
+    public const string ManageTenant = "admin:manage-tenant";
+    /// <summary>Request a break-glass grant (any authorized clinical/admin caller may originate).</summary>
+    public const string BreakGlassRequest = "admin:break-glass-request";
+    /// <summary>Approve a break-glass grant (dual control: a second authorized approver ≠ requester).</summary>
+    public const string BreakGlassApprove = "admin:break-glass-approve";
+    /// <summary>View the audit / access-review / break-glass dashboards (the view is itself audited).</summary>
+    public const string ReadDashboard = "admin:read-dashboard";
+
     public const string Resource = "admin";
 
     /// <summary>The admin audiences. Super Admin additionally carries the global scope for cross-tenant actions.</summary>
@@ -108,6 +118,40 @@ public static class AdminPolicies
         {
             Action = EditConfig, ResourceType = Resource,
             Roles = Set(Admins), Scopes = Set("admin:write"),
+            RequiredConditions = [AbacConditions.TenantMatch],
+            Sensitive = true,
+        },
+        // Tenant administration — Super Admin only (FR-IAM-008; global surface → tenant null).
+        new PolicyRule
+        {
+            Action = ManageTenant, ResourceType = Resource,
+            Roles = Set("super_admin"), Scopes = Set("admin:write"),
+            RequiredConditions = [AbacConditions.TenantMatch],
+            Sensitive = true,
+        },
+        // Break-glass request — a broad set of clinical/oversight roles may ORIGINATE (dual-control gates approval).
+        new PolicyRule
+        {
+            Action = BreakGlassRequest, ResourceType = Resource,
+            Roles = Set("doctor", "nurse", "medical_approval", "medical_director", "case_manager", "org_admin", "super_admin"),
+            Scopes = Set("admin:break-glass"),
+            RequiredConditions = [AbacConditions.TenantMatch],
+            Sensitive = true,
+        },
+        // Break-glass approval — a distinct authorized approver tier (dual control enforced in the handler too).
+        new PolicyRule
+        {
+            Action = BreakGlassApprove, ResourceType = Resource,
+            Roles = Set("medical_director", "org_admin", "super_admin"),
+            Scopes = Set("admin:break-glass"),
+            RequiredConditions = [AbacConditions.TenantMatch],
+            Sensitive = true,
+        },
+        // Dashboards — admins + oversight; the view is Sensitive → the read is audited.
+        new PolicyRule
+        {
+            Action = ReadDashboard, ResourceType = Resource,
+            Roles = Set("org_admin", "super_admin", "medical_director"), Scopes = Set("admin:read"),
             RequiredConditions = [AbacConditions.TenantMatch],
             Sensitive = true,
         },
