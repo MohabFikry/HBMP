@@ -1,4 +1,3 @@
-import { z } from "zod";
 import {
   zApprovalItem,
   zApprovalReview,
@@ -113,6 +112,29 @@ const drugCoded = (drugId: unknown) => {
 };
 /** prescriptionId → its line ids (in order), cached from the queue so dispense can target concrete lines. */
 const rxLineIds = new Map<string, string[]>();
+/** Map an authorization status → a resolved bilingual StatusKind for the approvals worklist. */
+const authStatus = (s: unknown) => {
+  const k = String(s ?? "Submitted");
+  const map: Record<string, { kind: "ok" | "info" | "part" | "warn" | "bad" | "neu"; label: { en: string; ar: string } }> = {
+    Submitted: { kind: "info", label: { en: "Submitted", ar: "مُقدَّم" } },
+    UnderReview: { kind: "part", label: { en: "Under review", ar: "قيد المراجعة" } },
+    Approved: { kind: "ok", label: { en: "Approved", ar: "معتمد" } },
+    PartiallyApproved: { kind: "part", label: { en: "Partially approved", ar: "معتمد جزئياً" } },
+    Rejected: { kind: "bad", label: { en: "Rejected", ar: "مرفوض" } },
+    InfoRequested: { kind: "warn", label: { en: "Info requested", ar: "طُلبت معلومات" } },
+    EmergencyApproved: { kind: "ok", label: { en: "Emergency approved", ar: "اعتماد طارئ" } },
+    Overridden: { kind: "warn", label: { en: "Overridden", ar: "تجاوز" } },
+    Expired: { kind: "neu", label: { en: "Expired", ar: "منتهٍ" } },
+  };
+  return map[k] ?? map.Submitted;
+};
+/** Decision kind → the approvals-service endpoint segment (decisions are per-type, not a single /decision). */
+const decisionPath: Record<string, string> = {
+  approve: "approve",
+  reject: "reject",
+  partial: "partially-approve",
+  request_info: "request-info",
+};
 
 /**
  * Last reception search cards, keyed by beneficiaryId. The reception service returns ONE min-necessary card that
@@ -331,19 +353,66 @@ export class HttpApiClient implements ApiClient {
     });
   }
 
-  approvalWorklist() {
-    return getJson(`/authorizations/worklist`, z.array(zApprovalItem));
+  // Approvals (Phase 7, US-060) — the worklist is GET /authorizations/ (min-necessary: codes + SLA, NO clinical
+  // payload — that is /review only, audited as a PHI read). Decisions are per-type endpoints, not one /decision;
+  // a decision needs the request UnderReview, so decide assigns first (idempotent-ish) then routes by kind.
+  async approvalWorklist() {
+    const r = (await getRaw(`/authorizations/`)) as any[];
+    const now = Date.now();
+    return (r ?? []).map((a: any) => {
+      const dueMs = a.slaDueAt ? Date.parse(a.slaDueAt) : now;
+      const submittedAt = new Date(now - Number(a.tatElapsedSeconds ?? 0) * 1000).toISOString();
+      const code = (a.serviceCodes ?? [])[0] ?? "—";
+      return parseOr(zApprovalItem, {
+        id: a.authorizationId,
+        patient: { id: a.beneficiaryId, token: caseToken({ beneficiaryId: a.beneficiaryId }) },
+        service: { system: "CPT", code, label: loc(code) },
+        requestedBy: loc("Provider"),
+        priority: String(a.priority ?? "routine").toLowerCase(),
+        sla: {
+          dueAt: a.slaDueAt ?? submittedAt,
+          breached: !!a.slaBreached,
+          minutesRemaining: Math.round((dueMs - now) / 60000),
+        },
+        status: authStatus(a.status),
+        submittedAt,
+        estimatedCost: "—",
+      });
+    });
   }
-  approvalReview(approvalId: string) {
-    return getJson(`/authorizations/${encodeURIComponent(approvalId)}/review`, zApprovalReview);
+  async approvalReview(approvalId: string) {
+    const a = (await getRaw(`/authorizations/${encodeURIComponent(approvalId)}/review`)) as any;
+    const codes: string[] = a?.serviceCodes ?? [];
+    return parseOr(zApprovalReview, {
+      id: a?.authorizationId ?? approvalId,
+      patient: { id: a?.beneficiaryId ?? "", token: caseToken({ beneficiaryId: a?.beneficiaryId }) },
+      service: { system: "CPT", code: codes[0] ?? "—", label: loc(codes[0] ?? "") },
+      clinicalJustification: a?.emrSummary ?? "clinical context unavailable",
+      supportingCodes: codes.slice(1).map((c) => ({ system: "CPT" as const, code: c, label: loc(c) })),
+      documents: (a?.documents ?? []).map((d: any) => ({ id: d.id ?? d.documentId ?? "", name: d.name ?? d.title ?? "document" })),
+      requestedAmount: "—",
+    });
   }
-  decide(req: DecisionRequest) {
-    return postJson(
-      `/authorizations/${encodeURIComponent(req.approvalId)}/decision`,
-      req,
-      zDecisionResult,
-      req.idempotencyKey,
-    );
+  async decide(req: DecisionRequest) {
+    const seg = decisionPath[req.decision] ?? "approve";
+    const base = `/authorizations/${encodeURIComponent(req.approvalId)}`;
+    // Move Submitted → UnderReview so the decision is legal; ignore if already assigned/underway.
+    try {
+      await postRaw(`${base}/assign`, {}, `${req.idempotencyKey}:assign`);
+    } catch {
+      /* already assigned or not assignable — proceed to the decision, which will report any real conflict */
+    }
+    const body =
+      req.decision === "partial"
+        ? { approvedScope: req.approvedAmount ? [req.approvedAmount] : [], rationale: req.rationale }
+        : { rationale: req.rationale };
+    const r = (await postRaw(`${base}/${seg}`, body, req.idempotencyKey)) as any;
+    return parseOr(zDecisionResult, {
+      approvalId: r?.authorizationId ?? req.approvalId,
+      decisionId: r?.decisionId ?? r?.id ?? req.idempotencyKey,
+      status: authStatus(r?.status),
+      replayed: !!r?.replayed,
+    });
   }
 
   executiveDashboard(scope: "executive" | "finance" | "director") {
