@@ -1,0 +1,108 @@
+/* App-level layout for the portal shell. Design tokens/components come from @mersal/design-system. */
+
+.app-grid {
+  display: grid;
+  grid-template-columns: 250px 1fr;
+  grid-template-rows: 60px 1fr;
+  min-height: 100vh;
+}
+.app-bar {
+  grid-column: 1 / 3;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: var(--sp4);
+  padding: 0 var(--sp5);
+  border-radius: 0;
+  border-inline: 0;
+  border-top: 0;
+}
+.app-search {
+  flex: 1;
+  max-width: 420px;
+  margin-inline: auto;
+}
+.app-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+}
+.app-user {
+  font-weight: 600;
+  font-size: var(--fs-subhead);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+nav.mrs-rail {
+  grid-row: 2;
+  position: sticky;
+  top: 60px;
+  align-self: start;
+  height: calc(100vh - 60px);
+}
+.app-main {
+  grid-row: 2;
+  min-width: 0;
+  padding: var(--sp6);
+}
+.app-crumb {
+  color: var(--text-2);
+  font-size: var(--fs-subhead);
+  margin-bottom: var(--sp4);
+}
+.app-crumb [aria-current="page"] {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+/* Page header (v1.1 brand-tick eyebrow). */
+.pagehead {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp4);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp5);
+}
+.pagehead h1 {
+  font-size: var(--fs-title-1);
+  font-weight: 600;
+}
+.role-eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.role-eyebrow::before {
+  content: "";
+  width: 16px;
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--brand), var(--gold));
+}
+
+/* Login screen. */
+.login-wrap {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--sp6);
+}
+
+@media (max-width: 760px) {
+  .app-grid {
+    grid-template-columns: 1fr;
+  }
+  nav.mrs-rail {
+    display: none;
+  }
+  .app-bar {
+    grid-column: 1;
+  }
+}

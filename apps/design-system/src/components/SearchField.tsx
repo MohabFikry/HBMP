@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes } from "react";
+import { forwardRef, type InputHTMLAttributes } from "react";
 import { Icon } from "./Icon";
 import { cx } from "../lib/cx";
 
@@ -8,12 +8,18 @@ export interface SearchFieldProps extends Omit<InputHTMLAttributes<HTMLInputElem
   className?: string;
 }
 
-/** Search input with a leading icon; RTL-aware padding. Pass aria-label since the label is visual-only. */
-export function SearchField({ className, ...rest }: SearchFieldProps) {
+/**
+ * Search input with a leading icon; RTL-aware padding. Pass aria-label since the label is visual-only.
+ * Forwards its ref to the underlying input so callers can focus it (e.g. the "/" keyboard shortcut).
+ */
+export const SearchField = forwardRef<HTMLInputElement, SearchFieldProps>(function SearchField(
+  { className, ...rest },
+  ref,
+) {
   return (
     <div className={cx("mrs-search", className)} role="search">
       <Icon name="search" className="mrs-search-icon" />
-      <input type="search" {...rest} />
+      <input type="search" ref={ref} {...rest} />
     </div>
   );
-}
+});
