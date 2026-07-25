@@ -25,7 +25,9 @@ import type {
   LabOrder,
   MarkReadResult,
   Notification,
+  OrderRow,
   PatientListItem,
+  RxRow,
   RoleBinding,
   SodConflict,
   TenantSummary,
@@ -61,6 +63,10 @@ export interface ApiClient {
   getEncounter(patientId: string): Promise<Encounter>;
   placeOrder(req: PlaceOrderRequest): Promise<PlaceOrderResult>;
   prescribe(req: PrescribeRequest): Promise<PrescribeResult>;
+  /** The clinician's own orders (US-032). Pass status="Completed" for the results inbox. */
+  ordersMine(status?: string): Promise<OrderRow[]>;
+  /** The clinician's own e-prescriptions (US-033). */
+  prescriptionsMine(status?: string): Promise<RxRow[]>;
 
   // Lab / imaging — queue + consume (Phase 5)
   labQueue(kind: "lab" | "imaging"): Promise<LabOrder[]>;

@@ -14,6 +14,11 @@ const ReceptionVisits = lazy(() => import("./ReceptionDesk").then((m) => ({ defa
 const ReceptionAppointments = lazy(() => import("./ReceptionDesk").then((m) => ({ default: m.ReceptionAppointments })));
 const ReceptionCheckIn = lazy(() => import("./ReceptionDesk").then((m) => ({ default: m.ReceptionCheckIn })));
 const DoctorEncounter = lazy(() => import("./DoctorEncounter").then((m) => ({ default: m.DoctorEncounter })));
+// Clinician worklists (Phase 4) — my patients / orders / prescriptions / results inbox share one chunk.
+const DoctorPatients = lazy(() => import("./ClinicianWorklists").then((m) => ({ default: m.DoctorPatients })));
+const DoctorOrders = lazy(() => import("./ClinicianWorklists").then((m) => ({ default: m.DoctorOrders })));
+const DoctorPrescriptions = lazy(() => import("./ClinicianWorklists").then((m) => ({ default: m.DoctorPrescriptions })));
+const DoctorResults = lazy(() => import("./ClinicianWorklists").then((m) => ({ default: m.DoctorResults })));
 const LabQueue = lazy(() => import("./LabQueue").then((m) => ({ default: m.LabQueue })));
 const PharmacyDispense = lazy(() => import("./PharmacyDispense").then((m) => ({ default: m.PharmacyDispense })));
 const ApprovalsWorklist = lazy(() => import("./ApprovalsWorklist").then((m) => ({ default: m.ApprovalsWorklist })));
@@ -42,8 +47,12 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/reception/queue": () => <ReceptionVisits />,
   "/reception/appointments": () => <ReceptionAppointments />,
   "/reception/check-in": () => <ReceptionCheckIn />,
-  // 2. Doctor — consultation / EMR.
+  // 2. Doctor — consultation / EMR + cross-encounter worklists.
   "/clinician/encounter": () => <DoctorEncounter />,
+  "/clinician/patients": () => <DoctorPatients />,
+  "/clinician/orders": () => <DoctorOrders />,
+  "/clinician/prescriptions": () => <DoctorPrescriptions />,
+  "/clinician/results": () => <DoctorResults />,
   // 3. Lab / imaging — queue + consume.
   "/lab/queue": () => <LabQueue kind="lab" />,
   "/imaging/queue": () => <LabQueue kind="imaging" />,

@@ -113,6 +113,19 @@ public static class PrescriptionEndpoints
             return Results.Ok(PrescriptionResponse.From(rx));
         });
 
+        // My prescriptions (prescriber's worklist, US-033) — the e-prescriptions I authored, newest first,
+        // scoped by CreatedBy == subject. No treating-gate needed (you always relate to what you prescribed).
+        v1.MapGet("/mine", async (string? status, PharmacyDbContext db, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        {
+            var sub = me.Principal?.Subject;
+            if (string.IsNullOrWhiteSpace(sub)) return Results.Ok(Array.Empty<PrescriptionResponse>());
+            var q = db.Prescriptions.AsNoTracking().Include(p => p.Lines).Where(p => p.CreatedBy == sub);
+            if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<RxStatus>(status, ignoreCase: true, out var st))
+                q = q.Where(p => p.Status == st);
+            var rows = await q.OrderByDescending(p => p.SubmittedAt).Take(100).ToListAsync(ct);
+            return Results.Ok(rows.Select(p => PrescriptionResponse.From(p)));
+        }).RequireAuthorization(HbmpPolicies.Scope("pharmacy:read"));
+
         v1.MapPost("/{id:guid}/cancel", async (
             Guid id, CancelRequest req, HttpRequest http, PharmacyDbContext db, PharmacyGate gate,
             IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, CancellationToken ct) =>

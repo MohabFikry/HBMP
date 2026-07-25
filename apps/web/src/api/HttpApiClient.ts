@@ -20,6 +20,8 @@ import {
   zLabOrder,
   zMarkReadResult,
   zNotification,
+  zOrderRow,
+  zRxRow,
   zPatientListItem,
   zPlaceOrderResult,
   zPrescribeResult,
@@ -384,6 +386,38 @@ export class HttpApiClient implements ApiClient {
       prescriptionId: r?.prescriptionId ?? r?.PrescriptionId ?? "",
       status: rxStatus(r?.status),
     });
+  }
+
+  // Clinician worklists (Phase 4, US-032/033) — "my orders" / "my prescriptions" are scoped server-side by
+  // CreatedBy == subject, so no beneficiary is leaked cross-clinician. We flatten each to a min-necessary row
+  // (masked beneficiary token + first-line code + status). The results inbox is just ordersMine("Completed").
+  async ordersMine(status?: string) {
+    const r = (await getRaw(`/investigation-orders/mine${status ? `?status=${encodeURIComponent(status)}` : ""}`)) as any[];
+    return (r ?? []).map((o: any) => {
+      const lines: any[] = o.lines ?? [];
+      return parseOr(zOrderRow, {
+        id: o.orderId,
+        orderNo: o.orderNo ?? "",
+        beneficiary: { id: o.beneficiaryId, token: caseToken({ beneficiaryId: o.beneficiaryId }) },
+        orderType: String(o.orderType ?? ""),
+        primaryCode: lines[0]?.code ?? "—",
+        lineCount: lines.length,
+        status: orderStatus(o.status),
+        requestedAt: o.requestedAt ?? new Date().toISOString(),
+      });
+    });
+  }
+  async prescriptionsMine(status?: string) {
+    const r = (await getRaw(`/prescriptions/mine${status ? `?status=${encodeURIComponent(status)}` : ""}`)) as any[];
+    return (r ?? []).map((p: any) =>
+      parseOr(zRxRow, {
+        id: p.prescriptionId,
+        beneficiary: { id: p.beneficiaryId, token: caseToken({ beneficiaryId: p.beneficiaryId }) },
+        lineCount: (p.lines ?? []).length,
+        status: rxStatus(p.status),
+        submittedAt: p.submittedAt ?? undefined,
+      }),
+    );
   }
 
   // Lab / Imaging (Phase 5, US-040) — the orders service exposes ONE capability-filtered provider queue at

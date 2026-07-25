@@ -110,6 +110,21 @@ public static class OrdersEndpoints
             return Results.Ok(OrderResponse.From(order));
         });
 
+        // ---- My orders (ordering clinician's worklist, US-032) ----
+        // The orders I created, newest first, optionally filtered by status (e.g. Completed = the results inbox).
+        // Scoped to the caller by CreatedBy == subject — no cross-clinician leakage, no treating-gate needed
+        // (you always have a relationship with an order you authored).
+        v1.MapGet("/mine", async (string? status, OrdersDbContext db, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        {
+            var sub = me.Principal?.Subject;
+            if (string.IsNullOrWhiteSpace(sub)) return Results.Ok(Array.Empty<OrderResponse>());
+            var q = db.Orders.AsNoTracking().Include(o => o.Lines).Where(o => o.CreatedBy == sub);
+            if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<OrderStatus>(status, ignoreCase: true, out var st))
+                q = q.Where(o => o.Status == st);
+            var rows = await q.OrderByDescending(o => o.RequestedAt).Take(100).ToListAsync(ct);
+            return Results.Ok(rows.Select(OrderResponse.From));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"));
+
         // ---- Cancel (not yet fully consumed) ----
         v1.MapPost("/{id:guid}/cancel", async (
             Guid id, CancelOrderRequest req, HttpRequest http, OrdersDbContext db, OrdersGate gate,

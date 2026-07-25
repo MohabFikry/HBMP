@@ -27,6 +27,8 @@ import {
   zAppointmentRow,
   zBreakGlassGrant,
   zCheckInResult,
+  zOrderRow,
+  zRxRow,
   zExportResult,
   zFinancialSummary,
   zSettlement,
@@ -201,6 +203,33 @@ export class DevApiClient implements ApiClient {
             ? [loc("Patient has a moderate penicillin allergy — review.", "لدى المريض حساسية متوسطة من البنسلين — راجع.")]
             : [],
       }),
+    );
+  }
+
+  ordersMine(status?: string) {
+    const rows = [
+      { id: "ord-1", no: "ORD-2026-000118", tok: "•••4821", type: "Lab", code: "80053", n: 1, st: { kind: "info" as const, label: loc("Active", "نشط") }, key: "Active", at: "2026-07-22T08:10:00Z" },
+      { id: "ord-2", no: "ORD-2026-000119", tok: "•••7710", type: "Imaging", code: "71046", n: 1, st: { kind: "ok" as const, label: loc("Completed", "مكتمل") }, key: "Completed", at: "2026-07-21T14:00:00Z" },
+      { id: "ord-3", no: "ORD-2026-000120", tok: "•••2093", type: "Lab", code: "85025", n: 2, st: { kind: "ok" as const, label: loc("Completed", "مكتمل") }, key: "Completed", at: "2026-07-20T09:30:00Z" },
+    ].filter((r) => !status || r.key === status);
+    return this.gate(
+      () =>
+        ok(z.array(zOrderRow), rows.map((r) => ({
+          id: r.id, orderNo: r.no, beneficiary: { id: r.id, token: r.tok },
+          orderType: r.type, primaryCode: r.code, lineCount: r.n, status: r.st, requestedAt: r.at,
+        }))),
+      [],
+    );
+  }
+  prescriptionsMine(status?: string) {
+    void status;
+    return this.gate(
+      () =>
+        ok(z.array(zRxRow), [
+          { id: "rx-1", beneficiary: { id: "rx-1", token: "•••4821" }, lineCount: 2, status: { kind: "ok", label: loc("Approved", "معتمدة") }, submittedAt: "2026-07-22T08:15:00Z" },
+          { id: "rx-2", beneficiary: { id: "rx-2", token: "•••2093" }, lineCount: 1, status: { kind: "part", label: loc("Partially dispensed", "صُرفت جزئياً") }, submittedAt: "2026-07-21T10:00:00Z" },
+        ]),
+      [],
     );
   }
 

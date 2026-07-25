@@ -21,3 +21,4 @@ export * from "./finance";
 export * from "./notification";
 export * from "./admin";
 export * from "./reception";
+export * from "./clinician";
