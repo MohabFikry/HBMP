@@ -30,6 +30,8 @@ import {
   zOrderRow,
   zRxRow,
   zVitalsResult,
+  zResultTask,
+  zResultUpload,
   type VitalInput,
   zExportResult,
   zFinancialSummary,
@@ -307,6 +309,25 @@ export class DevApiClient implements ApiClient {
         replayed,
       });
     });
+  }
+
+  awaitingResult(kind: "lab" | "imaging") {
+    const rows =
+      kind === "lab"
+        ? [{ orderId: "ORD-55012", lineId: "L-1", orderNo: "ORD-2026-000118", code: "80053", desc: "Comprehensive metabolic panel", tok: "•••4821" }]
+        : [{ orderId: "ORD-77003", lineId: "L-9", orderNo: "ORD-2026-000119", code: "71046", desc: "Chest X-ray", tok: "•••7710" }];
+    return this.gate(
+      () =>
+        ok(z.array(zResultTask), rows.map((r) => ({
+          orderId: r.orderId, lineId: r.lineId, orderNo: r.orderNo, orderType: kind === "lab" ? "Lab" : "Imaging",
+          beneficiary: { id: r.orderId, token: r.tok }, code: r.code, description: r.desc, consumedAt: NOW,
+        }))),
+      [],
+    );
+  }
+  uploadResult(orderId: string, lineId: string, resultValue: string) {
+    void resultValue;
+    return this.gate(() => ok(zResultUpload, { orderId, lineId, uploaded: true }));
   }
 
   // ---- Pharmacy ----------------------------------------------------------

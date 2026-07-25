@@ -3,7 +3,7 @@
 Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `HBMP-Design/claude-code-prompts/00-MASTER-PROMPT-LIST.md`). Status: ☐ not started · ◐ in progress · ☑ done.
 
 ## Dependency order
-`0 → 0b → 1 → 2 → 2b → 3 → 4 → 5,6 (parallel) → 14 (retrofit) → 7 → 8 → 10 → 10b`; `8b` + `9` run continuously from R0/R1; `11` gates go-live; `12` after 11; `13` after core. `10b` (claims) needs 5/6 fulfillment records, 2b contracts/tariffs, and 7 authorizations. **`14` (branch scoping & clinical sensitivity) is a cross-cutting retrofit of the built services and runs before `7` and `9`** — approvals must be built member-scoped and blind to sensitive results, and the frontend needs the branch switcher + restricted-result state.
+`0 → 0b → 1 → 2 → 2b → 3 → 4 → 5,6 (parallel) → 14 (retrofit) → 7 → 8 → 10 → 10b`; `8b` + `9` run continuously from R0/R1; `11` gates go-live; `12` after 11; `13` after core. `10b` (claims) needs 5/6 fulfillment records, 2b contracts/tariffs, and 7 authorizations. **`14` (branch scoping & clinical sensitivity) is a cross-cutting retrofit of the built services and runs before `7` and `9`** — approvals must be built member-scoped and blind to sensitive results, and the frontend needs the branch switcher + restricted-result state. **`15` (call centre portal) is additive** and needs `3` (appointment engine), `2` (eligibility search), `1` (contacts), `8` (notifications) and `9` (design system/portal catalog) — all complete — so it can run now; it pairs with `14` (the Call Centre role is MemberScoped / all branches, i.e. `BranchUnrestricted` once 14 lands).
 
 ## ⇒ New here? Read docs/HANDOFF.md first (full continuation guide).
 
@@ -49,6 +49,12 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 14 | Branch & Sensitivity | 14.6 Examination type + sensitivity classification | ☐ | |
 | 14 | Branch & Sensitivity | 14.7 Sensitive-result gating + release-request workflow | ☐ | |
 | 14 | Branch & Sensitivity | 14.8 Branch switcher + restricted-result UI | ☐ | |
+| 15 | Call Centre | 15.1 `callcentre-service` (interaction + caller verification) | ☐ | |
+| 15 | Call Centre | 15.2 Member search + min-necessary 360 | ☐ | |
+| 15 | Call Centre | 15.3 Book/reschedule/cancel from the call | ☐ | |
+| 15 | Call Centre | 15.4 Contact updates + referrals/follow-ups | ☐ | |
+| 15 | Call Centre | 15.5 Call Centre portal (frontend) | ☐ | |
+| 15 | Call Centre | 15.6 KPIs, notifications + E2E | ☐ | |
 | 7 | Approvals | 7.1 `approvals-service` + worklist + review | ☑ | 15ba511 |
 | 7 | Approvals | 7.2 Decisions + downstream effects | ☑ | a098550 |
 | 7 | Approvals | 7.3 Break-glass + SLA/TAT | ☑ | d13a4d5 |

@@ -52,7 +52,8 @@ Each role is bound to a **scope** — the horizon of records it may ever touch, 
 | Doctors | **BranchScoped** *(operational lists only — clinical record access stays `TR`-gated and cross-branch)* |
 | Branch/Clinic Manager (§3.20) | **BranchScoped** *(one or more assigned branches)* |
 | Beneficiary Management | MemberScoped |
-| Call Center | MemberScoped |
+| Call Center | MemberScoped *(all branches — central hotline)* |
+| Call Centre Supervisor (§3.21) | MemberScoped *(all branches — same data exclusions as the agent)* |
 | Medical Approval | MemberScoped |
 | Medical Director | MemberScoped |
 | Case Managers | MemberScoped |
@@ -103,13 +104,15 @@ Each role below follows the same template: **Purpose · Portal · Typical users 
 
 ### 3.3 Call Center
 - **Purpose:** Remote beneficiary support — inbound/outbound calls, appointment help, benefit questions, complaint intake, triage routing.
-- **Portal:** Call Center portal (with CTI/soft-phone).
+- **Portal:** Call Center portal (with CTI/soft-phone) — the call-shaped agent workspace (open call → search → verify → 360 → act → wrap up).
 - **Typical users:** Mersal call-center agents and team leads.
-- **Scope:** `tenant:own` for identity + eligibility + appointment + case-ticket data.
-- **Scope mode:** **MemberScoped** — a caller may belong to any branch; the agent books across all branches. Where an agent is dedicated to a single site, the Appointment-Coordinator duty set applies and is BranchScoped.
-- **Key capabilities:** Verify caller identity (knowledge-based + registration ref); view/update contact details; book/modify appointments; open and track support tickets/cases; view benefit coverage summary (what's covered, remaining limits); escalate to Case Managers.
-- **Highest tier:** **T2** (coverage, financial limits summary). **No clinical detail** beyond appointment specialty.
-- **Notes:** Every caller verification and every PII read is audited with a correlation ID tied to the call. Agents see coverage **balances**, not **diagnoses**.
+- **Scope:** `tenant:own` for identity + eligibility + appointment + case-ticket data, plus the `call_interaction` / `caller_verification` records of their **own** calls.
+- **Scope mode:** **MemberScoped (all branches — central hotline)** — the call centre is a *central hotline*, not a site desk: a caller may belong to any branch, and the agent searches, views and books **across all six branches**. **Branch and specialty are selectors on the booking form, never restrictions**; the policy bundle declares `RowScope.BranchUnrestricted` and the portal shows an **"All branches" indicator** instead of a branch switcher ([37 §3](37-branch-scoping-and-clinical-sensitivity.md)). Where an agent is dedicated to a single site, the Appointment-Coordinator duty set applies instead and is BranchScoped.
+- **Key capabilities:** Open and close a **call interaction** (reason code, outcome, notes) correlated by `call_ref`; **verify caller identity before any disclosure** (see the hard rule below); search a member by **phone — the primary call-centre entry point** — or member no./national ID/passport/refugee ID/UNHCR no.; view the minimum-necessary **member 360** — eligibility verdict + coverage summary with **remaining limits**, contact details, **appointments across all branches** (type, time, branch, doctor name + specialty), open referrals and follow-ups due; **book / reschedule / cancel** appointments into any branch through the existing appointment engine, with a **mandatory cancel reason code**; update/correct contact details and preferred channel; open and track support tickets/cases; escalate to Case Managers.
+- **Highest tier:** **T2** (coverage, financial limits summary). **No clinical detail** beyond appointment type, branch, doctor name and specialty.
+- **Notes:** Every caller verification and every PII read is audited with a correlation ID tied to the call (`call_ref`). Agents see coverage **balances**, not **diagnoses**.
+  **HARD RULE — verify before you disclose.** No member detail is shown until the agent records a **passed caller verification confirming at least TWO identifier types** (e.g. member no. + date of birth) for **this interaction and this beneficiary**. Pre-verification an agent sees only *match / no match*, the display name, and **which identifier types to challenge on** — never appointments, contacts, coverage or history. **Failed** verifications are persisted and audited, never silently discarded; a verification is **single-interaction, single-beneficiary, and expires when the call closes**. **Only identifier *types* are ever stored** in the call-centre records — never the values the caller recited (those stay in patient-service) — and the UI never displays a stored identifier value for the agent to read out: the caller states it, the agent confirms it.
+  **HARD RULE — the Call Center sees no clinical data whatsoever.** No diagnoses, no EMR/clinical notes, no lab or imaging results, no prescriptions, no examination detail — the whole clinical field set is stripped server-side, exactly as for Reception ([Permission Matrix §3.2/§4](11-permission-matrix.md)). The only clinically-adjacent facts an agent may see are **that an appointment exists** and its **type, time, branch, doctor name and specialty**.
 
 ### 3.4 Doctors
 - **Purpose:** Deliver clinical care — consult, diagnose, document encounters, order investigations, prescribe, and refer.
@@ -285,6 +288,16 @@ The hand-off is one-directional in each phase: the clinical opinion returns as a
 - **Highest tier:** **T1–T2** (identity + appointment + operational metrics). **No EMR, no diagnoses, no result values.**
 - **Notes:** **HARD RULE — a Branch Manager is an operations role, not a clinical one:** the clinical field set is stripped exactly as for Reception, and a **sensitive** result is never visible beyond existence metadata. **A Branch Manager cannot grant themselves (or anyone) a branch assignment** — `user_branch_assignment` changes are made by **Org Admin** (staff) / **Network Team** (practitioner records), on request, and are audited (§7). Branch-level reporting is available across branches only in aggregate, via a MemberScoped reporting grant.
 
+### 3.21 Call Centre Supervisor *(new — Phase 15)*
+- **Purpose:** Supervise the contact-centre team — oversee call activity and quality, coach agents, review verification failures and complaint outcomes, and own the call-centre KPIs. The senior variant of [Call Center](#33-call-center), **not** a wider data role.
+- **Portal:** Call Center portal (supervisor view: team call history, KPI board, escalations) — the agent workspace plus team-level lists.
+- **Typical users:** Call-centre team leads, shift supervisors, quality/coaching staff.
+- **Scope:** `tenant:own` over the **team's** `call_interaction` + `caller_verification` records (an agent sees only their own); identical member surfaces to an agent when personally handling a call.
+- **Scope mode:** **MemberScoped (all branches — central hotline)** — identical to the agent; branch is a reporting dimension only.
+- **Key capabilities:** Everything a Call Center agent can do, plus: read the **whole team's** call history and interaction detail (reason code, outcome, notes, linked appointment changes); monitor call-centre KPIs — calls handled per agent/day, average handle time, first-contact resolution, reason-code mix, appointments booked/rescheduled/cancelled via the call centre, **verification-failure rate**, abandoned rate; review verification failures and complaint escalations; reassign or escalate follow-ups.
+- **Highest tier:** **T2** (coverage/limits summary + operational metrics). **Same clinical exclusions as the agent — seniority grants no clinical read.**
+- **Notes:** **HARD RULE — supervision widens *whose* calls are visible, never *what fields* are visible.** A supervisor sees more interactions, not more data: **no diagnoses, EMR notes, results, prescriptions or examination detail**, and **no identifier values** (call records store only which identifier *types* were confirmed). KPI and coaching views are **aggregate and PHI-free**. **Verify-before-disclose still binds the supervisor** whenever they handle a call themselves — reviewing a colleague's call log is never a substitute for verifying the caller in front of them.
+
 ---
 
 ## 4. Role hierarchy & inheritance
@@ -303,7 +316,7 @@ graph TD
     end
     subgraph Front-office
         REC[Reception]
-        CC[Call Center]
+        CC[Call Center] --> CCS[Call Centre Supervisor]
         BM[Beneficiary Management]
         BRM[Branch/Clinic Manager]
     end
@@ -333,6 +346,7 @@ graph TD
 | Medical Approval → Medical Director | Case clinical read | Director-only override/appeal powers add on top |
 | Org Admin → Super Admin | Tenant admin surface | Cross-tenant + break-glass require explicit elevation |
 | Claims Officer → Claims Reviewer (Senior) | Claims/batch read + line-decision surface | **No clinical read is added**; Reviewer-only dual-control approval of overrides/high-value adjustments adds on top |
+| Call Center → Call Centre Supervisor | Visibility of the **team's** call interactions + call-centre KPIs | **No clinical read is added** and no identifier values; the member field set is identical to the agent's, and verify-before-disclose still applies |
 
 The dashed edge `Claims Officer ⇢ Medical Approval` is **not** inheritance — it is a **hand-off** (§3.19). Routing a line to clinical review transfers the *question*, never the Claims Officer's field visibility.
 
@@ -346,7 +360,8 @@ Legend: **F** = Full (CRUD within scope) · **W** = Write/contribute · **R** = 
 |---|---|---|---|---|---|---|---|---|---|---|
 | Beneficiary Mgmt | F | W | – | – | – | R° | – | R° | R°(self dir.) | – |
 | Reception | R° | R°(verdict) | – | R°(appt) | – | R°(own site) | – | – | – | – |
-| Call Center | R/W(contact) | R°(coverage) | – | R/W(appt) | R°(status) | R° | R°(balance) | – | – | – |
+| Call Center | R/W(contact) | R°(coverage) | **–** | R/W(appt) | R°(status) | R° | R°(balance) | – | – | – |
+| Call Centre Supervisor | R/W(contact) | R°(coverage) | **–** | R/W(appt) | R°(status) | R° | R°(balance) | R°(call-centre KPIs) | – | – |
 | Doctors | R(treating) | R°(elig) | F(treating) | F(own) | W(raise) | R° | – | R°(own) | – | – |
 | Nurses | R(assigned) | R° | W(assigned) | R(care) | – | R° | – | – | – | – |
 | Labs | R°(order) | – | R°(indication) | C(lab) | – | R°(own) | – | R°(own) | – | – |
@@ -365,7 +380,7 @@ Legend: **F** = Full (CRUD within scope) · **W** = Write/contribute · **R** = 
 | Super Admin | R°(BG) | R°(BG) | R°(BG) | R°(BG) | R°(BG) | R°(BG) | R°(BG) | R | F(global) | R°(access) |
 | *Audit service* | – | – | – | – | – | – | – | – | – | append-only |
 
-`BG` = break-glass only (time-boxed, dual-control, loudly audited). Note the **hard rules** visible in this table: Reception `emr = –`; Doctors `emr` is treating-scoped; Labs/Imaging `emr = R°(indication)` and no prescription/consume-rx; Pharmacies no lab/imaging results; Finance `emr = –` and no diagnosis; Approval `emr = R(clinical)`; **Claims Officer / Claims Reviewer `emr = –`** — no diagnosis, no notes, no result *values* (result existence + date + document reference only, as proof-of-service); **Branch/Clinic Manager `emr = –`**.
+`BG` = break-glass only (time-boxed, dual-control, loudly audited). Note the **hard rules** visible in this table: Reception `emr = –`; Doctors `emr` is treating-scoped; Labs/Imaging `emr = R°(indication)` and no prescription/consume-rx; Pharmacies no lab/imaging results; Finance `emr = –` and no diagnosis; Approval `emr = R(clinical)`; **Claims Officer / Claims Reviewer `emr = –`** — no diagnosis, no notes, no result *values* (result existence + date + document reference only, as proof-of-service); **Branch/Clinic Manager `emr = –`**; **Call Center / Call Centre Supervisor `emr = –`** — and every non-`emr` cell in those two rows is additionally gated on a **passed caller verification** bound to the current call.
 
 **Scope mode applies on top of every cell.** Each row is *additionally* narrowed by the role's scope mode (§2): a **BranchScoped** row (Reception, Appointment Coordinator, Nurses, Doctors' operational lists, Branch/Clinic Manager) returns only the **active branch**; a **MemberScoped** row spans all branches; a **ProviderScoped** row is unchanged. Scope mode never *widens* a cell — it can only narrow it. Independently, **any result whose `sensitivity_level` ≠ `Standard` collapses to existence-only for every role except the authoring/ordering doctor**, regardless of what this table grants ([37](37-branch-scoping-and-clinical-sensitivity.md)).
 
@@ -384,6 +399,9 @@ Legend: **F** = Full (CRUD within scope) · **W** = Write/contribute · **R** = 
 | Result *existence* is proof-of-service, not clinical content | Claims Officer, Claims Reviewer | §3.17 | Projection exposes `exists`/`resulted_at`/`document_ref` only; `value` stripped |
 | Medical-necessity questions leave the claims role entirely | Claims Officer → Medical Approval/Director | §3.19 | Route-to-clinical-review; opinion returns, visibility does not |
 | Approval CAN view EMR/notes/reports | Medical Approval, Medical Director | §3.9/§3.10 | ABAC purpose = utilization-review |
+| **Nothing is disclosed to a caller before identity is verified** | Call Center, Call Centre Supervisor | §3.3 verify-before-disclose hard rule; §3.21 | Server-side verification gate: ≥2 identifier types, bound to interaction + beneficiary; otherwise **403 + audited** |
+| **Call Centre cannot view any clinical data** | Call Center, Call Centre Supervisor | §3.3/§3.21; `emr = –` in §5 | Field-level deny + server-side projection ([Perm Matrix §3.2/§4](11-permission-matrix.md)) |
+| **Only identifier *types* are stored, never identifier values** | Call Center, Call Centre Supervisor | §3.3 | `caller_verification.verified_identifiers` holds types only; values stay in patient-service and are never echoed to the agent |
 | **Branch-scoped roles reach only the active branch** | Reception, Appointment Coordinator, Nurses, Doctors (operational lists), Branch/Clinic Manager | §2 scope-mode table; per-role **Scope mode** | ABAC `BSC` + `RowScope.BranchIds` (+ optional RLS); cross-branch = **403**, not empty |
 | **Sensitive results are existence-only to everyone but the author** | *All* roles except the authoring/ordering doctor — **including Medical Approval and Case Managers** | §3.9 sensitivity carve-out; §3.10 | Server-side projection: category+date+status+branch+`RESTRICTED` only; content requires an active grant |
 | **Release of a sensitive report needs a justified, decided request** | Requester (any role) → authoring doctor **or** Medical Director | §3.4/§3.10 | Mandatory `purpose_code` + justification; time-boxed, single-result, non-transferable grant; every read-under-grant separately audited |

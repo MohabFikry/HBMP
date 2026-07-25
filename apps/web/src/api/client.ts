@@ -26,6 +26,8 @@ import type {
   MarkReadResult,
   Notification,
   OrderRow,
+  ResultTask,
+  ResultUpload,
   PatientListItem,
   RxRow,
   RoleBinding,
@@ -75,6 +77,10 @@ export interface ApiClient {
   // Lab / imaging — queue + consume (Phase 5)
   labQueue(kind: "lab" | "imaging"): Promise<LabOrder[]>;
   consume(req: ConsumeRequest): Promise<ConsumeResult>;
+  /** Consumed lines this provider still owes a result on (US-042). */
+  awaitingResult(kind: "lab" | "imaging"): Promise<ResultTask[]>;
+  /** Attach a result value to a consumed line (US-042). */
+  uploadResult(orderId: string, lineId: string, resultValue: string): Promise<ResultUpload>;
 
   // Pharmacy — dispense (Phase 6)
   pharmacyQueue(): Promise<Prescription[]>;

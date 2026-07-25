@@ -37,7 +37,7 @@
 | ❌ | Denied |
 | — | Not applicable to this role/resource |
 
-**ABAC condition codes** (defined fully in §5): `TR` treating-relationship · `PO` provider-ownership · `TEN` tenant-match · `ASG` assignment · `OST` order-status · `PUR` purpose-binding · `SOD` segregation-of-duties clear · `BG` break-glass active · `CNA` claims-originator-not-adjudicator · `NPA` not-provider-affiliated · `DCT` dual-control-above-threshold · `BOS` batch-open-single-membership · **`BSC` branch-scope** · **`SGA` sensitive-grant-active**.
+**ABAC condition codes** (defined fully in §5): `TR` treating-relationship · `PO` provider-ownership · `TEN` tenant-match · `ASG` assignment · `OST` order-status · `PUR` purpose-binding · `SOD` segregation-of-duties clear · `BG` break-glass active · `CNA` claims-originator-not-adjudicator · `NPA` not-provider-affiliated · `DCT` dual-control-above-threshold · `BOS` batch-open-single-membership · **`BSC` branch-scope** · **`SGA` sensitive-grant-active** · **`CVP` caller-verification-passed**.
 
 **Sensitivity fields tracked at field level:** `diagnosis`, `emr_note`, `prescription`, `lab_result`, `imaging_result`, `financials` (amounts/claims), `pii` (identity/registration), `refugee_ref` (UNHCR/registration ID), **`sensitive_result`** (the content of any result whose `sensitivity_level` ≠ `Standard`).
 
@@ -91,6 +91,8 @@ Resources map to microservices (see [0A](0A-DESIGN-FOUNDATIONS.md)). Object-leve
 | `examination_type` *(Phase 14)* | masterdata (reference) | none directly, but **carries `sensitivity_level` + `sensitive_category`**, which govern §3.5/§4 |
 | `report_access_request` *(Phase 14)* | orders | `purpose_code`, **`justification` (free text — may itself hint at clinical context)**, requester role, decision reason |
 | `report_access_grant` *(Phase 14)* | orders | `grantee_user_id`, `result_ref`, `expires_at`, `purpose_code` — **single-result, non-transferable** |
+| `call_interaction` *(Phase 15)* | callcentre | `call_ref`, `beneficiary_id` (`pii` link), agent, reason code, outcome, free-text `notes` — **contact-centre operational data, no clinical content** |
+| `caller_verification` *(Phase 15)* | callcentre | `verified_identifiers` — **which identifier *types* were confirmed, never the values** — plus result, `failure_reason`, verifier, timestamp |
 
 ---
 
@@ -104,7 +106,8 @@ Cells show allowed actions with their decision symbol. Absent actions are denied
 |---|---|---|---|---|
 | Beneficiary Mgmt | C✅ R✅ U✅ D🟠(SOD) | C✅ R✅ U✅ | R✅ U🟠(assign) | R✅ |
 | Reception | R🔒(pii min) 🟠TR/ASG | — | R🔒(verdict) | C✅ R🔒 |
-| Call Center | R🔒 U🟠(contact) | R🔒 | R🔒(coverage) | C✅ R🔒 |
+| Call Center | R🔒🟠CVP U🟠(contact, CVP) | R🔒🟠CVP | R🔒(coverage + remaining limits)🟠CVP | C✅ R🔒🟠CVP |
+| **Call Centre Supervisor** | R🔒🟠CVP U🟠(contact, CVP) | R🔒🟠CVP | R🔒(coverage + remaining limits)🟠CVP | C✅ R🔒🟠CVP |
 | Doctors | R🟠TR | R🟠TR | R🔒🟠TR | R🔒 |
 | Nurses | R🟠(TR/ASG) | — | R🔒 | R🔒 |
 | Labs | R🔒🟠(PO+OST) | — | — | — |
@@ -127,7 +130,8 @@ Cells show allowed actions with their decision symbol. Absent actions are denied
 |---|---|---|---|---|---|---|
 | Beneficiary Mgmt | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Reception** | **❌** | **❌** | **❌** | **❌** | **❌** | **❌** |
-| Call Center | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Call Center** | **❌** | **❌** | **❌** | **❌** | **❌** | **❌** |
+| **Call Centre Supervisor** | **❌** | **❌** | **❌** | **❌** | **❌** | **❌** |
 | **Doctors** | C🟠TR R🟠TR U🟠TR | C🟠TR R🟠TR U🟠TR | C🟠TR R🟠TR | C🟠TR R🟠TR | R🟠TR | R🟠TR |
 | Nurses | R🟠(TR/ASG) U🟠(nursing) | C🟠(nursing) R🟠 | R🟠(problem list) | R🔒(admin only) | R🟠(TR) | R🟠(TR) |
 | **Labs** | R🔒(indication)🟠(PO+OST) | ❌ | R🔒(indication only)🟠 | **❌** | C🟠(PO+OST) R🟠 U🟠 | ❌ |
@@ -144,7 +148,7 @@ Cells show allowed actions with their decision symbol. Absent actions are denied
 | Org Admin | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Super Admin | R🧨 | R🧨 | R🧨 | R🧨 | R🧨 | R🧨 |
 
-> **Hard-rule check (must always hold):** Reception row = all ❌. Doctors clinical = all 🟠TR. Labs `prescription` = ❌. Imaging `prescription` = ❌. Pharmacies `lab_result` = ❌ and `imaging_result` = ❌. Finance `diagnosis` = ❌ (and whole clinical row ❌). **Claims Officer / Claims Reviewer `diagnosis` = ❌, `emr_note` = ❌, `lab_result.value` = ❌, `imaging_result.value` = ❌** — only `*_result.existence` (exists + `resulted_at` + `document_ref`) is readable, as proof-of-service. Medical Approval clinical = R✅ under `PUR`. Any change breaking these must be rejected at review.
+> **Hard-rule check (must always hold):** Reception row = all ❌. **Call Center / Call Centre Supervisor rows = all ❌** (no clinical data whatsoever — see §3.6). Doctors clinical = all 🟠TR. Labs `prescription` = ❌. Imaging `prescription` = ❌. Pharmacies `lab_result` = ❌ and `imaging_result` = ❌. Finance `diagnosis` = ❌ (and whole clinical row ❌). **Claims Officer / Claims Reviewer `diagnosis` = ❌, `emr_note` = ❌, `lab_result.value` = ❌, `imaging_result.value` = ❌** — only `*_result.existence` (exists + `resulted_at` + `document_ref`) is readable, as proof-of-service. Medical Approval clinical = R✅ under `PUR`. Any change breaking these must be rejected at review.
 >
 > **Clinical-review hand-off:** a claim line needing medical-necessity judgement is routed to `ClinicalReview`, where **Medical Approval / Medical Director** read the clinical context under `PUR` and record an **opinion**. Routing never widens the Claims Officer's projection, and the clinical reviewer gains **no** `DC`/`AJ`/`B` rights on the claim ([10 §3.19](10-role-matrix.md)).
 
@@ -154,7 +158,8 @@ Cells show allowed actions with their decision symbol. Absent actions are denied
 |---|---|---|---|---|---|---|
 | Beneficiary Mgmt | ❌ | ❌ | R🔒 | ❌ | ❌ | ❌ |
 | Reception | R🔒(appt)🟠PO | ❌ | R🔒(own site)🟠PO | ❌ | ❌ | ❌ |
-| Call Center | R🔒(status) C🟠(appt) U🟠(appt) | R🔒(status) | R🔒 | R🔒(balance) | ❌ | ❌ |
+| Call Center | R🔒(status)🟠CVP C🟠(appt, CVP) U🟠(appt, CVP — cancel requires `reason_code`) | R🔒(status)🟠CVP | R🔒 | R🔒(balance)🟠CVP | ❌ | ❌ |
+| **Call Centre Supervisor** | R🔒(status)🟠CVP C🟠(appt, CVP) U🟠(appt, CVP) | R🔒(status)🟠CVP | R🔒 | R🔒(balance)🟠CVP | ❌ | ❌ |
 | Doctors | C🟠TR R🟠TR U🟠TR | C🟠TR R🟠TR | R🔒 | ❌ | ❌ | ❌ |
 | Nurses | R🟠(care) | ❌ | R🔒 | ❌ | ❌ | ❌ |
 | Labs | R🟠(PO+OST) X🟠 U🟠 | ❌ | R🔒(own)🟠PO | ❌ | ❌ | ❌ |
@@ -247,6 +252,33 @@ Actions here use the extended tokens from §1: **DC** Decide · **AJ** Adjust ·
 > 4. **Release requires a decided request.** A `report_access_grant` may exist **only** as the product of an `Approved` `report_access_request` carrying a **mandatory `purpose_code` + free-text `justification`**, decided by the **authoring/ordering doctor or a Medical Director** (`SOD`: requester ≠ decider). A Director decision is flagged `decided_by_role=MedicalDirector` and **extra-audited**.
 > 5. **Branch scoping never replaces an existing control.** `BSC` composes with `TR`/`PO`/`ASG`/`TEN` and with the §4 field rules — it narrows, it never grants.
 
+### 3.6 Call-centre resources (Phase 15 — see [10 §3.3/§3.21](10-role-matrix.md))
+
+The contact centre owns two resources in the `callcentre` schema: `call_interaction` (one row per call, keyed by `call_ref`) and `caller_verification` (one row per verification attempt — **pass *and* fail**). Everything an agent does to a member is gated on `CVP` (§5) and correlated to the interaction.
+
+| Role | call_interaction | caller_verification | member 360 (composed read) | appointment C/U **from a call** | contact U **from a call** |
+|---|---|---|---|---|---|
+| **Call Center** | C✅ R🟠(own calls) U🟠(own, while `Open`) | C✅ R🟠(own interaction) | R🔒🟠**CVP** *(pre-verification: match/no-match + name + challengeable identifier **types** only)* | C🟠**CVP** U🟠**CVP** *(cancel requires a `reason_code`)* | U🟠**CVP** |
+| **Call Centre Supervisor** | C✅ R✅(**team**) U🟠(own, while `Open`) | C✅ R✅(**team**) | R🔒🟠**CVP** | C🟠**CVP** U🟠**CVP** | U🟠**CVP** |
+| Case Managers | R🔒🟠ASG (calls of their own case load: reason, outcome, timestamps) | ❌ | — | — | — |
+| Reception / Appointment Coordinator | ❌ | ❌ | ❌ | — *(books at its own branch under `BSC`, not from a call)* | — |
+| Medical Approval / Medical Director | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Finance / Claims Officer / Claims Reviewer | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Doctors / Nurses / Labs / Imaging / Pharmacies / Provider Admin | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Network Team | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Org Admin | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Reporting / analytics | R🔒 **aggregate & de-identified only** (KPI read model — no `notes`, no `pii`) | R🔒 **aggregate only** (failure *rate*) | ❌ | ❌ | ❌ |
+| DPO / compliance reviewer | R🔒(register: `call_ref`, reason, outcome, actor — oversight of disclosure, not the conversation) | R🔒(register: result + which identifier **types**) | ❌ | ❌ | ❌ |
+| Super Admin | R🧨 | R🧨 | R🧨 | ❌ | ❌ |
+| *audit service* | — | — | — | — | — |
+
+> **Hard-rule check (must always hold) — call centre:**
+> 1. **(a) Verify before you disclose.** The member 360 and **every** appointment (book/reschedule/cancel) and contact action from a call require an **active `caller_verification` with `result='Passed'` and ≥2 confirmed identifier types, bound to *this* `interaction_id` **and** *this* `beneficiary_id`** (`CVP`). Absent or failed ⇒ **`403` + audited `CallerVerificationRequired`** — **never** a partially-populated `200`. A verification **expires when the interaction closes** and is never inherited by a later call. Failed attempts are **persisted and audited**, never silently discarded.
+> 2. **(b) The Call Centre sees no clinical data — absolutely.** `diagnosis`, `emr_note`, `lab_result`, `imaging_result`, `prescription` and **examination detail** = **❌** for Call Center and Call Centre Supervisor, with **no condition, purpose, grant or break-glass path** that lifts it. The only clinically-adjacent projection is that an **appointment exists**, with its type, time, **branch**, doctor **name** and **specialty**.
+> 3. **(c) Only identifier *types* may be persisted.** `caller_verification.verified_identifiers` stores **which identifier types** were confirmed (e.g. `["MemberNo","DateOfBirth"]`) — **never the values** the caller recited. Values remain in patient-service, are never copied into the `callcentre` schema, and are never rendered to the agent for read-out: the caller states the value, the agent confirms it.
+> 4. **MemberScoped / all branches.** The Call Centre is a central hotline: its bundle sets `RowScope.BranchUnrestricted`, so **no `BSC` predicate applies**. Branch and specialty are **selectors** on search/booking, never restrictions; a cross-branch read is normal, not a denial.
+> 5. **Reuse, don't fork.** Appointment writes delegate to the existing emr endpoints and inherit their guarantees (no double-booking, `Idempotency-Key`, `If-Match`); contact writes delegate to patient-service and inherit its one-primary rule and history. The call centre stores the **linkage** (`interaction_id` / `call_ref`), never a second copy of the record.
+
 ---
 
 ## 4. Field-level rules for sensitive fields
@@ -257,7 +289,8 @@ Even when a role may Read an object, individual fields are governed independentl
 |---|---|---|---|---|---|---|---|---|
 | Beneficiary Mgmt | denied | denied | denied | denied | denied | denied | visible | visible |
 | **Reception** | denied | denied | denied | denied | denied | denied | masked (min) | masked |
-| Call Center | denied | denied | denied | denied | denied | masked (balance) | visible(verify) | masked |
+| **Call Center** | **denied** | **denied** | **denied** | **denied** | **denied** | masked (balance + remaining limits)🟠CVP | visible(verify: name/contact — identifier **values** never displayed)🟠CVP | masked |
+| **Call Centre Supervisor** | **denied** | **denied** | **denied** | **denied** | **denied** | masked (balance + remaining limits)🟠CVP | visible🟠CVP | masked |
 | **Doctors** | visible🟠TR | visible🟠TR | visible🟠TR | visible🟠TR | visible🟠TR | denied | visible🟠TR | masked |
 | Nurses | visible(problem)🟠 | visible🟠 | masked(admin) | visible🟠 | visible🟠 | denied | visible🟠 | denied |
 | **Labs** | masked→indication🟠 | denied | **denied** | visible(own)🟠 | denied | denied | masked | denied |
@@ -294,6 +327,17 @@ Even when a role may Read an object, individual fields are governed independentl
 | Reporting / analytics | **denied** | aggregated/de-identified only | denied | visible (dimension) | denied |
 | Super Admin | 🧨 (loud break-glass) | 🧨 | 🔒 | visible | 🧨 |
 
+**Field-level rules — call-centre fields (Phase 15).** Same vocabulary (`visible` / `masked` / `derived` / `denied`); every `visible` cell for a call-centre role is *additionally* conditioned on `CVP`.
+
+| Role \ Field | `identifier_value` (the value recited by the caller) | `verified_identifier_types` | `call_interaction.notes` | appointment `branch` + `doctor` + `specialty` | clinical field set (`diagnosis`, `emr_note`, `lab_result`, `imaging_result`, `prescription`, examination detail) |
+|---|---|---|---|---|---|
+| **Call Center** | **denied — never persisted, never rendered** | visible (own interaction) | visible (own calls) | visible (branch name + doctor name + specialty only) | **denied** |
+| **Call Centre Supervisor** | **denied — never persisted, never rendered** | visible (team) | visible (team) | visible | **denied** |
+| Case Managers | denied | masked🟠ASG | masked🟠ASG (reason + outcome, not the body) | visible🟠ASG | *(per §4 above)* |
+| Reception / Appointment Coordinator / Branch Manager | denied | denied | denied | visible🟠BSC (own branch) | denied |
+| DPO / compliance reviewer | denied | visible (register) | masked (oversight of disclosure, not the conversation) | visible | denied |
+| Reporting / analytics | denied | aggregated only (failure rate) | **denied** | aggregated only | **denied** |
+
 **Key field-level encodings of the hard rules:**
 - `Finance.diagnosis = denied` — claims are adjudicated on **billing/service codes + amounts**, never the diagnosis narrative. A procedure code that could reveal condition is exposed only at the minimum granularity needed to price/adjudicate.
 - `Labs.prescription = denied`, `Imaging.prescription = denied` — the medication list is stripped from any order payload sent to labs/imaging.
@@ -307,6 +351,9 @@ Even when a role may Read an object, individual fields are governed independentl
 - `*.sensitive_result = denied → existence-only` for **every** role except the authoring/ordering doctor (and the beneficiary) — **HARD RULE.** The server projects `{ sensitive: true, sensitive_category, resulted_at, status, ordering_branch, marker: "RESTRICTED" }` and **strips** `value`, `unit`, `reference_range`, `abnormal_flag`, `interpretation`, `report_body`, narrative and any document content. `MedicalApproval.sensitive_result = denied` **overrides** `MedicalApproval.* = visible🟠PUR` above: purpose-binding does not defeat the sensitivity gate. Release is only via `SGA`, and `Finance/Claims.sensitive_result` stays `denied` even then.
 - `release.justification` is itself sensitive — it is written by a clinician and may carry clinical context. It is visible to the **requester** and the **decider** (and to the DPO for oversight), never to unrelated roles, and it is never echoed into notifications ([FR-NOT-003](07-functional-requirements.md)).
 - `active_branch / branch_id = visible🟠BSC` for BranchScoped roles — a user may see **which** branches they are permitted to work in and which is active, never the roster or the worklists of a branch they are not assigned to.
+- `CallCentre.diagnosis / emr_note / lab_result / imaging_result / prescription / examination_detail = denied` — **HARD RULE.** The call-centre projection is an **allow-list**: identity (member no., display name, age band, member status), eligibility verdict + coverage categories + **remaining limits**, contacts + preferred channel, appointments (id, type, status, `scheduled_start`, branch name, doctor name, specialty), open referrals (`REF-*`) and follow-ups due — and nothing else. A new clinical field is invisible to the call centre by default, and **no query manipulation may widen it**; the projection is applied server-side.
+- `CallCentre.* = 🟠CVP` — **HARD RULE.** Every one of those `visible`/`masked` cells is conditioned on a **passed caller verification bound to the current interaction and beneficiary** (§5 `CVP`). Before a pass, the only projection is `{ matchCount, beneficiaryId, displayName, challengeableIdentifierTypes[] }`; the 360, contacts, coverage and appointments are **absent from the payload**, not merely hidden in the UI.
+- `CallCentre.identifier_value = denied` — **HARD RULE.** The `callcentre` schema stores **only which identifier types** were confirmed (`caller_verification.verified_identifiers`), never the values; and the agent's screen never displays a stored identifier value to be read out to the caller.
 - `practitioner.license_no / license_expiry = visible` only to the Network Team (credentialing) and the practitioner themselves; other roles get a **derived validity flag**, never the number.
 
 **Field-level projection for claims (canonical allow-list).** The claims projection is an **allow-list**, not a deny-list — new clinical fields are invisible to claims by default:
@@ -343,6 +390,8 @@ Attributes are asserted by trusted sources: **token claims** (Keycloak), **resou
 | `BOS` | **Batch open, single membership** | `batch.status ∈ {Open, UnderReview}` **AND** the claim has no other batch membership where `batch_status ∈ {Open, UnderReview}`; removal from `UnderReview` requires `reason != ""` | claims service (unique partial index) | Claims Officer, Claims Reviewer |
 | **`BSC`** | **Branch scope** | `resource.branch_id ∈ subject.permitted_branch_ids` **AND** (`subject.scope_mode != "BranchScoped"` **OR** `resource.branch_id == subject.active_branch_id`). `permitted_branch_ids` = the user's `Home` ∪ `Additional` assignments filtered to `status='Active'` and `valid_from ≤ now < valid_to`; `active_branch_id` is taken from the `X-Active-Branch` header **only after** it is validated against that set (absent ⇒ Home; outside the set ⇒ `403` + audited `BranchScopeDenied`). Never trust the header. | identity (assignments, active-branch claim) + the owning service (resource `branch_id`) | **BranchScoped:** Reception, Appointment Coordinator, Nurses, Doctors *(operational lists)*, Branch/Clinic Manager. **MemberScoped** bundles set `BranchUnrestricted`; **ProviderScoped** roles use `PO` instead |
 | **`SGA`** | **Sensitive grant active** | `∃ report_access_grant g : g.grantee_user_id == subject.id AND g.result_ref == resource.result_ref AND g.revoked_at IS NULL AND now() < g.expires_at AND g.request.status == 'Approved'`. The grant is **single-result and non-transferable** — no role-, team- or case-level grant exists. Every hit **must** emit a `SensitiveResultReadUnderGrant` audit event carrying `grant_id`, `purpose_code` and actor. | orders service (`report_access_grant`) + audit | Any principal reading a result where `sensitivity_level != 'Standard'` **and** who is not the authoring/ordering doctor. **Never** satisfiable for Finance/Claims roles |
+
+| **`CVP`** | **Caller verification passed** | `∃ caller_verification v : v.interaction_id == request.aux.call.interaction_id AND v.beneficiary_id == resource.beneficiary_id AND v.result == 'Passed' AND count(v.verified_identifiers) >= policy.min_identifier_types` (**default 2**, configurable) **AND** `interaction.status == 'Open'`. The verification is **single-interaction and single-beneficiary**, **expires when the interaction closes**, and is **never inherited** from an earlier call. Absent/failed ⇒ **`403` + audited `CallerVerificationRequired`**; the failed attempt itself is persisted **and** audited. Only the identifier **types** are stored — never the values. | callcentre service (`caller_verification`, `call_interaction`) + audit | **Call Center, Call Centre Supervisor** — every member-360 read and every appointment (book/reschedule/cancel) or contact mutation performed from a call |
 
 **Environmental modifiers (Zero Trust):** every decision may additionally require `device.compliant = true`, `network.ip ∈ allowlist` (for admin/finance), `auth.mfa = true`, and `auth.acr ≥ step_up` for T3/T4 or Export. These are combined by the gateway/policy engine (see [Security Model §4](18-security-model.md)).
 
@@ -799,6 +848,93 @@ resourcePolicy:
       # MUST raise an additional, high-severity audit event (extra-audited).
 ```
 
+### 6.13 Rego — call centre: nothing is disclosed before the caller is verified (`CVP`), and no clinical field ever
+
+```rego
+package hbmp.callcentre
+
+default allow = false
+
+call_centre_roles := {"call_centre_agent", "call_centre_supervisor"}
+
+# CVP — a Passed verification for THIS interaction and THIS beneficiary, ≥ 2 identifier
+# types, while the interaction is still open. Never inherited from an earlier call.
+verified {
+    v := input.aux.verification
+    v.interaction_id == input.aux.call.interaction_id
+    v.beneficiary_id == input.resource.beneficiary_id
+    v.result == "Passed"
+    count(v.verified_identifier_types) >= input.policy.min_identifier_types   # default 2
+    input.aux.call.status == "Open"
+}
+
+# pre-verification: search only, and only enough to run the challenge
+allow {
+    input.action == "read"
+    input.resource.type == "call_centre_search_result"
+    input.subject.role in call_centre_roles
+    input.subject.tenant_id == input.resource.tenant_id                       # TEN
+}
+
+# member 360 + every appointment/contact action from a call
+allow {
+    input.action in {"read", "create", "update"}
+    input.resource.type in {"member_360", "appointment", "contact", "call_interaction"}
+    input.subject.role in call_centre_roles
+    input.subject.tenant_id == input.resource.tenant_id                       # TEN
+    verified                                                                 # CVP
+    input.env.mfa == true
+}
+
+# cancelling from a call always carries a coded reason
+deny[reason] {
+    input.action == "update"
+    input.resource.type == "appointment"
+    input.request.body.operation == "cancel"
+    input.request.body.reason_code == ""
+    reason := "CancelReasonRequired"                                          # 422
+}
+
+# an unverified (or failed, or expired) interaction is an explicit DENY + audit,
+# never a thinned-out 200
+deny[reason] {
+    input.resource.type in {"member_360", "appointment", "contact"}
+    input.subject.role in call_centre_roles
+    not verified
+    reason := "CallerVerificationRequired"                                    # 403 + audit
+}
+
+# MemberScoped: the hotline is never branch-filtered — no BSC predicate applies
+branch_unrestricted { input.subject.role in call_centre_roles }
+
+# HARD RULE — clinical content is never projected to the call centre.
+# Allow-list projection; anything not listed is stripped server-side.
+allowed_fields := {"member_no", "display_name", "age_band", "member_status",
+                   "eligibility_verdict", "coverage_category", "remaining_limit",
+                   "contact_value", "preferred_channel", "address",
+                   "appointment_id", "appointment_type", "appointment_status",
+                   "scheduled_start", "branch_name", "doctor_name", "specialty",
+                   "referral_ref", "referral_status", "follow_up_due_at"} {
+    input.subject.role in call_centre_roles
+}
+
+denied_fields := {"diagnosis", "diagnosis_code", "problem_list", "emr_note", "clinical_note",
+                  "soap", "indication", "chief_complaint", "examination_detail",
+                  "lab_result", "imaging_result", "result_value", "report_body",
+                  "prescription", "medication_list", "refugee_ref",
+                  "identifier_value"} {                    # values are never stored or shown
+    input.subject.role in call_centre_roles
+}
+
+# the sensitivity gate is moot here — the call centre never reaches a result at all
+deny[reason] {
+    input.resource.type in {"investigation_result", "prescription", "emr_record",
+                            "clinical_note", "diagnosis"}
+    input.subject.role in call_centre_roles
+    reason := "CallCentreClinicalDenied"
+}
+```
+
 ---
 
 ## 7. Deny-by-default & precedence
@@ -810,8 +946,9 @@ resourcePolicy:
 5. **Environment can only restrict, never expand.** Failing device/MFA/IP checks can turn ✅ into ❌ but never the reverse.
 6. **Sensitivity-deny overrides purpose-binding and every role grant.** A non-`Standard` result's `value`/report is denied even to a role whose row says ✅ (Medical Approval under `PUR`, Medical Director, Case Manager). Only `SGA` — an active, unexpired, unrevoked, single-result, non-transferable grant — or authorship lifts it; break-glass lifts it *loudly*.
 7. **Branch-scope narrows, never grants.** `BSC` can only remove rows from a result set (and turn a cross-branch request into a `403`). Satisfying `BSC` never substitutes for `TR`, `PO`, `ASG`, `PUR` or the field rules, and no branch assignment widens a field projection.
+8. **Verification-deny precedes every call-centre allow.** For a call-centre principal, `CVP` is evaluated as an **explicit deny ahead of the role grant**: absent an interaction-bound, beneficiary-bound `Passed` verification, the member 360 and every appointment/contact action are denied (`403` + audit) whatever §3 grants. It cannot be satisfied by a previous call, by a colleague's verification, by a supervisor's team-wide read, or by break-glass — and satisfying it never widens the field projection: the clinical set stays `denied`.
 
-Precedence order evaluated by the policy engine: `explicit-deny (field/SoD/sensitivity/branch/env)` ▶ `break-glass-scoped-allow` ▶ `grant-scoped-allow (SGA)` ▶ `ABAC-conditional-allow` ▶ `RBAC-allow` ▶ `default-deny`.
+Precedence order evaluated by the policy engine: `explicit-deny (field/SoD/sensitivity/branch/verification/env)` ▶ `break-glass-scoped-allow` ▶ `grant-scoped-allow (SGA)` ▶ `ABAC-conditional-allow` ▶ `RBAC-allow` ▶ `default-deny`.
 
 ---
 
@@ -838,6 +975,14 @@ Every cell here must agree with [10-role-matrix.md §5–7](10-role-matrix.md). 
 - **Every `report_access_request` create carries a non-empty `purpose_code` + `justification`**, and every `decide` carries `SOD` (requester ≠ decider) with the decider being the authoring doctor **or** a Medical Director.
 - **Every allow that depends on `SGA` is paired with a `SensitiveResultReadUnderGrant` audit assertion** — a read-under-grant that does not audit is a failing build.
 - **No user may create/update their own `user_branch_assignment`** — the self-grant fixture must deny for every role, including Branch/Clinic Manager and Org Admin acting on themselves.
+- **Every call-centre read of the member 360, and every appointment/contact write from a call, carries `CVP`** — no policy in the call-centre bundle reaches a beneficiary resource without an interaction-bound, beneficiary-bound `Passed` verification predicate.
+- **The unverified fixture is a deny, not a thin payload** — it must assert `403` + audited `CallerVerificationRequired`, and explicitly assert that the response is **not** a `200` with fields omitted.
+- **A verification is single-interaction and single-beneficiary** — fixtures must deny a verification reused across interactions, reused for another beneficiary, or used after the interaction is `Closed`; and a `Passed` result with **fewer than 2 identifier types** must be rejected (`422`).
+- **A failed verification is persisted and audited** — a fixture that discards a `Failed` attempt, or records it without an audit event, is a failing build.
+- **Call Center / Call Centre Supervisor `diagnosis`, `emr_note`, `lab_result`, `imaging_result`, `prescription` and examination detail = `denied`**, with **no `PUR`, `SGA`, `ASG` or `BG` path** anywhere in the bundle that lifts them; the call-centre projection is an **allow-list** (§4) asserted over the **serialized response**, not just the DTO type.
+- **No identifier value is persisted in the `callcentre` schema** — a design-lint/schema assertion must show `caller_verification` carries identifier **types** only, and the frontend fixture must assert no stored identifier value is ever rendered.
+- **The Call Centre bundle declares `MemberScoped` / `BranchUnrestricted`** and contains **no `BSC` predicate** — a cross-branch read is normal for this role, and branch/specialty appear only as selectors.
+- **Every call-centre disclosure and mutation is audited and correlated by `call_ref`** — search, verification (pass *and* fail), 360 read, book/reschedule/cancel, contact update, interaction open/close.
 
 ---
 

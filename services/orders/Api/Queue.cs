@@ -62,7 +62,36 @@ public static class QueueEndpoints
             await AuditRead(audit, me, "search", items.Count);
             return Results.Ok(items.Select(QueueItemResponse.From));
         }).RequireAuthorization(HbmpPolicies.Scope("orders:read"));
+
+        // ---- Awaiting result: lines THIS provider has consumed but not yet uploaded a result for (US-042). ----
+        // Drives the result-upload worklist; a result may only be attached to a line this provider consumed.
+        v1.MapGet("/awaiting-result", async (
+            OrdersDbContext db, FulfillmentGate gate, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        {
+            var denied = await gate.AuthorizeQueueAsync(ct);
+            if (denied is not null) return denied;
+            var provider = Guid.TryParse(me.Principal?.ProviderId, out var pg) ? pg : Guid.Empty;
+
+            var rows = await (
+                from f in db.Fulfillments.AsNoTracking()
+                where f.PerformingProviderId == provider && f.ResultUploadedAt == null
+                join l in db.Set<OrderLine>().AsNoTracking() on f.OrderLineId equals l.OrderLineId
+                join o in db.Orders.AsNoTracking() on l.OrderId equals o.OrderId
+                orderby f.ConsumedAt descending
+                select new AwaitingResultResponse(
+                    o.OrderId, l.OrderLineId, o.OrderNo, o.OrderType.ToString(), o.BeneficiaryId,
+                    l.Code, l.Description, f.ConsumedAt)
+            ).Take(100).ToListAsync(ct);
+
+            await AuditRead(audit, me, "awaiting-result", rows.Count);
+            return Results.Ok(rows);
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"));
     }
+
+    /// <summary>A consumed line still awaiting its result upload (US-042) — the provider's result worklist row.</summary>
+    public sealed record AwaitingResultResponse(
+        Guid OrderId, Guid LineId, string OrderNo, string OrderType, Guid BeneficiaryId,
+        string Code, string? Description, DateTimeOffset ConsumedAt);
 
     /// <summary>Orders the caller may fulfil: type ∈ their capability, order still open, with ≥1 available line.
     /// The projection to available lines happens in <see cref="QueueItemResponse.From"/>.</summary>

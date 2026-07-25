@@ -31,15 +31,15 @@ async function request(path: string, init: RequestInit): Promise<unknown> {
   let res: Response;
   const token = getToken();
   const auth: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  // For FormData bodies, let the browser set `Content-Type` (with the multipart boundary) itself.
+  const isForm = typeof FormData !== "undefined" && init.body instanceof FormData;
+  const baseHeaders: Record<string, string> = isForm
+    ? { Accept: "application/json", ...auth }
+    : { "Content-Type": "application/json", Accept: "application/json", ...auth };
   try {
     res = await fetch(`${API_BASE}${path}`, {
       ...init,
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        ...auth,
-        ...(init.headers ?? {}),
-      },
+      headers: { ...baseHeaders, ...(init.headers ?? {}) },
     });
   } catch (e) {
     throw new ApiError("network", e instanceof Error ? e.message : "Network request failed");
@@ -67,6 +67,16 @@ export function postRaw(path: string, body: unknown, idempotencyKey?: string): P
   const headers: Record<string, string> = {};
   if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
   return request(path, { method: "POST", body: JSON.stringify(body), headers });
+}
+
+/**
+ * POST a multipart/form-data body (e.g. a lab/imaging result with an optional file). We deliberately pass no
+ * `Content-Type` so the browser sets the multipart boundary itself; the JSON default is overridden to undefined.
+ */
+export function postForm(path: string, fields: Record<string, string | Blob>): Promise<unknown> {
+  const form = new FormData();
+  for (const [k, v] of Object.entries(fields)) form.append(k, v);
+  return request(path, { method: "POST", body: form });
 }
 
 /**

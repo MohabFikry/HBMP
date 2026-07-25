@@ -31,7 +31,7 @@ Mersal operates **six branches** (Aswan, Alexandria, 6th of October, Maadi, Dokk
   - Switching **announces the new context via `aria-live="polite"`** ("Active branch: Maadi") so the change is not silent for screen-reader users, and re-fetches the current view rather than leaving stale rows on screen.
   - The switch is **audited** (`ActiveBranchSwitched`: actor, from, to, correlation id). The picker is a **hint only** — the server re-validates the active branch on every request; an unpermitted branch yields a `403` page, never a silently empty list.
   - **⟵RTL:** the control mirrors to the opposite end of the app bar with the menu aligned accordingly; branch names render in the active language (AR/EN).
-- **MemberScoped roles** (Medical Approval, Medical Director, Case Manager, Finance, Claims, Network Team, Org/Super Admin, managers/reporting) see an **"All branches" indicator** in the same slot, with an **optional branch filter** in the page toolbar. This is a **convenience, never a restriction** — clearing it always returns the full, cross-branch view, and no member-centred worklist is ever branch-gated.
+- **MemberScoped roles** (Medical Approval, Medical Director, Case Manager, Finance, Claims, Network Team, Org/Super Admin, managers/reporting, and the **Call Centre** — a central hotline, §2.13) see an **"All branches" indicator** in the same slot, with an **optional branch filter** in the page toolbar. This is a **convenience, never a restriction** — clearing it always returns the full, cross-branch view, and no member-centred worklist is ever branch-gated.
 - **ProviderScoped roles** (external labs, imaging centres, pharmacies, Provider Admin) see **no branch control at all** — the Mersal branch dimension does not apply to a contracted provider's queue.
 - **Every appointment, queue/day-list, encounter and order screen displays the active branch** in its page header (and on printed/exported day-lists), so a user can never mistake which site the list belongs to. Branch appears as an explicit labelled field, not merely as a colour or an icon.
 
@@ -190,6 +190,27 @@ flowchart TD
     BR --> BR6[Branch Operational Reports]
 ```
 **BranchScoped** — every screen shows the **active branch only**, chosen from the manager's assigned branches via the app-bar switcher; a request for an unassigned branch returns the 403 page, never an empty list. **No EMR, no diagnoses, no result values** in nav (min-necessary, as for Reception), and **no ability to grant branch assignments** — coverage changes are *requested* from Org Admin / Network Team.
+
+### 2.13 Call Centre portal
+```mermaid
+flowchart TD
+    CC[Call Centre] --> CC1[Active Call]
+    CC1 --> CC1a[Search & Identify]
+    CC1 --> CC1b[Verify Caller]
+    CC1 --> CC1c[Member 360 — locked until verified]
+    CC1 --> CC1d[Book / Reschedule / Cancel]
+    CC1 --> CC1e[Wrap-up: outcome + notes]
+    CC --> CC2[Member Search]
+    CC --> CC3[Appointments]
+    CC --> CC4[Call History]
+```
+**Persistent call bar.** The workspace is *call-shaped*: a call bar is pinned above the content area for the whole session with **Start call / Close call**, an **elapsed timer**, and a **reason-code** select (Book · Reschedule · Cancel · Appointment enquiry · Eligibility enquiry · Update contact · Complaint · Other). It is a landmark region in the tab order, announces the call state via `aria-live="polite"` ("Call started", "Call closed"), and stays visible while the agent moves between Search, the 360 and Appointments — every action taken is stamped with the interaction's `call_ref`. Closing the call clears the member context and **expires the verification**.
+
+**Locked / unverified state.** Everything member-specific starts **locked**. Pre-verification the agent sees only *match / no match*, the display name, and **which identifier types to challenge on**; the 360, contacts, coverage and appointment routes render a **"Not yet verified"** locked state using four cues (neutral hue + lock icon + ghost pill + text — never colour alone), and the underlying data is **absent from the payload**, not merely CSS-hidden. Verification is a checklist of identifier **types** the agent confirms verbally — **≥2 required**, explicit Pass/Fail — and the UI **never displays a stored identifier value** for the agent to read out: the caller states it, the agent confirms it. A Pass unlocks the 360 and is announced via `aria-live`; a Fail shows guidance, keeps everything locked, and is recorded.
+
+**MemberScoped — a central hotline.** The app bar shows the **"All branches" indicator**, *not* a branch switcher: the agent searches, views and books across all six branches. Branch and specialty are **selectors** in the slot picker (with next-available and the existing waitlist option), never restrictions, and each appointment row carries its branch name explicitly. Cancelling from a call requires a **reason code**; booking is never optimistic — the server's no-double-book result is authoritative and a "slot just taken" `409` renders as a clear, recoverable state.
+
+**Min-necessary nav.** No EMR, no diagnoses, no results, no prescriptions and no examination detail anywhere in this portal's routes — appointment **type, time, branch, doctor name and specialty** only. *Call History* is the agent's own calls; a **Call Centre Supervisor** additionally sees the team's history and a KPI board (aggregate, PHI-free).
 
 ---
 

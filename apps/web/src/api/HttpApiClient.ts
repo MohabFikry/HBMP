@@ -23,6 +23,8 @@ import {
   zOrderRow,
   zRxRow,
   zVitalsResult,
+  zResultTask,
+  zResultUpload,
   zPatientListItem,
   zPlaceOrderResult,
   zPrescribeResult,
@@ -44,7 +46,7 @@ import {
   type VitalInput,
 } from "@mersal/contracts";
 import type { ApiClient } from "./client";
-import { getRaw, postRaw, parseOr } from "./http";
+import { getRaw, postRaw, postForm, parseOr } from "./http";
 
 /** Wrap a plain service string as the bilingual shape the portal contracts use (same text both langs). */
 const loc = (s: unknown) => ({ en: String(s ?? ""), ar: String(s ?? "") });
@@ -458,6 +460,29 @@ export class HttpApiClient implements ApiClient {
           panelsDone: 0,
         });
       });
+  }
+  // Result upload (Phase 5.3, US-042) — the "awaiting result" worklist is the provider's consumed-but-unreported
+  // lines; a result posts as multipart form (resultValue and/or a report file — this screen sends the value).
+  async awaitingResult(kind: "lab" | "imaging") {
+    const r = (await getRaw(`/investigation-orders/awaiting-result`)) as any[];
+    return (r ?? [])
+      .filter((x: any) => String(x.orderType ?? "").toLowerCase() === kind)
+      .map((x: any) =>
+        parseOr(zResultTask, {
+          orderId: x.orderId,
+          lineId: x.lineId,
+          orderNo: x.orderNo ?? "",
+          orderType: String(x.orderType ?? ""),
+          beneficiary: { id: x.beneficiaryId, token: caseToken({ beneficiaryId: x.beneficiaryId }) },
+          code: x.code ?? "—",
+          description: x.description ?? undefined,
+          consumedAt: x.consumedAt ?? new Date().toISOString(),
+        }),
+      );
+  }
+  async uploadResult(orderId: string, lineId: string, resultValue: string) {
+    await postForm(`/investigation-orders/${encodeURIComponent(orderId)}/lines/${encodeURIComponent(lineId)}/result`, { resultValue });
+    return parseOr(zResultUpload, { orderId, lineId, uploaded: true });
   }
   async consume(req: ConsumeRequest) {
     const orderLineId = orderLineByOrderId.get(String(req.orderId));

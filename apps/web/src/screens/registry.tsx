@@ -23,6 +23,8 @@ const DoctorResults = lazy(() => import("./ClinicianWorklists").then((m) => ({ d
 const NurseVitals = lazy(() => import("./NursePortal").then((m) => ({ default: m.NurseVitals })));
 const NurseResults = lazy(() => import("./NursePortal").then((m) => ({ default: m.NurseResults })));
 const LabQueue = lazy(() => import("./LabQueue").then((m) => ({ default: m.LabQueue })));
+// Lab/imaging result upload (Phase 5.3) — one chunk, parameterised by capability.
+const ResultUpload = lazy(() => import("./ResultUpload").then((m) => ({ default: m.ResultUpload })));
 const PharmacyDispense = lazy(() => import("./PharmacyDispense").then((m) => ({ default: m.PharmacyDispense })));
 const ApprovalsWorklist = lazy(() => import("./ApprovalsWorklist").then((m) => ({ default: m.ApprovalsWorklist })));
 const ExecutiveDashboard = lazy(() => import("./ExecutiveDashboard").then((m) => ({ default: m.ExecutiveDashboard })));
@@ -63,6 +65,10 @@ export const SCREENS: Record<string, () => ReactNode> = {
   // 3. Lab / imaging — queue + consume.
   "/lab/queue": () => <LabQueue kind="lab" />,
   "/imaging/queue": () => <LabQueue kind="imaging" />,
+  "/lab/consume": () => <LabQueue kind="lab" />,
+  "/imaging/consume": () => <LabQueue kind="imaging" />,
+  "/lab/result": () => <ResultUpload kind="lab" />,
+  "/imaging/result": () => <ResultUpload kind="imaging" />,
   // 4. Pharmacy — dispense (queue + partial dispense).
   "/pharmacy/queue": () => <PharmacyDispense />,
   // 5. Approvals — worklist + decision (US-060).
