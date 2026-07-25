@@ -74,6 +74,32 @@ public sealed record ReviewView(
         ctx?.Documents ?? []);
 }
 
+// ---- Decisions (phase 7.2) ----
+
+public sealed record ApproveRequest(string? Rationale);
+public sealed record PartialApproveRequest(IReadOnlyList<string> ApprovedScope, string Rationale);
+public sealed record RejectRequest(string Rationale);
+public sealed record RequestInfoRequest(string Rationale);
+
+/// <summary>The recorded decision (append-only ledger row) returned to the reviewer, plus the resulting status.</summary>
+public sealed record DecisionView(
+    Guid AuthorizationId,
+    string AuthNo,
+    string Status,
+    string Decision,
+    string? Rationale,
+    IReadOnlyList<string>? ApprovedScope,
+    bool BreakGlass,
+    int? TatSeconds,
+    bool SlaBreached,
+    DateTimeOffset DecidedAt)
+{
+    public static DecisionView From(Authorization a, AuthorizationDecision d) => new(
+        a.AuthorizationId, a.AuthNo, a.Status.ToString(), d.Decision.ToString(), d.Rationale,
+        d.ApprovedScope is null ? null : Codes.Parse(d.ApprovedScope), d.BreakGlass,
+        a.TatSeconds, a.SlaBreached, d.DecidedAt);
+}
+
 /// <summary>Tiny JSON helper for the <c>service_codes</c> jsonb string array (avoids a serializer dependency in
 /// the projection path; the codes are simple tokens).</summary>
 internal static class Codes

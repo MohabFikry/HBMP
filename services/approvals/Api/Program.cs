@@ -19,6 +19,7 @@ builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddApprovalsInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ApprovalsGate>();
+builder.Services.AddScoped<DecisionDeps>();
 
 // The clinical review view assembles a field-scoped projection from emr-service under the caller's purpose (PUR),
 // fail-closed. document-service supplies supporting reports; both are reached with the caller's bearer token.
@@ -43,6 +44,7 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "ap
 
 app.MapWorklist();   // phase 7.1 ingestion + reviewer inbox + assign
 app.MapReview();     // phase 7.1 clinical review view (field-scoped, PHI-read audited)
+app.MapDecisions();  // phase 7.2 decisions (mandatory rationale) + downstream events + TAT/SLA
 
 app.Run();
 
