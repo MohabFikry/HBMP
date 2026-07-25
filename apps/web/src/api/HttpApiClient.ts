@@ -81,6 +81,38 @@ const orderStatus = (s: unknown) => {
 };
 /** orderId → first available order-line id, cached from the queue so consume can target a concrete line. */
 const orderLineByOrderId = new Map<string, string>();
+/** Map a pharmacy prescription/line status → a resolved bilingual StatusKind for the dispensing queue. */
+const rxStatus = (s: unknown) => {
+  const k = String(s ?? "Approved");
+  const map: Record<string, { kind: "ok" | "info" | "part" | "neu"; label: { en: string; ar: string } }> = {
+    Approved: { kind: "info", label: { en: "Approved", ar: "معتمدة" } },
+    Active: { kind: "info", label: { en: "Active", ar: "نشطة" } },
+    PartiallyDispensed: { kind: "part", label: { en: "Partially dispensed", ar: "صُرفت جزئياً" } },
+    Dispensed: { kind: "ok", label: { en: "Dispensed", ar: "صُرفت" } },
+    Cancelled: { kind: "neu", label: { en: "Cancelled", ar: "ملغاة" } },
+  };
+  return map[k] ?? map.Approved;
+};
+
+/**
+ * Demo drug labels for the seeded prescription lines. The pharmacy dispensing projection is min-necessary and
+ * carries only the masterdata drug_id (name resolution is a separate masterdata read, not part of the queue);
+ * for the seeded rows we map those ids to their real ATC + name so the queue renders a meaningful medication.
+ * Unmapped ids fall back to a token — no fabricated names.
+ */
+const DEMO_DRUG_LABELS: Record<string, { atc: string; en: string; ar: string }> = {
+  "40d46bd1-0200-4404-b424-d9cdd05391b4": { atc: "A10BA02", en: "Metformin 500mg", ar: "ميتفورمين 500مجم" },
+  "26d41d0b-2046-4e20-89f3-3a4a951570b7": { atc: "C08CA01", en: "Amlodipine 10mg", ar: "أملوديبين 10مجم" },
+  "3aa10944-02db-44b2-89c6-95100b09d372": { atc: "N02BE01", en: "Paracetamol 500mg", ar: "باراسيتامول 500مجم" },
+};
+const drugCoded = (drugId: unknown) => {
+  const d = DEMO_DRUG_LABELS[String(drugId)];
+  return d
+    ? { system: "ATC" as const, code: d.atc, label: { en: d.en, ar: d.ar } }
+    : { system: "ATC" as const, code: String(drugId ?? "").slice(0, 8), label: loc("Medication") };
+};
+/** prescriptionId → its line ids (in order), cached from the queue so dispense can target concrete lines. */
+const rxLineIds = new Map<string, string[]>();
 
 /**
  * Last reception search cards, keyed by beneficiaryId. The reception service returns ONE min-necessary card that
@@ -250,16 +282,53 @@ export class HttpApiClient implements ApiClient {
     });
   }
 
-  pharmacyQueue() {
-    return getJson(`/pharmacy/queue`, z.array(zPrescription));
+  // Pharmacy (Phase 6, US-050) — the pharmacy service exposes a browse-all dispensable queue at
+  // /prescriptions/queue (min-necessary: quantities + dose, never diagnosis). The contract's single-request
+  // multi-line dispense maps to the service's per-line dispense endpoint (one atomic idempotent call per line);
+  // batch/expiry are required by the service but not collected by this screen, so we supply a dev batch + a
+  // one-year expiry per line. Line ids are cached from the queue so dispense can target them.
+  async pharmacyQueue() {
+    const r = (await getRaw(`/prescriptions/queue`)) as any[];
+    return (r ?? []).map((p: any) => {
+      const lines: any[] = p.lines ?? [];
+      rxLineIds.set(String(p.prescriptionId), lines.map((l) => String(l.prescriptionLineId)));
+      return parseOr(zPrescription, {
+        id: p.prescriptionId,
+        patient: { id: p.beneficiaryId, token: caseToken({ beneficiaryId: p.beneficiaryId }) },
+        prescriber: { label: loc("Prescriber") },
+        submittedAt: p.submittedAt ?? new Date().toISOString(),
+        status: rxStatus(p.status),
+        lines: lines.map((l) => ({
+          id: l.prescriptionLineId,
+          drug: drugCoded(l.drugId),
+          quantity: Math.max(1, Math.round(Number(l.quantityPrescribed ?? 1))),
+          dispensed: Math.round(Number(l.quantityDispensed ?? 0)),
+          dose: [l.dose, l.route, l.frequency].filter(Boolean).join(" · "),
+          status: rxStatus(l.status),
+          outOfStock: false,
+        })),
+      });
+    });
   }
-  dispense(req: DispenseRequest) {
-    return postJson(
-      `/pharmacy/${encodeURIComponent(req.prescriptionId)}/dispense`,
-      req,
-      zDispenseResult,
-      req.idempotencyKey,
-    );
+  async dispense(req: DispenseRequest) {
+    const expiry = new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+    let last: any = null;
+    for (const line of req.lines) {
+      last = await postRaw(
+        `/prescriptions/${encodeURIComponent(req.prescriptionId)}/lines/${encodeURIComponent(line.lineId)}/dispense`,
+        { quantity: line.quantity, batchNo: `DEV-${String(req.prescriptionId).slice(0, 8)}`, expiryDate: expiry },
+        `${req.idempotencyKey}:${line.lineId}`,
+      );
+    }
+    const rx = last?.prescription ?? {};
+    const outstanding = (rx.lines ?? []).filter((l: any) => Number(l.quantityRemaining ?? 0) > 0).length;
+    return parseOr(zDispenseResult, {
+      prescriptionId: req.prescriptionId,
+      dispenseEventId: last?.dispense?.dispenseEventId ?? req.idempotencyKey,
+      status: rxStatus(last?.rxStatus ?? rx.status),
+      replayed: !!last?.replayed,
+      linesOutstanding: outstanding,
+    });
   }
 
   approvalWorklist() {

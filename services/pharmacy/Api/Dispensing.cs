@@ -19,6 +19,20 @@ public static class DispensingEndpoints
     {
         var v1 = app.MapGroup("/api/v1/prescriptions").RequireAuthorization();
 
+        // ---- 6.1 Queue: browse ALL currently-dispensable prescriptions (min-necessary projection). Same
+        // dispensing-relevant fields as search, without requiring a patient identifier — the pharmacist's worklist. ----
+        v1.MapGet("/queue", async (
+            PharmacyDbContext db, DispensingGate gate, IAuditClient audit, IHbmpPrincipalAccessor me,
+            TimeProvider clock, CancellationToken ct) =>
+        {
+            var denied = await gate.AuthorizeSearchAsync(ct);
+            if (denied is not null) return denied;
+
+            var items = await Dispensable(db, clock.GetUtcNow()).OrderBy(p => p.SubmittedAt).Take(100).ToListAsync(ct);
+            await AuditRead(audit, me, "queue", items.Count);
+            return Results.Ok(items.Select(DispensableRxView.From));
+        }).RequireAuthorization(HbmpPolicies.Scope("pharmacy:read"));
+
         // ---- 6.1 Search: only dispensable prescriptions, projected to dispensing-relevant fields ----
         v1.MapGet("/search", async (
             PharmacyDbContext db, DispensingGate gate, IBeneficiaryResolver resolver, IAuditClient audit,
