@@ -22,6 +22,7 @@ builder.Services.AddScoped<AdminGate>();
 builder.Services.AddScoped<RoleAdminService>();
 builder.Services.AddScoped<AccessReviewService>();
 builder.Services.AddScoped<PolicyConfigService>();
+builder.Services.AddScoped<GovernanceService>();
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("admin-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
@@ -42,6 +43,7 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "ad
 app.MapUsers();          // 8b.1 grant/revoke/de-provision + access matrix (SoD-checked, audited)
 app.MapAccessReview();   // 8b.1 access-review campaigns (recertify/revoke/auto-expire)
 app.MapPolicyConfig();   // 8b.1 session/device policy + staged policy proposals
+app.MapGovernance();     // 8b.2 master-data versioning + template linter + system config
 
 app.Run();
 

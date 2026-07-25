@@ -18,6 +18,9 @@ public sealed class AdminDbContext(DbContextOptions<AdminDbContext> options) : D
     public DbSet<SessionPolicy> SessionPolicies => Set<SessionPolicy>();
     public DbSet<DevicePolicy> DevicePolicies => Set<DevicePolicy>();
     public DbSet<PolicyProposal> PolicyProposals => Set<PolicyProposal>();
+    public DbSet<MasterDataVersion> MasterDataVersions => Set<MasterDataVersion>();
+    public DbSet<NotificationTemplateVersion> TemplateVersions => Set<NotificationTemplateVersion>();
+    public DbSet<SystemConfig> SystemConfigs => Set<SystemConfig>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -85,6 +88,33 @@ public sealed class AdminDbContext(DbContextOptions<AdminDbContext> options) : D
             e.HasKey(x => x.ProposalId);
             e.Property(x => x.DiffJson).HasColumnType("jsonb").HasColumnName("diff");
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+        });
+
+        b.Entity<MasterDataVersion>(e =>
+        {
+            e.ToTable("master_data_version");
+            e.HasKey(x => x.VersionId);
+            e.Property(x => x.System).HasConversion<string>().HasColumnName("system");
+            e.Property(x => x.AttributesJson).HasColumnType("jsonb").HasColumnName("attributes");
+            e.HasIndex(x => new { x.System, x.Code });
+            e.HasIndex(x => new { x.System, x.Code, x.VersionNo }).IsUnique();
+        });
+
+        b.Entity<NotificationTemplateVersion>(e =>
+        {
+            e.ToTable("notification_template_version");
+            e.HasKey(x => x.TemplateVersionId);
+            e.HasIndex(x => new { x.TenantId, x.TemplateKey, x.Channel });
+            e.HasIndex(x => new { x.TenantId, x.TemplateKey, x.Channel, x.VersionNo }).IsUnique();
+        });
+
+        b.Entity<SystemConfig>(e =>
+        {
+            e.ToTable("system_config");
+            e.HasKey(x => x.ConfigId);
+            e.Property(x => x.ValueType).HasConversion<string>().HasColumnName("value_type");
+            e.HasIndex(x => new { x.TenantId, x.Key });
+            e.HasIndex(x => new { x.TenantId, x.Key, x.VersionNo }).IsUnique();
         });
     }
 }

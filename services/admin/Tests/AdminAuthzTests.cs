@@ -74,6 +74,20 @@ public class AdminAuthzTests
     }
 
     [Fact]
+    public async Task Master_data_edit_is_governance_only_org_admin_is_denied()
+    {
+        // FR-MDM-008: only clinical governance (Medical Director) + Super Admin may edit master data. Org Admin
+        // manages access, not clinical reference content.
+        var gov = await Engine().EvaluateAsync(new AuthzRequest(
+            Principal("medical_director", "t0", "admin:write"), AdminPolicies.EditMasterData, Res("t0")));
+        var org = await Engine().EvaluateAsync(new AuthzRequest(
+            Principal("org_admin", "t0", "admin:write"), AdminPolicies.EditMasterData, Res("t0")));
+        gov.IsAllowed.Should().BeTrue();
+        org.IsAllowed.Should().BeFalse();
+        _outbox.Events.Should().Contain(e => e.DecisionOutcome == "Deny");
+    }
+
+    [Fact]
     public async Task Reading_the_access_matrix_is_a_sensitive_audited_allow()
     {
         var d = await Engine().EvaluateAsync(new AuthzRequest(

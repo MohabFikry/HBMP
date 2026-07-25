@@ -45,6 +45,23 @@ caught. A grant that would breach SoD is rejected `409` with the conflict reason
 - **Policy proposals** — `POST /policy-proposals` (Super Admin only) **stages** a versioned bundle diff with a
   rationale; it never hot-patches live ABAC — deployment goes through the audited CI path (Security + DPO review).
 
+## Governance — master data / templates / config (phase 8b.2)
+
+All governance edits are **effective-dated**: a change appends a new version and closes the prior version's window,
+so a historical order/prescription resolves the version in force at **its** time (FR-MDM-007) — history is never
+mutated.
+
+- **Master data** (`POST /master-data`, `GET /master-data/{system}/{code}/as-of?at=`) — versioned edits to
+  ICD/CPT/LOINC/ATC/Drug/interactions/allergens/formulary, held as a JSON attribute snapshot per version.
+  Restricted to **clinical governance (Medical Director) + Super Admin** (FR-MDM-008); Org Admin is denied. The
+  as-of resolver returns the version in force at a date (null if not yet existing or retired then).
+- **Notification templates** (`POST /templates`) — bilingual AR/EN versions, **linted before save**
+  (`TemplateLinter`): a template bound to an outbound channel (SMS/email/WhatsApp) with a clinical/PHI token in its
+  subject or body is **rejected** (data minimization), and AR/EN parity is required (no English-only outbound).
+  In-app templates may carry a clinical token but still need parity.
+- **System configuration** (`PUT /system-config`) — typed (`Text/Whole/Number/Boolean/Duration`), validated, and
+  effective-dated; tenant-scoped or platform-level (`tenant_id = "*"`). A malformed value is rejected before store.
+
 ## Authorization (`libs/authz/AdminPolicies`, v8b.1)
 
 Org Admin + Super Admin only; every action is `Sensitive` → the allow is audited. Org Admin is pinned to its own
@@ -72,4 +89,11 @@ widening Org Admin. `admin:propose-policy` is Super-Admin only.
   at the review deadline (binding revoked) while a recertified one is kept; low-tier grants stay out of a T3
   campaign.
 
-Serialized via the `admin-db` collection. Total: 40 admin tests; full solution 516 green.
+- `GovernanceUnitTests` (pure) — the template linter blocks PHI-in-SMS and requires AR/EN parity (in-app exempt
+  from PHI rule, not parity); config values are typed-validated; effective-dating picks the version in force at a
+  date.
+- `GovernanceIntegrationTests` (env-gated) — a master-data edit **appends** a version and a historical date resolves
+  the **old** one (FR-MDM-007); a PHI-in-SMS template save is rejected + audited; a config change is typed +
+  versioned (one in-force row).
+
+Serialized via the `admin-db` collection. Total: 56 admin tests; full solution 532 green.

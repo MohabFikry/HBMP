@@ -27,6 +27,15 @@ public static class AdminPolicies
     /// <summary>Recertify or revoke a grant in an access-review campaign (audited, linked to the grant).</summary>
     public const string Review = "admin:review";
 
+    // ---- Phase 8b.2 governance actions (master data / templates / system config) ----
+    /// <summary>Effective-dated master-data edit (ICD/CPT/LOINC/Drug/ATC/interactions/allergens/formulary).
+    /// Restricted to clinical governance (FR-MDM-008).</summary>
+    public const string EditMasterData = "admin:edit-masterdata";
+    /// <summary>Manage bilingual notification templates (PHI-safe linter enforced).</summary>
+    public const string EditTemplate = "admin:edit-template";
+    /// <summary>Manage tenant/platform system configuration (typed, validated, effective-dated).</summary>
+    public const string EditConfig = "admin:edit-config";
+
     public const string Resource = "admin";
 
     /// <summary>The admin audiences. Super Admin additionally carries the global scope for cross-tenant actions.</summary>
@@ -73,6 +82,31 @@ public static class AdminPolicies
         new PolicyRule
         {
             Action = Review, ResourceType = Resource,
+            Roles = Set(Admins), Scopes = Set("admin:write"),
+            RequiredConditions = [AbacConditions.TenantMatch],
+            Sensitive = true,
+        },
+        // Master-data governance — clinical governance (Medical Director) + Super Admin only (FR-MDM-008). Org
+        // Admin is NOT a master-data editor. Master data is a global reference surface → tenant null (global).
+        new PolicyRule
+        {
+            Action = EditMasterData, ResourceType = Resource,
+            Roles = Set("medical_director", "super_admin"), Scopes = Set("admin:write"),
+            RequiredConditions = [AbacConditions.TenantMatch],
+            Sensitive = true,
+        },
+        // Notification-template governance — clinical governance + admins (bilingual, PHI-safe linter).
+        new PolicyRule
+        {
+            Action = EditTemplate, ResourceType = Resource,
+            Roles = Set("medical_director", "super_admin", "org_admin"), Scopes = Set("admin:write"),
+            RequiredConditions = [AbacConditions.TenantMatch],
+            Sensitive = true,
+        },
+        // System configuration — admins.
+        new PolicyRule
+        {
+            Action = EditConfig, ResourceType = Resource,
             Roles = Set(Admins), Scopes = Set("admin:write"),
             RequiredConditions = [AbacConditions.TenantMatch],
             Sensitive = true,
