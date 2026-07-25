@@ -24,7 +24,9 @@ import {
   zTenantSummary,
   zSodConflict,
   zAccessReviewCampaign,
+  zAppointmentRow,
   zBreakGlassGrant,
+  zCheckInResult,
   zExportResult,
   zFinancialSummary,
   zSettlement,
@@ -108,6 +110,31 @@ export class DevApiClient implements ApiClient {
         visitGate: { allowed: true },
       }),
     );
+  }
+
+  // ---- Reception day board -----------------------------------------------
+  appointments(filter: "all" | "booked" | "checked-in" = "all") {
+    const rows = [
+      { id: "appt-1", token: "•••4821", type: "Consultation", ar: "كشف", st: "Booked", chip: { kind: "info" as const, label: loc("Booked", "محجوز") }, at: "2026-07-22T09:00:00Z", eligible: true },
+      { id: "appt-2", token: "•••7710", type: "FollowUp", ar: "متابعة", st: "CheckedIn", chip: { kind: "ok" as const, label: loc("Checked in", "تم الوصول") }, at: "2026-07-22T09:30:00Z", eligible: false },
+      { id: "appt-3", token: "•••2093", type: "Consultation", ar: "كشف", st: "Booked", chip: { kind: "info" as const, label: loc("Booked", "محجوز") }, at: "2026-07-22T10:00:00Z", eligible: true },
+      { id: "appt-4", token: "•••5540", type: "Procedure", ar: "إجراء", st: "NoShow", chip: { kind: "warn" as const, label: loc("No-show", "لم يحضر") }, at: "2026-07-22T08:30:00Z", eligible: false },
+    ].filter((r) => (filter === "booked" ? r.st === "Booked" : filter === "checked-in" ? r.st === "CheckedIn" : true));
+    return this.gate(
+      () =>
+        ok(z.array(zAppointmentRow), rows.map((r) => ({
+          id: r.id,
+          beneficiary: { id: r.id, token: r.token },
+          appointmentType: r.type,
+          status: r.chip,
+          scheduledStart: r.at,
+          checkInEligible: r.eligible,
+        }))),
+      [],
+    );
+  }
+  checkIn(appointmentId: string) {
+    return this.gate(() => ok(zCheckInResult, { id: appointmentId, status: { kind: "ok", label: loc("Checked in", "تم الوصول") } }));
   }
 
   // ---- EMR ---------------------------------------------------------------

@@ -20,3 +20,4 @@ export * from "./case";
 export * from "./finance";
 export * from "./notification";
 export * from "./admin";
+export * from "./reception";

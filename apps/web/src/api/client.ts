@@ -1,9 +1,11 @@
 import type {
   AccessReviewCampaign,
+  AppointmentRow,
   ApprovalItem,
   ApprovalReview,
   Beneficiary360,
   BreakGlassGrant,
+  CheckInResult,
   CaseListItem,
   ConsumeRequest,
   ConsumeResult,
@@ -48,6 +50,11 @@ export interface ApiClient {
   // Reception — eligibility (Phase 2)
   searchEligibility(query: string): Promise<EligibilityHit[]>;
   checkEligibility(beneficiaryId: string): Promise<EligibilityResult>;
+
+  // Reception — day board (Phase 3). `filter` scopes the board: all / booked (arrivals to process) /
+  // checked-in (waiting). checkIn transitions Booked → CheckedIn and enqueues a walk-in ticket.
+  appointments(filter?: "all" | "booked" | "checked-in"): Promise<AppointmentRow[]>;
+  checkIn(appointmentId: string): Promise<CheckInResult>;
 
   // Doctor — EMR (Phase 4)
   listPatients(): Promise<PatientListItem[]>;

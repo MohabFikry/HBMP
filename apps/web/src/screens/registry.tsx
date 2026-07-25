@@ -9,6 +9,10 @@ import { lazy, type ReactNode } from "react";
 const ReceptionEligibility = lazy(() =>
   import("./ReceptionEligibility").then((m) => ({ default: m.ReceptionEligibility })),
 );
+// Reception desk (Phase 3) — day board, visits, and check-in share one chunk.
+const ReceptionVisits = lazy(() => import("./ReceptionDesk").then((m) => ({ default: m.ReceptionVisits })));
+const ReceptionAppointments = lazy(() => import("./ReceptionDesk").then((m) => ({ default: m.ReceptionAppointments })));
+const ReceptionCheckIn = lazy(() => import("./ReceptionDesk").then((m) => ({ default: m.ReceptionCheckIn })));
 const DoctorEncounter = lazy(() => import("./DoctorEncounter").then((m) => ({ default: m.DoctorEncounter })));
 const LabQueue = lazy(() => import("./LabQueue").then((m) => ({ default: m.LabQueue })));
 const PharmacyDispense = lazy(() => import("./PharmacyDispense").then((m) => ({ default: m.PharmacyDispense })));
@@ -35,6 +39,9 @@ export const SCREENS: Record<string, () => ReactNode> = {
   // 1. Reception — eligibility (also surfaced in the beneficiary-management portal).
   "/reception/eligibility": () => <ReceptionEligibility />,
   "/beneficiaries/eligibility": () => <ReceptionEligibility />,
+  "/reception/queue": () => <ReceptionVisits />,
+  "/reception/appointments": () => <ReceptionAppointments />,
+  "/reception/check-in": () => <ReceptionCheckIn />,
   // 2. Doctor — consultation / EMR.
   "/clinician/encounter": () => <DoctorEncounter />,
   // 3. Lab / imaging — queue + consume.

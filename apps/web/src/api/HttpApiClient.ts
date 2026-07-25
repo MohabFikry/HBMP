@@ -1,8 +1,10 @@
 import {
   zAccessReviewCampaign,
+  zAppointmentRow,
   zApprovalItem,
   zApprovalReview,
   zBreakGlassGrant,
+  zCheckInResult,
   zRoleBinding,
   zSodConflict,
   zTenantSummary,
@@ -62,6 +64,18 @@ const statusToVerdict = (status: unknown): "eligible" | "ineligible" | "review" 
   if (s === "active") return "eligible";
   if (s === "blocked" || s === "expired") return "ineligible";
   return "review";
+};
+/** Map an emr appointment status (Booked/CheckedIn/Completed/NoShow/Cancelled) → a non-color StatusKind chip. */
+const apptStatusChip = (s: unknown): { kind: "ok" | "info" | "warn" | "neu"; label: { en: string; ar: string } } => {
+  const k = String(s ?? "Booked");
+  const map: Record<string, { kind: "ok" | "info" | "warn" | "neu"; label: { en: string; ar: string } }> = {
+    Booked: { kind: "info", label: { en: "Booked", ar: "محجوز" } },
+    CheckedIn: { kind: "ok", label: { en: "Checked in", ar: "تم الوصول" } },
+    Completed: { kind: "neu", label: { en: "Completed", ar: "مكتمل" } },
+    NoShow: { kind: "warn", label: { en: "No-show", ar: "لم يحضر" } },
+    Cancelled: { kind: "neu", label: { en: "Cancelled", ar: "ملغى" } },
+  };
+  return map[k] ?? map.Booked;
 };
 /** Map an emr encounter status → a resolved bilingual StatusKind for the doctor worklist chip. */
 const encounterStatus = (s: unknown) => {
@@ -240,6 +254,28 @@ export class HttpApiClient implements ApiClient {
         ? { allowed: true }
         : { allowed: false, reason: { en: "Coverage not active — refer to eligibility desk.", ar: "التغطية غير فعّالة — يُرجى مراجعة مكتب الأهلية." } },
     });
+  }
+
+  // Reception day board (Phase 3, US-020) — the emr appointments list is date/status scoped (no clinic params
+  // required, unlike the clinical walk-in queue). Reception sees a masked beneficiary token + type/time/status
+  // only. `checkIn` posts a minimal body (normal priority); member details on the queue ticket are optional.
+  async appointments(filter: "all" | "booked" | "checked-in" = "all") {
+    const status = filter === "booked" ? "Booked" : filter === "checked-in" ? "CheckedIn" : "";
+    const r = (await getRaw(`/appointments${status ? `?status=${status}` : ""}`)) as any[];
+    return (r ?? []).map((a: any) =>
+      parseOr(zAppointmentRow, {
+        id: a.appointmentId,
+        beneficiary: { id: a.beneficiaryId, token: caseToken({ beneficiaryId: a.beneficiaryId }) },
+        appointmentType: String(a.appointmentType ?? ""),
+        status: apptStatusChip(a.status),
+        scheduledStart: a.scheduledStart ?? new Date().toISOString(),
+        checkInEligible: String(a.status ?? "") === "Booked",
+      }),
+    );
+  }
+  async checkIn(appointmentId: string) {
+    const r = (await postRaw(`/appointments/${encodeURIComponent(appointmentId)}/check-in`, { priority: 1 })) as any;
+    return parseOr(zCheckInResult, { id: r?.appointmentId ?? appointmentId, status: apptStatusChip(r?.status ?? "CheckedIn") });
   }
 
   // Doctor / EMR (Phase 4, US-030) — the emr service is encounter-centric and treating-relationship gated: the

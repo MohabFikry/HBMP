@@ -174,6 +174,21 @@ public static class AppointmentsModule
             return Results.Created($"/api/v1/appointments/{booked.AppointmentId}", AppointmentResponse.From(booked));
         });
 
+        // GET /appointments — reception's day board (US-020). Defaults to today's appointments; an optional
+        // ?status= filters to a single status (e.g. Scheduled for the check-in worklist). Ordered by start time.
+        read.MapGet("/appointments", async (
+            DateTimeOffset? date, string? status, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
+        {
+            var day = (date ?? clock.GetUtcNow()).Date;
+            var lo = new DateTimeOffset(day, TimeSpan.Zero);
+            var hi = lo.AddDays(1);
+            var q = db.Appointments.AsNoTracking().Where(a => a.ScheduledStart >= lo && a.ScheduledStart < hi);
+            if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<AppointmentStatus>(status, ignoreCase: true, out var st))
+                q = q.Where(a => a.Status == st);
+            var rows = await q.OrderBy(a => a.ScheduledStart).Take(200).ToListAsync(ct);
+            return Results.Ok(rows.Select(AppointmentResponse.From));
+        });
+
         read.MapGet("/appointments/{id:guid}", async (Guid id, HttpResponse resp, EmrDbContext db, CancellationToken ct) =>
         {
             var a = await db.Appointments.AsNoTracking().FirstOrDefaultAsync(x => x.AppointmentId == id, ct);
