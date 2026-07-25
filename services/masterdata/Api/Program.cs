@@ -144,6 +144,39 @@ v1.MapPost("/drug-interactions/check", async (DrugCheckRequest req, MasterDataDb
     });
 });
 
+// By-id interaction check the pharmacy uses (prescription_line.drug_id are uuids). Highest-severity interaction
+// among a set of drug ids (order-insensitive).
+v1.MapPost("/drug-interactions/check-by-ids", async (DrugIdCheckRequest req, MasterDataDbContext db, CancellationToken ct) =>
+{
+    var ids = (req.DrugIds ?? []).ToHashSet();
+    var hits = await db.DrugInteractions.AsNoTracking()
+        .Where(i => ids.Contains(i.DrugAId) && ids.Contains(i.DrugBId))
+        .ToListAsync(ct);
+    var top = hits.Count == 0 ? (InteractionSeverity?)null : hits.Max(h => h.Severity);
+    return Results.Ok(new
+    {
+        checkedDrugIds = ids,
+        interactions = hits.Select(h => new { severity = h.Severity.ToString(), h.DrugAId, h.DrugBId, h.Description }),
+        highestSeverity = top?.ToString(),
+    });
+});
+
+// By-id allergy check the pharmacy uses: flag a drug (uuid) against a beneficiary's allergen ids (uuids). A
+// conflict is raised when the drug's ATC code (or an ancestor) matches a Drug-category allergen's code.
+v1.MapPost("/allergies/check-by-ids", async (AllergyIdCheckRequest req, MasterDataDbContext db, CancellationToken ct) =>
+{
+    var drug = await db.Drugs.AsNoTracking().FirstOrDefaultAsync(x => x.DrugId == req.DrugId, ct);
+    if (drug is null) return Results.NotFound(new { req.DrugId, resolved = false });
+    var atcChain = drug.AtcCode is null
+        ? new HashSet<string>()
+        : MasterDataNormalize.AtcAncestors(drug.AtcCode).Append(drug.AtcCode).ToHashSet(StringComparer.Ordinal);
+    var allergenIds = (req.AllergenIds ?? []).ToHashSet();
+    var codes = await db.Allergens.AsNoTracking()
+        .Where(a => allergenIds.Contains(a.AllergenId)).Select(a => a.Code).ToListAsync(ct);
+    var conflict = codes.Any(c => atcChain.Contains(c));
+    return Results.Ok(new { req.DrugId, conflict, matchedOn = conflict ? "atc-class" : null });
+});
+
 // Flag a drug against a patient's allergen codes/classes.
 v1.MapPost("/allergies/check", async (AllergyCheckRequest req, MasterDataDbContext db, CancellationToken ct) =>
 {

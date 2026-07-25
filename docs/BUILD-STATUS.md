@@ -34,7 +34,7 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 3 | Appointments | 3.3 Queue + reminders hook | ☑ | (3.3) |
 | 4 | Clinical EMR | 4.1 `emr-service` + treating-relationship ABAC | ☑ | (4.1) |
 | 4 | Clinical EMR | 4.2 `orders-service` + approval routing | ☑ | (4.2) |
-| 4 | Clinical EMR | 4.3 `pharmacy-service` Rx + referral creation | ☐ | |
+| 4 | Clinical EMR | 4.3 `pharmacy-service` Rx + referral creation | ☑ | (4.3) |
 | 5 | Lab/Imaging | 5.1 Provider order queue + search | ☐ | |
 | 5 | Lab/Imaging | 5.2 Atomic idempotent consume | ☐ | |
 | 5 | Lab/Imaging | 5.3 Result upload + routing | ☐ | |

@@ -221,6 +221,18 @@ public static class ClinicalEndpoints
             return Results.Created($"/api/v1/encounters/{id}/vitals/{vital.VitalId}", VitalResponse.From(vital));
         }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
 
+        // ---- Beneficiary allergy list (beneficiary-level read) — treating clinician / oversight. pharmacy-service
+        // calls this (token forwarded) to source allergies for advisory prescribe-time alerts (US-033). ----
+        ben.MapGet("/{beneficiaryId:guid}/allergies", async (
+            Guid beneficiaryId, EmrDbContext db, ClinicalGate gate, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync("emr:read", EmrPolicies.Resources.Allergy, beneficiaryId.ToString(), beneficiaryId, ct);
+            if (denied is not null) return denied;
+            var allergies = await db.Allergies.AsNoTracking()
+                .Where(a => a.BeneficiaryId == beneficiaryId && !a.IsDeleted).ToListAsync(ct);
+            return Results.Ok(allergies.Select(AllergyResponse.From));
+        });
+
         // ---- Allergy (beneficiary-level): allergen validated vs masterdata ----
         ben.MapPost("/{beneficiaryId:guid}/allergies", async (
             Guid beneficiaryId, AddAllergyRequest req, EmrDbContext db, ClinicalGate gate, IClinicalCodeValidator codes,
