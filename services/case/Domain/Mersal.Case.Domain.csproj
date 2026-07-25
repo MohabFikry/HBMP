@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>Mersal.Case.Domain</RootNamespace></PropertyGroup>
+</Project>

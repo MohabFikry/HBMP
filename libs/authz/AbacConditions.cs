@@ -12,6 +12,10 @@ public static class AbacConditions
     public const string ResourceStatusActive = "resource-status-active";
     public const string BreakGlass = "break-glass";
 
+    /// <summary>Case-assignment (phase 10): a Case Manager may act on a case (and reach that beneficiary's
+    /// coordination view) ONLY while they hold an ACTIVE assignment to it. Unassignment revokes it (10 §3.11).</summary>
+    public const string CaseAssignment = "case-assignment";
+
     /// <summary>Tenant isolation: principal.tenant == resource.tenant (or resource has no tenant scope).</summary>
     public static bool TenantMatches(AuthzRequest r) =>
         r.Resource.TenantId is null || string.Equals(r.Principal.TenantId, r.Resource.TenantId, StringComparison.Ordinal);
@@ -25,4 +29,11 @@ public static class AbacConditions
     public static bool HasTreatingRelationship(AuthzRequest r) =>
         r.Resource.BeneficiaryId is not null
         && r.Resource.TreatingBeneficiaryIds.Contains(r.Resource.BeneficiaryId);
+
+    /// <summary>Case-assignment: the caller holds an active assignment to the case being acted on. The case id is
+    /// carried as <see cref="ResourceRef.Id"/>; the caller's active-assignment set is resolved (from the
+    /// <c>case_assignment</c> rows) into <see cref="ResourceRef.AssignedCaseIds"/> before evaluation — mirroring how
+    /// treating-relationship is resolved. Unassignment empties the set → immediate revocation.</summary>
+    public static bool HasCaseAssignment(AuthzRequest r) =>
+        r.Resource.Id is not null && r.Resource.AssignedCaseIds.Contains(r.Resource.Id);
 }

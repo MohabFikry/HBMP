@@ -33,6 +33,10 @@ public sealed record ResourceRef
 
     /// <summary>The beneficiary this resource concerns (for treating-relationship checks).</summary>
     public string? BeneficiaryId { get; init; }
+
+    /// <summary>Case ids the principal holds an ACTIVE assignment to (case-assignment ABAC, phase 10). Resolved
+    /// from the <c>case_assignment</c> rows before evaluation; unassignment removes the id → access revoked.</summary>
+    public IReadOnlySet<string> AssignedCaseIds { get; init; } = new HashSet<string>();
 }
 
 public enum AuthzEffect { Deny, Allow }
