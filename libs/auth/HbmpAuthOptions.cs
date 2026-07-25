@@ -13,6 +13,14 @@ public sealed class HbmpAuthOptions
     /// <summary>OIDC issuer / Keycloak realm URL. JWKS is discovered from its metadata.</summary>
     public string Authority { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Additional accepted token issuers beyond <see cref="Authority"/>. Needed when clients and
+    /// services reach Keycloak on different hostnames (split-horizon dev: a browser mints a token via
+    /// <c>http://localhost:8080/realms/…</c> while services fetch JWKS via <c>http://keycloak:8080/…</c>).
+    /// When set, the token's <c>iss</c> may match any of these (plus the discovered Authority issuer).
+    /// </summary>
+    public string[] ValidIssuers { get; set; } = Array.Empty<string>();
+
     /// <summary>Expected token audience (aud) — the API's client id / resource.</summary>
     public string Audience { get; set; } = string.Empty;
 

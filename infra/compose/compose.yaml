@@ -260,6 +260,7 @@ services:
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Messaging__Uri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       Messaging__Queue: "audit.events"
       Worm__Endpoint: "http://minio:9000"
@@ -284,6 +285,7 @@ services:
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["8090:8080"]   # also reachable via Kong at :8000/api/v1/hello
@@ -304,6 +306,7 @@ services:
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["8091:8080"]
     depends_on:
@@ -323,6 +326,7 @@ services:
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["8092:8080"]
@@ -341,6 +345,7 @@ services:
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["8093:8080"]
@@ -359,6 +364,7 @@ services:
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       ClamAV__Host: "clamav"
       Blob__Endpoint: "http://minio:9000"
       Blob__AccessKey: "${MINIO_ROOT_USER}"
@@ -382,6 +388,7 @@ services:
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Cache__Valkey: "valkey:6379,password=${VALKEY_PASSWORD}"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
@@ -403,6 +410,7 @@ services:
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Eligibility__BaseUrl: "http://eligibility-service:8080"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
@@ -423,6 +431,7 @@ services:
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Masterdata__BaseUrl: "http://masterdata-service:8080"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
@@ -443,6 +452,7 @@ services:
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["8098:8080"]
@@ -462,6 +472,7 @@ services:
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["8099:8080"]
@@ -481,6 +492,7 @@ services:
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["8100:8080"]
@@ -500,6 +512,7 @@ services:
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["8101:8080"]
@@ -519,6 +532,7 @@ services:
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["8102:8080"]
@@ -538,6 +552,7 @@ services:
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["8103:8080"]
@@ -557,6 +572,7 @@ services:
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["8104:8080"]
@@ -576,6 +592,7 @@ services:
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["8105:8080"]

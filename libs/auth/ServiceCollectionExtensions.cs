@@ -49,10 +49,16 @@ public static class ServiceCollectionExtensions
                 jwt.RequireHttpsMetadata = options.RequireHttpsMetadata;
                 jwt.MapInboundClaims = false; // keep raw Keycloak claim names (sub, scope, realm_access…)
 
+                // Accept the Authority issuer plus any explicitly-allowed issuers (split-horizon dev:
+                // browser tokens carry iss=localhost:8080 while services fetch JWKS via keycloak:8080).
+                // The JwtBearer handler additionally concatenates the discovered Authority issuer.
+                var validIssuers = new List<string> { options.Authority };
+                validIssuers.AddRange(options.ValidIssuers);
+
                 jwt.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuer = true,
-                    ValidIssuer = options.Authority,
+                    ValidIssuers = validIssuers,
                     ValidateAudience = !string.IsNullOrWhiteSpace(options.Audience),
                     ValidAudience = options.Audience,
                     ValidateIssuerSigningKey = true,   // signature via JWKS

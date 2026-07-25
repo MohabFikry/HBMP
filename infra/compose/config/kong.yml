@@ -1,38 +1,161 @@
 _format_version: "3.0"
-# Kong DB-less declarative config (Tier 1). Public API is fronted by Traefik/NGINX + ModSecurity
-# (OWASP CRS) + TLS at the edge (ADR-0004); Kong does routing, coarse JWT validation against
-# Keycloak, rate limiting, and correlation-id propagation. Services ALSO validate tokens fully
-# (defense in depth, libs/auth). Add each service's routes as it comes online.
+# Kong DB-less declarative config (Tier 1). Single public API origin at :8000 for the SPA.
+# Kong routes /api/v1/<area> to the owning service and applies a permissive dev CORS policy
+# (SPA origin http://localhost:5173). Services ALSO fully validate the JWT (defense in depth,
+# libs/auth) — Kong here does routing + CORS + correlation-id, not auth.
+#
+# Routing is by the service's REAL path prefix (see each service's MapGroup). Where the frontend
+# HttpApiClient used a different prefix, the frontend path is being reconciled to these real routes.
 
 services:
-  # --- hello-service: the phase-0.5 vertical slice ---
+  # --- masterdata-service: reference data (owns several bare /api/v1 resources) ---
+  - name: masterdata-service
+    url: http://masterdata-service:8080
+    routes:
+      - name: masterdata-routes
+        paths:
+          - /api/v1/icd-codes
+          - /api/v1/cpt-codes
+          - /api/v1/atc-classes
+          - /api/v1/drugs
+          - /api/v1/drug-interactions
+          - /api/v1/allergens
+        strip_path: false
+
+  # --- patient-service: beneficiary registration + identifiers ---
+  - name: patient-service
+    url: http://patient-service:8080
+    routes:
+      - name: patient-routes
+        paths: ["/api/v1/beneficiaries", "/api/v1/registrations"]
+        strip_path: false
+
+  # --- policy-service: coverage + limits ---
+  - name: policy-service
+    url: http://policy-service:8080
+    routes:
+      - name: policy-routes
+        paths: ["/api/v1/policies", "/api/v1/coverages", "/api/v1/coverage-limits"]
+        strip_path: false
+
+  # --- eligibility-service: reception search + eligibility check ---
+  - name: eligibility-service
+    url: http://eligibility-service:8080
+    routes:
+      - name: eligibility-routes
+        paths: ["/api/v1/eligibility", "/api/v1/reception"]
+        strip_path: false
+
+  # --- emr-service: encounters, appointments, clinical docs, queue ---
+  - name: emr-service
+    url: http://emr-service:8080
+    routes:
+      - name: emr-routes
+        paths:
+          - /api/v1/encounters
+          - /api/v1/appointments
+          - /api/v1/appointment-slots
+          - /api/v1/queue
+          - /api/v1/queues
+          - /api/v1/treating-relationship
+        strip_path: false
+
+  # --- provider-service: provider network + contracts ---
+  - name: provider-service
+    url: http://provider-service:8080
+    routes:
+      - name: provider-routes
+        paths: ["/api/v1/providers", "/api/v1/contracts"]
+        strip_path: false
+
+  # --- orders-service: investigation orders + lab/imaging fulfillment ---
+  - name: orders-service
+    url: http://orders-service:8080
+    routes:
+      - name: orders-routes
+        paths: ["/api/v1/investigation-orders"]
+        strip_path: false
+
+  # --- pharmacy-service: prescriptions + dispensing + referrals ---
+  - name: pharmacy-service
+    url: http://pharmacy-service:8080
+    routes:
+      - name: pharmacy-routes
+        paths: ["/api/v1/prescriptions", "/api/v1/referrals"]
+        strip_path: false
+
+  # --- approvals-service: authorization worklist + decisions ---
+  - name: approvals-service
+    url: http://approvals-service:8080
+    routes:
+      - name: approvals-routes
+        paths: ["/api/v1/authorizations"]
+        strip_path: false
+
+  # --- notification-service ---
+  - name: notification-service
+    url: http://notification-service:8080
+    routes:
+      - name: notification-routes
+        paths: ["/api/v1/notifications"]
+        strip_path: false
+
+  # --- reporting-service: KPIs + dashboards ---
+  - name: reporting-service
+    url: http://reporting-service:8080
+    routes:
+      - name: reporting-routes
+        paths: ["/api/v1/reports", "/api/v1/dashboards"]
+        strip_path: false
+
+  # --- admin-service: platform administration ---
+  - name: admin-service
+    url: http://admin-service:8080
+    routes:
+      - name: admin-routes
+        paths: ["/api/v1/admin"]
+        strip_path: false
+
+  # --- case-service: case management + beneficiary-360 (Phase 10.1) ---
+  - name: case-service
+    url: http://case-service:8080
+    routes:
+      - name: case-routes
+        paths: ["/api/v1/cases"]
+        strip_path: false
+
+  # --- finance-service: utilization/settlements/summaries/exports (Phase 10.2) ---
+  - name: finance-service
+    url: http://finance-service:8080
+    routes:
+      - name: finance-routes
+        paths: ["/api/v1/finance"]
+        strip_path: false
+
+  # --- hello-service: phase-0.5 vertical slice ---
   - name: hello-service
     url: http://hello-service:8080
     routes:
       - name: hello-routes
-        paths: ["/api/v1/hello", "/health/live"]
+        paths: ["/api/v1/hello"]
         strip_path: false
-    plugins:
-      - name: rate-limiting
-        config: { minute: 600, policy: local }
-      # Coarse JWT validation at the gateway. Kong OSS `jwt` plugin verifies the signature against
-      # a registered consumer credential holding the Keycloak realm's RS256 public key. Provision it
-      # after first boot (the realm's public key is at /realms/mersal). Services still fully validate.
-      # - name: jwt
-      #   config: { claims_to_verify: ["exp"], key_claim_name: "iss" }
-
-  # --- audit-service: internal only; NOT exposed publicly (read API reached in-cluster / admin) ---
-  # (no public route — the audit read API is reached via the internal network / admin ingress)
-
-routes: []
 
 plugins:
-  # Global correlation IDs (W3C-style) on every request — propagated to services + audit trail.
+  # Dev CORS: allow the Vite SPA origin to call the API with a bearer token.
+  - name: cors
+    config:
+      origins: ["http://localhost:5173", "http://127.0.0.1:5173"]
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+      headers: ["Authorization", "Content-Type", "Idempotency-Key", "Accept-Language", "X-Correlation-Id"]
+      exposed_headers: ["X-Correlation-Id"]
+      credentials: true
+      max_age: 3600
+  # Global correlation IDs (W3C-style) on every request.
   - name: correlation-id
     config:
       header_name: X-Correlation-Id
       generator: uuid
       echo_downstream: true
-  # Basic global rate limit as a safety net (per-route limits override).
+  # Safety-net global rate limit.
   - name: rate-limiting
     config: { minute: 1200, policy: local }
