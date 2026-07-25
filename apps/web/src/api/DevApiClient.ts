@@ -32,6 +32,10 @@ import {
   zProviderLocation,
   zProviderContract,
   type CreateProviderInput,
+  zBeneficiaryRow,
+  zRegisterResult,
+  zStatusChangeResult,
+  type RegisterBeneficiaryInput,
   zCheckInResult,
   zOrderRow,
   zRxRow,
@@ -931,6 +935,29 @@ export class DevApiClient implements ApiClient {
   }
   createProvider(input: CreateProviderInput) {
     return this.gate(() => ok(zProviderSummary, { id: "PRV-NEW", code: input.code, legalName: input.legalName, providerType: input.providerType, status: { kind: "warn", label: loc("Suspended", "موقوف") }, onboardingState: "Draft" }));
+  }
+
+  beneficiarySearch(query: { name?: string; status?: string }) {
+    const all = [
+      { id: "BEN-1", memberNo: "MRS-M-10231", givenName: "Omar", familyName: "Khaled", chip: { kind: "info" as const, label: loc("Pending", "قيد الانتظار") }, raw: "Pending", ids: [{ type: "NationalID", value: "•••2931", isPrimary: true }] },
+      { id: "BEN-2", memberNo: "MRS-M-10555", givenName: "Salma", familyName: "Adel", chip: { kind: "ok" as const, label: loc("Active", "نشط") }, raw: "Active", ids: [{ type: "UNHCRNo", value: "801-•••45", isPrimary: true }] },
+      { id: "BEN-3", memberNo: undefined, givenName: "Amina", familyName: "Yusuf", chip: { kind: "warn" as const, label: loc("Suspended", "موقوف") }, raw: "Suspended", ids: [{ type: "Passport", value: "A•••221", isPrimary: true }] },
+    ].filter((b) => (!query.name || (b.givenName + " " + b.familyName).toLowerCase().includes(query.name.toLowerCase())) && (!query.status || b.raw === query.status));
+    return this.gate(
+      () => ok(z.array(zBeneficiaryRow), all.map((b) => ({
+        id: b.id, memberNo: b.memberNo, givenName: b.givenName, familyName: b.familyName,
+        status: b.chip, statusRaw: b.raw, identifiers: b.ids,
+      }))),
+      [],
+    );
+  }
+  registerBeneficiary(input: RegisterBeneficiaryInput) {
+    void input;
+    return this.gate(() => ok(zRegisterResult, { id: "BEN-NEW", memberNo: undefined, status: { kind: "info", label: loc("Pending", "قيد الانتظار") } }));
+  }
+  changeBeneficiaryStatus(id: string, toStatus: string, reason: string) {
+    void reason;
+    return this.gate(() => ok(zStatusChangeResult, { id, status: { kind: toStatus === "Active" ? "ok" : "warn", label: loc(toStatus, toStatus) } }));
   }
 
   adminMasterData() {

@@ -1,6 +1,10 @@
 import type {
   AccessReviewCampaign,
   AppointmentRow,
+  BeneficiaryRow,
+  RegisterBeneficiaryInput,
+  RegisterResult,
+  StatusChangeResult,
   ApprovalItem,
   ApprovalReview,
   Beneficiary360,
@@ -145,6 +149,11 @@ export interface ApiClient {
   providerLocations(providerId: string): Promise<ProviderLocation[]>;
   providerContracts(providerId: string): Promise<ProviderContract[]>;
   createProvider(input: CreateProviderInput): Promise<ProviderSummary>;
+
+  // Beneficiary management — the beneficiary registry (Phase 1). Min-necessary identity, no clinical data.
+  beneficiarySearch(query: { name?: string; status?: string }): Promise<BeneficiaryRow[]>;
+  registerBeneficiary(input: RegisterBeneficiaryInput): Promise<RegisterResult>;
+  changeBeneficiaryStatus(id: string, toStatus: string, reason: string): Promise<StatusChangeResult>;
 }
 
 /**

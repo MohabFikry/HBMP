@@ -10,6 +10,10 @@ import {
   zProviderLocation,
   zProviderContract,
   type CreateProviderInput,
+  zBeneficiaryRow,
+  zRegisterResult,
+  zStatusChangeResult,
+  type RegisterBeneficiaryInput,
   zCheckInResult,
   zRoleBinding,
   zSodConflict,
@@ -82,6 +86,19 @@ const statusToVerdict = (status: unknown): "eligible" | "ineligible" | "review" 
   if (s === "active") return "eligible";
   if (s === "blocked" || s === "expired") return "ineligible";
   return "review";
+};
+/** Map a beneficiary status (Pending/Active/Suspended/Expired/Blocked/Inactive) → a non-color StatusKind chip. */
+const beneficiaryStatusChip = (s: unknown): { kind: "ok" | "info" | "warn" | "bad" | "neu"; label: { en: string; ar: string } } => {
+  const k = String(s ?? "Pending");
+  const map: Record<string, { kind: "ok" | "info" | "warn" | "bad" | "neu"; label: { en: string; ar: string } }> = {
+    Pending: { kind: "info", label: { en: "Pending", ar: "قيد الانتظار" } },
+    Active: { kind: "ok", label: { en: "Active", ar: "نشط" } },
+    Suspended: { kind: "warn", label: { en: "Suspended", ar: "موقوف" } },
+    Expired: { kind: "neu", label: { en: "Expired", ar: "منتهٍ" } },
+    Blocked: { kind: "bad", label: { en: "Blocked", ar: "محظور" } },
+    Inactive: { kind: "neu", label: { en: "Inactive", ar: "غير نشط" } },
+  };
+  return map[k] ?? map.Pending;
 };
 /** Map an emr appointment status (Booked/CheckedIn/Completed/NoShow/Cancelled) → a non-color StatusKind chip. */
 const apptStatusChip = (s: unknown): { kind: "ok" | "info" | "warn" | "neu"; label: { en: string; ar: string } } => {
@@ -1127,6 +1144,48 @@ export class HttpApiClient implements ApiClient {
       status: providerStatusChip(r?.status ?? "Suspended"),
       onboardingState: String(r?.onboardingState ?? "Draft"),
     });
+  }
+
+  // Beneficiary management (Phase 1, US-001..005) — the registry: register, search/manage, status/reactivation.
+  // Min-necessary identity projection (name + member no + identifiers + status), never clinical data.
+  async beneficiarySearch(query: { name?: string; status?: string }) {
+    const qs = new URLSearchParams();
+    if (query.name) qs.set("name", query.name);
+    if (query.status) qs.set("status", query.status);
+    const r = (await getRaw(`/beneficiaries${qs.toString() ? `?${qs}` : ""}`)) as any;
+    const items: any[] = r?.items ?? (Array.isArray(r) ? r : []);
+    return items.map((b: any) =>
+      parseOr(zBeneficiaryRow, {
+        id: b.beneficiaryId,
+        memberNo: b.memberNo ?? undefined,
+        givenName: String(b.givenName ?? ""),
+        familyName: String(b.familyName ?? ""),
+        status: beneficiaryStatusChip(b.status),
+        statusRaw: String(b.status ?? ""),
+        identifiers: (b.identifiers ?? []).map((i: any) => ({ type: String(i.type ?? ""), value: String(i.value ?? ""), isPrimary: Boolean(i.isPrimary) })),
+      }),
+    );
+  }
+  async registerBeneficiary(input: RegisterBeneficiaryInput) {
+    const idem = `reg:${input.identifierType}:${input.identifierValue}`;
+    const body = {
+      givenName: input.givenName,
+      familyName: input.familyName,
+      birthDate: input.birthDate || null,
+      sex: input.sex ?? null,
+      identifiers: [{ type: input.identifierType, value: input.identifierValue, isPrimary: true }],
+      contacts: input.phone ? [{ type: "Phone", value: input.phone, isPrimary: true }] : [],
+    };
+    const r = (await postRaw(`/beneficiaries`, body, idem)) as any;
+    return parseOr(zRegisterResult, {
+      id: r?.beneficiaryId ?? "",
+      memberNo: r?.memberNo ?? undefined,
+      status: beneficiaryStatusChip(r?.status ?? "Pending"),
+    });
+  }
+  async changeBeneficiaryStatus(id: string, toStatus: string, reason: string) {
+    const r = (await postRaw(`/beneficiaries/${encodeURIComponent(id)}/status`, { toStatus, reason })) as any;
+    return parseOr(zStatusChangeResult, { id: r?.beneficiaryId ?? id, status: beneficiaryStatusChip(r?.status ?? toStatus) });
   }
 
   // Governance reads (Phase 8b.2) — the master-data versions + typed system-config currently in force. Reference

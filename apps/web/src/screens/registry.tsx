@@ -13,6 +13,10 @@ const ReceptionEligibility = lazy(() =>
 const ReceptionVisits = lazy(() => import("./ReceptionDesk").then((m) => ({ default: m.ReceptionVisits })));
 const ReceptionAppointments = lazy(() => import("./ReceptionDesk").then((m) => ({ default: m.ReceptionAppointments })));
 const ReceptionCheckIn = lazy(() => import("./ReceptionDesk").then((m) => ({ default: m.ReceptionCheckIn })));
+// Beneficiary-management portal (Phase 1) — register / manage / status share one chunk.
+const BeneficiaryRegister = lazy(() => import("./BeneficiaryPortal").then((m) => ({ default: m.BeneficiaryRegister })));
+const BeneficiaryManage = lazy(() => import("./BeneficiaryPortal").then((m) => ({ default: m.BeneficiaryManage })));
+const BeneficiaryStatus = lazy(() => import("./BeneficiaryPortal").then((m) => ({ default: m.BeneficiaryStatus })));
 const DoctorEncounter = lazy(() => import("./DoctorEncounter").then((m) => ({ default: m.DoctorEncounter })));
 // Clinician worklists (Phase 4) — my patients / orders / prescriptions / results inbox share one chunk.
 const DoctorPatients = lazy(() => import("./ClinicianWorklists").then((m) => ({ default: m.DoctorPatients })));
@@ -65,6 +69,9 @@ export const SCREENS: Record<string, () => ReactNode> = {
   // 1. Reception — eligibility (also surfaced in the beneficiary-management portal).
   "/reception/eligibility": () => <ReceptionEligibility />,
   "/beneficiaries/eligibility": () => <ReceptionEligibility />,
+  "/beneficiaries/register": () => <BeneficiaryRegister />,
+  "/beneficiaries/manage": () => <BeneficiaryManage />,
+  "/beneficiaries/status": () => <BeneficiaryStatus />,
   "/reception/queue": () => <ReceptionVisits />,
   "/reception/appointments": () => <ReceptionAppointments />,
   "/reception/check-in": () => <ReceptionCheckIn />,

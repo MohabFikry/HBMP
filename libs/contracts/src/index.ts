@@ -27,3 +27,4 @@ export * from "./formulary";
 export * from "./approvals-extra";
 export * from "./report-view";
 export * from "./provider";
+export * from "./beneficiary";
