@@ -158,6 +158,7 @@ export function NotificationPane({
                         <span className="npane-subject">{n.subject}</span>
                         <span className="npane-preview">{n.body}</span>
                         <span className="npane-meta">
+                          <StatusChip kind={n.status.kind} label={t(n.status.label)} />
                           {n.actionable && !n.read && (
                             <StatusChip kind="warn" label={L.notificationsActionNeeded[lang]} />
                           )}

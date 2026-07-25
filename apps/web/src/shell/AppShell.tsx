@@ -162,13 +162,19 @@ export function AppShell({ children }: { children: ReactNode }) {
           <button
             ref={avatarRef}
             type="button"
-            className="app-avatar"
+            className="app-userbtn"
             aria-haspopup="dialog"
             aria-expanded={userPaneOpen}
             onClick={() => setUserPaneOpen((v) => !v)}
             aria-label={`${L.accountOpen[lang]} — ${session.displayName}`}
           >
-            <span aria-hidden="true">{initials(session.displayName)}</span>
+            <span className="app-avatar" aria-hidden="true">
+              {initials(session.displayName)}
+            </span>
+            <span className="app-userbtn-text">
+              <span className="app-userbtn-name">{session.displayName}</span>
+              <span className="app-userbtn-role">{tr(portal.eyebrow)}</span>
+            </span>
           </button>
         </div>
       </header>
