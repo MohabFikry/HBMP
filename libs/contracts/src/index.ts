@@ -16,3 +16,5 @@ export * from "./lab";
 export * from "./pharmacy";
 export * from "./approvals";
 export * from "./dashboard";
+export * from "./case";
+export * from "./finance";

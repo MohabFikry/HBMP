@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "./helpers";
@@ -63,10 +63,47 @@ describe("Executive dashboard — chart data-table alternative (US-073)", () => 
     expect(screen.getByRole("columnheader", { name: "Visits" })).toBeInTheDocument();
   });
 
-  it("MIN-NECESSARY: the finance-scoped dashboard shows spend categories, not diagnoses", async () => {
+  it("MIN-NECESSARY: the finance summaries screen has a data-table toggle (US-073) and no diagnosis dimension", async () => {
+    renderApp("/finance/summaries", "finance");
+    await screen.findByRole("heading", { name: "Financial summaries" });
+    // Toggle reveals the accessible table; its dimensions are billing (service line / category / provider).
+    await userEvent.click(screen.getByRole("button", { name: "Show data table" }));
+    expect(await screen.findByRole("columnheader", { name: "Share" })).toBeInTheDocument();
+    // No clinical grouping is even offered.
+    expect(screen.queryByRole("radio", { name: /diagnos/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("Finance portal — no clinical reach (US-095, Phase 10.3)", () => {
+  it("utilization shows billing codes + spend and never a diagnosis column", async () => {
     renderApp("/finance/utilization", "finance");
-    await screen.findByRole("heading", { name: "Top spend categories" });
-    expect(screen.queryByRole("heading", { name: "Top diagnoses" })).not.toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Utilization" });
+    // Billing code present; no diagnosis/clinical column header anywhere.
+    expect(await screen.findByText("70553")).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: /diagnos/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: /clinical/i })).not.toBeInTheDocument();
+  });
+
+  it("export confirms and reports an audited row count", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderApp("/finance/exports", "finance");
+    await screen.findByRole("heading", { name: "Exports" });
+    await userEvent.click(screen.getByRole("button", { name: "Export (masked, audited)" }));
+    expect(await screen.findByText(/rows/)).toBeInTheDocument();
+    confirmSpy.mockRestore();
+  });
+});
+
+describe("Case manager — coordination 360 is a summary (Phase 10.3)", () => {
+  it("shows coord-visible diagnoses but only masked note/rx/result sections", async () => {
+    renderApp("/cases/my-cases", "case_manager");
+    // Open the first assigned case's 360.
+    const openButtons = await screen.findAllByRole("button", { name: "Open 360" });
+    await userEvent.click(openButtons[0]);
+    await screen.findByRole("heading", { name: "Clinical summary (coordination)" });
+    // Diagnosis is coord-visible; notes/results appear only as "summary only" masked counts.
+    expect(await screen.findByText(/E11\.9/)).toBeInTheDocument();
+    expect(screen.getAllByText(/summary only/).length).toBeGreaterThan(0);
   });
 });
 

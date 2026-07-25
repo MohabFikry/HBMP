@@ -14,9 +14,18 @@ import {
   zPlaceOrderResult,
   zPrescribeResult,
   zPrescription,
+  zBeneficiary360,
+  zCaseListItem,
+  zCoordinationTask,
+  zEscalation,
+  zExportResult,
+  zFinancialSummary,
+  zSettlement,
+  zUtilizationView,
   type ConsumeRequest,
   type DecisionRequest,
   type DispenseRequest,
+  type ExportRequest,
   type Localized,
   type PlaceOrderRequest,
   type PrescribeRequest,
@@ -455,5 +464,183 @@ export class DevApiClient implements ApiClient {
         charts: scope === "finance" ? charts.filter((c) => c.id !== "topdx") : charts,
       });
     });
+  }
+
+  // ---- Case management (Phase 10.1) — assignment-scoped, coordination summary ----------------------------
+  myCases() {
+    return this.gate(
+      () =>
+        ok(z.array(zCaseListItem), [
+          {
+            id: "CASE-2026-000042",
+            caseNo: "CASE-2026-000042",
+            beneficiary: { id: "MRS-M-10231", token: "A.H · •••4821" },
+            category: "chronic",
+            priority: "high",
+            status: { kind: "warn", label: loc("Active", "نشطة") },
+            openedAt: "2026-07-10T09:00:00Z",
+            summary: loc("Diabetes care coordination", "تنسيق رعاية السكري"),
+          },
+          {
+            id: "CASE-2026-000051",
+            caseNo: "CASE-2026-000051",
+            beneficiary: { id: "MRS-M-10555", token: "Y.H · •••7702" },
+            category: "vulnerable",
+            priority: "urgent",
+            status: { kind: "info", label: loc("Open", "مفتوحة") },
+            openedAt: "2026-07-18T11:30:00Z",
+            summary: loc("Post-surgery follow-up", "متابعة بعد الجراحة"),
+          },
+        ]),
+      [],
+    );
+  }
+  beneficiary360(caseId: string) {
+    return this.gate(() =>
+      ok(zBeneficiary360, {
+        caseId,
+        caseNo: caseId,
+        beneficiary: { id: "MRS-M-10231", token: "A.H · •••4821" },
+        coverage: {
+          status: { kind: "ok", label: loc("Eligible", "مؤهل") },
+          planName: loc("Mersal Essential", "مرسال الأساسية"),
+          coverageCategory: loc("Band B — Outpatient + Pharmacy", "الفئة ب — عيادات + صيدلية"),
+          annualCap: "EGP 20,000",
+          remaining: "EGP 8,400",
+        },
+        carePlan: {
+          status: loc("Active", "نشطة"),
+          goals: [
+            loc("HbA1c below 7% by Q4", "خفض السكر التراكمي دون ٧٪ بالربع الرابع"),
+            loc("Quarterly retinal screening", "فحص الشبكية الفصلي"),
+          ],
+          reviewDue: "2026-09-30T00:00:00Z",
+        },
+        appointments: [
+          { id: "APT-2201", clinic: loc("Endocrinology", "الغدد الصماء"), when: "2026-07-28T10:00:00Z", status: { kind: "info", label: loc("Booked", "محجوز") } },
+        ],
+        openApprovals: [
+          { authNo: "AUTH-9001", status: { kind: "info", label: loc("Awaiting review", "بانتظار المراجعة") }, priority: "high", decidedAt: undefined },
+        ],
+        // Coordination clinical SUMMARY: diagnoses coord-visible; notes/rx/results MASKED (count only).
+        clinical: {
+          activeDiagnoses: [
+            { system: "ICD-10", code: "E11.9", label: loc("Type 2 diabetes", "السكري من النوع ٢") },
+            { system: "ICD-10", code: "I10", label: loc("Essential hypertension", "ارتفاع ضغط الدم") },
+          ],
+          notes: { count: 4, summaryOnly: true },
+          prescriptions: { count: 3, summaryOnly: true },
+          results: { count: 6, summaryOnly: true },
+        },
+      }),
+    );
+  }
+  caseTasks(caseId: string) {
+    return this.gate(
+      () =>
+        ok(z.array(zCoordinationTask), [
+          { id: "TSK-1", caseId, title: loc("Book retinal screening", "حجز فحص الشبكية"), state: "todo", dueAt: "2026-07-30T00:00:00Z", status: { kind: "info", label: loc("To do", "للتنفيذ") } },
+          { id: "TSK-2", caseId, title: loc("Confirm pharmacy refill", "تأكيد صرف الصيدلية"), state: "in_progress", status: { kind: "warn", label: loc("In progress", "قيد التنفيذ") } },
+          { id: "TSK-3", caseId, title: loc("Call beneficiary re: diet plan", "الاتصال بالمستفيد بخصوص نظام الغذاء"), state: "done", status: { kind: "ok", label: loc("Done", "تم") } },
+        ]),
+      [],
+    );
+  }
+  escalations() {
+    return this.gate(
+      () =>
+        ok(z.array(zEscalation), [
+          {
+            id: "ESC-1",
+            caseId: "CASE-2026-000051",
+            caseNo: "CASE-2026-000051",
+            raisedToRole: loc("Medical Approval", "الموافقة الطبية"),
+            reason: "Urgent authorization for post-surgical imaging pending > 24h.",
+            status: { kind: "warn", label: loc("Raised", "مُصعّدة") },
+            raisedAt: "2026-07-20T08:00:00Z",
+          },
+        ]),
+      [],
+    );
+  }
+
+  // ---- Finance (Phase 10.2) — billing codes + amounts only, no diagnosis --------------------------------
+  utilization() {
+    return this.gate(() =>
+      ok(zUtilizationView, {
+        from: "2026-06-22",
+        to: "2026-07-22",
+        rows: [
+          { serviceCode: "70553", serviceLine: loc("Imaging", "أشعة"), coverageCategory: loc("Outpatient", "عيادات خارجية"), providerRef: "PRV-•••301", authorizedQty: 12, deliveredQty: 9, spend: "EGP 58,500" },
+          { serviceCode: "J01CA04", serviceLine: loc("Pharmacy", "صيدلية"), coverageCategory: loc("Pharmacy", "صيدلية"), providerRef: "PRV-•••118", authorizedQty: 240, deliveredQty: 231, spend: "EGP 12,400" },
+          { serviceCode: "80053", serviceLine: loc("Lab", "مختبر"), coverageCategory: loc("Outpatient", "عيادات خارجية"), providerRef: "PRV-•••204", authorizedQty: 88, deliveredQty: 86, spend: "EGP 9,120" },
+        ],
+        totalAuthorized: 340,
+        totalDelivered: 326,
+        totalSpend: "EGP 80,020",
+      }),
+    );
+  }
+  settlements() {
+    return this.gate(
+      () =>
+        ok(z.array(zSettlement), [
+          {
+            id: "STL-2026-000007",
+            settlementNo: "STL-2026-000007",
+            providerRef: "PRV-•••301",
+            providerName: loc("Nile Imaging Center", "مركز النيل للأشعة"),
+            periodStart: "2026-06-01",
+            periodEnd: "2026-06-30",
+            currency: "EGP",
+            total: "EGP 58,500",
+            status: { kind: "info", label: loc("Submitted", "مُقدّمة") },
+            state: "submitted",
+            lines: [
+              { serviceCode: "70553", serviceLine: loc("Imaging", "أشعة"), deliveredQty: 9, agreedUnitPrice: "EGP 6,500", lineTotal: "EGP 58,500" },
+            ],
+          },
+          {
+            id: "STL-2026-000006",
+            settlementNo: "STL-2026-000006",
+            providerRef: "PRV-•••118",
+            providerName: loc("Cairo Community Pharmacy", "صيدلية القاهرة") ,
+            periodStart: "2026-06-01",
+            periodEnd: "2026-06-30",
+            currency: "EGP",
+            total: "EGP 12,400",
+            status: { kind: "ok", label: loc("Approved", "معتمدة") },
+            state: "approved",
+            lines: [
+              { serviceCode: "J01CA04", serviceLine: loc("Pharmacy", "صيدلية"), deliveredQty: 231, agreedUnitPrice: "EGP 53.68", lineTotal: "EGP 12,400" },
+            ],
+          },
+        ]),
+      [],
+    );
+  }
+  financialSummary(dimension: "serviceline" | "category" | "provider") {
+    return this.gate(() =>
+      ok(zFinancialSummary, {
+        dimension,
+        buckets: [
+          { key: loc("Imaging", "أشعة"), deliveredQty: 9, spend: "EGP 58,500", sharePercent: 73 },
+          { key: loc("Pharmacy", "صيدلية"), deliveredQty: 231, spend: "EGP 12,400", sharePercent: 15 },
+          { key: loc("Lab", "مختبر"), deliveredQty: 86, spend: "EGP 9,120", sharePercent: 12 },
+        ],
+        totalSpend: "EGP 80,020",
+      }),
+    );
+  }
+  exportReport(req: ExportRequest) {
+    return this.gate(() =>
+      ok(zExportResult, {
+        report: req.report,
+        format: req.format,
+        rowCount: 3,
+        filename: `${req.report}-${req.from}_${req.to}.${req.format}`,
+        status: { kind: "ok", label: loc("Export ready (audited)", "التصدير جاهز (مُدقّق)") },
+      }),
+    );
   }
 }

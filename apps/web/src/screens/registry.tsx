@@ -14,6 +14,14 @@ const LabQueue = lazy(() => import("./LabQueue").then((m) => ({ default: m.LabQu
 const PharmacyDispense = lazy(() => import("./PharmacyDispense").then((m) => ({ default: m.PharmacyDispense })));
 const ApprovalsWorklist = lazy(() => import("./ApprovalsWorklist").then((m) => ({ default: m.ApprovalsWorklist })));
 const ExecutiveDashboard = lazy(() => import("./ExecutiveDashboard").then((m) => ({ default: m.ExecutiveDashboard })));
+// Case-manager portal (Phase 10.3) — one chunk for the two case screens.
+const MyCases = lazy(() => import("./CaseManager").then((m) => ({ default: m.MyCases })));
+const Escalations = lazy(() => import("./CaseManager").then((m) => ({ default: m.Escalations })));
+// Finance portal (Phase 10.3) — one chunk for the four finance screens.
+const FinanceUtilization = lazy(() => import("./FinancePortal").then((m) => ({ default: m.FinanceUtilization })));
+const FinanceSettlements = lazy(() => import("./FinancePortal").then((m) => ({ default: m.FinanceSettlements })));
+const FinanceSummaries = lazy(() => import("./FinancePortal").then((m) => ({ default: m.FinanceSummaries })));
+const FinanceExports = lazy(() => import("./FinancePortal").then((m) => ({ default: m.FinanceExports })));
 
 export const SCREENS: Record<string, () => ReactNode> = {
   // 1. Reception — eligibility (also surfaced in the beneficiary-management portal).
@@ -28,9 +36,17 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/pharmacy/queue": () => <PharmacyDispense />,
   // 5. Approvals — worklist + decision (US-060).
   "/approvals/worklist": () => <ApprovalsWorklist />,
-  // 6. Executive dashboard (US-073) — director scope; finance sees a diagnosis-free finance scope.
+  // 6. Executive dashboard (US-073) — director scope.
   "/director/dashboards": () => <ExecutiveDashboard scope="director" />,
-  "/finance/utilization": () => <ExecutiveDashboard scope="finance" />,
+  // 7. Case-manager portal (Phase 10.3) — My Cases → coordination-360 (+ tasks); escalations.
+  "/cases/my-cases": () => <MyCases />,
+  "/cases/beneficiary-360": () => <MyCases />,
+  "/cases/escalations": () => <Escalations />,
+  // 8. Finance portal (Phase 10.3) — utilization / settlements / summaries / exports. No clinical route exists.
+  "/finance/utilization": () => <FinanceUtilization />,
+  "/finance/settlements": () => <FinanceSettlements />,
+  "/finance/summaries": () => <FinanceSummaries />,
+  "/finance/exports": () => <FinanceExports />,
 };
 
 export function screenFor(fullPath: string): (() => ReactNode) | undefined {

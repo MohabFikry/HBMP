@@ -14,9 +14,18 @@ import {
   zPlaceOrderResult,
   zPrescribeResult,
   zPrescription,
+  zBeneficiary360,
+  zCaseListItem,
+  zCoordinationTask,
+  zEscalation,
+  zExportResult,
+  zFinancialSummary,
+  zSettlement,
+  zUtilizationView,
   type ConsumeRequest,
   type DecisionRequest,
   type DispenseRequest,
+  type ExportRequest,
   type PlaceOrderRequest,
   type PrescribeRequest,
 } from "@mersal/contracts";
@@ -87,5 +96,33 @@ export class HttpApiClient implements ApiClient {
 
   executiveDashboard(scope: "executive" | "finance" | "director") {
     return getJson(`/reports/dashboards/${scope}`, zExecutiveDashboard);
+  }
+
+  // Case management (Phase 10.1) — assignment-scoped; the server re-authorizes every call (case-assignment ABAC).
+  myCases() {
+    return getJson(`/cases`, z.array(zCaseListItem));
+  }
+  beneficiary360(caseId: string) {
+    return getJson(`/cases/${encodeURIComponent(caseId)}/beneficiary-360`, zBeneficiary360);
+  }
+  caseTasks(caseId: string) {
+    return getJson(`/cases/${encodeURIComponent(caseId)}/tasks`, z.array(zCoordinationTask));
+  }
+  escalations() {
+    return getJson(`/cases/escalations`, z.array(zEscalation));
+  }
+
+  // Finance (Phase 10.2) — billing codes + amounts only; the finance service denies any clinical read.
+  utilization() {
+    return getJson(`/finance/utilization`, zUtilizationView);
+  }
+  settlements() {
+    return getJson(`/finance/settlements`, z.array(zSettlement));
+  }
+  financialSummary(dimension: "serviceline" | "category" | "provider") {
+    return getJson(`/finance/summaries?dimension=${dimension}`, zFinancialSummary);
+  }
+  exportReport(req: ExportRequest) {
+    return postJson(`/finance/exports`, req, zExportResult);
   }
 }

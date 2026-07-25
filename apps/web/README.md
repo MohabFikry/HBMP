@@ -18,7 +18,9 @@ with an `aria-live` announcement, full keyboard nav, RTL parity, and ≥44px tar
 | `/lab/queue`, `/imaging/queue` | Queue + consume | **Idempotency-Key** consume with replay handling; masked patient ref, no Rx. |
 | `/pharmacy/queue` | Dispense | Per-line partial dispense, out-of-stock guard, idempotent dispense; no results. |
 | `/approvals/worklist` | Worklist + decision | **US-060** mandatory rationale (shared zod refine) + break-glass. |
-| `/director/dashboards`, `/finance/utilization` | Executive dashboard | **US-073** every chart has a data-table toggle; finance scope shows no diagnoses. |
+| `/director/dashboards` | Executive dashboard | **US-073** every chart has a data-table toggle. |
+| `/cases/my-cases`, `/cases/escalations` | Case manager (10.3) | Assignment-scoped My Cases → **coordination-360** (diagnoses coord-visible; notes/rx/results masked "summary only"); escalations. |
+| `/finance/utilization`, `/finance/settlements`, `/finance/summaries`, `/finance/exports` | Finance (10.3) | Billing codes + amounts only — **no clinical route or column** (finance ≠ diagnosis); summaries have a US-073 data-table toggle; exports confirm + audited. |
 
 ### API layer (`src/api/`)
 

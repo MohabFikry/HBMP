@@ -1,8 +1,11 @@
 import type {
   ApprovalItem,
   ApprovalReview,
+  Beneficiary360,
+  CaseListItem,
   ConsumeRequest,
   ConsumeResult,
+  CoordinationTask,
   DecisionRequest,
   DecisionResult,
   DispenseRequest,
@@ -10,7 +13,11 @@ import type {
   EligibilityHit,
   EligibilityResult,
   Encounter,
+  Escalation,
   ExecutiveDashboard,
+  ExportRequest,
+  ExportResult,
+  FinancialSummary,
   LabOrder,
   PatientListItem,
   PlaceOrderRequest,
@@ -18,6 +25,8 @@ import type {
   PrescribeRequest,
   PrescribeResult,
   Prescription,
+  Settlement,
+  UtilizationView,
 } from "@mersal/contracts";
 
 /**
@@ -54,6 +63,18 @@ export interface ApiClient {
 
   // Executive dashboard (Phase 8)
   executiveDashboard(scope: "executive" | "finance" | "director"): Promise<ExecutiveDashboard>;
+
+  // Case management — assignment-scoped (Phase 10.1). 360 is a coordination SUMMARY.
+  myCases(): Promise<CaseListItem[]>;
+  beneficiary360(caseId: string): Promise<Beneficiary360>;
+  caseTasks(caseId: string): Promise<CoordinationTask[]>;
+  escalations(): Promise<Escalation[]>;
+
+  // Finance — billing codes + amounts only, no diagnosis (Phase 10.2).
+  utilization(): Promise<UtilizationView>;
+  settlements(): Promise<Settlement[]>;
+  financialSummary(dimension: "serviceline" | "category" | "provider"): Promise<FinancialSummary>;
+  exportReport(req: ExportRequest): Promise<ExportResult>;
 }
 
 /**

@@ -53,9 +53,9 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 9 | Frontend | 9.1 Design system in code | ☑ | 9e38a22 |
 | 9 | Frontend | 9.2 Role portals + permission routing | ☑ | a282450 |
 | 9 | Frontend | 9.3 Flagship screens + `@mersal/contracts` | ☑ | 5197336 |
-| 10 | Case + Finance | 10.1 `case-service` + beneficiary-360 | ☐ | |
-| 10 | Case + Finance | 10.2 `finance-service` (no-diagnosis) | ☐ | |
-| 10 | Case + Finance | 10.3 Case + Finance portals | ☐ | |
+| 10 | Case + Finance | 10.1 `case-service` + beneficiary-360 | ☑ | c1e0c63 |
+| 10 | Case + Finance | 10.2 `finance-service` (no-diagnosis) | ☑ | e23c2fd |
+| 10 | Case + Finance | 10.3 Case + Finance portals | ☑ | (10.3) |
 | 10b | Claims Mgmt | 10b.1 `claims-service` + auto-derived claims (no double-billing) | ☐ | |
 | 10b | Claims Mgmt | 10b.2 Batching + batch lifecycle (single-open-batch) | ☐ | |
 | 10b | Claims Mgmt | 10b.3 Automated pre-adjudication (9-step, all reasons) | ☐ | |
@@ -79,5 +79,15 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
   six flagship screens are `React.lazy` (per-portal chunks); the dev app uses `DevApiClient` fixtures
   (bilingual, contract-valid, no PHI) — swap `HttpApiClient` once services are reachable behind Kong. CI in
   `.github/workflows/frontend-ci.yml`.
+- **Phase 10 (Case + Finance):** two new .NET services — `case-service` (schema `case`, the `case-assignment`
+  ABAC condition in `libs/authz`, beneficiary-360 coordination summary, PHI-read audited) and `finance-service`
+  (schema `finance`, the `FinanceProjection` whitelist + `FinanceCannotReadDiagnosisTests` proving finance ≠
+  diagnosis, settlements priced from `provider_contract`). Plus the **Case Manager + Finance portals** in
+  `apps/web` (10.3): `CaseManager.tsx` (My Cases → coordination-360 with masked clinical sections + tasks;
+  Escalations) and `FinancePortal.tsx` (Utilization / Settlements / Summaries with US-073 data-table toggle /
+  audited Exports) — both `React.lazy` chunks. New `@mersal/contracts` modules `case.ts` + `finance.ts` (the
+  finance≠diagnosis + coordination-summary invariants are structural + contract-tested). Frontend suite:
+  contracts 9 + design-system 18 + web 21 = **48 tests**. Backend: case-service 27 + finance-service 14.
+  DB-integration tests env-gated (`CASE_TEST_DB` / `FINANCE_TEST_DB`, hbmp superuser conn).
 - Docker/Compose, Helm, OpenTofu: **not yet installed** (Docker needs root). Tier 1 infra authored in `infra/compose`; run once Docker is installed.
 - Repo initialized in place at `/home/mohab/Mersal` with `HBMP-Design/` as a subfolder.
