@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { AppShell } from "../shell/AppShell";
@@ -5,6 +6,7 @@ import { LoginPage } from "../pages/LoginPage";
 import { SectionPage } from "../pages/SectionPage";
 import { Forbidden, NotFound } from "./Forbidden";
 import { ALL_ROUTES, portalForRole } from "../portals/catalog";
+import { screenFor } from "../screens/registry";
 
 /** Home = the first section of the signed-in user's portal that they can access. */
 function useHomePath(): string {
@@ -39,7 +41,21 @@ function ResolveRoute() {
   const entry = ALL_ROUTES.find((r) => r.fullPath === path);
   if (!entry) return <NotFound />;
   if (!can(entry.section.permission)) return <Forbidden path={path} />;
-  return <SectionPage section={entry.section} />;
+  // A wired flagship screen (9.3) takes over its route; every other section keeps the 9.2 stub.
+  // Screens are code-split (React.lazy), so a Suspense boundary covers the per-portal chunk load.
+  const screen = screenFor(path);
+  if (!screen) return <SectionPage section={entry.section} />;
+  return (
+    <Suspense
+      fallback={
+        <div className="async-loading" role="status" aria-live="polite" style={{ padding: "var(--sp6)" }}>
+          <span className="mrs-spin" aria-hidden="true" />
+        </div>
+      }
+    >
+      {screen()}
+    </Suspense>
+  );
 }
 
 function AuthedApp() {

@@ -16,6 +16,23 @@ on:
       - "libs/contracts/**"
 
 jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Type-check
+        run: pnpm --filter @mersal/contracts lint
+      - name: Contract invariant tests (US-060 / US-073)
+        run: pnpm --filter @mersal/contracts test
+
   design-system:
     runs-on: ubuntu-latest
     steps:

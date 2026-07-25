@@ -1,9 +1,31 @@
 # @mersal/web
 
-Mersal HBMP role portals (Phase 9.2). A single React app that presents **a distinct, code-split portal per
-role** over the shared `@mersal/design-system`, with **permission-driven routing** so a user never sees a
-route or menu item they cannot use (US-070 / US-071). Phase 9.3 fills specific sections with their wired
-flagship screens; the shell, auth, routing, and min-necessary navigation are live now.
+Mersal HBMP role portals (Phase 9.2/9.3). A single React app that presents **a distinct, code-split portal
+per role** over the shared `@mersal/design-system`, with **permission-driven routing** so a user never sees a
+route or menu item they cannot use (US-070 / US-071). Phase 9.3 wires six **flagship screens** to their phase
+APIs via typed zod clients.
+
+## Flagship screens (9.3)
+
+Each screen is `React.lazy` (its own chunk), consumes the API through a typed `ApiClient` whose responses are
+zod-validated against `@mersal/contracts`, and implements the four states (loading / empty / error / success)
+with an `aria-live` announcement, full keyboard nav, RTL parity, and ≥44px targets.
+
+| Route | Screen | Notes |
+|-------|--------|-------|
+| `/reception/eligibility` | Eligibility search | Min-necessary — coverage + visit gate only, **no clinical fields**. |
+| `/clinician/encounter` | Consultation / EMR | Treating-gated patient list → SOAP/vitals/dx tabs, place order + prescribe. |
+| `/lab/queue`, `/imaging/queue` | Queue + consume | **Idempotency-Key** consume with replay handling; masked patient ref, no Rx. |
+| `/pharmacy/queue` | Dispense | Per-line partial dispense, out-of-stock guard, idempotent dispense; no results. |
+| `/approvals/worklist` | Worklist + decision | **US-060** mandatory rationale (shared zod refine) + break-glass. |
+| `/director/dashboards`, `/finance/utilization` | Executive dashboard | **US-073** every chart has a data-table toggle; finance scope shows no diagnoses. |
+
+### API layer (`src/api/`)
+
+`ApiClient` is an interface (like `AuthClient`). `DevApiClient` backs the dev app + tests with bilingual,
+contract-valid fixtures (never real PHI) and supports `latencyMs` (loading) + `fault: "error" | "empty"`
+(states) + Idempotency-Key **replay** (returns `replayed: true` instead of double-applying). `HttpApiClient`
+is the drop-in that talks to the services behind Kong (`/api/v1`), zod-validating every response.
 
 ## What's here
 

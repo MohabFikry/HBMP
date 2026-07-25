@@ -17,7 +17,7 @@ describe("axe — portal shell & login (a11y gate)", () => {
 
   it("portal shell (banner + navigation + main landmarks) has no serious/critical violations", async () => {
     const { container } = renderApp("/", "medical_approval");
-    await screen.findByRole("heading", { name: "Worklist" });
+    await screen.findByRole("heading", { name: "Approval worklist" });
     // Landmarks present.
     expect(screen.getByRole("banner")).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Approval worklist" })).toBeInTheDocument();

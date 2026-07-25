@@ -52,7 +52,7 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 8b | Admin Platform | 8b.3 Tenant/provider + break-glass governance | ☑ | 8107dc1 |
 | 9 | Frontend | 9.1 Design system in code | ☑ | 9e38a22 |
 | 9 | Frontend | 9.2 Role portals + permission routing | ☑ | a282450 |
-| 9 | Frontend | 9.3 Flagship screens | ☐ | |
+| 9 | Frontend | 9.3 Flagship screens + `@mersal/contracts` | ☑ | (9.3) |
 | 10 | Case + Finance | 10.1 `case-service` + beneficiary-360 | ☐ | |
 | 10 | Case + Finance | 10.2 `finance-service` (no-diagnosis) | ☐ | |
 | 10 | Case + Finance | 10.3 Case + Finance portals | ☐ | |
@@ -71,9 +71,13 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 
 ## Environment notes
 - .NET 8 SDK: user-local `~/.dotnet` (use `./dotnet.sh`). Node 20, psql 17 present.
-- **Frontend (Phase 9):** pnpm workspace at repo root (`pnpm-workspace.yaml`); `apps/design-system` is live.
-  Node 20 ⇒ use **pnpm 9** (`npx pnpm@9.15.9 …`); pnpm ≥10 needs Node 22. Design-system: `pnpm --filter
-  @mersal/design-system {dev,test,build,lint}` (test = vitest unit + **axe** gate). CI in
+- **Frontend (Phase 9):** pnpm workspace at repo root (`pnpm-workspace.yaml`); `apps/design-system` (9.1),
+  `apps/web` (9.2 portals + 9.3 flagship screens), and `libs/contracts` (`@mersal/contracts` — shared zod
+  mirror) are live. Node 20 ⇒ use **pnpm 9** (`npx pnpm@9.15.9 …`); pnpm ≥10 needs Node 22. Filters:
+  `pnpm --filter @mersal/{design-system,web,contracts} {dev,test,build,lint}` (design-system + web test =
+  vitest unit + **axe** gate). Frontend suite: contracts 5 + design-system 18 + web 18 = **41 tests**. The
+  six flagship screens are `React.lazy` (per-portal chunks); the dev app uses `DevApiClient` fixtures
+  (bilingual, contract-valid, no PHI) — swap `HttpApiClient` once services are reachable behind Kong. CI in
   `.github/workflows/frontend-ci.yml`.
 - Docker/Compose, Helm, OpenTofu: **not yet installed** (Docker needs root). Tier 1 infra authored in `infra/compose`; run once Docker is installed.
 - Repo initialized in place at `/home/mohab/Mersal` with `HBMP-Design/` as a subfolder.
