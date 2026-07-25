@@ -10,6 +10,7 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
 
     public DbSet<Prescription> Prescriptions => Set<Prescription>();
     public DbSet<PrescriptionLine> PrescriptionLines => Set<PrescriptionLine>();
+    public DbSet<DispenseEvent> DispenseEvents => Set<DispenseEvent>();
     public DbSet<Referral> Referrals => Set<Referral>();
     public DbSet<PrescriptionAlert> PrescriptionAlerts => Set<PrescriptionAlert>();
     public DbSet<ProcessedRequest> ProcessedRequests => Set<ProcessedRequest>();
@@ -35,7 +36,20 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
             e.ToTable("prescription_line");
             e.HasKey(x => x.PrescriptionLineId);
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            // xmin optimistic-concurrency guard: the dispense UPDATE only applies when the line hasn't moved,
+            // so exactly one racer wins under parallel dispense (23 §3 "Pharmacy-specific guards").
+            e.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
+            e.Ignore(x => x.QuantityRemaining);
             e.HasIndex(x => x.PrescriptionId);
+        });
+
+        b.Entity<DispenseEvent>(e =>
+        {
+            e.ToTable("dispense_event");
+            e.HasKey(x => x.DispenseId);
+            e.Property(x => x.IdempotencyKey).HasMaxLength(80);
+            e.HasIndex(x => x.IdempotencyKey).IsUnique();
+            e.HasIndex(x => x.PrescriptionLineId);
         });
 
         b.Entity<Referral>(e =>

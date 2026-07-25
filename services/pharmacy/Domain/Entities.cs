@@ -38,6 +38,29 @@ public sealed class PrescriptionLine
     public decimal QuantityDispensed { get; set; }       // accumulator, 0 ≤ dispensed ≤ prescribed (phase 6)
     public int RefillsAllowed { get; set; }
     public RxLineStatus Status { get; set; } = RxLineStatus.Active;
+    public uint RowVersion { get; set; }                 // xmin — optimistic-concurrency guard on dispense (phase 6)
+
+    public decimal QuantityRemaining => QuantityPrescribed - QuantityDispensed;
+}
+
+/// <summary>Append-only dispense record (22-data-dictionary §8.3, extended with <see cref="ExpiryDate"/> for lot
+/// expiry). One immutable row per dispense: it is the duplicate-proof anchor — <see cref="IdempotencyKey"/> is UNIQUE
+/// so a replayed key is rejected by the DB and mapped to "return prior outcome". Batch + expiry are captured on every
+/// dispense; a policy-approved substitution records <see cref="SubstitutedDrugId"/> + <see cref="SubstitutionReason"/>.
+/// Never updated or soft-deleted — full history lives in audit_event.</summary>
+public sealed class DispenseEvent
+{
+    public Guid DispenseId { get; set; }
+    public Guid PrescriptionLineId { get; set; }
+    public Guid DispensingPharmacyId { get; set; }
+    public decimal Quantity { get; set; }
+    public string IdempotencyKey { get; set; } = default!;   // UNIQUE — dedup guarantee
+    public string BatchNo { get; set; } = default!;
+    public DateOnly ExpiryDate { get; set; }
+    public Guid? SubstitutedDrugId { get; set; }             // phase 6.3 — policy-approved alternative actually dispensed
+    public string? SubstitutionReason { get; set; }
+    public DateTimeOffset DispensedAt { get; set; }
+    public Guid DispensedBy { get; set; }
 }
 
 /// <summary>Referral lifecycle (§4): Requested → Accepted → Scheduled → Completed; plus Cancelled, Expired.

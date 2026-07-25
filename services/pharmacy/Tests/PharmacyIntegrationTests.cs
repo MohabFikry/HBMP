@@ -8,6 +8,7 @@ namespace Mersal.Pharmacy.Tests;
 /// <summary>Phase 4.3 persistence at the datastore (env-gated <c>PHARMACY_TEST_DB</c>): a prescription + lines
 /// round-trip with the routed status, a referral persists in Requested, the sequence issuer is monotonic, and the
 /// DB enforces the dispense accumulator invariant (0 ≤ dispensed ≤ prescribed). Self-cleans by scope tag.</summary>
+[Collection("pharmacy-db")]
 public class PharmacyIntegrationTests
 {
     private static readonly string? Db = Environment.GetEnvironmentVariable("PHARMACY_TEST_DB");

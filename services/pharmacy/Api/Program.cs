@@ -11,6 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 var masterDataUrl = builder.Configuration["MasterData:BaseUrl"] ?? "http://masterdata-service:8080";
 var emrUrl = builder.Configuration["Emr:BaseUrl"] ?? "http://emr-service:8080";
+var patientUrl = builder.Configuration["Patient:BaseUrl"] ?? "http://patient-service:8080";
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("pharmacy-service");
@@ -22,11 +23,17 @@ builder.Services.AddPharmacyInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<PharmacyGate>();
+builder.Services.AddScoped<DispensingGate>();
+builder.Services.AddScoped<DispenseExecutor>();
 
-// Named clients for the advisory screener (masterdata interactions/allergies + emr allergy list).
+// Named clients for the advisory screener (masterdata interactions/allergies + emr allergy list) + phase-6 lookups.
 builder.Services.AddHttpClient("masterdata", c => c.BaseAddress = new Uri(masterDataUrl));
 builder.Services.AddHttpClient("emr", c => c.BaseAddress = new Uri(emrUrl));
+builder.Services.AddHttpClient("patient", c => c.BaseAddress = new Uri(patientUrl));
 builder.Services.AddScoped<IPrescribingScreener, HttpPrescribingScreener>();
+// Phase 6.3 formulary/PBM stand-in (masterdata approved-alternatives) + phase-6.1 beneficiary resolver (patient-service).
+builder.Services.AddScoped<IFormularyService, MasterDataFormularyService>();
+builder.Services.AddScoped<IBeneficiaryResolver, HttpBeneficiaryResolver>();
 // Typed clients: drug validation (masterdata) + treating relationship (emr) — both fail-closed on writes.
 builder.Services.AddHttpClient<IDrugValidator, HttpDrugValidator>(c => c.BaseAddress = new Uri(masterDataUrl));
 builder.Services.AddHttpClient<ITreatingRelationshipClient, HttpTreatingRelationshipClient>(c => c.BaseAddress = new Uri(emrUrl));
@@ -48,6 +55,7 @@ if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "pharmacy-service" })).AllowAnonymous();
 
 app.MapPrescriptions();
+app.MapDispensing();
 app.MapReferrals();
 
 app.Run();

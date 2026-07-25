@@ -30,6 +30,23 @@ public interface ITreatingRelationshipClient
     Task<bool> TreatsAsync(Guid beneficiaryId, string? bearerToken, CancellationToken ct = default);
 }
 
+/// <summary>Formulary / PBM check (phase 6.3, US-052). Today it returns the masterdata approved-alternatives for a
+/// prescribed drug; it is a clearly-marked, swappable stand-in for a future external PBM/formulary integration
+/// (<c>IPbmService</c>) — the dispensing rule that only a policy-approved alternative may be substituted depends on
+/// this interface, not on any concrete provider. HTTP impl in Api; tests inject a fake.</summary>
+public interface IFormularyService
+{
+    Task<IReadOnlyList<Guid>> ApprovedAlternativesAsync(Guid drugId, string? bearerToken, CancellationToken ct = default);
+}
+
+/// <summary>Resolves a beneficiary id from a policy / passport / member number (phase 6.1 search) via
+/// patient-service. Best-effort and fail-safe (a lookup failure yields no match rather than leaking). HTTP impl in
+/// Api; tests inject a fake. Rx-number and beneficiary-id searches do not need it.</summary>
+public interface IBeneficiaryResolver
+{
+    Task<Guid?> ResolveAsync(string? policyNo, string? passport, string? memberNo, string? bearerToken, CancellationToken ct = default);
+}
+
 /// <summary>Issues the next monotonic business key for a year from a named counter table (rx_seq / referral_seq).</summary>
 public sealed class SequenceIssuer(PharmacyDbContext db)
 {

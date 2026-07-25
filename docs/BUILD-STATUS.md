@@ -38,9 +38,9 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 5 | Lab/Imaging | 5.1 Provider order queue + search | ☑ | 0c88fec |
 | 5 | Lab/Imaging | 5.2 Atomic idempotent consume | ☑ | 0c88fec |
 | 5 | Lab/Imaging | 5.3 Result upload + routing | ☑ | 0c88fec |
-| 6 | Pharmacy | 6.1 Dispensable search | ☐ | |
-| 6 | Pharmacy | 6.2 Partial dispensing (batch/expiry) | ☐ | |
-| 6 | Pharmacy | 6.3 Substitution + out-of-stock | ☐ | |
+| 6 | Pharmacy | 6.1 Dispensable search | ☑ | (6) |
+| 6 | Pharmacy | 6.2 Partial dispensing (batch/expiry) | ☑ | (6) |
+| 6 | Pharmacy | 6.3 Substitution + out-of-stock | ☑ | (6) |
 | 7 | Approvals | 7.1 `approvals-service` + worklist + review | ☐ | |
 | 7 | Approvals | 7.2 Decisions + downstream effects | ☐ | |
 | 7 | Approvals | 7.3 Break-glass + SLA/TAT | ☐ | |

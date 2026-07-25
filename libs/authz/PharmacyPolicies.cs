@@ -7,14 +7,29 @@ namespace Mersal.Authz;
 /// </summary>
 public static class PharmacyPolicies
 {
-    public const string Version = "4.3";
+    public const string Version = "6.0";
 
     public const string RxCreate = "rx:create";
     public const string RxRead = "rx:read";
     public const string ReferralCreate = "referral:create";
 
+    /// <summary>Phase 6: a pharmacist dispenses a prescription line for their OWN dispensing pharmacy.</summary>
+    public const string Dispense = "rx:dispense";
+
     public static IReadOnlyList<PolicyRule> Rules() =>
     [
+        // Phase 6: a pharmacist dispenses a line at their OWN pharmacy (tenant + provider-ownership). No treating
+        // relationship — a pharmacist does not treat the patient; a prescription is dispensable network-wide. The Rx
+        // reject rule + lot-expiry + accumulator guards are enforced in the dispense domain, not here. Default-deny
+        // for everyone else (a doctor cannot dispense). Note the distinct resourceType keeps this rule separate from
+        // the treating-gated prescribe rules so PolicyBundle.Match returns the right one.
+        new PolicyRule
+        {
+            Action = Dispense, ResourceType = "prescription_line",
+            Roles = Set("pharmacist"), Scopes = Set("pharmacy:dispense"),
+            RequiredConditions = [AbacConditions.TenantMatch, AbacConditions.ProviderOwnership],
+            Sensitive = true,
+        },
         new PolicyRule
         {
             Action = RxCreate, ResourceType = "prescription",

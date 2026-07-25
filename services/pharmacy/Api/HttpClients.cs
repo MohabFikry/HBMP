@@ -112,6 +112,61 @@ public sealed class HttpPrescribingScreener(IHttpClientFactory factory) : IPresc
     private sealed record AllergyCheckDto(bool Conflict, string? MatchedOn);
 }
 
+/// <summary>Formulary/PBM stand-in (phase 6.3): today it reads masterdata's policy-approved alternatives for a drug.
+/// A clearly-marked, swappable interface (<see cref="IFormularyService"/>) so a future external PBM can replace it
+/// without touching the dispensing rule. Fail-safe: a lookup failure yields no alternatives → substitution is blocked
+/// and routed to approvals (never dispense off-list).</summary>
+public sealed class MasterDataFormularyService(IHttpClientFactory factory) : IFormularyService
+{
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    public async Task<IReadOnlyList<Guid>> ApprovedAlternativesAsync(Guid drugId, string? bearerToken, CancellationToken ct = default)
+    {
+        try
+        {
+            var masterdata = factory.CreateClient("masterdata");
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/drugs/by-id/{drugId}/alternatives");
+            BearerHeader.Apply(req, bearerToken);
+            using var resp = await masterdata.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) return [];
+            var body = await resp.Content.ReadFromJsonAsync<AlternativesDto>(Json, ct);
+            return body?.Alternatives ?? [];
+        }
+        catch (HttpRequestException) { return []; }   // fail-safe: no off-list substitution on transport failure
+    }
+
+    private sealed record AlternativesDto(Guid[]? Alternatives);
+}
+
+/// <summary>Resolves a beneficiary id from a policy/passport/member number via patient-service (phase 6.1 search).
+/// Best-effort and fail-safe — a lookup failure returns null (no match) rather than leaking or erroring.</summary>
+public sealed class HttpBeneficiaryResolver(IHttpClientFactory factory) : IBeneficiaryResolver
+{
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    public async Task<Guid?> ResolveAsync(string? policyNo, string? passport, string? memberNo, string? bearerToken, CancellationToken ct = default)
+    {
+        var q = new List<string>();
+        if (!string.IsNullOrWhiteSpace(policyNo)) q.Add($"policyNo={Uri.EscapeDataString(policyNo)}");
+        if (!string.IsNullOrWhiteSpace(passport)) q.Add($"passport={Uri.EscapeDataString(passport)}");
+        if (!string.IsNullOrWhiteSpace(memberNo)) q.Add($"memberNo={Uri.EscapeDataString(memberNo)}");
+        if (q.Count == 0) return null;
+        try
+        {
+            var patient = factory.CreateClient("patient");
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/beneficiaries/resolve?{string.Join('&', q)}");
+            BearerHeader.Apply(req, bearerToken);
+            using var resp = await patient.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) return null;
+            var body = await resp.Content.ReadFromJsonAsync<ResolveDto>(Json, ct);
+            return body?.BeneficiaryId;
+        }
+        catch (HttpRequestException) { return null; }
+    }
+
+    private sealed record ResolveDto(Guid? BeneficiaryId);
+}
+
 /// <summary>Treating-relationship check via emr-service (token forwarded, boolean only). Fails closed.</summary>
 public sealed class HttpTreatingRelationshipClient(HttpClient http) : ITreatingRelationshipClient
 {
