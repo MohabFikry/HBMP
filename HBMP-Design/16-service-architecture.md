@@ -24,15 +24,15 @@ HBMP is a **microservices** platform of reusable core services (identity, patien
 | Service | Responsibility | Owned data (schema) | Key APIs | Publishes | Consumes |
 |---|---|---|---|---|---|
 | **api-gateway** | Edge routing, authN validation, rate limit, request aggregation entry | none (config) | all `/api/v1/*` proxied | — | — |
-| **identity/auth** | Keycloak (OIDC) integration, RBAC, token/scope issuance | `identity` | `/users`, `/roles`, token introspection | `UserProvisioned`, `RoleAssigned` | `ProviderOnboarded` |
+| **identity/auth** | Keycloak (OIDC) integration, RBAC, token/scope issuance, **user↔branch assignment + active-branch context** *(Phase 14)* | `identity` | `/users`, `/roles`, token introspection, `/users/{id}/branch-assignments`, `/me/branches`, `/me/active-branch` | `UserProvisioned`, `RoleAssigned`, `UserBranchAssigned`, `UserBranchRevoked`, `ActiveBranchSwitched`, `BranchScopeDenied` | `ProviderOnboarded`, `BranchCreated`, `BranchStatusChanged` |
 | **patient-service** | Beneficiary master, identifiers, contacts, family | `patient` | `/beneficiaries`, `/beneficiaries/{id}/identifiers` | `BeneficiaryRegistered`, `BeneficiaryStatusChanged` | `DocumentAttached` |
 | **policy-service** | Policies, coverage, limits, benefit categories | `policy` | `/policies`, `/coverages` | `CoverageActivated`, `CoverageLimitChanged` | `BeneficiaryStatusChanged` |
 | **eligibility-service** | Compute + cache eligibility snapshots | `eligibility` | `/eligibility/check` | `EligibilityRecomputed` | `CoverageActivated`, `CoverageLimitChanged`, `OrderLinesConsumed`, `RxLinesDispensed` |
 | **emr-service** | Appointments, encounters, SOAP notes, diagnoses, vitals, allergies, med history | `emr` | `/appointments`, `/encounters`, `/encounters/{id}/notes` | `EncounterCreated`, `EncounterFinished`, `DiagnosisRecorded` | `BeneficiaryRegistered` |
-| **orders-service** | Investigation orders, lines, fulfillment (consume) | `orders` | `/investigation-orders`, `.../consume` | `OrderRequested`, `OrderApproved`, `OrderLinesConsumed`, `OrderCompleted` | `AuthorizationDecided`, `EncounterCreated` |
+| **orders-service** | Investigation orders, lines, fulfillment (consume), **sensitive-result gating + report access requests/grants** *(Phase 14)* | `orders` | `/investigation-orders`, `.../consume`, `/report-access-requests`, `/report-access-requests/{id}/decision`, `/report-access-grants` | `OrderRequested`, `OrderApproved`, `OrderLinesConsumed`, `OrderCompleted`, `SensitiveResultRestricted`, `ReportAccessRequested`, `ReportAccessInfoRequested`, `ReportAccessApproved`, `ReportAccessDenied`, `ReportAccessGrantExpired`, `ReportAccessGrantRevoked`, `SensitiveResultReadUnderGrant` | `AuthorizationDecided`, `EncounterCreated`, `ExaminationTypeChanged` |
 | **approvals-service** | Authorizations & decisions, referrals | `approvals` | `/authorizations`, `.../decision`, `/referrals` | `AuthorizationRequested`, `AuthorizationDecided`, `ReferralCreated` | `OrderRequested`, `PrescriptionSubmitted` |
 | **pharmacy-service** | Prescriptions, lines, dispense events | `pharmacy` | `/prescriptions`, `.../dispense` | `PrescriptionSubmitted`, `PrescriptionApproved`, `RxLinesDispensed` | `AuthorizationDecided` |
-| **provider-service** | Providers, locations, contracts, service lines | `provider` | `/providers`, `/providers/{id}/contracts` | `ProviderOnboarded`, `ContractActivated` | — |
+| **provider-service** *(remit widened, Phase 14: **network & facilities**)* | Contracted providers, locations, contracts, service lines **plus internal Mersal branches and practitioners/specialties** — kept as separate tables ([37](37-branch-scoping-and-clinical-sensitivity.md)) | `provider` | `/providers`, `/providers/{id}/contracts`, `/branches`, `/practitioners`, `/practitioners/{id}/specialties`, `/practitioners/{id}/branch-assignments`, `/specialties` | `ProviderOnboarded`, `ContractActivated`, `BranchCreated`, `BranchUpdated`, `BranchStatusChanged`, `PractitionerCreated`, `PractitionerSpecialtyChanged`, `PractitionerBranchAssigned`, `PractitionerBranchRevoked` | — |
 | **claims-service** *(Phase 10b)* | Claim origination (auto-derived, provider-submitted, beneficiary reimbursement), batching, pre-adjudication, line-level decisions, adjustments, settlement advice ([36-claims-management.md](36-claims-management.md)) | `claims` | `/claims`, `/claims/{id}/lines/{lineId}/decision`, `/claim-batches`, `/claim-batches/{id}/settlement-advice`, `/reimbursement-requests` | `ClaimCreated`, `ClaimSubmitted`, `ClaimAdjudicated`, `ClaimLineDecided`, `ClaimApproved`, `ClaimPartiallyApproved`, `ClaimDenied`, `ClaimAdjusted`, `ClaimVoided`, `ClaimAppealed`, `ReimbursementSubmitted`, `ReimbursementMatched`, `ReimbursementRequiresManualAssessment`, `BatchCreated`, `BatchUnderReview`, `BatchDecided`, `SettlementAdviceIssued` | `OrderLinesConsumed`, `RxLinesDispensed`, `AuthorizationDecided`, `CoverageChanged` |
 | **notification-service** | Templated multi-channel notifications | `notification` | `/notifications` (internal) | `NotificationSent` | *(most domain events)* |
 | **reporting-service** | Read models, dashboards, exports | read replicas + OpenSearch | `/reports/*` | — | *(all domain events)* |
@@ -54,6 +54,22 @@ Supporting infra: **Event Bus** (NATS JetStream domain events), **Object Storage
 - **Outbox + idempotency** as everywhere else: every claims event is written in the same transaction as the state change and relayed; consumers dedupe on `event.id`; claim submission, decision, adjustment and batch settlement require an `Idempotency-Key` ([17-api-specifications.md](17-api-specifications.md)). `UNIQUE` on the fulfillment/dispense reference enforces one payable line per delivered item (`DUPLICATE_CLAIM`), and a partial unique index keeps a claim in at most one open batch.
 
 > **Naming note:** `OrderLinesConsumed` and `RxLinesDispensed` are the names the **implemented** orders/pharmacy services actually emit (phases 5 & 6) — this catalog and [36](36-claims-management.md) match the shipped code. `CoverageChanged` in [36](36-claims-management.md) corresponds to this catalog's `CoverageActivated` + `CoverageLimitChanged` pair.
+
+### 2.2 provider-service widens to "network & facilities"; branch & sensitivity ownership (Phase 14)
+
+Phase 14 adds **multi-branch awareness**, **practitioner specialty** and **sensitivity-gated results** ([37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md) is the authoritative design). **No new service is introduced.** Ownership is distributed across four existing contexts:
+
+| Owning service | New tables (Phase 14) | Responsibility |
+|---|---|---|
+| **provider-service** *(remit widened)* | `branch`, `practitioner`, `specialty`, `practitioner_specialty`, `practitioner_branch_assignment` | The **facilities & clinical-workforce registry**. `branch` is Mersal-operated **internal** reference data (six seeded rows: `ASW`, `ALX`, `OCT`, `MAA`, `DOK`, `NSR`); `provider`/`provider_location` remain the **contracted third-party** network. **They are separate tables and must stay separate** — only branches are subject to staff branch-scoping, and no provider-side principal may enumerate them. |
+| **identity-service** | `user_branch_assignment` | Who may work where. `assignment_type` ∈ {`Home`,`Additional`}, validity window, status; **exactly one active `Home` per user** enforced by a partial unique index. Computes the **permitted branch set** and validates the **`X-Active-Branch`** header on every request (absent ⇒ Home; outside the set ⇒ `403` + `BranchScopeDenied`). Assignments are administered by Org Admin / Network Team — **never self-granted**. |
+| **masterdata-service** | `examination_type` | The orderable catalogue and its **`sensitivity_level`** (`Standard` / `Sensitive` / `HighlySensitive`) + `sensitive_category`. Classification is **configuration ratified by the Medical Director + DPO**, not code. |
+| **orders-service** | `report_access_request`, `report_access_grant` | Owns and **enforces the sensitive gate**. Order lines and results carry a **denormalized `sensitivity_level` pinned at order creation**, so gating never depends on a cross-service join at read time. Runs the release-request workflow and issues **time-boxed, single-result, non-transferable** grants. |
+
+- **The gate is a projection, not a filter.** For a result where `sensitivity_level != 'Standard'`, orders-service projects **existence metadata only** (category, date, status, ordering branch, `RESTRICTED` marker) to every principal except the **authoring/ordering doctor** — **including approvals-service's reviewers and case managers**. Content is released only under an **active, unexpired, unrevoked grant**, and **every read under a grant emits `SensitiveResultReadUnderGrant`**, separately from ordinary PHI-read audit. Break-glass still works and is *loud*: author + Medical Director + DPO notified, retrospective review mandatory.
+- **Branch scoping is a shared authorization concern, not a service.** `libs/authz` gains the **`BranchScope`** ABAC condition and `RowScope.BranchIds` / `BranchUnrestricted`, mirroring the existing provider-scoping shape; each policy bundle declares its scope mode (EMR appointment/queue reads require `BranchScope`; approvals/finance/claims set `BranchUnrestricted`). Optional PostgreSQL **RLS on `branch_id`** (session GUC) is defence in depth on branch-scoped tables, mirroring the proven `provider_id` pattern.
+- **Cross-service references are values, not FKs** — `branch_id`, `practitioner_id`, `examination_type_id` are carried as identifiers with denormalized display fields (`branch_code`, `branch_name_en/ar`, specialty name, `sensitivity_level`), consistent with schema-per-service isolation (§1).
+- **Alternative considered and deferred: a dedicated `org-service`.** A separate bounded context for facilities/workforce is architecturally cleaner and remains viable, but standing up, deploying, monitoring and backing up an extra service for **~6 slow-changing branch rows** is not defensible on an NGO budget. The decision is recorded as a **deferral, not a rejection**: the tables are kept in their own migration set with no FK coupling to `provider`/`provider_location`, so extraction later is a move, not a rewrite. Flag it if operational reality diverges ([37 §1](37-branch-scoping-and-clinical-sensitivity.md)).
 
 ---
 
@@ -207,6 +223,18 @@ Transport: **NATS JetStream** (durable streams, at-least-once, ordered subjects 
 | `hbmp.claims.ClaimLineDecided.v1` | claims | reporting, notification, audit | Roll decisions up to batch totals, notify payee |
 | `hbmp.claims.BatchDecided.v1` | claims | claims (settlement), reporting | Freeze rollups, trigger settlement advice |
 | `hbmp.claims.SettlementAdviceIssued.v1` | claims | notification, reporting, audit | Hand-off artifact to Finance/provider (no payment execution) |
+| `hbmp.provider.BranchCreated.v1` | provider | identity, emr, reporting, audit | Seed a new Mersal facility into scoping and reporting dimensions |
+| `hbmp.provider.BranchUpdated.v1` | provider | identity, emr, reporting | Propagate name/hours/contact changes to display projections |
+| `hbmp.provider.BranchStatusChanged.v1` | provider | identity, emr, reporting, audit | `Suspended`/`Closed` — stop new bookings, keep history readable |
+| `hbmp.provider.PractitionerBranchAssigned.v1` | provider | emr (availability/booking), reporting, audit | A doctor may be scheduled at this branch (booking validates against it) |
+| `hbmp.identity.ActiveBranchSwitched.v1` | identity | audit, reporting | Working context changed — actor, from, to, correlation id |
+| `hbmp.identity.BranchScopeDenied.v1` | identity | audit, security monitoring | Cross-branch or out-of-permitted-set attempt (**deny, not empty result**) |
+| `hbmp.orders.SensitiveResultRestricted.v1` | orders | reporting, notification, audit | A non-`Standard` result exists — project the **restricted form only** |
+| `hbmp.orders.ReportAccessRequested.v1` | orders | notification, audit | Route the justified release request to the authoring doctor |
+| `hbmp.orders.ReportAccessApproved.v1` | orders | notification, audit | Time-boxed, single-result, non-transferable grant issued |
+| `hbmp.orders.ReportAccessDenied.v1` | orders | notification, audit | Refusal with mandatory reason, notified to the requester |
+| `hbmp.orders.ReportAccessGrantExpired.v1` / `…GrantRevoked.v1` | orders | notification, audit | Access decays by default and is withdrawable on demand |
+| `hbmp.orders.SensitiveResultReadUnderGrant.v1` | orders | audit *(high severity)* | **Every** read under a grant — `grant_id`, `purpose_code`, actor — audited separately from ordinary PHI-read |
 | `hbmp.*.` (all) | all | audit, reporting | Audit + read-model projection |
 
 Versioning: event `type` carries `.vN`; new fields are additive; breaking changes bump the version and run **dual-publish** during migration.
@@ -315,6 +343,7 @@ This is a **choreographed saga** (no central orchestrator). Compensation on reje
   2. **Kong** validates scope and injects the tenant/provider context header.
   3. **PostgreSQL RLS** policies filter rows by `provider_id`/case-worker assignment (see [18-security-model.md](18-security-model.md)).
 - Beneficiary clinical data is **not** provider-partitioned (a refugee may be seen by many providers); access is governed by role + care-relationship, audited on every read.
+- **Branch scoping (Phase 14)** adds a *third*, orthogonal narrowing for internal staff: `BranchScoped` roles are filtered to their **active branch** (validated server-side from `X-Active-Branch`), `MemberScoped` roles span all branches, `ProviderScoped` roles are unaffected. It is enforced in the same three layers — token/identity claim (permitted set + active branch), gateway/service (`BranchScope` ABAC), PostgreSQL RLS on `branch_id` where enabled — and it **narrows only**: it never substitutes for provider-ownership, treating-relationship or the field-level minimum-necessary rules ([11](11-permission-matrix.md), [37 §3](37-branch-scoping-and-clinical-sensitivity.md)).
 
 ---
 
@@ -349,5 +378,6 @@ This is a **choreographed saga** (no central orchestrator). Compensation on reje
 - Status transition rules referenced by sagas: [23-state-machines.md](23-state-machines.md)
 - RLS/tenant/PHI enforcement: [18-security-model.md](18-security-model.md)
 - claims-service design (origination, batching, adjudication, settlement): [36-claims-management.md](36-claims-management.md)
+- Branch model, scope modes, practitioner specialty, sensitivity gating & release workflow (phase 14, §2.2): [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md)
 - Open-source infra realization: [25-deployment-architecture.md](25-deployment-architecture.md)
 - Authoritative stack: [0C-OPEN-SOURCE-STACK.md](0C-OPEN-SOURCE-STACK.md)

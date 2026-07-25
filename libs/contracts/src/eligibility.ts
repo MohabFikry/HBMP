@@ -17,17 +17,21 @@ export const zBeneficiaryIdentity = z.object({
   id: zId,
   name: zLocalized,
   cardNumber: z.string(),
-  dateOfBirth: zDate,
-  gender: z.enum(["female", "male", "unspecified"]),
+  // DOB + gender are optional: the reception min-necessary card omits them by design (they are not needed to
+  // confirm coverage at the desk). Full-demographic zones supply them; reception renders them only if present.
+  dateOfBirth: zDate.optional(),
+  gender: z.enum(["female", "male", "unspecified"]).optional(),
 });
 export type BeneficiaryIdentity = z.infer<typeof zBeneficiaryIdentity>;
 
 export const zCoverage = z.object({
   planName: zLocalized,
   band: zLocalized,
-  validUntil: zDate,
+  // validUntil + copayPercent are optional: the reception card summarises active benefit categories + remaining
+  // limits, and does not always carry a policy end-date or copay schedule. Screens render them only when present.
+  validUntil: zDate.optional(),
   /** Beneficiary copay as a percentage (0–100). */
-  copayPercent: z.number().min(0).max(100),
+  copayPercent: z.number().min(0).max(100).optional(),
   annualCapRemaining: z.string().optional(),
 });
 export type Coverage = z.infer<typeof zCoverage>;

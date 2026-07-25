@@ -40,6 +40,20 @@ no-show detection, slot release, and waitlist promotion (FR-APT-001..011, X3/P3)
   completed. Reception is `provider:own` + today's assigned beneficiaries; **T1 data only, no EMR**.
 - **Encounter on check-in** (FR-APT-008): checking in generates `ENC-…`, linking eligibility
   snapshot, provider, and beneficiary — the hand-off to the clinical workflow.
+- **Branch awareness (37, phase 14):** `appointment`, `appointment_slot`, `provider_availability`,
+  `waitlist_entry`, and the queue ticket carry **`branch_id`** alongside the existing `location_id`
+  (a Mersal-branch booking sets `branch_id`; an external provider-location booking leaves it NULL).
+  **BranchScoped** roles (Reception, Appointment Coordinator, Nurse, Doctor operational lists,
+  Branch/Clinic Manager) see **only the active branch** — a cross-branch request is **denied (403),
+  never silently empty**. **MemberScoped** roles (approvals, Medical Director, Case/Finance/Claims,
+  managers, admin) see **all branches** with an optional branch filter, never a restriction; external
+  providers stay **ProviderScoped** and are untouched. Active branch comes from `X-Active-Branch`,
+  defaulting to the user's Home branch and **always validated server-side** against the permitted set.
+- **Doctor↔branch rule:** a doctor may only have availability created or be booked at a **branch they
+  are assigned to** — otherwise `422` with a clear reason, validated at availability creation *and* at
+  booking (never UI-only). Doctor pickers filter by **active branch + specialty**.
+- **The no-double-book guarantee survives the retrofit:** adding `branch_id` must not weaken the
+  phase-3 `FOR UPDATE` lock or the partial-unique active-slot index — re-run the concurrency suite.
 - **Reminders:** event-driven, **bilingual (AR/EN)**, and **data-minimized — no diagnoses/clinical
   detail on outbound channels**. **In-app notifications are the current channel; SMS/WhatsApp are
   future.** Design templates channel-agnostic so SMS/WhatsApp can be added later.
@@ -65,9 +79,13 @@ no-show detection, slot release, and waitlist promotion (FR-APT-001..011, X3/P3)
 - ../../05-business-process-maps.md (P3 appointments; X3 no-show & cancellation)
 - ../../13-ux-flows.md (booking / queue flows)
 - ../../23-state-machines.md (§6 appointment/encounter lifecycle)
+- ../../37-branch-scoping-and-clinical-sensitivity.md (§2–3 branch model, scope modes; §4 doctor↔branch)
 
 ## Guardrails
 - Slot reservation must be atomic — never allow two bookings to win the same slot.
+- Branch scoping is **server-side and narrowing only** — it never replaces eligibility, treating-
+  relationship, or min-necessary rules, and a cross-branch read returns a denial, not an empty list.
+- Never trust `X-Active-Branch`; never let a client widen its own permitted branch set.
 - Never book against unavailable capacity or a blackout; never skip the booking-time eligibility check.
 - Free the slot and promote the waitlist on every cancel/no-show — no wasted capacity.
 - Reception queue exposes T1 identity/appointment data only — never EMR.

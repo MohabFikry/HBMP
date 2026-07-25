@@ -3,7 +3,7 @@
 
 **Program codename:** PBM (Pharmacy/Patient Benefit Management) — positioned as a **Healthcare Benefit Management Platform (HBMP)**, not merely an NGO EMR.
 **Client:** Mersal Foundation for Charity and Development (مؤسسة مرسال) — medical charity, Egypt.
-**Document status:** DRAFT v0.9 — *balanced full first pass across all 36 deliverables, pending review & approval.*
+**Document status:** DRAFT v0.9 — *balanced full first pass across all 37 deliverables, pending review & approval.*
 **Last updated:** 2026-07-21
 
 > ⚠️ **Do not begin implementation** until the complete architecture, workflows, and specifications in this workspace have been reviewed and approved by Mersal stakeholders.
@@ -18,7 +18,7 @@ Read [`0A-DESIGN-FOUNDATIONS.md`](0A-DESIGN-FOUNDATIONS.md) **first** — it def
 
 ---
 
-### The 36 Deliverables
+### The 37 Deliverables
 
 | # | Deliverable | File | Cluster |
 |---|-------------|------|---------|
@@ -59,6 +59,7 @@ Read [`0A-DESIGN-FOUNDATIONS.md`](0A-DESIGN-FOUNDATIONS.md) **first** — it def
 | 34 | Technical Documentation | [34-technical-documentation.md](34-technical-documentation.md) | F |
 | 35 | Implementation Plan | [35-implementation-plan.md](35-implementation-plan.md) | F |
 | 36 | Claims Management (Phase 10b) | [36-claims-management.md](36-claims-management.md) | E |
+| 37 | Branch Scoping, Practitioner Specialty & Clinical Sensitivity (Phase 14) | [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md) | D |
 
 ---
 
@@ -66,8 +67,8 @@ Read [`0A-DESIGN-FOUNDATIONS.md`](0A-DESIGN-FOUNDATIONS.md) **first** — it def
 
 - **Executives / Mersal leadership:** 01 → 28 → 29 → 27 → 33
 - **Product & BA:** 02 → 03 → 04 → 05 → 07 → 31 → 32
-- **Architects & Engineers:** 0A → 16 → 15 → 17 → 23 → 24 → 25 → 30
-- **Security / DPO / Compliance:** 10 → 11 → 18 → 19 → 20
+- **Architects & Engineers:** 0A → 16 → 15 → 17 → 23 → 24 → 25 → 30 → **37**
+- **Security / DPO / Compliance:** 10 → 11 → 18 → 19 → 20 → **37** (branch scoping, special-category data, sensitive-result release)
 - **Finance / Claims:** 10 → 11 → **36** → 31 (EPIC-13) → 32 (US-CLM-*) → 16
 - **UX / Accessibility:** 03 → 09 → 12 → 13 → 14 → 21
 

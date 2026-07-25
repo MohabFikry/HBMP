@@ -2,7 +2,7 @@
 
 [⬅ Back to Index](00-README-INDEX.md) · [Design Foundations](0A-DESIGN-FOUNDATIONS.md)
 
-**Siblings:** [10-role-matrix.md](10-role-matrix.md) · [18-security-model.md](18-security-model.md) · [19-audit-strategy.md](19-audit-strategy.md) · [20-compliance-checklist.md](20-compliance-checklist.md)
+**Siblings:** [10-role-matrix.md](10-role-matrix.md) · [18-security-model.md](18-security-model.md) · [19-audit-strategy.md](19-audit-strategy.md) · [20-compliance-checklist.md](20-compliance-checklist.md) · [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md)
 
 > **Authority.** This document is the **source of truth** for authorization on HBMP. It defines, for every **role × resource × action**, whether access is permitted, and — for sensitive **fields** — whether the field is visible, masked, or denied. It encodes the ABAC conditions and provides example policy rules in pseudo-Rego/Cerbos that the policy engine (OPA/Cerbos) enforces. The narrative rationale is in the [Role Matrix](10-role-matrix.md); enforcement wiring is in the [Security Model](18-security-model.md).
 
@@ -37,11 +37,19 @@
 | ❌ | Denied |
 | — | Not applicable to this role/resource |
 
-**ABAC condition codes** (defined fully in §5): `TR` treating-relationship · `PO` provider-ownership · `TEN` tenant-match · `ASG` assignment · `OST` order-status · `PUR` purpose-binding · `SOD` segregation-of-duties clear · `BG` break-glass active · `CNA` claims-originator-not-adjudicator · `NPA` not-provider-affiliated · `DCT` dual-control-above-threshold · `BOS` batch-open-single-membership.
+**ABAC condition codes** (defined fully in §5): `TR` treating-relationship · `PO` provider-ownership · `TEN` tenant-match · `ASG` assignment · `OST` order-status · `PUR` purpose-binding · `SOD` segregation-of-duties clear · `BG` break-glass active · `CNA` claims-originator-not-adjudicator · `NPA` not-provider-affiliated · `DCT` dual-control-above-threshold · `BOS` batch-open-single-membership · **`BSC` branch-scope** · **`SGA` sensitive-grant-active**.
 
-**Sensitivity fields tracked at field level:** `diagnosis`, `emr_note`, `prescription`, `lab_result`, `imaging_result`, `financials` (amounts/claims), `pii` (identity/registration), `refugee_ref` (UNHCR/registration ID).
+**Sensitivity fields tracked at field level:** `diagnosis`, `emr_note`, `prescription`, `lab_result`, `imaging_result`, `financials` (amounts/claims), `pii` (identity/registration), `refugee_ref` (UNHCR/registration ID), **`sensitive_result`** (the content of any result whose `sensitivity_level` ≠ `Standard`).
 
 **Result split (claims minimization):** every result-bearing field is projected as two independent things — `*_result.existence` (that a result exists, its `resulted_at` date and its `document_ref`) and `*_result.value` (the clinical content: values, units, flags, narrative, report body). A role may be allowed the **existence** and denied the **value**. This is what lets a Claims Officer verify *service was rendered* without ever reading a result.
+
+**Sensitivity split (clinical minimization — Phase 14, [37](37-branch-scoping-and-clinical-sensitivity.md)):** the same two-part projection is applied a second time, on a *clinical* rather than a financial axis. Every order line and result carries a **denormalized `sensitivity_level`** ∈ {`Standard`, `Sensitive`, `HighlySensitive`} (pinned from the `examination_type` at order creation) plus a `sensitive_category` ∈ {`MentalHealth`, `HIV_STI`, `Genetic`, `SubstanceUse`, `ReproductiveHealth`, `GBV_Forensic`, `Other`}. Where the level is **not** `Standard`:
+- **`*_result.existence+`** — category, `resulted_at`, order/result status, ordering **branch**, and a `RESTRICTED` marker — is the **only** projection for every principal except the authoring/ordering doctor;
+- **`*_result.value`** and the **report `document`** are **default-deny**, released only under an active `report_access_grant` (`SGA`).
+
+This split **overrides** every wider grant elsewhere in this document — including Medical Approval's `PUR` clinical read. A restricted result is never silently widened by a role, a purpose, or a case link.
+
+**Branch dimension (Phase 14):** roles carry a **scope mode** ([10 §2](10-role-matrix.md)) — `BranchScoped`, `MemberScoped`, `ProviderScoped`. Every branch-scoped resource row carries `branch_id`; the `BSC` condition narrows reads to the caller's **active branch**. Branch scoping only ever **narrows**; it never substitutes for `TR`, `PO`, `ASG` or the field rules in §4.
 
 ---
 
@@ -76,6 +84,13 @@ Resources map to microservices (see [0A](0A-DESIGN-FOUNDATIONS.md)). Object-leve
 | `user` / `role_binding` | identity | admin metadata |
 | `audit_event` | audit | append-only |
 | `document` (reports, DICOM ref) | document | clinical attachments |
+| `branch` *(Phase 14)* | provider *("network & facilities")* | operational reference data — **no PHI**; `branch_code` is a stable reporting key |
+| `user_branch_assignment` *(Phase 14)* | identity | admin metadata — `assignment_type` ∈ {`Home`,`Additional`}, validity window; **self-grant is forbidden** |
+| `practitioner` *(Phase 14)* | provider | `pii` (name, `license_no`, `license_expiry`) — clinical profile behind a user |
+| `specialty` / `practitioner_specialty` *(Phase 14)* | provider (reference) | none — reference data; one specialty flagged `is_primary` |
+| `examination_type` *(Phase 14)* | masterdata (reference) | none directly, but **carries `sensitivity_level` + `sensitive_category`**, which govern §3.5/§4 |
+| `report_access_request` *(Phase 14)* | orders | `purpose_code`, **`justification` (free text — may itself hint at clinical context)**, requester role, decision reason |
+| `report_access_grant` *(Phase 14)* | orders | `grantee_user_id`, `result_ref`, `expires_at`, `purpose_code` — **single-result, non-transferable** |
 
 ---
 
@@ -187,6 +202,51 @@ Actions here use the extended tokens from §1: **DC** Decide · **AJ** Adjust ·
 > 5. `A` on `claim_decision`/`claim_adjustment` (dual control, `DCT`) is **never** exercised by the same principal who recorded the override/adjustment.
 > 6. No role anywhere in this matrix holds an "execute payment" action — the platform issues settlement advice only.
 
+### 3.5 Branch, practitioner & sensitivity resources (Phase 14 — see [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md))
+
+**3.5.1 Object-level.** `SW` (switch) is the active-branch switch action on `user_branch_assignment`; it is a **read of one's own permitted set + a context change**, never a grant.
+
+| Role | branch | user_branch_assignment | practitioner | specialty | examination_type | report_access_request | report_access_grant |
+|---|---|---|---|---|---|---|---|
+| Reception / Appointment Coordinator | R✅ (permitted set) | R🔒(self) SW🟠(own permitted set) | R🔒(name, specialty, branch) | R✅ | R🔒(orderable name only) | ❌ | ❌ |
+| Nurses | R✅ (permitted set) | R🔒(self) SW🟠 | R🔒 | R✅ | R🔒 | C🟠(TR, purpose+justification) R🟠(own requests) | R🔒🟠(own, active grants) |
+| **Doctors** | R✅ (permitted set) | R🔒(self) SW🟠 | R🔒 U🟠(self profile) | R✅ | R✅ | C🟠(TR) R🟠(own + **those routed to them as author**) **A🟠(SOD: author, not requester)** | R🔒🟠(own) **D🟠(revoke: author)** |
+| **Branch/Clinic Manager** | R✅ (assigned branches) U🟠(BSC: opening hours/availability of the **active** branch) | R🔒(staff of active branch — **C/U ❌**) SW🟠 | R🔒(coverage view: name, specialty, sessions) | R✅ | R🔒 | ❌ | ❌ |
+| Medical Approval | R✅ (all) | ❌ | R🔒 | R✅ | R✅ | C🟠(PUR, purpose+justification) R🟠(own requests) | R🔒🟠(own, active grants) |
+| **Medical Director** | R✅ (all) | R🔒(oversight) | R✅ | R✅ | R✅ U🟠(classification, with clinical governance) | R✅ **A🟠(SOD: alternate decider — flagged + extra-audited)** | R✅ **D🟠(revoke)** |
+| Case Managers | R✅ (all) | ❌ | R🔒 | R✅ | R🔒 | C🟠(ASG, purpose+justification) R🟠(own requests) | R🔒🟠(own, active grants) |
+| Finance / Claims Officer / Claims Reviewer | R🔒(code + name, as a reporting/batching dimension) | ❌ | R🔒(performing clinician ref only) | R🔒 | R🔒(code + name) | ❌ | ❌ |
+| **Network Team** | C✅ R✅ U✅ D🟠(SOD) | ❌ | C✅ R✅ U✅ D🟠(SOD) | C✅ R✅ U✅ | R✅ | ❌ | ❌ |
+| **Org Admin** | R✅ U🟠(SOD, org config) | **C✅ R✅ U✅ D🟠(SOD — never for self)** | R🔒 | R✅ | R🔒 | ❌ | R🔒(register view: who holds what, no content) |
+| Super Admin | R✅ | R🧨 | R🧨 | R✅ | R✅ | R🧨 | R🧨 |
+| DPO / compliance reviewer | R✅ | R🔒 | R🔒 | R✅ | R✅ | R🔒(register: purpose + decision, **not** the result) | R✅ **D🟠(revoke)** |
+| Labs / Imaging / Pharmacies / Provider Admin | ❌ *(branch is internal to Mersal)* | ❌ | ❌ | R🔒(referral routing only) | R🔒(their own orderables) | ❌ | ❌ |
+| Beneficiary (self-service) | ❌ | ❌ | R🔒(treating clinician name + specialty) | — | — | — *(the subject's own access is a data-subject right, not a grant)* | — |
+| *audit service* | — | — | — | — | — | — | append-only (C only) |
+
+**3.5.2 Sensitive results — the two-column projection.** For a result whose `sensitivity_level` ≠ `Standard` (`existence+` = category, `resulted_at`, status, ordering branch, `RESTRICTED` marker):
+
+| Role | `sensitive_result.existence+` | `sensitive_result.value` / report `document` |
+|---|---|---|
+| **Authoring / ordering doctor** (with `TR`) | ✅ | **✅** — the only routine reader |
+| Beneficiary (data subject, future portal) | ✅ | ✅ (own data) |
+| Other treating clinicians (Doctors, Nurses) | ✅ | **❌** → 🟠`SGA` |
+| **Medical Approval team** | ✅ | **❌** → 🟠`SGA` — *this deliberately overrides `PUR`* |
+| **Medical Director** | ✅ | **❌** → 🟠`SGA` (may *decide* release without reading) |
+| **Case Managers** | ✅ | **❌** → 🟠`SGA` |
+| Reception / Appointment Coordinator / Branch Manager | ✅ (status only, no category where the category alone is identifying) | **❌** |
+| Finance / Claims Officer / Claims Reviewer | ✅ (proof-of-service only: exists + date + `document_ref`) | **❌** — never, not even under a grant |
+| Labs / Imaging / Pharmacies (performing provider) | ✅ | **✅ only for the result they authored**, `PO`+`OST`; ❌ for any other |
+| Reporting / analytics | ✅ **aggregated & de-identified only** | **❌** |
+| Super Admin / emergency clinician | ✅ | 🧨 **loud break-glass** — notifies author + Medical Director + DPO, mandatory retrospective review |
+
+> **Hard-rule check (must always hold) — branch & sensitivity:**
+> 1. **(a) Branch scope is a denial, not a filter.** A `BranchScoped` role (Reception, Appointment Coordinator, Nurses, Doctors' operational lists, Branch/Clinic Manager) may read a branch-scoped resource **only where `resource.branch_id == subject.active_branch`** *and* the active branch ∈ the subject's permitted set (Home ∪ Additional, `Active`, in-window). A cross-branch request returns **`403` + audited `BranchScopeDenied`** — **never** an empty `200`. `MemberScoped` roles are unrestricted by branch; `ProviderScoped` roles are unaffected.
+> 2. **(b) Sensitive results are default-deny for everyone but the author.** Where `sensitivity_level != 'Standard'`, `result.value` and the **report document** = **❌ for every role — including the medical approval team and the Medical Director** — unless an **active, unexpired, unrevoked `report_access_grant`** exists for `(subject, result)` (`SGA`). `existence+` (category, date, status, branch, `RESTRICTED` marker) = **✅**. Claims/Finance never receive the value, grant or no grant.
+> 3. **(c) A grant is single-result and non-transferable.** One `report_access_grant` covers **exactly one `result_ref` for exactly one `grantee_user_id`**; it cannot be re-scoped, widened, shared, delegated, or inherited by a role or a team queue. It is **time-boxed** (default 72 h `Sensitive` / 24 h `HighlySensitive`, configurable), auto-expires, is revocable by the author / Medical Director / DPO, and **every read under it is audited separately** with `grant_id`, `purpose_code` and actor.
+> 4. **Release requires a decided request.** A `report_access_grant` may exist **only** as the product of an `Approved` `report_access_request` carrying a **mandatory `purpose_code` + free-text `justification`**, decided by the **authoring/ordering doctor or a Medical Director** (`SOD`: requester ≠ decider). A Director decision is flagged `decided_by_role=MedicalDirector` and **extra-audited**.
+> 5. **Branch scoping never replaces an existing control.** `BSC` composes with `TR`/`PO`/`ASG`/`TEN` and with the §4 field rules — it narrows, it never grants.
+
 ---
 
 ## 4. Field-level rules for sensitive fields
@@ -214,6 +274,26 @@ Even when a role may Read an object, individual fields are governed independentl
 | Org Admin | denied | denied | denied | denied | denied | denied | masked(dir) | denied |
 | Super Admin | 🧨 | 🧨 | 🧨 | 🧨 | 🧨 | 🧨 | 🧨 | 🧨 |
 
+**Field-level rules — branch, practitioner & sensitivity fields (Phase 14).** Same vocabulary (`visible` / `masked` / `derived` / `denied`); `existence-only` means the `existence+` projection of §3.5.2 and nothing else.
+
+| Role \ Field | `sensitive_result` (value/report) | `sensitive_category` | `release.justification` | `active_branch` / `branch_id` | `practitioner.license_no` |
+|---|---|---|---|---|---|
+| **Authoring / ordering doctor** | **visible**🟠TR | visible | visible (own decisions) | visible🟠BSC (own permitted set) | visible (self) |
+| Other Doctors / Nurses | **denied → existence-only** (visible🟠SGA) | visible | visible (own request only) | visible🟠BSC | masked |
+| **Medical Approval** | **denied → existence-only** (visible🟠SGA) | visible🟠PUR | visible (own request only) | visible (all branches) | masked |
+| **Medical Director** | **denied → existence-only** (visible🟠SGA) | visible | visible (as decider) | visible (all branches) | visible |
+| Case Managers | **denied → existence-only** (visible🟠SGA) | visible🟠ASG | visible (own request only) | visible (all branches) | masked |
+| Reception / Appointment Coordinator | **denied** | denied | denied | visible🟠BSC (own permitted set) | denied |
+| **Branch/Clinic Manager** | **denied** | denied | denied | visible🟠BSC (assigned branches) | masked (validity flag only) |
+| Finance / Claims Officer / Claims Reviewer | **denied** — existence-only, **no grant ever widens this** | **denied** | denied | visible (reporting dimension) | denied |
+| Labs / Imaging (performing provider) | visible🟠(PO+OST) **for their own authored result only** | visible (own order) | denied | — *(branch not exposed to external providers beyond the ordering site name)* | denied |
+| Pharmacies | **denied** | denied | denied | — | denied |
+| Network Team | denied | denied | denied | visible (all branches) | visible (credentialing) |
+| Org Admin | denied | denied | denied | visible (all branches) | masked |
+| DPO / compliance reviewer | **denied** (governs the register, not the content) | visible | visible | visible | masked |
+| Reporting / analytics | **denied** | aggregated/de-identified only | denied | visible (dimension) | denied |
+| Super Admin | 🧨 (loud break-glass) | 🧨 | 🔒 | visible | 🧨 |
+
 **Key field-level encodings of the hard rules:**
 - `Finance.diagnosis = denied` — claims are adjudicated on **billing/service codes + amounts**, never the diagnosis narrative. A procedure code that could reveal condition is exposed only at the minimum granularity needed to price/adjudicate.
 - `Labs.prescription = denied`, `Imaging.prescription = denied` — the medication list is stripped from any order payload sent to labs/imaging.
@@ -224,6 +304,10 @@ Even when a role may Read an object, individual fields are governed independentl
 - `ClaimsOfficer.lab_result = denied → existence-only`, `ClaimsOfficer.imaging_result = denied → existence-only` — **HARD RULE.** The claims projection exposes `{ exists: true, resulted_at, document_ref, document_type }` and **strips** `value`, `unit`, `reference_range`, `abnormal_flag`, `interpretation`, `report_body`, and any DICOM/report content. This is exactly enough to prove *the service was rendered* and nothing more. `claim_document` inherits the same rule: a clinical attachment is a **reference** to a claims role, not a readable body.
 - `Provider.* (claims) = 🟠PO` — a provider-side principal's claim/batch/document/settlement reads are filtered by `provider_ownership`; there is no cross-provider claims read and no bulk export of another payee's data.
 - `Beneficiary / CaseManager.claims = self / ASG only` — reimbursement scope only; a member sees their own request, decision outcome and reason code, never a provider claim, batch or settlement advice.
+- `*.sensitive_result = denied → existence-only` for **every** role except the authoring/ordering doctor (and the beneficiary) — **HARD RULE.** The server projects `{ sensitive: true, sensitive_category, resulted_at, status, ordering_branch, marker: "RESTRICTED" }` and **strips** `value`, `unit`, `reference_range`, `abnormal_flag`, `interpretation`, `report_body`, narrative and any document content. `MedicalApproval.sensitive_result = denied` **overrides** `MedicalApproval.* = visible🟠PUR` above: purpose-binding does not defeat the sensitivity gate. Release is only via `SGA`, and `Finance/Claims.sensitive_result` stays `denied` even then.
+- `release.justification` is itself sensitive — it is written by a clinician and may carry clinical context. It is visible to the **requester** and the **decider** (and to the DPO for oversight), never to unrelated roles, and it is never echoed into notifications ([FR-NOT-003](07-functional-requirements.md)).
+- `active_branch / branch_id = visible🟠BSC` for BranchScoped roles — a user may see **which** branches they are permitted to work in and which is active, never the roster or the worklists of a branch they are not assigned to.
+- `practitioner.license_no / license_expiry = visible` only to the Network Team (credentialing) and the practitioner themselves; other roles get a **derived validity flag**, never the number.
 
 **Field-level projection for claims (canonical allow-list).** The claims projection is an **allow-list**, not a deny-list — new clinical fields are invisible to claims by default:
 
@@ -257,6 +341,8 @@ Attributes are asserted by trusted sources: **token claims** (Keycloak), **resou
 | `NPA` | **Not provider-affiliated** | `subject.provider_id` is null/absent **AND** `subject.id ∉ resource.provider.affiliated_user_ids` **AND** `subject.provider_group_id ≠ resource.provider_group_id` | identity + provider service | Claims Officer, Claims Reviewer |
 | `DCT` | **Dual control above threshold** | `resource.amount > policy.dual_control_threshold ⇒ approver.id ≠ resource.recorded_by AND approver.role = claims_reviewer AND CNA AND NPA` | claims service + policy config | Claims Reviewer (override, high-value adjustment, negative net payable) |
 | `BOS` | **Batch open, single membership** | `batch.status ∈ {Open, UnderReview}` **AND** the claim has no other batch membership where `batch_status ∈ {Open, UnderReview}`; removal from `UnderReview` requires `reason != ""` | claims service (unique partial index) | Claims Officer, Claims Reviewer |
+| **`BSC`** | **Branch scope** | `resource.branch_id ∈ subject.permitted_branch_ids` **AND** (`subject.scope_mode != "BranchScoped"` **OR** `resource.branch_id == subject.active_branch_id`). `permitted_branch_ids` = the user's `Home` ∪ `Additional` assignments filtered to `status='Active'` and `valid_from ≤ now < valid_to`; `active_branch_id` is taken from the `X-Active-Branch` header **only after** it is validated against that set (absent ⇒ Home; outside the set ⇒ `403` + audited `BranchScopeDenied`). Never trust the header. | identity (assignments, active-branch claim) + the owning service (resource `branch_id`) | **BranchScoped:** Reception, Appointment Coordinator, Nurses, Doctors *(operational lists)*, Branch/Clinic Manager. **MemberScoped** bundles set `BranchUnrestricted`; **ProviderScoped** roles use `PO` instead |
+| **`SGA`** | **Sensitive grant active** | `∃ report_access_grant g : g.grantee_user_id == subject.id AND g.result_ref == resource.result_ref AND g.revoked_at IS NULL AND now() < g.expires_at AND g.request.status == 'Approved'`. The grant is **single-result and non-transferable** — no role-, team- or case-level grant exists. Every hit **must** emit a `SensitiveResultReadUnderGrant` audit event carrying `grant_id`, `purpose_code` and actor. | orders service (`report_access_grant`) + audit | Any principal reading a result where `sensitivity_level != 'Standard'` **and** who is not the authoring/ordering doctor. **Never** satisfiable for Finance/Claims roles |
 
 **Environmental modifiers (Zero Trust):** every decision may additionally require `device.compliant = true`, `network.ip ∈ allowlist` (for admin/finance), `auth.mfa = true`, and `auth.acr ≥ step_up` for T3/T4 or Export. These are combined by the gateway/policy engine (see [Security Model §4](18-security-model.md)).
 
@@ -572,6 +658,147 @@ resourcePolicy:
               - expr: request.aux.removal_reason == ""                                # reason mandatory
 ```
 
+### 6.11 Rego — branch scope (`BSC`): a BranchScoped role reaches only the active branch
+
+```rego
+package hbmp.branch
+
+default allow = false
+
+branch_scoped_roles := {"reception", "appointment_coordinator", "nurse",
+                        "doctor", "branch_manager"}
+
+# the permitted set is Home ∪ Additional, active and in-window (asserted by identity)
+permitted { input.subject.permitted_branch_ids[_] == input.subject.active_branch_id }
+
+allow {
+    input.action == "read"
+    input.resource.type in {"appointment", "appointment_slot", "queue_entry",
+                            "encounter", "investigation_order", "waitlist_entry"}
+    input.subject.role in branch_scoped_roles
+    input.subject.tenant_id == input.resource.tenant_id            # TEN
+    permitted                                                      # header validated server-side
+    input.resource.branch_id == input.subject.active_branch_id     # BSC (narrowing)
+    treating_or_site_relationship                                  # BSC never replaces TR/ASG
+}
+
+# MemberScoped bundles (approvals, finance, claims, case mgmt, reporting) omit the
+# branch predicate entirely: RowScope.BranchUnrestricted = true.
+allow {
+    input.action == "read"
+    input.subject.scope_mode == "MemberScoped"
+    input.subject.tenant_id == input.resource.tenant_id
+    other_conditions_hold
+}
+
+# a cross-branch attempt is an explicit DENY (403 + audit), never an empty result set
+deny[reason] {
+    input.subject.role in branch_scoped_roles
+    input.resource.branch_id != input.subject.active_branch_id
+    reason := "BranchScopeDenied"
+}
+
+# an active branch outside the permitted set is rejected before any resource lookup
+deny[reason] {
+    not permitted
+    reason := "BranchScopeDenied"
+}
+```
+
+### 6.12 Cerbos — sensitive result: default-deny, author-only, released only by an active grant
+
+```yaml
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: "investigation_result"
+  version: "default"
+  rules:
+    # existence metadata is always available to anyone who may see the order at all
+    - actions: ["read:existence"]          # category, resulted_at, status, branch, RESTRICTED marker
+      effect: EFFECT_ALLOW
+      roles: ["doctor", "nurse", "medical_approval", "medical_director",
+              "case_manager", "claims_officer", "claims_reviewer", "finance"]
+      condition:
+        match:
+          expr: request.aux.jwt.tenant_id == resource.attr.tenant_id              # TEN
+
+    # HARD RULE — the content of a non-Standard result is denied to everyone by default
+    - actions: ["read:value", "read:report_document"]
+      effect: EFFECT_DENY
+      roles: ["*"]
+      condition:
+        match:
+          expr: resource.attr.sensitivity_level != "Standard"
+
+    # …except the authoring / ordering doctor, with a live treating relationship
+    - actions: ["read:value", "read:report_document"]
+      effect: EFFECT_ALLOW
+      roles: ["doctor"]
+      condition:
+        match:
+          any:
+            of:
+              - expr: request.principal.id == resource.attr.authored_by
+              - expr: request.principal.id == resource.attr.ordered_by
+          all:
+            of:
+              - expr: request.principal.id in resource.attr.care_team             # TR
+              - expr: request.principal.attr.mfa == true
+
+    # …or a principal holding an active, unexpired, unrevoked, single-result grant
+    - actions: ["read:value", "read:report_document"]
+      effect: EFFECT_ALLOW
+      roles: ["doctor", "nurse", "medical_approval", "medical_director", "case_manager"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.aux.grant.grantee_user_id == request.principal.id   # SGA non-transferable
+              - expr: request.aux.grant.result_ref == resource.attr.result_ref    # SGA single-result
+              - expr: request.aux.grant.revoked_at == null
+              - expr: timestamp(request.aux.grant.expires_at) > now()             # SGA time-boxed
+              - expr: request.aux.grant.purpose_code != ""
+              - expr: request.principal.attr.mfa == true
+      # NOTE: the service MUST emit SensitiveResultReadUnderGrant (grant_id, purpose_code,
+      # actor) on every hit — separately from the ordinary PHI-read audit event.
+
+    # claims/finance are never eligible, grant or no grant
+    - actions: ["read:value", "read:report_document"]
+      effect: EFFECT_DENY
+      roles: ["claims_officer", "claims_reviewer", "finance", "reception",
+              "branch_manager", "provider_admin", "pharmacy"]
+---
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: "report_access_request"
+  version: "default"
+  rules:
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      roles: ["doctor", "nurse", "medical_approval", "medical_director", "case_manager"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.purpose_code in
+                      ["ContinuityOfCare","AuthorizationDecision","ClinicalReview",
+                       "Complaint","Legal","Other"]                               # mandatory
+              - expr: size(request.resource.attr.justification) > 0               # mandatory
+    - actions: ["decide"]
+      effect: EFFECT_ALLOW
+      roles: ["doctor", "medical_director"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.principal.id != resource.attr.requested_by          # SOD
+              - expr: request.principal.id == resource.attr.result_authored_by ||
+                      request.principal.attr.role == "medical_director"           # author OR Director
+              - expr: request.principal.attr.mfa == true
+      # NOTE: a medical_director decision sets decided_by_role=MedicalDirector and
+      # MUST raise an additional, high-severity audit event (extra-audited).
+```
+
 ---
 
 ## 7. Deny-by-default & precedence
@@ -581,8 +808,10 @@ resourcePolicy:
 3. **SoD-deny overrides role-allow.** An action is denied if the subject is conflicted for that specific record, regardless of role.
 4. **Break-glass never silently widens.** `BG` allows only what its grant scopes, for its window, and always emits audit; it cannot be used to bypass SoD deny for self-approval.
 5. **Environment can only restrict, never expand.** Failing device/MFA/IP checks can turn ✅ into ❌ but never the reverse.
+6. **Sensitivity-deny overrides purpose-binding and every role grant.** A non-`Standard` result's `value`/report is denied even to a role whose row says ✅ (Medical Approval under `PUR`, Medical Director, Case Manager). Only `SGA` — an active, unexpired, unrevoked, single-result, non-transferable grant — or authorship lifts it; break-glass lifts it *loudly*.
+7. **Branch-scope narrows, never grants.** `BSC` can only remove rows from a result set (and turn a cross-branch request into a `403`). Satisfying `BSC` never substitutes for `TR`, `PO`, `ASG`, `PUR` or the field rules, and no branch assignment widens a field projection.
 
-Precedence order evaluated by the policy engine: `explicit-deny (field/SoD/env)` ▶ `break-glass-scoped-allow` ▶ `ABAC-conditional-allow` ▶ `RBAC-allow` ▶ `default-deny`.
+Precedence order evaluated by the policy engine: `explicit-deny (field/SoD/sensitivity/branch/env)` ▶ `break-glass-scoped-allow` ▶ `grant-scoped-allow (SGA)` ▶ `ABAC-conditional-allow` ▶ `RBAC-allow` ▶ `default-deny`.
 
 ---
 
@@ -601,6 +830,14 @@ Every cell here must agree with [10-role-matrix.md §5–7](10-role-matrix.md). 
 - **`DC` cells all carry `CNA` + `NPA`**; **`A` on `claim_decision`/`claim_adjustment` carries `DCT`**; **`B` carries `BOS`**.
 - Claims adjudication and settlement release are never held by the same principal (§6.7, §6.8).
 - No resource in §2 exposes an "execute payment" action.
+- **Every role in §3.5.1 declares exactly one scope mode**, and it matches [10 §2](10-role-matrix.md); no role is both BranchScoped and `BranchUnrestricted`.
+- **Every branch-scoped resource read carries `BSC`**; no policy in a BranchScoped bundle reads a branch-scoped resource without a `branch_id` predicate.
+- **A cross-branch read is a deny, not a filter** — the branch fixtures assert `403` + `BranchScopeDenied`, and explicitly assert that the response is **not** an empty `200`.
+- **`sensitive_result` = `denied → existence-only` for every role except the authoring/ordering doctor**, including `medical_approval`, `medical_director` and `case_manager`; `finance`/`claims_officer`/`claims_reviewer` are `denied` **with no `SGA` path**.
+- **No grant is role-, team- or case-scoped** — every `report_access_grant` cell asserts a single `grantee_user_id` + single `result_ref`, a non-null `expires_at`, and no delegation/transfer action anywhere in §2.
+- **Every `report_access_request` create carries a non-empty `purpose_code` + `justification`**, and every `decide` carries `SOD` (requester ≠ decider) with the decider being the authoring doctor **or** a Medical Director.
+- **Every allow that depends on `SGA` is paired with a `SensitiveResultReadUnderGrant` audit assertion** — a read-under-grant that does not audit is a failing build.
+- **No user may create/update their own `user_branch_assignment`** — the self-grant fixture must deny for every role, including Branch/Clinic Manager and Org Admin acting on themselves.
 
 ---
 
@@ -610,5 +847,6 @@ Every cell here must agree with [10-role-matrix.md §5–7](10-role-matrix.md). 
 - Audit of every read/write/approve/consume/export → **[19-audit-strategy.md](19-audit-strategy.md)**
 - Regulatory mapping of minimization → **[20-compliance-checklist.md](20-compliance-checklist.md)**
 - Claims module design (origination, batching, adjudication, adjustments, settlement) → **[36-claims-management.md](36-claims-management.md)**
+- Branch model, scope modes (`BSC`), practitioner specialty, sensitivity classification and the release-request workflow (`SGA`) → **[37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md)**
 
 > **Change control:** policy bundles are versioned, peer-reviewed by Security Architect + DPO, tested against a permission-regression suite (including the six hard rules), and deployed via the audited pipeline. No manual policy edits in production.

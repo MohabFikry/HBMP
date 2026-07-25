@@ -43,6 +43,27 @@ AllergyIntolerance, MedicationRequest, ServiceRequest).
   clinical summary under **minimum-necessary sharing** (FR-CLIN-011). See the referral skill.
 - **Results loop:** clinicians view returned lab/imaging results in-context once released
   (FR-CLIN-010) and are notified on release.
+- **Practitioner & specialty (37 §4):** every clinician has a `practitioner` record (Doctor/Nurse,
+  licence + expiry) with **structured specialty** from the reference list — many allowed, **exactly one
+  `is_primary`** — and **one or many branch assignments**. Specialty drives referral routing, doctor
+  pickers (filtered by active branch + specialty), reporting, and default examination-type suggestions.
+- **Examination type + sensitivity (37 §5):** orders reference an `examination_type` carrying
+  `sensitivity_level` ∈ {`Standard`,`Sensitive`,`HighlySensitive`} and a `sensitive_category`
+  (`MentalHealth` confirmed; HIV_STI, Genetic, SubstanceUse, ReproductiveHealth, GBV_Forensic proposed).
+  **Sensitivity is PINNED at order creation** and denormalized onto order/line/result, so later
+  reclassification can never retroactively unlock already-restricted data and gating never needs a
+  cross-service join at read time.
+- **Sensitive results are default-deny (37 §6):** full content is readable **only by the authoring/
+  ordering doctor** (with treating relationship). **Everyone else — other treating clinicians, the
+  approvals team, case managers, reporting — gets existence metadata only** (category, date, status,
+  ordering branch, `RESTRICTED` marker); never values, never the report document. This deliberately
+  **overrides the approval team's standing EMR oversight** for sensitive results.
+- **Release is by justified request:** mandatory `purpose_code` + free-text `justification`, decided by
+  the **authoring/ordering doctor OR a Medical Director** (Director decisions flagged + extra-audited).
+  Approval creates a **time-boxed, single-result, non-transferable grant** (default 72h `Sensitive`,
+  24h `HighlySensitive`), revocable and auto-expiring — and **every read under a grant writes its own
+  audit event** carrying the grant id and purpose, separate from ordinary PHI-read audit. Break-glass
+  still exists but is loud (author + Medical Director + DPO notified, retrospective review mandatory).
 
 ## Key entities, states & invariants
 - `encounter` status: `InProgress → Finished | Cancelled`. Appointment/encounter lifecycle in ../../23 §6.
@@ -56,7 +77,8 @@ AllergyIntolerance, MedicationRequest, ServiceRequest).
   Break-glass exists for emergencies (heightened logging, post-hoc review). This is a **HARD RULE**.
 - Minimum-necessary neighbours: Labs/Imaging see only the order indication (not the med list);
   Pharmacies see only Rx + safety flags (not lab/imaging results); the Approval team is the *only*
-  non-treating role with broad clinical read (purpose = utilization-review).
+  non-treating role with broad clinical read (purpose = utilization-review) — **except for
+  sensitivity-classified results, which are restricted from them too** (see 37 §6).
 
 ## How to apply
 1. Open the encounter; load the treated patient's authorized longitudinal view (history, allergies,
@@ -73,9 +95,14 @@ AllergyIntolerance, MedicationRequest, ServiceRequest).
 - ../../15-database-erd.md (emr schema structure)
 - ../../22-data-dictionary.md (emr schema: encounter/emr_note/diagnosis/vital/allergy/medication_history)
 - ../../24-sequence-diagrams.md (encounter → orders/rx, approvals, result release)
+- ../../37-branch-scoping-and-clinical-sensitivity.md (§4 practitioner/specialty · §5–6 sensitivity + release)
 
 ## Guardrails
 - Enforce treating-relationship ABAC on every EMR read; default-deny; audit PHI reads, not just writes.
+- Never expose a sensitive result's values or report to anyone but the authoring doctor without an
+  active grant — strip server-side (FieldProjector), never "hide" it in the client.
+- Never release a sensitive result without a recorded purpose + justification; never issue an open-
+  ended, multi-result, or transferable grant; audit every read under a grant separately.
 - Never hard-delete clinical data; signed notes are immutable (addendum only).
 - Never suppress a Contraindicated interaction/allergy alert without a logged override.
 - Nurses: vitals/observations/administration only — no formal diagnosis authorship, no prescribing.

@@ -11,7 +11,7 @@ This document specifies the **functional requirements (FRs)** for the Mersal HBM
 - **Rationale** — why it exists.
 - **Phase** — which of the 7 care phases it primarily serves: `Registration`, `Eligibility`, `Appointments`, `Consultation`, `Lab & Imaging`, `Pharmacy`, `Approval` (or `Cross-cutting`).
 
-**Module codes:** `REG` Registration/Policy · `ELG` Eligibility · `APT` Appointments · `CLIN` Clinical/EMR · `LAB` Lab & Imaging · `RX` Pharmacy · `AUTH` Approvals · `NET` Provider Network · `NOT` Notifications · `RPT` Reporting · `IAM` Admin/Identity · `MDM` Master Data · `AUD` Audit · `CLM` Claims Management.
+**Module codes:** `REG` Registration/Policy · `ELG` Eligibility · `APT` Appointments · `CLIN` Clinical/EMR · `LAB` Lab & Imaging · `RX` Pharmacy · `AUTH` Approvals · `NET` Provider Network · `NOT` Notifications · `RPT` Reporting · `IAM` Admin/Identity · `MDM` Master Data · `AUD` Audit · `CLM` Claims Management · `BRN` Branch Scoping & Practitioner Specialty · `SEN` Clinical Sensitivity.
 
 > **Traceability:** every FR is expected to trace forward to user stories in [32-user-stories.md](32-user-stories.md) and back to processes in [05-business-process-maps.md](05-business-process-maps.md) / [06-bpmn-diagrams.md](06-bpmn-diagrams.md).
 
@@ -371,7 +371,112 @@ This document specifies the **functional requirements (FRs)** for the Mersal HBM
 
 ---
 
-## 16. Priority summary (MoSCoW rollup)
+## 16. Branch Scoping, Practitioner Specialty (`BRN`) & Clinical Sensitivity (`SEN`)
+
+> **New module — build phase `14`** ([37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md) is the authoritative design; build prompt: [claude-code-prompts/phase-14-branch-scoping-and-sensitivity.md](claude-code-prompts/phase-14-branch-scoping-and-sensitivity.md)). Two capabilities are added to the running platform: **multi-branch (location) awareness with practitioner specialty**, and **sensitivity-gated clinical results** with a justified release-request workflow. Because both are cross-cutting overlays rather than a new care phase, the **Phase** column reads `Branch (14)` / `Sensitivity (14)` / `Cross-cutting (14)`.
+>
+> Two hard boundaries govern every requirement here: **(a)** branch scoping is an **additional narrowing filter, never a replacement** for an existing control (treating-relationship, provider-ownership and minimum-necessary field rules are unchanged); **(b)** a **sensitive result is default-deny** — only the authoring/ordering doctor sees its content, and everyone else, **including the medical approval team**, sees existence metadata until a justified release is granted.
+
+**16.1 Branch entity & staff assignment (`BRN`)**
+
+| ID | Statement | Priority | Rationale | Phase |
+|----|-----------|----------|-----------|-------|
+| FR-BRN-001 | The system shall maintain an internal **`branch`** entity (code, EN/AR name, city, address, timezone, phone, opening hours, status ∈ {`Active`,`Suspended`,`Closed`}) representing a Mersal-operated facility. | M | Mersal delivers care from its own sites; the platform had no internal org-unit concept. | Branch (14) |
+| FR-BRN-002 | The system shall **seed the six branches** `ASW` Aswan, `ALX` Alexandria, `OCT` 6th of October, `MAA` Maadi, `DOK` Dokki, `NSR` Nasr City with bilingual (AR/EN) names, all `Africa/Cairo`. | M | These are the operating sites; branch codes are stable keys used in business keys and reporting. | Branch (14) |
+| FR-BRN-003 | A `branch` shall be **distinct from a contracted `provider_location`**: only branches are subject to staff branch-scoping, and no provider-side role shall administer or enumerate branches. | M | Conflating an internal facility with a contracted third-party site would leak Mersal's org structure and break provider isolation. | Branch (14) |
+| FR-BRN-004 | The system shall support **branch status transitions** (`Active → Suspended → Active`, `→ Closed`) with reason and audit; a non-`Active` branch shall accept no new bookings while remaining readable for history. | S | Sites open, pause and close; historical records must survive. | Branch (14) |
+| FR-BRN-005 | The system shall assign a user to branches via **`user_branch_assignment`** with `assignment_type` ∈ {`Home`,`Additional`}, a validity window and a status. | M | Staff have a base site and may cover others — the confirmed "can also work elsewhere" requirement. | Branch (14) |
+| FR-BRN-006 | The system shall enforce **exactly one active `Home` branch per user** by a database partial unique index — `(user_id) WHERE assignment_type='Home' AND status='Active'` — not by application logic alone. | M | Makes an ambiguous default context *impossible*, not merely unlikely. | Cross-cutting (14) |
+| FR-BRN-007 | The system shall compute a user's **permitted branch set** as `Home ∪ Additional`, filtered to `status='Active'` and within the validity window, re-evaluated **on every request**. | M | Revocation must take effect immediately, without waiting for token expiry. | Cross-cutting (14) |
+| FR-BRN-008 | **No user shall create, extend or approve their own branch assignment.** `user_branch_assignment` shall be maintained by **Org Admin** and `practitioner_branch_assignment` by the **Network Team**, with every change audited (actor, subject, branch, type, validity, justification). | M | Self-granted scope is self-granted access; see [10 §7](10-role-matrix.md). | Cross-cutting (14) |
+| FR-BRN-009 | Revocation of a branch assignment shall take effect **immediately** on the next request, and shall be audited and notified to the affected user. | M | A revoked assignment that lingers is an open door. | Cross-cutting (14) |
+
+**16.2 Active-branch context (`BRN`)**
+
+| ID | Statement | Priority | Rationale | Phase |
+|----|-----------|----------|-----------|-------|
+| FR-BRN-010 | The client shall declare the working context with an **`X-Active-Branch: <branch_id>`** header; when the header is **absent the service shall default to the user's `Home` branch**. | M | One unambiguous working context, with a safe default. | Cross-cutting (14) |
+| FR-BRN-011 | The service shall **validate the active branch against the permitted set on every request** and, where it is outside that set, return **`403`** with an RFC 7807 problem document and write an audited **`BranchScopeDenied`** event. **The header shall never be trusted.** | M | The header is a client hint; authorization is a server decision. | Cross-cutting (14) |
+| FR-BRN-012 | Switching the active branch shall emit an audited **`ActiveBranchSwitched`** event carrying actor, from-branch, to-branch and correlation id. | M | Which site a user was working in is material to every downstream action. | Cross-cutting (14) |
+| FR-BRN-013 | Every response shall **echo the active branch** so the UI can display the current context unambiguously. | S | A user must never mistake which site they are working in. | Cross-cutting (14) |
+| FR-BRN-014 | The system shall expose the user's **permitted branch list** (with the `Home` branch marked) to the branch switcher, and nothing beyond it. | M | The switcher is a scoped picker, not a directory of the organization. | Branch (14) |
+
+**16.3 Scope modes & branch-scoped worklists (`BRN`)**
+
+| ID | Statement | Priority | Rationale | Phase |
+|----|-----------|----------|-----------|-------|
+| FR-BRN-015 | Every role shall declare exactly one **scope mode** — `BranchScoped`, `MemberScoped` or `ProviderScoped` — in its policy bundle ([10 §2](10-role-matrix.md), [11 §5](11-permission-matrix.md)). | M | The mode is the contract that makes filtering testable rather than incidental. | Cross-cutting (14) |
+| FR-BRN-016 | For **BranchScoped** roles — Reception, Appointment Coordinator, Nurse, Doctor *(operational lists)*, Branch/Clinic Manager — the system shall filter **server-side to the active branch**: appointment lists, the reception queue/day-list, encounters and branch-originated orders. | M | Branch relevance must be enforced, not left to a client-side filter. | Branch (14) |
+| FR-BRN-017 | A BranchScoped request for a record belonging to **another branch shall be denied** (`403` + audited), **not returned as an empty result set**. | M | "Empty" leaks nothing but teaches nothing; denial is the testable, auditable behaviour. | Cross-cutting (14) |
+| FR-BRN-018 | For **MemberScoped** roles — Medical Approval, Medical Director, Case Manager, Finance, Claims Officer/Reviewer, Network Team, Org/Super Admin, managers and reporting — work shall span **all branches by default**, with any branch filter offered as a **convenience only, never a restriction**. | M | Beneficiaries move between sites; member-centred work must not be fragmented by geography. | Cross-cutting (14) |
+| FR-BRN-019 | **ProviderScoped** queues (external labs, imaging centres, pharmacies) shall be **unchanged** by branch scoping and shall continue to be scoped by provider-ownership. | M | Mersal's internal branch dimension is not a contracted provider's concern. | Cross-cutting (14) |
+| FR-BRN-020 | Branch scoping shall be an **additional narrowing filter** that never replaces an existing control: treating-relationship, provider-ownership, assignment and minimum-necessary field rules shall continue to apply unchanged. | M | A narrowing filter that silently becomes a grant is a privacy regression. | Cross-cutting (14) |
+| FR-BRN-021 | Branch-scoped tables shall optionally carry a **PostgreSQL RLS predicate** on `branch_id` (session GUC) as defence in depth, mirroring the proven `provider_id` RLS pattern. | C | Belt-and-braces against a missed service-layer predicate. | Cross-cutting (14) |
+
+**16.4 Practitioner, specialty & scheduling (`BRN`)**
+
+| ID | Statement | Priority | Rationale | Phase |
+|----|-----------|----------|-----------|-------|
+| FR-BRN-022 | The system shall maintain a **`practitioner`** record — the clinical profile behind a user — with `practitioner_type` ∈ {`Doctor`,`Nurse`}, EN/AR name, licence number, licence expiry and status. | M | Clinical identity was previously implicit in the user account. | Branch (14) |
+| FR-BRN-023 | The system shall maintain a bilingual **`specialty`** reference list (General Practice, Internal Medicine, Pediatrics, OB/GYN, Cardiology, Dermatology, **Psychiatry**, **Clinical Psychology**, Neurology, Orthopaedics, ENT, Ophthalmology, Endocrinology, Gastroenterology, Nephrology, Pulmonology, Urology, Oncology, Rheumatology, General Surgery, Emergency Medicine, Radiology, Pathology, Physiotherapy, Nutrition, Dentistry). | M | Referral routing, reporting and examination-type suggestion all need structured specialty. | Branch (14) |
+| FR-BRN-024 | A practitioner shall carry **one or more specialties with exactly one flagged `is_primary`**, replacing the referral's free-text `specialty`. | M | "One primary" makes routing and utilization-by-specialty deterministic. | Branch (14) |
+| FR-BRN-025 | A practitioner shall be assignable to **one or many branches** via `practitioner_branch_assignment` with a validity window and status. | M | Doctors rotate between sites; a single-site model would not survive contact with the rota. | Branch (14) |
+| FR-BRN-026 | The system shall **reject creation of availability, and reject booking, for a doctor at a branch they are not assigned to**, returning `422` with a clear, actionable reason — validated at *both* availability creation and booking time. | M | Catching it only at booking strands patients; catching it only at availability lets manual bookings through. | Branch (14) |
+| FR-BRN-027 | The **doctor picker shall filter by active branch + specialty**, and the clinician profile shall display specialty. | M | Booking staff must not be able to pick a clinician who cannot serve the site. | Branch (14) |
+| FR-BRN-028 | Specialty shall drive **referral routing**, **utilization-by-specialty reporting**, and **default examination-type suggestions**. | S | The structured field pays for itself across three workflows. | Branch (14) |
+| FR-BRN-029 | **Licence expiry** shall feed the existing credential-reminder sweep, and an expired licence shall be surfaced on the practitioner profile and rota views. | S | Compliance and quality; reuses machinery already built. | Cross-cutting (14) |
+| FR-BRN-030 | Branch shall be available as a **reporting dimension** (`branch_code`) across operational and financial reports, without becoming an access boundary for MemberScoped roles. | S | Managers steer by site; analysts must not be walled in by it. | Branch (14) / Reporting |
+
+**16.5 Examination types & sensitivity classification (`SEN`)**
+
+| ID | Statement | Priority | Rationale | Phase |
+|----|-----------|----------|-----------|-------|
+| FR-SEN-001 | The system shall maintain an **`examination_type`** master-data reference (code, EN/AR name, `category` ∈ {`Lab`,`Imaging`,`Procedure`,`Consultation`,`Assessment`}, default code system + code linking to CPT/LOINC, status). | M | Orders carried codes but no orderable catalogue to classify or govern. | Sensitivity (14) |
+| FR-SEN-002 | Each examination type shall carry a **`sensitivity_level`** ∈ {`Standard`,`Sensitive`,`HighlySensitive`} and a **`sensitive_category`** ∈ {`MentalHealth`,`HIV_STI`,`Genetic`,`SubstanceUse`,`ReproductiveHealth`,`GBV_Forensic`,`Other`}. | M | Special-category clinical data must be identifiable *as data*, not by convention. | Sensitivity (14) |
+| FR-SEN-003 | The sensitive-category list shall be **configuration, not code**, ratified by the Medical Director + DPO; **`MentalHealth` is the confirmed requirement** and the remainder are the standard special-category set under Egypt PDPL and UNHCR data-protection norms. | M | The policy owner, not the developer, decides what counts as special-category. | Cross-cutting (14) |
+| FR-SEN-004 | The order and each order line shall carry the `examination_type_id` and a **denormalized `sensitivity_level` pinned at order creation**; gating shall never depend on a cross-service join at read time. | M | A gate that requires a remote lookup fails open under load — which is precisely the wrong failure. | Cross-cutting (14) |
+| FR-SEN-005 | Results and report documents shall **inherit the classification** of the order line that produced them. | M | Classification must follow the data, not the request. | Sensitivity (14) |
+| FR-SEN-006 | A later reclassification of an `examination_type` shall **not retroactively downgrade** the pinned sensitivity of existing orders/results; upgrades shall apply going forward and be audited. | M | Data classified as sensitive at capture stays sensitive; consent and expectation were set then. | Cross-cutting (14) |
+
+**16.6 Sensitive result gating (`SEN`)**
+
+| ID | Statement | Priority | Rationale | Phase |
+|----|-----------|----------|-----------|-------|
+| FR-SEN-007 | For a result whose `sensitivity_level` ≠ `Standard`, **full content** (values, report document, clinical narrative) shall be readable **only by the authoring/ordering doctor** with a treating relationship — and by the beneficiary themselves via a future portal. | M | Special-category data has a minimum-necessary audience of one. | Sensitivity (14) |
+| FR-SEN-008 | **Every other principal** — other treating clinicians, the **medical approval team**, Medical Director, case managers, reception, finance/claims and reporting — shall receive **existence metadata only**: category, date, status, ordering branch and a `RESTRICTED` marker. **Never values, never the report.** | M | Existence is enough to coordinate care and adjudicate benefit; content is not. | Cross-cutting (14) |
+| FR-SEN-009 | This gate shall **deliberately override the approval team's standing EMR read** ([FR-CLIN-013](#4-clinical--emr-clin), [FR-AUTH-003](#7-approvals--authorizations-auth)): authorization decisions on sensitive services shall proceed on **existence + the requesting doctor's clinical justification**, or via an approved release request. | M | The one non-treating role with broad clinical read is exactly the role this rule exists to bound. | Cross-cutting (14) |
+| FR-SEN-010 | Sensitive result content shall be excluded from **exports, printed packets, read-model projections, search indexes and outbound notifications**; a notification shall say a restricted result is available, never what it says. | M | A gate on the read path that leaks through the report path is not a gate ([FR-NOT-003](#9-notifications-not)). | Cross-cutting (14) |
+| FR-SEN-011 | The system shall emit **`SensitiveResultRestricted`** when a restricted result is created, so downstream consumers project the restricted form from the outset. | M | Read models must never materialize content they may not serve. | Cross-cutting (14) |
+
+**16.7 Release request, decision & grants (`SEN`)**
+
+| ID | Statement | Priority | Rationale | Phase |
+|----|-----------|----------|-----------|-------|
+| FR-SEN-012 | A principal needing content shall raise a **`report_access_request`** carrying the result reference, requester, requested-for role, a **mandatory `purpose_code`** ∈ {`ContinuityOfCare`,`AuthorizationDecision`,`ClinicalReview`,`Complaint`,`Legal`,`Other`}, a **mandatory free-text `justification`**, and a requested TTL. | M | Access to special-category data must be *asked for*, on the record, with a stated reason. | Sensitivity (14) |
+| FR-SEN-013 | A request missing `purpose_code` or `justification` shall be **rejected at validation** (`422`), never accepted as a draft that could be approved. | M | An unjustified request must not be approvable by accident. | Sensitivity (14) |
+| FR-SEN-014 | The request shall follow the lifecycle `Requested → UnderReview → (InfoRequested ⇄ UnderReview) → (Approved \| Denied)`, with `Approved → (Expired \| Revoked)`, routed on creation to the **authoring/ordering doctor** ([23-state-machines.md](23-state-machines.md)). | M | Canonical, testable release state machine. | Sensitivity (14) |
+| FR-SEN-015 | A request shall be decidable by the **authoring/ordering doctor OR a Medical Director**; a Director decision shall be flagged **`decided_by_role = MedicalDirector`** and **extra-audited** as a high-severity event. | M | Care must not stall because one clinician is unavailable — but the shortcut must be visible. | Sensitivity (14) |
+| FR-SEN-016 | The **requester shall never be the decider** (segregation of duties), and the decision screen shall show requester, role, purpose, justification and requested duration. | M | Self-release is not release. | Cross-cutting (14) |
+| FR-SEN-017 | A **denial shall require a reason** and shall be notified to the requester. | M | A refusal without a reason cannot be appealed or improved on. | Sensitivity (14) |
+| FR-SEN-018 | An approval shall produce a **`report_access_grant`** that is **time-boxed** (default **72 h** `Sensitive`, **24 h** `HighlySensitive`, configurable), **scoped to exactly one result**, and **non-transferable** — bound to a single `grantee_user_id`, never to a role, team or queue. | M | A durable, shareable grant is a permanent leak with extra steps. | Cross-cutting (14) |
+| FR-SEN-019 | Grants shall **auto-expire**, and shall be **revocable** at any time by the authoring doctor, a Medical Director or the DPO; expiry and revocation shall be audited and notified. | M | Access must decay by default and be withdrawable on demand. | Cross-cutting (14) |
+| FR-SEN-020 | **Every read performed under a grant shall be audited separately** from ordinary PHI-read audit, carrying `grant_id`, `purpose_code`, actor, result reference and correlation id, and shall emit `SensitiveResultReadUnderGrant`. | M | The grant register is the evidence that the exception stayed exceptional. | Cross-cutting (14) |
+| FR-SEN-021 | For a `HighlySensitive` result, **Medical Director visibility of the release shall be mandatory** and the default grant TTL shall be shorter. | M | The highest-risk category carries the tightest default. | Sensitivity (14) |
+| FR-SEN-022 | The system shall publish the release events via the **transactional outbox**: `ReportAccessRequested`, `ReportAccessInfoRequested`, `ReportAccessApproved`, `ReportAccessDenied`, `ReportAccessGrantExpired`, `ReportAccessGrantRevoked`, `SensitiveResultReadUnderGrant`. | M | Notification, reporting and audit without coupling. | Cross-cutting (14) |
+| FR-SEN-023 | The system shall report **release KPIs** — request volume by purpose, approval/denial rate, decision TAT, Medical-Director-decided share, grants active/expired/revoked, and reads-under-grant. | S | If the exception path is growing, governance must see it. | Sensitivity (14) / Reporting |
+
+**16.8 Break-glass, data-subject rights & UI (`SEN`)**
+
+| ID | Statement | Priority | Rationale | Phase |
+|----|-----------|----------|-----------|-------|
+| FR-SEN-024 | **Break-glass shall remain available** on a sensitive result for genuine emergencies but shall be **loud**: extra justification, immediate notification to the **authoring doctor and the Medical Director and the DPO**, and **mandatory retrospective review** — reusing the existing `BreakGlass` machinery. | M | Emergencies happen; silent emergencies are how the gate erodes. | Cross-cutting (14) |
+| FR-SEN-025 | The **beneficiary's own access** to their data shall be **unaffected** by sensitivity gating (data-subject rights, [20-compliance-checklist.md](20-compliance-checklist.md)). | M | The gate protects the subject; it must never be used against them. | Cross-cutting (14) |
+| FR-SEN-026 | A restricted result shall render in a **locked state** — category + date + `RESTRICTED` chip using four cues (neutral hue + lock icon + ghost pill + text) — with a **"Request access"** action opening the justification form; screens shall be bilingual (Arabic RTL + English) and meet **WCAG 2.2 AA**. | M | Non-colour status encoding and full a11y/i18n are platform-wide requirements ([21-accessibility-checklist.md](21-accessibility-checklist.md), [0B](0B-DESIGN-SYSTEM-UI.md)). | Cross-cutting (14) |
+| FR-SEN-027 | Appointment, queue and order screens shall **display the active branch** prominently, and the **branch switcher** shall be keyboard-operable, announce changes via `aria-live`, mirror under RTL, and be audited ([14-navigation-structure.md](14-navigation-structure.md)). | M | A user must never be able to mistake which site they are working in. | Cross-cutting (14) |
+
+---
+
+## 17. Priority summary (MoSCoW rollup)
 
 | Module | Must | Should | Could/Won't |
 |--------|------|--------|-------------|
@@ -390,8 +495,10 @@ This document specifies the **functional requirements (FRs)** for the Mersal HBM
 | Consumption Invariants | 10 | 0 | 0 |
 | Audit | 5 | 1 | 1 |
 | Claims Management (10b) | 65 | 3 | 0 |
+| Branch Scoping & Practitioner Specialty (14) | 24 | 5 | 1 |
+| Clinical Sensitivity (14) | 26 | 1 | 0 |
 
-> The **Consumption Invariants** and **Data-Minimization** FRs are release-gating: no MVP is acceptable without them ([28-mvp-definition.md](28-mvp-definition.md)).
+> The **Consumption Invariants** and **Data-Minimization** FRs are release-gating: no MVP is acceptable without them ([28-mvp-definition.md](28-mvp-definition.md)). The **`SEN` gating FRs** (FR-SEN-007 … FR-SEN-010, FR-SEN-018 … FR-SEN-020) and the **branch-denial FR** (FR-BRN-017) are release-gating for phase 14 in the same way.
 
 ---
 
@@ -401,3 +508,4 @@ This document specifies the **functional requirements (FRs)** for the Mersal HBM
 - Who can do each FR: [10-role-matrix.md](10-role-matrix.md) · [11-permission-matrix.md](11-permission-matrix.md)
 - Lifecycles referenced: [23-state-machines.md](23-state-machines.md)
 - Claims module design (phase 10b): [36-claims-management.md](36-claims-management.md)
+- Branch scoping, practitioner specialty & clinical sensitivity design (phase 14): [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md)

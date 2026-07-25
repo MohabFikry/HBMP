@@ -123,7 +123,8 @@ function ResultCard({ result, t, S }: { result: EligibilityResult; t: (l: Locali
         <div>
           <h2 style={{ margin: 0 }}>{t(b.name)}</h2>
           <p className="muted" style={{ margin: "4px 0 0" }}>
-            {t(S.card)}: <span className="tnum">{b.cardNumber}</span> · {t(S.dob)}: <span className="tnum">{b.dateOfBirth}</span>
+            {t(S.card)}: <span className="tnum">{b.cardNumber}</span>
+            {b.dateOfBirth && <> · {t(S.dob)}: <span className="tnum">{b.dateOfBirth}</span></>}
           </p>
         </div>
         <StatusChip kind={result.status.kind} label={t(result.status.label)} />
@@ -133,8 +134,8 @@ function ResultCard({ result, t, S }: { result: EligibilityResult; t: (l: Locali
         <div className="kv-grid" aria-label={t(S.coverage)}>
           <div><dt>{t(S.plan)}</dt><dd>{t(c.planName)}</dd></div>
           <div><dt>{t(S.band)}</dt><dd>{t(c.band)}</dd></div>
-          <div><dt>{t(S.copay)}</dt><dd className="tnum">{c.copayPercent}%</dd></div>
-          <div><dt>{t(S.validUntil)}</dt><dd className="tnum">{c.validUntil}</dd></div>
+          {c.copayPercent != null && <div><dt>{t(S.copay)}</dt><dd className="tnum">{c.copayPercent}%</dd></div>}
+          {c.validUntil && <div><dt>{t(S.validUntil)}</dt><dd className="tnum">{c.validUntil}</dd></div>}
           {c.annualCapRemaining && <div><dt>{t(S.capRemaining)}</dt><dd className="tnum">{c.annualCapRemaining}</dd></div>}
         </div>
       )}

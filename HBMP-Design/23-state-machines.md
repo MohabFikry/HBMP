@@ -443,11 +443,67 @@ stateDiagram-v2
 
 ---
 
+## 11. Report Access Request Lifecycle (sensitive result release)
+
+Canonical: `Requested → UnderReview → (InfoRequested ⇄ UnderReview) → (Approved | Denied)`; an `Approved` request yields a time-boxed grant that ends `Expired` or `Revoked`. Module design: [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Requested: request release (purpose + justification)
+    Requested --> UnderReview: routed to authoring/ordering doctor
+    UnderReview --> InfoRequested: needs better justification
+    InfoRequested --> UnderReview: justification supplemented
+    UnderReview --> Approved: authoring doctor OR Medical Director grants
+    UnderReview --> Denied: refused (reason mandatory)
+    Approved --> Expired: grant TTL elapsed
+    Approved --> Revoked: author / Medical Director / DPO revokes
+    Denied --> [*]
+    Expired --> [*]
+    Revoked --> [*]
+```
+
+| From | Event | Guard / Condition | To | Side-effects / Emitted Event | Actor / Role | Audit note |
+|---|---|---|---|---|---|---|
+| — | request-release | **`purpose_code` AND `justification` both present** (absent ⇒ rejected at validation, never persisted); target is a single non-`Standard` result | Requested | `ReportAccessRequested`; notify authoring doctor | Requesting clinician / Approval Team / Case Manager | Requester, role, purpose, justification, `result_ref` recorded |
+| Requested | route / pick-up | routed to the **authoring/ordering doctor**; Medical Director may pick up in parallel | UnderReview | (no new event; SLA timer starts) | orders-service / Authoring Doctor / Medical Director | Decider identity recorded |
+| UnderReview | request-info | justification insufficient | InfoRequested | `ReportAccessInfoRequested`; notify requester | Authoring Doctor / Medical Director | Information gap recorded |
+| InfoRequested | supply-info | supplemented justification provided | UnderReview | (no new event) | Requester | Supplement appended, original preserved |
+| UnderReview | approve | decider is the **authoring/ordering doctor OR a Medical Director**; TTL ≤ policy max | Approved | `ReportAccessApproved`; create `report_access_grant` (single result, non-transferable) | Authoring Doctor / **Medical Director** | `decided_by_role`; **Medical Director decisions flagged + extra-audited** |
+| UnderReview | deny | **reason mandatory** | Denied | `ReportAccessDenied`; notify requester | Authoring Doctor / Medical Director | Reason mandatory and stored |
+| Approved | (read under grant) | grant live: `now < expires_at` AND `revoked_at IS NULL` AND actor = `grantee_user_id` AND result = `result_ref` | Approved (no transition) | `SensitiveResultReadUnderGrant` | Grantee | **Every read audited separately** with `grant_id`, purpose, actor |
+| Approved | expire | TTL elapsed — default **72h** `Sensitive`, **24h** `HighlySensitive` (configurable) | Expired | `ReportAccessGrantExpired`; notify requester | System (timer) | Auto-expiry audited; **grants are never extended — a longer need is a new request** |
+| Approved | revoke | early withdrawal of access | Revoked | `ReportAccessGrantRevoked`; notify requester | Authoring Doctor / Medical Director / DPO | `revoked_by` + reason recorded |
+
+### Release guards (invariant detail)
+- **Purpose + justification are mandatory:** a request missing either is rejected at validation with `422` and audited — it never enters `Requested`.
+- **Decider authority:** only the **authoring/ordering doctor** or a **Medical Director** may decide (so care is not blocked when the author is unavailable). Any other actor's decision attempt is rejected and audited as `TransitionDenied`.
+- **Grant shape:** **time-boxed** (default 72h `Sensitive` / 24h `HighlySensitive`), **scoped to exactly one result**, and **non-transferable** — the grant binds `grantee_user_id` + `result_ref` and cannot be delegated or widened.
+- **Read auditing:** every read under a grant emits `SensitiveResultReadUnderGrant`, separately from ordinary PHI-read audit; reads after expiry/revocation are denied and audited.
+- **Default state is restricted:** without a live grant, non-authoring roles — including the **medical approval team**, case managers, and reporting — see **existence metadata only** (category, date, status, ordering branch, `RESTRICTED` marker), never values or the report document ([37 §6.1](37-branch-scoping-and-clinical-sensitivity.md)).
+- **Break-glass** remains available for genuine emergencies but is loud: extra justification, immediate notification to the authoring doctor **and** Medical Director **and** DPO, plus mandatory retrospective review ([18-security-model.md](18-security-model.md)).
+- The **beneficiary's own** access to their data is unaffected (data-subject rights, [20-compliance-checklist.md](20-compliance-checklist.md)).
+
+### 11.1 Branch context — audited transitions, not a state machine
+
+Active-branch context is **per-request**, not a persisted lifecycle, so it has no state diagram — but its two transitions are audited exactly like state changes:
+
+| Event | Guard / Condition | Side-effects / Emitted Event | Actor / Role | Audit note |
+|---|---|---|---|---|
+| `ActiveBranchSwitched` | new branch ∈ the user's permitted set (Home ∪ Additional, `Active`, in validity window) | Active-branch context changes; UI announces via `aria-live` | Branch-scoped staff user | Actor, from-branch, to-branch, correlation id |
+| `BranchScopeDenied` | `X-Active-Branch` **outside** the permitted set, or a cross-branch resource requested | `403` — request rejected, **not** silently emptied | Any | Attempted branch + resource recorded; **the header is never trusted** |
+
+> Branch scoping is an **additional narrowing filter**, never a replacement for existing controls — `TreatingRelationship`, `ProviderOwnership`, and minimum-necessary field rules still apply unchanged ([37 §3](37-branch-scoping-and-clinical-sensitivity.md), [11-permission-matrix.md](11-permission-matrix.md)).
+
+**Consistency note (per the global invariants above):** every transition here — request, info request, decision, grant creation, expiry, revocation, each read under a grant, and each branch switch or denial — writes an **immutable, hash-chained** `audit_event` (actor, from/to, purpose, justification, correlation id); nothing is mutated or hard-deleted, and **illegal transitions are rejected and audited as `TransitionDenied`**.
+
+---
+
 ## Consistency Notes
 - Order & Prescription share the **atomic-consume / no-reuse** pattern — the only difference is domain (tests vs meds) and pharmacy-specific substitution/OOS guards.
 - Authorization decisions feed the gates in Order/Prescription (`route-approval`/`approve`).
 - Appointment `NoShow` and `Cancelled` free slots that drive **waitlist promotion** (see [05](05-business-process-maps.md) X3 and [06](06-bpmn-diagrams.md) BPMN-3).
 - Claim / Claim Line / Batch / Reimbursement (§7–§10) are **strictly downstream** of the atomic-consume and dispense invariants: the `order_fulfillment` / `dispense_event` rows are the authoritative usage record, and the unique `fulfillment_ref` guard is the money-side mirror of the **no-reuse** invariant. Claims never touch `coverage_limit.consumed_value`.
+- Report Access Request (§11) is **orthogonal** to the Investigation Order lifecycle: it gates *disclosure* of a result's content and never changes the order's own state. Sensitivity is pinned on the order at creation ([22 §10B.9](22-data-dictionary.md)), so a later reclassification cannot retroactively unlock restricted data.
 - **Audit (applies to all claims transitions, per the global invariants above):** every transition, decision, adjustment, and export writes an **immutable, hash-chained** `audit_event` (actor, from/to, before/after minimized amounts, correlation id, justification where required); nothing is mutated or hard-deleted — corrections are append-only adjustments or a compensating `Void`. **Illegal transitions are rejected and audited as `TransitionDenied`.**
 
 ## Cross-References
@@ -456,4 +512,5 @@ stateDiagram-v2
 - Sequence diagrams (atomic consume, partial dispense, approvals): [24-sequence-diagrams.md](24-sequence-diagrams.md)
 - Claims module design (origination, batching, adjudication, settlement): [36-claims-management.md](36-claims-management.md)
 - Claims schema, enums & reason codes: [22-data-dictionary.md](22-data-dictionary.md) §10A / §11.5
+- Branch scoping, practitioner specialty & sensitivity gating (§11 above): [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md); schema & enums: [22-data-dictionary.md](22-data-dictionary.md) §10B / §11.6
 - Foundations & glossary: [0A-DESIGN-FOUNDATIONS.md](0A-DESIGN-FOUNDATIONS.md)

@@ -45,6 +45,25 @@ const caseStatus = (s: unknown) =>
 const caseToken = (c: any) => `•••${String(c.beneficiaryId ?? c.caseId ?? "").slice(-4)}`;
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+/** Map the reception card's accessible status tone to the design-system StatusKind. */
+const toneToKind = (tone: unknown): "ok" | "warn" | "bad" | "neu" | "info" =>
+  ({ positive: "ok", caution: "warn", critical: "bad", neutral: "neu" })[String(tone ?? "neutral")] as any ?? "neu";
+/** Map member coverage status → the eligibility verdict the result card renders. */
+const statusToVerdict = (status: unknown): "eligible" | "ineligible" | "review" => {
+  const s = String(status ?? "").toLowerCase();
+  if (s === "active") return "eligible";
+  if (s === "blocked" || s === "expired") return "ineligible";
+  return "review";
+};
+
+/**
+ * Last reception search cards, keyed by beneficiaryId. The reception service returns ONE min-necessary card that
+ * already carries identity + coverage + remaining limits; the fixture-era client split this into search+check, so
+ * we cache the card from the search and let {@link HttpApiClient.checkEligibility} map it — no second round-trip
+ * and no fabricated PHI (the card is the single source of truth reception is allowed to see).
+ */
+const receptionCards = new Map<string, any>();
+
 /**
  * The production API client — talks to the phase services through the gateway (`/api/v1`), zod-validating
  * every response against the shared contract, and sending `Idempotency-Key` on consume/dispense/decide.
@@ -53,11 +72,50 @@ const caseToken = (c: any) => `•••${String(c.beneficiaryId ?? c.caseId ?? 
  * the drop-in the app uses once the services are reachable behind Kong — exactly the AuthClient→OIDC pattern.
  */
 export class HttpApiClient implements ApiClient {
-  searchEligibility(query: string) {
-    return getJson(`/eligibility/search?q=${encodeURIComponent(query)}`, z.array(zEligibilityHit));
+  // Reception (Phase 2, US-010) — the eligibility service exposes ONE min-necessary reception card at
+  // `/reception/search`; there is deliberately no full-demographic "get by id" for reception (Reception≠EMR).
+  // We adapt the card into the search-hit + result-card contract, caching the card so the check step needs no
+  // second call (and never fabricates DOB/gender the card intentionally omits).
+  async searchEligibility(query: string) {
+    const r = (await getRaw(`/reception/search?q=${encodeURIComponent(query)}`)) as any;
+    const cards: any[] = r?.results ?? [];
+    receptionCards.clear();
+    for (const c of cards) receptionCards.set(String(c.identity?.beneficiaryId), c);
+    return cards.map((c: any) =>
+      parseOr(zEligibilityHit, {
+        id: c.identity?.beneficiaryId,
+        name: loc(c.identity?.displayName),
+        cardNumber: c.identity?.memberNo ?? "",
+      }),
+    );
   }
-  checkEligibility(beneficiaryId: string) {
-    return getJson(`/eligibility/${encodeURIComponent(beneficiaryId)}`, zEligibilityResult);
+  async checkEligibility(beneficiaryId: string) {
+    const c = receptionCards.get(String(beneficiaryId));
+    const identity = c?.identity ?? {};
+    const categories: string[] = c?.coverage ?? [];
+    const limits: any[] = c?.remainingLimits ?? [];
+    // Pick a monetary remaining-limit (annual cap) for the coverage summary, if the card carries one.
+    const cap = limits.find((l) => /amount|annual/i.test(String(l.limitType)));
+    const active = String(identity.status ?? "").toLowerCase() === "active";
+    return parseOr(zEligibilityResult, {
+      verdict: statusToVerdict(identity.status),
+      status: { kind: toneToKind(identity.statusSemantics?.tone), label: loc(identity.statusSemantics?.label ?? identity.status) },
+      beneficiary: {
+        id: identity.beneficiaryId ?? beneficiaryId,
+        name: loc(identity.displayName),
+        cardNumber: identity.memberNo ?? "",
+      },
+      coverage: categories.length
+        ? {
+            planName: { en: "Benefit coverage", ar: "التغطية التأمينية" },
+            band: loc(categories.join(" · ")),
+            annualCapRemaining: cap ? money(cap.remaining) : undefined,
+          }
+        : null,
+      visitGate: active
+        ? { allowed: true }
+        : { allowed: false, reason: { en: "Coverage not active — refer to eligibility desk.", ar: "التغطية غير فعّالة — يُرجى مراجعة مكتب الأهلية." } },
+    });
   }
 
   listPatients() {

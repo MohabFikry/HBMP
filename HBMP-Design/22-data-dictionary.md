@@ -710,6 +710,184 @@ Indexes: `(document_id, field_name)`; partial `(confidence) WHERE accepted_by IS
 
 ---
 
+## 10B. Domain: Branch, Practitioner & Clinical Sensitivity (`provider`, `masterdata`, `orders` schemas)
+
+Added in **Phase 14** — authoritative module design: [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md). Numbered `10B` so the existing `§11` enumeration references stay valid. `branch`, `user_branch_assignment`, `practitioner*` and `specialty` live in the **`provider`** schema (its remit widens from "contracted network" to "network & facilities"); `examination_type` is reference data in **`masterdata`**; `report_access_request` / `report_access_grant` live with the results they gate in **`orders`**.
+
+> **Minimum-necessary note (hard rule):** branch scoping is an **additional narrowing filter, never a replacement** for the existing row/field rules ([11 §3](11-permission-matrix.md)) — a clinician still needs `TreatingRelationship` to open a record. For any result whose `sensitivity_level` ≠ `Standard`, the clinical **values and report documents are PHI with restricted disclosure**: non-authoring roles (including the medical approval team, case managers, and reporting) receive **existence metadata only** — category, date, status, ordering branch, and a `RESTRICTED` marker — never the values. Content is released only under a time-boxed `report_access_grant` or audited break-glass ([37 §6](37-branch-scoping-and-clinical-sensitivity.md), [18-security-model.md](18-security-model.md)).
+
+### 10B.1 `branch`
+
+| Column | Type | Null | Key | Description | Sens | Validation |
+|---|---|---|---|---|---|---|
+| `branch_id` | `uuid` | No | PK | UUID v7 | Internal | v7 generated |
+| `branch_code` | `varchar(8)` | No | UK | Stable code used in business keys/reporting | Internal | uppercase `^[A-Z]{3,8}$` |
+| `name_en` | `varchar(120)` | No | | English name | Internal | non-empty |
+| `name_ar` | `varchar(120)` | No | | Arabic name (RTL display) | Internal | non-empty |
+| `city` | `varchar(60)` | Yes | | City / governorate | Internal | |
+| `address` | `varchar(256)` | Yes | | Street address | Internal | |
+| `timezone` | `varchar(40)` | No | | IANA tz, default `'Africa/Cairo'` | Internal | valid IANA zone |
+| `phone` | `varchar(30)` | Yes | | Branch switchboard | Internal | E.164-ish |
+| `opening_hours` | `jsonb` | Yes | | Weekday → open/close windows | Internal | schema-validated |
+| `status` | `varchar(16)` | No | | Lifecycle | Internal | enum (see §11.6) |
+
+Indexes: PK; `UNIQUE(branch_code)`; `(status)`.
+
+Seeded reference rows (all `Africa/Cairo`): `ASW` Aswan / أسوان, `ALX` Alexandria / الإسكندرية, `OCT` 6th of October / السادس من أكتوبر, `MAA` Maadi / المعادي, `DOK` Dokki / الدقي, `NSR` Nasr City / مدينة نصر.
+
+> **`branch` ≠ `provider_location` (§5.2).** A `branch` is a **Mersal-operated internal facility**; a `provider_location` is a **contracted third-party site**. Both may host care, but only branches are subject to staff branch-scoping — external providers stay `ProviderScoped`. The two tables are never merged.
+
+### 10B.2 `user_branch_assignment`
+
+| Column | Type | Null | Key | Description | Sens | Validation |
+|---|---|---|---|---|---|---|
+| `assignment_id` | `uuid` | No | PK | UUID v7 | Internal | v7 generated |
+| `user_id` | `uuid` | No | logical FK | Staff user (`identity`) | Internal | |
+| `branch_id` | `uuid` | No | FK | Assigned branch | Internal | FK `provider.branch` |
+| `assignment_type` | `varchar(12)` | No | | Home vs additional working branch | Internal | enum (see §11.6) |
+| `valid_from` | `date` | No | | Assignment start | Internal | |
+| `valid_to` | `date` | Yes | | Assignment end (null = open) | Internal | ≥ `valid_from` |
+| `status` | `varchar(12)` | No | | Lifecycle | Internal | enum (see §11.6) |
+
+Indexes: PK; **partial `UNIQUE(user_id) WHERE assignment_type='Home' AND status='Active'`** (exactly one active Home branch per user); `UNIQUE(user_id, branch_id) WHERE status='Active'`; `(branch_id, status)`.
+
+> **Permitted set** = Home ∪ Additional, filtered to `status='Active'` and within the validity window. The `X-Active-Branch` header is validated against it on every request — never trusted; a mismatch is `403` + audited `BranchScopeDenied`. Revocation takes effect on the next request.
+
+### 10B.3 `practitioner`
+
+| Column | Type | Null | Key | Description | Sens | Validation |
+|---|---|---|---|---|---|---|
+| `practitioner_id` | `uuid` | No | PK | UUID v7 | Internal | v7 generated |
+| `user_id` | `uuid` | No | logical FK, UK | Backing identity user | Internal | `UNIQUE` — one profile per user |
+| `practitioner_type` | `varchar(12)` | No | | Clinical role class | Internal | enum (see §11.6) |
+| `full_name_en` | `varchar(160)` | No | | English display name | PII | non-empty |
+| `full_name_ar` | `varchar(160)` | Yes | | Arabic display name | PII | |
+| `license_no` | `varchar(40)` | Yes | | Professional licence number | PII | unique per authority |
+| `license_expiry` | `date` | Yes | | Licence expiry (feeds credential reminders) | Internal | ≥ issue date |
+| `status` | `varchar(16)` | No | | Lifecycle | Internal | enum: Active/Suspended/Inactive |
+
+Indexes: PK; `UNIQUE(user_id)`; `(status)`; partial `(license_expiry) WHERE status='Active'`.
+
+### 10B.4 `specialty` / `practitioner_specialty`
+
+| Table.Column | Type | Null | Key | Description | Sens |
+|---|---|---|---|---|---|
+| `specialty.specialty_code` | `varchar(20)` | No | PK/UK | Stable reference code | Public |
+| `specialty.name_en` | `varchar(120)` | No | | English name | Public |
+| `specialty.name_ar` | `varchar(120)` | No | | Arabic name | Public |
+| `specialty.parent_code` | `varchar(20)` | Yes | FK | Parent specialty (sub-specialty tree) | Public |
+| `practitioner_specialty.practitioner_id` | `uuid` | No | PK/FK | | Internal |
+| `practitioner_specialty.specialty_code` | `varchar(20)` | No | PK/FK | | Internal |
+| `practitioner_specialty.is_primary` | `boolean` | No | | Exactly one primary per practitioner | Internal |
+
+Indexes: `specialty` PK on `specialty_code`, `(parent_code)`; `practitioner_specialty` composite PK `(practitioner_id, specialty_code)`, **partial `UNIQUE(practitioner_id) WHERE is_primary`**, `(specialty_code)`.
+
+> A practitioner carries **≥ 1** specialty with exactly one flagged primary. Specialty drives referral routing, the doctor picker (filtered by active branch **+** specialty), utilization reporting, and default examination-type suggestions.
+
+### 10B.5 `practitioner_branch_assignment`
+
+| Column | Type | Null | Key | Description | Sens | Validation |
+|---|---|---|---|---|---|---|
+| `practitioner_id` | `uuid` | No | PK/FK | | Internal | FK `practitioner` |
+| `branch_id` | `uuid` | No | PK/FK | | Internal | FK `branch` |
+| `valid_from` | `date` | No | | | Internal | |
+| `valid_to` | `date` | Yes | | Null = open-ended | Internal | ≥ `valid_from` |
+| `status` | `varchar(12)` | No | | Lifecycle | Internal | enum: Active/Revoked |
+
+Indexes: composite PK `(practitioner_id, branch_id)`; `(branch_id, status)`.
+
+> A doctor may serve **one or many** branches. Availability creation **and** booking validate the doctor→branch assignment; booking at an unassigned branch fails `422` with an explicit reason.
+
+### 10B.6 `examination_type` (`masterdata` — reference)
+
+| Column | Type | Null | Key | Description | Sens | Validation |
+|---|---|---|---|---|---|---|
+| `examination_type_id` | `uuid` | No | PK | UUID v7 | Public | v7 generated |
+| `code` | `varchar(30)` | No | UK | Stable examination code | Public | `UNIQUE` |
+| `name_en` | `varchar(160)` | No | | English name | Public | non-empty |
+| `name_ar` | `varchar(160)` | No | | Arabic name | Public | non-empty |
+| `category` | `varchar(16)` | No | | Examination category | Public | enum (see §11.6) |
+| `default_code_system` | `varchar(10)` | Yes | | Billing/terminology system | Public | enum: CPT/LOINC/LOCAL |
+| `default_code` | `varchar(20)` | Yes | | Default code in that system | Public | exists in masterdata |
+| `sensitivity_level` | `varchar(20)` | No | | Disclosure class, default `'Standard'` | Public | enum (see §11.6) |
+| `sensitive_category` | `varchar(24)` | Yes | | Special-category type; **null when `sensitivity_level='Standard'`** | Public | enum (see §11.6) |
+| `status` | `varchar(16)` | No | | Lifecycle | Public | enum: Active/Retired |
+
+Indexes: PK; `UNIQUE(code)`; `(category, status)`; `(sensitivity_level)`; `CHECK (sensitivity_level = 'Standard' OR sensitive_category IS NOT NULL)`.
+
+> The **classification table is configuration, not code** — the Medical Director + DPO ratify the category list ([37 §5](37-branch-scoping-and-clinical-sensitivity.md), [20-compliance-checklist.md](20-compliance-checklist.md)).
+
+### 10B.7 `report_access_request`
+
+| Column | Type | Null | Key | Description | Sens | Validation |
+|---|---|---|---|---|---|---|
+| `request_id` | `uuid` | No | PK | UUID v7 | Internal | v7 generated |
+| `result_ref` | `uuid` | No | logical FK | Target result / fulfillment reference | **PHI (link)** | exactly one result per request |
+| `document_id` | `uuid` | Yes | logical FK | Report blob, when the request targets a document | **PHI (link)** | must belong to `result_ref` |
+| `beneficiary_id` | `uuid` | No | logical FK | Data subject | **PHI (link)** | validated via event |
+| `requested_by` | `uuid` | No | logical FK | Requesting user | Internal | |
+| `requested_for_role` | `varchar(40)` | No | | Role the access is needed in | Internal | enum from [10-role-matrix.md](10-role-matrix.md) |
+| `purpose_code` | `varchar(24)` | No | | Lawful purpose of the disclosure | Internal | enum (see §11.6); **mandatory** |
+| `justification` | `text` | **No** | | Free-text clinical/operational rationale | **PHI** | **mandatory**, non-empty; minimized in exports |
+| `requested_ttl_hours` | `integer` | Yes | | Requested grant duration | Internal | 1 ≤ h ≤ policy max |
+| `status` | `varchar(16)` | No | | Lifecycle | Internal | enum (see §11.6) |
+| `decided_by` | `uuid` | Yes | logical FK | Deciding user | Internal | authoring doctor OR Medical Director |
+| `decided_by_role` | `varchar(24)` | Yes | | Authority the decision was made under | Internal | `AuthoringDoctor` / `MedicalDirector` |
+| `decided_at` | `timestamptz` | Yes | | Decision time (UTC) | Internal | ≥ `created_at` |
+| `decision_reason` | `text` | Yes | | **Mandatory on Deny**; optional otherwise | **PHI** | required when `status='Denied'` |
+
+Indexes: PK; `(result_ref, status)`; `(requested_by, status)`; `(beneficiary_id)`; partial `(status) WHERE status IN ('Requested','UnderReview','InfoRequested')` (decision worklist).
+
+> A request without **both** `purpose_code` and `justification` is rejected at validation — never persisted as a pending request. `decided_by_role='MedicalDirector'` decisions are **extra-audited** ([19-audit-strategy.md](19-audit-strategy.md)).
+
+### 10B.8 `report_access_grant`
+
+| Column | Type | Null | Key | Description | Sens | Validation |
+|---|---|---|---|---|---|---|
+| `grant_id` | `uuid` | No | PK | UUID v7 | Internal | v7 generated |
+| `request_id` | `uuid` | No | FK | Approved request | Internal | FK `report_access_request`; status `Approved` |
+| `grantee_user_id` | `uuid` | No | logical FK | **Sole** authorized reader — non-transferable | Internal | = `request.requested_by` |
+| `result_ref` | `uuid` | No | logical FK | **Single** result covered | **PHI (link)** | = `request.result_ref` |
+| `purpose_code` | `varchar(24)` | No | | Copied from the request (purpose limitation) | Internal | enum (see §11.6) |
+| `granted_at` | `timestamptz` | No | | Grant start (UTC) | Internal | |
+| `expires_at` | `timestamptz` | No | | TTL end — default **72h** `Sensitive`, **24h** `HighlySensitive` | Internal | > `granted_at` |
+| `revoked_at` | `timestamptz` | Yes | | Early revocation | Internal | ≥ `granted_at` |
+| `revoked_by` | `uuid` | Yes | logical FK | Author / Medical Director / DPO | Internal | required when `revoked_at` set |
+
+Indexes: PK; `UNIQUE(request_id)`; **`(grantee_user_id, result_ref) WHERE revoked_at IS NULL`** (live-grant lookup on every read); partial `(expires_at) WHERE revoked_at IS NULL` (expiry sweep).
+
+> A grant is **time-boxed, single-result, and non-transferable**. **Every read under a grant** emits a `SensitiveResultReadUnderGrant` audit event carrying `grant_id`, `purpose_code`, and actor — separately from ordinary PHI-read audit. Grants are never extended: a longer need is a **new** request.
+
+### 10B.9 Additive columns on existing tables
+
+Additive only — all new columns are nullable or carry a default, so migrations are expand/contract-safe.
+
+| Table (§) | New column | Type | Null | Description | Sens |
+|---|---|---|---|---|---|
+| `emr.appointment` (§6.1) | `branch_id` | `uuid` | Yes | Mersal branch hosting the appointment | Internal |
+| `emr.appointment_slot` | `branch_id` | `uuid` | Yes | Branch the slot belongs to | Internal |
+| `provider.provider_availability` | `branch_id` | `uuid` | Yes | Branch the availability applies to | Internal |
+| `emr.waitlist_entry` | `branch_id` | `uuid` | Yes | Branch the entry queues against | Internal |
+| `emr.encounter` (§6.2) | `branch_id` | `uuid` | Yes | Branch where the visit occurred | Internal |
+| `emr.queue_ticket` | `branch_id` | `uuid` | Yes | Branch owning the queue | Internal |
+| `orders.investigation_order` (§7.1) | `ordering_branch_id` | `uuid` | Yes | Branch the order originated from | Internal |
+| `orders.investigation_order` (§7.1) | `examination_type_id` | `uuid` | Yes | FK `masterdata.examination_type` | Internal |
+| `orders.investigation_order` (§7.1) | `sensitivity_level` | `varchar(20)` | No | Denormalized, `DEFAULT 'Standard'` | Internal |
+| `orders.order_line` (§7.2) | `examination_type_id` | `uuid` | Yes | Per-line examination type | Internal |
+| `orders.order_line` (§7.2) | `sensitivity_level` | `varchar(20)` | No | Denormalized, `DEFAULT 'Standard'` | Internal |
+| `orders.order_fulfillment` / result (§7.3) | `examination_type_id` | `uuid` | Yes | Inherited from the line | Internal |
+| `orders.order_fulfillment` / result (§7.3) | `sensitivity_level` | `varchar(20)` | No | Denormalized, `DEFAULT 'Standard'` | Internal |
+
+Indexes added: `(branch_id, scheduled_start)` on `appointment`; `(branch_id, status)` on `appointment_slot`, `waitlist_entry`, `queue_ticket`; `(branch_id, started_at)` on `encounter`; `(ordering_branch_id, status)` on `investigation_order`; partial `(sensitivity_level) WHERE sensitivity_level <> 'Standard'` on order/line/result.
+
+> **`branch_id` nullable ⇒ NULL means an *external provider location*, not a Mersal branch.** Rows with a null `branch_id` are out of scope for branch filtering and remain governed by `ProviderOwnership` ([37 §3](37-branch-scoping-and-clinical-sensitivity.md)).
+>
+> **Sensitivity is pinned at creation.** `sensitivity_level` is copied onto the order, its lines, and the resulting result/report **at the moment the order is created**, and is never recomputed from `examination_type` afterwards. Reclassifying an examination type later changes *future* orders only — it can **never retroactively unlock** data that was captured under a stricter class (and a later tightening is applied by an explicit, audited re-classification job, never silently). Denormalization also means gating never depends on a cross-service join at read time.
+>
+> **Clinical result values for non-`Standard` results are PHI with restricted disclosure** — existence metadata only for everyone except the authoring/ordering doctor (with treating relationship), the beneficiary, and a live `report_access_grant` holder.
+
+---
+
 ## 11. Enumerations (Canonical)
 
 ### 11.1 Lifecycle statuses (see [23-state-machines.md](23-state-machines.md))
@@ -792,6 +970,26 @@ Order types: `Lab`, `Imaging`, `Procedure`. Code systems: `CPT`, `LOINC`, `LOCAL
 | `ILLEGIBLE_DOCUMENT` | Receipt/invoice unreadable or OCR unusable |
 | `RECEIPT_MISMATCH` | Receipt does not match the authorized order/prescription or the fulfillment record |
 
+### 11.6 Branch, practitioner & sensitivity enums (`provider` / `masterdata` / `orders` schemas — see [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md))
+
+| Enum | Values |
+|---|---|
+| Branch status | Active, Suspended, Closed |
+| Branch assignment type | Home, Additional |
+| Branch assignment status | Active, Revoked |
+| Practitioner type | Doctor, Nurse |
+| Practitioner branch assignment status | Active, Revoked |
+| Examination category | Lab, Imaging, Procedure, Consultation, Assessment |
+| **Sensitivity level** | Standard, Sensitive, HighlySensitive |
+| **Sensitive category** | MentalHealth, HIV_STI, Genetic, SubstanceUse, ReproductiveHealth, GBV_Forensic, Other |
+| **Purpose code** | ContinuityOfCare, AuthorizationDecision, ClinicalReview, Complaint, Legal, Other |
+| **Report access request status** | Requested, UnderReview, InfoRequested, Approved, Denied, Expired, Revoked |
+| Scope mode | BranchScoped, MemberScoped, ProviderScoped |
+
+**Scope mode** is an authorization attribute, not a stored column: `BranchScoped` roles (Reception, Appointment Coordinator, Nurse, Doctor worklists, Branch/Clinic Manager) are filtered server-side to the **active branch**; `MemberScoped` roles (Approvals, Medical Director, Case Manager, Finance/Claims, Network, Admin, Reporting) span **all branches** with branch as an optional convenience filter; `ProviderScoped` (external labs/imaging/pharmacies) is unchanged and unaffected by the branch dimension ([37 §3](37-branch-scoping-and-clinical-sensitivity.md), [11-permission-matrix.md](11-permission-matrix.md)).
+
+> **Sensitivity is pinned, not looked up.** `sensitivity_level` is denormalized onto `investigation_order`, `order_line`, and the result at **order creation**; a later reclassification of the `examination_type` never retroactively unlocks previously restricted data. Clinical **result values** for `Sensitive` / `HighlySensitive` results are **PHI with restricted disclosure** — existence metadata only outside the authoring doctor, the beneficiary, and a live `report_access_grant`.
+
 ---
 
 ## 12. Reference / Lookup Tables Summary
@@ -803,6 +1001,9 @@ Order types: `Lab`, `Imaging`, `Procedure`. Code systems: `CPT`, `LOINC`, `LOCAL
 | `drug`, `atc_class`, `drug_interaction`, `allergen` | masterdata | cache + OpenSearch |
 | `notification_template` | notification | local |
 | `role`, `permission` | identity | local |
+| `branch` | provider | replicated read (6 seeded rows) |
+| `specialty` | provider | replicated read |
+| `examination_type` | masterdata | cache + replicated read |
 
 ---
 
@@ -811,5 +1012,6 @@ Order types: `Lab`, `Imaging`, `Procedure`. Code systems: `CPT`, `LOINC`, `LOCAL
 - Structural model & indexes: [15-database-erd.md](15-database-erd.md)
 - Transitions/guards for status enums: [23-state-machines.md](23-state-machines.md)
 - Claims module design (origination, batching, adjudication, settlement): [36-claims-management.md](36-claims-management.md)
+- Branch scoping, practitioner specialty & sensitivity gating (§10B / §11.6): [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md)
 - Sensitivity handling, RLS, masking, minimization: [18-security-model.md](18-security-model.md)
 - API field shapes: [17-api-specifications.md](17-api-specifications.md)

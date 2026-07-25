@@ -7,7 +7,7 @@ It contains four things that work together:
 
 | Layer | What it is | Where |
 |-------|-----------|-------|
-| **Design docs** | 36 deliverables + foundations — the single source of truth (vision → architecture → data → security → delivery → claims) | `00-README-INDEX.md`, `0A`, `0B`, `0C`, `01`–`36` |
+| **Design docs** | 37 deliverables + foundations — the single source of truth (vision → architecture → data → security → delivery → claims → branch scoping & clinical sensitivity) | `00-README-INDEX.md`, `0A`, `0B`, `0C`, `01`–`37` |
 | **Prototypes** | Two working, clickable HTML UIs demonstrating the enterprise experience | `prototype-hbmp-multiscreen.html`, `prototype-approvals-worklist.html` |
 | **Build prompts** | Phased Claude Code prompts that build the whole production app | `claude-code-prompts/` |
 | **Domain skills** | 20 Mersal-specific Claude Code skills encoding the business rules | `claude-code-skills/` |
@@ -29,7 +29,7 @@ flowchart LR
     UX --> R
 ```
 
-- **Design docs** define *what* and *why* — every prompt reads them first. They cover the whole journey end to end: registration → eligibility → encounter → orders/prescriptions → fulfillment → approvals → and now **claims** (`36-claims-management.md`), which turns delivered, authorized services into reviewed, decided, and settled financial records.
+- **Design docs** define *what* and *why* — every prompt reads them first. They cover the whole journey end to end: registration → eligibility → encounter → orders/prescriptions → fulfillment → approvals → and now **claims** (`36-claims-management.md`), which turns delivered, authorized services into reviewed, decided, and settled financial records — plus **branch scoping, practitioner specialty & clinical sensitivity** (`37-branch-scoping-and-clinical-sensitivity.md`), which scopes operational work to Mersal's six branches and default-denies sensitive (mental-health first) results outside the authoring doctor until a justified, time-boxed release is granted.
 - **Skills** carry *Mersal's rules* (benefit logic, state machines, minimum-necessary zoning, brand system) so Claude Code applies them consistently.
 - **Prompts** are the *build instructions*, phase by phase.
 - **Prototypes** are the *UX target* the frontend must match.
@@ -53,8 +53,11 @@ Open `00-README-INDEX.md` (audience reading paths), then `0A-DESIGN-FOUNDATIONS.
 Follow `claude-code-prompts/00-MASTER-PROMPT-LIST.md`. Run phases in dependency order, one focused session each; activate that phase's skills; review the diff and run tests before moving on:
 
 ```
-0 → 0b → 1 → 2 → 2b → 3 → 4 → 5,6 → 7 → 8 → 10 → 10b
+0 → 0b → 1 → 2 → 2b → 3 → 4 → 5,6 → 14 → 7 → 8 → 10 → 10b
 8b (admin) + 9 (frontend) run alongside; 11 hardening, 12 migration/go-live, 13 interop are gates.
+14 (Branch Scoping & Clinical Sensitivity) is a cross-cutting RETROFIT of the built services and runs
+   before 7 and 9 — approvals must be built member-scoped and blind to sensitive results, and the
+   frontend needs the branch switcher + restricted-result state from the start.
 10b (Claims Management) is post-v1 and requires authorizations, fulfillment and contract tariffs to be live.
 ```
 
@@ -101,6 +104,7 @@ mersal-hbmp/
 - Prototypes: `prototype-hbmp-multiscreen.html` · `prototype-approvals-worklist.html`
 - MVP / delivery: [`28-mvp-definition.md`](28-mvp-definition.md) · [`29-delivery-plan.md`](29-delivery-plan.md) · [`35-implementation-plan.md`](35-implementation-plan.md)
 - Claims (Phase 10b, finance/claims audience): [`36-claims-management.md`](36-claims-management.md) → EPIC-13 in [`31-product-backlog.md`](31-product-backlog.md) → `US-CLM-*` in [`32-user-stories.md`](32-user-stories.md)
+- Branch scoping, specialty & clinical sensitivity (Phase 14, security/DPO + architects): [`37-branch-scoping-and-clinical-sensitivity.md`](37-branch-scoping-and-clinical-sensitivity.md) → build prompt [`claude-code-prompts/phase-14-branch-scoping-and-sensitivity.md`](claude-code-prompts/phase-14-branch-scoping-and-sensitivity.md)
 
 ---
 

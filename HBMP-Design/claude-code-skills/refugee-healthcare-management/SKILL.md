@@ -56,6 +56,31 @@ Access (export), Rectification (with history), Erasure where lawful (subject to 
 retention + legal hold), Restriction/objection (consent withdrawal), Portability (FHIR-aligned
 export), Info on processing (RoPA extract).
 
+**Special-category clinical data (37 §5–6) — a tier above ordinary PHI.**
+- **Categories.** `MentalHealth` is the **confirmed** Mersal requirement. `HIV_STI`, `Genetic`,
+  `SubstanceUse`, `ReproductiveHealth`, and `GBV_Forensic` are the **proposed** remainder — they are
+  the standard special-category set for refugee-serving health programmes and carry the same
+  stigma/safety risk profile under Egypt PDPL and UNHCR data-protection norms. **Ratifying the final
+  list is a Medical Director + DPO decision, and it is configuration, not code** — never hard-code a
+  category policy that only an engineer can change.
+- **Default-deny disclosure.** For a result classified `Sensitive`/`HighlySensitive`, full content is
+  visible only to the **authoring/ordering doctor**; everyone else — including other treating
+  clinicians, the **medical approval team**, case managers, and reporting — receives **existence
+  metadata only** (category, date, status, ordering branch, `RESTRICTED` marker). This deliberately
+  overrides the approval team's standing clinical oversight.
+- **Release requires a justified request.** Mandatory `purpose_code` + free-text `justification`;
+  decided by the authoring doctor **or** a Medical Director (flagged + extra-audited). Grants are
+  **time-boxed** (default 72h `Sensitive` / 24h `HighlySensitive`), **single-result**,
+  **non-transferable**, revocable, auto-expiring — and **every read under a grant is separately
+  audited** with the grant id and purpose.
+- **Break-glass is loud, not convenient.** Emergency access demands extra justification, immediately
+  notifies the **authoring doctor + Medical Director + DPO**, and is flagged for mandatory
+  retrospective review.
+- **The beneficiary's own rights are unaffected.** Sensitivity gating restricts *staff* disclosure; it
+  never narrows data-subject access, rectification, or portability for the beneficiary themselves.
+- For refugees, a leaked mental-health, GBV, or HIV record can mean stigma, family rupture, or danger
+  in the host community — treat these gates as safety controls, not paperwork.
+
 **Dignity, access & non-discrimination (NGO-specific, not optional):**
 - **Low literacy** — plain language, icons paired with text, no jargon-only status; never rely
   on reading dense text to complete a critical task.
@@ -94,6 +119,8 @@ export), Info on processing (RoPA extract).
 - `../../03-user-personas.md` (refugee beneficiary personas, literacy/bandwidth context)
 - `../../21-accessibility-checklist.md` (RTL, low-literacy, reflow, non-color status)
 - `../../0A-DESIGN-FOUNDATIONS.md` §2–3 (glossary, identifiers) · `../../11-permission-matrix.md`
+- `../../37-branch-scoping-and-clinical-sensitivity.md` §5–6 (special-category classification,
+  default-deny gating, justified release-request workflow, loud break-glass)
 
 ## Guardrails
 - Not legal advice — Mersal's DPO + counsel validate PDPL applicability and cross-border posture.
@@ -102,3 +129,7 @@ export), Info on processing (RoPA extract).
 - Never let analytics, logs, notifications, or exports leak direct identifiers or PHI.
 - Never design a registration or eligibility path that penalizes a refugee for lacking a
   National ID or for their nationality/status.
+- Never disclose special-category clinical content without a recorded purpose + justification and an
+  active, time-boxed, single-result grant — and never treat the approval team as an exception.
+- Never hard-code the special-category list; it is Medical Director + DPO configuration, and never let
+  sensitivity gating be read as a limit on the beneficiary's own data-subject rights.

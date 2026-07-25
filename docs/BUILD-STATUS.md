@@ -3,7 +3,7 @@
 Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `HBMP-Design/claude-code-prompts/00-MASTER-PROMPT-LIST.md`). Status: ☐ not started · ◐ in progress · ☑ done.
 
 ## Dependency order
-`0 → 0b → 1 → 2 → 2b → 3 → 4 → 5,6 (parallel) → 7 → 8 → 10 → 10b`; `8b` + `9` run continuously from R0/R1; `11` gates go-live; `12` after 11; `13` after core. `10b` (claims) needs 5/6 fulfillment records, 2b contracts/tariffs, and 7 authorizations.
+`0 → 0b → 1 → 2 → 2b → 3 → 4 → 5,6 (parallel) → 14 (retrofit) → 7 → 8 → 10 → 10b`; `8b` + `9` run continuously from R0/R1; `11` gates go-live; `12` after 11; `13` after core. `10b` (claims) needs 5/6 fulfillment records, 2b contracts/tariffs, and 7 authorizations. **`14` (branch scoping & clinical sensitivity) is a cross-cutting retrofit of the built services and runs before `7` and `9`** — approvals must be built member-scoped and blind to sensitive results, and the frontend needs the branch switcher + restricted-result state.
 
 ## ⇒ New here? Read docs/HANDOFF.md first (full continuation guide).
 
@@ -41,6 +41,14 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 6 | Pharmacy | 6.1 Dispensable search | ☑ | ce79500 |
 | 6 | Pharmacy | 6.2 Partial dispensing (batch/expiry) | ☑ | ce79500 |
 | 6 | Pharmacy | 6.3 Substitution + out-of-stock | ☑ | ce79500 |
+| 14 | Branch & Sensitivity | 14.1 `branch` entity + seed the six branches | ☐ | |
+| 14 | Branch & Sensitivity | 14.2 User↔branch assignment + active-branch context (`X-Active-Branch`) | ☐ | |
+| 14 | Branch & Sensitivity | 14.3 `BranchScope` ABAC + `RowScope` + policy-bundle scope modes | ☐ | |
+| 14 | Branch & Sensitivity | 14.4 Branch-scope appointments/queue/orders worklists | ☐ | |
+| 14 | Branch & Sensitivity | 14.5 Practitioner + specialty + doctor↔branch assignment | ☐ | |
+| 14 | Branch & Sensitivity | 14.6 Examination type + sensitivity classification | ☐ | |
+| 14 | Branch & Sensitivity | 14.7 Sensitive-result gating + release-request workflow | ☐ | |
+| 14 | Branch & Sensitivity | 14.8 Branch switcher + restricted-result UI | ☐ | |
 | 7 | Approvals | 7.1 `approvals-service` + worklist + review | ☑ | 15ba511 |
 | 7 | Approvals | 7.2 Decisions + downstream effects | ☑ | a098550 |
 | 7 | Approvals | 7.3 Break-glass + SLA/TAT | ☑ | d13a4d5 |
@@ -89,5 +97,11 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
   finance≠diagnosis + coordination-summary invariants are structural + contract-tested). Frontend suite:
   contracts 9 + design-system 18 + web 21 = **48 tests**. Backend: case-service 27 + finance-service 14.
   DB-integration tests env-gated (`CASE_TEST_DB` / `FINANCE_TEST_DB`, hbmp superuser conn).
+- **Phase 14 (Branch & Sensitivity)** is listed above **before 7** because it is a cross-cutting *retrofit* of
+  `libs/authz`, identity, provider, emr and orders — that is its correct execution slot. Phases 7–10 were built
+  ahead of it, so landing 14 also means revisiting the approvals worklist (member-scoped, no sensitive-result
+  content) and the phase-9 portals (branch switcher, locked-result state). Migrations are additive only and the
+  full existing suite must stay green. Design: `HBMP-Design/37-branch-scoping-and-clinical-sensitivity.md`;
+  prompt: `HBMP-Design/claude-code-prompts/phase-14-branch-scoping-and-sensitivity.md`.
 - Docker/Compose, Helm, OpenTofu: **not yet installed** (Docker needs root). Tier 1 infra authored in `infra/compose`; run once Docker is installed.
 - Repo initialized in place at `/home/mohab/Mersal` with `HBMP-Design/` as a subfolder.

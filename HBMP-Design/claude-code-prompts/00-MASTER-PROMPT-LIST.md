@@ -38,6 +38,7 @@ This folder turns the **HBMP design set** (`../HBMP-Design/*.md`) into a sequenc
 | 11 | [phase-11-hardening-and-nfr.md](phase-11-hardening-and-nfr.md) | Performance/load, security hardening + pen-test, HA/**DR**, observability/SLOs, runbooks | 08, 18, 25, 26, 27, 34 | — | pre-prod gate |
 | 12 | [phase-12-migration-and-golive.md](phase-12-migration-and-golive.md) | Data migration (providers/beneficiaries), gated release, pilot go-live + hypercare | 20, 25, 29, 35 | Master Lists (via 0b) | go-live |
 | 13 | [phase-13-interoperability-and-roadmap.md](phase-13-interoperability-and-roadmap.md) | FHIR R4 facade + integration adapters (UNHCR/gov/HL7) + OCR/NLP hooks | 16, 17, 20, 35 | — | R5+/roadmap |
+| 14 | [phase-14-branch-scoping-and-sensitivity.md](phase-14-branch-scoping-and-sensitivity.md) | **Cross-cutting retrofit:** six Mersal **branches** + active-branch switcher and server-side **branch scoping** (operational roles branch-scoped, approvals/managers member-scoped, external providers provider-scoped), **practitioner records + structured specialty**, **examination types with sensitivity** and **default-deny sensitive results** released only via a justified, time-boxed, fully audited grant | **37**, 22, 23, 10, 11, 07, 16, 14 | — | retrofit / R4-prep |
 
 > **This is a full production build set — all functionality, not just design.** Beyond the core journey it covers the provider network, every admin/platform capability, case management, finance, non-functional hardening (performance, security, DR, observability), data migration, gated go-live, and interoperability. Together the phases realize every role/portal and service in the architecture ([../HBMP-Design/16-service-architecture.md](../HBMP-Design/16-service-architecture.md)).
 
@@ -48,8 +49,8 @@ Release definitions and exit criteria: [../HBMP-Design/29-delivery-plan.md](../H
 ## Dependency order
 
 ```
-0 → 0b → 1 → 2 → 2b → 3 → 4 → 5,6 (parallel) → 7 → 8 → 10 → 10b
-8b (admin) + 9 (frontend) run continuously alongside from R0/R1.
+0 → 0b → 1 → 2 → 2b → 3 → 4 → 5,6 (parallel) → 14 (retrofit) → 7 → 8 → 10 → 10b
+8b (admin) + 9 (frontend) run continuously alongside from R0/R1 — 9 after 14.
 11 (hardening/NFR) is cross-cutting and gates go-live.
 12 (migration & go-live) after the functional set + 11.
 13 (interoperability) after core services; DPIA gate before any external integration.
@@ -59,9 +60,10 @@ Release definitions and exit criteria: [../HBMP-Design/29-delivery-plan.md](../H
 - 0b (master data) is required before 4 (orders/prescriptions reference ICD/CPT/Drug).
 - **2b (provider network) must precede 5 and 6** — labs, imaging centers, and pharmacies must be onboarded (with isolation) before they can fulfill orders/prescriptions.
 - 5 and 6 can be built in parallel after 4 and 2b.
-- 7 depends on 4 (it authorizes orders/prescriptions) and 19 (audit).
+- **14 (branch scoping & clinical sensitivity) is a cross-cutting RETROFIT of the already-built services — it runs next, before 7 and before 9.** It touches `libs/authz`, identity, provider, emr, and orders, so it must land while those surfaces are still the only consumers: **7 (approvals) has to be built already knowing it is member-scoped across all branches and that sensitive results are content-restricted from the approval team** (retrofitting that into a finished worklist means reworking its queries, projections, and authorization tests), and **9 (frontend) needs the branch switcher, the active-branch context, and the locked/restricted-result state** as first-class parts of the design system rather than bolt-ons. Every migration is additive and every existing test must stay green. Authoritative design: [../HBMP-Design/37-branch-scoping-and-clinical-sensitivity.md](../HBMP-Design/37-branch-scoping-and-clinical-sensitivity.md).
+- 7 depends on 4 (it authorizes orders/prescriptions) and 19 (audit), and on **14** for its member scope + sensitive-result restrictions.
 - 8b (admin/platform) is incremental: user/role admin lands early (R0/R1), master-data & config admin follow their services.
-- 9 tracks the backend: build each portal as its APIs become available; all portals reuse the shared design system delivered early in phase 9.
+- 9 tracks the backend: build each portal as its APIs become available; all portals reuse the shared design system delivered early in phase 9 — which must already include the **branch switcher and restricted-result state from 14**.
 - 10 (case/finance) after the core services produce the events/data it reads.
 - **10b (claims) sits after 7 and alongside/after 10** — it needs **5/6** (`order_fulfillment`/`dispense_event` are the payable anchors), **2b** (provider contracts + tariffs for pricing), **7** (authorization linkage for gated lines), and **1** (`document-service` for invoices/receipts/settlement advice). It pairs with 10: claims produces the settlement advice, Finance executes payment **outside** the platform. Authoritative design: [../HBMP-Design/36-claims-management.md](../HBMP-Design/36-claims-management.md).
 - 11 (hardening), 12 (migration/go-live), and the DPIA gate in 13 are **production-readiness gates** — see [../HBMP-Design/35-implementation-plan.md](../HBMP-Design/35-implementation-plan.md).
