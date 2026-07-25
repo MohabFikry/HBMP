@@ -132,6 +132,14 @@ services:
         paths: ["/api/v1/finance"]
         strip_path: false
 
+  # --- claims-service: claims capture/batching/adjudication/settlement (Phase 10b) ---
+  - name: claims-service
+    url: http://claims-service:8080
+    routes:
+      - name: claims-routes
+        paths: ["/api/v1/claims", "/api/v1/claim-batches", "/api/v1/reconciliation", "/api/v1/reimbursement-requests"]
+        strip_path: false
+
   # --- hello-service: phase-0.5 vertical slice ---
   - name: hello-service
     url: http://hello-service:8080

@@ -602,6 +602,27 @@ services:
       rabbitmq: { condition: service_started }
     networks: [hbmp]
 
+  # --- claims-service (10b): auto-derived/submitted/reimbursement claims, batching, adjudication, settlement advice. ---
+  claims-service:
+    build: { context: ../.., dockerfile: services/claims/Dockerfile }
+    <<: *restart
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Claims: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Auth__Authority: "http://keycloak:8080/realms/mersal"
+      Auth__Audience: "hbmp-api"
+      Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
+      Siblings__Provider: "http://provider-service:8080"
+      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    ports: ["8106:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      keycloak: { condition: service_started }
+      rabbitmq: { condition: service_started }
+    networks: [hbmp]
+
   # web:  # React portals (phase 9) — served behind Kong/Traefik
   #   build: { context: ../.., dockerfile: apps/web/Dockerfile }
   #   <<: *restart
