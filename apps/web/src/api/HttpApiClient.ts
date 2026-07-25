@@ -55,6 +55,16 @@ const statusToVerdict = (status: unknown): "eligible" | "ineligible" | "review" 
   if (s === "blocked" || s === "expired") return "ineligible";
   return "review";
 };
+/** Map an emr encounter status → a resolved bilingual StatusKind for the doctor worklist chip. */
+const encounterStatus = (s: unknown) => {
+  const k = String(s ?? "InProgress");
+  const map: Record<string, { kind: "ok" | "info" | "neu"; label: { en: string; ar: string } }> = {
+    InProgress: { kind: "info", label: { en: "In progress", ar: "جارٍ" } },
+    Completed: { kind: "ok", label: { en: "Completed", ar: "مكتمل" } },
+    Cancelled: { kind: "neu", label: { en: "Cancelled", ar: "ملغى" } },
+  };
+  return map[k] ?? map.InProgress;
+};
 
 /**
  * Last reception search cards, keyed by beneficiaryId. The reception service returns ONE min-necessary card that
@@ -118,11 +128,61 @@ export class HttpApiClient implements ApiClient {
     });
   }
 
-  listPatients() {
-    return getJson(`/emr/patients`, z.array(zPatientListItem));
+  // Doctor / EMR (Phase 4, US-030) — the emr service is encounter-centric and treating-relationship gated: the
+  // "my patients" worklist is the caller's own encounters (/encounters/mine), and a patient row's id IS its
+  // encounter id, so getEncounter maps straight to /encounters/{id}/clinical. emr stores the beneficiary id but
+  // not the name (that lives in patient-service), so we render a masked token — the doctor's zone still shows
+  // full clinical detail (diagnoses/SOAP/vitals) that no other zone may see.
+  async listPatients() {
+    const r = (await getRaw(`/encounters/mine`)) as any[];
+    return (r ?? []).map((e: any) =>
+      parseOr(zPatientListItem, {
+        id: e.encounterId,
+        name: loc(`Beneficiary •••${String(e.beneficiaryId ?? "").slice(-4)}`),
+        mrn: e.encounterNo ?? "",
+        treating: true,
+        lastVisit: e.startedAt ? String(e.startedAt).slice(0, 10) : null,
+        status: encounterStatus(e.status),
+      }),
+    );
   }
-  getEncounter(patientId: string) {
-    return getJson(`/emr/patients/${encodeURIComponent(patientId)}/encounter`, zEncounter);
+  async getEncounter(encounterId: string) {
+    const r = (await getRaw(`/encounters/${encodeURIComponent(encounterId)}/clinical`)) as any;
+    const e = r?.encounter ?? {};
+    const note = (r?.notes ?? [])[0] ?? {};
+    const vitals: any[] = r?.vitals ?? [];
+    const v = (type: string) => vitals.find((x) => String(x.vitalType) === type)?.valueNum ?? null;
+    return parseOr(zEncounter, {
+      id: e.encounterId ?? encounterId,
+      patientId: e.beneficiaryId ?? "",
+      patientName: loc(`Beneficiary •••${String(e.beneficiaryId ?? "").slice(-4)}`),
+      openedAt: e.startedAt ?? new Date().toISOString(),
+      signed: (r?.notes ?? []).some((n: any) => n.isSigned),
+      soap: {
+        subjective: note.subjective ?? "",
+        objective: note.objective ?? "",
+        assessment: note.assessment ?? "",
+        plan: note.plan ?? "",
+      },
+      vitals: {
+        heightCm: v("Height"),
+        weightKg: v("Weight"),
+        systolic: v("BP"),
+        diastolic: null,
+        heartRate: v("HR"),
+        tempC: v("Temp"),
+      },
+      allergies: (r?.allergies ?? []).map((a: any) => ({
+        id: a.allergyId,
+        substance: loc(a.reaction ?? "Allergen"),
+        severity: String(a.severity ?? "mild").toLowerCase(),
+      })),
+      diagnoses: (r?.diagnoses ?? []).map((d: any) => ({
+        system: "ICD-10",
+        code: d.icdCode,
+        label: loc(d.icdCode),
+      })),
+    });
   }
   placeOrder(req: PlaceOrderRequest) {
     return postJson(`/orders`, req, zPlaceOrderResult);

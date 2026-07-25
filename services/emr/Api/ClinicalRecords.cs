@@ -32,6 +32,21 @@ public static class ClinicalEndpoints
             return Results.Ok(new { beneficiaryId, treats });
         }).RequireAuthorization();
 
+        // ---- My treating load (US-030) — the encounters this clinician owns (created_by = caller). This is the
+        // min-necessary "my patients" worklist: a doctor sees only beneficiaries they are actively treating, never
+        // the whole panel. Per-encounter clinical reads are still re-gated by the treating rule below. ----
+        enc.MapGet("/mine", async (EmrDbContext db, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        {
+            var p = me.Principal;
+            if (p is null) return Results.Unauthorized();
+            var mine = await db.Encounters.AsNoTracking()
+                .Where(e => e.CreatedBy == p.Subject)
+                .OrderByDescending(e => e.StartedAt)
+                .Take(100)
+                .ToListAsync(ct);
+            return Results.Ok(mine.Select(EncounterResponse.From));
+        });
+
         // ---- Full clinical record (US-030) — treating clinician or approval team only ----
         enc.MapGet("/{id:guid}/clinical", async (
             Guid id, EmrDbContext db, ClinicalGate gate, HttpContext http, CancellationToken ct) =>
