@@ -35,6 +35,30 @@
   color: var(--text-2);
   white-space: nowrap;
 }
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp3);
+  inline-size: 100%;
+  padding: var(--sp3);
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+  border-radius: var(--radius-2, 8px);
+  background: var(--surface-1, transparent);
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.picker-row > span:first-child {
+  font-weight: 600;
+  flex: 1;
+}
+.picker-row:hover {
+  background: var(--surface-2, rgba(0, 0, 0, 0.05));
+}
+.picker-row:focus-visible {
+  outline: 3px solid var(--focus, #1d9ba6);
+  outline-offset: 2px;
+}
 .app-bell {
   position: relative;
   display: inline-flex;

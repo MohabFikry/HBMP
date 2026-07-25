@@ -29,6 +29,8 @@ import {
   zCheckInResult,
   zOrderRow,
   zRxRow,
+  zVitalsResult,
+  type VitalInput,
   zExportResult,
   zFinancialSummary,
   zSettlement,
@@ -231,6 +233,10 @@ export class DevApiClient implements ApiClient {
         ]),
       [],
     );
+  }
+
+  recordVitals(encounterId: string, readings: VitalInput[]) {
+    return this.gate(() => ok(zVitalsResult, { encounterId, recorded: readings.length }));
   }
 
   // ---- Lab / imaging -----------------------------------------------------

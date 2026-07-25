@@ -22,6 +22,7 @@ import {
   zNotification,
   zOrderRow,
   zRxRow,
+  zVitalsResult,
   zPatientListItem,
   zPlaceOrderResult,
   zPrescribeResult,
@@ -40,6 +41,7 @@ import {
   type ExportRequest,
   type PlaceOrderRequest,
   type PrescribeRequest,
+  type VitalInput,
 } from "@mersal/contracts";
 import type { ApiClient } from "./client";
 import { getRaw, postRaw, parseOr } from "./http";
@@ -418,6 +420,17 @@ export class HttpApiClient implements ApiClient {
         submittedAt: p.submittedAt ?? undefined,
       }),
     );
+  }
+
+  // Vitals capture (Phase 4, US-030) — one POST /encounters/{id}/vitals per reading (treating-gated: the nurse
+  // owns the encounter). emr accepts enum NAMES (JsonStringEnumConverter), so we send the readable vitalType.
+  async recordVitals(encounterId: string, readings: VitalInput[]) {
+    let recorded = 0;
+    for (const r of readings) {
+      await postRaw(`/encounters/${encodeURIComponent(encounterId)}/vitals`, { vitalType: r.type, valueNum: r.value });
+      recorded += 1;
+    }
+    return parseOr(zVitalsResult, { encounterId, recorded });
   }
 
   // Lab / Imaging (Phase 5, US-040) — the orders service exposes ONE capability-filtered provider queue at

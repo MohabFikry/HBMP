@@ -29,6 +29,8 @@ import type {
   PatientListItem,
   RxRow,
   RoleBinding,
+  VitalInput,
+  VitalsResult,
   SodConflict,
   TenantSummary,
   PlaceOrderRequest,
@@ -67,6 +69,8 @@ export interface ApiClient {
   ordersMine(status?: string): Promise<OrderRow[]>;
   /** The clinician's own e-prescriptions (US-033). */
   prescriptionsMine(status?: string): Promise<RxRow[]>;
+  /** Record vitals on an encounter (nurse triage, US-030) — treating-gated server-side. */
+  recordVitals(encounterId: string, readings: VitalInput[]): Promise<VitalsResult>;
 
   // Lab / imaging — queue + consume (Phase 5)
   labQueue(kind: "lab" | "imaging"): Promise<LabOrder[]>;

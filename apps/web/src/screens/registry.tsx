@@ -19,6 +19,9 @@ const DoctorPatients = lazy(() => import("./ClinicianWorklists").then((m) => ({ 
 const DoctorOrders = lazy(() => import("./ClinicianWorklists").then((m) => ({ default: m.DoctorOrders })));
 const DoctorPrescriptions = lazy(() => import("./ClinicianWorklists").then((m) => ({ default: m.DoctorPrescriptions })));
 const DoctorResults = lazy(() => import("./ClinicianWorklists").then((m) => ({ default: m.DoctorResults })));
+// Nurse portal (Phase 4) — vitals capture + read; patients reuses the clinician worklist.
+const NurseVitals = lazy(() => import("./NursePortal").then((m) => ({ default: m.NurseVitals })));
+const NurseResults = lazy(() => import("./NursePortal").then((m) => ({ default: m.NurseResults })));
 const LabQueue = lazy(() => import("./LabQueue").then((m) => ({ default: m.LabQueue })));
 const PharmacyDispense = lazy(() => import("./PharmacyDispense").then((m) => ({ default: m.PharmacyDispense })));
 const ApprovalsWorklist = lazy(() => import("./ApprovalsWorklist").then((m) => ({ default: m.ApprovalsWorklist })));
@@ -53,6 +56,10 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/clinician/orders": () => <DoctorOrders />,
   "/clinician/prescriptions": () => <DoctorPrescriptions />,
   "/clinician/results": () => <DoctorResults />,
+  // 2b. Nurse — my patients (reused) / vitals & triage / results inbox.
+  "/nurse/patients": () => <DoctorPatients />,
+  "/nurse/vitals": () => <NurseVitals />,
+  "/nurse/results": () => <NurseResults />,
   // 3. Lab / imaging — queue + consume.
   "/lab/queue": () => <LabQueue kind="lab" />,
   "/imaging/queue": () => <LabQueue kind="imaging" />,
