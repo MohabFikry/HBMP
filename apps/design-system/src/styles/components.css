@@ -300,8 +300,17 @@ html[dir="rtl"] .mrs-search input {
 }
 
 /* ---------- Data table / worklist ---------- */
+/* Wide tables scroll horizontally *inside their own pane* rather than pushing the whole page into a
+   horizontal scroll. The wrapper owns the overflow so the outer layout stays put as the viewport shrinks. */
+.mrs-wl-scroll {
+  inline-size: 100%;
+  max-inline-size: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
 .mrs-wl {
   width: 100%;
+  min-inline-size: max-content;
   border-collapse: separate;
   border-spacing: 0;
 }

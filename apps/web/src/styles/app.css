@@ -120,6 +120,9 @@ nav.mrs-rail {
   /* min-height:0 lets this grid child shrink below its content so overflow-y actually scrolls. */
   min-height: 0;
   overflow-y: auto;
+  /* Never let a wide child (e.g. a data table) scroll the whole page sideways — inner panes own their
+     own horizontal scroll (.mrs-wl-scroll). Explicit x:hidden also stops y:auto promoting x to auto. */
+  overflow-x: hidden;
   padding: var(--sp6);
 }
 .app-crumb {

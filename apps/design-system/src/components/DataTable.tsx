@@ -70,7 +70,8 @@ export function DataTable<Row>({
   const colCount = columns.length;
 
   return (
-    <table className={cx("mrs-wl", density === "compact" && "mrs-compact")}>
+    <div className="mrs-wl-scroll">
+      <table className={cx("mrs-wl", density === "compact" && "mrs-compact")}>
       <caption className="sr-only">{caption}</caption>
       <thead>
         <tr>
@@ -137,6 +138,7 @@ export function DataTable<Row>({
             );
           })}
       </tbody>
-    </table>
+      </table>
+    </div>
   );
 }
