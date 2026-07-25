@@ -50,7 +50,7 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 8b | Admin Platform | 8b.1 User/role admin + SoD + access review | ☑ | 70e8f17 |
 | 8b | Admin Platform | 8b.2 Master-data/template/config admin | ☑ | e761ea3 |
 | 8b | Admin Platform | 8b.3 Tenant/provider + break-glass governance | ☑ | 8107dc1 |
-| 9 | Frontend | 9.1 Design system in code | ☐ | |
+| 9 | Frontend | 9.1 Design system in code | ☑ | (9.1) |
 | 9 | Frontend | 9.2 Role portals + permission routing | ☐ | |
 | 9 | Frontend | 9.3 Flagship screens | ☐ | |
 | 10 | Case + Finance | 10.1 `case-service` + beneficiary-360 | ☐ | |
@@ -71,5 +71,9 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 
 ## Environment notes
 - .NET 8 SDK: user-local `~/.dotnet` (use `./dotnet.sh`). Node 20, psql 17 present.
+- **Frontend (Phase 9):** pnpm workspace at repo root (`pnpm-workspace.yaml`); `apps/design-system` is live.
+  Node 20 ⇒ use **pnpm 9** (`npx pnpm@9.15.9 …`); pnpm ≥10 needs Node 22. Design-system: `pnpm --filter
+  @mersal/design-system {dev,test,build,lint}` (test = vitest unit + **axe** gate). CI in
+  `.github/workflows/frontend-ci.yml`.
 - Docker/Compose, Helm, OpenTofu: **not yet installed** (Docker needs root). Tier 1 infra authored in `infra/compose`; run once Docker is installed.
 - Repo initialized in place at `/home/mohab/Mersal` with `HBMP-Design/` as a subfolder.

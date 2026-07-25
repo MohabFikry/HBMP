@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Compact Mersal mark for the nav-rail tile / small placements: teal brand tile + gold Arabic "م". -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Mersal">
+  <title>Mersal</title>
+  <rect width="64" height="64" rx="16" fill="#16808D"/>
+  <text x="32" y="46" text-anchor="middle"
+        font-family="Cairo, 'Noto Sans Arabic', system-ui, sans-serif" font-weight="600"
+        font-size="42" fill="#E0A106">م</text>
+</svg>

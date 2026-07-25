@@ -1,0 +1,36 @@
+name: frontend-ci
+
+# Design-system + portals CI. The axe accessibility gate fails the build on any serious/critical
+# violation (0B §9 / 21-accessibility-checklist). Runs on frontend-affecting changes.
+on:
+  push:
+    paths:
+      - "apps/**"
+      - "libs/contracts/**"
+      - "package.json"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/frontend-ci.yml"
+  pull_request:
+    paths:
+      - "apps/**"
+      - "libs/contracts/**"
+
+jobs:
+  design-system:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Type-check
+        run: pnpm --filter @mersal/design-system lint
+      - name: Unit + accessibility (axe) tests
+        run: pnpm --filter @mersal/design-system test
+      - name: Build (Storybook/gallery bundle)
+        run: pnpm --filter @mersal/design-system build

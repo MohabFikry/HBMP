@@ -1,0 +1,16 @@
+{
+  "name": "mersal-hbmp-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Mersal HBMP frontend workspace (design system, role portals, shared contracts).",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "ds:dev": "pnpm --filter @mersal/design-system dev",
+    "ds:test": "pnpm --filter @mersal/design-system test"
+  }
+}

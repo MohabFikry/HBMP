@@ -1,0 +1,128 @@
+/*
+ * Mersal HBMP design tokens — CSS custom properties.
+ * Normative source: 0A-DESIGN-FOUNDATIONS.md §5 + 0B-DESIGN-SYSTEM-UI.md (incl. §10b v1.1),
+ * kept byte-faithful to prototype-hbmp-multiscreen.html / prototype-approvals-worklist.html.
+ * Brand hues (--brand #00ACAC, --gold) are DECORATIVE ONLY; text/controls use the accessible teal tokens.
+ */
+:root {
+  --font-latin: "Inter", -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-arabic: "Cairo", "Noto Sans Arabic", system-ui, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+
+  /* Radii */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-pill: 999px;
+
+  /* 8-point spacing scale */
+  --sp1: 4px;
+  --sp2: 8px;
+  --sp3: 12px;
+  --sp4: 16px;
+  --sp5: 20px;
+  --sp6: 24px;
+  --sp8: 32px;
+  --sp10: 40px;
+  --sp12: 48px;
+
+  /* Type scale (1.25 major third, 16px base) */
+  --fs-display: 34px;
+  --fs-title-1: 28px;
+  --fs-title-2: 22px;
+  --fs-title-3: 18px;
+  --fs-body-lg: 17px;
+  --fs-body: 15px;
+  --fs-subhead: 14px;
+  --fs-caption: 13px;
+
+  /* Motion */
+  --dur: 200ms;
+  --dur-micro: 120ms;
+  --dur-overlay: 320ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Material / elevation (v1.1 physics) */
+  --glass-blur: blur(20px) saturate(1.2);
+  --elev-1: 0 1px 2px rgba(16, 38, 43, 0.05), 0 2px 8px rgba(16, 38, 43, 0.05);
+  --elev-hover: 0 4px 14px rgba(16, 38, 43, 0.1), 0 2px 4px rgba(16, 38, 43, 0.06);
+  --elev-2: 0 8px 26px rgba(16, 38, 43, 0.12);
+  --elev-3: 0 18px 50px rgba(16, 38, 43, 0.24);
+}
+
+/* ---------- Light theme ---------- */
+html[data-theme="light"] {
+  --surface-0: #eef5f5;
+  --surface-1: #ffffff;
+  --surface-2: #f7fbfb;
+  --page-wash: linear-gradient(180deg, #e2efef 0%, #eef5f5 340px);
+
+  --text-1: #12262b; /* body        14.8:1 */
+  --text-2: #4a5a61; /* secondary    7.0:1 */
+  --text-3: #6b7c82; /* meta / micro-labels */
+
+  --accent: #007a7a; /* teal-700 actions/links 5.2:1 */
+  --accent-press: #005c5c;
+  --accent-tint: #e1f1f1;
+  --brand: #00acac; /* decorative only */
+  --gold: #b57a00; /* text-safe accent variant used decoratively */
+  --border: #d7e3e3;
+  --border-strong: #b9cccc;
+  --focus: #007a7a;
+
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-brd: rgba(255, 255, 255, 0.6);
+  --scrim: rgba(8, 30, 32, 0.35);
+
+  /* Status tokens (hue + bg pairs, AA on their bg) */
+  --st-ok-bg: #e4f2ea;
+  --st-ok-fg: #1e7a46;
+  --st-info-bg: #e4edf9;
+  --st-info-fg: #1f5fa6;
+  --st-part-bg: #f6ecd9;
+  --st-part-fg: #8a5a00;
+  --st-warn-bg: #f7e7d6;
+  --st-warn-fg: #9c4e00;
+  --st-bad-bg: #f8e1df;
+  --st-bad-fg: #b3261e;
+  --st-neu-bg: #e7ecee;
+  --st-neu-fg: #41525a;
+}
+
+/* ---------- Dark theme (deep teal, on-brand) ---------- */
+html[data-theme="dark"] {
+  --surface-0: #04282a;
+  --surface-1: #063437;
+  --surface-2: #0a3e41;
+  --page-wash: linear-gradient(180deg, #021d1f 0%, #04282a 340px);
+
+  --text-1: #eaf5f4;
+  --text-2: #a9c4c4;
+  --text-3: #7fa0a0;
+
+  --accent: #5fd3d3; /* lightened for AA on dark */
+  --accent-press: #86e3e3;
+  --accent-tint: #0e4649;
+  --brand: #00acac;
+  --gold: #ebc169;
+  --border: #12484b;
+  --border-strong: #1c5a5e;
+  --focus: #5fd3d3;
+
+  --glass-bg: rgba(6, 40, 42, 0.6);
+  --glass-brd: rgba(120, 200, 200, 0.28); /* v1.1: raised alpha */
+  --scrim: rgba(0, 0, 0, 0.5);
+
+  --st-ok-bg: #123a28;
+  --st-ok-fg: #7fe0a6;
+  --st-info-bg: #12304f;
+  --st-info-fg: #9fc8f7;
+  --st-part-bg: #3b2f12;
+  --st-part-fg: #ebc169;
+  --st-warn-bg: #432a12;
+  --st-warn-fg: #f2b27a;
+  --st-bad-bg: #43201d;
+  --st-bad-fg: #f5a29b;
+  --st-neu-bg: #123033;
+  --st-neu-fg: #b9d2d2;
+}

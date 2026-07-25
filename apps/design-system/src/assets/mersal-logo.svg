@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Mersal Foundation official logo lockup, reproduced as scalable SVG from the supplied brand mark.
+  Gold Arabic wordmark (مرسال) over teal Latin "Mersal" with "FOUNDATION" beneath.
+  Colors sampled from the official asset: gold #E0A106, teal #16808D, slate #566E76.
+  Uses `currentColor`-independent brand hues (decorative brand identity, not UI control tokens).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 190" role="img" aria-label="Mersal Foundation">
+  <title>Mersal Foundation</title>
+  <!-- Arabic wordmark -->
+  <text x="180" y="78" text-anchor="middle" direction="rtl"
+        font-family="Cairo, 'Noto Sans Arabic', system-ui, sans-serif" font-weight="600"
+        font-size="82" fill="#E0A106" letter-spacing="-1">مرسال</text>
+  <!-- Latin wordmark -->
+  <text x="180" y="150" text-anchor="middle"
+        font-family="Inter, 'Segoe UI', system-ui, sans-serif" font-weight="600"
+        font-size="88" fill="#16808D" letter-spacing="-3">Mersal</text>
+  <!-- Sub-wordmark -->
+  <text x="180" y="182" text-anchor="middle"
+        font-family="Inter, 'Segoe UI', system-ui, sans-serif" font-weight="500"
+        font-size="22" fill="#566E76" letter-spacing="14">FOUNDATION</text>
+</svg>

@@ -1,0 +1,4 @@
+/* Single entry point for all Mersal design-system styles. Import once at app root. */
+@import "../tokens/tokens.css";
+@import "./base.css";
+@import "./components.css";

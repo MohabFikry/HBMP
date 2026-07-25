@@ -1,0 +1,600 @@
+/* Component styles — prefixed `mrs-` so they never collide with app CSS. Ported from the prototypes. */
+
+/* ---------- Card / panel ---------- */
+.mrs-card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--elev-1);
+}
+.mrs-glass {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--elev-2), inset 0 1px 0 var(--glass-brd);
+}
+
+/* ---------- Button ---------- */
+.mrs-btn {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.mrs-btn svg {
+  width: 17px;
+  height: 17px;
+}
+.mrs-btn:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  box-shadow: var(--elev-hover);
+  transform: translateY(-1px);
+}
+.mrs-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
+}
+.mrs-btn.mrs-sm {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: var(--fs-caption);
+}
+.mrs-btn.mrs-lg {
+  min-height: 48px;
+  padding: 0 20px;
+}
+.mrs-btn.mrs-primary {
+  background: var(--accent);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0));
+  color: #fff;
+  border-color: transparent;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), var(--elev-1);
+}
+html[data-theme="dark"] .mrs-btn.mrs-primary {
+  color: #04282a; /* dark-mode primary label = deep ink; white fails AA on light teal */
+}
+.mrs-btn.mrs-primary:hover:not(:disabled) {
+  background-color: var(--accent-press);
+}
+.mrs-btn.mrs-secondary {
+  background: var(--surface-1);
+  color: var(--accent);
+  border-color: var(--border);
+}
+.mrs-btn.mrs-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--accent);
+}
+.mrs-btn.mrs-ghost:hover:not(:disabled) {
+  background: var(--accent-tint);
+}
+.mrs-btn.mrs-danger {
+  color: var(--st-bad-fg);
+  border-color: var(--st-bad-fg);
+}
+.mrs-btn.mrs-warn {
+  color: var(--st-warn-fg);
+  border-color: var(--st-warn-fg);
+}
+.mrs-btn:disabled,
+.mrs-btn[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.mrs-btn .mrs-spin {
+  width: 15px;
+  height: 15px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: mrs-spin 0.7s linear infinite;
+}
+@keyframes mrs-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- Icon button ---------- */
+.mrs-iconbtn {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  background: transparent;
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.mrs-iconbtn:hover {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+.mrs-iconbtn svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* ---------- Input / field ---------- */
+.mrs-field {
+  display: block;
+}
+.mrs-field .mrs-label {
+  font-weight: 500;
+  font-size: var(--fs-subhead);
+  display: block;
+  color: var(--text-1);
+}
+.mrs-field .mrs-control {
+  width: 100%;
+  margin-top: 6px;
+  min-height: 44px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-1);
+  padding: 10px 12px;
+  font: inherit;
+}
+.mrs-field textarea.mrs-control {
+  min-height: 80px;
+  resize: vertical;
+}
+.mrs-field .mrs-control[aria-invalid="true"] {
+  border-color: var(--st-bad-fg);
+}
+.mrs-field .mrs-help {
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+  margin-top: 4px;
+}
+.mrs-field .mrs-error {
+  color: var(--st-bad-fg);
+  font-size: var(--fs-caption);
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.mrs-field .mrs-error svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Search field */
+.mrs-search {
+  position: relative;
+}
+.mrs-search input {
+  width: 100%;
+  height: 44px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-1);
+  padding: 0 16px 0 40px;
+  font: inherit;
+}
+html[dir="rtl"] .mrs-search input {
+  padding: 0 40px 0 16px;
+}
+.mrs-search .mrs-search-icon {
+  position: absolute;
+  inset-inline-start: 14px;
+  top: 13px;
+  width: 18px;
+  height: 18px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+/* ---------- Status chip ---------- */
+.mrs-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  border: 1.5px solid transparent;
+  white-space: nowrap;
+}
+.mrs-chip svg {
+  width: 14px;
+  height: 14px;
+}
+.mrs-chip.ok {
+  background: var(--st-ok-bg);
+  color: var(--st-ok-fg);
+}
+.mrs-chip.info {
+  background: var(--st-info-bg);
+  color: var(--st-info-fg);
+  border-style: dashed;
+  border-color: currentColor;
+}
+.mrs-chip.part {
+  background: var(--st-part-bg);
+  color: var(--st-part-fg);
+}
+.mrs-chip.warn {
+  background: transparent;
+  color: var(--st-warn-fg);
+  border-color: currentColor;
+}
+.mrs-chip.bad {
+  background: var(--st-bad-bg);
+  color: var(--st-bad-fg);
+  border-radius: 7px; /* square-ish badge = grayscale "stop" tell */
+}
+.mrs-chip.neu {
+  background: transparent;
+  color: var(--st-neu-fg);
+  border-color: var(--border);
+}
+
+/* ---------- Segmented control ---------- */
+.mrs-seg {
+  display: inline-flex;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  padding: 3px;
+  gap: 3px;
+}
+.mrs-seg button {
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-weight: 600;
+  font-size: var(--fs-caption);
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+}
+.mrs-seg button[aria-checked="true"] {
+  background: var(--surface-1);
+  color: var(--accent);
+  box-shadow: var(--elev-1);
+}
+
+/* ---------- Tabs ---------- */
+.mrs-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.mrs-tab {
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  padding: 12px;
+  font: inherit;
+  font-weight: 600;
+  border-bottom: 2px solid transparent;
+  min-height: 44px;
+  cursor: pointer;
+}
+.mrs-tab[aria-selected="true"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.mrs-tabpane {
+  padding: var(--sp5) 0;
+}
+
+/* ---------- Data table / worklist ---------- */
+.mrs-wl {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.mrs-wl th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2);
+  text-align: start;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  z-index: 5;
+  white-space: nowrap;
+}
+.mrs-wl th button.mrs-sort {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.mrs-wl td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.mrs-wl tbody tr:last-child td {
+  border-bottom: 0;
+}
+.mrs-wl.mrs-compact td {
+  padding: 8px 16px;
+}
+.mrs-row {
+  cursor: pointer;
+}
+.mrs-row:hover {
+  background: var(--surface-2);
+}
+.mrs-row[aria-selected="true"] {
+  background: var(--accent-tint);
+}
+.mrs-row[aria-selected="true"] td:first-child {
+  box-shadow: inset 4px 0 0 var(--accent);
+}
+html[dir="rtl"] .mrs-row[aria-selected="true"] td:first-child {
+  box-shadow: inset -4px 0 0 var(--accent);
+}
+.mrs-row:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
+}
+.mrs-tablestate {
+  padding: var(--sp8);
+  text-align: center;
+  color: var(--text-2);
+}
+
+/* ---------- Navigation rail ---------- */
+nav.mrs-rail {
+  padding: var(--sp4) var(--sp3);
+  overflow: auto;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-inline-end: 1px solid var(--border);
+}
+.mrs-rail .mrs-grp {
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: var(--sp4) var(--sp3) var(--sp2);
+  border-top: 1px solid var(--border);
+  margin-top: var(--sp2);
+}
+.mrs-rail .mrs-grp:first-of-type {
+  border-top: 0;
+  margin-top: 0;
+}
+.mrs-navi {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px var(--sp3);
+  border-radius: var(--r-md);
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-weight: 500;
+  min-height: 44px;
+  position: relative;
+  text-align: start;
+  cursor: pointer;
+}
+.mrs-navi svg {
+  width: 19px;
+  height: 19px;
+  flex: none;
+}
+.mrs-navi:hover {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+.mrs-navi[aria-current="page"] {
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-weight: 600;
+}
+.mrs-navi[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 4px;
+  border-radius: 4px;
+  background: var(--accent);
+}
+
+/* ---------- KPI card ---------- */
+.mrs-kpi {
+  padding: var(--sp5);
+  position: relative;
+  overflow: hidden;
+}
+.mrs-kpi::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--brand), var(--accent));
+}
+.mrs-kpi:hover {
+  box-shadow: var(--elev-hover);
+}
+.mrs-kpi .mrs-kpi-lab {
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mrs-kpi .mrs-kpi-val {
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin-top: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.mrs-kpi .mrs-kpi-delta {
+  font-size: 12.5px;
+  font-weight: 600;
+  margin-top: 8px;
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.mrs-kpi .up {
+  color: var(--st-ok-fg);
+}
+.mrs-kpi .down {
+  color: var(--st-bad-fg);
+}
+
+/* ---------- Brand / logo lockup ---------- */
+.mrs-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  font-weight: 600;
+}
+.mrs-brand .mrs-logo {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: linear-gradient(135deg, var(--brand), #0a6e70);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-weight: 600;
+  box-shadow: var(--elev-1);
+  overflow: hidden;
+  flex: none;
+}
+.mrs-brand .mrs-logo img {
+  width: 27px;
+  height: auto;
+  display: block;
+}
+.mrs-brand .mrs-wordmark {
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  font-size: 15.5px;
+}
+
+/* ---------- Modal / sheet ---------- */
+.mrs-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  display: grid;
+  place-items: center;
+  z-index: 80;
+  animation: mrs-fade var(--dur) var(--ease);
+}
+.mrs-modal {
+  background: var(--glass-bg);
+  backdrop-filter: blur(28px) saturate(1.2);
+  -webkit-backdrop-filter: blur(28px) saturate(1.2);
+  border: 1px solid var(--glass-brd);
+  border-radius: var(--r-lg);
+  box-shadow: var(--elev-3);
+  width: min(520px, 92vw);
+  max-height: 88vh;
+  overflow: auto;
+  padding: var(--sp6);
+}
+.mrs-modal .mrs-modal-body {
+  background: var(--surface-1);
+  border-radius: var(--r-md);
+  padding: var(--sp4);
+  margin-top: var(--sp3);
+}
+@keyframes mrs-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ---------- Toast / inline alert ---------- */
+.mrs-toastwrap {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 24px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 90;
+}
+.mrs-toast {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  box-shadow: var(--elev-3);
+  border-radius: var(--r-pill);
+  padding: 12px 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+  max-width: 90vw;
+  pointer-events: auto;
+}
+.mrs-toast svg {
+  width: 18px;
+  height: 18px;
+  color: var(--st-ok-fg);
+}
+.mrs-alert {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: var(--fs-subhead);
+}
+.mrs-alert svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+.mrs-alert.mrs-alert-bad {
+  background: var(--st-bad-bg);
+  color: var(--st-bad-fg);
+  border-color: var(--st-bad-fg);
+}
+.mrs-alert.mrs-alert-ok {
+  background: var(--st-ok-bg);
+  color: var(--st-ok-fg);
+}

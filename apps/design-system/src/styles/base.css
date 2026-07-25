@@ -1,0 +1,120 @@
+/* Base document styles — typography, focus, motion, layout primitives. Ported from the prototypes. */
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+body {
+  font-family: var(--font-latin);
+  background-color: var(--surface-0);
+  background-image: var(--page-wash);
+  background-repeat: no-repeat;
+  color: var(--text-1);
+  font-size: var(--fs-body);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.005em;
+  font-feature-settings: "cv05", "cv08", "ss01", "tnum";
+  text-rendering: optimizeLegibility;
+}
+html[lang="ar"] body {
+  font-family: var(--font-arabic);
+  letter-spacing: 0;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: 0;
+  font-feature-settings: "tnum";
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  letter-spacing: -0.021em;
+  text-wrap: balance;
+  line-height: 1.18;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.muted {
+  color: var(--text-2);
+}
+
+/* Skip link */
+.skip {
+  position: absolute;
+  left: 12px;
+  top: -48px;
+  background: var(--accent);
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: var(--r-sm);
+  z-index: 60;
+  transition: top var(--dur);
+}
+.skip:focus {
+  top: 12px;
+}
+
+/* Base motion contract (v1.1): interactive elements animate; reduced-motion disables */
+.mrs-btn,
+.mrs-iconbtn,
+.mrs-navi,
+.mrs-row,
+.mrs-tab,
+.mrs-seg button,
+.mrs-chip,
+.mrs-card {
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease),
+    color var(--dur) var(--ease), box-shadow var(--dur) var(--ease), transform var(--dur-micro) var(--ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* Glass degrades to solid where backdrop-filter is unsupported or transparency is unwanted */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .mrs-glass,
+  header.mrs-bar,
+  nav.mrs-rail {
+    background: var(--surface-1) !important;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .mrs-glass,
+  header.mrs-bar,
+  nav.mrs-rail {
+    background: var(--surface-1) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
