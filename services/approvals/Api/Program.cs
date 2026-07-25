@@ -6,8 +6,13 @@ using Mersal.Authz;
 using Mersal.Events;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Accept enum NAMES in request bodies (e.g. decision "Approved") as well as numbers — the portals send
+// readable enum strings. Backward compatible: numeric enum values still deserialize.
+builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("approvals-service");

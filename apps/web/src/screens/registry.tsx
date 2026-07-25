@@ -29,6 +29,10 @@ const PharmacyDispense = lazy(() => import("./PharmacyDispense").then((m) => ({ 
 // Pharmacy substitutions (Phase 6.3) — formulary lookup of policy-approved alternatives.
 const Substitutions = lazy(() => import("./Substitutions").then((m) => ({ default: m.Substitutions })));
 const ApprovalsWorklist = lazy(() => import("./ApprovalsWorklist").then((m) => ({ default: m.ApprovalsWorklist })));
+// Approvals break-glass + SLA (Phase 7.3) — manual auth / emergency approve / TAT board share one chunk.
+const ApprovalsManual = lazy(() => import("./ApprovalsExtra").then((m) => ({ default: m.ApprovalsManual })));
+const ApprovalsEmergency = lazy(() => import("./ApprovalsExtra").then((m) => ({ default: m.ApprovalsEmergency })));
+const ApprovalsSla = lazy(() => import("./ApprovalsExtra").then((m) => ({ default: m.ApprovalsSla })));
 const ExecutiveDashboard = lazy(() => import("./ExecutiveDashboard").then((m) => ({ default: m.ExecutiveDashboard })));
 // Case-manager portal (Phase 10.3) — one chunk for the two case screens.
 const MyCases = lazy(() => import("./CaseManager").then((m) => ({ default: m.MyCases })));
@@ -77,6 +81,9 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/pharmacy/substitutions": () => <Substitutions />,
   // 5. Approvals — worklist + decision (US-060).
   "/approvals/worklist": () => <ApprovalsWorklist />,
+  "/approvals/manual": () => <ApprovalsManual />,
+  "/approvals/emergency": () => <ApprovalsEmergency />,
+  "/approvals/sla": () => <ApprovalsSla />,
   // 6. Executive dashboard (US-073) — director scope.
   "/director/dashboards": () => <ExecutiveDashboard scope="director" />,
   // 7. Case-manager portal (Phase 10.3) — My Cases → coordination-360 (+ tasks); escalations.

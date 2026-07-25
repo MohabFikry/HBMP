@@ -26,6 +26,10 @@ import {
   zResultTask,
   zResultUpload,
   zDrugRef,
+  zTatSummary,
+  zManualAuthResult,
+  zEmergencyResult,
+  type ManualAuthInput,
   zPatientListItem,
   zPlaceOrderResult,
   zPrescribeResult,
@@ -638,6 +642,47 @@ export class HttpApiClient implements ApiClient {
       status: authStatus(r?.status),
       replayed: !!r?.replayed,
     });
+  }
+
+  // Approvals break-glass + SLA (Phase 7.3). The TAT board is a PHI-free reporting read (durations converted to
+  // whole minutes). A manual authorization is a break-glass create (Idempotency-Key + mandatory justification,
+  // always Approved from this form). Emergency-approve acts on a pending authorization from the worklist.
+  async slaSummary() {
+    const r = (await getRaw(`/authorizations/tat-summary`)) as any;
+    const min = (s: unknown) => Math.round((Number(s ?? 0) / 60) * 10) / 10;
+    return parseOr(zTatSummary, {
+      total: Number(r?.total ?? 0),
+      avgMinutes: min(r?.avgTatSeconds),
+      p95Minutes: min(r?.p95TatSeconds),
+      breaches: Number(r?.slaBreaches ?? 0),
+      byStatus: (r?.byStatus ?? []).map((b: any) => ({
+        status: String(b.status ?? ""),
+        count: Number(b.count ?? 0),
+        avgMinutes: min(b.avgTatSeconds),
+        p95Minutes: min(b.p95TatSeconds),
+        breaches: Number(b.slaBreaches ?? 0),
+      })),
+    });
+  }
+  async createManualAuth(input: ManualAuthInput) {
+    const idem = `manual:${input.beneficiaryId}:${input.serviceCodes.join(",")}`;
+    const body = {
+      beneficiaryId: input.beneficiaryId,
+      serviceCodes: input.serviceCodes,
+      decision: "Approved",
+      justification: input.justification,
+      rationale: input.rationale ?? null,
+    };
+    const r = (await postRaw(`/authorizations/manual`, body, idem)) as any;
+    return parseOr(zManualAuthResult, {
+      authorizationId: r?.authorizationId ?? r?.AuthorizationId ?? "",
+      authNo: r?.authNo ?? r?.AuthNo ?? "",
+      status: authStatus(r?.status),
+    });
+  }
+  async emergencyApprove(authId: string, justification: string) {
+    const r = (await postRaw(`/authorizations/${encodeURIComponent(authId)}/emergency-approve`, { justification }, `emg:${authId}`)) as any;
+    return parseOr(zEmergencyResult, { authorizationId: r?.authorizationId ?? authId, status: authStatus(r?.status ?? "EmergencyApproved") });
   }
 
   // Director / Reporting (Phase 8.3) — the reporting service emits one executive dashboard at

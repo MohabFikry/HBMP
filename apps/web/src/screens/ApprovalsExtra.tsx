@@ -1,0 +1,178 @@
+import { useState } from "react";
+import { Button, Card, DataTable, InlineAlert, InputField, KpiCard, StatusChip, TextareaField } from "@mersal/design-system";
+import type { Column } from "@mersal/design-system";
+import type { ApprovalItem, Localized, TatSummary } from "@mersal/contracts";
+import { useApi } from "../api/ApiProvider";
+import { useAsync } from "../api/useAsync";
+import { AsyncSection, PageHeader, useLoc } from "./_shared";
+
+const S = {
+  slaTitle: { en: "SLA / TAT board", ar: "لوحة الاستجابة" },
+  slaEmpty: { en: "No decided authorizations to report on yet.", ar: "لا توجد موافقات مُقرّرة بعد." },
+  total: { en: "Decided", ar: "تم البت فيها" },
+  avg: { en: "Avg TAT (min)", ar: "متوسط الاستجابة (د)" },
+  p95: { en: "P95 TAT (min)", ar: "الاستجابة p95 (د)" },
+  breaches: { en: "SLA breaches", ar: "تجاوزات الاستجابة" },
+  status: { en: "Status", ar: "الحالة" },
+  count: { en: "Count", ar: "العدد" },
+
+  manualTitle: { en: "Manual authorization", ar: "تفويض يدوي" },
+  beneficiary: { en: "Beneficiary ID", ar: "معرّف المستفيد" },
+  codes: { en: "Service codes (comma-separated)", ar: "رموز الخدمات (مفصولة بفواصل)" },
+  justification: { en: "Justification", ar: "المبرر" },
+  create: { en: "Create manual authorization", ar: "إنشاء تفويض يدوي" },
+  created: { en: "Manual authorization created — flagged for retrospective review.", ar: "تم إنشاء التفويض — مُعلّم للمراجعة اللاحقة." },
+  needFields: { en: "Beneficiary, at least one code, and a justification are required.", ar: "المستفيد ورمز واحد على الأقل والمبرر مطلوبة." },
+
+  emgTitle: { en: "Emergency / override", ar: "طارئ / تجاوز" },
+  emgEmpty: { en: "No pending authorizations.", ar: "لا توجد موافقات معلّقة." },
+  patient: { en: "Patient", ar: "المريض" },
+  service: { en: "Service", ar: "الخدمة" },
+  emgApprove: { en: "Emergency approve", ar: "اعتماد طارئ" },
+  emgJust: { en: "Reason for emergency approval", ar: "سبب الاعتماد الطارئ" },
+  confirm: { en: "Confirm", ar: "تأكيد" },
+  cancel: { en: "Cancel", ar: "إلغاء" },
+  approved: { en: "Emergency approved.", ar: "تم الاعتماد الطارئ." },
+} satisfies Record<string, Localized>;
+
+const m = (n: number) => Math.round(n).toLocaleString();
+
+/** SLA / TAT board — turnaround + breach metrics across decided authorizations (PHI-free reporting read). */
+export function ApprovalsSla() {
+  const api = useApi();
+  const t = useLoc();
+  const state = useAsync<TatSummary>(() => api.slaSummary(), []);
+  const cols: Column<TatSummary["byStatus"][number]>[] = [
+    { key: "status", header: t(S.status), cell: (r) => r.status },
+    { key: "count", header: t(S.count), cell: (r) => <span className="tnum">{r.count}</span> },
+    { key: "avg", header: t(S.avg), cell: (r) => <span className="tnum">{m(r.avgMinutes)}</span> },
+    { key: "p95", header: t(S.p95), cell: (r) => <span className="tnum">{m(r.p95Minutes)}</span> },
+    { key: "breaches", header: t(S.breaches), cell: (r) => <span className="tnum">{r.breaches}</span> },
+  ];
+  return (
+    <>
+      <PageHeader title={t(S.slaTitle)} />
+      <AsyncSection state={state} isEmpty={(d) => d.total === 0} emptyLabel={S.slaEmpty}>
+        {(d) => (
+          <div className="stack" style={{ gap: "var(--sp4)" }}>
+            <div className="kpi-row">
+              <KpiCard label={t(S.total)} value={m(d.total)} />
+              <KpiCard label={t(S.avg)} value={m(d.avgMinutes)} />
+              <KpiCard label={t(S.p95)} value={m(d.p95Minutes)} />
+              <KpiCard label={t(S.breaches)} value={m(d.breaches)} />
+            </div>
+            <Card as="section" style={{ padding: "var(--sp3)" }}>
+              <DataTable columns={cols} rows={d.byStatus} rowKey={(r) => r.status} caption={t(S.slaTitle)} />
+            </Card>
+          </div>
+        )}
+      </AsyncSection>
+    </>
+  );
+}
+
+/** Manual authorization — a break-glass approval created out-of-band (always flagged for retrospective review). */
+export function ApprovalsManual() {
+  const api = useApi();
+  const t = useLoc();
+  const [beneficiaryId, setBeneficiaryId] = useState("");
+  const [codes, setCodes] = useState("");
+  const [justification, setJustification] = useState("");
+  const [status, setStatus] = useState<"idle" | "saving" | "done" | "invalid">("idle");
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const serviceCodes = codes.split(",").map((c) => c.trim()).filter(Boolean);
+    if (beneficiaryId.trim() === "" || serviceCodes.length === 0 || justification.trim() === "") {
+      setStatus("invalid");
+      return;
+    }
+    setStatus("saving");
+    try {
+      await api.createManualAuth({ beneficiaryId: beneficiaryId.trim(), serviceCodes, justification: justification.trim() });
+      setStatus("done");
+      setBeneficiaryId(""); setCodes(""); setJustification("");
+    } catch {
+      setStatus("idle");
+    }
+  }
+  return (
+    <>
+      <PageHeader title={t(S.manualTitle)} />
+      <Card as="section" style={{ padding: "var(--sp5)" }}>
+        <form onSubmit={submit} className="stack" aria-label={t(S.manualTitle)}>
+          <InputField label={t(S.beneficiary)} value={beneficiaryId} onChange={(e) => setBeneficiaryId(e.currentTarget.value)} autoComplete="off" />
+          <InputField label={t(S.codes)} value={codes} onChange={(e) => setCodes(e.currentTarget.value)} autoComplete="off" />
+          <TextareaField label={t(S.justification)} value={justification} onChange={(e) => setJustification(e.currentTarget.value)} rows={3} />
+          <div aria-live="polite" className="stack" style={{ gap: "var(--sp2)" }}>
+            {status === "invalid" && <InlineAlert tone="bad">{t(S.needFields)}</InlineAlert>}
+            {status === "done" && <StatusChip kind="ok" label={t(S.created)} />}
+            <div><Button type="submit" variant="primary" loading={status === "saving"}>{t(S.create)}</Button></div>
+          </div>
+        </form>
+      </Card>
+    </>
+  );
+}
+
+/** Emergency / override — emergency-approve a pending authorization (mandatory reason, retrospective review). */
+export function ApprovalsEmergency() {
+  const api = useApi();
+  const t = useLoc();
+  const state = useAsync<ApprovalItem[]>(() => api.approvalWorklist(), []);
+  const [active, setActive] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<Set<string>>(new Set());
+
+  async function confirm(id: string) {
+    if (reason.trim() === "") return;
+    setBusy(true);
+    try {
+      await api.emergencyApprove(id, reason.trim());
+      setDone((prev) => new Set(prev).add(id));
+      setActive(null);
+      setReason("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const cols: Column<ApprovalItem>[] = [
+    { key: "patient", header: t(S.patient), cell: (r) => <span className="tnum">{r.patient.token}</span> },
+    { key: "service", header: t(S.service), cell: (r) => <span className="tnum">{r.service.code}</span> },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    {
+      key: "act",
+      header: "",
+      cell: (r) =>
+        done.has(r.id) ? (
+          <StatusChip kind="ok" label={t(S.approved)} />
+        ) : active === r.id ? (
+          <div className="stack" style={{ gap: "var(--sp2)", minWidth: 260 }}>
+            <InputField label={t(S.emgJust)} value={reason} onChange={(e) => setReason(e.currentTarget.value)} autoComplete="off" />
+            <div style={{ display: "flex", gap: "var(--sp2)" }}>
+              <Button variant="primary" size="sm" loading={busy} onClick={() => void confirm(r.id)}>{t(S.confirm)}</Button>
+              <Button variant="ghost" size="sm" onClick={() => { setActive(null); setReason(""); }}>{t(S.cancel)}</Button>
+            </div>
+          </div>
+        ) : (
+          <Button variant="secondary" size="sm" onClick={() => setActive(r.id)}>{t(S.emgApprove)}</Button>
+        ),
+    },
+  ];
+  return (
+    <>
+      <PageHeader title={t(S.emgTitle)} />
+      <Card as="section" style={{ padding: "var(--sp3)" }}>
+        <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.emgEmpty}>
+          {(rows) => (
+            <div aria-live="polite">
+              <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.emgTitle)} />
+            </div>
+          )}
+        </AsyncSection>
+      </Card>
+    </>
+  );
+}

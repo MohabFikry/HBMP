@@ -33,6 +33,10 @@ import {
   zResultTask,
   zResultUpload,
   zDrugRef,
+  zTatSummary,
+  zManualAuthResult,
+  zEmergencyResult,
+  type ManualAuthInput,
   type VitalInput,
   zExportResult,
   zFinancialSummary,
@@ -476,6 +480,29 @@ export class DevApiClient implements ApiClient {
         replayed,
       });
     });
+  }
+
+  slaSummary() {
+    return this.gate(() =>
+      ok(zTatSummary, {
+        total: 42, avgMinutes: 87.5, p95Minutes: 240, breaches: 5,
+        byStatus: [
+          { status: "Approved", count: 28, avgMinutes: 65, p95Minutes: 180, breaches: 1 },
+          { status: "Rejected", count: 6, avgMinutes: 110, p95Minutes: 260, breaches: 2 },
+          { status: "UnderReview", count: 8, avgMinutes: 130, p95Minutes: 300, breaches: 2 },
+        ],
+      }),
+    );
+  }
+  createManualAuth(input: ManualAuthInput) {
+    void input;
+    return this.gate(() =>
+      ok(zManualAuthResult, { authorizationId: "AUTH-MAN-0007", authNo: "AUTH-2026-0M07", status: { kind: "ok", label: loc("Approved", "معتمد") } }),
+    );
+  }
+  emergencyApprove(authId: string, justification: string) {
+    void justification;
+    return this.gate(() => ok(zEmergencyResult, { authorizationId: authId, status: { kind: "ok", label: loc("Emergency approved", "اعتماد طارئ") } }));
   }
 
   // ---- Dashboard ---------------------------------------------------------

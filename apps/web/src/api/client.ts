@@ -7,6 +7,10 @@ import type {
   BreakGlassGrant,
   CheckInResult,
   DrugRef,
+  EmergencyResult,
+  ManualAuthInput,
+  ManualAuthResult,
+  TatSummary,
   CaseListItem,
   ConsumeRequest,
   ConsumeResult,
@@ -94,6 +98,10 @@ export interface ApiClient {
   approvalWorklist(): Promise<ApprovalItem[]>;
   approvalReview(approvalId: string): Promise<ApprovalReview>;
   decide(req: DecisionRequest): Promise<DecisionResult>;
+  // Approvals — break-glass + SLA (Phase 7.3)
+  slaSummary(): Promise<TatSummary>;
+  createManualAuth(input: ManualAuthInput): Promise<ManualAuthResult>;
+  emergencyApprove(authId: string, justification: string): Promise<EmergencyResult>;
 
   // Executive dashboard (Phase 8)
   executiveDashboard(scope: "executive" | "finance" | "director"): Promise<ExecutiveDashboard>;
