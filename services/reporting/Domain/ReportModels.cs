@@ -1,0 +1,54 @@
+namespace Mersal.Reporting.Domain;
+
+// Report result contracts (aggregate, PHI-free). Shared by the query service, the API and the dashboard contracts.
+
+public sealed record TatRow(string Dimension, long Count, double AvgTatSeconds, double P95TatSeconds, long SlaBreaches);
+public sealed record ApprovalTatReport(long Total, double AvgTatSeconds, double P95TatSeconds, long SlaBreaches, IReadOnlyList<TatRow> ByPriority);
+
+public sealed record PendingRow(string Status, string Priority, string AgeBucket, long Count, long SlaBreaches);
+public sealed record PendingApprovalsReport(long Total, long SlaBreaches, IReadOnlyList<PendingRow> Rows);
+
+public sealed record WorkloadRow(string ClinicId, DateOnly Period, long Encounters);
+public sealed record ClinicWorkloadReport(IReadOnlyList<WorkloadRow> Rows);
+
+public sealed record UtilizationRow(string Code, long Count);
+public sealed record UtilizationReport(string Dimension, IReadOnlyList<UtilizationRow> Rows);
+
+public sealed record NoShowRow(string ClinicId, long Booked, long Attended, long NoShow, double NoShowRate);
+public sealed record NoShowReport(long Booked, long Attended, long NoShow, double NoShowRate, IReadOnlyList<NoShowRow> ByClinic);
+
+public sealed record CodeRankRow(string Code, long Count);
+public sealed record TopCodesReport(string Kind, IReadOnlyList<CodeRankRow> Rows);
+
+public sealed record RejectionReasonRow(string ReasonCode, long Count);
+public sealed record RejectedRequestsReport(long Total, IReadOnlyList<RejectionReasonRow> ByReason);
+
+public sealed record FinancialRow(string ServiceLine, decimal Amount, long Count);
+public sealed record FinancialSummaryReport(decimal TotalAmount, long TotalCount, IReadOnlyList<FinancialRow> ByServiceLine);
+
+/// <summary>Age-bucketing for pending approvals (data-driven, PHI-free).</summary>
+public static class AgeBuckets
+{
+    public static string Of(TimeSpan age) => age switch
+    {
+        { TotalHours: < 4 } => "<4h",
+        { TotalHours: < 24 } => "4-24h",
+        { TotalDays: < 3 } => "1-3d",
+        _ => ">3d",
+    };
+}
+
+/// <summary>p95 over a sample using nearest-rank; pure so it is unit-tested and reused by the query service.</summary>
+public static class Percentile
+{
+    public static double P95(IReadOnlyList<long> values) => Of(values, 0.95);
+
+    public static double Of(IReadOnlyList<long> values, double q)
+    {
+        if (values is null || values.Count == 0) return 0;
+        var sorted = values.OrderBy(v => v).ToArray();
+        var rank = (int)Math.Ceiling(q * sorted.Length);
+        var idx = Math.Clamp(rank - 1, 0, sorted.Length - 1);
+        return sorted[idx];
+    }
+}
