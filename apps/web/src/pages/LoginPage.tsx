@@ -6,6 +6,7 @@ import { portalForRole } from "../portals/catalog";
 import { PORTALS } from "../portals/catalog";
 import type { Role } from "../authz/permissions";
 import { L } from "../i18n/strings";
+import { LIVE } from "../config";
 
 /**
  * Login (US-070): OIDC + MFA. The dev build shows a role picker (standing in for the IdP's account) plus
@@ -40,6 +41,18 @@ export function LoginPage() {
     }
   }
 
+  // Live mode: identity + MFA are owned by Keycloak. A single button starts the auth-code + PKCE redirect;
+  // on return the role (and thus portal) is derived from the token, not chosen here.
+  async function onKeycloakSignIn() {
+    setBusy(true);
+    try {
+      await login(role, "000000"); // args ignored by the OIDC client — it redirects to Keycloak
+    } catch {
+      setBusy(false);
+      setError(L.mfaError[lang]);
+    }
+  }
+
   return (
     <div className="login-wrap">
       <Card style={{ padding: "var(--sp8)", width: "min(440px, 92vw)" }}>
@@ -50,6 +63,16 @@ export function LoginPage() {
         <p className="muted" style={{ textAlign: "center", marginTop: "var(--sp2)" }}>
           {L.loginSub[lang]}
         </p>
+        {LIVE ? (
+          <div style={{ display: "grid", gap: "var(--sp4)", marginTop: "var(--sp5)" }}>
+            <Button type="button" variant="primary" loading={busy} onClick={onKeycloakSignIn}>
+              {L.signIn[lang]}
+            </Button>
+            <p className="muted" style={{ textAlign: "center", fontSize: "var(--fs-footnote)" }}>
+              {lang === "ar" ? "تسجيل الدخول عبر Keycloak" : "Secure sign-in via Keycloak"}
+            </p>
+          </div>
+        ) : (
         <form onSubmit={onSubmit} style={{ display: "grid", gap: "var(--sp4)", marginTop: "var(--sp5)" }}>
           <div className="mrs-field">
             <label className="mrs-label" htmlFor="role">
@@ -82,6 +105,7 @@ export function LoginPage() {
             {L.signIn[lang]}
           </Button>
         </form>
+        )}
       </Card>
     </div>
   );

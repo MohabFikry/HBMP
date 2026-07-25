@@ -1,4 +1,6 @@
 import type { z } from "zod";
+import { API_BASE } from "../config";
+import { getToken } from "../auth/tokenStore";
 
 /**
  * A normalised API failure. `kind` lets screens branch: `network` (offline/timeout), `http` (a 4xx/5xx with
@@ -25,14 +27,19 @@ export function parseOr<T>(schema: z.ZodType<T>, data: unknown): T {
   return r.data;
 }
 
-const BASE = "/api/v1";
-
 async function request(path: string, init: RequestInit): Promise<unknown> {
   let res: Response;
+  const token = getToken();
+  const auth: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   try {
-    res = await fetch(`${BASE}${path}`, {
+    res = await fetch(`${API_BASE}${path}`, {
       ...init,
-      headers: { "Content-Type": "application/json", Accept: "application/json", ...(init.headers ?? {}) },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...auth,
+        ...(init.headers ?? {}),
+      },
     });
   } catch (e) {
     throw new ApiError("network", e instanceof Error ? e.message : "Network request failed");

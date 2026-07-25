@@ -1,6 +1,8 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import type { ApiClient } from "./client";
 import { DevApiClient } from "./DevApiClient";
+import { HttpApiClient } from "./HttpApiClient";
+import { LIVE } from "../config";
 
 const ApiContext = createContext<ApiClient | null>(null);
 
@@ -10,7 +12,10 @@ const ApiContext = createContext<ApiClient | null>(null);
  * entry swaps in {@link HttpApiClient} once the services are reachable.
  */
 export function ApiProvider({ client, children }: { client?: ApiClient; children: ReactNode }) {
-  const value = useMemo(() => client ?? new DevApiClient({ latencyMs: 250 }), [client]);
+  const value = useMemo(
+    () => client ?? (LIVE ? new HttpApiClient() : new DevApiClient({ latencyMs: 250 })),
+    [client],
+  );
   return <ApiContext.Provider value={value}>{children}</ApiContext.Provider>;
 }
 

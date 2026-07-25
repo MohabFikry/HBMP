@@ -2,6 +2,11 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { auditClient } from "../audit/auditClient";
 import type { Permission, Role } from "../authz/permissions";
 import { DevAuthClient, SESSION_TTL, type AuthClient, type Session } from "./authClient";
+import { OidcAuthClient } from "./oidcClient";
+import { LIVE } from "../config";
+
+/** The default auth client: real OIDC (Keycloak) in live mode, else the no-backend dev stub. */
+const defaultAuthClient: AuthClient = LIVE ? new OidcAuthClient() : new DevAuthClient();
 
 /** Idle warning fires this long before the session expires. */
 const WARN_BEFORE_MS = 60 * 1000;
@@ -20,7 +25,7 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({ children, client = new DevAuthClient() }: { children: ReactNode; client?: AuthClient }) {
+export function AuthProvider({ children, client = defaultAuthClient }: { children: ReactNode; client?: AuthClient }) {
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
   const [timeoutWarning, setTimeoutWarning] = useState(false);
