@@ -22,6 +22,8 @@ const FinanceUtilization = lazy(() => import("./FinancePortal").then((m) => ({ d
 const FinanceSettlements = lazy(() => import("./FinancePortal").then((m) => ({ default: m.FinanceSettlements })));
 const FinanceSummaries = lazy(() => import("./FinancePortal").then((m) => ({ default: m.FinanceSummaries })));
 const FinanceExports = lazy(() => import("./FinancePortal").then((m) => ({ default: m.FinanceExports })));
+// Cross-cutting inbox (Phase 8.1) — one chunk, mounted under every portal's `/…/notifications` route.
+const Notifications = lazy(() => import("./Notifications").then((m) => ({ default: m.Notifications })));
 
 export const SCREENS: Record<string, () => ReactNode> = {
   // 1. Reception — eligibility (also surfaced in the beneficiary-management portal).
@@ -50,5 +52,8 @@ export const SCREENS: Record<string, () => ReactNode> = {
 };
 
 export function screenFor(fullPath: string): (() => ReactNode) | undefined {
+  // The notifications inbox is the same screen under every portal base (/reception/notifications,
+  // /clinician/notifications, …) — map them all to one component rather than enumerating each.
+  if (fullPath.endsWith("/notifications")) return () => <Notifications />;
   return SCREENS[fullPath];
 }

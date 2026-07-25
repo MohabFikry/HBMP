@@ -19,6 +19,8 @@ import type {
   ExportResult,
   FinancialSummary,
   LabOrder,
+  MarkReadResult,
+  Notification,
   PatientListItem,
   PlaceOrderRequest,
   PlaceOrderResult,
@@ -75,6 +77,10 @@ export interface ApiClient {
   settlements(): Promise<Settlement[]>;
   financialSummary(dimension: "serviceline" | "category" | "provider"): Promise<FinancialSummary>;
   exportReport(req: ExportRequest): Promise<ExportResult>;
+
+  // Notifications — the caller's own in-app inbox (Phase 8.1). Self-service, cross-portal.
+  notifications(unreadOnly?: boolean): Promise<Notification[]>;
+  markNotificationRead(id: string): Promise<MarkReadResult>;
 }
 
 /**

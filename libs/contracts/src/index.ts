@@ -18,3 +18,4 @@ export * from "./approvals";
 export * from "./dashboard";
 export * from "./case";
 export * from "./finance";
+export * from "./notification";

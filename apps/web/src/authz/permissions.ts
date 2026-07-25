@@ -72,7 +72,9 @@ export type Permission =
   | "director.dashboards"
   | "director.oversight"
   | "director.quality"
-  | "director.escalations";
+  | "director.escalations"
+  // Cross-cutting — every role has an in-app inbox (self-service, server row-filtered by recipient).
+  | "notification.read";
 
 export type Role =
   | "reception"
@@ -121,9 +123,10 @@ export const rolePermissions: Record<Role, Permission[]> = {
   medical_director: ["director.dashboards", "director.oversight", "director.quality", "director.escalations", "approvals.sla"],
 };
 
-/** Effective permissions for a role (deduplicated). */
+/** Effective permissions for a role (deduplicated). Every role additionally carries `notification.read` —
+ * the in-app inbox is a self-service surface available in every portal (the server row-filters by recipient). */
 export function permissionsForRole(role: Role): ReadonlySet<Permission> {
-  return new Set(rolePermissions[role]);
+  return new Set<Permission>([...rolePermissions[role], "notification.read"]);
 }
 
 export function hasPermission(perms: ReadonlySet<Permission>, required: Permission): boolean {

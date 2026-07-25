@@ -18,6 +18,8 @@ import {
   zCaseListItem,
   zCoordinationTask,
   zEscalation,
+  zNotification,
+  zMarkReadResult,
   zExportResult,
   zFinancialSummary,
   zSettlement,
@@ -642,5 +644,40 @@ export class DevApiClient implements ApiClient {
         status: { kind: "ok", label: loc("Export ready (audited)", "التصدير جاهز (مُدقّق)") },
       }),
     );
+  }
+
+  // ---- Notifications (Phase 8.1) — the caller's own in-app inbox, cross-portal --------------------------
+  notifications(unreadOnly?: boolean) {
+    const all = [
+      {
+        id: "NTF-1",
+        subject: "Authorization awaiting review",
+        body: "A new authorization is on your worklist and awaiting a decision.",
+        status: { kind: "warn" as const, label: loc("Action needed", "إجراء مطلوب") },
+        entityRef: "AUTH-2026-0001",
+        sourceEventType: "AuthorizationSubmitted",
+        actionable: true,
+        read: false,
+        createdAt: "2026-07-22T07:30:00Z",
+      },
+      {
+        id: "NTF-2",
+        subject: "Authorization approved",
+        body: "An authorization you requested has been approved.",
+        status: { kind: "ok" as const, label: loc("Approved", "معتمد") },
+        entityRef: "AUTH-2026-0002",
+        sourceEventType: "AuthorizationDecided",
+        actionable: false,
+        read: true,
+        createdAt: "2026-07-21T12:00:00Z",
+      },
+    ];
+    return this.gate(
+      () => ok(z.array(zNotification), unreadOnly ? all.filter((n) => !n.read) : all),
+      [],
+    );
+  }
+  markNotificationRead(id: string) {
+    return this.gate(() => ok(zMarkReadResult, { id, read: true }));
   }
 }

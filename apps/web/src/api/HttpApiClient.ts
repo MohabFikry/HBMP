@@ -11,6 +11,8 @@ import {
   zKpiWidget,
   zChartWidget,
   zLabOrder,
+  zMarkReadResult,
+  zNotification,
   zPatientListItem,
   zPlaceOrderResult,
   zPrescribeResult,
@@ -73,6 +75,16 @@ const coverageChip = (s: unknown): { kind: "ok" | "warn" | "bad" | "neu"; label:
   if (k === "blocked" || k === "expired" || k === "lapsed") return { kind: "bad", label: { en: k[0].toUpperCase() + k.slice(1), ar: "منتهٍ" } };
   if (k === "none") return { kind: "neu", label: { en: "None", ar: "لا يوجد" } };
   return { kind: "warn", label: { en: "Review", ar: "قيد المراجعة" } };
+};
+/** Map a notification's canonical status vocabulary → a non-color StatusKind chip (accessibility: hue+text). */
+const notificationChip = (s: unknown): { kind: "ok" | "info" | "warn" | "bad" | "neu"; label: { en: string; ar: string } } => {
+  const raw = String(s ?? "Informational");
+  const k = raw.toLowerCase();
+  if (k.includes("action")) return { kind: "warn", label: { en: raw, ar: "إجراء مطلوب" } };
+  if (k.includes("escalat")) return { kind: "bad", label: { en: raw, ar: "تصعيد" } };
+  if (k.includes("approv")) return { kind: "ok", label: { en: raw, ar: "معتمد" } };
+  if (k.includes("reject") || k.includes("fail")) return { kind: "bad", label: { en: raw, ar: "مرفوض" } };
+  return { kind: "info", label: { en: raw, ar: "معلومة" } };
 };
 /** Map a case/approval priority string → the zCasePriority enum. */
 const casePriority = (p: unknown): "low" | "normal" | "high" | "urgent" =>
@@ -688,5 +700,28 @@ export class HttpApiClient implements ApiClient {
       filename: r?.filename ?? `${req.report}-${req.from}_${req.to}.${req.format}`,
       status: "ok",
     });
+  }
+
+  // Notifications (Phase 8.1) — the caller's own in-app inbox. The service row-filters by recipient == caller,
+  // so this is inherently min-necessary. Map the service's status vocabulary → a non-color StatusKind chip.
+  async notifications(unreadOnly?: boolean) {
+    const r = (await getRaw(`/notifications/${unreadOnly ? "?unreadOnly=true" : ""}`)) as any[];
+    return (Array.isArray(r) ? r : []).map((n: any) =>
+      parseOr(zNotification, {
+        id: n.notificationId ?? n.id,
+        subject: String(n.subject ?? ""),
+        body: String(n.body ?? ""),
+        status: notificationChip(n.statusText),
+        entityRef: n.entityRef ?? undefined,
+        sourceEventType: String(n.sourceEventType ?? ""),
+        actionable: Boolean(n.actionable ?? (String(n.statusText ?? "").toLowerCase().includes("action"))),
+        read: Boolean(n.read),
+        createdAt: n.createdAt ?? new Date().toISOString(),
+      }),
+    );
+  }
+  async markNotificationRead(id: string) {
+    const r = (await postRaw(`/notifications/${encodeURIComponent(id)}/read`, {})) as any;
+    return parseOr(zMarkReadResult, { id: r?.notificationId ?? id, read: true });
   }
 }

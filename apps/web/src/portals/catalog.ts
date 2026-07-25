@@ -223,6 +223,21 @@ export const PORTALS: PortalDef[] = [
   },
 ];
 
+// Cross-cutting inbox: every portal gets a Notifications section (self-service; the notification-service row-filters
+// by recipient == caller, so it is inherently min-necessary). Appended here so it renders last in the nav for all
+// roles without repeating it in every portal literal above.
+const NOTIFICATIONS_SECTION: Section = {
+  key: "notifications",
+  path: "notifications",
+  label: { en: "Notifications", ar: "الإشعارات" },
+  group: { en: "Inbox", ar: "الوارد" },
+  icon: "clock",
+  permission: "notification.read",
+};
+for (const portal of PORTALS) {
+  if (!portal.sections.some((s) => s.key === "notifications")) portal.sections.push(NOTIFICATIONS_SECTION);
+}
+
 export function portalForRole(role: Role): PortalDef {
   const p = PORTALS.find((x) => x.role === role);
   if (!p) throw new Error(`No portal defined for role ${role}`);
