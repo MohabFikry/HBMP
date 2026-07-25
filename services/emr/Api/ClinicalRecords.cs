@@ -20,6 +20,18 @@ public static class ClinicalEndpoints
         var enc = app.MapGroup("/api/v1/encounters").RequireAuthorization();
         var ben = app.MapGroup("/api/v1/beneficiaries").RequireAuthorization();
 
+        // Min-necessary treating-relationship probe (boolean only) — the authoritative source of the treating
+        // truth (emr owns encounters). orders-service / pharmacy-service call this, forwarding the caller's
+        // token, to gate their own writes by the SAME rule (US-030) without duplicating encounter data.
+        app.MapGet("/api/v1/treating-relationship", async (
+            Guid beneficiaryId, ITreatingRelationship treating, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        {
+            var p = me.Principal;
+            if (p is null) return Results.Unauthorized();
+            var treats = await treating.TreatsAsync(p.Subject, p.ProviderId, beneficiaryId, ct);
+            return Results.Ok(new { beneficiaryId, treats });
+        }).RequireAuthorization();
+
         // ---- Full clinical record (US-030) — treating clinician or approval team only ----
         enc.MapGet("/{id:guid}/clinical", async (
             Guid id, EmrDbContext db, ClinicalGate gate, HttpContext http, CancellationToken ct) =>
