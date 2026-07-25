@@ -8,6 +8,8 @@ import {
   zEligibilityResult,
   zEncounter,
   zExecutiveDashboard,
+  zKpiWidget,
+  zChartWidget,
   zLabOrder,
   zPatientListItem,
   zPlaceOrderResult,
@@ -415,8 +417,46 @@ export class HttpApiClient implements ApiClient {
     });
   }
 
-  executiveDashboard(scope: "executive" | "finance" | "director") {
-    return getJson(`/reports/dashboards/${scope}`, zExecutiveDashboard);
+  // Director / Reporting (Phase 8.3) — the reporting service emits one executive dashboard at
+  // /dashboards/executive (zone-tagged widgets, each with chart series + a mandatory accessible dataTable +
+  // bilingual labels, PHI-free). The zod contract splits widgets into kpis + charts, so we map gauge/summary
+  // widgets to KPI cards and the rest to charts (every chart keeps its required dataTable — US-073).
+  async executiveDashboard(scope: "executive" | "finance" | "director") {
+    const d = (await getRaw(`/dashboards/executive`)) as any;
+    const widgets: any[] = d?.widgets ?? [];
+    const bi = (x: any) => ({ en: String(x?.en ?? ""), ar: String(x?.ar ?? "") });
+    const points = (w: any) => (w.series?.[0]?.points ?? []) as any[];
+    const chartTypeByKind: Record<number, "bar" | "line" | "donut"> = { 0: "line", 1: "bar", 2: "donut", 3: "bar", 4: "donut", 5: "bar" };
+    const isKpi = (w: any) => w.kind === 2 || w.kind === 5; // Gauge | Summary → KPI card
+
+    const kpis = widgets.filter(isKpi).map((w) =>
+      parseOr(zKpiWidget, {
+        kind: "kpi",
+        id: w.key,
+        title: bi(w.title),
+        value: String(points(w).reduce((acc: number, p: any) => acc + Number(p.value ?? 0), 0)),
+      }),
+    );
+    const charts = widgets.filter((w) => !isKpi(w)).map((w) =>
+      parseOr(zChartWidget, {
+        kind: "chart",
+        id: w.key,
+        title: bi(w.title),
+        chartType: chartTypeByKind[w.kind as number] ?? "bar",
+        series: points(w).map((p: any) => ({ label: loc(p.label), value: Number(p.value ?? 0), display: String(p.value ?? 0) })),
+        dataTable: {
+          columns: (w.dataTable?.columns ?? []).map(bi),
+          rows: (w.dataTable?.rows ?? []).map((row: any[]) => row.map((c) => String(c))),
+        },
+      }),
+    );
+    return parseOr(zExecutiveDashboard, {
+      version: d?.contractVersion ?? "1.0",
+      generatedAt: d?.generatedAt ?? new Date().toISOString(),
+      scope,
+      kpis,
+      charts,
+    });
   }
 
   // Case management (Phase 10.1) — assignment-scoped; the server re-authorizes every call (case-assignment ABAC).
