@@ -37,6 +37,7 @@ import {
   zManualAuthResult,
   zEmergencyResult,
   type ManualAuthInput,
+  zReportView,
   type VitalInput,
   zExportResult,
   zFinancialSummary,
@@ -503,6 +504,45 @@ export class DevApiClient implements ApiClient {
   emergencyApprove(authId: string, justification: string) {
     void justification;
     return this.gate(() => ok(zEmergencyResult, { authorizationId: authId, status: { kind: "ok", label: loc("Emergency approved", "اعتماد طارئ") } }));
+  }
+
+  directorReport(section: "oversight" | "quality" | "escalations") {
+    const views: Record<string, unknown> = {
+      oversight: {
+        kpis: [
+          { label: loc("Pending", "معلّقة"), value: "3" },
+          { label: loc("SLA breaches", "تجاوزات"), value: "1" },
+          { label: loc("Avg TAT (min)", "متوسط (د)"), value: "58" },
+          { label: loc("P95 TAT (min)", "p95 (د)"), value: "120" },
+        ],
+        tables: [{
+          title: loc("Pending by status", "المعلّقة حسب الحالة"),
+          columns: [loc("Status", "الحالة"), loc("Priority", "الأولوية"), loc("Count", "العدد")],
+          rows: [["Submitted", "Emergency", "1"], ["Submitted", "Urgent", "1"], ["UnderReview", "Routine", "1"]],
+        }],
+      },
+      quality: {
+        kpis: [
+          { label: loc("Booked", "محجوزة"), value: "60" },
+          { label: loc("No-shows", "تخلّف"), value: "9" },
+          { label: loc("No-show rate", "نسبة التخلّف"), value: "15%" },
+        ],
+        tables: [{
+          title: loc("Top diagnoses", "أكثر التشخيصات"),
+          columns: [loc("ICD-10", "ICD-10"), loc("Count", "العدد")],
+          rows: [["E11.9", "23"], ["I10", "19"], ["J06.9", "15"]],
+        }],
+      },
+      escalations: {
+        kpis: [{ label: loc("Rejected", "مرفوضة"), value: "2" }],
+        tables: [{
+          title: loc("Rejections by reason", "الرفض حسب السبب"),
+          columns: [loc("Reason", "السبب"), loc("Count", "العدد")],
+          rows: [["NOT_COVERED", "1"], ["INSUFFICIENT_DOCS", "1"]],
+        }],
+      },
+    };
+    return this.gate(() => ok(zReportView, views[section]));
   }
 
   // ---- Dashboard ---------------------------------------------------------

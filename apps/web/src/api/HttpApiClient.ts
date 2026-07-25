@@ -30,6 +30,7 @@ import {
   zManualAuthResult,
   zEmergencyResult,
   type ManualAuthInput,
+  zReportView,
   zPatientListItem,
   zPlaceOrderResult,
   zPrescribeResult,
@@ -724,6 +725,79 @@ export class HttpApiClient implements ApiClient {
       scope,
       kpis,
       charts,
+    });
+  }
+
+  // Director oversight / quality / escalations (Phase 8.3) — de-identified reporting aggregates (no PHI). Each
+  // section fetches the relevant /reports/* endpoints and normalises them to KPI headlines + accessible tables.
+  async directorReport(section: "oversight" | "quality" | "escalations") {
+    const min = (s: unknown) => `${Math.round(Number(s ?? 0) / 60)}`;
+    const pct = (n: unknown) => `${Math.round(Number(n ?? 0) * 100)}%`;
+    if (section === "oversight") {
+      const pend = (await getRaw(`/reports/pending-approvals`)) as any;
+      const tat = (await getRaw(`/reports/approval-tat`)) as any;
+      return parseOr(zReportView, {
+        kpis: [
+          { label: { en: "Pending", ar: "معلّقة" }, value: String(pend?.total ?? 0) },
+          { label: { en: "SLA breaches", ar: "تجاوزات" }, value: String(pend?.slaBreaches ?? 0) },
+          { label: { en: "Avg TAT (min)", ar: "متوسط الاستجابة (د)" }, value: min(tat?.avgTatSeconds) },
+          { label: { en: "P95 TAT (min)", ar: "الاستجابة p95 (د)" }, value: min(tat?.p95TatSeconds) },
+        ],
+        tables: [
+          {
+            title: { en: "Pending by status", ar: "المعلّقة حسب الحالة" },
+            columns: [{ en: "Status", ar: "الحالة" }, { en: "Priority", ar: "الأولوية" }, { en: "Age", ar: "العمر" }, { en: "Count", ar: "العدد" }, { en: "Breaches", ar: "تجاوزات" }],
+            rows: (pend?.rows ?? []).map((r: any) => [String(r.status), String(r.priority), String(r.ageBucket), String(r.count), String(r.slaBreaches)]),
+          },
+          {
+            title: { en: "Turnaround by priority", ar: "الاستجابة حسب الأولوية" },
+            columns: [{ en: "Priority", ar: "الأولوية" }, { en: "Count", ar: "العدد" }, { en: "Avg (min)", ar: "متوسط (د)" }, { en: "P95 (min)", ar: "p95 (د)" }],
+            rows: (tat?.byPriority ?? []).map((r: any) => [String(r.dimension), String(r.count), min(r.avgTatSeconds), min(r.p95TatSeconds)]),
+          },
+        ],
+      });
+    }
+    if (section === "quality") {
+      const dx = (await getRaw(`/reports/top-diagnoses`)) as any;
+      const rx = (await getRaw(`/reports/top-medications`)) as any;
+      const ns = (await getRaw(`/reports/no-show`)) as any;
+      return parseOr(zReportView, {
+        kpis: [
+          { label: { en: "Booked", ar: "محجوزة" }, value: String(ns?.booked ?? 0) },
+          { label: { en: "Attended", ar: "حضر" }, value: String(ns?.attended ?? 0) },
+          { label: { en: "No-shows", ar: "تخلّف" }, value: String(ns?.noShow ?? 0) },
+          { label: { en: "No-show rate", ar: "نسبة التخلّف" }, value: pct(ns?.noShowRate) },
+        ],
+        tables: [
+          {
+            title: { en: "Top diagnoses", ar: "أكثر التشخيصات" },
+            columns: [{ en: "ICD-10", ar: "ICD-10" }, { en: "Count", ar: "العدد" }],
+            rows: (dx?.rows ?? []).map((r: any) => [String(r.code), String(r.count)]),
+          },
+          {
+            title: { en: "Top medications", ar: "أكثر الأدوية" },
+            columns: [{ en: "ATC", ar: "ATC" }, { en: "Count", ar: "العدد" }],
+            rows: (rx?.rows ?? []).map((r: any) => [String(r.code), String(r.count)]),
+          },
+          {
+            title: { en: "No-show by clinic", ar: "التخلّف حسب العيادة" },
+            columns: [{ en: "Clinic", ar: "العيادة" }, { en: "Booked", ar: "محجوزة" }, { en: "No-show", ar: "تخلّف" }, { en: "Rate", ar: "النسبة" }],
+            rows: (ns?.byClinic ?? []).map((r: any) => [String(r.clinicId), String(r.booked), String(r.noShow), pct(r.noShowRate)]),
+          },
+        ],
+      });
+    }
+    // escalations → rejected/flagged authorization requests by reason (de-identified).
+    const rej = (await getRaw(`/reports/rejected-requests`)) as any;
+    return parseOr(zReportView, {
+      kpis: [{ label: { en: "Rejected", ar: "مرفوضة" }, value: String(rej?.total ?? 0) }],
+      tables: [
+        {
+          title: { en: "Rejections by reason", ar: "الرفض حسب السبب" },
+          columns: [{ en: "Reason", ar: "السبب" }, { en: "Count", ar: "العدد" }],
+          rows: (rej?.byReason ?? []).map((r: any) => [String(r.reasonCode), String(r.count)]),
+        },
+      ],
     });
   }
 

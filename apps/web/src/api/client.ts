@@ -10,6 +10,7 @@ import type {
   EmergencyResult,
   ManualAuthInput,
   ManualAuthResult,
+  ReportView,
   TatSummary,
   CaseListItem,
   ConsumeRequest,
@@ -105,6 +106,8 @@ export interface ApiClient {
 
   // Executive dashboard (Phase 8)
   executiveDashboard(scope: "executive" | "finance" | "director"): Promise<ExecutiveDashboard>;
+  // Director oversight / quality / escalations — de-identified reporting aggregates (Phase 8.3).
+  directorReport(section: "oversight" | "quality" | "escalations"): Promise<ReportView>;
 
   // Case management — assignment-scoped (Phase 10.1). 360 is a coordination SUMMARY.
   myCases(): Promise<CaseListItem[]>;

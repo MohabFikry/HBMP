@@ -34,6 +34,8 @@ const ApprovalsManual = lazy(() => import("./ApprovalsExtra").then((m) => ({ def
 const ApprovalsEmergency = lazy(() => import("./ApprovalsExtra").then((m) => ({ default: m.ApprovalsEmergency })));
 const ApprovalsSla = lazy(() => import("./ApprovalsExtra").then((m) => ({ default: m.ApprovalsSla })));
 const ExecutiveDashboard = lazy(() => import("./ExecutiveDashboard").then((m) => ({ default: m.ExecutiveDashboard })));
+// Director oversight / quality / escalations (Phase 8.3) — one generic report screen, parameterised.
+const DirectorReport = lazy(() => import("./ReportView").then((m) => ({ default: m.DirectorReport })));
 // Case-manager portal (Phase 10.3) — one chunk for the two case screens.
 const MyCases = lazy(() => import("./CaseManager").then((m) => ({ default: m.MyCases })));
 const Escalations = lazy(() => import("./CaseManager").then((m) => ({ default: m.Escalations })));
@@ -86,6 +88,9 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/approvals/sla": () => <ApprovalsSla />,
   // 6. Executive dashboard (US-073) — director scope.
   "/director/dashboards": () => <ExecutiveDashboard scope="director" />,
+  "/director/oversight": () => <DirectorReport section="oversight" />,
+  "/director/quality": () => <DirectorReport section="quality" />,
+  "/director/escalations": () => <DirectorReport section="escalations" />,
   // 7. Case-manager portal (Phase 10.3) — My Cases → coordination-360 (+ tasks); escalations.
   "/cases/my-cases": () => <MyCases />,
   "/cases/beneficiary-360": () => <MyCases />,

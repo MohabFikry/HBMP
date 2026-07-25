@@ -25,3 +25,4 @@ export * from "./clinician";
 export * from "./fulfillment";
 export * from "./formulary";
 export * from "./approvals-extra";
+export * from "./report-view";
