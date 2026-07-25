@@ -241,6 +241,30 @@ read.MapGet("/providers/{id:guid}/capabilities", async (Guid id, ProviderDbConte
     return Results.Ok(new { p.ProviderId, status = p.Status.ToString(), routable = p.Status == ProviderStatus.Active, capabilities = caps });
 });
 
+// --- Read a provider's locations (tenant + ABAC PO gated) --------------------------------------
+read.MapGet("/providers/{id:guid}/locations", async (Guid id, ProviderDbContext db, ProviderAccessGuard guard, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+{
+    var tenant = me.Principal?.TenantId;
+    var p = await db.Providers.AsNoTracking().FirstOrDefaultAsync(x => x.ProviderId == id && x.TenantId == tenant && !x.IsDeleted, ct);
+    if (p is null) return Results.NotFound();
+    var decision = await guard.AuthorizeAsync(me.Require(), p.TenantId, p.ProviderId.ToString(), ct);
+    if (!decision.IsAllowed) return Results.Problem(statusCode: 403, title: "provider access denied", detail: decision.ReasonCode);
+    var rows = await db.Locations.AsNoTracking().Where(l => l.ProviderId == id && !l.IsDeleted).OrderByDescending(l => l.IsPrimary).ToListAsync(ct);
+    return Results.Ok(rows.Select(l => new { l.LocationId, l.Name, l.Governorate, l.Address, l.IsPrimary }));
+});
+
+// --- Read a provider's contracts + service-line counts (tenant + ABAC PO gated) ----------------
+read.MapGet("/providers/{id:guid}/contracts", async (Guid id, ProviderDbContext db, ProviderAccessGuard guard, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+{
+    var tenant = me.Principal?.TenantId;
+    var p = await db.Providers.AsNoTracking().FirstOrDefaultAsync(x => x.ProviderId == id && x.TenantId == tenant && !x.IsDeleted, ct);
+    if (p is null) return Results.NotFound();
+    var decision = await guard.AuthorizeAsync(me.Require(), p.TenantId, p.ProviderId.ToString(), ct);
+    if (!decision.IsAllowed) return Results.Problem(statusCode: 403, title: "provider access denied", detail: decision.ReasonCode);
+    var rows = await db.Contracts.AsNoTracking().Include(c => c.ServiceLines).Where(c => c.ProviderId == id && !c.IsDeleted).OrderByDescending(c => c.EffectiveFrom).ToListAsync(ct);
+    return Results.Ok(rows.Select(c => new { c.ContractId, c.ContractNo, status = c.Status.ToString(), c.EffectiveFrom, c.EffectiveTo, serviceLines = c.ServiceLines.Count }));
+});
+
 // 2b.2 — Network Team onboarding workflow (activate/suspend/terminate, user provisioning, reminders).
 app.MapOnboarding();
 // 2b.3 — provider-scoped performance metrics + network roll-up.

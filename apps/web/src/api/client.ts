@@ -11,6 +11,10 @@ import type {
   ManualAuthInput,
   ManualAuthResult,
   MasterDataVersion,
+  ProviderSummary,
+  ProviderLocation,
+  ProviderContract,
+  CreateProviderInput,
   ReportView,
   SystemConfigEntry,
   TatSummary,
@@ -135,6 +139,12 @@ export interface ApiClient {
   breakGlassGrants(): Promise<BreakGlassGrant[]>;
   adminMasterData(): Promise<MasterDataVersion[]>;
   adminSystemConfig(): Promise<SystemConfigEntry[]>;
+
+  // Provider network — the tenant's provider directory (Phase 2b). Network-Team scope; no beneficiary PHI.
+  providerList(): Promise<ProviderSummary[]>;
+  providerLocations(providerId: string): Promise<ProviderLocation[]>;
+  providerContracts(providerId: string): Promise<ProviderContract[]>;
+  createProvider(input: CreateProviderInput): Promise<ProviderSummary>;
 }
 
 /**

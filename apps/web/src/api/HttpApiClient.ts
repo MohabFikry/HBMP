@@ -6,6 +6,10 @@ import {
   zBreakGlassGrant,
   zMasterDataVersion,
   zSystemConfigEntry,
+  zProviderSummary,
+  zProviderLocation,
+  zProviderContract,
+  type CreateProviderInput,
   zCheckInResult,
   zRoleBinding,
   zSodConflict,
@@ -90,6 +94,18 @@ const apptStatusChip = (s: unknown): { kind: "ok" | "info" | "warn" | "neu"; lab
     Cancelled: { kind: "neu", label: { en: "Cancelled", ar: "ملغى" } },
   };
   return map[k] ?? map.Booked;
+};
+/** Map a provider/contract status → a non-color StatusKind chip (Active=ok, Suspended/Draft=warn, Terminated/Expired=neu). */
+const providerStatusChip = (s: unknown): { kind: "ok" | "warn" | "neu" | "info"; label: { en: string; ar: string } } => {
+  const k = String(s ?? "");
+  const map: Record<string, { kind: "ok" | "warn" | "neu" | "info"; label: { en: string; ar: string } }> = {
+    Active: { kind: "ok", label: { en: "Active", ar: "نشط" } },
+    Suspended: { kind: "warn", label: { en: "Suspended", ar: "موقوف" } },
+    Terminated: { kind: "neu", label: { en: "Terminated", ar: "منتهٍ" } },
+    Draft: { kind: "warn", label: { en: "Draft", ar: "مسودة" } },
+    Expired: { kind: "neu", label: { en: "Expired", ar: "منتهٍ" } },
+  };
+  return map[k] ?? { kind: "info", label: { en: k || "—", ar: k || "—" } };
 };
 /** Map an emr encounter status → a resolved bilingual StatusKind for the doctor worklist chip. */
 const encounterStatus = (s: unknown) => {
@@ -1060,6 +1076,59 @@ export class HttpApiClient implements ApiClient {
       }),
     );
   }
+  // Provider network (Phase 2b, US-018..021) — the Network Team's tenant-scoped directory (never provider-scoped
+  // ABAC, so it sees the whole tenant network). Locations/contracts are per-provider reads; performance is
+  // derived client-side from the directory (the network roll-up /metrics is not routed at the gateway).
+  async providerList() {
+    const r = (await getRaw(`/providers`)) as any[];
+    return (Array.isArray(r) ? r : []).map((p: any) =>
+      parseOr(zProviderSummary, {
+        id: p.providerId,
+        code: String(p.providerCode ?? ""),
+        legalName: String(p.legalName ?? ""),
+        providerType: String(p.providerTypeLabel ?? p.providerType ?? ""),
+        status: providerStatusChip(p.status),
+        onboardingState: String(p.onboardingState ?? ""),
+      }),
+    );
+  }
+  async providerLocations(providerId: string) {
+    const r = (await getRaw(`/providers/${encodeURIComponent(providerId)}/locations`)) as any[];
+    return (Array.isArray(r) ? r : []).map((l: any) =>
+      parseOr(zProviderLocation, {
+        id: l.locationId,
+        name: String(l.name ?? ""),
+        governorate: l.governorate ?? undefined,
+        address: l.address ?? undefined,
+        isPrimary: Boolean(l.isPrimary),
+      }),
+    );
+  }
+  async providerContracts(providerId: string) {
+    const r = (await getRaw(`/providers/${encodeURIComponent(providerId)}/contracts`)) as any[];
+    return (Array.isArray(r) ? r : []).map((c: any) =>
+      parseOr(zProviderContract, {
+        id: c.contractId,
+        contractNo: String(c.contractNo ?? ""),
+        status: providerStatusChip(c.status),
+        effectiveFrom: String(c.effectiveFrom ?? ""),
+        effectiveTo: c.effectiveTo ?? undefined,
+        serviceLines: Number(c.serviceLines ?? 0),
+      }),
+    );
+  }
+  async createProvider(input: CreateProviderInput) {
+    const r = (await postRaw(`/providers`, { providerCode: input.code, legalName: input.legalName, providerType: input.providerType })) as any;
+    return parseOr(zProviderSummary, {
+      id: r?.providerId ?? "",
+      code: String(r?.providerCode ?? input.code),
+      legalName: String(r?.legalName ?? input.legalName),
+      providerType: String(r?.providerTypeLabel ?? r?.providerType ?? input.providerType),
+      status: providerStatusChip(r?.status ?? "Suspended"),
+      onboardingState: String(r?.onboardingState ?? "Draft"),
+    });
+  }
+
   // Governance reads (Phase 8b.2) — the master-data versions + typed system-config currently in force. Reference
   // configuration, not PHI; every admin read is audited server-side.
   async adminMasterData() {

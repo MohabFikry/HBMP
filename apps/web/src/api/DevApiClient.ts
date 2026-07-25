@@ -28,6 +28,10 @@ import {
   zBreakGlassGrant,
   zMasterDataVersion,
   zSystemConfigEntry,
+  zProviderSummary,
+  zProviderLocation,
+  zProviderContract,
+  type CreateProviderInput,
   zCheckInResult,
   zOrderRow,
   zRxRow,
@@ -896,6 +900,39 @@ export class DevApiClient implements ApiClient {
       [],
     );
   }
+  providerList() {
+    return this.gate(
+      () => ok(z.array(zProviderSummary), [
+        { id: "PRV-1", code: "PRV-0001", legalName: "Nile Central Hospital", providerType: "Hospital", status: { kind: "ok", label: loc("Active", "نشط") }, onboardingState: "Activated" },
+        { id: "PRV-2", code: "PRV-0002", legalName: "Cairo Care Clinic", providerType: "Clinic", status: { kind: "ok", label: loc("Active", "نشط") }, onboardingState: "Activated" },
+        { id: "PRV-3", code: "PRV-0003", legalName: "Delta Diagnostics Lab", providerType: "Lab", status: { kind: "warn", label: loc("Suspended", "موقوف") }, onboardingState: "Credentialed" },
+      ]),
+      [],
+    );
+  }
+  providerLocations(providerId: string) {
+    void providerId;
+    return this.gate(
+      () => ok(z.array(zProviderLocation), [
+        { id: "LOC-1", name: "Main Campus", governorate: "Cairo", address: "12 Nile Corniche", isPrimary: true },
+        { id: "LOC-2", name: "East Annex", governorate: "Cairo", address: "4 Salah Salem St", isPrimary: false },
+      ]),
+      [],
+    );
+  }
+  providerContracts(providerId: string) {
+    void providerId;
+    return this.gate(
+      () => ok(z.array(zProviderContract), [
+        { id: "CON-1", contractNo: "CON-2026-0001", status: { kind: "ok", label: loc("Active", "نشط") }, effectiveFrom: "2026-01-01", effectiveTo: "2026-12-31", serviceLines: 4 },
+      ]),
+      [],
+    );
+  }
+  createProvider(input: CreateProviderInput) {
+    return this.gate(() => ok(zProviderSummary, { id: "PRV-NEW", code: input.code, legalName: input.legalName, providerType: input.providerType, status: { kind: "warn", label: loc("Suspended", "موقوف") }, onboardingState: "Draft" }));
+  }
+
   adminMasterData() {
     return this.gate(
       () => ok(z.array(zMasterDataVersion), [

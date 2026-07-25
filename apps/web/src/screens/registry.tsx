@@ -36,6 +36,12 @@ const ApprovalsSla = lazy(() => import("./ApprovalsExtra").then((m) => ({ defaul
 const ExecutiveDashboard = lazy(() => import("./ExecutiveDashboard").then((m) => ({ default: m.ExecutiveDashboard })));
 // Director oversight / quality / escalations (Phase 8.3) — one generic report screen, parameterised.
 const DirectorReport = lazy(() => import("./ReportView").then((m) => ({ default: m.DirectorReport })));
+// Provider network portal (Phase 2b) — directory / performance / contracts / locations / onboarding share one chunk.
+const NetworkDirectory = lazy(() => import("./NetworkPortal").then((m) => ({ default: m.NetworkDirectory })));
+const NetworkPerformance = lazy(() => import("./NetworkPortal").then((m) => ({ default: m.NetworkPerformance })));
+const NetworkContracts = lazy(() => import("./NetworkPortal").then((m) => ({ default: m.NetworkContracts })));
+const NetworkLocations = lazy(() => import("./NetworkPortal").then((m) => ({ default: m.NetworkLocations })));
+const NetworkOnboarding = lazy(() => import("./NetworkPortal").then((m) => ({ default: m.NetworkOnboarding })));
 // Case-manager portal (Phase 10.3) — one chunk for the two case screens.
 const MyCases = lazy(() => import("./CaseManager").then((m) => ({ default: m.MyCases })));
 const Escalations = lazy(() => import("./CaseManager").then((m) => ({ default: m.Escalations })));
@@ -102,6 +108,12 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/finance/settlements": () => <FinanceSettlements />,
   "/finance/summaries": () => <FinanceSummaries />,
   "/finance/exports": () => <FinanceExports />,
+  // 9. Provider network (Phase 2b) — Network-Team directory + onboarding + contracts/locations + performance.
+  "/network/directory": () => <NetworkDirectory />,
+  "/network/onboarding": () => <NetworkOnboarding />,
+  "/network/contracts": () => <NetworkContracts />,
+  "/network/locations": () => <NetworkLocations />,
+  "/network/performance": () => <NetworkPerformance />,
 };
 
 // Admin sections are shared by the org-admin (/admin/*) and super-admin (/platform/*) portals; map by the
