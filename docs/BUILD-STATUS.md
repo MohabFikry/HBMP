@@ -52,7 +52,7 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 8b | Admin Platform | 8b.3 Tenant/provider + break-glass governance | ☑ | 8107dc1 |
 | 9 | Frontend | 9.1 Design system in code | ☑ | 9e38a22 |
 | 9 | Frontend | 9.2 Role portals + permission routing | ☑ | a282450 |
-| 9 | Frontend | 9.3 Flagship screens + `@mersal/contracts` | ☑ | (9.3) |
+| 9 | Frontend | 9.3 Flagship screens + `@mersal/contracts` | ☑ | 5197336 |
 | 10 | Case + Finance | 10.1 `case-service` + beneficiary-360 | ☐ | |
 | 10 | Case + Finance | 10.2 `finance-service` (no-diagnosis) | ☐ | |
 | 10 | Case + Finance | 10.3 Case + Finance portals | ☐ | |
