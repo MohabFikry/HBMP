@@ -55,6 +55,21 @@ export function getJson<T>(path: string, schema: z.ZodType<T>): Promise<T> {
 }
 
 /**
+ * Raw GET/POST that return the untyped body. Used by {@link HttpApiClient} when a service's response shape
+ * differs from the shared contract (e.g. a service emits a plain string where the portal contract wants a
+ * bilingual object): the client maps the raw body to the contract shape, then validates that mapping. This
+ * keeps the service and the screens/contracts each unchanged, with the adapter living at the integration seam.
+ */
+export function getRaw(path: string): Promise<unknown> {
+  return request(path, { method: "GET" });
+}
+export function postRaw(path: string, body: unknown, idempotencyKey?: string): Promise<unknown> {
+  const headers: Record<string, string> = {};
+  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+  return request(path, { method: "POST", body: JSON.stringify(body), headers });
+}
+
+/**
  * POST with an optional `Idempotency-Key` header (per CLAUDE.md API conventions: consume/dispense/decide
  * must not double-apply). The key is BOTH a header and part of the body so a relay/retry maps to one row.
  */

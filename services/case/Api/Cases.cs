@@ -53,7 +53,7 @@ public static class Cases
         // --- My Cases (caller's ACTIVE assignments) — cursor paged ------------------------------------------
         v1.MapGet("", async (CaseDeps deps, CancellationToken ct, string? cursor, int? pageSize, string? status) =>
         {
-            var denied = await deps.Gate.CheckAsync(CasePolicies.Read, null, "list-my-cases", ct);
+            var denied = await deps.Gate.CheckAsync(CasePolicies.ReadList, null, "list-my-cases", ct);
             if (denied is not null) return denied;
             if (!Guid.TryParse(deps.Subject, out var mgr)) return Results.Ok(new CaseListResponse([], null));
 

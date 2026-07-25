@@ -19,6 +19,10 @@ public static class CasePolicies
 
     /// <summary>Read a case / My-Cases worklist entry — assignment-scoped for the Case Manager.</summary>
     public const string Read = "case:read";
+    /// <summary>List the caller's OWN worklist (My Cases). Authorized by role + tenant; the query itself is
+    /// scoped to the caller's active assignments, so no per-case assignment is required (and a concrete case id
+    /// isn't available at list time). A distinct action because the per-case <c>Read</c> rule needs a case id.</summary>
+    public const string ReadList = "case:read-list";
     /// <summary>Supervisory oversight read — a Manager / Medical Director reads a case WITHOUT a treating/assignment
     /// relationship (a distinct action because the engine matches one rule per action+resource; the gate selects it
     /// by role). Kept distinct so the two read purposes are separately auditable.</summary>
@@ -50,6 +54,14 @@ public static class CasePolicies
         {
             Action = ReadOversight, ResourceType = Resource,
             Roles = Set("manager", "medical_director"), Scopes = Set("case:read"),
+            RequiredConditions = [AbacConditions.TenantMatch],
+        },
+        // My-Cases list — Case Manager, tenant only. The endpoint's query filters to the caller's ACTIVE
+        // assignments, so min-necessary holds without a per-case assignment (no case id exists at list time).
+        new PolicyRule
+        {
+            Action = ReadList, ResourceType = Resource,
+            Roles = Set("case_manager"), Scopes = Set("case:read"),
             RequiredConditions = [AbacConditions.TenantMatch],
         },
         // Beneficiary-360 coordination assembly — Case Manager, tenant + active assignment. Sensitive (PHI-read).

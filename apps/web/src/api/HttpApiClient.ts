@@ -30,7 +30,20 @@ import {
   type PrescribeRequest,
 } from "@mersal/contracts";
 import type { ApiClient } from "./client";
-import { getJson, postJson } from "./http";
+import { getJson, postJson, getRaw, postRaw, parseOr } from "./http";
+
+/** Wrap a plain service string as the bilingual shape the portal contracts use (same text both langs). */
+const loc = (s: unknown) => ({ en: String(s ?? ""), ar: String(s ?? "") });
+/** Pre-format a numeric amount as the contract's display string, e.g. 12400 -> "EGP 12,400". */
+const money = (n: unknown) => `EGP ${Number(n ?? 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+/** Map a service case status (Open/Active/OnHold/Resolved/Closed) to the contract's snake_case enum. */
+const caseStatus = (s: unknown) =>
+  ({ open: "open", active: "active", onhold: "on_hold", resolved: "resolved", closed: "closed" })[
+    String(s ?? "open").toLowerCase()
+  ] ?? "open";
+/** A masked, min-necessary display token for a case row (never a beneficiary name). */
+const caseToken = (c: any) => `•••${String(c.beneficiaryId ?? c.caseId ?? "").slice(-4)}`;
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
  * The production API client — talks to the phase services through the gateway (`/api/v1`), zod-validating
@@ -99,30 +112,126 @@ export class HttpApiClient implements ApiClient {
   }
 
   // Case management (Phase 10.1) — assignment-scoped; the server re-authorizes every call (case-assignment ABAC).
-  myCases() {
-    return getJson(`/cases`, z.array(zCaseListItem));
+  // The service returns { items } with PascalCase enums + a plain summary; adapt to the array + lowercase-enum
+  // + bilingual contract shape.
+  async myCases() {
+    const r = (await getRaw(`/cases`)) as any;
+    const items: any[] = Array.isArray(r) ? r : (r?.items ?? []);
+    return items.map((c: any) =>
+      parseOr(zCaseListItem, {
+        id: c.caseId ?? c.id,
+        caseNo: c.caseNo,
+        beneficiary: { id: c.beneficiaryId ?? c.beneficiary?.id ?? c.caseId, token: caseToken(c) },
+        category: String(c.category ?? "complex").toLowerCase(),
+        priority: String(c.priority ?? "normal").toLowerCase(),
+        status: caseStatus(c.status),
+        openedAt: c.openedAt ?? new Date().toISOString(),
+        summary: c.summary ? loc(c.summary) : undefined,
+      }),
+    );
   }
   beneficiary360(caseId: string) {
     return getJson(`/cases/${encodeURIComponent(caseId)}/beneficiary-360`, zBeneficiary360);
   }
-  caseTasks(caseId: string) {
-    return getJson(`/cases/${encodeURIComponent(caseId)}/tasks`, z.array(zCoordinationTask));
+  async caseTasks(caseId: string) {
+    const r = (await getRaw(`/cases/${encodeURIComponent(caseId)}/tasks`)) as any;
+    const items: any[] = Array.isArray(r) ? r : (r?.items ?? []);
+    return items.map((t: any) =>
+      parseOr(zCoordinationTask, {
+        id: t.taskId ?? t.id,
+        caseId: t.caseId ?? caseId,
+        title: loc(t.title ?? t.description ?? ""),
+        state: String(t.state ?? "todo").toLowerCase().replace(/inprogress/, "in_progress"),
+        dueAt: t.dueAt ?? undefined,
+        status: "ok",
+      }),
+    );
   }
-  escalations() {
-    return getJson(`/cases/escalations`, z.array(zEscalation));
+  async escalations() {
+    const r = (await getRaw(`/cases/escalations`)) as any;
+    const items: any[] = Array.isArray(r) ? r : (r?.items ?? []);
+    return items.map((e: any) =>
+      parseOr(zEscalation, {
+        id: e.escalationId ?? e.id,
+        caseId: e.caseId ?? "",
+        caseNo: e.caseNo ?? "",
+        raisedToRole: loc(e.raisedToRole ?? e.targetRole ?? ""),
+        reason: String(e.reason ?? ""),
+        status: "ok",
+        raisedAt: e.raisedAt ?? e.createdAt ?? new Date().toISOString(),
+      }),
+    );
   }
 
   // Finance (Phase 10.2) — billing codes + amounts only; the finance service denies any clinical read.
-  utilization() {
-    return getJson(`/finance/utilization`, zUtilizationView);
+  // The service emits plain strings + numeric amounts; these adapters map to the bilingual + pre-formatted
+  // contract shape (and compute share%), then validate the mapping.
+  async utilization() {
+    const r = (await getRaw(`/finance/utilization`)) as any;
+    return parseOr(zUtilizationView, {
+      from: r?.from ?? "",
+      to: r?.to ?? "",
+      rows: (r?.rows ?? []).map((x: any) => ({
+        serviceCode: x.serviceCode,
+        serviceLine: loc(x.serviceLine),
+        coverageCategory: loc(x.coverageCategory),
+        providerRef: x.providerRef ?? undefined,
+        authorizedQty: x.authorizedQty ?? 0,
+        deliveredQty: x.deliveredQty ?? 0,
+        spend: money(x.spend),
+      })),
+      totalAuthorized: r?.totalAuthorized ?? 0,
+      totalDelivered: r?.totalDelivered ?? 0,
+      totalSpend: money(r?.totalSpend),
+    });
   }
-  settlements() {
-    return getJson(`/finance/settlements`, z.array(zSettlement));
+  async settlements() {
+    const r = (await getRaw(`/finance/settlements`)) as any[];
+    return (r ?? []).map((s: any) =>
+      parseOr(zSettlement, {
+        id: s.id,
+        settlementNo: s.settlementNo,
+        providerRef: s.providerRef ?? s.providerId ?? "",
+        providerName: loc(s.providerName ?? s.providerRef ?? ""),
+        periodStart: s.periodStart ?? "",
+        periodEnd: s.periodEnd ?? "",
+        currency: s.currency ?? "EGP",
+        total: money(s.total),
+        status: "ok",
+        state: String(s.state ?? s.status ?? "draft").toLowerCase(),
+        lines: (s.lines ?? []).map((l: any) => ({
+          serviceCode: l.serviceCode,
+          serviceLine: loc(l.serviceLine),
+          deliveredQty: l.deliveredQty ?? 0,
+          agreedUnitPrice: money(l.agreedUnitPrice),
+          lineTotal: money(l.lineTotal),
+        })),
+      }),
+    );
   }
-  financialSummary(dimension: "serviceline" | "category" | "provider") {
-    return getJson(`/finance/summaries?dimension=${dimension}`, zFinancialSummary);
+  async financialSummary(dimension: "serviceline" | "category" | "provider") {
+    const r = (await getRaw(`/finance/summaries?dimension=${dimension}`)) as any;
+    const buckets: any[] = r?.buckets ?? [];
+    const total = buckets.reduce((acc, b) => acc + Number(b.spend ?? 0), 0) || 1;
+    return parseOr(zFinancialSummary, {
+      dimension: r?.dimension ?? dimension,
+      buckets: buckets.map((b: any) => ({
+        key: loc(b.key),
+        deliveredQty: b.deliveredQty ?? 0,
+        spend: money(b.spend),
+        sharePercent: Math.round((Number(b.spend ?? 0) / total) * 100),
+      })),
+      totalSpend: money(r?.totalSpend ?? total),
+    });
   }
-  exportReport(req: ExportRequest) {
-    return postJson(`/finance/exports`, req, zExportResult);
+  async exportReport(req: ExportRequest) {
+    const r = (await postRaw(`/finance/exports`, req)) as any;
+    return parseOr(zExportResult, {
+      report: r?.report ?? req.report,
+      format: r?.format ?? req.format,
+      rowCount: r?.rowCount ?? r?.rows ?? 0,
+      filename: r?.filename ?? `${req.report}-${req.from}_${req.to}.${req.format}`,
+      status: "ok",
+    });
   }
 }
