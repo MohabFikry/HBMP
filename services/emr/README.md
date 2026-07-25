@@ -65,6 +65,25 @@ it), because `ux_appointment_active_slot` only counts `Booked`/`CheckedIn`.
   promotion), and when the beneficiary's no-show tally reaches the threshold emits
   `BeneficiaryNoShowThresholdReached` for **Case Manager** follow-up (05 X3). Emits `ApptNoShow`.
 
+## Queue + reminders (Phase 3.3)
+
+A **reception walk-in queue** per `(location, provider, optional doctor)`, fed by check-ins and walk-ins,
+kept consistent with appointment status.
+
+- `POST /api/v1/appointments/{id}/check-in { memberNo, displayName, priority }` — `Booked → CheckedIn` and
+  enqueues a **minimum-necessary** ticket (display identity only). Emits `ApptCheckedIn`.
+- `GET /api/v1/queues?locationId&providerId&doctorId` (`appointment:read`) — ordered queue (priority-desc
+  then arrival) exposing **only** position / memberNo / display name / type / wait time — **no EMR data**
+  (guarded by `QueueMinNecessaryTests`).
+- `POST /api/v1/queues/call-next` — pop the head (`Waiting → InConsultation`); `.../requeue`, `.../remove`,
+  `.../complete` manage the rest. Cancel/no-show remove a ticket automatically (in the transition service).
+
+**Reminders hook.** `IReminderChannel` has a live **in-app** implementation (enqueues
+`AppointmentReminderIssued` for notification-service) and **SMS/WhatsApp stubs** behind the same interface —
+no provider integration this phase. `ReminderDispatcher` selects by the beneficiary's preferred channel and
+**falls back to in-app**. A reminder fires on booking; `POST /api/v1/appointments/reminders/run?withinMinutes`
+sweeps imminent bookings for upcoming reminders.
+
 ## Data
 
 - `Infrastructure/Migrations/0001_emr.sql` — `encounter` (unique `encounter_no`, partial-unique
@@ -73,6 +92,8 @@ it), because `ux_appointment_active_slot` only counts `Booked`/`CheckedIn`.
   `appointment` (+ `appointment_history` twin trigger; partial-unique active-slot and idempotency indexes;
   status/type/linkage CHECKs), `waitlist_entry`.
 - `Infrastructure/Migrations/0003_appointment_transitions.sql` — `processed_request` idempotency ledger.
+- `Infrastructure/Migrations/0004_queue.sql` — `appointment_queue` (partial-unique active ticket per
+  appointment).
 
 Apply in order with `psql`.
 
@@ -89,6 +110,10 @@ Apply in order with `psql`.
 - `AppointmentTransitionTests` — reschedule atomicity (old freed + new held), cancel release + waitlist
   promotion, no-show guard + reporting flag + backfill, illegal-transition refusal, stale-If-Match `412`,
   and idempotency-ledger replay (env-gated `EMR_TEST_DB`).
+- `ReminderDispatcherTests` — channel selection honors the preferred channel, falls back to in-app, fires
+  the chosen channel, and enforces queue ordering (priority then arrival).
+- `QueueMinNecessaryTests` — reflection proof the queue ticket carries no clinical/EMR/PII field.
+- `QueueIntegrationTests` — check-in enqueues + ordering, and cancel removes the ticket (env-gated).
 
 Endpoint wiring (gate → 422 / create + queue, booking 409/waitlist, idempotent replay, audit, events) is
 exercised against the live stack.

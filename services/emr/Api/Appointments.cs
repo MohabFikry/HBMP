@@ -89,7 +89,8 @@ public static class AppointmentsModule
         // POST /appointments — concurrency-safe booking (US-020).
         write.MapPost("/appointments", async (
             BookAppointmentRequest req, HttpRequest http, EmrDbContext db, AppointmentBookingService booking,
-            IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+            ReminderDispatcher reminders, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me,
+            TimeProvider clock, CancellationToken ct) =>
         {
             var idem = http.Headers["Idempotency-Key"].ToString();
             if (string.IsNullOrWhiteSpace(idem))
@@ -163,6 +164,11 @@ public static class AppointmentsModule
                 if (type == AppointmentType.Referral && booked.ReferralRef is { Length: > 0 } refRef)
                     await outbox.EnqueueAsync("ReferralScheduled", "emr.events",
                         new { referralRef = refRef, appointmentId = booked.AppointmentId }, ct);
+
+                // Fire a booking reminder now (in-app live; SMS/WhatsApp are stubs). Honors preferred channel.
+                var preferred = Enum.TryParse<ReminderChannel>(req.PreferredChannel, out var pc) ? pc : ReminderChannel.InApp;
+                await reminders.DispatchAsync(booked.AppointmentId, booked.BeneficiaryId, booked.ProviderId,
+                    booked.ScheduledStart, ReminderKind.Booked, preferred, ct);
             }
 
             return Results.Created($"/api/v1/appointments/{booked.AppointmentId}", AppointmentResponse.From(booked));
@@ -260,11 +266,7 @@ public static class AppointmentsModule
     private const int RepeatNoShowThreshold = 3;
     private static readonly TimeSpan NoShowGrace = TimeSpan.FromMinutes(15);
 
-    private static uint? IfMatch(HttpRequest http)
-    {
-        var raw = http.Headers.IfMatch.ToString().Trim().Trim('"');
-        return uint.TryParse(raw, out var v) ? v : null;
-    }
+    private static uint? IfMatch(HttpRequest http) => AppointmentEndpointsShared.IfMatch(http);
 
     // Idempotency: a seen key replays the prior outcome (re-fetch + 200) instead of re-applying.
     private static async Task<(IResult? Replay, string? Key)> CheckIdempotency(
@@ -294,18 +296,7 @@ public static class AppointmentsModule
                 new { waitlistId = w.WaitlistId, beneficiaryId = w.BeneficiaryId, providerId = w.ProviderId }, ct);
     }
 
-    private static IResult? MapFailure(TransitionOutcome outcome) => outcome switch
-    {
-        TransitionOutcome.Ok => null,
-        TransitionOutcome.NotFound => Results.NotFound(),
-        TransitionOutcome.IllegalTransition => Results.Problem(statusCode: 409, title: "Transition not allowed",
-            type: "urn:hbmp:transition-denied", detail: "The appointment is not in a state that allows this action."),
-        TransitionOutcome.SlotTaken => Results.Problem(statusCode: 409, title: "Slot already booked", type: "urn:hbmp:slot-taken"),
-        TransitionOutcome.SlotNotFound => Results.Problem(statusCode: 404, title: "Slot not found", type: "urn:hbmp:slot-not-found"),
-        TransitionOutcome.PreconditionFailed => Results.Problem(statusCode: 412, title: "Version mismatch",
-            type: "urn:hbmp:precondition-failed", detail: "The appointment changed since you last read it; re-fetch and retry."),
-        _ => Results.Problem(statusCode: 400),
-    };
+    private static IResult? MapFailure(TransitionOutcome outcome) => AppointmentEndpointsShared.MapFailure(outcome);
 
     private static async Task<IResult> AuditAndReturn(
         IResult problem, IAuditClient audit, IHbmpPrincipalAccessor me, string outcome, Guid id, TransitionOutcome reason, CancellationToken ct)

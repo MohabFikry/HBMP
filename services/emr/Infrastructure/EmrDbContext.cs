@@ -63,6 +63,15 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             e.HasKey(x => x.IdempotencyKey);
         });
 
+        b.Entity<QueueTicket>(e =>
+        {
+            e.ToTable("appointment_queue");
+            e.HasKey(x => x.QueueId);
+            e.Property(x => x.AppointmentType).HasConversion<string>().HasColumnName("appointment_type");
+            e.Property(x => x.State).HasConversion<string>().HasColumnName("state");
+            e.HasIndex(x => new { x.LocationId, x.ProviderId, x.State });
+        });
+
         b.Entity<Encounter>(e =>
         {
             e.ToTable("encounter");

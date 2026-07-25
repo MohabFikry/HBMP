@@ -20,6 +20,12 @@ builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddEmrInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);
 
+// Reminder channels: in-app live now; SMS/WhatsApp stubs behind the same interface (3.3).
+builder.Services.AddScoped<IReminderChannel, InAppReminderChannel>();
+builder.Services.AddScoped<IReminderChannel, SmsReminderChannelStub>();
+builder.Services.AddScoped<IReminderChannel, WhatsAppReminderChannelStub>();
+builder.Services.AddScoped<ReminderDispatcher>();
+
 // Visit gate reads member status from eligibility-service (2.1).
 builder.Services.AddHttpClient<IMemberStatusProvider, HttpMemberStatusProvider>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Eligibility:BaseUrl"] ?? "http://eligibility-service:8080"));
@@ -127,6 +133,7 @@ v1.MapGet("/queue", async (EmrDbContext db, CancellationToken ct) =>
 }).RequireAuthorization();
 
 app.MapAppointments();
+app.MapQueue();
 
 app.Run();
 

@@ -33,7 +33,8 @@ public sealed record CreateSlotsRequest(
 public sealed record BookAppointmentRequest(
     Guid BeneficiaryId, Guid ProviderId, Guid LocationId, string AppointmentType,
     Guid? SlotId, DateTimeOffset? ScheduledStart, DateTimeOffset? ScheduledEnd,
-    string? ReferralRef, Guid? OriginEncounterId, bool JoinWaitlistIfFull);
+    string? ReferralRef, Guid? OriginEncounterId, bool JoinWaitlistIfFull,
+    string? PreferredChannel = null);
 
 /// <summary>Minimum-necessary appointment view — scheduling + identity only, never EMR/clinical data.</summary>
 public sealed record AppointmentResponse(
@@ -66,3 +67,20 @@ public sealed record WaitlistResponse(Guid WaitlistId, string Status, int Priori
 public sealed record RescheduleRequest(Guid NewSlotId);
 
 public sealed record CancelRequest(string? Reason);
+
+// ---- Phase 3.3 queue + reminders ----
+
+/// <summary>Check in an arrived beneficiary. <see cref="MemberNo"/>/<see cref="DisplayName"/> are the
+/// minimum-necessary display identity for the queue (reception already sees these); no clinical data.</summary>
+public sealed record CheckInRequest(string? MemberNo, string? DisplayName, int Priority);
+
+/// <summary>Minimum-necessary queue row — position, display identity, type, wait time. NEVER EMR/clinical
+/// fields (enforced by <c>QueueMinNecessaryTests</c>).</summary>
+public sealed record QueueItemView(
+    Guid QueueId, Guid AppointmentId, int Position, string? MemberNo, string? DisplayName,
+    string AppointmentType, string State, long WaitSeconds)
+{
+    public static QueueItemView From(QueueTicket t, int position, DateTimeOffset now) => new(
+        t.QueueId, t.AppointmentId, position, t.MemberNo, t.DisplayName,
+        t.AppointmentType.ToString(), t.State.ToString(), (long)(now - t.EnqueuedAt).TotalSeconds);
+}

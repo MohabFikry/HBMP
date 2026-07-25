@@ -39,6 +39,32 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
         if (ifMatch is { } v) db.Entry(appt).Property(x => x.RowVersion).OriginalValue = v;
     }
 
+    /// <summary>Check a beneficiary in (Booked→CheckedIn) and place a min-necessary ticket on the reception
+    /// queue (3.3). Transition legality goes through <see cref="AppointmentWorkflow"/>.</summary>
+    public async Task<TransitionResult> CheckInAsync(
+        Guid appointmentId, string? memberNo, string? displayName, int priority, uint? ifMatch,
+        DateTimeOffset now, CancellationToken ct = default)
+    {
+        var appt = await db.Appointments.FirstOrDefaultAsync(a => a.AppointmentId == appointmentId, ct);
+        if (appt is null) return TransitionResult.Fail(TransitionOutcome.NotFound);
+        if (!AppointmentWorkflow.CanTransition(appt.Status, AppointmentStatus.CheckedIn))
+            return TransitionResult.Fail(TransitionOutcome.IllegalTransition);
+
+        appt.Status = AppointmentStatus.CheckedIn;
+        appt.UpdatedAt = now;
+        ApplyIfMatch(appt, ifMatch);
+        db.Set<QueueTicket>().Add(new QueueTicket
+        {
+            QueueId = Guid.NewGuid(), AppointmentId = appt.AppointmentId, BeneficiaryId = appt.BeneficiaryId,
+            ProviderId = appt.ProviderId, LocationId = appt.LocationId,
+            MemberNo = memberNo, DisplayName = displayName, AppointmentType = appt.AppointmentType,
+            Priority = priority, State = QueueTicketState.Waiting, EnqueuedAt = now,
+        });
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException) { return TransitionResult.Fail(TransitionOutcome.PreconditionFailed); }
+        return new TransitionResult(TransitionOutcome.Ok, appt);
+    }
+
     public async Task<TransitionResult> RescheduleAsync(
         Guid appointmentId, Guid newSlotId, uint? ifMatch, DateTimeOffset now, CancellationToken ct = default)
     {
@@ -102,6 +128,7 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException) { return TransitionResult.Fail(TransitionOutcome.PreconditionFailed); }
 
+        await RemoveQueueTicketsAsync(appointmentId, ct);   // cancel removes any queue ticket (3.3)
         var promoted = freedSlot ? await PromoteWaitlistAsync(appt, now, ct) : null;
         return new TransitionResult(TransitionOutcome.Ok, appt, promoted);
     }
@@ -120,6 +147,7 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException) { return TransitionResult.Fail(TransitionOutcome.PreconditionFailed); }
 
+        await RemoveQueueTicketsAsync(appointmentId, ct);           // no-show removes any queue ticket (3.3)
         var promoted = await PromoteWaitlistAsync(appt, now, ct);   // free the slot for backfill
         var noShowCount = await db.Appointments.CountAsync(
             a => a.BeneficiaryId == appt.BeneficiaryId && a.Status == AppointmentStatus.NoShow, ct);
@@ -139,6 +167,19 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
         next.Status = WaitlistStatus.Promoted;
         await db.SaveChangesAsync(ct);
         return next;
+    }
+
+    /// <summary>Remove any active (Waiting/InConsultation) queue tickets for an appointment (3.3) — keeps the
+    /// reception queue consistent when the appointment is cancelled or marked no-show.</summary>
+    private async Task RemoveQueueTicketsAsync(Guid appointmentId, CancellationToken ct)
+    {
+        var tickets = await db.Set<QueueTicket>()
+            .Where(t => t.AppointmentId == appointmentId
+                        && (t.State == QueueTicketState.Waiting || t.State == QueueTicketState.InConsultation))
+            .ToListAsync(ct);
+        if (tickets.Count == 0) return;
+        foreach (var t in tickets) t.State = QueueTicketState.Removed;
+        await db.SaveChangesAsync(ct);
     }
 }
 
