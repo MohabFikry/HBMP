@@ -41,7 +41,7 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 6 | Pharmacy | 6.1 Dispensable search | ☑ | ce79500 |
 | 6 | Pharmacy | 6.2 Partial dispensing (batch/expiry) | ☑ | ce79500 |
 | 6 | Pharmacy | 6.3 Substitution + out-of-stock | ☑ | ce79500 |
-| 7 | Approvals | 7.1 `approvals-service` + worklist + review | ☐ | |
+| 7 | Approvals | 7.1 `approvals-service` + worklist + review | ☑ | 15ba511 |
 | 7 | Approvals | 7.2 Decisions + downstream effects | ☐ | |
 | 7 | Approvals | 7.3 Break-glass + SLA/TAT | ☐ | |
 | 8 | Notify+Reporting | 8.1 `notification-service` | ☐ | |
