@@ -21,6 +21,10 @@
 | **A** | Approve | Adjudicate/authorize (approvals, payments, merges) |
 | **X** | Consume | Record fulfillment/consumption against an order/benefit (dispense, collect, complete) |
 | **E** | Export | Extract data out of the platform (download, report export, API bulk) |
+| **DC** | Decide | Record a **claim-line** adjudication decision (approve / partially approve / deny / request-info / route-to-clinical-review) — distinct from `A` (clinical approval / payment release) |
+| **AJ** | Adjust | Record an append-only claim adjustment (price/quantity correction, deduction, recovery, write-off, reallocation) |
+| **B** | Batch | Create/manage a claim batch — add/remove claims, transition batch state, issue settlement advice |
+| **V** | Void | Compensating reversal of a submitted claim/decision (never a delete; always paired with a reason + audit) |
 
 **Decision values**
 
@@ -33,9 +37,11 @@
 | ❌ | Denied |
 | — | Not applicable to this role/resource |
 
-**ABAC condition codes** (defined fully in §5): `TR` treating-relationship · `PO` provider-ownership · `TEN` tenant-match · `ASG` assignment · `OST` order-status · `PUR` purpose-binding · `SOD` segregation-of-duties clear · `BG` break-glass active.
+**ABAC condition codes** (defined fully in §5): `TR` treating-relationship · `PO` provider-ownership · `TEN` tenant-match · `ASG` assignment · `OST` order-status · `PUR` purpose-binding · `SOD` segregation-of-duties clear · `BG` break-glass active · `CNA` claims-originator-not-adjudicator · `NPA` not-provider-affiliated · `DCT` dual-control-above-threshold · `BOS` batch-open-single-membership.
 
 **Sensitivity fields tracked at field level:** `diagnosis`, `emr_note`, `prescription`, `lab_result`, `imaging_result`, `financials` (amounts/claims), `pii` (identity/registration), `refugee_ref` (UNHCR/registration ID).
+
+**Result split (claims minimization):** every result-bearing field is projected as two independent things — `*_result.existence` (that a result exists, its `resulted_at` date and its `document_ref`) and `*_result.value` (the clinical content: values, units, flags, narrative, report body). A role may be allowed the **existence** and denied the **value**. This is what lets a Claims Officer verify *service was rendered* without ever reading a result.
 
 ---
 
@@ -59,6 +65,14 @@ Resources map to microservices (see [0A](0A-DESIGN-FOUNDATIONS.md)). Object-leve
 | `approval_case` | approvals | attached clinical evidence |
 | `provider` / `contract` / `catalog` | provider | `financials` (rates) |
 | `claim` / `invoice` / `payment` | finance (reporting) | `financials`, service codes |
+| `claim` | claims | `financials`, service codes, provider, member ref |
+| `claim_line` | claims | `financials`, service code, quantity, fulfillment ref, `auth` ref |
+| `claim_decision` | claims | decision, allowed amount, reason codes, rationale, decider (append-only) |
+| `claim_adjustment` | claims | signed amount delta, adjustment type, reason code, rationale (append-only) |
+| `claim_batch` | claims | rollup `financials`, payee provider/branch, period |
+| `reimbursement_request` | claims | `pii` (member), receipt `financials`, OCR candidates + confidence |
+| `claim_document` | claims (document) | invoice/receipt/proof-of-service scans — **clinical attachments are reference-only for claims roles** |
+| `settlement_advice` | claims | net payable, per-line detail, payee — immutable, WORM-stored |
 | `user` / `role_binding` | identity | admin metadata |
 | `audit_event` | audit | append-only |
 | `document` (reports, DICOM ref) | document | clinical attachments |
@@ -85,6 +99,8 @@ Cells show allowed actions with their decision symbol. Absent actions are denied
 | Medical Director | R✅ | R✅ | R✅ | R✅ |
 | Case Managers | R🟠ASG | R🟠ASG | R🟠ASG | R🟠ASG |
 | Finance | R🔒(pii min) | — | R✅(financial) | R🔒 |
+| **Claims Officer** | R🔒(pii min: member no., name, DOB) | — | R🔒(coverage @ service date) | R🔒(verdict @ service date) |
+| **Claims Reviewer** | R🔒(pii min) | — | R🔒(coverage @ service date) | R🔒(verdict @ service date) |
 | Provider Admin | ❌ | ❌ | ❌ | ❌ |
 | Network Team | ❌ | ❌ | R🔒(contract) | ❌ |
 | Org Admin | R🔒(dir)🟠 | ❌ | R🔒(config) | ❌ |
@@ -106,12 +122,16 @@ Cells show allowed actions with their decision symbol. Absent actions are denied
 | Medical Director | R✅🟠PUR | R✅🟠PUR | R✅🟠PUR | R✅🟠PUR | R✅🟠PUR | R✅🟠PUR |
 | Case Managers | R🔒(summary)🟠ASG | R🔒(summary)🟠ASG | R🔒(coord)🟠ASG | R🔒🟠ASG | R🔒🟠ASG | R🔒🟠ASG |
 | **Finance** | ❌ | ❌ | **❌** | ❌ | ❌ | ❌ |
+| **Claims Officer** | **❌** | **❌** | **❌** | ❌ | **❌** value → R🔒 existence only | **❌** value → R🔒 existence only |
+| **Claims Reviewer** | **❌** | **❌** | **❌** | ❌ | **❌** value → R🔒 existence only | **❌** value → R🔒 existence only |
 | Provider Admin | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Network Team | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Org Admin | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Super Admin | R🧨 | R🧨 | R🧨 | R🧨 | R🧨 | R🧨 |
 
-> **Hard-rule check (must always hold):** Reception row = all ❌. Doctors clinical = all 🟠TR. Labs `prescription` = ❌. Imaging `prescription` = ❌. Pharmacies `lab_result` = ❌ and `imaging_result` = ❌. Finance `diagnosis` = ❌ (and whole clinical row ❌). Medical Approval clinical = R✅ under `PUR`. Any change breaking these must be rejected at review.
+> **Hard-rule check (must always hold):** Reception row = all ❌. Doctors clinical = all 🟠TR. Labs `prescription` = ❌. Imaging `prescription` = ❌. Pharmacies `lab_result` = ❌ and `imaging_result` = ❌. Finance `diagnosis` = ❌ (and whole clinical row ❌). **Claims Officer / Claims Reviewer `diagnosis` = ❌, `emr_note` = ❌, `lab_result.value` = ❌, `imaging_result.value` = ❌** — only `*_result.existence` (exists + `resulted_at` + `document_ref`) is readable, as proof-of-service. Medical Approval clinical = R✅ under `PUR`. Any change breaking these must be rejected at review.
+>
+> **Clinical-review hand-off:** a claim line needing medical-necessity judgement is routed to `ClinicalReview`, where **Medical Approval / Medical Director** read the clinical context under `PUR` and record an **opinion**. Routing never widens the Claims Officer's projection, and the clinical reviewer gains **no** `DC`/`AJ`/`B` rights on the claim ([10 §3.19](10-role-matrix.md)).
 
 ### 3.3 Orders, approvals, provider, finance, admin, audit
 
@@ -129,13 +149,43 @@ Cells show allowed actions with their decision symbol. Absent actions are denied
 | Medical Director | R✅ | R✅ U✅ A✅🟠SOD (override) | R🔒 | R🔒(cost) | ❌ | ❌ |
 | Case Managers | R🟠ASG | C🟠ASG R🟠ASG U🟠ASG | R🔒 | R🔒🟠ASG | ❌ | ❌ |
 | Finance | R🔒(billing code) | R🔒(status) | R🔒(rates) | C✅ R✅ U✅ A🟠SOD(release) E🔒 | ❌ | ❌ |
+| **Claims Officer** | R🔒(code + fulfillment ref) | R🔒(auth status/scope) | R🔒(tariff/contract) | see §3.4 | ❌ | ❌ |
+| **Claims Reviewer** | R🔒(code + fulfillment ref) | R🔒(auth status/scope) | R🔒(tariff/contract) | see §3.4 | ❌ | ❌ |
 | Provider Admin | R🔒(own ops)🟠PO | ❌ | C🟠PO R🟠PO U🟠PO | R🔒(own)🟠PO | C🟠PO R🟠PO U🟠PO D🟠PO (own users) | ❌ |
 | Network Team | ❌ | ❌ | C✅ R✅ U✅ A🟠SOD | R🔒(rates) | ❌ | ❌ |
 | Org Admin | ❌ | ❌ | R🔒 | ❌ | C✅ R✅ U✅ D🟠SOD (tenant) | R🔒(access-review view) |
 | Super Admin | R🧨 | R🧨 | R✅ | R🧨 | C✅ R✅ U✅ D✅ (global)🟠SOD | R🔒(read, cannot alter) |
 | *audit service* | — | — | — | — | — | append-only (C only) |
 
-**Export (E) note:** Export is a *distinct, elevated* action. Only Finance (financial reports, masked PII), Medical Director/Approval (case packets under `PUR`), Network Team (network reports), Org/Super Admin (operational, no PHI content) and reporting-designated users may Export, always 🔒-masked and always audited as a high-severity `data.export` event. **No provider-side role may bulk-export beneficiary data.**
+**Export (E) note:** Export is a *distinct, elevated* action. Only Finance (financial reports, masked PII), Medical Director/Approval (case packets under `PUR`), Network Team (network reports), Claims Officer/Reviewer (settlement advice + claim registers, **no clinical fields**), Org/Super Admin (operational, no PHI content) and reporting-designated users may Export, always 🔒-masked and always audited as a high-severity `data.export` event. **No provider-side role may bulk-export beneficiary data.**
+
+### 3.4 Claims & settlement (Phase 10b — see [36-claims-management.md](36-claims-management.md))
+
+Actions here use the extended tokens from §1: **DC** Decide · **AJ** Adjust · **B** Batch · **V** Void (plus C/R/U/E).
+
+| Role | claim | claim_line | claim_decision | claim_adjustment | claim_batch | reimbursement_request | claim_document | settlement_advice |
+|---|---|---|---|---|---|---|---|---|
+| **Claims Officer** | C✅ R✅ U🟠(pre-submit only) V🟠(CNA+NPA) | R✅ U🟠(manual pricing on `NO_TARIFF`) | C(DC)🟠(CNA+NPA) R✅ | C(AJ)🟠(CNA+NPA, ≤threshold) R✅ | C(B)✅ R✅ U(B)🟠BOS | R✅ U🟠(match/confirm OCR) DC🟠(CNA+NPA) | C✅ R🔒(non-clinical projection) | C✅ R✅ E🔒✅(audited, no clinical fields) |
+| **Claims Reviewer (Senior)** | R✅ V🟠(CNA+NPA) | R✅ | R✅ **A🟠DCT** (approve override above threshold) | C(AJ)🟠(CNA+NPA) R✅ **A🟠DCT** (high-value) | R✅ U(B)🟠(remove from `UnderReview`, reason required) | R✅ DC🟠(CNA+NPA) | R🔒 | C✅ R✅ E🔒✅ |
+| Medical Approval / Medical Director | R🔒(routed line only, non-financial context) | R🔒(routed line only) | R🔒 + **C(opinion)**🟠PUR — **DC ❌** | ❌ | ❌ | R🔒(routed line only) | R🟠PUR (clinical attachment for the routed line) | ❌ |
+| Finance | R🔒(rollups) | R🔒 | R🔒 | R🔒 | R✅(rollups) | R🔒 | ❌ | R✅ E🔒 **A🟠SOD (payment release, external execution)** |
+| Provider Admin / provider-side roles | C🟠PO R🟠PO U🟠PO(pre-submit) | R🟠PO | R🔒🟠PO (own outcome + reason codes) | R🔒🟠PO | R🔒🟠PO (own batches only) | ❌ | C🟠PO R🟠PO (own submissions) | R🔒🟠PO (own advice) E🔒🟠PO |
+| Network Team | R🔒(aggregate variance) | ❌ | ❌ | R🔒(deduction terms) | R🔒(aggregate) | ❌ | ❌ | R🔒(aggregate) |
+| Case Managers | R🔒🟠ASG (own case load's reimbursements) | ❌ | R🔒🟠ASG (status) | ❌ | ❌ | C🟠ASG R🟠ASG U🟠ASG (submit on behalf) | C🟠ASG R🟠ASG | ❌ |
+| Beneficiary (self-service) | R🔒(self, own reimbursement only) | ❌ | R🔒(self: outcome + reason) | ❌ | ❌ | C🟠(self) R🟠(self) U🟠(self, pre-submit) | C🟠(self) R🟠(self) | ❌ |
+| Reception | ❌ | ❌ | ❌ | ❌ | ❌ | C🟠(on behalf, at own site) R🔒🟠PO | C🟠 R🔒🟠PO | ❌ |
+| Doctors / Nurses / Labs / Imaging / Pharmacies | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Org Admin | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Super Admin | R🧨 | R🧨 | R🧨 | R🧨 | R🧨 | R🧨 | R🧨 | R🧨 |
+| *audit service* | — | — | — | — | — | — | — | — |
+
+> **Claims hard-rule check (must always hold):**
+> 1. Claims Officer / Claims Reviewer: `diagnosis` = ❌, `emr_note` = ❌, `lab_result.value` = ❌, `imaging_result.value` = ❌; `*_result.existence` (+ `resulted_at`, `document_ref`) = ✅ **as proof-of-service only**.
+> 2. Every provider-side claims cell carries `PO` — a provider sees **only its own** claims, lines, batches, documents and settlement advice, never another provider's.
+> 3. Beneficiary / Case Manager claims access is limited to **their own / their assigned case load's reimbursement** — never another member's claim, never a provider batch.
+> 4. `DC` (decide) is **never** held by the claim's originator/submitter (`CNA`) nor by anyone provider-affiliated with the claiming provider (`NPA`).
+> 5. `A` on `claim_decision`/`claim_adjustment` (dual control, `DCT`) is **never** exercised by the same principal who recorded the override/adjustment.
+> 6. No role anywhere in this matrix holds an "execute payment" action — the platform issues settlement advice only.
 
 ---
 
@@ -157,6 +207,8 @@ Even when a role may Read an object, individual fields are governed independentl
 | Medical Director | visible🟠PUR | visible🟠PUR | visible🟠PUR | visible🟠PUR | visible🟠PUR | visible(cost) | visible🟠PUR | masked |
 | Case Managers | visible(coord)🟠ASG | masked(summary)🟠 | masked🟠 | masked🟠 | masked🟠 | masked🟠 | visible🟠ASG | masked |
 | **Finance** | **denied** | denied | denied | denied | denied | visible | masked(min) | denied |
+| **Claims Officer** | **denied** | **denied** | denied | **denied**→existence-only | **denied**→existence-only | visible | masked(min) | denied |
+| **Claims Reviewer** | **denied** | **denied** | denied | **denied**→existence-only | **denied**→existence-only | visible | masked(min) | denied |
 | Provider Admin | denied | denied | denied | denied | denied | masked(own) | denied | denied |
 | Network Team | denied | denied | denied | denied | denied | visible(rates) | denied | denied |
 | Org Admin | denied | denied | denied | denied | denied | denied | masked(dir) | denied |
@@ -168,6 +220,22 @@ Even when a role may Read an object, individual fields are governed independentl
 - `Pharmacies.lab_result = denied → derived`, `Pharmacies.imaging_result = denied` — pharmacies receive a **derived safety flag** (e.g., "renal-adjust: yes", "interaction: none") computed server-side from results, never the raw result values.
 - `Reception.*clinical = denied` — the entire clinical field set is stripped; Reception receives identity+appointment+eligibility-verdict only.
 - `Doctors.* = visible🟠TR` — visible **only** while the treating relationship is active.
+- `ClaimsOfficer.diagnosis = denied`, `ClaimsOfficer.emr_note = denied` — **HARD RULE.** Claims are adjudicated on **service code + quantity + date + provider + authorization + amount**, never on the clinical reason. Identical for `ClaimsReviewer`; seniority adds dual-control authority, never clinical read.
+- `ClaimsOfficer.lab_result = denied → existence-only`, `ClaimsOfficer.imaging_result = denied → existence-only` — **HARD RULE.** The claims projection exposes `{ exists: true, resulted_at, document_ref, document_type }` and **strips** `value`, `unit`, `reference_range`, `abnormal_flag`, `interpretation`, `report_body`, and any DICOM/report content. This is exactly enough to prove *the service was rendered* and nothing more. `claim_document` inherits the same rule: a clinical attachment is a **reference** to a claims role, not a readable body.
+- `Provider.* (claims) = 🟠PO` — a provider-side principal's claim/batch/document/settlement reads are filtered by `provider_ownership`; there is no cross-provider claims read and no bulk export of another payee's data.
+- `Beneficiary / CaseManager.claims = self / ASG only` — reimbursement scope only; a member sees their own request, decision outcome and reason code, never a provider claim, batch or settlement advice.
+
+**Field-level projection for claims (canonical allow-list).** The claims projection is an **allow-list**, not a deny-list — new clinical fields are invisible to claims by default:
+
+| Projected to claims roles | Never projected to claims roles |
+|---|---|
+| `service_code` (+ code system), `service_description`, `service_date`, `quantity` | `diagnosis`, `diagnosis_code`, `problem_list` |
+| `provider_id`, `provider_location_id`, `contract_id`, `agreed_price` | `emr_note`, `clinical_note`, `soap.*`, `indication`, `chief_complaint` |
+| `authorization_id`, `auth_status`, `auth_scope`, `auth_valid_to` | `lab_result.value/unit/range/flag/interpretation` |
+| `fulfillment_ref`, `dispense_event_ref`, `fulfilled_at` | `imaging_result.value/report_body/DICOM` |
+| `billed_amount`, `allowed_amount`, `adjustment_amount`, `net_payable`, `currency` | `prescription` clinical detail (indication, prescriber notes) |
+| `*_result.exists`, `*_result.resulted_at`, `*_result.document_ref` | any free-text authored by a clinician |
+| member `pii` at minimum granularity (member no., name, DOB) | `refugee_ref` |
 
 ---
 
@@ -185,6 +253,10 @@ Attributes are asserted by trusted sources: **token claims** (Keycloak), **resou
 | `PUR` | Purpose binding | `request.purpose = "utilization_review"` AND active `approval_case` links resource | approvals + policy engine | Medical Approval, Medical Director |
 | `SOD` | Segregation-of-duties clear | `subject.id ≠ resource.originator_id` (and no conflicting role held) | approvals/finance/identity | Approval, Director, Finance, Beneficiary Mgmt |
 | `BG` | Break-glass active | active, time-boxed `break_glass_grant` for `(subject, resource)` with reason + dual approval | identity + audit | Super Admin, emergency clinicians |
+| `CNA` | **Claims originator ≠ adjudicator** (SoD) | `subject.id ∉ {resource.created_by, resource.submitted_by, resource.requested_by}` for the claim **and** for the parent claim/reimbursement of a line | claims service | Claims Officer, Claims Reviewer |
+| `NPA` | **Not provider-affiliated** | `subject.provider_id` is null/absent **AND** `subject.id ∉ resource.provider.affiliated_user_ids` **AND** `subject.provider_group_id ≠ resource.provider_group_id` | identity + provider service | Claims Officer, Claims Reviewer |
+| `DCT` | **Dual control above threshold** | `resource.amount > policy.dual_control_threshold ⇒ approver.id ≠ resource.recorded_by AND approver.role = claims_reviewer AND CNA AND NPA` | claims service + policy config | Claims Reviewer (override, high-value adjustment, negative net payable) |
+| `BOS` | **Batch open, single membership** | `batch.status ∈ {Open, UnderReview}` **AND** the claim has no other batch membership where `batch_status ∈ {Open, UnderReview}`; removal from `UnderReview` requires `reason != ""` | claims service (unique partial index) | Claims Officer, Claims Reviewer |
 
 **Environmental modifiers (Zero Trust):** every decision may additionally require `device.compliant = true`, `network.ip ∈ allowlist` (for admin/finance), `auth.mfa = true`, and `auth.acr ≥ step_up` for T3/T4 or Export. These are combined by the gateway/policy engine (see [Security Model §4](18-security-model.md)).
 
@@ -349,6 +421,155 @@ resourcePolicy:
               - expr: request.principal.attr.can_release == true
               - expr: request.principal.id != resource.attr.initiated_by        # SOD
               - expr: request.principal.attr.ip_allowlisted == true
+              - expr: request.principal.id != resource.attr.claim_adjudicated_by # adjudication ≠ settlement release
+```
+
+### 6.8 Rego — Claims Officer decides a line: SoD + not-provider-affiliated, clinical fields stripped
+
+```rego
+package hbmp.claims
+
+default allow = false
+
+# DC — record a line-level adjudication decision
+allow {
+    input.action == "decide"
+    input.resource.type == "claim_line"
+    input.subject.role == "claims_officer"
+    input.subject.tenant_id == input.resource.tenant_id                  # TEN
+    input.subject.id != input.resource.claim.created_by                  # CNA
+    input.subject.id != input.resource.claim.submitted_by                # CNA
+    not provider_affiliated                                              # NPA
+    input.env.mfa == true
+}
+
+provider_affiliated {
+    input.subject.provider_id == input.resource.claim.provider_id
+}
+provider_affiliated {
+    input.subject.provider_group_id == input.resource.claim.provider_group_id
+}
+provider_affiliated {
+    input.resource.claim.provider.affiliated_user_ids[_] == input.subject.id
+}
+
+# HARD RULE — clinical content is never projected to claims roles.
+# Allow-list projection; anything not listed is stripped server-side.
+allowed_fields := {"service_code", "service_description", "service_date", "quantity",
+                   "provider_id", "provider_location_id", "contract_id", "agreed_price",
+                   "authorization_id", "auth_status", "auth_scope",
+                   "fulfillment_ref", "dispense_event_ref",
+                   "billed_amount", "allowed_amount", "adjustment_amount", "currency",
+                   "result_exists", "resulted_at", "result_document_ref"} {
+    input.subject.role in {"claims_officer", "claims_reviewer"}
+}
+
+denied_fields := {"diagnosis", "diagnosis_code", "emr_note", "clinical_note", "indication",
+                  "lab_result", "imaging_result", "raw_result_value", "result_value",
+                  "reference_range", "abnormal_flag", "interpretation", "report_body",
+                  "prescription_clinical_detail", "refugee_ref"} {
+    input.subject.role in {"claims_officer", "claims_reviewer"}
+}
+```
+
+### 6.9 Rego — provider sees only its own claims/batches (`PO`); member sees only own reimbursement
+
+```rego
+package hbmp.claims.scope
+
+allow {
+    input.action == "read"
+    input.resource.type in {"claim", "claim_line", "claim_batch",
+                            "claim_document", "settlement_advice"}
+    input.subject.role in {"provider_admin", "provider_user"}
+    input.subject.provider_id == input.resource.provider_id              # PO
+    input.subject.tenant_id == input.resource.tenant_id                  # TEN
+}
+
+# a provider may never decide, adjust, batch or void
+deny {
+    input.action in {"decide", "adjust", "batch", "void"}
+    input.subject.role in {"provider_admin", "provider_user"}
+}
+
+# beneficiary / case manager: reimbursement only, own record only
+allow {
+    input.action in {"create", "read"}
+    input.resource.type in {"reimbursement_request", "claim_document"}
+    input.subject.role == "beneficiary"
+    input.resource.beneficiary_id == input.subject.beneficiary_id        # self
+}
+
+# update only while still editable (pre-submit)
+allow {
+    input.action == "update"
+    input.resource.type == "reimbursement_request"
+    input.subject.role == "beneficiary"
+    input.resource.beneficiary_id == input.subject.beneficiary_id        # self
+    input.resource.status == "Draft"
+}
+
+allow {
+    input.action in {"create", "read", "update"}
+    input.resource.type in {"reimbursement_request", "claim_document"}
+    input.subject.role == "case_manager"
+    input.resource.beneficiary_id == input.subject.assigned_beneficiaries[_]   # ASG
+}
+```
+
+### 6.10 Cerbos — dual control above threshold (`DCT`) + single open batch (`BOS`)
+
+```yaml
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: "claim_adjustment"
+  version: "default"
+  rules:
+    - actions: ["approve"]            # dual-control approval of an override / high-value adjustment
+      effect: EFFECT_ALLOW
+      roles: ["claims_reviewer"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.aux.jwt.tenant_id == resource.attr.tenant_id            # TEN
+              - expr: request.principal.id != resource.attr.recorded_by               # DCT dual control
+              - expr: request.principal.id != resource.attr.claim_created_by          # CNA
+              - expr: request.principal.id != resource.attr.claim_submitted_by        # CNA
+              - expr: request.principal.attr.provider_id != resource.attr.provider_id # NPA
+              - expr: request.principal.attr.mfa == true
+    - actions: ["approve"]
+      effect: EFFECT_DENY
+      roles: ["claims_officer"]
+      condition:
+        match:
+          expr: resource.attr.amount > resource.attr.dual_control_threshold  # must escalate to reviewer
+---
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: "claim_batch"
+  version: "default"
+  rules:
+    - actions: ["batch"]              # add a claim to a batch
+      effect: EFFECT_ALLOW
+      roles: ["claims_officer", "claims_reviewer"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: resource.attr.status in ["Open", "UnderReview"]                 # BOS
+              - expr: request.aux.claim.open_batch_count == 0                         # BOS single membership
+              - expr: request.aux.jwt.tenant_id == resource.attr.tenant_id
+      # DB backstop: unique partial index on claim_id WHERE batch_status IN (Open, UnderReview)
+    - actions: ["batch"]              # remove from a batch already under review
+      effect: EFFECT_DENY
+      roles: ["claims_officer"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: resource.attr.status == "UnderReview"
+              - expr: request.aux.removal_reason == ""                                # reason mandatory
 ```
 
 ---
@@ -367,13 +588,19 @@ Precedence order evaluated by the policy engine: `explicit-deny (field/SoD/env)`
 
 ## 8. Consistency rules with the Role Matrix
 
-Every cell here must agree with [10-role-matrix.md §5–6](10-role-matrix.md). The six hard rules are re-verified here in §3.2 and §4. A CI check (design-lint) should assert:
+Every cell here must agree with [10-role-matrix.md §5–7](10-role-matrix.md). The hard rules are re-verified here in §3.2, §3.4 and §4. A CI check (design-lint) should assert:
 - Reception has zero non-❌ cells in the clinical block.
 - Finance `diagnosis` field = `denied` and clinical objects = ❌.
 - Labs/Imaging `prescription` = `denied`.
 - Pharmacies `lab_result`/`imaging_result` = `denied`.
 - Doctors clinical reads all carry `TR`.
 - Approval/Director clinical reads all carry `PUR`.
+- **Claims Officer/Reviewer `diagnosis` = `denied`, `emr_note` = `denied`, `lab_result`/`imaging_result` = `denied → existence-only`**, and the claims projection is an allow-list (§4).
+- **Every provider-side claims cell carries `PO`**; no cross-provider claims read exists.
+- **Beneficiary/Case Manager claims cells are `self`/`ASG` and reimbursement-only.**
+- **`DC` cells all carry `CNA` + `NPA`**; **`A` on `claim_decision`/`claim_adjustment` carries `DCT`**; **`B` carries `BOS`**.
+- Claims adjudication and settlement release are never held by the same principal (§6.7, §6.8).
+- No resource in §2 exposes an "execute payment" action.
 
 ---
 
@@ -382,5 +609,6 @@ Every cell here must agree with [10-role-matrix.md §5–6](10-role-matrix.md). 
 - Enforcement points (gateway/service/RLS/field), Zero Trust, step-up, break-glass → **[18-security-model.md](18-security-model.md)**
 - Audit of every read/write/approve/consume/export → **[19-audit-strategy.md](19-audit-strategy.md)**
 - Regulatory mapping of minimization → **[20-compliance-checklist.md](20-compliance-checklist.md)**
+- Claims module design (origination, batching, adjudication, adjustments, settlement) → **[36-claims-management.md](36-claims-management.md)**
 
 > **Change control:** policy bundles are versioned, peer-reviewed by Security Architect + DPO, tested against a permission-regression suite (including the six hard rules), and deployed via the audited pipeline. No manual policy edits in production.

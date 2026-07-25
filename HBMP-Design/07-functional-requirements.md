@@ -11,7 +11,7 @@ This document specifies the **functional requirements (FRs)** for the Mersal HBM
 - **Rationale** — why it exists.
 - **Phase** — which of the 7 care phases it primarily serves: `Registration`, `Eligibility`, `Appointments`, `Consultation`, `Lab & Imaging`, `Pharmacy`, `Approval` (or `Cross-cutting`).
 
-**Module codes:** `REG` Registration/Policy · `ELG` Eligibility · `APT` Appointments · `CLIN` Clinical/EMR · `LAB` Lab & Imaging · `RX` Pharmacy · `AUTH` Approvals · `NET` Provider Network · `NOT` Notifications · `RPT` Reporting · `IAM` Admin/Identity · `MDM` Master Data · `AUD` Audit.
+**Module codes:** `REG` Registration/Policy · `ELG` Eligibility · `APT` Appointments · `CLIN` Clinical/EMR · `LAB` Lab & Imaging · `RX` Pharmacy · `AUTH` Approvals · `NET` Provider Network · `NOT` Notifications · `RPT` Reporting · `IAM` Admin/Identity · `MDM` Master Data · `AUD` Audit · `CLM` Claims Management.
 
 > **Traceability:** every FR is expected to trace forward to user stories in [32-user-stories.md](32-user-stories.md) and back to processes in [05-business-process-maps.md](05-business-process-maps.md) / [06-bpmn-diagrams.md](06-bpmn-diagrams.md).
 
@@ -255,7 +255,123 @@ This document specifies the **functional requirements (FRs)** for the Mersal HBM
 
 ---
 
-## 15. Priority summary (MoSCoW rollup)
+## 15. Claims Management (`CLM`)
+
+> **New module — build phase `10b`** ([36-claims-management.md](36-claims-management.md) is the authoritative design; build prompt: [claude-code-prompts/phase-10b-claims-management.md](claude-code-prompts/phase-10b-claims-management.md)). Claims turn **already-delivered, authorized services** into reviewed, decided and settled financial records. Because claims sit downstream of fulfillment rather than inside the 7 care phases, the **Phase** column below reads `Claims (10b)` / `Cross-cutting (10b)`.
+>
+> Two hard boundaries govern every requirement here: **(a)** claims are adjudicated on **codes and amounts, never on diagnosis** — medical-necessity questions are routed to a clinical reviewer; **(b)** the platform **issues settlement advice but never moves money**.
+
+**15.1 Claim origination — three channels**
+
+| ID | Statement | Priority | Rationale | Phase |
+|----|-----------|----------|-----------|-------|
+| FR-CLM-001 | The system shall **auto-derive** a claimable item from each `order_fulfillment` (consume) and `dispense_event` row — consuming `OrderLinesConsumed` / `RxLinesDispensed` events — priced from the performing provider's contract tariff. | M | Fulfillment records are the authoritative usage truth; auto-derivation is the baseline of what the network actually delivered. | Claims (10b) |
+| FR-CLM-002 | The system shall accept a **provider-submitted** claim/invoice with supporting documents, and shall **match** each submitted line to an auto-derived claimable item on `(provider, beneficiary, service code, service date, authorization)`. | M | Providers bill in their own cycle; matching reconciles their bill to our record. | Claims (10b) |
+| FR-CLM-003 | A submitted line that cannot be matched shall be flagged `NO_FULFILLMENT_RECORD` and routed to **manual assessment**; it shall **never** be auto-approved. | M | Billing for undelivered service is the primary claims fraud/error vector. | Claims (10b) |
+| FR-CLM-004 | The system shall record the provider's **billed amount alongside the contract price** on every matched line and surface any difference as a **price-variance adjustment candidate**. | M | Variance must be visible and actionable, not silently absorbed. | Claims (10b) |
+| FR-CLM-005 | The system shall accept a **beneficiary reimbursement request** for out-of-pocket services — submitted by the member, or by Reception/a Case Manager on their behalf — carrying **receipts** plus **proof-of-service** evidence (result/dispense evidence). | M | Members do pay out of pocket; reimbursement is the third, human-heavy origination channel. | Claims (10b) |
+| FR-CLM-006 | A reimbursement request shall reference an **authorized** underlying prescription or investigation order (or an explicitly configured non-gated category); otherwise it shall be denied `NO_PRIOR_AUTH` or routed to manual assessment. | M | Reimbursement must not become a bypass of the authorization gate. | Claims (10b) |
+| FR-CLM-007 | Reimbursement shall be capped at the **contract tariff or the receipt amount, whichever is lower**, unless a Claims Officer records an explicit **override with justification** (subject to dual control above threshold, FR-CLM-050). | M | Prevents out-of-network prices leaking into the benefit spend. | Claims (10b) |
+| FR-CLM-008 | The system shall **not store** the beneficiary's bank/payout details on the claim; settlement advice shall reference the member only, with disbursement handled by Mersal's existing finance process. | M | Data minimization; payout data has no place in a benefit record. | Claims (10b) |
+| FR-CLM-009 | All claim/reimbursement documents shall be **virus-scanned, type/size-validated, typed, encrypted and stored in `document-service`**, referenced from the claim. | M | Untrusted uploads from providers and members; see [18-security-model.md](18-security-model.md). | Cross-cutting (10b) |
+
+**15.2 OCR-assisted reimbursement intake**
+
+| ID | Statement | Priority | Rationale | Phase |
+|----|-----------|----------|-----------|-------|
+| FR-CLM-010 | The system shall run submitted reimbursement documents through an **OCR extraction pipeline** behind the pluggable `IDocumentOcrProvider` interface, extracting candidate **provider, service date, amount, currency, and service/drug codes**. | M | Manual keying of receipts is slow and error-prone at refugee-caseload volume. | Claims (10b) |
+| FR-CLM-011 | Every OCR-extracted value shall carry a **confidence score** and a reference to its **source document region**, both persisted with the candidate. | M | A number without provenance cannot be trusted with money. | Claims (10b) |
+| FR-CLM-012 | **OCR shall be assistive, never authoritative:** no OCR-extracted value shall affect an amount, a match, or a decision until a **human has confirmed it**. | M | Machine reading of a smudged Arabic receipt must never silently become a payment. | Claims (10b) |
+| FR-CLM-013 | Where extraction confidence is high and the candidate **auto-matches** an authorized prescription/investigation order, the system shall pre-fill claim lines flagged `AUTO_MATCHED`; where confidence is low or the match is ambiguous, the request shall be routed to the **manual assessment queue**. | M | Automate the easy majority, route the ambiguous remainder to a human. | Claims (10b) |
+| FR-CLM-014 | The OCR engine shall support **Arabic and English** (e.g. Tesseract `ara+eng`), be **self-hosted**, and shall not transmit any document outside the platform boundary. | M | Bilingual receipts are the norm; PHI/PII must not leave the on-prem boundary ([0C](0C-OPEN-SOURCE-STACK.md)). | Cross-cutting (10b) |
+| FR-CLM-015 | A reviewer performing manual assessment shall see the **document image with the OCR overlay** (extracted field, confidence, highlighted region) and shall be able to correct any value, with the correction audited. | M | Human confirmation must be cheap and verifiable against the source. | Claims (10b) |
+| FR-CLM-016 | The system shall report **OCR auto-match rate** and **manual-assessment rate** as operational KPIs. | S | Tunes the confidence threshold and sizes the assessment team. | Claims (10b) / Reporting |
+
+**15.3 Batching**
+
+| ID | Statement | Priority | Rationale | Phase |
+|----|-----------|----------|-----------|-------|
+| FR-CLM-017 | The system shall create a claim **batch** by any of: **date range** (`serviceDateFrom..serviceDateTo`, optionally `receivedDate`), **provider branch** (`provider_location`), **provider group** (parent provider across branches), or **manual selection** from a filtered worklist. | M | Different payees settle on different cycles; exceptions need hand-picking. | Claims (10b) |
+| FR-CLM-018 | The system shall enforce **single open-batch membership** — a claim shall belong to at most one batch whose status is `Open` or `UnderReview` — via a unique partial index, not application logic alone. | M | Makes settling the same claim twice *impossible*, not merely unlikely. | Cross-cutting (10b) |
+| FR-CLM-019 | Settlement batches shall be **provider-homogeneous** (one payee); reimbursement batches shall group by period with the payee being the beneficiary cohort. | M | A settlement advice must address exactly one payee. | Claims (10b) |
+| FR-CLM-020 | Each batch shall carry running **rollup totals**: claimed, priced, approved, adjusted, denied, and **net payable**. | M | The batch is the unit of review and settlement; its totals must always be current. | Claims (10b) |
+| FR-CLM-021 | The system shall allow a claim to be **removed from an `Open` batch** (audited); removal from an `UnderReview` batch shall require a **mandatory reason** and shall be audited as an exception. | M | Late corrections happen; they must leave a trail. | Claims (10b) |
+| FR-CLM-022 | The system shall issue a human-readable **batch number** `BAT-<yyyy>-<base32(8)>` per [0A §3](0A-DESIGN-FOUNDATIONS.md). | M | Speakable key for finance and provider correspondence. | Claims (10b) |
+| FR-CLM-023 | The system shall enforce the batch lifecycle `Open → UnderReview → Decided → SettlementIssued → Closed` (plus `Cancelled`); a batch shall reach **`Decided` only when every line has a recorded decision**, and rollup totals shall be **frozen at `SettlementIssued`**. | M | No half-decided batch may be settled; frozen totals make the advice immutable. | Claims (10b) |
+
+**15.4 Automated pre-adjudication**
+
+| ID | Statement | Priority | Rationale | Phase |
+|----|-----------|----------|-----------|-------|
+| FR-CLM-024 | The system shall run automated **pre-adjudication per claim line in a fixed 9-step order**: (1) beneficiary status & policy validity on the service date, (2) coverage-category match, (3) pre-auth linkage, (4) fulfillment linkage, (5) duplicate check, (6) provider network status & contract effectivity, (7) tariff pricing, (8) coverage-limit availability, (9) co-pay/deductible split. | M | A fixed, versioned order makes adjudication deterministic, testable and explainable. | Claims (10b) |
+| FR-CLM-025 | Pre-adjudication shall **collect all applicable reason codes** rather than stopping at the first failure. | M | Partial approvals must be precise, and providers must get one complete answer, not a drip of denials. | Claims (10b) |
+| FR-CLM-026 | Every failed check shall emit a **coded reason** from the controlled set: `NOT_ELIGIBLE`, `POLICY_EXPIRED`, `NOT_COVERED_CATEGORY`, `NO_PRIOR_AUTH`, `AUTH_EXPIRED`, `EXCEEDS_AUTH_SCOPE`, `NO_FULFILLMENT_RECORD`, `DUPLICATE_CLAIM`, `PROVIDER_OUT_OF_NETWORK`, `CONTRACT_NOT_EFFECTIVE`, `NO_TARIFF`, `LIMIT_EXCEEDED`. | M | Free-text denials cannot be reported on, appealed against, or tested. | Claims (10b) |
+| FR-CLM-027 | Where no contract tariff exists for the code on the service date, the system shall emit `NO_TARIFF` and route the line to **manual pricing** — it shall **never infer, estimate or guess a price**. | M | A guessed price is an unauditable payment; a human must own it. | Claims (10b) |
+| FR-CLM-028 | Where the linked authorization is `PartiallyApproved`, the approved scope shall **cap** the payable lines/quantities, emitting `EXCEEDS_AUTH_SCOPE` for the excess. | M | Partial approvals must bind the money, not just the clinical permission. | Claims (10b) |
+| FR-CLM-029 | Pre-adjudication shall output, per line, a `system_recommendation` ∈ {`RecommendApprove`, `RecommendPartial`, `RecommendDeny`, `RequiresManualReview`} plus reason codes and a computed `allowed_amount`. **The system recommends; the Claims Officer decides.** | M | Keeps accountability with a human while automating the analysis. | Claims (10b) |
+| FR-CLM-030 | Auto-approval of clean, low-value lines shall be **configurable per policy and OFF by default**, and shall **never** apply to gated, high-value, reimbursement, or `RequiresManualReview` lines. | M | Automation is an efficiency lever, not a control bypass. | Claims (10b) |
+| FR-CLM-031 | Adjudication rules shall be expressed **declaratively and versioned**, and the **rule version shall be recorded on every decision**. | M | A decision must be reproducible against the rules in force at the time. | Cross-cutting (10b) |
+
+**15.5 Review & decision**
+
+| ID | Statement | Priority | Rationale | Phase |
+|----|-----------|----------|-----------|-------|
+| FR-CLM-032 | The system shall support **line-level Claims Officer decisions**: **Approve · Partially approve** (with allowed amount) **· Deny** (coded reason mandatory) **· Adjust · Request info · Route to clinical review**. | M | The claim line, not the invoice, is the true unit of adjudication. | Claims (10b) |
+| FR-CLM-033 | Line decisions shall **roll up to the batch**, recomputing batch totals on every decision; the batch outcome (`Approved` / `PartiallyApproved` / `Denied`) shall be derived from its lines, never entered directly. | M | One consistent number for settlement, derived from evidence. | Claims (10b) |
+| FR-CLM-034 | Denials and partial approvals shall require a **coded reason**; free-text **rationale shall be mandatory** for deny, adjust and override decisions. | M | Appeals, reporting and audit all depend on structured reasons. | Claims (10b) |
+| FR-CLM-035 | The Claims Officer workspace shall present, per line: service code + description, service date, provider/branch, billed amount, contract price, system recommendation + reason codes, linked authorization, fulfillment reference, and supporting documents (invoice, receipt, proof-of-service, OCR overlay) — and **shall present no diagnosis, no clinical note, and no lab/imaging result value**. | M | Minimum-necessary is enforced in the projection, not in training. | Cross-cutting (10b) |
+| FR-CLM-036 | The system shall support **Request info**, moving the line/claim to `PendingInfo`, notifying the submitter, and resuming adjudication on supply of information while **preserving the thread**. | M | Most disputes are missing-document problems, not judgement problems. | Claims (10b) |
+| FR-CLM-037 | The system shall support **Route to clinical review**, transitioning the line to `ClinicalReview` and placing it in the **Medical Approval / Medical Director** worklist; the clinical reviewer shall see the clinical context under purpose binding and **record an opinion**, and shall **not** make the payment decision. | M | Medical-necessity judgement needs a clinician; the payment decision stays with claims. | Claims (10b) / Approval |
+| FR-CLM-038 | Routing a line to clinical review shall **not widen the Claims Officer's field projection**, and the returned clinical opinion shall be surfaced to the officer as a **structured verdict + rationale only**. | M | The hand-off must not become a back door into the EMR. | Cross-cutting (10b) |
+| FR-CLM-039 | Every decision shall record **decider, timestamp, decision, allowed amount, reason code(s), rationale, rule version and correlation id**, appended to `claim_decision`. | M | Non-repudiation of every financial judgement. | Claims (10b) |
+| FR-CLM-040 | Submitted claims and recorded decisions shall be **append-only** — never edited or deleted. Corrections shall be made by an **adjustment** or a compensating **Void + re-claim**. | M | Financial history must be reconstructable; see [19-audit-strategy.md](19-audit-strategy.md). | Cross-cutting (10b) |
+| FR-CLM-041 | The system shall enforce the claim lifecycle `Draft → Submitted → UnderAdjudication → (PendingInfo \| ClinicalReview) → (Approved \| PartiallyApproved \| Denied) → Settled`, plus `Appealed` and `Void`, per [23-state-machines.md](23-state-machines.md). | M | Canonical claim state machine. | Claims (10b) |
+
+**15.6 Reconciliation & adjustments**
+
+| ID | Statement | Priority | Rationale | Phase |
+|----|-----------|----------|-----------|-------|
+| FR-CLM-042 | The system shall provide a **reconciliation view** for a period comparing three records: what Mersal's fulfillment data says was **delivered**, what the provider **billed**, and what was **approved for payment**. | M | Three views of the same month must be made to agree, visibly. | Claims (10b) |
+| FR-CLM-043 | Reconciliation shall bucket every discrepancy as **matched**, **billed-not-delivered**, **delivered-not-billed**, **price variance**, **quantity variance**, or **duplicate**, each actionable from the worklist. | M | Named buckets turn a spreadsheet argument into a workflow. | Claims (10b) |
+| FR-CLM-044 | The system shall report **aged delivered-not-billed** (unbilled delivered service) so accruals and provider chasing are possible. | S | Protects the budget picture from lagging provider invoicing. | Claims (10b) / Reporting |
+| FR-CLM-045 | The system shall support the adjustment types `PriceCorrection`, `QuantityCorrection`, `Deduction`, `Recovery`/`Clawback`, `Writeoff`, `Reversal`/`Void`, and `Reallocation`. | M | Covers the full set of real-world corrections without ad-hoc edits. | Claims (10b) |
+| FR-CLM-046 | Every adjustment shall be **append-only**, carry a **sign (debit/credit)**, a **coded reason**, a **mandatory rationale**, and shall **net into the batch rollup**; adjustments shall never mutate a prior amount. | M | Corrections must add to the record, not overwrite it. | Cross-cutting (10b) |
+| FR-CLM-047 | A `Recovery`/`Clawback` shall **reference the original claim line** it recovers against and may be carried into a later batch. | M | Overpayments are recovered across periods and must stay traceable. | Claims (10b) |
+| FR-CLM-048 | A batch **net payable shall not fall below zero** without an explicit, **dual-controlled** approval. | M | A negative settlement is an exceptional financial event. | Claims (10b) |
+| FR-CLM-049 | Every adjustment shall be audited with **before/after amounts**, actor, reason and correlation id. | M | Adjustments are the highest-risk money-moving action in the module. | Cross-cutting (10b) |
+
+**15.7 Settlement advice, exports & appeals**
+
+| ID | Statement | Priority | Rationale | Phase |
+|----|-----------|----------|-----------|-------|
+| FR-CLM-050 | On batch `Decided`, the system shall generate an **immutable settlement advice / remittance statement** per payee containing: header (payee provider/branch or reimbursement cohort, period, batch no., generated-by, generated-at), per-claim/line detail (approved, adjusted, denied with reason codes), and the totals chain **claimed → priced → approved → adjustments → net payable**. | M | The single, defensible hand-off artifact to finance and to the provider. | Claims (10b) |
+| FR-CLM-051 | The settlement advice shall be stored as a stable document in `document-service` on a **WORM/object-locked** bucket and referenced from the batch. | M | Tamper-evidence for a financial statement. | Claims (10b) |
+| FR-CLM-052 | The system shall support **audited exports** of claims data and settlement advice — **CSV/XLSX** for finance and **PDF** for the provider — carrying **no clinical fields**, with each export written as a high-severity `data.export` audit event. | M | Sharing must be traceable and must not leak PHI. | Cross-cutting (10b) |
+| FR-CLM-053 | The system shall **not execute payments or bank transfers**. Disbursement is performed externally by Finance/treasury; the system may optionally record a **payment reference** back against the batch. | M | Explicit scope boundary — the platform is a benefit system, not a payment rail. | Claims (10b) |
+| FR-CLM-054 | The system shall support **appeals**: a provider or member may appeal an `Approved`, `PartiallyApproved` or `Denied` claim, transitioning it to `Appealed` and back to `UnderAdjudication` for re-adjudication, with the **original decision preserved**. | M | Due process for providers and members; denials must be contestable. | Claims (10b) |
+| FR-CLM-055 | An appeal shall be **decided by a different principal** than the original decider. | M | An appeal reviewed by its author is not an appeal. | Claims (10b) |
+
+**15.8 Integrity, segregation of duties & audit**
+
+| ID | Statement | Priority | Rationale | Phase |
+|----|-----------|----------|-----------|-------|
+| FR-CLM-056 | **No double-billing:** the data model shall enforce a unique constraint of **one payable claim line per fulfillment/dispense reference**; a duplicate submission shall be detected and denied `DUPLICATE_CLAIM`. | M | Makes paying twice for one delivered service structurally impossible. | Cross-cutting (10b) |
+| FR-CLM-057 | **No re-decrement of coverage:** claims shall reconcile against the existing `consumed_value` accumulator moved by the consume/dispense transaction, and shall **never** decrement coverage/limits again or maintain a parallel accumulator. | M | Claims are downstream of fulfillment; a second decrement would corrupt every remaining-limit answer ([FR-INV-006](#13-order--prescription-consumption-invariants-inv--first-class-frs)). | Cross-cutting (10b) |
+| FR-CLM-058 | **Segregation of duties:** the principal deciding a claim line shall **not** be its originator/submitter, and shall **not** be affiliated with the claiming provider. | M | Self-adjudication and provider self-payment are the two classic claims frauds. | Cross-cutting (10b) |
+| FR-CLM-059 | **Adjudication ≠ settlement release:** the principal who adjudicated a claim/batch shall not be the principal who releases its payment in the finance process. | M | Preserves the existing initiate ≠ release split end-to-end. | Cross-cutting (10b) |
+| FR-CLM-060 | **Dual control:** overrides above a configurable value threshold and high-value adjustments shall require approval by a **second, senior approver** (Claims Reviewer) who did not record them. | M | Large discretionary amounts must never rest on one signature. | Cross-cutting (10b) |
+| FR-CLM-061 | **Minimum-necessary projection:** claims projections shall strip `diagnosis`, `emr_note`, and lab/imaging **result values** server-side; result **existence, date and document reference** may be exposed as proof-of-service. | M | Hard privacy rule; see [11-permission-matrix.md §3.4/§4](11-permission-matrix.md). | Cross-cutting (10b) |
+| FR-CLM-062 | **Provider isolation:** a provider-side principal shall access only **its own** claims, lines, batches, documents and settlement advice. | M | Hard isolation rule ([FR-NET-005](#8-provider-network-net)). | Cross-cutting (10b) |
+| FR-CLM-063 | **Member scope:** a beneficiary shall access only their **own** reimbursement request and its outcome; a Case Manager only those of their **assigned** case load. | M | Members must not see other members' claims or provider batches. | Cross-cutting (10b) |
+| FR-CLM-064 | **Idempotency:** claim submit, line decide, adjust and batch-add operations shall accept an `Idempotency-Key` and shall not double-apply on retry. | M | Money-moving operations over unreliable networks. | Cross-cutting (10b) |
+| FR-CLM-065 | **Immutable audit:** every claim state change, decision, adjustment, void, batch transition, settlement issuance and export shall write an **append-only, hash-chained** audit event; **nothing in claims shall be hard-deleted**. | M | Tamper-evident financial accountability. | Cross-cutting (10b) |
+| FR-CLM-066 | The system shall publish claims **domain events via the transactional outbox** (`ClaimCreated`, `ClaimSubmitted`, `ClaimAdjudicated`, `ClaimLineDecided`, `ClaimApproved`, `ClaimPartiallyApproved`, `ClaimDenied`, `ClaimAdjusted`, `ClaimVoided`, `ClaimAppealed`, `ReimbursementSubmitted`, `ReimbursementMatched`, `ReimbursementRequiresManualAssessment`, `BatchCreated`, `BatchUnderReview`, `BatchDecided`, `SettlementAdviceIssued`). | M | Reporting, notification and finance integration without coupling. | Cross-cutting (10b) |
+| FR-CLM-067 | The system shall report claims **KPIs**: TAT (submission → decision), approval/denial rate, top denial reasons, adjustment value by type, provider variance league table, batch cycle time, and recovery outstanding. | S | Steering the claims operation and the provider network. | Claims (10b) / Reporting |
+| FR-CLM-068 | All claims screens shall be **bilingual (Arabic RTL + English)** and meet **WCAG 2.2 AA**, including non-colour encoding of decision/variance status. | M | Platform-wide a11y/i18n requirement ([21-accessibility-checklist.md](21-accessibility-checklist.md)). | Cross-cutting (10b) |
+
+---
+
+## 16. Priority summary (MoSCoW rollup)
 
 | Module | Must | Should | Could/Won't |
 |--------|------|--------|-------------|
@@ -273,6 +389,7 @@ This document specifies the **functional requirements (FRs)** for the Mersal HBM
 | Master Data | 5 | 4 | 0 |
 | Consumption Invariants | 10 | 0 | 0 |
 | Audit | 5 | 1 | 1 |
+| Claims Management (10b) | 65 | 3 | 0 |
 
 > The **Consumption Invariants** and **Data-Minimization** FRs are release-gating: no MVP is acceptable without them ([28-mvp-definition.md](28-mvp-definition.md)).
 
@@ -283,3 +400,4 @@ This document specifies the **functional requirements (FRs)** for the Mersal HBM
 - Screen realization: [12-ui-wireframes.md](12-ui-wireframes.md) · Flows: [13-ux-flows.md](13-ux-flows.md)
 - Who can do each FR: [10-role-matrix.md](10-role-matrix.md) · [11-permission-matrix.md](11-permission-matrix.md)
 - Lifecycles referenced: [23-state-machines.md](23-state-machines.md)
+- Claims module design (phase 10b): [36-claims-management.md](36-claims-management.md)

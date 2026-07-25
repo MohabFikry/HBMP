@@ -189,6 +189,24 @@ Every component ships meeting: keyboard operability, visible 3px focus (never re
 
 ---
 
+## 10b. Visual refinement v1.1 (design audit + enterprise polish)
+
+A design audit (via the `healthcare-uiux-designer` skill) found the v1.0 system **correct but visually conservative** — accessibility, status encoding, and glass discipline were right; depth, motion, and hierarchy were timid. v1.1 adds the following **normative** refinements, implemented in both prototypes and required of the production frontend (phase 9):
+
+| # | Finding (v1.0) | Refinement (v1.1) |
+|---|----------------|-------------------|
+| 1 | Flat single-tint page canvas | **Layered page wash:** subtle top-down gradient (`--page-wash`, ~340px fade into `--surface-0`) in both themes — content zones read as layered, not pasted |
+| 2 | Elevation nearly invisible; no hover physics | Refined `--elev-1` (dual-layer soft shadow) + new **`--elev-hover`** token; interactive cards/buttons lift on hover |
+| 3 | No applied motion vocabulary | Base transition rule on all interactive elements (background/border/color/shadow 200ms ease-out; transform 120ms); `prefers-reduced-motion` still disables |
+| 4 | Buttons flat, no pressed state | Hover = `translateY(-1px)` + `--elev-hover`; active = return + shadow drop; primary gains a **top-light gradient + inner highlight** (still token teal); dark-mode primary text switches to deep ink (`#04282A`) because the dark accent is light teal — white would fail AA |
+| 5 | KPI cards under-designed | **Brand hairline** (3px `--brand→--accent` gradient top edge), uppercase micro-label, 34px tabular numerals with tight tracking, delta as bordered pill, hover lift |
+| 6 | Table headers weak hierarchy | **Micro-label style:** 11.5px, uppercase, `.06em` tracking, `--text-3` — data rows now dominate |
+| 7 | Nav rail groups unarticulated | Hairline dividers between groups (first exempt), micro-label styling |
+| 8 | Page header lacked a brand moment | Eyebrow/role label gains a **brand tick** (16×3px `--brand→--gold` gradient bar); `h1` normalized to title-1 (28px) |
+| 9 | Dark glass edges too faint | `--glass-brd` alpha raised to `.28` in dark theme |
+
+Rules that did **not** change (and must not): the accessible-token/decorative-brand split, four-cue status chips, the glass contrast contract, focus rings, target sizes, RTL mirroring, and both themes' AA ratios. Brand gradients appear only as **decorative hairlines/ticks** — never as text or control fills carrying meaning.
+
 ## 11. Reference implementations
 Two working, single-file builds in this folder demonstrate the system — open either in a browser:
 

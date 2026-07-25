@@ -80,6 +80,18 @@ bottom tab bar on mobile) · Command palette (Cmd/Ctrl-K) · avatar/tooltip/pagi
 **Motion:** 120/200/320ms, ease-out `cubic-bezier(.2,.8,.2,1)`; `prefers-reduced-motion` → instant/
 opacity; no looping motion around clinical data.
 
+**Visual refinement v1.1 (0B §10b — normative polish layer):** layered page canvas via a subtle
+`--page-wash` gradient (~340px fade into `--surface-0`, both themes) · refined `--elev-1` +
+**`--elev-hover`** with hover-lift/active-settle physics on interactive cards & buttons · a base
+transition rule on all interactive elements (colors/shadow 200ms, transform 120ms) · primary button
+gains a top-light gradient sheen + inner highlight (**dark-theme primary text = deep ink `#04282A`**
+because the dark accent is light teal) · KPI cards: 3px `--brand→--accent` top hairline, uppercase
+micro-label, 34px tabular numerals, bordered delta pill · table headers & nav-group labels use the
+**micro-label style** (11.5px, uppercase, `.06em`, `--text-3`) with hairline dividers between nav
+groups · page-header eyebrow carries a 16×3px `--brand→--gold` **brand tick**, h1 = 28px · dark
+`--glass-brd` alpha ≥ `.28`. Brand gradients are decorative hairlines/ticks only — never text or
+meaning-bearing fills.
+
 ## Key entities/tokens/rules & invariants
 - **Role min-necessary UI:** the screen renders only the fields the role may see — never surface a
   field just because there's space (Reception ≠ EMR; Finance ≠ diagnosis; providers see indication,

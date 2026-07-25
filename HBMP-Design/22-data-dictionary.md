@@ -533,6 +533,183 @@ Index: `(entity_type, entity_id, occurred_at)`; `(correlation_id)`.
 
 ---
 
+## 10A. Domain: Claims (`claims` schema)
+
+Added in **Phase 10b** — authoritative module design: [36-claims-management.md](36-claims-management.md). Numbered `10A` so the existing `§11` enumeration references stay valid.
+
+> **Minimum-necessary note (hard rule):** the `claims` schema contains **no diagnosis, ICD code, EMR note, lab/imaging result value, or other clinical column anywhere** — adjudication is on *service codes and amounts only* ([36 §2.2](36-claims-management.md), [11 §3.2](11-permission-matrix.md)). Claims rows are **Internal/financial**; `beneficiary_id` is a **PHI-linking** identifier (it associates money with a person, so it is treated as PHI for RLS, masking, and audit-on-read) and clinical narrative is stripped server-side from every claims projection. Where medical necessity must be judged, the line is routed to a clinical reviewer in `approvals`; the clinical opinion lives there, not here.
+
+### 10A.1 `claim`
+
+| Column | Type | Null | Key | Description | Sens | Validation |
+|---|---|---|---|---|---|---|
+| `claim_id` | `uuid` | No | PK | UUID v7 | Internal | v7 generated |
+| `claim_no` | `varchar(20)` | No | UK | Business key `CLM-YYYY-NNNNNN` | Internal | regex `^CLM-\d{4}-\d{6}$` |
+| `origin` | `varchar(20)` | No | | Origination channel | Internal | enum (see §11.5) |
+| `beneficiary_id` | `uuid` | No | logical FK | Claim subject | **PHI (link)** | validated via event |
+| `provider_id` | `uuid` | Yes | logical FK | Payee provider; **null for reimbursement** | Internal | required when `origin <> 'Reimbursement'` |
+| `provider_location_id` | `uuid` | Yes | logical FK | Branch that rendered the service | Internal | must belong to `provider_id` |
+| `batch_id` | `uuid` | Yes | FK | Owning batch | Internal | FK `claim_batch`; ≤ 1 open batch |
+| `authorization_id` | `uuid` | Yes | logical FK | Pre-auth linkage | Internal | mandatory for gated services |
+| `service_date_from` | `date` | No | | Service period start | Internal | ≤ today |
+| `service_date_to` | `date` | Yes | | Service period end | Internal | ≥ `service_date_from` |
+| `currency_code` | `char(3)` | No | | Claim currency | Internal | ISO 4217 |
+| `claimed_amount` | `numeric(14,2)` | No | | As billed/submitted | Internal | ≥ 0 |
+| `priced_amount` | `numeric(14,2)` | Yes | | Repriced to contract tariff | Internal | ≥ 0 |
+| `approved_amount` | `numeric(14,2)` | Yes | | Sum of approved line amounts | Internal | 0 ≤ approved ≤ priced |
+| `adjusted_amount` | `numeric(14,2)` | Yes | | Net of adjustments (**signed**) | Internal | may be negative |
+| `net_payable` | `numeric(14,2)` | Yes | | `approved + adjusted` | Internal | ≥ 0 unless dual-control approved |
+| `status` | `varchar(20)` | No | | Lifecycle status | Internal | enum (see §11) |
+| `submitted_at` | `timestamptz` | Yes | | Submission (UTC) | Internal | |
+| `decided_at` | `timestamptz` | Yes | | Final decision (UTC) | Internal | ≥ `submitted_at` |
+| `row_version` | `integer` | No | | Optimistic concurrency (ETag) | Internal | |
+
+Indexes: PK; `UNIQUE(claim_no)`; `(beneficiary_id, status)`; `(provider_id, service_date_from)`; `(batch_id)`; `(status)`.
+
+> Submitted claims are **never mutated or hard-deleted**: corrections are `claim_adjustment` rows or a compensating `Void` + re-claim ([36 §2.5](36-claims-management.md)).
+
+### 10A.2 `claim_line`
+
+| Column | Type | Null | Key | Description | Sens | Validation |
+|---|---|---|---|---|---|---|
+| `claim_line_id` | `uuid` | No | PK | | Internal | |
+| `claim_id` | `uuid` | No | FK | Parent claim | Internal | FK `claim` |
+| `fulfillment_ref` | `uuid` | Yes | logical FK | `orders.order_fulfillment.fulfillment_id` **or** `pharmacy.dispense_event.dispense_id` | Internal | required for any payable line |
+| `fulfillment_type` | `varchar(20)` | No | | Discriminator for `fulfillment_ref` | Internal | enum (see §11.5); `None` ⇒ `fulfillment_ref` null |
+| `code_system` | `varchar(10)` | No | | Coding system | Internal | enum: CPT/LOINC/LOCAL/DRUG |
+| `code` | `varchar(20)` | No | | Service/drug code | Internal | exists in masterdata |
+| `description` | `varchar(200)` | Yes | | Display text (non-clinical) | Internal | |
+| `quantity` | `numeric(14,3)` | No | | Billed quantity | Internal | > 0 |
+| `billed_amount` | `numeric(14,2)` | No | | As billed by provider/receipt | Internal | ≥ 0 |
+| `contract_price` | `numeric(14,2)` | Yes | | `contract_service_line.agreed_price` on service date | Internal | ≥ 0; null ⇒ `NO_TARIFF` → manual pricing |
+| `allowed_amount` | `numeric(14,2)` | Yes | | Payable after adjudication | Internal | 0 ≤ allowed ≤ max(billed, contract_price) |
+| `member_share` | `numeric(14,2)` | Yes | | Co-pay / deductible portion | Internal | ≥ 0 |
+| `status` | `varchar(20)` | No | | Line lifecycle | Internal | enum (see §11) |
+| `system_recommendation` | `varchar(24)` | Yes | | Pre-adjudication output | Internal | enum (see §11.5) |
+| `rule_version` | `varchar(20)` | Yes | | Rule-set version applied | Internal | semver |
+
+Indexes: PK; `(claim_id)`; `(status)`; `(code_system, code)`;
+**`UNIQUE(fulfillment_ref) WHERE fulfillment_ref IS NOT NULL AND status <> 'Void'`** — the **no-double-billing guard**: at most one live payable line per fulfillment/dispense record. Violations surface as `DUPLICATE_CLAIM`.
+
+### 10A.3 `claim_decision` (append-only)
+
+| Column | Type | Null | Key | Description | Sens | Validation |
+|---|---|---|---|---|---|---|
+| `decision_id` | `uuid` | No | PK | | Internal | |
+| `claim_line_id` | `uuid` | No | FK | Line decided | Internal | FK `claim_line` |
+| `decision` | `varchar(24)` | No | | Officer decision | Internal | enum (see §11.5) |
+| `allowed_amount` | `numeric(14,2)` | Yes | | Amount allowed by this decision | Internal | ≥ 0; required for Approve/PartiallyApprove |
+| `reason_codes` | `text[]` | Yes | | Coded reasons (all applicable) | Internal | values from §11.5; **mandatory** for Deny/PartiallyApprove |
+| `rationale` | `text` | Yes | | Free-text justification (non-clinical) | Internal | **mandatory** for deny/adjust/override |
+| `decided_by` | `uuid` | No | | Claims Officer | Internal | **SoD:** ≠ originator; not provider-affiliated |
+| `decided_at` | `timestamptz` | No | | Decision time (UTC) | Internal | |
+| `rule_version` | `varchar(20)` | Yes | | Rule-set version at decision | Internal | semver |
+| `correlation_id` | `varchar(64)` | No | | Cross-service trace | Internal | |
+
+Indexes: `(claim_line_id, decided_at)`; `(decided_by)`; `(correlation_id)`.
+
+> No `updated_at`/soft-delete: rows are **immutable**. A changed outcome is a *new* decision row; full history via `audit_event`.
+
+### 10A.4 `claim_adjustment` (append-only)
+
+| Column | Type | Null | Key | Description | Sens | Validation |
+|---|---|---|---|---|---|---|
+| `adjustment_id` | `uuid` | No | PK | | Internal | |
+| `claim_line_id` | `uuid` | No | FK | Line adjusted | Internal | FK `claim_line` |
+| `adjustment_type` | `varchar(20)` | No | | Kind of adjustment | Internal | enum (see §11.5) |
+| `amount_delta` | `numeric(14,2)` | No | | **Signed** delta (debit −/credit +) | Internal | ≠ 0; nets into batch rollup |
+| `reason_code` | `varchar(40)` | No | | Coded reason | Internal | values from §11.5 |
+| `rationale` | `text` | No | | Mandatory justification | Internal | non-empty |
+| `recovers_claim_line_id` | `uuid` | Yes | FK | Original line recovered against | Internal | **required** for Recovery/Clawback |
+| `created_by` | `uuid` | No | | Actor | Internal | dual control above value threshold |
+| `created_at` | `timestamptz` | No | | UTC | Internal | |
+
+Indexes: `(claim_line_id, created_at)`; `(adjustment_type)`; `(recovers_claim_line_id)`.
+
+### 10A.5 `claim_batch`
+
+| Column | Type | Null | Key | Description | Sens | Validation |
+|---|---|---|---|---|---|---|
+| `batch_id` | `uuid` | No | PK | | Internal | |
+| `batch_no` | `varchar(20)` | No | UK | Business key `BAT-YYYY-NNNNNN` | Internal | regex `^BAT-\d{4}-\d{6}$` |
+| `batch_type` | `varchar(16)` | No | | Provider settlement vs reimbursement cohort | Internal | enum: Provider/Reimbursement |
+| `selection_mode` | `varchar(16)` | No | | How claims were selected | Internal | enum (see §11.5) |
+| `payee_provider_id` | `uuid` | Yes | logical FK | Payee (null for reimbursement batches) | Internal | required when `batch_type='Provider'` |
+| `provider_location_id` | `uuid` | Yes | logical FK | Branch, when branch-level settlement | Internal | must belong to payee |
+| `period_from` | `date` | No | | Period start | Internal | |
+| `period_to` | `date` | No | | Period end | Internal | ≥ `period_from` |
+| `status` | `varchar(20)` | No | | Batch lifecycle | Internal | enum (see §11) |
+| `total_claimed` | `numeric(16,2)` | No | | Rollup: as billed | Internal | ≥ 0 |
+| `total_priced` | `numeric(16,2)` | No | | Rollup: repriced | Internal | ≥ 0 |
+| `total_approved` | `numeric(16,2)` | No | | Rollup: approved | Internal | ≥ 0 |
+| `total_adjusted` | `numeric(16,2)` | No | | Rollup: adjustments (**signed**) | Internal | may be negative |
+| `total_denied` | `numeric(16,2)` | No | | Rollup: denied value | Internal | ≥ 0 |
+| `net_payable` | `numeric(16,2)` | No | | `total_approved + total_adjusted` | Internal | ≥ 0 unless dual-control approved |
+| `created_by` | `uuid` | No | | Batch creator | Internal | **SoD:** creator ≠ settlement releaser |
+| `decided_at` | `timestamptz` | Yes | | All lines decided (UTC) | Internal | |
+| `settlement_document_id` | `uuid` | Yes | logical FK | Settlement advice in `document` (WORM) | Internal | set at `SettlementIssued` |
+
+Indexes: `UNIQUE(batch_no)`; `(payee_provider_id, period_from)`; `(status)`; and on `claim`: **`UNIQUE(claim_id) WHERE batch_id IS NOT NULL AND batch_status IN ('Open','UnderReview')`** — a claim sits in **at most one open batch**.
+
+> Rollup totals are recomputed on every line decision/adjustment and **frozen at `SettlementIssued`**.
+
+### 10A.6 `reimbursement_request`
+
+| Column | Type | Null | Key | Description | Sens | Validation |
+|---|---|---|---|---|---|---|
+| `request_id` | `uuid` | No | PK | | Internal | |
+| `claim_id` | `uuid` | Yes | FK | Claim raised from this request | Internal | FK `claim`; set on match |
+| `beneficiary_id` | `uuid` | No | logical FK | Claimant | **PHI (link)** | |
+| `submitted_by` | `uuid` | No | | Member / Reception / Case Manager | Internal | |
+| `submitted_at` | `timestamptz` | No | | UTC | Internal | |
+| `receipt_total` | `numeric(14,2)` | No | | Total on receipt(s) | Internal | ≥ 0 |
+| `currency_code` | `char(3)` | No | | | Internal | ISO 4217 |
+| `status` | `varchar(20)` | No | | Reimbursement lifecycle | Internal | enum (see §11) |
+| `match_confidence` | `numeric(5,4)` | Yes | | Auto-match confidence 0–1 | Internal | below threshold ⇒ `ManualAssessment` |
+| `match_method` | `varchar(12)` | No | | How the match was made | Internal | enum: AutoOcr/Manual/Unmatched |
+| `linked_order_id` | `uuid` | Yes | logical FK | Authorized investigation order | Internal | one of order/prescription required |
+| `linked_prescription_id` | `uuid` | Yes | logical FK | Authorized prescription | Internal | one of order/prescription required |
+
+Indexes: `(beneficiary_id, submitted_at DESC)`; `(status)`; `(claim_id)`.
+
+> No bank/payout details are stored here — payout happens through Mersal's existing finance process ([36 §3.3](36-claims-management.md)). Reimbursement is capped at **min(contract tariff, receipt)** unless an officer records an audited override.
+
+### 10A.7 `claim_document` (link table)
+
+| Column | Type | Null | Key | Description | Sens | Validation |
+|---|---|---|---|---|---|---|
+| `claim_document_id` | `uuid` | No | PK | | Internal | |
+| `claim_id` | `uuid` | Yes | FK | Linked claim | Internal | exactly one of claim/request set |
+| `request_id` | `uuid` | Yes | FK | Linked reimbursement request | Internal | exactly one of claim/request set |
+| `document_id` | `uuid` | No | logical FK | `document.document_id` (document-service) | Internal | scanned + encrypted |
+| `doc_type` | `varchar(20)` | No | | Kind of evidence | Internal | enum (see §11.5) |
+| `linked_by` | `uuid` | No | | Actor | Internal | |
+| `linked_at` | `timestamptz` | No | | UTC | Internal | |
+
+Indexes: `UNIQUE(claim_id, document_id)`; `UNIQUE(request_id, document_id)`; `(document_id)`.
+
+> `ResultProof`/`DispenseProof` evidence proves a service **existed** (date + document reference) — claims roles never read the clinical **content** ([36 §9](36-claims-management.md)).
+
+### 10A.8 `ocr_extraction`
+
+| Column | Type | Null | Key | Description | Sens | Validation |
+|---|---|---|---|---|---|---|
+| `extraction_id` | `uuid` | No | PK | | Internal | |
+| `document_id` | `uuid` | No | logical FK | Source document | Internal | |
+| `field_name` | `varchar(40)` | No | | e.g. provider, date, amount, code | Internal | allow-list |
+| `extracted_value` | `varchar(256)` | Yes | | Raw OCR value | Internal | |
+| `confidence` | `numeric(5,4)` | No | | Engine confidence 0–1 | Internal | 0 ≤ c ≤ 1 |
+| `page` | `integer` | Yes | | Source page | Internal | ≥ 1 |
+| `region` | `jsonb` | Yes | | Bounding box for the overlay | Internal | |
+| `accepted_by` | `uuid` | Yes | | Human who confirmed the value | Internal | |
+| `accepted_at` | `timestamptz` | Yes | | Confirmation time (UTC) | Internal | |
+
+Indexes: `(document_id, field_name)`; partial `(confidence) WHERE accepted_by IS NULL`.
+
+> **OCR is assistive, never authoritative.** No extracted value affects money until `accepted_by`/`accepted_at` are set by a human; low confidence or any mismatch routes the request to `ManualAssessment`.
+
+---
+
 ## 11. Enumerations (Canonical)
 
 ### 11.1 Lifecycle statuses (see [23-state-machines.md](23-state-machines.md))
@@ -550,6 +727,10 @@ Index: `(entity_type, entity_id, occurred_at)`; `(correlation_id)`.
 | **Appointment status** | Booked, CheckedIn, Completed, NoShow, Cancelled |
 | **Policy/Coverage status** | Active, Suspended, Expired |
 | **Provider status** | Active, Suspended, Terminated |
+| **Claim status** | Draft, Submitted, UnderAdjudication, PendingInfo, ClinicalReview, Approved, PartiallyApproved, Denied, Settled, Appealed, Void |
+| **Claim Line status** | Pending, Approved, PartiallyApproved, Denied, Adjusted, Void |
+| **Claim Batch status** | Open, UnderReview, Decided, SettlementIssued, Closed, Cancelled |
+| **Reimbursement status** | Submitted, OcrProcessing, AutoMatched, ManualAssessment, Adjudicating, Approved, PartiallyApproved, Denied, Paid (recorded), Void |
 
 ### 11.2 Identifier types
 
@@ -576,6 +757,41 @@ Order types: `Lab`, `Imaging`, `Procedure`. Code systems: `CPT`, `LOINC`, `LOCAL
 | Channel | SMS, Email, Push, InApp |
 | Roles | Physician, Pharmacist, CaseWorker, Approver, Admin, Auditor |
 
+### 11.5 Claims enums (`claims` schema — see [36-claims-management.md](36-claims-management.md))
+
+| Enum | Values |
+|---|---|
+| Claim origin | AutoDerived, ProviderSubmitted, Reimbursement |
+| Fulfillment type | OrderFulfillment, DispenseEvent, None |
+| Claim code systems | CPT, LOINC, LOCAL, DRUG |
+| System recommendation | RecommendApprove, RecommendPartial, RecommendDeny, RequiresManualReview |
+| Claim decision | Approve, PartiallyApprove, Deny, Adjust, RequestInfo, RouteToClinical |
+| Adjustment type | PriceCorrection, QuantityCorrection, Deduction, Recovery, Clawback, Writeoff, Reversal, Void, Reallocation |
+| Batch type | Provider, Reimbursement |
+| Batch selection mode | DateRange, ProviderBranch, ProviderGroup, Manual |
+| Reimbursement match method | AutoOcr, Manual, Unmatched |
+| Claim document type | Invoice, Receipt, ResultProof, DispenseProof, Statement, SettlementAdvice, Other |
+
+**Claim denial / reason codes** (adjudication collects **all** applicable codes per line, never stopping at the first failure — [36 §5](36-claims-management.md)):
+
+| Code | Raised when |
+|---|---|
+| `NOT_ELIGIBLE` | Beneficiary not eligible on the service date |
+| `POLICY_EXPIRED` | Policy/coverage not in effect on the service date |
+| `NOT_COVERED_CATEGORY` | Service `benefit_category` not covered |
+| `NO_PRIOR_AUTH` | Gated service with no authorization |
+| `AUTH_EXPIRED` | Authorization expired before the service date |
+| `EXCEEDS_AUTH_SCOPE` | Line falls outside a `PartiallyApproved` authorized scope |
+| `NO_FULFILLMENT_RECORD` | No matching `order_fulfillment` / `dispense_event` |
+| `DUPLICATE_CLAIM` | A live payable line already exists for the fulfillment reference |
+| `PROVIDER_OUT_OF_NETWORK` | Provider not active in the network on the service date |
+| `CONTRACT_NOT_EFFECTIVE` | No in-effect contract for the provider on the service date |
+| `NO_TARIFF` | No `contract_service_line.agreed_price` for the code/date → **manual pricing, never a guessed price** |
+| `LIMIT_EXCEEDED` | Coverage limit for the `limit_type` exhausted |
+| `NOT_MEDICALLY_NECESSARY` | Recorded by a **clinical reviewer** after `RouteToClinical` (never by a Claims Officer) |
+| `ILLEGIBLE_DOCUMENT` | Receipt/invoice unreadable or OCR unusable |
+| `RECEIPT_MISMATCH` | Receipt does not match the authorized order/prescription or the fulfillment record |
+
 ---
 
 ## 12. Reference / Lookup Tables Summary
@@ -594,5 +810,6 @@ Order types: `Lab`, `Imaging`, `Procedure`. Code systems: `CPT`, `LOINC`, `LOCAL
 
 - Structural model & indexes: [15-database-erd.md](15-database-erd.md)
 - Transitions/guards for status enums: [23-state-machines.md](23-state-machines.md)
+- Claims module design (origination, batching, adjudication, settlement): [36-claims-management.md](36-claims-management.md)
 - Sensitivity handling, RLS, masking, minimization: [18-security-model.md](18-security-model.md)
 - API field shapes: [17-api-specifications.md](17-api-specifications.md)

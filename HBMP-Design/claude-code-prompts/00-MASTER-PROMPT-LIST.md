@@ -34,6 +34,7 @@ This folder turns the **HBMP design set** (`../HBMP-Design/*.md`) into a sequenc
 | 9 | [phase-9-frontend-portals.md](phase-9-frontend-portals.md) | Design system in code + role portals (RTL/a11y) matching the prototypes | 0B, 09, 12, 13, 14, 21, prototypes | — | R1–R5 (per portal) |
 | 8b | [phase-8b-admin-platform.md](phase-8b-admin-platform.md) | Admin: users/roles, master-data admin, config, tenant, break-glass, access reviews | 10, 11, 18, 19 | — | R0→R5 |
 | 10 | [phase-10-case-mgmt-finance.md](phase-10-case-mgmt-finance.md) | Case management (beneficiary-360) + Finance (utilization/settlements/exports; **finance≠diagnosis**) | 07, 10, 11, 22 | — | R5 |
+| 10b | [phase-10b-claims-management.md](phase-10b-claims-management.md) | Claims capture (auto-derived/provider-submitted/**reimbursement+OCR**), batching, pre-adjudication, **line-level officer decisions**, reconciliation + adjustments, settlement advice (**no payment execution**) | **36**, 22, 23, 11, 07, 16 | — | R6/post-v1 |
 | 11 | [phase-11-hardening-and-nfr.md](phase-11-hardening-and-nfr.md) | Performance/load, security hardening + pen-test, HA/**DR**, observability/SLOs, runbooks | 08, 18, 25, 26, 27, 34 | — | pre-prod gate |
 | 12 | [phase-12-migration-and-golive.md](phase-12-migration-and-golive.md) | Data migration (providers/beneficiaries), gated release, pilot go-live + hypercare | 20, 25, 29, 35 | Master Lists (via 0b) | go-live |
 | 13 | [phase-13-interoperability-and-roadmap.md](phase-13-interoperability-and-roadmap.md) | FHIR R4 facade + integration adapters (UNHCR/gov/HL7) + OCR/NLP hooks | 16, 17, 20, 35 | — | R5+/roadmap |
@@ -47,7 +48,7 @@ Release definitions and exit criteria: [../HBMP-Design/29-delivery-plan.md](../H
 ## Dependency order
 
 ```
-0 → 0b → 1 → 2 → 2b → 3 → 4 → 5,6 (parallel) → 7 → 8 → 10
+0 → 0b → 1 → 2 → 2b → 3 → 4 → 5,6 (parallel) → 7 → 8 → 10 → 10b
 8b (admin) + 9 (frontend) run continuously alongside from R0/R1.
 11 (hardening/NFR) is cross-cutting and gates go-live.
 12 (migration & go-live) after the functional set + 11.
@@ -62,6 +63,7 @@ Release definitions and exit criteria: [../HBMP-Design/29-delivery-plan.md](../H
 - 8b (admin/platform) is incremental: user/role admin lands early (R0/R1), master-data & config admin follow their services.
 - 9 tracks the backend: build each portal as its APIs become available; all portals reuse the shared design system delivered early in phase 9.
 - 10 (case/finance) after the core services produce the events/data it reads.
+- **10b (claims) sits after 7 and alongside/after 10** — it needs **5/6** (`order_fulfillment`/`dispense_event` are the payable anchors), **2b** (provider contracts + tariffs for pricing), **7** (authorization linkage for gated lines), and **1** (`document-service` for invoices/receipts/settlement advice). It pairs with 10: claims produces the settlement advice, Finance executes payment **outside** the platform. Authoritative design: [../HBMP-Design/36-claims-management.md](../HBMP-Design/36-claims-management.md).
 - 11 (hardening), 12 (migration/go-live), and the DPIA gate in 13 are **production-readiness gates** — see [../HBMP-Design/35-implementation-plan.md](../HBMP-Design/35-implementation-plan.md).
 
 ---

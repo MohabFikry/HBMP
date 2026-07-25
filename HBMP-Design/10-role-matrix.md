@@ -156,7 +156,7 @@ Each role below follows the same template: **Purpose · Portal · Typical users 
 - **Scope:** `tenant:own` over financial + claim + coverage records.
 - **Key capabilities:** Process claims; validate against eligibility/coverage; generate invoices; schedule/approve provider payments (SoD split: initiate vs. release); reconcile; produce financial reports.
 - **Highest tier:** **T2** (financial + coverage).
-- **Notes:** **HARD RULE — Finance CANNOT view diagnoses.** Claims carry *coded, minimized* service/procedure references and amounts, but the **diagnosis field is masked/withheld** from Finance. Where a procedure code implies clinical detail, only the billing code needed for adjudication is exposed. Payment initiation and release are separate permissions held by different people.
+- **Notes:** **HARD RULE — Finance CANNOT view diagnoses.** Claims carry *coded, minimized* service/procedure references and amounts, but the **diagnosis field is masked/withheld** from Finance. Where a procedure code implies clinical detail, only the billing code needed for adjudication is exposed. Payment initiation and release are separate permissions held by different people. **As of Phase 10b**, claim *adjudication* is the dedicated **Claims Officer** role (§3.17); Finance consumes the resulting settlement advice and executes payment outside the platform ([36-claims-management.md](36-claims-management.md)).
 
 ### 3.13 Provider Admin
 - **Purpose:** Administer a single provider organization's users, sites, schedules, and service catalog on the platform.
@@ -194,6 +194,36 @@ Each role below follows the same template: **Purpose · Portal · Typical users 
 - **Highest tier:** **T4**.
 - **Notes:** Super Admin is **not** a routine data reader. Any access to beneficiary PHI/financials requires an explicit, time-boxed break-glass grant that is loudly audited and reviewed. Hardware-backed MFA, IP allowlist, and PIM-style just-in-time elevation required. See [Security Model §11](18-security-model.md).
 
+### 3.17 Claims Officer *(new — Phase 10b)*
+- **Purpose:** Adjudicate delivered, authorized services into decided and settleable financial records — review claim lines, decide them, assemble and manage batches, record adjustments, and generate settlement advice. The claims counterpart to Medical Approval: same discipline, **money instead of medicine**.
+- **Portal:** Claims portal (a distinct workspace alongside Finance; see [36-claims-management.md](36-claims-management.md)).
+- **Typical users:** Mersal claims processors/adjudicators, reimbursement assessors.
+- **Scope:** `tenant:own` over `claim`, `claim_line`, `claim_batch`, `claim_adjustment`, `reimbursement_request`, `claim_document`, `settlement_advice`. **Explicitly *not* `provider:own`** — a Claims Officer must not be affiliated with any provider whose claims they decide.
+- **Key capabilities:** Work the adjudication worklist (system recommendation + coded reasons); record **line-level** decisions — approve / partially approve / deny with mandatory coded reason / adjust / request info / route to clinical review; manually price `NO_TARIFF` lines; create and manage batches (date range, provider branch, provider group, manual selection) and roll line decisions up to batch totals; run reconciliation (billed-not-delivered, delivered-not-billed, price/quantity variance, duplicate); record append-only adjustments; assess beneficiary reimbursement requests including confirming OCR-extracted values; generate and export settlement advice.
+- **Highest tier:** **T2** (financial + coded service references + coverage). **No clinical (T3) access.**
+- **Notes:** **HARD RULE — Claims Officer CANNOT view diagnoses, EMR notes, or lab/imaging result *values*.** They adjudicate on **service codes, quantities, dates, amounts, authorizations and documents**. Result/report **existence, date and document reference** *are* visible as proof-of-service — the clinical **content** is stripped server-side from every claims projection ([Permission Matrix §3.2/§4](11-permission-matrix.md)). The platform **never executes payment**: settlement advice is a hand-off artifact to Finance/treasury. **SoD:** cannot decide a claim they originated/submitted, and cannot decide a claim belonging to a provider they are affiliated with.
+
+### 3.18 Claims Reviewer (Senior) *(new — Phase 10b)*
+- **Purpose:** Dual-control approver and escalation point for claims — the second pair of eyes required before an override above threshold, a high-value adjustment, or an exceptional settlement is committed.
+- **Portal:** Claims portal (senior view: dual-control queue, override/adjustment approvals, batch oversight, claims KPIs).
+- **Typical users:** Claims team leads, senior adjudicators, claims managers.
+- **Scope:** `tenant:own` — same claims object set as the Claims Officer, plus the dual-control approval queue and batch-level exception actions.
+- **Key capabilities:** Everything a Claims Officer can do, plus: approve/reject **overrides above the configured value threshold**; approve **high-value adjustments** (large deductions, write-offs, recoveries/clawbacks, a negative net-payable batch); authorise removal of a claim from an `UnderReview` batch; uphold or remand appeals before re-adjudication; monitor claims TAT, denial-reason mix, and provider variance.
+- **Highest tier:** **T2**. **Same clinical exclusions as the Claims Officer — seniority grants no clinical read.**
+- **Notes:** **SoD is strict:** the Reviewer approving an override or adjustment must **not** be the officer who recorded it, must not be the claim's originator/submitter, and must not be provider-affiliated for that claim. Dual-control approvals are logged as *distinct* events with rationale ([Audit Strategy](19-audit-strategy.md)).
+
+### 3.19 Clinical reviewer hand-off (no new role)
+
+Some claim lines turn on a genuine **medical-necessity** question that cannot be settled from codes and amounts alone. These lines are **routed to `ClinicalReview`** and land with the **existing [Medical Approval](#39-medical-approval) / [Medical Director](#310-medical-director)** roles — not with a new claims-clinical hybrid.
+
+| Aspect | Claims Officer / Reviewer | Clinical Reviewer (Medical Approval / Director) |
+|---|---|---|
+| Sees clinical context (diagnosis, notes, result values) | **Never** | **Yes**, under `PUR` purpose-binding, for the routed line only |
+| Records | The **payment decision** (approve/partial/deny/adjust) | A **clinical opinion** on medical necessity |
+| Makes the payment decision | **Yes** | **No** |
+
+The hand-off is one-directional in each phase: the clinical opinion returns as a structured verdict + rationale that the Claims Officer acts on; the officer never gains clinical read by virtue of the routing, and the clinical reviewer never gains claims-decision rights. Both hops are audited.
+
 ---
 
 ## 4. Role hierarchy & inheritance
@@ -226,6 +256,10 @@ graph TD
         NET[Network Team]
         FIN[Finance]
     end
+    subgraph Claims
+        CLMO[Claims Officer] --> CLMR[Claims Reviewer Senior]
+    end
+    CLMO -.->|routes medical-necessity<br/>lines, gains no clinical read| APPR
 ```
 
 **Reading the diagram:** an arrow `A --> B` means B's *clinical-read* capability is a **superset** of A's within the same domain — it does **not** mean B inherits A's write duties or portal. Inheritance is used only to reason about read scope; every permission is still enumerated explicitly in the [Permission Matrix](11-permission-matrix.md). Non-connected roles are peers with disjoint duties.
@@ -236,6 +270,9 @@ graph TD
 | Doctors → Medical Approval | Ability to *read* clinical evidence | Treating-write; approval is read+adjudicate only |
 | Medical Approval → Medical Director | Case clinical read | Director-only override/appeal powers add on top |
 | Org Admin → Super Admin | Tenant admin surface | Cross-tenant + break-glass require explicit elevation |
+| Claims Officer → Claims Reviewer (Senior) | Claims/batch read + line-decision surface | **No clinical read is added**; Reviewer-only dual-control approval of overrides/high-value adjustments adds on top |
+
+The dashed edge `Claims Officer ⇢ Medical Approval` is **not** inheritance — it is a **hand-off** (§3.19). Routing a line to clinical review transfers the *question*, never the Claims Officer's field visibility.
 
 ---
 
@@ -257,13 +294,15 @@ Legend: **F** = Full (CRUD within scope) · **W** = Write/contribute · **R** = 
 | Medical Director | R | R | R | R | A/override | R° | R°(cost) | R | – | – |
 | Case Managers | R(assigned) | R(assigned) | R°(summary) | R(assigned) | R/W(request) | R° | R°(assigned) | R° | – | – |
 | Finance | R°(PII) | R(coverage) | **–** | R°(billing code) | R°(status) | R°(rates) | F | R | – | – |
+| Claims Officer | R°(PII min) | R°(coverage @ svc date) | **–** | R°(code+fulfilment ref) | R°(auth scope) | R°(tariff/contract) | F(claims, batches, adj.) + A(line decide) | R°(claims KPIs) | – | – |
+| Claims Reviewer (Senior) | R°(PII min) | R°(coverage @ svc date) | **–** | R°(code+fulfilment ref) | R°(auth scope) | R°(tariff/contract) | F + A/dual-control(override, high-value adj.) | R(claims KPIs) | – | – |
 | Provider Admin | – | – | – | R°(own ops) | – | F(own) | R°(own) | R°(own) | W(own users) | – |
 | Network Team | – | R°(contract) | – | – | – | F(metadata) | R°(rates) | R | – | – |
 | Org Admin | R°(dir) | R°(config) | – | – | – | R° | – | R°(ops) | F(tenant) | R°(access rev.) |
 | Super Admin | R°(BG) | R°(BG) | R°(BG) | R°(BG) | R°(BG) | R°(BG) | R°(BG) | R | F(global) | R°(access) |
 | *Audit service* | – | – | – | – | – | – | – | – | – | append-only |
 
-`BG` = break-glass only (time-boxed, dual-control, loudly audited). Note the **hard rules** visible in this table: Reception `emr = –`; Doctors `emr` is treating-scoped; Labs/Imaging `emr = R°(indication)` and no prescription/consume-rx; Pharmacies no lab/imaging results; Finance `emr = –` and no diagnosis; Approval `emr = R(clinical)`.
+`BG` = break-glass only (time-boxed, dual-control, loudly audited). Note the **hard rules** visible in this table: Reception `emr = –`; Doctors `emr` is treating-scoped; Labs/Imaging `emr = R°(indication)` and no prescription/consume-rx; Pharmacies no lab/imaging results; Finance `emr = –` and no diagnosis; Approval `emr = R(clinical)`; **Claims Officer / Claims Reviewer `emr = –`** — no diagnosis, no notes, no result *values* (result existence + date + document reference only, as proof-of-service).
 
 ---
 
@@ -276,6 +315,9 @@ Legend: **F** = Full (CRUD within scope) · **W** = Write/contribute · **R** = 
 | Labs cannot view prescriptions | Labs (+ Imaging) | §3.6/§3.7 | Field-level deny in [Perm Matrix](11-permission-matrix.md) |
 | Pharmacies cannot view investigation results | Pharmacies | §3.8 | Field/object deny; derived safety flags only |
 | Finance cannot view diagnoses | Finance | §3.12; `emr = –` | Field-level mask on claim |
+| Claims Officer cannot view diagnoses / EMR notes / result **values** | Claims Officer, Claims Reviewer | §3.17/§3.18; `emr = –` in §5 | Field-level deny on the claims projection ([Perm Matrix §4](11-permission-matrix.md)) |
+| Result *existence* is proof-of-service, not clinical content | Claims Officer, Claims Reviewer | §3.17 | Projection exposes `exists`/`resulted_at`/`document_ref` only; `value` stripped |
+| Medical-necessity questions leave the claims role entirely | Claims Officer → Medical Approval/Director | §3.19 | Route-to-clinical-review; opinion returns, visibility does not |
 | Approval CAN view EMR/notes/reports | Medical Approval, Medical Director | §3.9/§3.10 | ABAC purpose = utilization-review |
 
 ---
@@ -300,6 +342,11 @@ Legend: **F** = Full (CRUD within scope) · **W** = Write/contribute · **R** = 
 | Provider Admin (grants roles) | Any clinical role they self-grant | Self-elevation to PHI access |
 | Org Admin (grants roles) | Super Admin (approves elevation) | Unilateral privilege escalation |
 | Network Team (sets rates) | Finance – Payment Release | Rate manipulation + self-pay |
+| Claims – originator/submitter of a claim (provider user, or Mersal staff submitting on their behalf, or the reimbursement requester) | Claims Officer / Claims Reviewer **adjudicating that same claim** | Self-adjudication of a claim one raised |
+| Any **provider-affiliated** role (Provider Admin, Labs, Imaging, Pharmacies, provider clinicians) | Claims Officer / Claims Reviewer **for claims of that provider** | A provider deciding its own money; Claims Officer is `tenant:own`, never `provider:own` |
+| Claims – adjudication (decide lines / close batch) | Finance – Payment Release (settlement release) | Single actor could both approve and pay |
+| Claims Officer who records an override / high-value adjustment | Claims Reviewer (Senior) approving that same override/adjustment | Dual control defeated; unchecked write-off, deduction or clawback |
+| Claims – batch `Decided` / settlement advice issuer | Finance – Payment Initiate **and** Payment Release (the existing pair stays split) | Preserves the initiate ≠ release split end-to-end from adjudication to disbursement |
 
 **SoD enforcement.** The policy engine evaluates SoD constraints at *assignment time* (prevent incompatible grant) and at *decision time* (deny an action if the subject is conflicted for the specific record — e.g., adjudicating a case they authored). Violations and overrides are audited as high-severity events.
 
@@ -326,5 +373,6 @@ The concrete conditions and example policy rules are in the [Permission Matrix �
 - What/how every access is logged → **[19-audit-strategy.md](19-audit-strategy.md)**
 - Regulatory mapping (HIPAA/GDPR/PDPL/UNHCR) → **[20-compliance-checklist.md](20-compliance-checklist.md)**
 - Role↔service mapping and portals → **[0A-DESIGN-FOUNDATIONS.md](0A-DESIGN-FOUNDATIONS.md)**
+- Claims roles, hand-offs, batching, settlement → **[36-claims-management.md](36-claims-management.md)**
 
 > **Change control:** any change to a role's scope, tier, or SoD conflicts must be reflected simultaneously here and in the Permission Matrix, and reviewed by the DPO + Security Architect before the policy bundle is deployed.

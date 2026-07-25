@@ -261,13 +261,199 @@ stateDiagram-v2
 
 ---
 
+## 7. Claim Lifecycle
+
+Canonical: `Draft → Submitted → UnderAdjudication → (Approved | PartiallyApproved | Denied) → Settled`; plus `PendingInfo`, `ClinicalReview`, `Appealed`, `Void`. Module design: [36-claims-management.md](36-claims-management.md).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Draft: originate (auto-derived / provider / reimbursement)
+    Draft --> Submitted: submit
+    Submitted --> UnderAdjudication: auto pre-adjudication
+    UnderAdjudication --> PendingInfo: info requested
+    PendingInfo --> UnderAdjudication: info supplied
+    UnderAdjudication --> ClinicalReview: medical-necessity question
+    ClinicalReview --> UnderAdjudication: clinical opinion recorded
+    UnderAdjudication --> Approved: all lines approved
+    UnderAdjudication --> PartiallyApproved: some lines approved/adjusted
+    UnderAdjudication --> Denied: all lines denied
+    Approved --> Settled: settlement advice issued
+    PartiallyApproved --> Settled: settlement advice issued
+    Approved --> Appealed: provider/member appeal
+    PartiallyApproved --> Appealed: provider/member appeal
+    Denied --> Appealed: provider/member appeal
+    Appealed --> UnderAdjudication: re-adjudicate
+    Approved --> Void: compensating reversal
+    PartiallyApproved --> Void: compensating reversal
+    Denied --> [*]
+    Settled --> [*]
+    Void --> [*]
+```
+
+| From | Event | Guard / Condition | To | Side-effects / Emitted Event | Actor / Role | Audit note |
+|---|---|---|---|---|---|---|
+| — | originate | fulfillment/dispense record exists (or matched reimbursement) | Draft | `ClaimCreated` | claims-service / Provider / Reception | Origin channel recorded |
+| Draft | submit | ≥ 1 line; beneficiary + service dates present | Submitted | `ClaimSubmitted` | Provider / claims-service | Submitted claims are immutable thereafter |
+| Submitted | pre-adjudicate | rules run per line, **all** reasons collected | UnderAdjudication | `ClaimAdjudicated`; per-line `system_recommendation` | claims-service (rules engine) | `rule_version` stored on every line |
+| UnderAdjudication | request-info | missing document/evidence | PendingInfo | `ClaimInfoRequested` | Claims Officer | Reason mandatory; SLA clock paused |
+| PendingInfo | supply-info | document uploaded + scanned | UnderAdjudication | `ClaimInfoSupplied` | Provider / Beneficiary / Case Manager | Document link audited |
+| UnderAdjudication | route-to-clinical | medical necessity in question | ClinicalReview | `ClaimRoutedToClinicalReview` | Claims Officer | **Officer never sees clinical content** |
+| ClinicalReview | return-opinion | clinical opinion recorded (opinion ≠ payment decision) | UnderAdjudication | `ClaimClinicalOpinionRecorded` | Medical Approval / Director | Opinion stored in `approvals`, not `claims` |
+| UnderAdjudication | decide | **every** line decided AND all approved | Approved | `ClaimApproved` | Claims Officer | Append-only `claim_decision` per line |
+| UnderAdjudication | decide | **every** line decided AND mixed outcomes | PartiallyApproved | `ClaimPartiallyApproved` | Claims Officer | Reason code mandatory on each non-approve |
+| UnderAdjudication | decide | **every** line decided AND all denied | Denied | `ClaimDenied` | Claims Officer | Coded reason + rationale mandatory |
+| Approved / PartiallyApproved | settle | owning batch reached `SettlementIssued` | Settled | `ClaimSettled` | claims-service | Amounts frozen; **no money moves in-platform** |
+| Approved / PartiallyApproved / Denied | appeal | appeal within window + new evidence | Appealed | `ClaimAppealed` | Provider / Beneficiary / Case Manager | Appeal reason recorded |
+| Appealed | re-adjudicate | appeal accepted for review | UnderAdjudication | `ClaimAdjudicated` | Claims Officer (SoD: ≠ original decider) | Prior decisions preserved, never edited |
+| Approved / PartiallyApproved | void | compensating reversal (error/fraud/duplicate) | Void | `ClaimVoided`; reversing `claim_adjustment` | Claims Reviewer (dual control) | **Justification mandatory**; original rows untouched |
+
+### Claim guards (invariant detail)
+- **Authorization gate:** a gated service is payable only against a valid, non-expired authorization in `Approved | PartiallyApproved | EmergencyApproved | Overridden`; a `PartiallyApproved` scope **caps** the payable lines (`NO_PRIOR_AUTH`, `AUTH_EXPIRED`, `EXCEEDS_AUTH_SCOPE`).
+- **Fulfillment gate:** **no payable line without a fulfillment reference** (`order_fulfillment` / `dispense_event`); otherwise `NO_FULFILLMENT_RECORD` → manual assessment, never auto-approval.
+- **Append-only decisions:** claims and decisions are never edited or deleted; corrections are `claim_adjustment` rows or a compensating `Void` + re-claim.
+- **No re-decrement:** claims reconcile against `coverage_limit.consumed_value`; they never move it.
+- **SoD:** the deciding officer is never the originator/submitter and is never affiliated with the claiming provider.
+
+---
+
+## 8. Claim Line Lifecycle
+
+Canonical: `Pending → (Approved | PartiallyApproved | Denied | Adjusted)`; plus `Void`. Line decisions roll up to the claim (§7) and to the batch (§9).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: line created + priced
+    Pending --> Approved: approve (full allowed amount)
+    Pending --> PartiallyApproved: partially approve (reduced allowed amount)
+    Pending --> Denied: deny (coded reason)
+    Pending --> Adjusted: adjust (price/quantity/deduction)
+    Approved --> Adjusted: post-decision adjustment
+    PartiallyApproved --> Adjusted: post-decision adjustment
+    Adjusted --> Adjusted: further adjustment
+    Approved --> Void: reversal
+    PartiallyApproved --> Void: reversal
+    Adjusted --> Void: reversal
+    Denied --> Void: reversal
+    Denied --> [*]
+    Void --> [*]
+```
+
+| From | Event | Guard / Condition | To | Side-effects / Emitted Event | Actor / Role | Audit note |
+|---|---|---|---|---|---|---|
+| — | create | **`UNIQUE(fulfillment_ref) WHERE status <> 'Void'`** holds; tariff resolved or `NO_TARIFF` flagged | Pending | `ClaimLineCreated` | claims-service | **No double-billing**; duplicates denied `DUPLICATE_CLAIM` |
+| Pending | approve | recommendation clean; within auth scope + limits | Approved | `ClaimLineDecided`; `allowed_amount` set | Claims Officer | Append-only `claim_decision` (rule_version, correlation id) |
+| Pending | partially-approve | allowed < billed (scope/limit/tariff cap) | PartiallyApproved | `ClaimLineDecided` | Claims Officer | **Reason code + rationale mandatory** |
+| Pending | deny | any blocking reason code applies | Denied | `ClaimLineDecided` | Claims Officer | **Reason code + rationale mandatory** |
+| Pending / Approved / PartiallyApproved / Adjusted | adjust | signed `amount_delta` ≠ 0; recovery references the original line | Adjusted | `ClaimAdjusted`; batch rollup recomputed | Claims Officer / Reviewer | Append-only `claim_adjustment`; before/after amounts audited |
+| Any decided | void | compensating reversal only (never an edit) | Void | `ClaimLineVoided` | Claims Reviewer (dual control) | Frees the `fulfillment_ref` for a corrected re-claim |
+| Denied | (re-decide) | via claim `Appealed` → re-adjudication only | Pending | `ClaimAdjudicated` | Claims Officer (≠ original decider) | New decision row; prior rows preserved |
+
+### Claim-line guards (invariant detail)
+- **Unique fulfillment reference:** at most one live (non-`Void`) payable line per `order_fulfillment`/`dispense_event` — the no-double-billing invariant, enforced by a partial unique index ([22 §10A.2](22-data-dictionary.md)).
+- **Deny/adjust require evidence:** a coded reason **and** free-text rationale; overrides above the configured value threshold need a second approver (dual control).
+- **No guessed prices:** missing tariff ⇒ `NO_TARIFF` → manual pricing, never an inferred amount.
+- **Clinical firewall:** `NOT_MEDICALLY_NECESSARY` can only originate from a `ClinicalReview` opinion, never from the Claims Officer.
+
+---
+
+## 9. Claim Batch Lifecycle
+
+Canonical: `Open → UnderReview → Decided → SettlementIssued → Closed`; plus `Cancelled`. A batch is the unit of review and settlement for one payee.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Open: create batch (date range / branch / group / manual)
+    Open --> UnderReview: lock selection, start review
+    Open --> Cancelled: cancel (empty / created in error)
+    UnderReview --> Open: reopen for re-selection
+    UnderReview --> Decided: every line decided
+    UnderReview --> Cancelled: cancel (reason mandatory)
+    Decided --> SettlementIssued: settlement advice generated
+    SettlementIssued --> Closed: hand-off acknowledged / payment ref recorded
+    Closed --> [*]
+    Cancelled --> [*]
+```
+
+| From | Event | Guard / Condition | To | Side-effects / Emitted Event | Actor / Role | Audit note |
+|---|---|---|---|---|---|---|
+| — | create | payee homogeneous; **each claim in at most one open batch** | Open | `BatchCreated` | Claims Officer | Selection mode + selector recorded |
+| Open | add / remove claim | claim not in another open batch; not already settled | Open | `BatchClaimAdded` / `BatchClaimRemoved` | Claims Officer | Removal audited |
+| Open | start-review | ≥ 1 claim in batch | UnderReview | `BatchUnderReview` | Claims Officer | Selection locked; SLA timer starts |
+| UnderReview | remove claim | **exception path** — reason mandatory | UnderReview | `BatchClaimRemoved` | Claims Reviewer | Audited as an exception |
+| UnderReview | reopen | no decisions issued yet | Open | `BatchReopened` | Claims Reviewer | Reason recorded |
+| UnderReview | decide | **every line of every claim has a recorded decision** | Decided | `BatchDecided`; rollup totals recomputed | Claims Reviewer | Totals snapshot audited |
+| Decided | issue-settlement | totals reconciled; SoD: releaser ≠ batch creator | SettlementIssued | `SettlementAdviceIssued`; immutable doc to WORM bucket | Claims Reviewer / Finance | **Totals frozen**; export audited, no clinical fields |
+| SettlementIssued | close | hand-off acknowledged; optional external payment reference recorded | Closed | `BatchClosed` | Finance | **Platform never executes payment** |
+| Open / UnderReview | cancel | no settlement issued | Cancelled | `BatchCancelled`; claims released back to the pool | Claims Reviewer | Reason mandatory |
+
+### Batch guards (invariant detail)
+- **Decided requires completeness:** the batch cannot reach `Decided` while any line is still `Pending`.
+- **One open batch per claim:** enforced by a partial unique index, so a claim can never be settled twice.
+- **Frozen totals:** `total_claimed/priced/approved/adjusted/denied` and `net_payable` are recomputed on every decision/adjustment and **immutable from `SettlementIssued`**; later corrections go into a *new* batch as `Recovery`/`Clawback`.
+- **Net payable ≥ 0** for a batch unless an explicit, dual-controlled approval is recorded.
+
+---
+
+## 10. Reimbursement Lifecycle (beneficiary out-of-pocket)
+
+Canonical: `Submitted → OcrProcessing → (AutoMatched | ManualAssessment) → Adjudicating → (Approved | PartiallyApproved | Denied) → Paid (recorded)`; plus `Void`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Submitted: submit receipts + result/dispense proof
+    Submitted --> OcrProcessing: file validated + malware scanned
+    Submitted --> Void: withdrawn / invalid files
+    OcrProcessing --> AutoMatched: high-confidence match to authorized Rx/order
+    OcrProcessing --> ManualAssessment: low confidence / ambiguous / mismatch
+    AutoMatched --> Adjudicating: human confirms extracted values
+    ManualAssessment --> Adjudicating: reviewer matches by hand
+    ManualAssessment --> Denied: unmatchable / illegible
+    Adjudicating --> Approved: fully reimbursable
+    Adjudicating --> PartiallyApproved: capped / partially covered
+    Adjudicating --> Denied: not reimbursable (coded reason)
+    Approved --> Paid: payment recorded (external)
+    PartiallyApproved --> Paid: payment recorded (external)
+    Approved --> Void: compensating reversal
+    PartiallyApproved --> Void: compensating reversal
+    Denied --> [*]
+    Paid --> [*]
+    Void --> [*]
+```
+
+| From | Event | Guard / Condition | To | Side-effects / Emitted Event | Actor / Role | Audit note |
+|---|---|---|---|---|---|---|
+| — | submit | receipts + result/dispense proof attached | Submitted | `ReimbursementSubmitted` | Beneficiary / Reception / Case Manager | Documents stored encrypted in document-service |
+| Submitted | scan-and-queue | file type/size valid AND malware scan clean | OcrProcessing | `ReimbursementOcrQueued` | document-service / claims-service | Rejected uploads audited |
+| Submitted | withdraw / reject-files | withdrawn or unusable files | Void | `ReimbursementVoided` | Beneficiary / Claims Officer | Reason recorded |
+| OcrProcessing | auto-match | confidence ≥ threshold AND match to an **authorized** order/prescription | AutoMatched | `ReimbursementMatched`; pre-fill claim lines | claims-service (`IDocumentOcrProvider`) | `match_confidence` + `match_method=AutoOcr` stored |
+| OcrProcessing | route-manual | **low confidence OR any mismatch** | ManualAssessment | `ReimbursementRequiresManualAssessment` | claims-service | OCR is assistive — never auto-final |
+| AutoMatched | confirm | **human accepts** each extracted value (`accepted_by`/`accepted_at`) | Adjudicating | `ClaimCreated` (origin `Reimbursement`) | Claims Officer | No OCR value affects money before confirmation |
+| ManualAssessment | match-manually | reviewer links the authorized order/prescription | Adjudicating | `ReimbursementMatched` (`match_method=Manual`) | Claims Officer | Manual match justified |
+| ManualAssessment | deny | unmatchable / illegible receipt | Denied | `ClaimDenied` | Claims Officer | `ILLEGIBLE_DOCUMENT` / `RECEIPT_MISMATCH` / `NO_FULFILLMENT_RECORD` |
+| Adjudicating | approve | evidence complete; amount within cap | Approved | `ClaimApproved` | Claims Officer | Cap rule applied and audited |
+| Adjudicating | partially-approve | receipt above cap or partially covered | PartiallyApproved | `ClaimPartiallyApproved` | Claims Officer | **Reason code + rationale mandatory** |
+| Adjudicating | deny | no authorization / not covered / not rendered | Denied | `ClaimDenied` | Claims Officer | Coded reason mandatory |
+| Approved / PartiallyApproved | record-payment | reimbursement batch settled externally | Paid (recorded) | `ReimbursementPaymentRecorded` | Finance | **Record only — platform moves no money**; no bank details stored |
+| Approved / PartiallyApproved | void | compensating reversal | Void | `ClaimVoided` | Claims Reviewer (dual control) | Justification mandatory |
+
+### Reimbursement guards (invariant detail)
+- **OCR is assistive, never authoritative:** every extracted value carries a confidence score and source region; low confidence, ambiguity, or any mismatch **must** route to `ManualAssessment`, and a human confirms before anything affects money.
+- **Payable cap:** reimbursement = **min(contract tariff, receipt amount)** unless the officer records an explicit, audited override with justification.
+- **Evidence required:** an authorized underlying order/prescription (or an explicitly allowed non-gated category), a legible receipt, and proof the service was rendered — *existence* of a result/dispense record only, never its clinical content.
+
+---
+
 ## Consistency Notes
 - Order & Prescription share the **atomic-consume / no-reuse** pattern — the only difference is domain (tests vs meds) and pharmacy-specific substitution/OOS guards.
 - Authorization decisions feed the gates in Order/Prescription (`route-approval`/`approve`).
 - Appointment `NoShow` and `Cancelled` free slots that drive **waitlist promotion** (see [05](05-business-process-maps.md) X3 and [06](06-bpmn-diagrams.md) BPMN-3).
+- Claim / Claim Line / Batch / Reimbursement (§7–§10) are **strictly downstream** of the atomic-consume and dispense invariants: the `order_fulfillment` / `dispense_event` rows are the authoritative usage record, and the unique `fulfillment_ref` guard is the money-side mirror of the **no-reuse** invariant. Claims never touch `coverage_limit.consumed_value`.
+- **Audit (applies to all claims transitions, per the global invariants above):** every transition, decision, adjustment, and export writes an **immutable, hash-chained** `audit_event` (actor, from/to, before/after minimized amounts, correlation id, justification where required); nothing is mutated or hard-deleted — corrections are append-only adjustments or a compensating `Void`. **Illegal transitions are rejected and audited as `TransitionDenied`.**
 
 ## Cross-References
 - Process maps: [05-business-process-maps.md](05-business-process-maps.md)
 - BPMN swimlanes with explicit gateways: [06-bpmn-diagrams.md](06-bpmn-diagrams.md)
 - Sequence diagrams (atomic consume, partial dispense, approvals): [24-sequence-diagrams.md](24-sequence-diagrams.md)
+- Claims module design (origination, batching, adjudication, settlement): [36-claims-management.md](36-claims-management.md)
+- Claims schema, enums & reason codes: [22-data-dictionary.md](22-data-dictionary.md) §10A / §11.5
 - Foundations & glossary: [0A-DESIGN-FOUNDATIONS.md](0A-DESIGN-FOUNDATIONS.md)

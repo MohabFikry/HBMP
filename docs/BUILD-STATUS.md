@@ -3,7 +3,7 @@
 Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `HBMP-Design/claude-code-prompts/00-MASTER-PROMPT-LIST.md`). Status: ☐ not started · ◐ in progress · ☑ done.
 
 ## Dependency order
-`0 → 0b → 1 → 2 → 2b → 3 → 4 → 5,6 (parallel) → 7 → 8 → 10`; `8b` + `9` run continuously from R0/R1; `11` gates go-live; `12` after 11; `13` after core.
+`0 → 0b → 1 → 2 → 2b → 3 → 4 → 5,6 (parallel) → 7 → 8 → 10 → 10b`; `8b` + `9` run continuously from R0/R1; `11` gates go-live; `12` after 11; `13` after core. `10b` (claims) needs 5/6 fulfillment records, 2b contracts/tariffs, and 7 authorizations.
 
 ## ⇒ New here? Read docs/HANDOFF.md first (full continuation guide).
 
@@ -56,6 +56,15 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 10 | Case + Finance | 10.1 `case-service` + beneficiary-360 | ☐ | |
 | 10 | Case + Finance | 10.2 `finance-service` (no-diagnosis) | ☐ | |
 | 10 | Case + Finance | 10.3 Case + Finance portals | ☐ | |
+| 10b | Claims Mgmt | 10b.1 `claims-service` + auto-derived claims (no double-billing) | ☐ | |
+| 10b | Claims Mgmt | 10b.2 Batching + batch lifecycle (single-open-batch) | ☐ | |
+| 10b | Claims Mgmt | 10b.3 Automated pre-adjudication (9-step, all reasons) | ☐ | |
+| 10b | Claims Mgmt | 10b.4 Officer review + line-level decisions (SoD, dual control) | ☐ | |
+| 10b | Claims Mgmt | 10b.5 Provider-submitted claims + document matching | ☐ | |
+| 10b | Claims Mgmt | 10b.6 Beneficiary reimbursement + OCR (assistive) | ☐ | |
+| 10b | Claims Mgmt | 10b.7 Reconciliation + append-only adjustments | ☐ | |
+| 10b | Claims Mgmt | 10b.8 Settlement advice + exports (no payment execution) | ☐ | |
+| 10b | Claims Mgmt | 10b.9 Appeals + claims KPIs | ☐ | |
 | 11 | Hardening/NFR | 11.1 Perf/scale · 11.2 Security sign-off · 11.3 DR/observability | ☐ | |
 | 12 | Migration/Go-live | 12.1 Migration pipelines · 12.2 Release mgmt · 12.3 Pilot + hypercare | ☐ | |
 | 13 | Interoperability | 13.1 FHIR R4 façade · 13.2 Adapters/ACL · 13.3 Interop test harness | ☐ | |

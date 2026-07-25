@@ -51,8 +51,19 @@ I18N + RTL + THEMING + LOGO
 - Light + dark themes (dark surface = --mersal-teal-900) via token switch.
 - Mersal logo lockup component: official white mark on teal tile, with accessible text fallback ("Mersal"); scales for nav rail + auth screen. Provide LTR/RTL lockups.
 
+VISUAL REFINEMENT v1.1 (../0B-DESIGN-SYSTEM-UI.md §10b — NORMATIVE, matches the current prototypes)
+- Layered page canvas: subtle top-down --page-wash gradient (~340px fade into --surface-0) in BOTH themes.
+- Elevation physics: refined --elev-1 (dual-layer soft shadow) + --elev-hover; interactive cards/buttons lift on hover, settle on :active.
+- Motion base: all interactive elements transition background/border/color/shadow 200ms ease-out + transform 120ms; prefers-reduced-motion disables.
+- Primary button: token teal fill + top-light gradient sheen + inner highlight; in DARK theme the primary label is deep ink #04282A (the dark accent is light teal — white text fails AA).
+- KPI cards: 3px --brand→--accent gradient top hairline, uppercase micro-label, 34px tabular numerals (tight tracking), delta as bordered pill, hover lift.
+- Table headers & nav-group labels: micro-label style — 11.5px, uppercase, .06em tracking, --text-3; hairline dividers between nav groups.
+- Page header: h1 = 28px title-1; eyebrow/role label carries a 16×3px --brand→--gold gradient brand tick.
+- Dark glass hairline --glass-brd alpha ≥ .28.
+- Brand gradients are DECORATIVE ONLY (hairlines/ticks) — never text or meaning-bearing fills; all v1.0 accessibility rules unchanged.
+
 ACCEPTANCE
-- Given the built library, When rendered, Then it matches the prototypes' look/feel (type, color, glass, spacing).
+- Given the built library, When rendered, Then it matches the prototypes' look/feel (type, color, glass, spacing) INCLUDING the v1.1 refinements above.
 - Given any interactive component, When keyboard-navigated, Then focus is visible (3px), targets ≥44px, and it works identically in AR/RTL and EN/LTR.
 - Given axe in CI, When it runs on the component gallery/Storybook, Then zero serious/critical violations (build fails otherwise).
 

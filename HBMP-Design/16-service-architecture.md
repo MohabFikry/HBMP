@@ -27,18 +27,33 @@ HBMP is a **microservices** platform of reusable core services (identity, patien
 | **identity/auth** | Keycloak (OIDC) integration, RBAC, token/scope issuance | `identity` | `/users`, `/roles`, token introspection | `UserProvisioned`, `RoleAssigned` | `ProviderOnboarded` |
 | **patient-service** | Beneficiary master, identifiers, contacts, family | `patient` | `/beneficiaries`, `/beneficiaries/{id}/identifiers` | `BeneficiaryRegistered`, `BeneficiaryStatusChanged` | `DocumentAttached` |
 | **policy-service** | Policies, coverage, limits, benefit categories | `policy` | `/policies`, `/coverages` | `CoverageActivated`, `CoverageLimitChanged` | `BeneficiaryStatusChanged` |
-| **eligibility-service** | Compute + cache eligibility snapshots | `eligibility` | `/eligibility/check` | `EligibilityRecomputed` | `CoverageActivated`, `CoverageLimitChanged`, `OrderConsumed`, `DispenseCompleted` |
+| **eligibility-service** | Compute + cache eligibility snapshots | `eligibility` | `/eligibility/check` | `EligibilityRecomputed` | `CoverageActivated`, `CoverageLimitChanged`, `OrderLinesConsumed`, `RxLinesDispensed` |
 | **emr-service** | Appointments, encounters, SOAP notes, diagnoses, vitals, allergies, med history | `emr` | `/appointments`, `/encounters`, `/encounters/{id}/notes` | `EncounterCreated`, `EncounterFinished`, `DiagnosisRecorded` | `BeneficiaryRegistered` |
-| **orders-service** | Investigation orders, lines, fulfillment (consume) | `orders` | `/investigation-orders`, `.../consume` | `OrderRequested`, `OrderApproved`, `OrderConsumed`, `OrderCompleted` | `AuthorizationDecided`, `EncounterCreated` |
+| **orders-service** | Investigation orders, lines, fulfillment (consume) | `orders` | `/investigation-orders`, `.../consume` | `OrderRequested`, `OrderApproved`, `OrderLinesConsumed`, `OrderCompleted` | `AuthorizationDecided`, `EncounterCreated` |
 | **approvals-service** | Authorizations & decisions, referrals | `approvals` | `/authorizations`, `.../decision`, `/referrals` | `AuthorizationRequested`, `AuthorizationDecided`, `ReferralCreated` | `OrderRequested`, `PrescriptionSubmitted` |
-| **pharmacy-service** | Prescriptions, lines, dispense events | `pharmacy` | `/prescriptions`, `.../dispense` | `PrescriptionSubmitted`, `PrescriptionApproved`, `DispenseCompleted` | `AuthorizationDecided` |
+| **pharmacy-service** | Prescriptions, lines, dispense events | `pharmacy` | `/prescriptions`, `.../dispense` | `PrescriptionSubmitted`, `PrescriptionApproved`, `RxLinesDispensed` | `AuthorizationDecided` |
 | **provider-service** | Providers, locations, contracts, service lines | `provider` | `/providers`, `/providers/{id}/contracts` | `ProviderOnboarded`, `ContractActivated` | — |
+| **claims-service** *(Phase 10b)* | Claim origination (auto-derived, provider-submitted, beneficiary reimbursement), batching, pre-adjudication, line-level decisions, adjustments, settlement advice ([36-claims-management.md](36-claims-management.md)) | `claims` | `/claims`, `/claims/{id}/lines/{lineId}/decision`, `/claim-batches`, `/claim-batches/{id}/settlement-advice`, `/reimbursement-requests` | `ClaimCreated`, `ClaimSubmitted`, `ClaimAdjudicated`, `ClaimLineDecided`, `ClaimApproved`, `ClaimPartiallyApproved`, `ClaimDenied`, `ClaimAdjusted`, `ClaimVoided`, `ClaimAppealed`, `ReimbursementSubmitted`, `ReimbursementMatched`, `ReimbursementRequiresManualAssessment`, `BatchCreated`, `BatchUnderReview`, `BatchDecided`, `SettlementAdviceIssued` | `OrderLinesConsumed`, `RxLinesDispensed`, `AuthorizationDecided`, `CoverageChanged` |
 | **notification-service** | Templated multi-channel notifications | `notification` | `/notifications` (internal) | `NotificationSent` | *(most domain events)* |
 | **reporting-service** | Read models, dashboards, exports | read replicas + OpenSearch | `/reports/*` | — | *(all domain events)* |
 | **audit-service** | Central append-only audit log | `audit` | `/audit/events` (query) | — | *(audit stream from all)* |
 | **document-service** | Document metadata + MinIO object-storage orchestration | `document` | `/documents`, `/documents/{id}/content` | `DocumentAttached` | — |
 
 Supporting infra: **Event Bus** (NATS JetStream domain events), **Object Storage** (MinIO, S3-compatible, WORM), **Relational DB** (self-hosted PostgreSQL, Patroni HA), **Search Engine** (OpenSearch), **Caching** (Valkey), **Message Queue** (RabbitMQ durable/quorum queues for commands/outbox). Secrets/keys in **OpenBao**; orchestration on **k3s** (Docker Compose at Tier 1).
+
+### 2.1 claims-service boundaries & invariants (Phase 10b)
+
+`claims-service` is a **financial-adjudication** bounded context added on top of the completed core (authorizations, fulfillment, contracts/tariffs) — see [36-claims-management.md](36-claims-management.md) for the authoritative design.
+
+- **Owned data (`claims` schema):** `claim`, `claim_line`, `claim_decision`, `claim_adjustment`, `claim_batch`, `reimbursement_request`, `claim_document`, `ocr_extraction`. Decisions and adjustments are **append-only**; corrections are compensating adjustments or Void + re-claim, never edits or hard deletes.
+- **Synchronous dependencies (in-mesh, never via the public gateway):** provider-service (contract tariffs + network/contract effectivity), policy-service/eligibility-service (coverage validity on the service date), approvals-service (authorization linkage and scope caps), document-service (invoices/receipts/results, OCR, WORM-stored settlement advice), masterdata (CPT/LOINC/LOCAL/drug code validation).
+- **Never reads emr-service.** Claims adjudicate on codes and amounts. Diagnoses, notes and lab/imaging **result values** are outside this service's blast radius; result *existence* (date + document reference) is the only evidence surfaced. Lines needing medical-necessity judgement are routed to a clinical reviewer in approvals-service, who owns that view.
+- **Never executes payments.** The terminal artifact is an immutable settlement advice handed to Finance/treasury; money moves outside the platform. An optional external payment reference may be recorded back against the batch.
+- **Never re-decrements coverage.** `order_fulfillment`/`dispense_event` rows remain the authoritative usage record; claims reconcile against them and never maintain a parallel accumulator.
+- **Cross-service references are values, not FKs** — `beneficiary_id`, `provider_id`, `authorization_id`, `order_fulfillment_id`, `dispense_event_id` are stored as identifiers with denormalized display fields, consistent with schema-per-service isolation (§1).
+- **Outbox + idempotency** as everywhere else: every claims event is written in the same transaction as the state change and relayed; consumers dedupe on `event.id`; claim submission, decision, adjustment and batch settlement require an `Idempotency-Key` ([17-api-specifications.md](17-api-specifications.md)). `UNIQUE` on the fulfillment/dispense reference enforces one payable line per delivered item (`DUPLICATE_CLAIM`), and a partial unique index keeps a claim in at most one open batch.
+
+> **Naming note:** `OrderLinesConsumed` and `RxLinesDispensed` are the names the **implemented** orders/pharmacy services actually emit (phases 5 & 6) — this catalog and [36](36-claims-management.md) match the shipped code. `CoverageChanged` in [36](36-claims-management.md) corresponds to this catalog's `CoverageActivated` + `CoverageLimitChanged` pair.
 
 ---
 
@@ -52,6 +67,7 @@ C4Context
     Person(pharmacist, "Pharmacist", "Dispenses medication")
     Person(approver, "Benefit Approver", "Authorizes orders/prescriptions/referrals")
     Person(provider_user, "Provider Staff", "Performs labs/imaging, fulfills orders")
+    Person(claims_officer, "Claims Officer", "Reviews claim batches, decides lines, issues settlement advice")
 
     System(hbmp, "HBMP Platform", "Benefit administration + EMR for refugee beneficiaries")
 
@@ -64,6 +80,7 @@ C4Context
     Rel(pharmacist, hbmp, "Uses", "HTTPS")
     Rel(approver, hbmp, "Uses", "HTTPS")
     Rel(provider_user, hbmp, "Uses", "HTTPS")
+    Rel(claims_officer, hbmp, "Uses", "HTTPS")
     Rel(hbmp, entra, "AuthN/OIDC")
     Rel(hbmp, sms, "Sends notifications")
     Rel(hbmp, unhcr, "Validates identifiers (batch)")
@@ -95,6 +112,7 @@ flowchart TB
         ORD[orders-service]
         APR[approvals-service]
         PHA[pharmacy-service]
+        CLM[claims-service]
         NOT[notification-service]
         RPT[reporting-service]
         AUD[audit-service]
@@ -110,7 +128,7 @@ flowchart TB
     end
 
     FD --> APIM --> WEBBFF & MOBBFF
-    WEBBFF --> IDS & PAT & POL & ELG & PRV & EMR & ORD & APR & PHA & DOC & RPT
+    WEBBFF --> IDS & PAT & POL & ELG & PRV & EMR & ORD & APR & PHA & CLM & DOC & RPT
     MOBBFF --> PAT & ELG & EMR & ORD & PHA & NOT
 
     Core --- PG
@@ -119,6 +137,9 @@ flowchart TB
     PAT --- RED
     RPT --- SRCH
     DOC --- BLOB
+    CLM -- tariffs --> PRV
+    CLM -- auth linkage --> APR
+    CLM -- docs + OCR + WORM advice --> DOC
     Core -. events .-> SB
     Clinical -. events .-> SB
     SB -. fan-out .-> NOT & RPT & AUD & ELG
@@ -159,7 +180,7 @@ Transport: **NATS JetStream** (durable streams, at-least-once, ordered subjects 
 ```json
 {
   "specversion": "1.0",
-  "type": "hbmp.orders.OrderConsumed.v1",
+  "type": "hbmp.orders.OrderLinesConsumed.v1",
   "source": "orders-service",
   "id": "01J...", 
   "time": "2026-07-21T10:15:00Z",
@@ -180,9 +201,12 @@ Transport: **NATS JetStream** (durable streams, at-least-once, ordered subjects 
 | `hbmp.policy.CoverageLimitChanged.v1` | policy | eligibility | Invalidate cache |
 | `hbmp.orders.OrderRequested.v1` | orders | approvals | Trigger authorization if required |
 | `hbmp.approvals.AuthorizationDecided.v1` | approvals | orders, pharmacy | Advance order/rx state |
-| `hbmp.orders.OrderConsumed.v1` | orders | eligibility, reporting, audit | Decrement limits, analytics |
-| `hbmp.pharmacy.DispenseCompleted.v1` | pharmacy | eligibility, reporting, audit | Decrement pharmacy limits |
+| `hbmp.orders.OrderLinesConsumed.v1` | orders | eligibility, reporting, audit | Decrement limits, analytics |
+| `hbmp.pharmacy.RxLinesDispensed.v1` | pharmacy | eligibility, reporting, audit | Decrement pharmacy limits |
 | `hbmp.document.DocumentAttached.v1` | document | orders, emr | Link results to orders/encounters |
+| `hbmp.claims.ClaimLineDecided.v1` | claims | reporting, notification, audit | Roll decisions up to batch totals, notify payee |
+| `hbmp.claims.BatchDecided.v1` | claims | claims (settlement), reporting | Freeze rollups, trigger settlement advice |
+| `hbmp.claims.SettlementAdviceIssued.v1` | claims | notification, reporting, audit | Hand-off artifact to Finance/provider (no payment execution) |
 | `hbmp.*.` (all) | all | audit, reporting | Audit + read-model projection |
 
 Versioning: event `type` carries `.vN`; new fields are additive; breaking changes bump the version and run **dual-publish** during migration.
@@ -211,10 +235,10 @@ sequenceDiagram
         DB-->>ORD: constraint violation
         ORD-->>P: 409 Conflict (or 200 replay if same key+payload)
     else success
-        ORD->>DB: write outbox: OrderConsumed
+        ORD->>DB: write outbox: OrderLinesConsumed
         ORD->>DB: COMMIT
         ORD-->>P: 200 { lineStatus, remaining }
-        ORD->>SB: publish OrderConsumed (async relay)
+        ORD->>SB: publish OrderLinesConsumed (async relay)
         SB->>ELG: decrement coverage_limit.consumed_value
     end
 ```
@@ -222,7 +246,7 @@ sequenceDiagram
 - **Atomicity**: fulfillment insert + line update + outbox insert in one transaction.
 - **Idempotency**: `UNIQUE(idempotency_key)`; a replay with the same key returns the original result (stored response), never a second consume.
 - **No over/duplicate use**: guarded conditional `UPDATE` + `CHECK (quantity_consumed <= quantity_ordered)`.
-- Limit decrement in eligibility is **eventually consistent** via `OrderConsumed`; the *authoritative* usage record is the fulfillment row, so a lagging eligibility cache can never cause double-spend of the order itself.
+- Limit decrement in eligibility is **eventually consistent** via `OrderLinesConsumed`; the *authoritative* usage record is the fulfillment row, so a lagging eligibility cache can never cause double-spend of the order itself.
 
 ### 8.2 Approval saga (order requires authorization)
 
@@ -259,7 +283,7 @@ This is a **choreographed saga** (no central orchestrator). Compensation on reje
 
 ## 9. Caching Strategy
 
-- **Eligibility snapshots** cached in **Valkey** keyed `elig:{beneficiaryId}:{coverageId}` with TTL + `version_hash`. Reads are cache-first; miss → recompute from policy/coverage → store. Invalidation is event-driven (`CoverageLimitChanged`, `OrderConsumed`, `DispenseCompleted`, `BeneficiaryStatusChanged`).
+- **Eligibility snapshots** cached in **Valkey** keyed `elig:{beneficiaryId}:{coverageId}` with TTL + `version_hash`. Reads are cache-first; miss → recompute from policy/coverage → store. Invalidation is event-driven (`CoverageLimitChanged`, `OrderLinesConsumed`, `RxLinesDispensed`, `BeneficiaryStatusChanged`).
 - **Master data** (ICD/CPT/LOINC/drug) cached read-through with long TTL; invalidated on catalog publish.
 - **Beneficiary lookups** (by identifier) cached short TTL for the registration/point-of-care hot path.
 - Cache is **never** the source of truth for consumption; it accelerates the *decision*, while the fulfillment/dispense tables enforce correctness.
@@ -324,5 +348,6 @@ This is a **choreographed saga** (no central orchestrator). Compensation on reje
 - Endpoint contracts & idempotency headers: [17-api-specifications.md](17-api-specifications.md)
 - Status transition rules referenced by sagas: [23-state-machines.md](23-state-machines.md)
 - RLS/tenant/PHI enforcement: [18-security-model.md](18-security-model.md)
+- claims-service design (origination, batching, adjudication, settlement): [36-claims-management.md](36-claims-management.md)
 - Open-source infra realization: [25-deployment-architecture.md](25-deployment-architecture.md)
 - Authoritative stack: [0C-OPEN-SOURCE-STACK.md](0C-OPEN-SOURCE-STACK.md)
