@@ -19,6 +19,8 @@ public static class DependencyInjection
         services.AddScoped<ClaimNoIssuer>();
         services.AddScoped<ClaimIntakeExecutor>();
         services.AddScoped<ClaimsQueries>();
+        services.AddScoped<BatchNoIssuer>();
+        services.AddScoped<BatchService>();
         return services;
     }
 }

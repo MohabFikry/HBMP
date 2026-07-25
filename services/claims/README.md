@@ -38,9 +38,14 @@ data (tariffs, authorizations, eligibility, fulfillment) comes over the API/even
   the no-double-billing unique index, RLS, the idempotent auto-derive intake executor (`ClaimIntakeExecutor`), tariff
   pricing (`IContractTariffProvider` → provider-service), min-necessary reads, and the `/api/v1/claims/intake` seam
   (mirrors finance `/projections` pending the fanout bus). Emits `ClaimCreated` / `ClaimLineCreated` via the outbox.
-- 10b.2 batching · 10b.3 9-step pre-adjudication · 10b.4 officer line decisions (SoD + dual control) · 10b.5
-  provider-submitted · 10b.6 reimbursement + OCR · 10b.7 reconciliation + adjustments · 10b.8 settlement advice +
-  exports · 10b.9 appeals + KPIs. *(built in subsequent slices)*
+- **10b.2 — batching + batch lifecycle.** `claim_batch` + `claim_batch_item` (+ `batch_seq`), the single-open-batch
+  partial unique index `ux_claim_one_open_batch` (a claim can never sit in two live batches → never settled twice),
+  the 23 §9 lifecycle (Open→UnderReview→Decided→SettlementIssued→Closed + Cancelled) with its guards (≥1 claim to
+  review, every line decided to Decide, reason to cancel/exception-remove), and rollups recomputed on every change and
+  frozen at SettlementIssued. Emits `BatchCreated` / `BatchUnderReview` / `BatchDecided` via the outbox.
+- 10b.3 9-step pre-adjudication · 10b.4 officer line decisions (SoD + dual control) · 10b.5 provider-submitted ·
+  10b.6 reimbursement + OCR · 10b.7 reconciliation + adjustments · 10b.8 settlement advice + exports · 10b.9 appeals
+  + KPIs. *(built in subsequent slices)*
 
 ## Endpoints (10b.1)
 

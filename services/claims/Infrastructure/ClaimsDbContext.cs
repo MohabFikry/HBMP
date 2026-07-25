@@ -12,6 +12,8 @@ public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options) :
 
     public DbSet<Claim> Claims => Set<Claim>();
     public DbSet<ClaimLine> ClaimLines => Set<ClaimLine>();
+    public DbSet<ClaimBatch> ClaimBatches => Set<ClaimBatch>();
+    public DbSet<ClaimBatchItem> ClaimBatchItems => Set<ClaimBatchItem>();
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -48,6 +50,29 @@ public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options) :
             e.HasIndex(x => x.ClaimId);
             e.HasIndex(x => x.Status);
             e.HasIndex(x => new { x.CodeSystem, x.Code });
+        });
+
+        b.Entity<ClaimBatch>(e =>
+        {
+            e.ToTable("claim_batch");
+            e.HasKey(x => x.BatchId);
+            e.Property(x => x.BatchType).HasConversion<string>().HasColumnName("batch_type");
+            e.Property(x => x.SelectionMode).HasConversion<string>().HasColumnName("selection_mode");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
+            e.HasIndex(x => x.BatchNo).IsUnique();
+            e.HasIndex(x => new { x.PayeeProviderId, x.PeriodFrom });
+            e.HasIndex(x => x.Status);
+            e.HasMany(x => x.Items).WithOne().HasForeignKey(i => i.BatchId);
+        });
+
+        b.Entity<ClaimBatchItem>(e =>
+        {
+            e.ToTable("claim_batch_item");
+            e.HasKey(x => x.BatchItemId);
+            e.Property(x => x.BatchStatusSnapshot).HasConversion<string>().HasColumnName("batch_status");
+            e.HasIndex(x => x.BatchId);
+            e.HasIndex(x => x.ClaimId);
         });
 
         b.Entity<ProcessedEvent>(e =>
