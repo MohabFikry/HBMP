@@ -47,9 +47,9 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 8 | Notify+Reporting | 8.1 `notification-service` | ☑ | 35604d3 |
 | 8 | Notify+Reporting | 8.2 `reporting-service` KPI read-models | ☑ | 4768621 |
 | 8 | Notify+Reporting | 8.3 Executive dashboard contracts | ☑ | 4768621 |
-| 8b | Admin Platform | 8b.1 User/role admin + SoD + access review | ☐ | |
-| 8b | Admin Platform | 8b.2 Master-data/template/config admin | ☐ | |
-| 8b | Admin Platform | 8b.3 Tenant/provider + break-glass governance | ☐ | |
+| 8b | Admin Platform | 8b.1 User/role admin + SoD + access review | ☑ | 70e8f17 |
+| 8b | Admin Platform | 8b.2 Master-data/template/config admin | ☑ | e761ea3 |
+| 8b | Admin Platform | 8b.3 Tenant/provider + break-glass governance | ☑ | 8107dc1 |
 | 9 | Frontend | 9.1 Design system in code | ☐ | |
 | 9 | Frontend | 9.2 Role portals + permission routing | ☐ | |
 | 9 | Frontend | 9.3 Flagship screens | ☐ | |
