@@ -16,6 +16,10 @@ export const zAppointmentRow = z.object({
   scheduledStart: zInstant,
   /** True when the appointment is Booked (the only state reception can check in). */
   checkInEligible: z.boolean(),
+  /** The emr row's `xmin` optimistic-concurrency token (opt-in): echoed as `If-Match` on check-in so a
+   * stale board loses to a concurrent transition with 412 instead of silently double-acting. Optional —
+   * absent for a fixture/older service, in which case check-in proceeds without the guard. */
+  rowVersion: z.number().int().optional(),
 });
 export type AppointmentRow = z.infer<typeof zAppointmentRow>;
 

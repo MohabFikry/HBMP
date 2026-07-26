@@ -36,16 +36,19 @@ public sealed record BookAppointmentRequest(
     string? ReferralRef, Guid? OriginEncounterId, bool JoinWaitlistIfFull,
     string? PreferredChannel = null);
 
-/// <summary>Minimum-necessary appointment view — scheduling + identity only, never EMR/clinical data.</summary>
+/// <summary>Minimum-necessary appointment view — scheduling + identity only, never EMR/clinical data.
+/// <see cref="RowVersion"/> is the row's <c>xmin</c> optimistic-concurrency token: it lets a client echo the
+/// value it read as <c>If-Match</c> on a transition (opt-in 412 on a stale write). It is surfaced on every
+/// row so the LIST endpoint carries a per-row token too, where a per-response <c>ETag</c> header cannot.</summary>
 public sealed record AppointmentResponse(
     Guid AppointmentId, Guid BeneficiaryId, Guid ProviderId, Guid LocationId, Guid? SlotId,
     string AppointmentType, string Status, DateTimeOffset ScheduledStart, DateTimeOffset ScheduledEnd,
-    string? ReferralRef, Guid? OriginEncounterId)
+    string? ReferralRef, Guid? OriginEncounterId, uint RowVersion)
 {
     public static AppointmentResponse From(Appointment a) => new(
         a.AppointmentId, a.BeneficiaryId, a.ProviderId, a.LocationId, a.SlotId,
         a.AppointmentType.ToString(), a.Status.ToString(), a.ScheduledStart, a.ScheduledEnd,
-        a.ReferralRef, a.OriginEncounterId);
+        a.ReferralRef, a.OriginEncounterId, a.RowVersion);
 }
 
 public sealed record SlotResponse(

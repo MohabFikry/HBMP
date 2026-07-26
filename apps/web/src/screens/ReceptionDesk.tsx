@@ -4,6 +4,7 @@ import type { Column } from "@mersal/design-system";
 import type { AppointmentRow, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
+import { ApiError } from "../api/http";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
@@ -20,6 +21,10 @@ const S = {
   action: { en: "Action", ar: "إجراء" },
   checkIn: { en: "Check in", ar: "تسجيل الوصول" },
   checkedIn: { en: "Checked in", ar: "تم الوصول" },
+  stale: {
+    en: "This appointment changed since the board loaded — refreshing.",
+    ar: "تغيّر هذا الموعد منذ تحميل اللوحة — يجري التحديث.",
+  },
 } satisfies Record<string, Localized>;
 
 const timeOf = (iso: string) =>
@@ -78,12 +83,24 @@ export function ReceptionCheckIn() {
   const state = useAsync<AppointmentRow[]>(() => api.appointments("booked"), []);
   const [busy, setBusy] = useState<string | null>(null);
   const [done, setDone] = useState<Set<string>>(new Set());
+  const [stale, setStale] = useState(false);
 
-  async function doCheckIn(id: string) {
-    setBusy(id);
+  async function doCheckIn(row: AppointmentRow) {
+    setBusy(row.id);
+    setStale(false);
     try {
-      await api.checkIn(id);
-      setDone((prev) => new Set(prev).add(id));
+      // Echo the version we read (opt-in If-Match): a concurrent transition invalidates our board → 412.
+      await api.checkIn(row.id, row.rowVersion);
+      setDone((prev) => new Set(prev).add(row.id));
+    } catch (e) {
+      // 412 = the row moved under us (already checked in / rescheduled elsewhere). Re-load the board rather
+      // than double-acting; any other failure re-throws for the generic handler.
+      if (e instanceof ApiError && e.status === 412) {
+        setStale(true);
+        state.reload();
+      } else {
+        throw e;
+      }
     } finally {
       setBusy(null);
     }
@@ -98,7 +115,7 @@ export function ReceptionCheckIn() {
         done.has(r.id) ? (
           <StatusChip kind="ok" label={t(S.checkedIn)} />
         ) : (
-          <Button variant="primary" size="sm" loading={busy === r.id} disabled={!r.checkInEligible} onClick={() => void doCheckIn(r.id)}>
+          <Button variant="primary" size="sm" loading={busy === r.id} disabled={!r.checkInEligible} onClick={() => void doCheckIn(r)}>
             {t(S.checkIn)}
           </Button>
         ),
@@ -111,6 +128,7 @@ export function ReceptionCheckIn() {
         <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.checkinEmpty}>
           {(rows) => (
             <div aria-live="polite">
+              {stale && <StatusChip kind="warn" label={t(S.stale)} />}
               <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.checkinTitle)} />
             </div>
           )}

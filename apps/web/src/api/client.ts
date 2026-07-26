@@ -82,7 +82,9 @@ export interface ApiClient {
   // Reception — day board (Phase 3). `filter` scopes the board: all / booked (arrivals to process) /
   // checked-in (waiting). checkIn transitions Booked → CheckedIn and enqueues a walk-in ticket.
   appointments(filter?: "all" | "booked" | "checked-in"): Promise<AppointmentRow[]>;
-  checkIn(appointmentId: string): Promise<CheckInResult>;
+  /** `rowVersion` (opt-in): the value read on the board, echoed as `If-Match` so a stale check-in loses to a
+   * concurrent transition with 412 instead of double-acting. Omit to check in without the guard. */
+  checkIn(appointmentId: string, rowVersion?: number): Promise<CheckInResult>;
 
   // Doctor — EMR (Phase 4)
   listPatients(): Promise<PatientListItem[]>;

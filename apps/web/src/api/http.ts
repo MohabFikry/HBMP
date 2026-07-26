@@ -103,9 +103,16 @@ export function getJson<T>(path: string, schema: z.ZodType<T>): Promise<T> {
 export function getRaw(path: string): Promise<unknown> {
   return request(path, { method: "GET" });
 }
-export function postRaw(path: string, body: unknown, idempotencyKey?: string): Promise<unknown> {
+export function postRaw(
+  path: string,
+  body: unknown,
+  idempotencyKey?: string,
+  opts?: { ifMatch?: string | number },
+): Promise<unknown> {
   const headers: Record<string, string> = {};
   if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+  // Optimistic-concurrency opt-in (emr appointment transitions): echo the row version we read as the ETag.
+  if (opts?.ifMatch !== undefined && opts.ifMatch !== null) headers["If-Match"] = `"${opts.ifMatch}"`;
   return request(path, { method: "POST", body: JSON.stringify(body), headers });
 }
 

@@ -352,11 +352,19 @@ export class HttpApiClient implements ApiClient {
         status: apptStatusChip(a.status),
         scheduledStart: a.scheduledStart ?? new Date().toISOString(),
         checkInEligible: String(a.status ?? "") === "Booked",
+        rowVersion: typeof a.rowVersion === "number" ? a.rowVersion : undefined,
       }),
     );
   }
-  async checkIn(appointmentId: string) {
-    const r = (await postRaw(`/appointments/${encodeURIComponent(appointmentId)}/check-in`, { priority: 1 })) as any;
+  async checkIn(appointmentId: string, rowVersion?: number) {
+    // Opt-in optimistic concurrency: echo the row version we read as If-Match; a stale board loses to a
+    // concurrent transition with 412 (surfaced as an ApiError the desk shows) instead of double check-in.
+    const r = (await postRaw(
+      `/appointments/${encodeURIComponent(appointmentId)}/check-in`,
+      { priority: 1 },
+      undefined,
+      rowVersion !== undefined ? { ifMatch: rowVersion } : undefined,
+    )) as any;
     return parseOr(zCheckInResult, { id: r?.appointmentId ?? appointmentId, status: apptStatusChip(r?.status ?? "CheckedIn") });
   }
 

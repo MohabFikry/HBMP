@@ -157,11 +157,13 @@ export class DevApiClient implements ApiClient {
           status: r.chip,
           scheduledStart: r.at,
           checkInEligible: r.eligible,
+          rowVersion: 1,
         }))),
       [],
     );
   }
-  checkIn(appointmentId: string) {
+  checkIn(appointmentId: string, _rowVersion?: number) {
+    void _rowVersion; // fixture path applies no concurrency guard; the live client echoes it as If-Match.
     return this.gate(() => ok(zCheckInResult, { id: appointmentId, status: { kind: "ok", label: loc("Checked in", "تم الوصول") } }));
   }
 
