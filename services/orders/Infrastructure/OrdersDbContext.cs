@@ -24,8 +24,10 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
             e.Property(x => x.OrderType).HasConversion<string>().HasColumnName("order_type");
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
             e.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
+            e.Property(x => x.OrderingBranchId).HasColumnName("ordering_branch_id");   // phase 14.4
             e.HasIndex(x => x.OrderNo).IsUnique();
             e.HasIndex(x => new { x.BeneficiaryId, x.Status });
+            e.HasIndex(x => x.OrderingBranchId);
             e.HasIndex(x => x.IdempotencyKey);
             e.HasMany(x => x.Lines).WithOne().HasForeignKey(l => l.OrderId);
         });

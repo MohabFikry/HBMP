@@ -23,7 +23,7 @@ public static class OrdersEndpoints
         v1.MapPost("", async (
             CreateOrderRequest req, HttpRequest http, OrdersDbContext db, OrdersGate gate, ICodeValidator codes,
             OrderRoutingOptions routing, OrderNoIssuer orderNos, IAuditClient audit, IOutbox outbox,
-            IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+            IHbmpPrincipalAccessor me, BranchScopeState branch, TimeProvider clock, CancellationToken ct) =>
         {
             var idem = http.Headers["Idempotency-Key"].ToString();
             if (string.IsNullOrWhiteSpace(idem))
@@ -62,6 +62,7 @@ public static class OrdersEndpoints
             {
                 OrderId = Guid.NewGuid(), OrderNo = await orderNos.NextAsync(now.Year, ct),
                 BeneficiaryId = req.BeneficiaryId, EncounterId = req.EncounterId, OrderingProviderId = providerId,
+                OrderingBranchId = branch.Context.ActiveBranchId,   // phase 14.4 — pin the raising branch
                 OrderType = req.OrderType, Status = OrderStatus.Requested, RequestedAt = now, ExpiresAt = req.ExpiresAt,
                 IdempotencyKey = idem, CreatedBy = actor,
                 Lines = req.Lines.Select(l => new OrderLine
@@ -114,13 +115,15 @@ public static class OrdersEndpoints
         // The orders I created, newest first, optionally filtered by status (e.g. Completed = the results inbox).
         // Scoped to the caller by CreatedBy == subject — no cross-clinician leakage, no treating-gate needed
         // (you always have a relationship with an order you authored).
-        v1.MapGet("/mine", async (string? status, OrdersDbContext db, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        v1.MapGet("/mine", async (string? status, OrdersDbContext db, IHbmpPrincipalAccessor me, BranchScopeState branch, CancellationToken ct) =>
         {
             var sub = me.Principal?.Subject;
             if (string.IsNullOrWhiteSpace(sub)) return Results.Ok(Array.Empty<OrderResponse>());
             var q = db.Orders.AsNoTracking().Include(o => o.Lines).Where(o => o.CreatedBy == sub);
             if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<OrderStatus>(status, ignoreCase: true, out var st))
                 q = q.Where(o => o.Status == st);
+            // 14.4 — a BranchScoped clinician sees only orders raised in the active branch.
+            if (branch.Context.ActiveBranchId is { } active) q = q.Where(o => o.OrderingBranchId == active);
             var rows = await q.OrderByDescending(o => o.RequestedAt).Take(100).ToListAsync(ct);
             return Results.Ok(rows.Select(OrderResponse.From));
         }).RequireAuthorization(HbmpPolicies.Scope("orders:read"));

@@ -19,6 +19,9 @@ public sealed class InvestigationOrder
     public Guid BeneficiaryId { get; set; }
     public Guid EncounterId { get; set; }
     public Guid OrderingProviderId { get; set; }
+    /// <summary>The Mersal branch where the order was raised (phase 14.4). NULL for legacy/external contexts —
+    /// branch scoping applies only to branch-bound orders (design 37 §3).</summary>
+    public Guid? OrderingBranchId { get; set; }
     public Guid? AuthorizationId { get; set; }
     public OrderType OrderType { get; set; }
     public OrderStatus Status { get; set; } = OrderStatus.Requested;
