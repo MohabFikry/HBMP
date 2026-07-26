@@ -43,6 +43,27 @@ export interface CcApi {
 
 const REASONS = ["BookAppointment", "RescheduleAppointment", "CancelAppointment", "AppointmentEnquiry", "EligibilityEnquiry", "UpdateContact", "Complaint", "Other"];
 const CANCEL_REASONS = ["PatientRequest", "PatientUnwell", "TransportIssue", "Rescheduling", "ClinicClosure", "DuplicateBooking", "Other"];
+// Bilingual display labels for the reason enums — the enum stays the option `value` (sent to the service),
+// only the shown text is localized so the AR portal never renders a raw English enum literal.
+const REASON_LABELS: Record<string, { en: string; ar: string }> = {
+  BookAppointment: { en: "Book appointment", ar: "حجز موعد" },
+  RescheduleAppointment: { en: "Reschedule appointment", ar: "إعادة جدولة موعد" },
+  CancelAppointment: { en: "Cancel appointment", ar: "إلغاء موعد" },
+  AppointmentEnquiry: { en: "Appointment enquiry", ar: "استفسار عن موعد" },
+  EligibilityEnquiry: { en: "Eligibility enquiry", ar: "استفسار عن الأهلية" },
+  UpdateContact: { en: "Update contact", ar: "تحديث بيانات الاتصال" },
+  Complaint: { en: "Complaint", ar: "شكوى" },
+  Other: { en: "Other", ar: "أخرى" },
+};
+const CANCEL_REASON_LABELS: Record<string, { en: string; ar: string }> = {
+  PatientRequest: { en: "Patient request", ar: "طلب المريض" },
+  PatientUnwell: { en: "Patient unwell", ar: "اعتلال صحة المريض" },
+  TransportIssue: { en: "Transport issue", ar: "مشكلة في المواصلات" },
+  Rescheduling: { en: "Rescheduling", ar: "إعادة جدولة" },
+  ClinicClosure: { en: "Clinic closure", ar: "إغلاق العيادة" },
+  DuplicateBooking: { en: "Duplicate booking", ar: "حجز مكرّر" },
+  Other: { en: "Other", ar: "أخرى" },
+};
 const OUTCOMES = ["Resolved", "FollowUpRequired", "Transferred", "Abandoned", "NoAction"];
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<{ status: number; data: T | null }> {
@@ -190,7 +211,7 @@ export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }
             <>
               <label htmlFor="cc-reason">{t(L.ccReason)}</label>
               <select id="cc-reason" value={reason} onChange={(e) => setReason(e.target.value)}>
-                {REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                {REASONS.map((r) => <option key={r} value={r}>{t(REASON_LABELS[r])}</option>)}
               </select>
               <Button variant="primary" onClick={startCall}>{t(L.ccStartCall)}</Button>
             </>
@@ -288,7 +309,7 @@ export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }
                                 {t(L.ccCancelReason)}
                                 <select value={cancelReason} onChange={(e) => setCancelReason(e.target.value)}>
                                   <option value="">—</option>
-                                  {CANCEL_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                                  {CANCEL_REASONS.map((r) => <option key={r} value={r}>{t(CANCEL_REASON_LABELS[r])}</option>)}
                                 </select>
                               </label>
                               <Button variant="danger" onClick={() => cancel(a.appointmentId)}>{t(L.ccCancel)}</Button>
