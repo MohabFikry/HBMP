@@ -1,4 +1,5 @@
 using System.Globalization;
+using Mersal.Claims.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -32,11 +33,24 @@ public static class DependencyInjection
         services.AddScoped<AdjudicationService>();
         services.AddScoped<DecisionService>();
         services.AddScoped<SubmissionService>();
+        services.AddScoped<ReimbursementService>();
         // Permissive fact source by default; the HTTP-backed eligibility/policy/approvals/provider wiring lands later.
         services.AddScoped<IExternalAdjudicationFacts, PermissiveAdjudicationFacts>();
         // No fulfillment resolver by default → provider-submitted lines land in manual assessment until the
         // orders/pharmacy fulfillment-query wiring is live (same deferral as the auto-derive event consumers).
         services.AddScoped<IFulfillmentResolver, NoFulfillmentResolver>();
+        // Reimbursement seams — all swappable by DI (the OCR provider is covered by a swappability test). Defaults
+        // are conservative: OCR extracts nothing, the scan trusts document-service, and no authorization resolves →
+        // every reimbursement lands in ManualAssessment until the self-hosted OCR + approvals wiring is live.
+        services.AddScoped<IDocumentOcrProvider, NullOcrProvider>();
+        services.AddScoped<IDocumentScanner, CleanDocumentScanner>();
+        services.AddScoped<IAuthorizedServiceResolver, NoAuthorizedServiceResolver>();
+        var confidence = decimal.TryParse(config["Claims:OcrConfidenceThreshold"], NumberStyles.Any,
+            CultureInfo.InvariantCulture, out var c) ? c : ReimbursementRules.DefaultConfidenceThreshold;
+        services.AddSingleton(new ReimbursementOptions
+        {
+            Languages = config["Claims:OcrLanguages"] ?? "ara+eng", ConfidenceThreshold = confidence,
+        });
 
         var threshold = decimal.TryParse(config["Claims:DualControlThreshold"], NumberStyles.Any,
             CultureInfo.InvariantCulture, out var t) ? t : 10_000m;

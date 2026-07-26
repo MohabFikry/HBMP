@@ -18,6 +18,8 @@ public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options) :
     public DbSet<ClaimSubmission> ClaimSubmissions => Set<ClaimSubmission>();
     public DbSet<ClaimSubmissionLine> ClaimSubmissionLines => Set<ClaimSubmissionLine>();
     public DbSet<ClaimDocument> ClaimDocuments => Set<ClaimDocument>();
+    public DbSet<ReimbursementRequest> ReimbursementRequests => Set<ReimbursementRequest>();
+    public DbSet<OcrExtraction> OcrExtractions => Set<OcrExtraction>();
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -115,6 +117,25 @@ public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options) :
             e.HasKey(x => x.ClaimDocumentId);
             e.Property(x => x.DocType).HasConversion<string>().HasColumnName("doc_type");
             e.HasIndex(x => x.DocumentId);
+        });
+
+        b.Entity<ReimbursementRequest>(e =>
+        {
+            e.ToTable("reimbursement_request");
+            e.HasKey(x => x.RequestId);
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.MatchMethod).HasConversion<string>().HasColumnName("match_method");
+            e.Property(x => x.CurrencyCode).HasColumnName("currency_code");
+            e.HasIndex(x => new { x.BeneficiaryId, x.SubmittedAt });
+            e.HasIndex(x => x.Status);
+        });
+
+        b.Entity<OcrExtraction>(e =>
+        {
+            e.ToTable("ocr_extraction");
+            e.HasKey(x => x.ExtractionId);
+            e.Property(x => x.Region).HasColumnName("region").HasColumnType("jsonb");
+            e.HasIndex(x => new { x.DocumentId, x.FieldName });
         });
 
         b.Entity<ProcessedEvent>(e =>

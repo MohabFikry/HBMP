@@ -68,8 +68,21 @@ data (tariffs, authorizations, eligibility, fulfillment) comes over the API/even
   atomically → `DUPLICATE_CLAIM` (409), no second payable line. Idempotent on the header `Idempotency-Key`;
   provider-isolated (ABAC PO + RLS); submission, document attach, and every match/no-match outcome audited. Emits
   `ClaimSubmitted`. Documents are stored by REFERENCE only (bytes stay scanned + encrypted in document-service).
-- 10b.6 reimbursement + OCR · 10b.7 reconciliation + adjustments · 10b.8 settlement advice + exports · 10b.9 appeals +
-  KPIs. *(built in subsequent slices)*
+- **10b.6 — beneficiary reimbursement + OCR (assistive, human-gated).** `reimbursement_request` + `ocr_extraction`
+  (append-only — a re-run is new rows; the ONLY permitted UPDATE is a human setting `accepted_by`/`accepted_at`, and
+  the extracted value/confidence/region are trigger-immutable). Pipeline: file type/size validation → **malware scan**
+  (rejected + audited) → persist request → **OCR** via pluggable `IDocumentOcrProvider` (default self-hosted Tesseract
+  `ara+eng`; only receipt/invoice/statement docs are read, never clinical result/dispense proofs) with confidence +
+  source region per field → decide **AutoMatched vs ManualAssessment** (`ReimbursementRules.DecideMatch`: needs an
+  authorized order, exactly one candidate, no mismatch, every field ≥ threshold — else manual). **OCR is assistive,
+  never authoritative:** `ConfirmAsync` is the human gate (records acceptance, creates the Reimbursement claim with
+  **Pending** lines); a line is payable only through an explicit officer decision (10b.4). Cap = **min(tariff,
+  receipt)** with an audited justified override (`ValidateOverride`). **No bank/payout field** anywhere (proven by a
+  structural test). Seams (`IDocumentOcrProvider` swappability-tested, `IDocumentScanner`, `IAuthorizedServiceResolver`)
+  all DI-swappable. Emits `ReimbursementSubmitted` / `ReimbursementMatched` / `ReimbursementRequiresManualAssessment` /
+  `ClaimCreated`.
+- 10b.7 reconciliation + adjustments · 10b.8 settlement advice + exports · 10b.9 appeals + KPIs.
+  *(built in subsequent slices)*
 
 ## Endpoints (10b.1)
 
