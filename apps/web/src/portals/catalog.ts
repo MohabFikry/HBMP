@@ -37,6 +37,7 @@ const G = {
   approvals: { en: "Approvals", ar: "الموافقات" },
   registration: { en: "Registration", ar: "التسجيل" },
   cases: { en: "Cases", ar: "الحالات" },
+  contact: { en: "Contact centre", ar: "مركز الاتصال" },
   finance: { en: "Finance", ar: "المالية" },
   network: { en: "Network", ar: "الشبكة" },
   admin: { en: "Administration", ar: "الإدارة" },
@@ -153,6 +154,17 @@ export const PORTALS: PortalDef[] = [
       { key: "cases", path: "my-cases", label: { en: "My cases", ar: "حالاتي" }, group: G.cases, icon: "doc", permission: "case.read" },
       { key: "beneficiary360", path: "beneficiary-360", label: { en: "Beneficiary 360", ar: "المستفيد 360" }, group: G.cases, icon: "user", permission: "case.beneficiary360" },
       { key: "escalations", path: "escalations", label: { en: "Escalations", ar: "التصعيدات" }, group: G.cases, icon: "triangle", permission: "case.escalations" },
+    ],
+  },
+  {
+    role: "call_center",
+    base: "call-centre",
+    title: { en: "Call Centre", ar: "مركز الاتصال" },
+    eyebrow: { en: "Call Centre", ar: "مركز الاتصال" },
+    // No clinical routes exist here — min-necessary (the call centre gets no clinical data).
+    sections: [
+      { key: "workspace", path: "workspace", label: { en: "Call workspace", ar: "مساحة المكالمة" }, group: G.contact, icon: "user", permission: "callcentre.workspace" },
+      { key: "history", path: "history", label: { en: "Call history", ar: "سجل المكالمات" }, group: G.contact, icon: "clock", permission: "callcentre.history" },
     ],
   },
   {

@@ -710,3 +710,32 @@ nav.mrs-rail {
 .upane-row + .upane-row {
   border-top: 1px solid var(--border);
 }
+
+/* ── 15.5 Call Centre workspace ─────────────────────────────────────────────── */
+.cc-workspace { display: flex; flex-direction: column; gap: var(--sp5); }
+.cc-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.cc-callbar { display: flex; align-items: center; gap: var(--sp4); flex-wrap: wrap; min-block-size: 44px; }
+.cc-callbar select, .cc-search select, .cc-wrapup select, .cc-cancel select {
+  min-block-size: 44px; padding: 0 var(--sp3); border: 1px solid var(--border);
+  border-radius: var(--radius-2); background: var(--surface-1); color: var(--text-1);
+}
+.cc-search { display: flex; align-items: flex-end; gap: var(--sp3); flex-wrap: wrap; }
+.cc-results { list-style: none; margin: var(--sp3) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp2); }
+.cc-result { display: flex; justify-content: space-between; gap: var(--sp4); inline-size: 100%;
+  min-block-size: 44px; padding: 0 var(--sp4); border: 1px solid var(--border); border-radius: var(--radius-2);
+  background: var(--surface-1); color: var(--text-1); cursor: pointer; }
+.cc-result[aria-pressed="true"] { border-color: var(--brand-teal); box-shadow: 0 0 0 2px var(--brand-teal); }
+.cc-muted { color: var(--text-2); }
+.cc-locked { display: flex; flex-direction: column; gap: var(--sp3); }
+.cc-lockchip { display: inline-flex; align-items: center; gap: var(--sp2); align-self: flex-start;
+  padding: var(--sp2) var(--sp3); border: 1px dashed var(--border); border-radius: 999px;
+  background: var(--surface-2); color: var(--text-2); font-weight: 600; }
+.cc-check { display: inline-flex; align-items: center; gap: var(--sp2); margin-inline-end: var(--sp4); min-block-size: 44px; }
+.cc-verify-actions, .cc-cancel { display: flex; align-items: center; gap: var(--sp3); flex-wrap: wrap; }
+.cc-error { color: var(--status-bad-fg, #b42318); font-weight: 600; }
+.cc-360 { display: flex; flex-direction: column; gap: var(--sp4); }
+.cc-360 section { border-top: 1px solid var(--border); padding-top: var(--sp3); }
+.cc-appts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp2); }
+.cc-appts li { display: flex; align-items: center; justify-content: space-between; gap: var(--sp4); flex-wrap: wrap; }
+.cc-wrapup { display: flex; gap: var(--sp4); flex-wrap: wrap; align-items: flex-end; }
+.cc-history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp2); }

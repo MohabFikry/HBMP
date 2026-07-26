@@ -54,6 +54,9 @@ const FinanceUtilization = lazy(() => import("./FinancePortal").then((m) => ({ d
 const FinanceSettlements = lazy(() => import("./FinancePortal").then((m) => ({ default: m.FinanceSettlements })));
 const FinanceSummaries = lazy(() => import("./FinancePortal").then((m) => ({ default: m.FinanceSummaries })));
 const FinanceExports = lazy(() => import("./FinancePortal").then((m) => ({ default: m.FinanceExports })));
+// Call Centre portal (Phase 15.5) — the call-shaped workspace + call history share one chunk.
+const CallCentreWorkspace = lazy(() => import("./CallCentre").then((m) => ({ default: m.CallCentreWorkspace })));
+const CallHistory = lazy(() => import("./CallCentre").then((m) => ({ default: m.CallHistory })));
 // Cross-cutting inbox (Phase 8.1) — one chunk, mounted under every portal's `/…/notifications` route.
 const Notifications = lazy(() => import("./Notifications").then((m) => ({ default: m.Notifications })));
 // Admin / platform governance (Phase 8b) — one chunk, mounted under both the org-admin (/admin) and
@@ -121,6 +124,9 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/network/contracts": () => <NetworkContracts />,
   "/network/locations": () => <NetworkLocations />,
   "/network/performance": () => <NetworkPerformance />,
+  // 10. Call Centre (Phase 15) — the call-shaped workspace + call history. No clinical route exists.
+  "/call-centre/workspace": () => <CallCentreWorkspace />,
+  "/call-centre/history": () => <CallHistory />,
 };
 
 // Admin sections are shared by the org-admin (/admin/*) and super-admin (/platform/*) portals; map by the
