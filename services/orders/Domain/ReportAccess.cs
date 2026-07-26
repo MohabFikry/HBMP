@@ -16,6 +16,7 @@ public enum ResultDisclosure { Full, ExistenceOnly }
 public sealed class ReportAccessRequest
 {
     public Guid RequestId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid OrderId { get; set; }
     public Guid OrderLineId { get; set; }
     public Guid BeneficiaryId { get; set; }
@@ -35,6 +36,7 @@ public sealed class ReportAccessRequest
 public sealed class ReportAccessGrant
 {
     public Guid GrantId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid RequestId { get; set; }
     public string GranteeUserId { get; set; } = default!;
     public Guid OrderLineId { get; set; }             // single-result scope

@@ -19,6 +19,7 @@ public enum SensitivityLevel { Standard, Sensitive, HighlySensitive }
 public sealed class InvestigationOrder
 {
     public Guid OrderId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public string OrderNo { get; set; } = default!;      // ORD-YYYY-NNNNNN
     public Guid BeneficiaryId { get; set; }
     public Guid EncounterId { get; set; }
@@ -43,6 +44,7 @@ public sealed class InvestigationOrder
 public sealed class OrderLine
 {
     public Guid OrderLineId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid OrderId { get; set; }
     public CodeSystem CodeSystem { get; set; }
     public string Code { get; set; } = default!;
@@ -66,6 +68,7 @@ public sealed class OrderLine
 public sealed class OrderFulfillment
 {
     public Guid FulfillmentId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid OrderLineId { get; set; }
     public Guid PerformingProviderId { get; set; }
     public decimal Quantity { get; set; }

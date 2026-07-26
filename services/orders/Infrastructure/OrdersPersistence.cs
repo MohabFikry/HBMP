@@ -1,4 +1,5 @@
 using System.Globalization;
+using Mersal.Data;
 using Mersal.Orders.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -60,10 +61,12 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddOrdersInfrastructure(this IServiceCollection services, IConfiguration config)
     {
-        services.AddDbContext<OrdersDbContext>(o =>
+        services.AddHbmpRls();
+        services.AddDbContext<OrdersDbContext>((sp, o) =>
             o.UseNpgsql(config.GetConnectionString("Orders")
                         ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential."))
-             .UseSnakeCaseNamingConvention());
+             .UseSnakeCaseNamingConvention()
+             .AddHbmpRlsInterceptors(sp));
         services.AddScoped<OrderNoIssuer>();
         services.AddScoped<ConsumeExecutor>();
 
