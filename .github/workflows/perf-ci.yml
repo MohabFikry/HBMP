@@ -1,0 +1,47 @@
+name: perf-ci
+
+# Load/stress/soak gate (Phase 11.1). Runs the /perf k6 suite against a prod-like staging
+# origin. Nightly (full profile) + on-demand. The suite encodes NFR §1/§2 targets as k6
+# thresholds, so a missed target exits non-zero and blocks the release-readiness signal.
+# PHI never appears in perf data or logs (NFR-042) — synthetic dataset only.
+on:
+  schedule:
+    - cron: "0 2 * * *" # nightly 02:00 UTC against staging
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Staging origin (Kong)"
+        required: true
+        default: "https://staging.mersal.internal"
+      smoke:
+        description: "Run short smoke profile instead of full"
+        type: boolean
+        default: false
+
+jobs:
+  k6:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update && sudo apt-get install -y k6
+      - name: Run perf suite (thresholds gate the run)
+        env:
+          BASE_URL: ${{ github.event.inputs.base_url || 'https://staging.mersal.internal' }}
+          OIDC_TOKEN_URL: ${{ secrets.PERF_OIDC_TOKEN_URL }}
+          OIDC_CLIENT_ID: ${{ secrets.PERF_OIDC_CLIENT_ID }}
+          OIDC_CLIENT_SECRET: ${{ secrets.PERF_OIDC_CLIENT_SECRET }}
+          SMOKE: ${{ github.event.inputs.smoke == 'true' && '1' || '' }}
+        run: perf/run.sh all
+      - name: Publish results artifact (p50/p95/p99, throughput, error rate)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results
+          path: perf/results/*.json
