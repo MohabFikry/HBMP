@@ -1,3 +1,4 @@
+using Mersal.Data;
 using Mersal.Document.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -9,9 +10,11 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddDocumentInfrastructure(this IServiceCollection services, IConfiguration config)
     {
-        services.AddDbContext<DocumentDbContext>(o =>
+        services.AddHbmpRls();
+        services.AddDbContext<DocumentDbContext>((sp, o) =>
             o.UseNpgsql(config.GetConnectionString("Document") ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential."))
-             .UseSnakeCaseNamingConvention());
+             .UseSnakeCaseNamingConvention()
+             .AddHbmpRlsInterceptors(sp));
 
         services.Configure<ClamAvOptions>(config.GetSection(ClamAvOptions.SectionName));
         services.Configure<BlobStoreOptions>(config.GetSection(BlobStoreOptions.SectionName));

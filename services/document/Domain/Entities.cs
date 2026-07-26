@@ -9,6 +9,7 @@ public enum Classification { PHI, PII, Internal }
 public sealed class Document
 {
     public Guid DocumentId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public DocType DocType { get; set; }
     public Guid OwnerBeneficiaryId { get; set; }          // logical FK
     public Classification Classification { get; set; }
@@ -23,6 +24,7 @@ public sealed class Document
 public sealed class DocumentVersion
 {
     public Guid DocumentVersionId { get; set; }
+    public string TenantId { get; set; } = "";
     public Guid DocumentId { get; set; }
     public int VersionNo { get; set; }
     public string BlobPath { get; set; } = default!;
