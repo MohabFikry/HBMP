@@ -10,7 +10,15 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
+    "lint:eslint": "eslint apps libs",
     "ds:dev": "pnpm --filter @mersal/design-system dev",
     "ds:test": "pnpm --filter @mersal/design-system test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "eslint": "^9.18.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "globals": "^15.14.0",
+    "typescript-eslint": "^8.20.0"
   }
 }

@@ -70,6 +70,10 @@ import {
 import type { ApiClient } from "./client";
 import { getRaw, postRaw, postForm, parseOr } from "./http";
 
+/* This client is a deliberate adapter between loosely-typed service JSON and the strict portal contracts;
+   it maps `any` service payloads then zod-validates the mapping, so `any` is intentional file-wide. */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 /** Wrap a plain service string as the bilingual shape the portal contracts use (same text both langs). */
 const loc = (s: unknown) => ({ en: String(s ?? ""), ar: String(s ?? "") });
 /** Pre-format a numeric amount as the contract's display string, e.g. 12400 -> "EGP 12,400". */
@@ -81,7 +85,6 @@ const caseStatus = (s: unknown) =>
   ] ?? "open";
 /** A masked, min-necessary display token for a case row (never a beneficiary name). */
 const caseToken = (c: any) => `•••${String(c.beneficiaryId ?? c.caseId ?? "").slice(-4)}`;
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 /** Map the reception card's accessible status tone to the design-system StatusKind. */
 const toneToKind = (tone: unknown): "ok" | "warn" | "bad" | "neu" | "info" =>
