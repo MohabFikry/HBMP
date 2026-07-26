@@ -53,6 +53,10 @@ export type Permission =
   // Call centre (Phase 15) — NO clinical reach by construction
   | "callcentre.workspace"
   | "callcentre.history"
+  // Claims (Phase 10b) — codes + amounts only, NO diagnosis by construction (finance-parity)
+  | "claims.worklist"
+  | "claims.reconciliation"
+  | "claims.insights"
   // Finance (NO clinical/diagnosis by construction)
   | "finance.utilization"
   | "finance.settlements"
@@ -90,6 +94,7 @@ export type Role =
   | "beneficiary_mgmt"
   | "case_manager"
   | "call_center"
+  | "claims_officer"
   | "finance"
   | "provider_admin"
   | "org_admin"
@@ -121,6 +126,8 @@ export const rolePermissions: Record<Role, Permission[]> = {
   case_manager: ["case.read", "case.beneficiary360", "case.escalations"],
   // Call Centre — a call workspace + call history. No clinical permission exists here (min-necessary).
   call_center: ["callcentre.workspace", "callcentre.history", "appointments.read"],
+  // Claims officer — worklist + reconciliation + PHI-free KPIs. No clinical/diagnosis permission (finance-parity).
+  claims_officer: ["claims.worklist", "claims.reconciliation", "claims.insights"],
   finance: ["finance.utilization", "finance.settlements", "finance.summaries", "finance.export"],
   provider_admin: ["provider.directory", "provider.onboarding", "provider.contracts", "provider.locations", "provider.performance"],
   org_admin: ["admin.users", "admin.policies", "admin.masterdata", "admin.tenants", "admin.audit", "admin.config"],

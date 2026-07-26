@@ -32,6 +32,12 @@ import {
   zNotification,
   zOrderRow,
   zRxRow,
+  zResultDetail,
+  zReportAccessRequestResult,
+  type ReportAccessInput,
+  zClaimRow,
+  zReconciliationRow,
+  zClaimsKpis,
   zVitalsResult,
   zResultTask,
   zResultUpload,
@@ -123,6 +129,32 @@ const providerStatusChip = (s: unknown): { kind: "ok" | "warn" | "neu" | "info";
     Expired: { kind: "neu", label: { en: "Expired", ar: "منتهٍ" } },
   };
   return map[k] ?? { kind: "info", label: { en: k || "—", ar: k || "—" } };
+};
+/** Map a claim lifecycle status (36 §3) → a non-color StatusKind chip. */
+const claimStatusChip = (s: unknown): { kind: "ok" | "info" | "part" | "warn" | "bad" | "neu"; label: { en: string; ar: string } } => {
+  const k = String(s ?? "");
+  const map: Record<string, { kind: "ok" | "info" | "part" | "warn" | "bad" | "neu"; label: { en: string; ar: string } }> = {
+    Draft: { kind: "neu", label: { en: "Draft", ar: "مسودة" } },
+    Submitted: { kind: "info", label: { en: "Submitted", ar: "مُقدّمة" } },
+    UnderReview: { kind: "info", label: { en: "Under review", ar: "قيد المراجعة" } },
+    Adjudicated: { kind: "ok", label: { en: "Adjudicated", ar: "تمت المراجعة" } },
+    PartiallyApproved: { kind: "part", label: { en: "Partially approved", ar: "موافقة جزئية" } },
+    Rejected: { kind: "bad", label: { en: "Rejected", ar: "مرفوضة" } },
+    Settled: { kind: "ok", label: { en: "Settled", ar: "مُسوّاة" } },
+    Cancelled: { kind: "neu", label: { en: "Cancelled", ar: "ملغاة" } },
+  };
+  return map[k] ?? { kind: "neu", label: { en: k || "—", ar: k || "—" } };
+};
+/** Map a reconciliation bucket (36 §7) → a non-color StatusKind chip. */
+const reconBucketChip = (s: unknown): { kind: "ok" | "info" | "warn" | "bad" | "neu"; label: { en: string; ar: string } } => {
+  const k = String(s ?? "");
+  const map: Record<string, { kind: "ok" | "info" | "warn" | "bad" | "neu"; label: { en: string; ar: string } }> = {
+    Matched: { kind: "ok", label: { en: "Matched", ar: "مطابقة" } },
+    PriceVariance: { kind: "warn", label: { en: "Price variance", ar: "فرق سعر" } },
+    BilledNotDelivered: { kind: "bad", label: { en: "Billed, not delivered", ar: "فوترة بلا تنفيذ" } },
+    DeliveredNotBilled: { kind: "info", label: { en: "Delivered, not billed", ar: "تنفيذ بلا فوترة" } },
+  };
+  return map[k] ?? { kind: "neu", label: { en: k || "—", ar: k || "—" } };
 };
 /** Map an emr encounter status → a resolved bilingual StatusKind for the doctor worklist chip. */
 const encounterStatus = (s: unknown) => {
@@ -449,8 +481,41 @@ export class HttpApiClient implements ApiClient {
         lineCount: lines.length,
         status: orderStatus(o.status),
         requestedAt: o.requestedAt ?? new Date().toISOString(),
+        firstLineId: lines[0]?.orderLineId ?? lines[0]?.lineId ?? undefined,
       });
     });
+  }
+
+  /** 14.6/14.7 — read one result. The orders service applies the sensitivity gate and returns either the value
+   *  or `{ restricted: true, … }` existence-only metadata; the discriminated union parses both. */
+  async resultDetail(orderId: string, lineId: string) {
+    const r = (await getRaw(`/investigation-orders/${orderId}/lines/${lineId}/result`)) as any;
+    if (r?.restricted === true)
+      return parseOr(zResultDetail, {
+        restricted: true, orderId, lineId,
+        category: r.category ?? r.orderType ?? "Result",
+        status: r.status ?? "Completed",
+        sensitivityLevel: r.sensitivityLevel ?? "Sensitive",
+        orderingBranch: r.orderingBranch ?? null,
+        date: r.date ?? r.resultUploadedAt ?? undefined,
+      });
+    return parseOr(zResultDetail, {
+      restricted: false, orderId, lineId,
+      category: r?.category ?? r?.orderType ?? "Result",
+      code: r?.code ?? "—",
+      value: r?.resultValue ?? r?.value ?? "—",
+      status: r?.status ?? "Completed",
+      resultedAt: r?.resultUploadedAt ?? r?.resultedAt ?? undefined,
+    });
+  }
+
+  /** 14.8 — request time-boxed access to a restricted result (POST /report-access-requests). */
+  async requestReportAccess(input: ReportAccessInput) {
+    const r = (await postRaw(`/report-access-requests`, {
+      orderId: input.orderId, orderLineId: input.lineId, purposeCode: input.purposeCode,
+      justification: input.justification, requestedTtlHours: input.requestedTtlHours,
+    })) as any;
+    return parseOr(zReportAccessRequestResult, { requestId: r?.requestId ?? r?.id ?? "unknown", status: r?.status ?? "Pending" });
   }
   async prescriptionsMine(status?: string) {
     const r = (await getRaw(`/prescriptions/mine${status ? `?status=${encodeURIComponent(status)}` : ""}`)) as any[];
@@ -1004,6 +1069,56 @@ export class HttpApiClient implements ApiClient {
       rowCount: r?.rowCount ?? r?.rows ?? 0,
       filename: r?.filename ?? `${req.report}-${req.from}_${req.to}.${req.format}`,
       status: "ok",
+    });
+  }
+
+  // Claims management (Phase 10b) — codes + amounts only, never a diagnosis. The service isolates provider
+  // users to their own claims and audits every read; the portal maps status/bucket → non-color StatusKind chips.
+  async claimsWorklist(status?: string) {
+    const r = (await getRaw(`/claims/worklist${status ? `?status=${encodeURIComponent(status)}` : ""}`)) as any[];
+    return (r ?? []).map((c: any) =>
+      parseOr(zClaimRow, {
+        id: c.claimId ?? c.id,
+        claimNo: c.claimNo ?? "",
+        origin: String(c.origin ?? ""),
+        status: claimStatusChip(c.status),
+        currency: c.currencyCode ?? c.currency ?? "EGP",
+        claimedAmount: Number(c.claimedAmount ?? 0),
+        netPayable: c.netPayable ?? null,
+        serviceDateFrom: String(c.serviceDateFrom ?? ""),
+        submittedAt: c.submittedAt ?? undefined,
+      }),
+    );
+  }
+
+  async claimsReconciliation(bucket?: string) {
+    const r = (await getRaw(`/reconciliation${bucket ? `?bucket=${encodeURIComponent(bucket)}` : ""}`)) as any[];
+    return (r ?? []).map((l: any) =>
+      parseOr(zReconciliationRow, {
+        claimId: l.claimId,
+        claimNo: l.claimNo ?? "",
+        origin: String(l.origin ?? ""),
+        code: l.code ?? "—",
+        serviceDate: String(l.serviceDate ?? ""),
+        billedAmount: Number(l.billedAmount ?? 0),
+        allowedAmount: l.allowedAmount ?? l.contractPrice ?? null,
+        bucket: String(l.bucket ?? ""),
+        status: reconBucketChip(l.bucket),
+      }),
+    );
+  }
+
+  async claimsKpis() {
+    const r = (await getRaw(`/claims/kpis`)) as any;
+    return parseOr(zClaimsKpis, {
+      averageTatHours: Number(r?.averageTatHours ?? 0),
+      approvalRate: Number(r?.approvalRate ?? 0),
+      denialRate: Number(r?.denialRate ?? 0),
+      ocrAutoMatchRate: Number(r?.ocrAutoMatchRate ?? 0),
+      agedUnbilledCount: Number(r?.agedUnbilledCount ?? 0),
+      agedUnbilledValue: Number(r?.agedUnbilledValue ?? 0),
+      recoveryOutstanding: Number(r?.recoveryOutstanding ?? 0),
+      topDenialReasons: (r?.topDenialReasons ?? []).map((d: any) => ({ reason: d.reason ?? d.code ?? "—", count: Number(d.count ?? 0) })),
     });
   }
 

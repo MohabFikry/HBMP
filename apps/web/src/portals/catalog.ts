@@ -38,6 +38,7 @@ const G = {
   registration: { en: "Registration", ar: "التسجيل" },
   cases: { en: "Cases", ar: "الحالات" },
   contact: { en: "Contact centre", ar: "مركز الاتصال" },
+  claims: { en: "Claims", ar: "المطالبات" },
   finance: { en: "Finance", ar: "المالية" },
   network: { en: "Network", ar: "الشبكة" },
   admin: { en: "Administration", ar: "الإدارة" },
@@ -165,6 +166,18 @@ export const PORTALS: PortalDef[] = [
     sections: [
       { key: "workspace", path: "workspace", label: { en: "Call workspace", ar: "مساحة المكالمة" }, group: G.contact, icon: "user", permission: "callcentre.workspace" },
       { key: "history", path: "history", label: { en: "Call history", ar: "سجل المكالمات" }, group: G.contact, icon: "clock", permission: "callcentre.history" },
+    ],
+  },
+  {
+    role: "claims_officer",
+    base: "claims",
+    title: { en: "Claims management", ar: "إدارة المطالبات" },
+    eyebrow: { en: "Claims officer", ar: "موظف المطالبات" },
+    // No clinical/diagnosis routes exist here — min-necessary (claims sees codes + amounts, never a diagnosis).
+    sections: [
+      { key: "worklist", path: "worklist", label: { en: "Claims worklist", ar: "قائمة المطالبات" }, group: G.claims, icon: "doc", permission: "claims.worklist" },
+      { key: "reconciliation", path: "reconciliation", label: { en: "Reconciliation", ar: "التسوية" }, group: G.claims, icon: "check2", permission: "claims.reconciliation" },
+      { key: "insights", path: "insights", label: { en: "Claims insights", ar: "مؤشرات المطالبات" }, group: G.insights, icon: "chart", permission: "claims.insights" },
     ],
   },
   {

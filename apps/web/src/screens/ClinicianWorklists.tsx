@@ -1,9 +1,11 @@
-import { Card, DataTable, StatusChip } from "@mersal/design-system";
+import { useState } from "react";
+import { Button, Card, DataTable, Modal, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
-import type { Localized, OrderRow, PatientListItem, RxRow } from "@mersal/contracts";
+import type { Localized, OrderRow, PatientListItem, ResultDetail, RxRow } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
+import { RestrictedResultCard, RequestAccessDialog } from "./RestrictedResultCard";
 
 const S = {
   patientsTitle: { en: "My patients", ar: "مرضاي" },
@@ -24,6 +26,12 @@ const S = {
   lines: { en: "Lines", ar: "البنود" },
   placed: { en: "Placed", ar: "تاريخ الطلب" },
   submitted: { en: "Submitted", ar: "تاريخ الإرسال" },
+  result: { en: "Result", ar: "النتيجة" },
+  viewResult: { en: "View result", ar: "عرض النتيجة" },
+  resultTitle: { en: "Result", ar: "النتيجة" },
+  value: { en: "Value", ar: "القيمة" },
+  accessRequested: { en: "Access request submitted — pending author / medical-director grant.", ar: "تم إرسال طلب الوصول — بانتظار موافقة الطبيب المُحرّر / المدير الطبي." },
+  close: { en: "Close", ar: "إغلاق" },
 } satisfies Record<string, Localized>;
 
 const dt = (s?: string | null) => (s ? new Date(s).toLocaleDateString() : "—");
@@ -81,11 +89,59 @@ export function DoctorOrders() {
 }
 
 /** Results inbox — my orders that are Completed (results are back). */
+/**
+ * Results inbox (Phase 4 US-032 + Phase 14.6/14.8). Opening a completed result fetches it through the sensitivity
+ * gate: a Standard result (or one the caller authored / holds a grant for) shows its value; a restricted result
+ * returns EXISTENCE-ONLY metadata, which renders the locked `RestrictedResultCard` + a "Request access" flow. The
+ * server sends no values for a restricted result, so no clinical value can ever reach this DOM.
+ */
 export function DoctorResults() {
   const api = useApi();
   const t = useLoc();
   const state = useAsync<OrderRow[]>(() => api.ordersMine("Completed"), []);
-  const cols = orderColumns(t);
+  const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState<ResultDetail | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [requesting, setRequesting] = useState(false);
+  const [requested, setRequested] = useState(false);
+
+  async function openResult(row: OrderRow) {
+    if (!row.firstLineId) return;
+    setBusy(true);
+    setDetail(null);
+    setRequesting(false);
+    setRequested(false);
+    setOpen(true);
+    try {
+      setDetail(await api.resultDetail(row.id, row.firstLineId));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitRequest(input: { purposeCode: string; justification: string; requestedTtlHours: number }) {
+    if (!detail) return;
+    await api.requestReportAccess({ orderId: detail.orderId, lineId: detail.lineId, ...input });
+    setRequesting(false);
+    setRequested(true);
+  }
+
+  const cols: Column<OrderRow>[] = [
+    ...orderColumns(t),
+    {
+      key: "result",
+      header: t(S.result),
+      cell: (r) =>
+        r.firstLineId ? (
+          <Button variant="secondary" onClick={() => openResult(r)}>
+            {t(S.viewResult)}
+          </Button>
+        ) : (
+          <span className="muted">—</span>
+        ),
+    },
+  ];
+
   return (
     <>
       <PageHeader title={t(S.resultsTitle)} />
@@ -94,6 +150,37 @@ export function DoctorResults() {
           {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.resultsTitle)} />}
         </AsyncSection>
       </Card>
+
+      <Modal open={open} onOpenChange={setOpen} title={t(S.resultTitle)}>
+        {busy && (
+          <div role="status" aria-live="polite" style={{ padding: "var(--sp4)" }}>
+            <span className="mrs-spin" aria-hidden="true" />
+          </div>
+        )}
+        {!busy && detail && detail.restricted && !requesting && (
+          <RestrictedResultCard result={detail} onRequestAccess={() => setRequesting(true)} />
+        )}
+        {!busy && detail && detail.restricted && requesting && (
+          <RequestAccessDialog onSubmit={submitRequest} onCancel={() => setRequesting(false)} />
+        )}
+        {!busy && requested && (
+          <p role="status" aria-live="polite" style={{ marginTop: "var(--sp3)" }}>
+            {t(S.accessRequested)}
+          </p>
+        )}
+        {!busy && detail && !detail.restricted && (
+          <dl style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px" }}>
+            <dt style={{ opacity: 0.7 }}>{t(S.type)}</dt>
+            <dd>{detail.category}</dd>
+            <dt style={{ opacity: 0.7 }}>{t(S.code)}</dt>
+            <dd className="tnum">{detail.code}</dd>
+            <dt style={{ opacity: 0.7 }}>{t(S.value)}</dt>
+            <dd>{detail.value}</dd>
+            <dt style={{ opacity: 0.7 }}>{t(S.status)}</dt>
+            <dd>{detail.status}</dd>
+          </dl>
+        )}
+      </Modal>
     </>
   );
 }

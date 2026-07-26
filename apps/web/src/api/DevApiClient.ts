@@ -39,6 +39,12 @@ import {
   zCheckInResult,
   zOrderRow,
   zRxRow,
+  zResultDetail,
+  zReportAccessRequestResult,
+  type ReportAccessInput,
+  zClaimRow,
+  zReconciliationRow,
+  zClaimsKpis,
   zVitalsResult,
   zResultTask,
   zResultUpload,
@@ -228,18 +234,41 @@ export class DevApiClient implements ApiClient {
 
   ordersMine(status?: string) {
     const rows = [
-      { id: "ord-1", no: "ORD-2026-000118", tok: "•••4821", type: "Lab", code: "80053", n: 1, st: { kind: "info" as const, label: loc("Active", "نشط") }, key: "Active", at: "2026-07-22T08:10:00Z" },
-      { id: "ord-2", no: "ORD-2026-000119", tok: "•••7710", type: "Imaging", code: "71046", n: 1, st: { kind: "ok" as const, label: loc("Completed", "مكتمل") }, key: "Completed", at: "2026-07-21T14:00:00Z" },
-      { id: "ord-3", no: "ORD-2026-000120", tok: "•••2093", type: "Lab", code: "85025", n: 2, st: { kind: "ok" as const, label: loc("Completed", "مكتمل") }, key: "Completed", at: "2026-07-20T09:30:00Z" },
+      { id: "ord-1", line: "ln-1", no: "ORD-2026-000118", tok: "•••4821", type: "Lab", code: "80053", n: 1, st: { kind: "info" as const, label: loc("Active", "نشط") }, key: "Active", at: "2026-07-22T08:10:00Z" },
+      // ord-2 is a psychiatry-panel result → sensitivity-restricted (14.7); resultDetail returns existence-only.
+      { id: "ord-2", line: "ln-2", no: "ORD-2026-000119", tok: "•••7710", type: "Imaging", code: "71046", n: 1, st: { kind: "ok" as const, label: loc("Completed", "مكتمل") }, key: "Completed", at: "2026-07-21T14:00:00Z" },
+      { id: "ord-3", line: "ln-3", no: "ORD-2026-000120", tok: "•••2093", type: "Lab", code: "85025", n: 2, st: { kind: "ok" as const, label: loc("Completed", "مكتمل") }, key: "Completed", at: "2026-07-20T09:30:00Z" },
     ].filter((r) => !status || r.key === status);
     return this.gate(
       () =>
         ok(z.array(zOrderRow), rows.map((r) => ({
           id: r.id, orderNo: r.no, beneficiary: { id: r.id, token: r.tok },
           orderType: r.type, primaryCode: r.code, lineCount: r.n, status: r.st, requestedAt: r.at,
+          firstLineId: r.line,
         }))),
       [],
     );
+  }
+
+  /** 14.6/14.7 — a completed result read. Line `ln-2` is sensitivity-restricted → existence-only metadata (no values). */
+  resultDetail(orderId: string, lineId: string) {
+    return this.gate(() => {
+      if (lineId === "ln-2")
+        return ok(zResultDetail, {
+          restricted: true as const, orderId, lineId, category: "Radiology — Psychiatry protocol",
+          status: "Completed", sensitivityLevel: "Sensitive", orderingBranch: "Maadi", date: "2026-07-21",
+        });
+      return ok(zResultDetail, {
+        restricted: false as const, orderId, lineId, category: "Laboratory — Chemistry panel",
+        code: "80053", value: "Within reference range", status: "Completed", resultedAt: "2026-07-20T11:00:00Z",
+      });
+    });
+  }
+
+  /** 14.8 — a report-access request; the server would enqueue it for the author/MD to grant. */
+  requestReportAccess(input: ReportAccessInput) {
+    void input;
+    return this.gate(() => ok(zReportAccessRequestResult, { requestId: "rar-dev-1", status: "Pending" }));
   }
   prescriptionsMine(status?: string) {
     void status;
@@ -826,6 +855,53 @@ export class DevApiClient implements ApiClient {
         rowCount: 3,
         filename: `${req.report}-${req.from}_${req.to}.${req.format}`,
         status: { kind: "ok", label: loc("Export ready (audited)", "التصدير جاهز (مُدقّق)") },
+      }),
+    );
+  }
+
+  // ---- Claims management (Phase 10b) — codes + amounts only, no diagnosis (finance-parity) --------------
+  claimsWorklist(status?: string) {
+    const rows = [
+      { id: "clm-1", claimNo: "CLM-2026-004411", origin: "Provider", key: "Submitted", st: { kind: "info" as const, label: loc("Submitted", "مُقدّمة") }, claimed: 3200, net: null, from: "2026-07-18", at: "2026-07-19T09:00:00Z" },
+      { id: "clm-2", claimNo: "CLM-2026-004412", origin: "AutoDerived", key: "Adjudicated", st: { kind: "ok" as const, label: loc("Adjudicated", "تمت المراجعة") }, claimed: 1450, net: 1305, from: "2026-07-15", at: "2026-07-16T11:30:00Z" },
+      { id: "clm-3", claimNo: "CLM-2026-004413", origin: "Reimbursement", key: "Rejected", st: { kind: "bad" as const, label: loc("Rejected", "مرفوضة") }, claimed: 900, net: 0, from: "2026-07-12", at: "2026-07-13T08:15:00Z" },
+    ].filter((r) => !status || r.key === status);
+    return this.gate(
+      () =>
+        ok(z.array(zClaimRow), rows.map((r) => ({
+          id: r.id, claimNo: r.claimNo, origin: r.origin, status: r.st, currency: "EGP",
+          claimedAmount: r.claimed, netPayable: r.net, serviceDateFrom: r.from, submittedAt: r.at,
+        }))),
+      [],
+    );
+  }
+
+  claimsReconciliation(bucket?: string) {
+    const rows = [
+      { claimId: "clm-1", claimNo: "CLM-2026-004411", origin: "Provider", code: "80053", date: "2026-07-18", billed: 320, allowed: 300, bucket: "PriceVariance", st: { kind: "warn" as const, label: loc("Price variance", "فرق سعر") } },
+      { claimId: "clm-4", claimNo: "CLM-2026-004420", origin: "AutoDerived", code: "71046", date: "2026-07-17", billed: 800, allowed: null, bucket: "BilledNotDelivered", st: { kind: "bad" as const, label: loc("Billed, not delivered", "فوترة بلا تنفيذ") } },
+      { claimId: "clm-5", claimNo: "CLM-2026-004421", origin: "Provider", code: "85025", date: "2026-07-16", billed: 150, allowed: 150, bucket: "Matched", st: { kind: "ok" as const, label: loc("Matched", "مطابقة") } },
+    ].filter((r) => !bucket || r.bucket === bucket);
+    return this.gate(
+      () =>
+        ok(z.array(zReconciliationRow), rows.map((r) => ({
+          claimId: r.claimId, claimNo: r.claimNo, origin: r.origin, code: r.code, serviceDate: r.date,
+          billedAmount: r.billed, allowedAmount: r.allowed, bucket: r.bucket, status: r.st,
+        }))),
+      [],
+    );
+  }
+
+  claimsKpis() {
+    return this.gate(() =>
+      ok(zClaimsKpis, {
+        averageTatHours: 34.5, approvalRate: 0.82, denialRate: 0.11, ocrAutoMatchRate: 0.74,
+        agedUnbilledCount: 12, agedUnbilledValue: 41250, recoveryOutstanding: 8900,
+        topDenialReasons: [
+          { reason: "Missing authorization", count: 7 },
+          { reason: "Non-covered service", count: 4 },
+          { reason: "Duplicate claim", count: 3 },
+        ],
       }),
     );
   }

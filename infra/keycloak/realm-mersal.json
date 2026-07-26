@@ -36,51 +36,51 @@
     "realm": [
       {
         "name": "reception",
-        "description": "Reception \u2014 eligibility + check-in, no EMR"
+        "description": "Reception — eligibility + check-in, no EMR"
       },
       {
         "name": "doctor",
-        "description": "Treating clinician \u2014 EMR, orders, prescriptions (treating-relationship)"
+        "description": "Treating clinician — EMR, orders, prescriptions (treating-relationship)"
       },
       {
         "name": "nurse",
-        "description": "Nursing \u2014 vitals + care, scoped clinical"
+        "description": "Nursing — vitals + care, scoped clinical"
       },
       {
         "name": "lab_tech",
-        "description": "Laboratory technician \u2014 order queue + consume, no prescriptions"
+        "description": "Laboratory technician — order queue + consume, no prescriptions"
       },
       {
         "name": "imaging_tech",
-        "description": "Imaging technician \u2014 order queue + consume, no prescriptions"
+        "description": "Imaging technician — order queue + consume, no prescriptions"
       },
       {
         "name": "pharmacist",
-        "description": "Pharmacy \u2014 dispensing, no investigation results"
+        "description": "Pharmacy — dispensing, no investigation results"
       },
       {
         "name": "medical_approval",
-        "description": "Medical Approval reviewer \u2014 authorizations, clinical review under purpose"
+        "description": "Medical Approval reviewer — authorizations, clinical review under purpose"
       },
       {
         "name": "medical_director",
-        "description": "Medical Director \u2014 emergency approval + override authority"
+        "description": "Medical Director — emergency approval + override authority"
       },
       {
         "name": "case_manager",
-        "description": "Case Manager \u2014 assigned beneficiary-360, coordination summary"
+        "description": "Case Manager — assigned beneficiary-360, coordination summary"
       },
       {
         "name": "finance",
-        "description": "Finance \u2014 utilization/settlements/exports, NEVER diagnoses"
+        "description": "Finance — utilization/settlements/exports, NEVER diagnoses"
       },
       {
         "name": "network_team",
-        "description": "Provider Network Team \u2014 provider metadata onboarding, no PHI"
+        "description": "Provider Network Team — provider metadata onboarding, no PHI"
       },
       {
         "name": "provider_admin",
-        "description": "Provider Admin \u2014 own provider only, no self-elevation"
+        "description": "Provider Admin — own provider only, no self-elevation"
       },
       {
         "name": "beneficiary_mgmt",
@@ -88,11 +88,19 @@
       },
       {
         "name": "org_admin",
-        "description": "Org Admin \u2014 tenant-scoped user/role/config admin, not content"
+        "description": "Org Admin — tenant-scoped user/role/config admin, not content"
       },
       {
         "name": "super_admin",
-        "description": "Super Admin \u2014 global config; PHI only via break-glass"
+        "description": "Super Admin — global config; PHI only via break-glass"
+      },
+      {
+        "name": "call_center",
+        "description": "Call Centre — caller verification + booking, no clinical data"
+      },
+      {
+        "name": "claims_officer",
+        "description": "Claims officer — worklist + reconciliation + KPIs (codes + amounts, no diagnosis)"
       }
     ]
   },

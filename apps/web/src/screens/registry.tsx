@@ -57,6 +57,10 @@ const FinanceExports = lazy(() => import("./FinancePortal").then((m) => ({ defau
 // Call Centre portal (Phase 15.5) — the call-shaped workspace + call history share one chunk.
 const CallCentreWorkspace = lazy(() => import("./CallCentre").then((m) => ({ default: m.CallCentreWorkspace })));
 const CallHistory = lazy(() => import("./CallCentre").then((m) => ({ default: m.CallHistory })));
+// Claims portal (Phase 10b) — worklist / reconciliation / insights share one chunk. Codes + amounts only, no diagnosis.
+const ClaimsWorklist = lazy(() => import("./ClaimsPortal").then((m) => ({ default: m.ClaimsWorklist })));
+const ClaimsReconciliation = lazy(() => import("./ClaimsPortal").then((m) => ({ default: m.ClaimsReconciliation })));
+const ClaimsInsights = lazy(() => import("./ClaimsPortal").then((m) => ({ default: m.ClaimsInsights })));
 // Cross-cutting inbox (Phase 8.1) — one chunk, mounted under every portal's `/…/notifications` route.
 const Notifications = lazy(() => import("./Notifications").then((m) => ({ default: m.Notifications })));
 // Admin / platform governance (Phase 8b) — one chunk, mounted under both the org-admin (/admin) and
@@ -127,6 +131,10 @@ export const SCREENS: Record<string, () => ReactNode> = {
   // 10. Call Centre (Phase 15) — the call-shaped workspace + call history. No clinical route exists.
   "/call-centre/workspace": () => <CallCentreWorkspace />,
   "/call-centre/history": () => <CallHistory />,
+  // 11. Claims (Phase 10b) — worklist / reconciliation / insights. Codes + amounts only; no clinical route exists.
+  "/claims/worklist": () => <ClaimsWorklist />,
+  "/claims/reconciliation": () => <ClaimsReconciliation />,
+  "/claims/insights": () => <ClaimsInsights />,
 };
 
 // Admin sections are shared by the org-admin (/admin/*) and super-admin (/platform/*) portals; map by the

@@ -42,6 +42,12 @@ import type {
   MarkReadResult,
   Notification,
   OrderRow,
+  ResultDetail,
+  ReportAccessInput,
+  ReportAccessRequestResult,
+  ClaimRow,
+  ReconciliationRow,
+  ClaimsKpis,
   ResultTask,
   ResultUpload,
   PatientListItem,
@@ -87,6 +93,13 @@ export interface ApiClient {
   ordersMine(status?: string): Promise<OrderRow[]>;
   /** The clinician's own e-prescriptions (US-033). */
   prescriptionsMine(status?: string): Promise<RxRow[]>;
+  /**
+   * Read a single completed result (14.6). Returns full values, OR existence-only metadata when the result is
+   * sensitivity-restricted and the caller neither authored it nor holds an active grant (14.7 server gate).
+   */
+  resultDetail(orderId: string, lineId: string): Promise<ResultDetail>;
+  /** Request time-boxed access to a restricted result (14.8) — purpose + justification are mandatory. */
+  requestReportAccess(input: ReportAccessInput): Promise<ReportAccessRequestResult>;
   /** Record vitals on an encounter (nurse triage, US-030) — treating-gated server-side. */
   recordVitals(encounterId: string, readings: VitalInput[]): Promise<VitalsResult>;
 
@@ -130,6 +143,11 @@ export interface ApiClient {
   settlements(): Promise<Settlement[]>;
   financialSummary(dimension: "serviceline" | "category" | "provider"): Promise<FinancialSummary>;
   exportReport(req: ExportRequest): Promise<ExportResult>;
+
+  // Claims management — codes + amounts only, no diagnosis (Phase 10b). Provider users isolated to own claims server-side.
+  claimsWorklist(status?: string): Promise<ClaimRow[]>;
+  claimsReconciliation(bucket?: string): Promise<ReconciliationRow[]>;
+  claimsKpis(): Promise<ClaimsKpis>;
 
   // Notifications — the caller's own in-app inbox (Phase 8.1). Self-service, cross-portal.
   notifications(unreadOnly?: boolean): Promise<Notification[]>;

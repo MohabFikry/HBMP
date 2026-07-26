@@ -27,6 +27,7 @@ export const OIDC = {
    */
   scope:
     "openid admin:read admin:write admin:break-glass " +
+    "callcentre:read callcentre:act callcentre:interaction callcentre:verify claims:read claims:reconcile claims:export " +
     "appointment:read appointment:write audit:read auth:decide auth:emergency auth:ingest " +
     "auth:manual auth:override auth:read auth:review case:manage case:read case:write document:write " +
     "eligibility:check emr:read emr:write encounter:write finance:approve finance:export finance:project " +
@@ -47,6 +48,8 @@ const ROLE_MAP: Array<[string, Role]> = [
   ["medical_director", "medical_director"],
   ["medical_approval", "medical_approval"],
   ["case_manager", "case_manager"],
+  ["call_center", "call_center"],
+  ["claims_officer", "claims_officer"],
   ["finance", "finance"],
   ["provider_admin", "provider_admin"],
   ["network_team", "provider_admin"],

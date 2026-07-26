@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
-import { renderNode } from "./helpers";
+import { renderApp, renderNode } from "./helpers";
+import { DevApiClient } from "../src/api/DevApiClient";
+import type { ReportAccessInput } from "@mersal/contracts";
 import { BranchSwitcher, type BranchOption } from "../src/shell/BranchSwitcher";
 import { RestrictedResultCard, RequestAccessDialog, type RestrictedResult } from "../src/screens/RestrictedResultCard";
 
@@ -70,5 +72,60 @@ describe("14.8 — request-access dialog", () => {
     await userEvent.click(screen.getByRole("button", { name: /submit request/i }));
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ purposeCode: "ClinicalReview", justification: "continuity of care" }));
+  });
+});
+
+/**
+ * The gap-fix: prove the restricted-result card is reachable through the LIVE results inbox — opening a
+ * sensitivity-restricted result surfaces the locked card and the request-access flow reaches the API. A
+ * Standard result in the same inbox shows its value, so the gate — not the UI — decides disclosure.
+ */
+describe("14.6/14.8 — results inbox wires the sensitivity gate", () => {
+  class ReqSpyApi extends DevApiClient {
+    requests: ReportAccessInput[] = [];
+    override requestReportAccess(input: ReportAccessInput) {
+      this.requests.push(input);
+      return super.requestReportAccess(input);
+    }
+  }
+
+  it("opens a restricted result as the locked card and files an access request", async () => {
+    const api = new ReqSpyApi({ latencyMs: 0 });
+    renderApp("/clinician/results", "doctor", api);
+
+    // The completed results inbox renders with a per-row "View result" action.
+    const viewButtons = await screen.findAllByRole("button", { name: /view result/i });
+    // ord-2 (row order: ord-2 then ord-3) is the sensitivity-restricted one.
+    await userEvent.click(viewButtons[0]);
+
+    // Locked card appears — existence only, no value.
+    expect(await screen.findByTestId("restricted-chip")).toHaveTextContent(/restricted/i);
+
+    // Request access → dialog → submit reaches the API with the order/line anchor.
+    await userEvent.click(screen.getByRole("button", { name: /request access/i }));
+    await userEvent.selectOptions(await screen.findByLabelText(/purpose/i), "ClinicalReview");
+    await userEvent.type(screen.getByLabelText(/justification/i), "continuity of care");
+    await userEvent.click(screen.getByRole("button", { name: /submit request/i }));
+
+    expect(api.requests).toHaveLength(1);
+    expect(api.requests[0]).toMatchObject({ purposeCode: "ClinicalReview", orderId: "ord-2", lineId: "ln-2" });
+  });
+
+  it("shows the value for a NON-restricted result (gate discloses)", async () => {
+    renderApp("/clinician/results", "doctor", new DevApiClient({ latencyMs: 0 }));
+    const viewButtons = await screen.findAllByRole("button", { name: /view result/i });
+    // ord-3 is a Standard lab result → value disclosed.
+    await userEvent.click(viewButtons[1]);
+    expect(await screen.findByText(/within reference range/i)).toBeInTheDocument();
+  });
+});
+
+/** Claims portal smoke — the newly-created officer portal renders its worklist against the live contract. */
+describe("Claims portal (Phase 10b UI)", () => {
+  it("renders the claims worklist for the claims officer", async () => {
+    renderApp("/claims/worklist", "claims_officer", new DevApiClient({ latencyMs: 0 }));
+    expect(await screen.findByRole("heading", { name: /claims worklist/i })).toBeInTheDocument();
+    // A claim row from the fixture is present (masked claim number, amounts — no diagnosis).
+    expect(await screen.findByText(/CLM-2026-004411/)).toBeInTheDocument();
   });
 });
