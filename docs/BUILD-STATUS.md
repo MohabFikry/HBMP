@@ -81,7 +81,7 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 10b | Claims Mgmt | 10b.9 Appeals + claims KPIs | ☑ | 7dc6ea7 |
 | 11 | Hardening/NFR | 11.1 Perf/scale harness + baseline + index/cache ADR | ☑ | cac6e7a |
 | 11 | Hardening/NFR | 11.2 STRIDE + CI security gates + OWASP API Top10 + sign-off | ☑ | c9d20c7 |
-| 11 | Hardening/NFR | 11.3 Fleet metrics + dashboards/alerts + DR/restore + runbooks | ☑ | e5581c1 |
+| 11 | Hardening/NFR | 11.3 Fleet metrics + dashboards/alerts + DR/restore + runbooks | ☑ | eb9c339 |
 | 16 | Audit Remediation | 16.1 Secrets purge + doc reconciliation | ☐ | |
 | 16 | Audit Remediation | 16.2 Durable transactional outbox (C1) | ☐ | |
 | 16 | Audit Remediation | 16.3 Admin authz middleware + MFA + idempotency (C3) | ☐ | |
