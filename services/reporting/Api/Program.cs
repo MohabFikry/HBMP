@@ -1,6 +1,7 @@
 using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Authz;
+using Mersal.Data;
 using Mersal.Events;
 using Mersal.Reporting.Api;
 using Mersal.Reporting.Infrastructure;
@@ -37,6 +38,7 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseHbmpRls(); // bind app.tenant_id GUC from the principal (RLS, ADR-0011)
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "reporting-service" })).AllowAnonymous();
