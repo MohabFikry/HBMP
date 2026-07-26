@@ -25,7 +25,10 @@ builder.Services.AddEligibilityInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);
 
 builder.Services.Configure<ConsumerOptions>(builder.Configuration.GetSection(ConsumerOptions.SectionName));
+builder.Services.AddSingleton<ConsumerHealthState>();
 builder.Services.AddHostedService<EventConsumer>();
+builder.Services.AddHealthChecks()
+    .AddCheck<EventConsumerHealthCheck>("event-consumer", tags: ["ready"]);
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("eligibility-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
@@ -45,6 +48,7 @@ app.UseHbmpRls(); // bind app.tenant_id GUC from the principal (RLS, ADR-0011)
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "eligibility-service" })).AllowAnonymous();
+app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 // Coordination coverage summary (10.1) — the fail-closed spine of the case-service beneficiary-360 view.
 app.MapCoordination();

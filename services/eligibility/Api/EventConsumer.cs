@@ -23,6 +23,7 @@ public sealed class ConsumerOptions
 public sealed class EventConsumer(
     IServiceScopeFactory scopeFactory,
     IOptions<ConsumerOptions> options,
+    ConsumerHealthState health,
     ILogger<EventConsumer> logger) : BackgroundService
 {
     private IConnection? _connection;
@@ -50,11 +51,13 @@ public sealed class EventConsumer(
                 _channel.BasicConsume(queue, autoAck: false, consumer);
                 logger.LogInformation("eligibility-service consuming {Queue}", queue);
             }
+            health.Connected = true;
         }
         catch (Exception ex)
         {
             // Broker not available (e.g. unit/dev without RabbitMQ): the service still serves checks
             // from projections seeded by other means. Log and continue rather than crash the host.
+            health.Connected = false;
             logger.LogWarning(ex, "eligibility event consumer could not connect; running without live event sync");
         }
         return Task.CompletedTask;
@@ -78,6 +81,7 @@ public sealed class EventConsumer(
             await updater.ApplyAsync(eventId, eventType, payload, ct);
 
             _channel!.BasicAck(ea.DeliveryTag, multiple: false);
+            health.MarkEventApplied();
         }
         catch (Exception ex)
         {
@@ -88,6 +92,7 @@ public sealed class EventConsumer(
 
     public override void Dispose()
     {
+        health.Connected = false;
         _channel?.Dispose();
         _connection?.Dispose();
         base.Dispose();
