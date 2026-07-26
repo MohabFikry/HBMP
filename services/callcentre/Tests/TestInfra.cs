@@ -23,6 +23,7 @@ public sealed class CallCentreFactory : WebApplicationFactory<Program>
     public static readonly string? Db = Environment.GetEnvironmentVariable("CALLCENTRE_TEST_DB");
     public FakeMemberDirectory Directory { get; } = new();
     public FakeAppointmentGateway Gateway { get; } = new();
+    public FakeContactGateway Contacts { get; } = new();
     public InMemoryOutbox Outbox { get; private set; } = default!;
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -38,6 +39,8 @@ public sealed class CallCentreFactory : WebApplicationFactory<Program>
             services.AddSingleton<IMemberDirectory>(Directory);
             services.RemoveAll<IAppointmentGateway>();
             services.AddSingleton<IAppointmentGateway>(Gateway);
+            services.RemoveAll<IContactGateway>();
+            services.AddSingleton<IContactGateway>(Contacts);
         });
     }
 
@@ -86,10 +89,12 @@ public sealed class FakeMemberDirectory : IMemberDirectory
 /// and returns a successful appointment id, so the callcentre delegation + linkage can be asserted without emr.</summary>
 public sealed class FakeAppointmentGateway : IAppointmentGateway
 {
+    internal static readonly System.Text.Json.JsonSerializerOptions Web = new(System.Text.Json.JsonSerializerDefaults.Web);
     public Guid BookedAppointmentId { get; } = Guid.NewGuid();
     public string? LastIdempotencyKey { get; private set; }
     public string? LastIfMatch { get; private set; }
     public string? LastMethod { get; private set; }
+    public string? LastBookAppointmentType { get; private set; }
 
     public Task<GatewayResult> SearchSlotsAsync(string qs, string? bearer, CancellationToken ct = default)
     {
@@ -100,6 +105,9 @@ public sealed class FakeAppointmentGateway : IAppointmentGateway
     public Task<GatewayResult> BookAsync(object body, string? bearer, string? idem, CancellationToken ct = default)
     {
         LastMethod = "book"; LastIdempotencyKey = idem;
+        using var doc = System.Text.Json.JsonDocument.Parse(
+            System.Text.Json.JsonSerializer.Serialize(body, FakeAppointmentGateway.Web));
+        LastBookAppointmentType = doc.RootElement.TryGetProperty("appointmentType", out var t) ? t.GetString() : null;
         return Task.FromResult(new GatewayResult(201, $"{{\"appointmentId\":\"{BookedAppointmentId}\"}}", BookedAppointmentId));
     }
 
@@ -113,6 +121,33 @@ public sealed class FakeAppointmentGateway : IAppointmentGateway
     {
         LastMethod = "cancel"; LastIdempotencyKey = idem; LastIfMatch = ifMatch;
         return Task.FromResult(new GatewayResult(200, $"{{\"appointmentId\":\"{id}\"}}", id));
+    }
+}
+
+/// <summary>Deterministic patient-service contact gateway — records the last edit, returns success.</summary>
+public sealed class FakeContactGateway : IContactGateway
+{
+    public string? LastKind { get; private set; }
+    public string? LastValue { get; private set; }
+
+    public Task<GatewayResult> UpdateContactAsync(Guid ben, Guid contactId, object body, string? bearer, CancellationToken ct = default)
+    {
+        Capture(body);
+        return Task.FromResult(new GatewayResult(200, "{\"ok\":true}", null));
+    }
+
+    public Task<GatewayResult> AddContactAsync(Guid ben, object body, string? bearer, CancellationToken ct = default)
+    {
+        Capture(body);
+        return Task.FromResult(new GatewayResult(201, "{\"ok\":true}", null));
+    }
+
+    private void Capture(object body)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(
+            System.Text.Json.JsonSerializer.Serialize(body, FakeAppointmentGateway.Web));
+        LastKind = doc.RootElement.TryGetProperty("kind", out var k) ? k.GetString() : null;
+        LastValue = doc.RootElement.TryGetProperty("value", out var v) ? v.GetString() : null;
     }
 }
 

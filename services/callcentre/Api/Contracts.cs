@@ -58,3 +58,11 @@ public sealed record RescheduleFromCallRequest(Guid InteractionId, Guid NewSlotI
 /// <summary>Cancel an appointment from the call. <paramref name="ReasonCode"/> is MANDATORY (a cancel without one
 /// is 422).</summary>
 public sealed record CancelFromCallRequest(Guid InteractionId, CallCancelReason? ReasonCode, string? Note);
+
+// --- 15.4 contact edits from the call ---------------------------------------------------------------------
+
+/// <summary>Correct an existing contact (delegates to patient-service, which keeps history).</summary>
+public sealed record UpdateContactFromCallRequest(Guid InteractionId, string Kind, string Value, string? PreferredChannel);
+
+/// <summary>Add a new contact (delegates to patient-service; may mark primary — patient owns the one-primary rule).</summary>
+public sealed record AddContactFromCallRequest(Guid InteractionId, string Kind, string Value, bool IsPrimary, string? PreferredChannel);

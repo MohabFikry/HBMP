@@ -28,6 +28,8 @@ builder.Services.AddScoped<CallDeps>();
 builder.Services.AddScoped<Mersal.CallCentre.Infrastructure.IMemberDirectory, HttpMemberDirectory>();
 // 15.3 — appointment actions delegate to the emr engine (no-double-book/idempotency/If-Match preserved there).
 builder.Services.AddScoped<Mersal.CallCentre.Infrastructure.IAppointmentGateway, HttpAppointmentGateway>();
+// 15.4 — contact corrections delegate to patient-service (one-primary rule + history live there).
+builder.Services.AddScoped<Mersal.CallCentre.Infrastructure.IContactGateway, HttpContactGateway>();
 foreach (var (name, url) in new[]
 {
     ("eligibility", builder.Configuration["Siblings:Eligibility"] ?? "http://eligibility-service:8080"),
@@ -62,6 +64,7 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "ca
 app.MapInteractions();   // phase 15.1 — call interactions + caller verification (the verification gate)
 app.MapMembers();        // phase 15.2 — member search + minimum-necessary, clinical-free 360 (verification-gated)
 app.MapCallAppointments(); // phase 15.3 — book/reschedule/cancel via the emr engine (verification-gated, linked)
+app.MapContacts();       // phase 15.4 — contact corrections via patient-service (verification-gated, validated)
 
 app.Run();
 
