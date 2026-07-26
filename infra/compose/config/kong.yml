@@ -4,9 +4,12 @@ _format_version: "3.0"
 # (SPA origin http://localhost:5173). Services ALSO fully validate the JWT (defense in depth,
 # libs/auth) — Kong here does routing + CORS + correlation-id.
 #
-# Edge auth (global JWT/OIDC plugin validating the realm JWKS) is deferred to Phase 17.6, when the
-# issuer moves in-house (ASP.NET Identity + OpenIddict) and the JWKS URL is stable; until then services
-# remain the enforcement point. See docs/adr and phase-17-identity-openiddict.md.
+# Edge auth (Phase 17.6): the issuer is now in-house (identity-service — ASP.NET Identity + OpenIddict,
+# ADR-0015) with a STABLE JWKS at http://identity-service:8080/.well-known/jwks. The OIDC/OAuth endpoints
+# (/connect/*, /.well-known/*) are routed to it below so the SPA reaches one origin. JWKS-based signature
+# validation is enforced at every service (defense in depth, libs/auth); for true EDGE enforcement in Tier
+# 2/3 add Kong's openid-connect plugin pointed at that JWKS (community-edition `jwt` cannot do JWKS
+# discovery with rotating RS256 keys, so services stay the enforcement point in Tier 1). Keycloak retired.
 #
 # Routing is by the service's REAL path prefix (see each service's MapGroup). Sub-paths under
 # /api/v1/beneficiaries are owned by MULTIPLE services (patient, emr, eligibility, document); the
@@ -188,6 +191,14 @@ services:
     routes:
       - name: callcentre-routes
         paths: ["/api/v1/call-interactions", "/api/v1/call-centre"]
+        strip_path: false
+
+  # --- identity-service: the in-app OIDC issuer (Phase 17). OAuth/OIDC endpoints + discovery/JWKS. ---
+  - name: identity-service
+    url: http://identity-service:8080
+    routes:
+      - name: identity-oidc-routes
+        paths: ["/connect", "/.well-known"]
         strip_path: false
 
 plugins:

@@ -97,3 +97,15 @@ protocol (cloud-ready, standards-based) — we only move *who issues*.
 - Token *validation* is untouched, so the blast radius on the 15 services is a config value, not code.
 - See the companion **frozen token-contract snapshot** (`docs/security/token-contract.md`) — the normative
   spec the OpenIddict issuer must satisfy — and ADRs [0011 (hbmp_app RLS)], [0013 (durable outbox)].
+
+## Update — cutover complete (Phase 17.6, 2026-07-26)
+
+17.1–17.6 are implemented and merged. `identity-service` is the issuer; the SPA and all 15 services
+authenticate against it (services' `Auth:Authority` → `http://identity-service:8080`, browser via
+`localhost:8090`, split-horizon reconciled by each service's `ValidIssuers`). Keycloak is removed from
+`infra/compose/compose.yaml`; `infra/keycloak/*` is retired-for-reference. Kong routes `/connect/*` +
+`/.well-known/*` to the issuer; edge JWKS validation stays at the service layer in Tier 1 (community Kong
+cannot do JWKS discovery with rotating RS256 keys) with the openid-connect plugin noted for Tier 2/3.
+Demo staff accounts (one per role, dev-only) are seeded by `UserSeeder`. Dev/test use ephemeral signing
+keys; **production must supply persistent RS256 keys from OpenBao** (tracked as the one remaining prod-hardening
+follow-up for go-live, Phase 12).

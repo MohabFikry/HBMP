@@ -23,7 +23,7 @@ This project ships 20 custom domain skills in `HBMP-Design/claude-code-skills/` 
 - **Data:** PostgreSQL (schema-per-service), Row-Level Security; at-rest via LUKS + pgcrypto; HA via Patroni; PITR via pgBackRest. EF Core or Dapper.
 - **API:** REST, versioned `/api/v1`, OpenAPI 3.1, FHIR R4-aligned where practical.
 - **Async:** RabbitMQ (commands/queues) + NATS JetStream or Redpanda (domain events); CloudEvents; **transactional outbox**.
-- **Identity:** Keycloak (OIDC/OAuth2, MFA TOTP/WebAuthn). **AuthZ:** RBAC + ABAC via OPA/Cerbos (or OpenFGA) + PostgreSQL RLS.
+- **Identity:** in-app **identity-service** — ASP.NET Core Identity + OpenIddict (OIDC/OAuth2, MFA TOTP) — issues the frozen token contract (`docs/security/token-contract.md`); replaced Keycloak in Phase 17 (ADR-0015). **AuthZ:** RBAC + ABAC via OPA/Cerbos (or OpenFGA) + PostgreSQL RLS.
 - **Infra:** k3s + Helm (Docker Compose single-node); Kong Gateway (OSS); Traefik/NGINX Ingress + ModSecurity (OWASP CRS) + Let's Encrypt; MinIO (S3-compatible, SSE, object-lock/WORM); Valkey cache; OpenSearch; OpenBao/Vault (KMS/secrets) + SOPS; Linkerd mTLS; OpenTelemetry + Prometheus + Grafana + Loki + Tempo. IaC via OpenTofu + Ansible + Helm.
 - **CI/CD:** GitLab CE (or Gitea + Woodpecker) + Harbor; Trivy scans; ClamAV on uploads. **DR:** pgBackRest + Velero + restic, offsite (RPO≤15m/RTO≤2h).
 - Cloud-ready = containers + Kubernetes + S3-compatible + OIDC + OTel; migrating to managed cloud swaps infra, not code.

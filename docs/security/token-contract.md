@@ -18,7 +18,7 @@ issuer MUST reproduce these shapes and values. Anything not listed here is free 
 |---|---|---|---|
 | Type | JWT access token | all services + SPA | Bearer, `Authorization: Bearer <jwt>` |
 | Signature | RS256, keys via JWKS discovery | `libs/auth` (`ValidateIssuerSigningKey`) | `RequireSignedTokens = true` |
-| `iss` | the issuer URL | `libs/auth` (`ValidateIssuer`, `ValidIssuers`) | co-locating the issuer lets the split-horizon `ValidIssuers` list collapse to one |
+| `iss` | the issuer URL | `libs/auth` (`ValidateIssuer`, `ValidIssuers`) | 17.6: services use `http://identity-service:8080`; browser tokens carry `iss=http://localhost:8090`, accepted via `ValidIssuers`. A single ingress hostname (Tier 2/3) collapses this to one |
 | `aud` | `hbmp-api` | `libs/auth` (`ValidateAudience` when set) | keep the audience name `hbmp-api` |
 | `exp` / `iat` / `nbf` | present; `exp` required | `libs/auth` (`ValidateLifetime`, `RequireExpirationTime`) | 30s clock skew allowed |
 

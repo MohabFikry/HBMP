@@ -26,6 +26,7 @@ public sealed class IdentityAppFactory : WebApplicationFactory<Program>
         builder.ConfigureAppConfiguration(c => c.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["ConnectionStrings:Identity"] = IdentityTestDb.Conn,
+            ["Issuer:SeedDemoUsers"] = "false", // don't seed demo staff into the shared test DB
         }));
         return base.CreateHost(builder);
     }

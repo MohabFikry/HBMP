@@ -1,6 +1,12 @@
-# Keycloak — identity & access (realm-as-code)
+# Keycloak — identity & access (realm-as-code) — ⚠️ RETIRED (Phase 17, ADR-0015)
 
-Phase 0.2. Keycloak is the OIDC/OAuth2 IdP (MFA via TOTP/WebAuthn). The realm is provisioned **as code** and imported on first boot by the Compose stack (`--import-realm`).
+> **RETIRED as of Phase 17.6.** Keycloak has been replaced by the in-app issuer **identity-service**
+> (ASP.NET Core Identity + OpenIddict). The realm/clients/roles/scopes now live in code + the `identity`
+> schema; the SPA and services authenticate against identity-service. These files are kept for historical
+> reference only — they are no longer imported or run (removed from `infra/compose/compose.yaml`). See
+> `docs/adr/0015-in-app-identity-openiddict.md` and `docs/security/token-contract.md`.
+
+Phase 0.2 (historical). Keycloak was the OIDC/OAuth2 IdP (MFA via TOTP/WebAuthn). The realm was provisioned **as code** and imported on first boot by the Compose stack (`--import-realm`).
 
 ## Files
 - **`realm-mersal.json`** — the `mersal` realm: roles, clients, client scopes, MFA policy, session/timeout, brute-force lockout, protocol mappers.

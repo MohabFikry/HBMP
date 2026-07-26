@@ -1,10 +1,9 @@
 -- Mersal HBMP — initial databases (Tier 1 starter)
--- Runs once on first Postgres boot. Keycloak + a shared app DB to start.
+-- Runs once on first Postgres boot. A shared app DB to start (identity lives in the `identity` schema of
+-- the hbmp DB — Phase 17 retired the separate Keycloak database).
 -- As you build services, create a database (or schema) per service per 0A/16.
 
-CREATE DATABASE keycloak;
-
--- Application database (schema-per-service lives inside this DB for Tier 1).
+-- Application database (schema-per-service lives inside this DB for Tier 1; `identity` is one of them).
 CREATE DATABASE hbmp;
 
 -- Per-service databases can be added later, e.g.:

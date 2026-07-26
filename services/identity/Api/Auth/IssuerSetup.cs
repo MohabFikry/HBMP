@@ -87,6 +87,7 @@ public static class IssuerSetup
             });
 
         services.AddHostedService<ClientSeeder>();
+        services.AddHostedService<UserSeeder>(); // demo staff accounts (dev-only; 17.6 cutover)
         return services;
     }
 }
