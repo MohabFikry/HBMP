@@ -95,10 +95,24 @@ jobs:
       - name: Domain-coverage gate
         run: bash tools/ci/coverage-gate.sh ./coverage
 
-      - name: Upload coverage + test results
+      - name: Restore local tools (Swagger CLI)
+        run: dotnet tool restore
+
+      - name: Generate + validate OpenAPI specs (all services)
+        run: |
+          CI_DB="Host=localhost;Port=5432;Database=hbmp;Username=hbmp;Password=ci_hbmp_pw"
+          for k in Admin Approvals Audit CallCentre Case Claims Document Eligibility Emr Finance \
+                   MasterData Notification Orders Patient Pharmacy Policy Provider Reporting; do
+            export "ConnectionStrings__${k}=${CI_DB}"
+          done
+          bash tools/ci/generate-openapi.sh artifacts/openapi
+
+      - name: Upload coverage + OpenAPI specs + test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-coverage
-          path: ./coverage
+          name: backend-coverage-openapi
+          path: |
+            ./coverage
+            ./artifacts/openapi
           retention-days: 14
