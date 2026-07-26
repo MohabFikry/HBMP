@@ -46,10 +46,43 @@ public static class FinanceEndpoints
             if (denied is not null) return denied;
             if (req.PeriodEnd < req.PeriodStart) return Unprocessable("bad-period", "period_end precedes period_start.");
 
+            // Idempotency: generating a settlement mints a financial artifact, so a replayed Idempotency-Key returns
+            // the settlement produced the first time rather than a duplicate. The header is honored when present
+            // (the SPA sends it on every mutation); callers that omit it fall through to a normal generate.
+            var idem = http.Headers["Idempotency-Key"].ToString();
+            if (!string.IsNullOrWhiteSpace(idem))
+            {
+                var prior = await deps.Db.ProcessedRequests.AsNoTracking().FirstOrDefaultAsync(r => r.IdempotencyKey == idem, ct);
+                if (prior is not null)
+                {
+                    var existing = await deps.Db.Settlements.AsNoTracking().Include(x => x.Lines)
+                        .FirstOrDefaultAsync(x => x.SettlementId == prior.ResultId && x.TenantId == deps.Tenant, ct);
+                    return existing is null
+                        ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found")
+                        : Results.Created($"/api/v1/finance/settlements/{existing.SettlementId}", SettlementView.From(existing));
+                }
+            }
+
             var bearer = http.Headers.Authorization.ToString();
             var s = await deps.Settlements.GenerateAsync(deps.Tenant, req.ProviderId, req.PeriodStart, req.PeriodEnd, deps.Subject, bearer, ct);
             deps.Db.Settlements.Add(s);
-            await deps.Db.SaveChangesAsync(ct);
+            if (!string.IsNullOrWhiteSpace(idem))
+                deps.Db.ProcessedRequests.Add(new ProcessedRequest
+                {
+                    IdempotencyKey = idem, Operation = "settlement:generate",
+                    ResultId = s.SettlementId, StatusCode = 201, CreatedAt = deps.Clock.GetUtcNow(),
+                });
+            try { await deps.Db.SaveChangesAsync(ct); }
+            catch (DbUpdateException) when (!string.IsNullOrWhiteSpace(idem))
+            {
+                // A concurrent request with the same key won the PK race — replay its settlement.
+                var prior = await deps.Db.ProcessedRequests.AsNoTracking().FirstOrDefaultAsync(r => r.IdempotencyKey == idem, ct);
+                var existing = prior is null ? null : await deps.Db.Settlements.AsNoTracking().Include(x => x.Lines)
+                    .FirstOrDefaultAsync(x => x.SettlementId == prior.ResultId && x.TenantId == deps.Tenant, ct);
+                return existing is null
+                    ? Conflict("A settlement for this Idempotency-Key is being created concurrently.")
+                    : Results.Created($"/api/v1/finance/settlements/{existing.SettlementId}", SettlementView.From(existing));
+            }
             await Audit(deps, AuditAction.Create, s.SettlementId.ToString(), "SettlementGenerated", null, s.Status.ToString());
             return Results.Created($"/api/v1/finance/settlements/{s.SettlementId}", SettlementView.From(s));
         }).RequireAuthorization(HbmpPolicies.Scope("finance:write"));

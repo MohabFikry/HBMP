@@ -16,6 +16,7 @@ public sealed class FinanceDbContext(DbContextOptions<FinanceDbContext> options)
     public DbSet<SettlementLine> SettlementLines => Set<SettlementLine>();
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
     public DbSet<ExportRecord> Exports => Set<ExportRecord>();
+    public DbSet<ProcessedRequest> ProcessedRequests => Set<ProcessedRequest>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -56,5 +57,18 @@ public sealed class FinanceDbContext(DbContextOptions<FinanceDbContext> options)
 
         b.Entity<ProcessedEvent>(e => { e.ToTable("processed_event"); e.HasKey(x => x.EventId); });
         b.Entity<ExportRecord>(e => { e.ToTable("export_record"); e.HasKey(x => x.ExportId); });
+        b.Entity<ProcessedRequest>(e => { e.ToTable("processed_request"); e.HasKey(x => x.IdempotencyKey); });
     }
+}
+
+/// <summary>HTTP idempotency ledger — a replayed <c>Idempotency-Key</c> on settlement generation returns the prior
+/// settlement instead of minting a second financial artifact. RLS-free (keys are opaque + globally unique), like the
+/// event dedupe ledger. Distinct from <c>ProcessedEvent</c>, which dedupes inbound domain events by event id.</summary>
+public sealed class ProcessedRequest
+{
+    public string IdempotencyKey { get; set; } = default!;
+    public string Operation { get; set; } = default!;
+    public Guid ResultId { get; set; }
+    public int StatusCode { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
 }
