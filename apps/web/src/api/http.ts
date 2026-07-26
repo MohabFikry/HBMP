@@ -2,19 +2,57 @@ import type { z } from "zod";
 import { API_BASE } from "../config";
 import { getToken } from "../auth/tokenStore";
 
+/** The RFC 7807 `application/problem+json` fields a service returns on a 4xx/5xx, when it supplies them. */
+export interface ProblemDetails {
+  title?: string;
+  detail?: string;
+  type?: string;
+  traceId?: string;
+}
+
 /**
  * A normalised API failure. `kind` lets screens branch: `network` (offline/timeout), `http` (a 4xx/5xx with
  * a problem body), or `schema` (the response did not match the contract — a real defect we surface loudly
- * rather than rendering garbage).
+ * rather than rendering garbage). For `http` failures the parsed {@link ProblemDetails} are attached so the
+ * UI can show the service's own `detail`/`title` (per CLAUDE.md: RFC 7807 problem+json) instead of a generic
+ * "request failed".
  */
 export class ApiError extends Error {
   constructor(
     readonly kind: "network" | "http" | "schema",
     message: string,
     readonly status?: number,
+    readonly problem?: ProblemDetails,
   ) {
     super(message);
     this.name = "ApiError";
+  }
+
+  /** The most specific human-readable reason available: server `detail` → `title` → the generic message. */
+  get reason(): string {
+    return this.problem?.detail ?? this.problem?.title ?? this.message;
+  }
+}
+
+/**
+ * Read an RFC 7807 problem body off a failed response, tolerating a non-JSON or unreadable body (returns
+ * `undefined` so the caller falls back to a generic message). Only `application/(problem+)json` is parsed.
+ */
+async function readProblem(res: Response): Promise<ProblemDetails | undefined> {
+  const ct = res.headers.get("content-type") ?? "";
+  if (!/application\/(problem\+)?json/i.test(ct)) return undefined;
+  try {
+    const b = (await res.json()) as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === "string" && v.length > 0 ? v : undefined);
+    const problem: ProblemDetails = {
+      title: str(b.title),
+      detail: str(b.detail),
+      type: str(b.type),
+      traceId: str(b.traceId) ?? str(b.traceID),
+    };
+    return problem.title || problem.detail || problem.type || problem.traceId ? problem : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -45,7 +83,9 @@ async function request(path: string, init: RequestInit): Promise<unknown> {
     throw new ApiError("network", e instanceof Error ? e.message : "Network request failed");
   }
   if (!res.ok) {
-    throw new ApiError("http", `Request to ${path} failed`, res.status);
+    const problem = await readProblem(res);
+    const msg = problem?.detail ?? problem?.title ?? `Request to ${path} failed`;
+    throw new ApiError("http", msg, res.status, problem);
   }
   return res.status === 204 ? null : await res.json();
 }

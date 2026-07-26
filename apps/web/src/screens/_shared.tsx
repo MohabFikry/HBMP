@@ -13,7 +13,11 @@ export function useLoc(): (l: Localized) => string {
 
 const STR = {
   loading: { en: "Loading…", ar: "جارٍ التحميل…" },
-  error: { en: "Couldn't load this. The service may be unavailable.", ar: "تعذّر التحميل. قد تكون الخدمة غير متاحة." },
+  // Kind-specific headline (a11y: the reason is stated in text, not by colour alone). The service's own
+  // RFC 7807 `detail` — when present — is shown beneath as the specific reason.
+  errorNetwork: { en: "Couldn't reach the service. Check your connection and retry.", ar: "تعذّر الوصول إلى الخدمة. تحقّق من اتصالك ثم أعد المحاولة." },
+  errorHttp: { en: "The service couldn't complete this request.", ar: "تعذّر على الخدمة إتمام هذا الطلب." },
+  errorSchema: { en: "The service returned an unexpected response.", ar: "أعادت الخدمة استجابةً غير متوقعة." },
   retry: { en: "Retry", ar: "إعادة المحاولة" },
 } satisfies Record<string, Localized>;
 
@@ -61,9 +65,16 @@ export function AsyncSection<T>({ state, isEmpty, emptyLabel, children }: AsyncS
     );
   }
   if (state.status === "error") {
+    const err = state.error;
+    const headline = err?.kind === "network" ? STR.errorNetwork : err?.kind === "schema" ? STR.errorSchema : STR.errorHttp;
+    // The server's problem+json `detail`/`title` (http failures only) is the specific, actionable reason.
+    const detail = err?.kind === "http" ? (err.problem?.detail ?? err.problem?.title) : undefined;
     return (
       <Card style={{ padding: "var(--sp6)", display: "grid", gap: "var(--sp3)" }}>
-        <InlineAlert tone="bad">{t(STR.error)}</InlineAlert>
+        <InlineAlert tone="bad">
+          <span>{t(headline)}</span>
+          {detail ? <span style={{ display: "block", marginTop: "var(--sp1)", opacity: 0.85, fontSize: "0.9em" }}>{detail}</span> : null}
+        </InlineAlert>
         <div>
           <Button variant="secondary" onClick={state.reload}>
             {t(STR.retry)}
