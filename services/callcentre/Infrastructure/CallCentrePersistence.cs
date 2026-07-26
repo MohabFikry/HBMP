@@ -68,6 +68,7 @@ public static class DependencyInjection
              .UseSnakeCaseNamingConvention());
         services.AddScoped<VerificationService>();
         services.AddScoped<CallRefIssuer>();
+        services.AddScoped<KpiService>();
         return services;
     }
 }

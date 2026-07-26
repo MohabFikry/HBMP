@@ -65,6 +65,7 @@ app.MapInteractions();   // phase 15.1 — call interactions + caller verificati
 app.MapMembers();        // phase 15.2 — member search + minimum-necessary, clinical-free 360 (verification-gated)
 app.MapCallAppointments(); // phase 15.3 — book/reschedule/cancel via the emr engine (verification-gated, linked)
 app.MapContacts();       // phase 15.4 — contact corrections via patient-service (verification-gated, validated)
+app.MapKpis();           // phase 15.6 — PHI-free call-centre KPIs (supervisor/manager scope)
 
 app.Run();
 

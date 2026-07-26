@@ -41,20 +41,20 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 6 | Pharmacy | 6.1 Dispensable search | ☑ | ce79500 |
 | 6 | Pharmacy | 6.2 Partial dispensing (batch/expiry) | ☑ | ce79500 |
 | 6 | Pharmacy | 6.3 Substitution + out-of-stock | ☑ | ce79500 |
-| 14 | Branch & Sensitivity | 14.1 `branch` entity + seed the six branches | ☐ | |
-| 14 | Branch & Sensitivity | 14.2 User↔branch assignment + active-branch context (`X-Active-Branch`) | ☐ | |
-| 14 | Branch & Sensitivity | 14.3 `BranchScope` ABAC + `RowScope` + policy-bundle scope modes | ☐ | |
-| 14 | Branch & Sensitivity | 14.4 Branch-scope appointments/queue/orders worklists | ☐ | |
-| 14 | Branch & Sensitivity | 14.5 Practitioner + specialty + doctor↔branch assignment | ☐ | |
-| 14 | Branch & Sensitivity | 14.6 Examination type + sensitivity classification | ☐ | |
-| 14 | Branch & Sensitivity | 14.7 Sensitive-result gating + release-request workflow | ☐ | |
-| 14 | Branch & Sensitivity | 14.8 Branch switcher + restricted-result UI | ☐ | |
-| 15 | Call Centre | 15.1 `callcentre-service` (interaction + caller verification) | ☐ | |
-| 15 | Call Centre | 15.2 Member search + min-necessary 360 | ☐ | |
-| 15 | Call Centre | 15.3 Book/reschedule/cancel from the call | ☐ | |
-| 15 | Call Centre | 15.4 Contact updates + referrals/follow-ups | ☐ | |
-| 15 | Call Centre | 15.5 Call Centre portal (frontend) | ☐ | |
-| 15 | Call Centre | 15.6 KPIs, notifications + E2E | ☐ | |
+| 14 | Branch & Sensitivity | 14.1 `branch` entity + seed the six branches | ☑ | d878aec |
+| 14 | Branch & Sensitivity | 14.2 User↔branch assignment + active-branch context (`X-Active-Branch`) | ☑ | 9e2edc4 |
+| 14 | Branch & Sensitivity | 14.3 `BranchScope` ABAC + `RowScope` + policy-bundle scope modes | ☑ | a1529ab |
+| 14 | Branch & Sensitivity | 14.4 Branch-scope appointments/queue/orders worklists | ☑ | 2bfeedb/25e6f4e |
+| 14 | Branch & Sensitivity | 14.5 Practitioner + specialty + doctor↔branch assignment | ☑ | f3e54bc |
+| 14 | Branch & Sensitivity | 14.6 Examination type + sensitivity classification | ☑ | 27db413 |
+| 14 | Branch & Sensitivity | 14.7 Sensitive-result gating + release-request workflow | ☑ | 25d3154 |
+| 14 | Branch & Sensitivity | 14.8 Branch switcher + restricted-result UI | ☑ | 0f5a4bd |
+| 15 | Call Centre | 15.1 `callcentre-service` (interaction + caller verification) | ☑ | bdcd50a |
+| 15 | Call Centre | 15.2 Member search + min-necessary 360 | ☑ | 324bfc7 |
+| 15 | Call Centre | 15.3 Book/reschedule/cancel from the call | ☑ | 533467a |
+| 15 | Call Centre | 15.4 Contact updates + referrals/follow-ups | ☑ | eea308c |
+| 15 | Call Centre | 15.5 Call Centre portal (frontend) | ☑ | 66feba8 |
+| 15 | Call Centre | 15.6 KPIs, notifications + E2E | ☑ | (15.6) |
 | 7 | Approvals | 7.1 `approvals-service` + worklist + review | ☑ | 15ba511 |
 | 7 | Approvals | 7.2 Decisions + downstream effects | ☑ | a098550 |
 | 7 | Approvals | 7.3 Break-glass + SLA/TAT | ☑ | d13a4d5 |

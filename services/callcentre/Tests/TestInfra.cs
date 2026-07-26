@@ -61,6 +61,17 @@ public sealed class CallCentreFactory : WebApplicationFactory<Program>
         c.DefaultRequestHeaders.Add("X-Test-Mfa", "1");
         return c;
     }
+
+    public HttpClient SupervisorClient()
+    {
+        var c = CreateClient();
+        c.DefaultRequestHeaders.Add("X-Test-Sub", "22222222-2222-2222-2222-222222222222");
+        c.DefaultRequestHeaders.Add("X-Test-Role", "call_center_supervisor");
+        c.DefaultRequestHeaders.Add("X-Test-Scope", "callcentre:interaction callcentre:verify callcentre:read callcentre:act");
+        c.DefaultRequestHeaders.Add("X-Test-Tenant", "t-callcentre");
+        c.DefaultRequestHeaders.Add("X-Test-Mfa", "1");
+        return c;
+    }
 }
 
 /// <summary>Deterministic member directory for endpoint tests — a search hit + a cross-branch 360.</summary>
