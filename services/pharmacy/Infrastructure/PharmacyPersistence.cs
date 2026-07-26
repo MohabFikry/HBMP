@@ -53,16 +53,29 @@ public sealed class SequenceIssuer(PharmacyDbContext db)
 {
     public Task<int> NextAsync(string table, int year, CancellationToken ct = default) => NextCoreAsync(table, year, ct);
 
+    // Whitelist the two known counter tables so no caller-supplied string is ever interpolated into SQL
+    // (the value maps to a compile-time constant; anything else throws before touching the DB).
+    private const string RxSeq = "rx_seq";
+    private const string ReferralSeq = "referral_seq";
+
+    private static string ResolveTable(string table) => table switch
+    {
+        RxSeq => RxSeq,
+        ReferralSeq => ReferralSeq,
+        _ => throw new ArgumentOutOfRangeException(nameof(table), table, "Unknown pharmacy sequence table."),
+    };
+
     private async Task<int> NextCoreAsync(string table, int year, CancellationToken ct)
     {
+        var seq = ResolveTable(table);
         var conn = db.Database.GetDbConnection();
         var opened = false;
         if (conn.State != System.Data.ConnectionState.Open) { await conn.OpenAsync(ct); opened = true; }
         try
         {
             await using var cmd = conn.CreateCommand();
-            cmd.CommandText = $@"INSERT INTO pharmacy.{table}(year, last_value) VALUES (@y, 1)
-                                 ON CONFLICT (year) DO UPDATE SET last_value = pharmacy.{table}.last_value + 1
+            cmd.CommandText = $@"INSERT INTO pharmacy.{seq}(year, last_value) VALUES (@y, 1)
+                                 ON CONFLICT (year) DO UPDATE SET last_value = pharmacy.{seq}.last_value + 1
                                  RETURNING last_value;";
             var p = cmd.CreateParameter(); p.ParameterName = "y"; p.Value = year; cmd.Parameters.Add(p);
             return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
