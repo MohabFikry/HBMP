@@ -148,8 +148,21 @@ public static class DispensingEndpoints
                 req.Quantity, req.BatchNo, req.ExpiryDate, req.SubstitutedDrugId, req.SubstitutionReason, clock.GetUtcNow(),
                 insideTransaction: async (rx, evt, c) =>
                 {
+                    // 18.A1: carry tenant + beneficiary + benefit category + service date so policy-service
+                    // can move coverage_limit.consumed_value for PHARMACY (FR-INV-006). Additive fields only.
                     await outbox.EnqueueAsync("RxLinesDispensed", "pharmacy.events",
-                        new { prescriptionId = rxId, prescriptionLineId = lineId, evt.Quantity, evt.BatchNo, idempotencyKey = idem }, c);
+                        new
+                        {
+                            prescriptionId = rxId,
+                            prescriptionLineId = lineId,
+                            tenantId = rx.TenantId,
+                            beneficiaryId = rx.BeneficiaryId,
+                            benefitCategory = "PHARMACY",
+                            serviceDate = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime),
+                            evt.Quantity,
+                            evt.BatchNo,
+                            idempotencyKey = idem,
+                        }, c);
                     if (rx.Status == RxStatus.Dispensed)
                         await outbox.EnqueueAsync("RxDispensed", "pharmacy.events", new { prescriptionId = rxId, rx.RxNo }, c);
                 }, ct);

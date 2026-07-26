@@ -45,8 +45,20 @@ public static class ConsumeEndpoints
             var result = await executor.ConsumeAsync(orderId, idem, provider, actor, reqs, clock.GetUtcNow(),
                 insideTransaction: async (order, fulfillments, c) =>
                 {
+                    // 18.A1: the payload now carries the tenant, the beneficiary, the benefit category and
+                    // the service date — everything policy-service needs to move the coverage accumulator
+                    // (FR-INV-006). Additive fields only; existing consumers (claims intake) are unaffected.
                     await outbox.EnqueueAsync("OrderLinesConsumed", "orders.events",
-                        new { orderId, lines = fulfillments.Select(f => new { f.OrderLineId, f.Quantity }), idempotencyKey = idem }, c);
+                        new
+                        {
+                            orderId,
+                            tenantId = order.TenantId,
+                            beneficiaryId = order.BeneficiaryId,
+                            benefitCategory = BenefitCategoryMap.ForOrderType(order.OrderType),
+                            serviceDate = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime),
+                            lines = fulfillments.Select(f => new { f.OrderLineId, f.Quantity }),
+                            idempotencyKey = idem,
+                        }, c);
                     if (order.Status == OrderStatus.Completed)
                         await outbox.EnqueueAsync("OrderCompleted", "orders.events", new { orderId, order.OrderNo }, c);
                 }, ct);

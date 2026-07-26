@@ -13,6 +13,7 @@ public static class DependencyInjection
         services.AddHbmpRls();
         services.AddDbContext<PolicyDbContext>((sp, o) =>
             o.UseNpgsql(config.GetConnectionString("Policy") ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential.")).UseSnakeCaseNamingConvention().AddHbmpRlsInterceptors(sp));
+        services.AddScoped<BenefitConsumptionApplier>();   // 18.A1 — the sole writer of consumed_value
         return services;
     }
 }

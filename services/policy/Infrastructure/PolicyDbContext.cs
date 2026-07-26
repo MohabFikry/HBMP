@@ -13,6 +13,8 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
     public DbSet<BenefitCategory> BenefitCategories => Set<BenefitCategory>();
     public DbSet<Coverage> Coverages => Set<Coverage>();
     public DbSet<CoverageLimit> CoverageLimits => Set<CoverageLimit>();
+    public DbSet<BenefitConsumptionRecord> BenefitConsumptions => Set<BenefitConsumptionRecord>();
+    public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -71,6 +73,34 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.ResetPeriod).HasConversion<string>().HasColumnName("reset_period");
             e.Property(x => x.LastResetOn).HasColumnName("last_reset_on");
             e.Ignore(x => x.Remaining);
+        });
+
+        // 18.A1 — the accumulator's append-only ledger + the consumer's dedupe table (0003).
+        b.Entity<BenefitConsumptionRecord>(e =>
+        {
+            e.ToTable("benefit_consumption");
+            e.HasKey(x => x.ConsumptionId);
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.EventId).HasColumnName("event_id");
+            e.Property(x => x.EventType).HasColumnName("event_type").IsRequired();
+            e.Property(x => x.SourceRef).HasColumnName("source_ref").IsRequired();
+            e.Property(x => x.BeneficiaryId).HasColumnName("beneficiary_id");
+            e.Property(x => x.BenefitCategory).HasColumnName("benefit_category");
+            e.Property(x => x.CoverageId).HasColumnName("coverage_id");
+            e.Property(x => x.Quantity).HasColumnName("quantity").HasColumnType("numeric(14,3)");
+            e.Property(x => x.Direction).HasConversion<string>().HasColumnName("direction");
+            e.Property(x => x.Outcome).HasConversion<string>().HasColumnName("outcome");
+            e.Property(x => x.MovedLimits).HasColumnName("moved_limits");
+            e.Property(x => x.AppliedAt).HasColumnName("applied_at");
+            e.HasIndex(x => x.SourceRef).IsUnique();
+        });
+
+        b.Entity<ProcessedEvent>(e =>
+        {
+            e.ToTable("processed_event");
+            e.HasKey(x => x.EventId);
+            e.Property(x => x.EventId).HasColumnName("event_id");
+            e.Property(x => x.ProcessedAt).HasColumnName("processed_at");
         });
     }
 }

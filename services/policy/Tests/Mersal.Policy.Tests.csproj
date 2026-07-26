@@ -4,7 +4,13 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" /><PackageReference Include="xunit" /><PackageReference Include="Xunit.SkippableFact" />
     <PackageReference Include="xunit.runner.visualstudio" /><PackageReference Include="coverlet.collector" />
     <PackageReference Include="FluentAssertions" /><PackageReference Include="Npgsql" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
   </ItemGroup>
-  <ItemGroup><ProjectReference Include="../Domain/Mersal.Policy.Domain.csproj" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Domain/Mersal.Policy.Domain.csproj" />
+    <ProjectReference Include="../Infrastructure/Mersal.Policy.Infrastructure.csproj" />
+    <ProjectReference Include="../Api/Mersal.Policy.Api.csproj" />
+    <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
+  </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
 </Project>

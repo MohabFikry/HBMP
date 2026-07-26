@@ -24,6 +24,10 @@ builder.Services.AddHbmpDurableOutbox<PolicyDbContext>();
 builder.Services.AddHbmpOutboxRelay();   // relay staged events (incl. audit) to RabbitMQ
 builder.Services.AddPolicyInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);
+// 18.A1 (X1) — consume the fulfillment streams and move coverage_limit.consumed_value. Without this the
+// accumulator never advances and every member is eligible forever.
+builder.Services.Configure<ConsumptionConsumerOptions>(builder.Configuration.GetSection(ConsumptionConsumerOptions.SectionName));
+builder.Services.AddHostedService<BenefitConsumptionConsumer>();
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("policy-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
     .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
