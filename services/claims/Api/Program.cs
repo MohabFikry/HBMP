@@ -46,6 +46,7 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "cl
 app.MapClaims();    // phase 10b.1 — auto-derived claims + min-necessary reads + intake seam
 app.MapBatches();   // phase 10b.2 — batching + batch lifecycle (single-open-batch DB guard)
 app.MapDecisions(); // phase 10b.4 — officer worklist + line decisions (SoD + dual control)
+app.MapSubmissions(); // phase 10b.5 — provider-submitted claims + document matching
 
 app.Run();
 

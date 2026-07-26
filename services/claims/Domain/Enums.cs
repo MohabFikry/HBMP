@@ -46,3 +46,12 @@ public enum BatchStatus { Open, UnderReview, Decided, SettlementIssued, Closed, 
 
 /// <summary>Reimbursement lifecycle (23-state-machines §10).</summary>
 public enum ReimbursementStatus { Submitted, OcrProcessing, AutoMatched, ManualAssessment, Adjudicating, Approved, PartiallyApproved, Denied, Paid, Void }
+
+/// <summary>Provider-submission header lifecycle (10b.5). Set from the per-line matching outcome.</summary>
+public enum SubmissionStatus { Received, Matched, PartiallyMatched, Unmatched }
+
+/// <summary>Per-line matching outcome of a provider submission (10b.5).
+/// <c>Matched</c> — a delivered/authorized fulfillment was found, a priced payable line was created;
+/// <c>Unmatched</c> — no fulfillment record → NO_FULFILLMENT_RECORD, RequiresManualReview, manual queue;
+/// <c>Duplicate</c> — a live payable line already exists for that fulfillment → DUPLICATE_CLAIM (no second line).</summary>
+public enum SubmissionLineOutcome { Matched, Unmatched, Duplicate }

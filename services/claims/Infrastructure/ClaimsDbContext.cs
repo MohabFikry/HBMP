@@ -15,6 +15,9 @@ public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options) :
     public DbSet<ClaimBatch> ClaimBatches => Set<ClaimBatch>();
     public DbSet<ClaimBatchItem> ClaimBatchItems => Set<ClaimBatchItem>();
     public DbSet<ClaimDecision> ClaimDecisions => Set<ClaimDecision>();
+    public DbSet<ClaimSubmission> ClaimSubmissions => Set<ClaimSubmission>();
+    public DbSet<ClaimSubmissionLine> ClaimSubmissionLines => Set<ClaimSubmissionLine>();
+    public DbSet<ClaimDocument> ClaimDocuments => Set<ClaimDocument>();
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -84,6 +87,34 @@ public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options) :
             e.Property(x => x.ReasonCodes).HasColumnName("reason_codes").HasColumnType("text[]");
             e.HasIndex(x => new { x.ClaimLineId, x.DecidedAt });
             e.HasIndex(x => x.IdempotencyKey).IsUnique();
+        });
+
+        b.Entity<ClaimSubmission>(e =>
+        {
+            e.ToTable("claim_submission");
+            e.HasKey(x => x.SubmissionId);
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.CurrencyCode).HasColumnName("currency_code");
+            e.HasIndex(x => x.IdempotencyKey).IsUnique();
+            e.HasIndex(x => new { x.ProviderId, x.SubmittedAt });
+            e.HasMany(x => x.Lines).WithOne().HasForeignKey(l => l.SubmissionId);
+        });
+
+        b.Entity<ClaimSubmissionLine>(e =>
+        {
+            e.ToTable("claim_submission_line");
+            e.HasKey(x => x.SubmissionLineId);
+            e.Property(x => x.CodeSystem).HasConversion<string>().HasColumnName("code_system");
+            e.Property(x => x.Outcome).HasConversion<string>().HasColumnName("outcome");
+            e.HasIndex(x => x.SubmissionId);
+        });
+
+        b.Entity<ClaimDocument>(e =>
+        {
+            e.ToTable("claim_document");
+            e.HasKey(x => x.ClaimDocumentId);
+            e.Property(x => x.DocType).HasConversion<string>().HasColumnName("doc_type");
+            e.HasIndex(x => x.DocumentId);
         });
 
         b.Entity<ProcessedEvent>(e =>

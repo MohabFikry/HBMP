@@ -57,8 +57,19 @@ data (tariffs, authorizations, eligibility, fulfillment) comes over the API/even
   allowed-amount bounds on partial. Optimistic concurrency (line `xmin`) → two officers = one winner + one 409.
   Decisions roll up to the claim status and batch rollups; `Idempotency-Key` required. Emits `ClaimLineDecided` +
   `ClaimApproved`/`ClaimPartiallyApproved`/`ClaimDenied`.
-- 10b.5 provider-submitted · 10b.6 reimbursement + OCR · 10b.7 reconciliation + adjustments · 10b.8 settlement advice
-  + exports · 10b.9 appeals + KPIs. *(built in subsequent slices)*
+- **10b.5 — provider-submitted claims + document matching.** `claim_submission` + `claim_submission_line` +
+  `claim_document` (+ RLS). A provider (or Mersal on their behalf, recorded as `submitted_on_behalf_of`) submits an
+  invoice; each line is matched to a delivered/authorized fulfillment on `(provider, beneficiary, code, service
+  date ± tolerance, authorization)` via `IFulfillmentResolver` (seam to orders/pharmacy; the 2-day tolerance lives in
+  `SubmissionMatcher`). **Matched** → a priced payable line records the provider's billed amount ALONGSIDE the contract
+  price and flags a `price_variance` when they differ (reconciliation candidate, never silently accepted). **Unmatched**
+  → a `NO_FULFILLMENT_RECORD` / RequiresManualReview line (no fulfillment_ref) in the manual queue, never auto-approved.
+  **Re-submission of an already-claimed fulfillment** hits the 10b.1 unique index → the whole submission rolls back
+  atomically → `DUPLICATE_CLAIM` (409), no second payable line. Idempotent on the header `Idempotency-Key`;
+  provider-isolated (ABAC PO + RLS); submission, document attach, and every match/no-match outcome audited. Emits
+  `ClaimSubmitted`. Documents are stored by REFERENCE only (bytes stay scanned + encrypted in document-service).
+- 10b.6 reimbursement + OCR · 10b.7 reconciliation + adjustments · 10b.8 settlement advice + exports · 10b.9 appeals +
+  KPIs. *(built in subsequent slices)*
 
 ## Endpoints (10b.1)
 

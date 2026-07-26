@@ -39,6 +39,7 @@ public class ClaimsCannotReadDiagnosisTests
         {
             typeof(Claim), typeof(ClaimLine), typeof(ClaimIntakeEvent), typeof(ClaimDecision),
             typeof(ClaimView), typeof(ClaimLineView), typeof(ClaimIntakeRequest), typeof(WorklistRow), typeof(BatchView),
+            typeof(ClaimSubmission), typeof(ClaimSubmissionLine), typeof(SubmissionView), typeof(SubmissionLineView),
         };
         foreach (var t in types)
         {
