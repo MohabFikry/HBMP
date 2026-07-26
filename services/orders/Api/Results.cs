@@ -106,7 +106,51 @@ public static class ResultEndpoints
             IAuthorizationEngine engine, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
         {
             var order = await db.Orders.AsNoTracking().Include(o => o.Lines).FirstOrDefaultAsync(o => o.OrderId == orderId, ct);
-            if (order is null || order.Lines.All(l => l.OrderLineId != lineId)) return Results.NotFound();
+            var line = order?.Lines.FirstOrDefault(l => l.OrderLineId == lineId);
+            if (order is null || line is null) return Results.NotFound();
+
+            // 14.7 — a NON-Standard result is default-deny except the authoring doctor or an active grant holder.
+            // This deliberately OVERRIDES the approval team's standing EMR oversight (design 37 §6).
+            if (line.SensitivityLevel != SensitivityLevel.Standard)
+            {
+                var subject = me.Principal?.Subject;
+                var isAuthor = order.CreatedBy == subject;
+                var now = DateTimeOffset.UtcNow;
+                var activeGrant = subject is null ? null : await db.ReportAccessGrants.AsNoTracking()
+                    .Where(g => g.GranteeUserId == subject && g.OrderLineId == lineId && g.RevokedAt == null && now < g.ExpiresAt)
+                    .OrderByDescending(g => g.GrantedAt).FirstOrDefaultAsync(ct);
+
+                if (SensitiveResultGate.Decide(line.SensitivityLevel, isAuthor, activeGrant is not null) == ResultDisclosure.ExistenceOnly)
+                {
+                    await audit.EmitAsync(new AuditEventDraft
+                    {
+                        EntityType = "order_fulfillment", EntityId = lineId.ToString(), Action = AuditAction.Read,
+                        ActorUserId = subject, DecisionOutcome = "ExistenceOnly", DecisionReasonCode = "sensitive-restricted", Severity = AuditSeverity.Notice,
+                    }, ct);
+                    // Existence metadata ONLY — never values, never a document ref.
+                    return Results.Ok(new
+                    {
+                        restricted = true, orderId, lineId, sensitivityLevel = line.SensitivityLevel.ToString(),
+                        category = line.CodeSystem.ToString(), status = line.Status.ToString(), orderingBranchId = order.OrderingBranchId,
+                    });
+                }
+
+                var sensitive = await db.Fulfillments.AsNoTracking()
+                    .Where(f => f.OrderLineId == lineId && f.ResultUploadedAt != null).OrderBy(f => f.ConsumedAt).ToListAsync(ct);
+                await audit.EmitAsync(activeGrant is not null && !isAuthor
+                    ? new AuditEventDraft   // a DISTINCT read-under-grant event (grant id + purpose + actor + result ref)
+                    {
+                        EntityType = "report_access_grant", EntityId = activeGrant.GrantId.ToString(), Action = AuditAction.Read,
+                        ActorUserId = subject, DecisionOutcome = "SensitiveResultReadUnderGrant", DecisionReasonCode = activeGrant.PurposeCode.ToString(),
+                        Severity = AuditSeverity.High, FieldClasses = ["phi"],
+                    }
+                    : new AuditEventDraft   // the authoring doctor's ordinary (audited) PHI read
+                    {
+                        EntityType = "order_fulfillment", EntityId = lineId.ToString(), Action = AuditAction.Read,
+                        ActorUserId = subject, DecisionOutcome = "Allow", DecisionReasonCode = "author", FieldClasses = ["phi"],
+                    }, ct);
+                return Results.Ok(sensitive.Select(ResultResponse.From));
+            }
 
             var denied = await AuthorizeResultReadAsync(gate, engine, me, order.BeneficiaryId, orderId.ToString(),
                 http.Headers.Authorization.ToString(), ct);

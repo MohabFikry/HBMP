@@ -11,6 +11,11 @@ public sealed record CreateOrderLine(CodeSystem CodeSystem, string Code, string?
 
 public sealed record CancelOrderRequest(string? Reason);
 
+// --- 14.7 sensitive-result release workflow ---------------------------------------------------
+public sealed record RaiseAccessRequest(Guid OrderId, Guid OrderLineId, string PurposeCode, string Justification, int RequestedTtlHours);
+
+public sealed record AccessDecision(string Decision, int? TtlHours, string? Reason);
+
 public sealed record OrderLineResponse(
     Guid OrderLineId, string CodeSystem, string Code, string? Description,
     decimal QuantityOrdered, decimal QuantityConsumed, string Status)

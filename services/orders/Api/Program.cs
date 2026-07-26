@@ -92,6 +92,7 @@ app.MapOrders();
 app.MapQueue();      // phase 5.1 provider queue + search
 app.MapConsume();    // phase 5.2 atomic idempotent consume
 app.MapResults();    // phase 5.3 result upload + routing
+app.MapReportAccess(); // phase 14.7 sensitive-result release requests + grants
 
 app.Run();
 

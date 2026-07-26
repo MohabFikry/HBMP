@@ -12,6 +12,8 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
     public DbSet<OrderLine> OrderLines => Set<OrderLine>();
     public DbSet<OrderFulfillment> Fulfillments => Set<OrderFulfillment>();
     public DbSet<ProcessedRequest> ProcessedRequests => Set<ProcessedRequest>();
+    public DbSet<ReportAccessRequest> ReportAccessRequests => Set<ReportAccessRequest>();   // 14.7
+    public DbSet<ReportAccessGrant> ReportAccessGrants => Set<ReportAccessGrant>();          // 14.7
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -61,6 +63,26 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
         {
             e.ToTable("processed_request");
             e.HasKey(x => x.IdempotencyKey);
+        });
+
+        // 14.7 — sensitive-result release requests + grants.
+        b.Entity<ReportAccessRequest>(e =>
+        {
+            e.ToTable("report_access_request");
+            e.HasKey(x => x.RequestId);
+            e.Property(x => x.PurposeCode).HasConversion<string>().HasColumnName("purpose_code");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.HasIndex(x => x.OrderLineId);
+            e.HasIndex(x => x.Status);
+        });
+
+        b.Entity<ReportAccessGrant>(e =>
+        {
+            e.ToTable("report_access_grant");
+            e.HasKey(x => x.GrantId);
+            e.Property(x => x.PurposeCode).HasConversion<string>().HasColumnName("purpose_code");
+            // active-grant lookup: one row per (grantee, line) while not revoked (partial index in SQL).
+            e.HasIndex(x => new { x.GranteeUserId, x.OrderLineId });
         });
     }
 }
