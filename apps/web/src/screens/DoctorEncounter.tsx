@@ -28,6 +28,10 @@ const S = {
   pickPatient: { en: "Select a patient to open their encounter.", ar: "اختر مريضاً لفتح اللقاء." },
   tabSummary: { en: "SOAP", ar: "التقييم" },
   tabVitals: { en: "Vitals", ar: "العلامات" },
+  vBp: { en: "BP", ar: "ضغط الدم" },
+  vHr: { en: "HR", ar: "النبض" },
+  vTemp: { en: "Temp", ar: "الحرارة" },
+  vHtWt: { en: "Ht/Wt", ar: "الطول/الوزن" },
   tabDx: { en: "Diagnoses & allergies", ar: "التشخيص والحساسية" },
   subjective: { en: "Subjective", ar: "الشكوى" },
   objective: { en: "Objective", ar: "الفحص" },
@@ -142,10 +146,10 @@ function EncounterPanel({ patientId, t }: { patientId: string; t: (l: Localized)
                 label: t(S.tabVitals),
                 content: (
                   <div className="kv-grid tnum">
-                    <div><dt>BP</dt><dd>{e.vitals.systolic}/{e.vitals.diastolic}</dd></div>
-                    <div><dt>HR</dt><dd>{e.vitals.heartRate}</dd></div>
-                    <div><dt>Temp</dt><dd>{e.vitals.tempC}°C</dd></div>
-                    <div><dt>Ht/Wt</dt><dd>{e.vitals.heightCm} / {e.vitals.weightKg}</dd></div>
+                    <div><dt>{t(S.vBp)}</dt><dd>{e.vitals.systolic}/{e.vitals.diastolic}</dd></div>
+                    <div><dt>{t(S.vHr)}</dt><dd>{e.vitals.heartRate}</dd></div>
+                    <div><dt>{t(S.vTemp)}</dt><dd>{e.vitals.tempC}°C</dd></div>
+                    <div><dt>{t(S.vHtWt)}</dt><dd>{e.vitals.heightCm} / {e.vitals.weightKg}</dd></div>
                   </div>
                 ),
               },
