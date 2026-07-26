@@ -271,6 +271,8 @@ app.MapOnboarding();
 app.MapMetrics();
 // 14.1 — internal Mersal branch registry (org reference data; reads open, writes Network/Org Admin).
 app.MapBranches();
+// 14.5 — practitioners, specialty & doctor↔branch assignment + the doctor picker + serves-branch probe.
+app.MapPractitioners();
 
 app.Run();
 

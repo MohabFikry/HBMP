@@ -43,3 +43,18 @@ public sealed record BranchView(
     Guid BranchId, string BranchCode, string NameEn, string NameAr, string? City, string? Address,
     string Timezone, string? Phone, string? OpeningHours, string Status);
 
+// --- 14.5 practitioner, specialty & branch assignment -----------------------------------------
+public sealed record CreatePractitioner(
+    string UserId, string PractitionerType, string FullNameEn, string FullNameAr, string? LicenseNo, DateOnly? LicenseExpiry);
+
+public sealed record AssignSpecialty(string SpecialtyCode, bool IsPrimary);
+
+public sealed record AssignPractitionerBranch(Guid BranchId, DateOnly ValidFrom, DateOnly? ValidTo);
+
+/// <summary>Picker/min-necessary practitioner view. <c>LicenseNo</c> is null unless the caller is an admin
+/// (provider:write) — no licence numbers to booking clinicians (design 37 §4).</summary>
+public sealed record PractitionerView(
+    Guid PractitionerId, string PractitionerType, string FullNameEn, string FullNameAr,
+    string? PrimarySpecialty, IReadOnlyList<string> Specialties, IReadOnlyList<Guid> Branches,
+    string Status, string? LicenseNo);
+

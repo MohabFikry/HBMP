@@ -15,6 +15,10 @@ public sealed class ProviderDbContext(DbContextOptions<ProviderDbContext> option
     public DbSet<ProviderCredential> Credentials => Set<ProviderCredential>();
     public DbSet<ProviderUser> Users => Set<ProviderUser>();
     public DbSet<Branch> Branches => Set<Branch>();   // 14.1 — internal Mersal facilities (not provider_location)
+    public DbSet<Specialty> Specialties => Set<Specialty>();                       // 14.5
+    public DbSet<Practitioner> Practitioners => Set<Practitioner>();               // 14.5
+    public DbSet<PractitionerSpecialty> PractitionerSpecialties => Set<PractitionerSpecialty>();          // 14.5
+    public DbSet<PractitionerBranchAssignment> PractitionerBranchAssignments => Set<PractitionerBranchAssignment>();   // 14.5
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -137,6 +141,59 @@ public sealed class ProviderDbContext(DbContextOptions<ProviderDbContext> option
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
             e.HasIndex(x => x.BranchCode).IsUnique().HasFilter("is_deleted = false");
             e.HasIndex(x => x.Status);
+        });
+
+        // 14.5 — practitioners, specialty & branch assignment (design 37 §4).
+        b.Entity<Specialty>(e =>
+        {
+            e.ToTable("specialty");
+            e.HasKey(x => x.SpecialtyCode);
+            e.Property(x => x.SpecialtyCode).HasColumnName("specialty_code");
+            e.Property(x => x.NameEn).HasColumnName("name_en").IsRequired();
+            e.Property(x => x.NameAr).HasColumnName("name_ar").IsRequired();
+            e.Property(x => x.ParentCode).HasColumnName("parent_code");
+            e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
+        });
+
+        b.Entity<Practitioner>(e =>
+        {
+            e.ToTable("practitioner");
+            e.HasKey(x => x.PractitionerId);
+            e.Property(x => x.TenantId).HasColumnName("tenant_id").IsRequired();
+            e.Property(x => x.UserId).HasColumnName("user_id").IsRequired();
+            e.Property(x => x.PractitionerType).HasConversion<string>().HasColumnName("practitioner_type");
+            e.Property(x => x.FullNameEn).HasColumnName("full_name_en").IsRequired();
+            e.Property(x => x.FullNameAr).HasColumnName("full_name_ar").IsRequired();
+            e.Property(x => x.LicenseNo).HasColumnName("license_no");
+            e.Property(x => x.LicenseExpiry).HasColumnName("license_expiry");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
+            e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.HasIndex(x => x.UserId).IsUnique().HasFilter("is_deleted = false");
+            e.HasMany(x => x.Specialties).WithOne().HasForeignKey(s => s.PractitionerId);
+            e.HasMany(x => x.BranchAssignments).WithOne().HasForeignKey(a => a.PractitionerId);
+        });
+
+        b.Entity<PractitionerSpecialty>(e =>
+        {
+            e.ToTable("practitioner_specialty");
+            e.HasKey(x => new { x.PractitionerId, x.SpecialtyCode });
+            e.Property(x => x.IsPrimary).HasColumnName("is_primary");
+        });
+
+        b.Entity<PractitionerBranchAssignment>(e =>
+        {
+            e.ToTable("practitioner_branch_assignment");
+            e.HasKey(x => x.AssignmentId);
+            e.Property(x => x.PractitionerId).HasColumnName("practitioner_id");
+            e.Property(x => x.BranchId).HasColumnName("branch_id");
+            e.Property(x => x.ValidFrom).HasColumnName("valid_from");
+            e.Property(x => x.ValidTo).HasColumnName("valid_to");
+            e.Property(x => x.Status).HasColumnName("status");
+            e.HasIndex(x => new { x.PractitionerId, x.Status });
+            e.HasIndex(x => x.BranchId);
         });
     }
 }
