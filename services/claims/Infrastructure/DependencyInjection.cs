@@ -36,6 +36,10 @@ public static class DependencyInjection
         services.AddScoped<ReimbursementService>();
         services.AddScoped<AdjustmentService>();
         services.AddScoped<ReconciliationQueries>();
+        services.AddScoped<SettlementService>();
+        // WORM document store seam — the physical MinIO object-lock upload lands with document-service integration;
+        // immutability on the claims side is the append-only settlement_advice row + content hash.
+        services.AddScoped<ISettlementDocumentStore, NullWormStore>();
         // Permissive fact source by default; the HTTP-backed eligibility/policy/approvals/provider wiring lands later.
         services.AddScoped<IExternalAdjudicationFacts, PermissiveAdjudicationFacts>();
         // No fulfillment resolver by default → provider-submitted lines land in manual assessment until the

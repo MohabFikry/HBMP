@@ -21,6 +21,8 @@ public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options) :
     public DbSet<ClaimDocument> ClaimDocuments => Set<ClaimDocument>();
     public DbSet<ReimbursementRequest> ReimbursementRequests => Set<ReimbursementRequest>();
     public DbSet<OcrExtraction> OcrExtractions => Set<OcrExtraction>();
+    public DbSet<SettlementAdvice> SettlementAdvices => Set<SettlementAdvice>();
+    public DbSet<SettlementPaymentReference> SettlementPaymentReferences => Set<SettlementPaymentReference>();
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -146,6 +148,20 @@ public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options) :
             e.HasKey(x => x.ExtractionId);
             e.Property(x => x.Region).HasColumnName("region").HasColumnType("jsonb");
             e.HasIndex(x => new { x.DocumentId, x.FieldName });
+        });
+
+        b.Entity<SettlementAdvice>(e =>
+        {
+            e.ToTable("settlement_advice");
+            e.HasKey(x => x.AdviceId);
+            e.HasIndex(x => new { x.BatchId, x.Version }).IsUnique();
+        });
+
+        b.Entity<SettlementPaymentReference>(e =>
+        {
+            e.ToTable("settlement_payment_reference");
+            e.HasKey(x => x.PaymentReferenceId);
+            e.HasIndex(x => x.BatchId);
         });
 
         b.Entity<ProcessedEvent>(e =>
