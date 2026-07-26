@@ -1,11 +1,12 @@
 import { permissionsForRole, type Role } from "../authz/permissions";
-import { OIDC, roleFromRealmRoles } from "../config";
+import { OIDC, roleFromClaimRoles } from "../config";
 import { getToken, setToken } from "./tokenStore";
 import type { AuthClient, Session } from "./authClient";
 
 /**
- * A minimal OIDC authorization-code + PKCE client for Keycloak — no external dependency. `login()` redirects
- * to the IdP; on return, `restore()` detects the `?code=` callback, exchanges it for an access token, and
+ * A minimal OIDC authorization-code + PKCE client for the in-app issuer (identity-service, OpenIddict —
+ * 17.5; formerly Keycloak), no external dependency. `login()` redirects to the IdP's `/connect/authorize`;
+ * on return, `restore()` detects the `?code=` callback, exchanges it for an access token, and
  * builds the same {@link Session} shape the dev client produces (so the shell/router/timeout logic is
  * unchanged). The access token is handed to the API layer via the token store; MFA is evidenced by the
  * token's `acr`/`amr` claims. See phase-9 US-070 and libs/auth.
@@ -19,8 +20,9 @@ interface JwtClaims {
   preferred_username?: string;
   name?: string;
   acr?: string;
-  amr?: string[];
-  realm_access?: { roles?: string[] };
+  amr?: string[] | string;
+  /** The issuer's flat, lower-case role claim (17.5). May be an array or a single value. */
+  roles?: string[] | string;
 }
 
 function decodeJwt(token: string): JwtClaims {
@@ -47,13 +49,18 @@ async function pkceChallenge(verifier: string): Promise<string> {
   return base64url(digest);
 }
 
+function asArray(v: string[] | string | undefined): string[] {
+  return Array.isArray(v) ? v : v ? [v] : [];
+}
+
 function sessionFrom(token: string): Session {
   const c = decodeJwt(token);
-  // FAIL CLOSED (H6): an unmapped realm role yields role=null (→ "no portal assigned" page). Never default
-  // to a portal — that would silently grant an authenticated stranger reception access.
-  const role: Role | null = roleFromRealmRoles(c.realm_access?.roles ?? []);
+  // FAIL CLOSED (H6): an unmapped role yields role=null (→ "no portal assigned" page). Never default to a
+  // portal — that would silently grant an authenticated stranger reception access. Roles are the issuer's
+  // flat `roles` claim (17.5), no longer Keycloak's nested realm_access.
+  const role: Role | null = roleFromClaimRoles(asArray(c.roles));
   const mfa = (c.acr && ["mfa", "aal2", "aal3", "loa2", "loa3", "2fa"].includes(c.acr)) ||
-    (c.amr ?? []).some((m) => ["mfa", "otp", "hwk", "totp", "webauthn", "sms"].includes(m));
+    asArray(c.amr).some((m) => ["mfa", "otp", "hwk", "totp", "webauthn", "sms"].includes(m));
   return {
     userId: c.sub,
     displayName: c.name ?? c.preferred_username ?? c.sub,
@@ -65,14 +72,14 @@ function sessionFrom(token: string): Session {
 }
 
 export class OidcAuthClient implements AuthClient {
-  /** Ignores the dev (role, mfaCode) args — the IdP owns identity + MFA. Redirects to Keycloak. */
+  /** Ignores the dev (role, mfaCode) args — the IdP owns identity + MFA. Redirects to the issuer. */
   async login(): Promise<Session> {
     const verifier = randomString();
     const state = randomString(16);
     sessionStorage.setItem(VERIFIER_KEY, verifier);
     sessionStorage.setItem(STATE_KEY, state);
     const challenge = await pkceChallenge(verifier);
-    const url = new URL(`${OIDC.authority}/protocol/openid-connect/auth`);
+    const url = new URL(`${OIDC.authority}/connect/authorize`);
     url.search = new URLSearchParams({
       client_id: OIDC.clientId,
       redirect_uri: OIDC.redirectUri,
@@ -89,7 +96,7 @@ export class OidcAuthClient implements AuthClient {
 
   async logout(): Promise<void> {
     setToken(null);
-    const url = new URL(`${OIDC.authority}/protocol/openid-connect/logout`);
+    const url = new URL(`${OIDC.authority}/connect/logout`);
     url.search = new URLSearchParams({
       client_id: OIDC.clientId,
       post_logout_redirect_uri: OIDC.redirectUri,
@@ -129,7 +136,7 @@ export class OidcAuthClient implements AuthClient {
 
 async function exchangeCode(code: string, verifier: string): Promise<string | null> {
   try {
-    const res = await fetch(`${OIDC.authority}/protocol/openid-connect/token`, {
+    const res = await fetch(`${OIDC.authority}/connect/token`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({

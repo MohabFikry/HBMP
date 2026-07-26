@@ -16,8 +16,9 @@ export const LIVE = env.VITE_LIVE === "1";
 export const API_BASE = env.VITE_API_BASE ?? "http://localhost:8000/api/v1";
 
 export const OIDC = {
-  /** Keycloak realm issuer, as the *browser* reaches it (must match the token `iss`). */
-  authority: env.VITE_OIDC_AUTHORITY ?? "http://localhost:8080/realms/mersal",
+  /** The in-app issuer (identity-service, OpenIddict), as the *browser* reaches it (must match token `iss`).
+   * Phase 17.5: this replaced Keycloak — endpoints are `/connect/*` and JWKS is at `/.well-known/jwks`. */
+  authority: env.VITE_OIDC_AUTHORITY ?? "http://localhost:8090",
   clientId: env.VITE_OIDC_CLIENT_ID ?? "hbmp-web",
   redirectUri: env.VITE_OIDC_REDIRECT ?? "http://localhost:5173/",
   /**
@@ -26,21 +27,21 @@ export const OIDC = {
    * still denies by role. Keycloak only issues the scopes the user's client is permitted.
    */
   scope:
-    "openid admin:read admin:write admin:break-glass " +
+    "openid offline_access admin:read admin:write admin:break-glass " +
     "callcentre:read callcentre:act callcentre:interaction callcentre:verify claims:read claims:reconcile claims:export " +
     "appointment:read appointment:write audit:read auth:decide auth:emergency auth:ingest " +
     "auth:manual auth:override auth:read auth:review case:manage case:read case:write document:write " +
     "eligibility:check emr:read emr:write encounter:write finance:approve finance:export finance:project " +
-    "finance:read finance:write hello:read notification:ingest notification:read orders:consume " +
+    "finance:read finance:write notification:ingest notification:read orders:consume " +
     "orders:read orders:write patient:write pharmacy:dispense pharmacy:read policy:write provider:finance " +
     "provider:read provider:write reception:search referral:write reporting:export reporting:project " +
     "reporting:read rx:write",
 };
 
 /**
- * Maps a Keycloak realm role to the SPA's portal {@link Role}. The IdP uses clinical titles
- * (`lab_tech`, `pharmacist`, …); the portal catalog uses portal keys (`lab`, `pharmacy`, …).
- * The first match (in portal-priority order) wins when a user carries several roles.
+ * Maps an issuer role (the token's flat lower-case `roles` claim) to the SPA's portal {@link Role}. The
+ * issuer uses clinical titles (`lab_tech`, `pharmacist`, …); the portal catalog uses portal keys (`lab`,
+ * `pharmacy`, …). The first match (in portal-priority order) wins when a user carries several roles.
  */
 const ROLE_MAP: Array<[string, Role]> = [
   ["super_admin", "super_admin"],
@@ -62,9 +63,9 @@ const ROLE_MAP: Array<[string, Role]> = [
   ["reception", "reception"],
 ];
 
-export function roleFromRealmRoles(realmRoles: readonly string[]): Role | null {
+export function roleFromClaimRoles(roles: readonly string[]): Role | null {
   for (const [kc, role] of ROLE_MAP) {
-    if (realmRoles.includes(kc)) return role;
+    if (roles.includes(kc)) return role;
   }
   return null;
 }
