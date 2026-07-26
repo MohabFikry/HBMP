@@ -63,7 +63,8 @@ if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "interop-service" })).AllowAnonymous();
 app.MapPrometheusScrapingEndpoint();
 
-app.MapFhir(); // phase 13.1 — the FHIR R4 façade at /fhir/r4 (read/search all; safe creates translate to native)
+app.MapFhir();        // phase 13.1 — the FHIR R4 façade at /fhir/r4 (read/search all; safe creates → native)
+app.MapIntegration(); // phase 13.2 — partner registry + DPIA-gated enablement + inbound anti-corruption ingest
 
 app.Run();
 

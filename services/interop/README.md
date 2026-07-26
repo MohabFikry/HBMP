@@ -48,8 +48,35 @@ INTEROP_TEST_DB="Host=localhost;Port=55432;Database=hbmp;Username=hbmp;Password=
 
 Min-necessary parity is also locked in `libs/authz/Tests/InteropPoliciesTests.cs`.
 
-## Roadmap (13.2 / 13.3)
+## Integration-readiness layer (13.2)
 
-Integration adapters + anti-corruption layer (UNHCR/gov/insurer/HL7/referral, OCR + Arabic-NLP hooks), all
-disabled behind the **DPIA gate** — no external integration goes live without a DPIA + data-sharing agreement
-(20 §6), enforced in CI and at runtime.
+A uniform outbound/inbound adapter pattern + **anti-corruption layer (ACL)** so future partners attach WITHOUT
+touching core services (16-service-architecture; 35 §10). The core depends on no partner schema: inbound data
+lands in `interop.inbound_staging`, the ACL maps it to internal domain events (emitted via the outbox) or
+quarantines it; outbound adapters ride the existing event stream. Every partner is `Disabled` until the DPIA gate
+passes.
+
+Registered partners (all seeded **Disabled / DPIA-pending**): `digital-referral-network` (FHIR — a fully-mapped
+ACL example), `hl7v2-referral`, `unhcr-identity`, `government-claims`, `insurer-eligibility` (stubs). OCR +
+Arabic-NLP ingestion hooks (`IDocumentOcrProvider`, `IArabicNlpExtractor`) ship as no-op stubs.
+
+Governance API under `/interop/integration` (admin-scoped): `GET /partners`, `POST /partners/{id}/dpia`,
+`POST /partners/{id}/enable` (DPIA-gated, refusal audited), `POST /partners/{id}/disable`,
+`POST /inbound/{partnerId}` (anti-corruption ingest).
+
+### Before you enable an integration — the DPIA gate
+
+**No external integration goes live without a DPIA + a data-sharing agreement.** `DpiaGate.CanEnable` refuses
+enablement (runtime `TryEnable` AND `tools/ci/check-integration-dpia.py` in CI) unless BOTH exist for the partner;
+a DB `CHECK` constraint makes an out-of-band `Enabled` write impossible too. Cross-border partners honour the
+PDPL (Law 151/2020) posture (20 §5). Enablement attempts — allowed or refused — are hash-chain audited.
+
+### Adding a new partner (the extension recipe)
+
+1. Implement `IInboundIntegrationAdapter` and/or `IOutboundIntegrationAdapter` for the partner, with the ACL
+   mapping partner-model ↔ internal domain events (see `ReferralNetworkAdapter` for a worked FHIR example). **No
+   core service changes.**
+2. Register the adapter in `AddInteropInfrastructure`; add a `PartnerDescriptor` row (seed migration or
+   `POST /partners`).
+3. Record the DPIA sign-off + data-sharing agreement (`POST /partners/{id}/dpia`), then enable
+   (`POST /partners/{id}/enable`). Until both artifacts exist, the gate keeps it `Disabled`.

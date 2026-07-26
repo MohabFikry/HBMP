@@ -25,6 +25,14 @@ public static class InteropPolicies
     /// <summary>The single resource type all FHIR-façade rules match on; the specific interaction is the action.</summary>
     public const string Resource = "fhir";
 
+    /// <summary>Resource type for integration-governance actions (partner registry, enablement, inbound ingest).</summary>
+    public const string GovernanceResource = "interop-admin";
+
+    // Integration-governance actions (13.2) — administering the partner registry + DPIA-gated enablement.
+    public const string PartnerRead = "interop:partner:read";
+    public const string PartnerManage = "interop:partner:manage";
+    public const string InboundIngest = "interop:inbound:ingest";
+
     // ---- SMART-on-FHIR interaction scopes (additive; advertised in the CapabilityStatement) -----------------
     public static string ReadScope(string resource) => $"fhir:read:{resource}";
     public static string WriteScope(string resource) => $"fhir:write:{resource}";
@@ -83,6 +91,33 @@ public static class InteropPolicies
         Write(AllergyIntolerance, "doctor", "nurse"),
         // NB: Patient, Coverage, DiagnosticReport, Encounter, Condition are read-only/derived via the façade —
         // there is deliberately NO write rule, and the endpoints reject POST with an OperationOutcome.
+
+        // ----- INTEGRATION GOVERNANCE (13.2) — administer the partner registry + DPIA-gated enablement -----
+        new PolicyRule
+        {
+            Action = PartnerRead, ResourceType = GovernanceResource,
+            Roles = new HashSet<string>(["super_admin", "org_admin"], StringComparer.Ordinal),
+            Scopes = new HashSet<string>(["admin:read"], StringComparer.Ordinal),
+            RequiredConditions = [AbacConditions.TenantMatch],
+        },
+        new PolicyRule
+        {
+            Action = PartnerManage, ResourceType = GovernanceResource,
+            Roles = new HashSet<string>(["super_admin", "org_admin"], StringComparer.Ordinal),
+            Scopes = new HashSet<string>(["admin:write"], StringComparer.Ordinal),
+            RequiredConditions = [AbacConditions.TenantMatch],
+            Sensitive = true,
+        },
+        // Inbound ingest is a machine-to-machine receipt (the partner posts). Restricted to the integration
+        // admin/system scope; every message is staged + audited regardless (anti-corruption boundary).
+        new PolicyRule
+        {
+            Action = InboundIngest, ResourceType = GovernanceResource,
+            Roles = new HashSet<string>(["super_admin", "org_admin"], StringComparer.Ordinal),
+            Scopes = new HashSet<string>(["admin:write"], StringComparer.Ordinal),
+            RequiredConditions = [AbacConditions.TenantMatch],
+            Sensitive = true,
+        },
     ];
 
     private static PolicyRule Read(string resource, params string[] roles) => new()

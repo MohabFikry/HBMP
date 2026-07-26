@@ -17,18 +17,23 @@ public sealed class InteropGate(IHbmpPrincipalAccessor me, IAuthorizationEngine 
     public HbmpPrincipal? Principal => me.Principal;
 
     /// <summary>Authorize a FHIR interaction. Returns null when allowed, else a ready 401/403 OperationOutcome.</summary>
-    public async Task<IResult?> CheckAsync(string action, string purpose, CancellationToken ct)
+    public Task<IResult?> CheckAsync(string action, string purpose, CancellationToken ct) =>
+        CheckAsync(action, InteropPolicies.Resource, purpose, ct);
+
+    /// <summary>Authorize an interaction on a given resource type (FHIR resources use the default; integration
+    /// governance uses <see cref="InteropPolicies.GovernanceResource"/>).</summary>
+    public async Task<IResult?> CheckAsync(string action, string resourceType, string purpose, CancellationToken ct)
     {
         var p = me.Principal;
         if (p is null)
             return FhirResults.Unauthenticated();
 
-        var resource = new ResourceRef { Type = InteropPolicies.Resource, TenantId = p.TenantId };
+        var resource = new ResourceRef { Type = resourceType, TenantId = p.TenantId };
         var decision = await engine.EvaluateAsync(new AuthzRequest(p, action, resource, purpose), ct);
         if (decision.IsAllowed) return null;
 
         return FhirResults.Forbidden(
-            $"You are not permitted to perform this FHIR interaction ({action}).", decision.ReasonCode);
+            $"You are not permitted to perform this interaction ({action}).", decision.ReasonCode);
     }
 }
 
