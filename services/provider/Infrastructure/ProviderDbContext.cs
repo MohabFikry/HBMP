@@ -14,6 +14,7 @@ public sealed class ProviderDbContext(DbContextOptions<ProviderDbContext> option
     public DbSet<ContractServiceLine> ServiceLines => Set<ContractServiceLine>();
     public DbSet<ProviderCredential> Credentials => Set<ProviderCredential>();
     public DbSet<ProviderUser> Users => Set<ProviderUser>();
+    public DbSet<Branch> Branches => Set<Branch>();   // 14.1 — internal Mersal facilities (not provider_location)
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -111,6 +112,31 @@ public sealed class ProviderDbContext(DbContextOptions<ProviderDbContext> option
             e.Property(x => x.RevokedAt).HasColumnName("revoked_at");
             e.HasIndex(x => x.ProviderId);
             e.HasIndex(x => new { x.TenantId, x.SubjectRef }).IsUnique();
+        });
+
+        // 14.1 — internal Mersal branch (org reference data, NOT tenant/provider scoped: the six branches are
+        // shared facilities, so no RLS predicate applies here — unlike the provider tables above).
+        b.Entity<Branch>(e =>
+        {
+            e.ToTable("branch");
+            e.HasKey(x => x.BranchId);
+            e.Property(x => x.BranchCode).HasColumnName("branch_code").IsRequired();
+            e.Property(x => x.NameEn).HasColumnName("name_en").IsRequired();
+            e.Property(x => x.NameAr).HasColumnName("name_ar").IsRequired();
+            e.Property(x => x.City).HasColumnName("city");
+            e.Property(x => x.Address).HasColumnName("address");
+            e.Property(x => x.Timezone).HasColumnName("timezone").IsRequired();
+            e.Property(x => x.Phone).HasColumnName("phone");
+            e.Property(x => x.OpeningHours).HasColumnName("opening_hours").HasColumnType("jsonb");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
+            e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();
+            e.Property(x => x.CreatedBy).HasColumnName("created_by");
+            e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.HasIndex(x => x.BranchCode).IsUnique().HasFilter("is_deleted = false");
+            e.HasIndex(x => x.Status);
         });
     }
 }

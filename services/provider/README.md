@@ -26,6 +26,11 @@ separation (`tenant_id` RLS) sits above provider isolation. (Layers 3–5 land i
   CPT is validated against masterdata-service; LOCAL is free; LOINC is recorded (no dataset loaded yet).
 - `provider_credential` — credential documents + status + expiry; mandatory credentials gate activation;
   a `ProviderCredentialExpiring` reminder fires ahead of `valid_to` (FR-NET-007).
+- `branch` (14.1, design 37 §2) — the **internal Mersal facility** (org unit), NOT `provider_location`.
+  `branch_code` (UK, live-row partial index), `name_en`/`name_ar`, `city`, `address`, `timezone` (default
+  `Africa/Cairo`), `phone`, `opening_hours` (jsonb), `status` {Active,Suspended,Closed}. Org reference data,
+  **no PHI, no tenant/provider scope** (the six branches are shared → no RLS predicate). Seeded with the six
+  branches ASW/ALX/OCT/MAA/DOK/NSR (EN+AR). Staff branch-scoping is layered on in 14.2+.
 
 ## Endpoints (`/api/v1`, tenant-scoped)
 
@@ -36,6 +41,15 @@ Network Team writes (`provider:write`), Provider Admin / Network Team read (`pro
 - `POST /contracts/{id}/service-lines` · `POST /providers/{id}/credentials`
 - `GET /providers/{id}/capabilities` — derived routable catalog (Active provider + in-effect contract only);
   `agreed_price` masked unless the caller holds `provider:finance`.
+
+### Branch registry (14.1 — internal facilities)
+
+Reads are open to **any authenticated user** (org reference data, no PHI — they drive the branch switcher
+and downstream branch-scoping); writes are Network/Org Admin (`provider:write`) and audited:
+
+- `GET /branches?status=` · `GET /branches/{id}`
+- `POST /branches` → `BranchCreated` · `PUT /branches/{id}` → `BranchUpdated`
+- `POST /branches/{id}/status` (reason required) → `BranchStatusChanged`
 
 ### Onboarding workflow (2b.2 — Network Team, FR-NET-003/004/007)
 

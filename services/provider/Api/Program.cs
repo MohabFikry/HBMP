@@ -269,6 +269,8 @@ read.MapGet("/providers/{id:guid}/contracts", async (Guid id, ProviderDbContext 
 app.MapOnboarding();
 // 2b.3 — provider-scoped performance metrics + network roll-up.
 app.MapMetrics();
+// 14.1 — internal Mersal branch registry (org reference data; reads open, writes Network/Org Admin).
+app.MapBranches();
 
 app.Run();
 

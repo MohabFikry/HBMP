@@ -28,3 +28,18 @@ public sealed record ProvisionUser(string SubjectRef, string Role);
 /// second approver must differ from the acting user (SoD).</summary>
 public sealed record StateChange(string Reason, string? SecondApproverSubject);
 
+// --- 14.1 branch (internal Mersal facilities; org reference data, no PHI) -----------------------
+public sealed record CreateBranch(
+    string BranchCode, string NameEn, string NameAr, string? City, string? Address,
+    string? Timezone, string? Phone, string? OpeningHours);
+
+public sealed record UpdateBranch(
+    string? NameEn, string? NameAr, string? City, string? Address, string? Timezone, string? Phone, string? OpeningHours);
+
+/// <summary>Branch status change carries a mandatory reason (audited).</summary>
+public sealed record ChangeBranchStatus(string Status, string Reason);
+
+public sealed record BranchView(
+    Guid BranchId, string BranchCode, string NameEn, string NameAr, string? City, string? Address,
+    string Timezone, string? Phone, string? OpeningHours, string Status);
+
