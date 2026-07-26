@@ -2,6 +2,7 @@ using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Auth.Authorization;
 using Mersal.Authz;
+using Mersal.Data;
 using Mersal.Emr.Api;
 using Mersal.Emr.Domain;
 using Mersal.Emr.Infrastructure;
@@ -64,6 +65,7 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseHbmpRls(); // bind app.tenant_id GUC from the principal (RLS, ADR-0011)
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 // 14.4 — resolve the active-branch context per request (design 37 §3). BranchScoped callers are narrowed to

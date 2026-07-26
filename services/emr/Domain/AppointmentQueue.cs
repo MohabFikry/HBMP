@@ -11,6 +11,7 @@ public enum QueueTicketState { Waiting, InConsultation, Done, Removed }
 public sealed class QueueTicket
 {
     public Guid QueueId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid AppointmentId { get; set; }
     public Guid BeneficiaryId { get; set; }
     public Guid ProviderId { get; set; }

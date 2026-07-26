@@ -19,6 +19,7 @@ public enum WaitlistStatus { Waitlisted, Promoted, Expired }
 public sealed class Appointment
 {
     public Guid AppointmentId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid BeneficiaryId { get; set; }
     public Guid ProviderId { get; set; }
     public Guid LocationId { get; set; }
@@ -54,6 +55,7 @@ public sealed class Appointment
 public sealed class ProviderAvailability
 {
     public Guid AvailabilityId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid ProviderId { get; set; }
     public Guid LocationId { get; set; }
     public Guid? BranchId { get; set; }   // phase 14 — Mersal branch (NULL = external provider location)
@@ -69,6 +71,7 @@ public sealed class ProviderAvailability
 public sealed class AppointmentSlot
 {
     public Guid SlotId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid ProviderId { get; set; }
     public Guid LocationId { get; set; }
     public Guid? BranchId { get; set; }   // phase 14 — Mersal branch (NULL = external provider location)
@@ -83,6 +86,7 @@ public sealed class AppointmentSlot
 public sealed class WaitlistEntry
 {
     public Guid WaitlistId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid BeneficiaryId { get; set; }
     public Guid ProviderId { get; set; }
     public Guid LocationId { get; set; }

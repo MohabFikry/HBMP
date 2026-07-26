@@ -1,4 +1,5 @@
 using System.Globalization;
+using Mersal.Data;
 using Mersal.Emr.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -42,10 +43,12 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddEmrInfrastructure(this IServiceCollection services, IConfiguration config)
     {
-        services.AddDbContext<EmrDbContext>(o =>
+        services.AddHbmpRls();
+        services.AddDbContext<EmrDbContext>((sp, o) =>
             o.UseNpgsql(config.GetConnectionString("Emr")
                         ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential."))
-             .UseSnakeCaseNamingConvention());
+             .UseSnakeCaseNamingConvention()
+             .AddHbmpRlsInterceptors(sp));
         services.AddScoped<EncounterNoIssuer>();
         services.AddScoped<AppointmentBookingService>();
         services.AddScoped<AppointmentTransitionService>();

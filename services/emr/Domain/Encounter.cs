@@ -9,6 +9,7 @@ public enum QueueState { Waiting, InConsultation, Done }
 public sealed class Encounter
 {
     public Guid EncounterId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public string EncounterNo { get; set; } = default!;   // ENC-YYYY-NNNNNN
     public Guid BeneficiaryId { get; set; }
     public Guid? AppointmentId { get; set; }
@@ -23,6 +24,7 @@ public sealed class Encounter
 public sealed class QueueEntry
 {
     public Guid QueueEntryId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid EncounterId { get; set; }
     public Guid BeneficiaryId { get; set; }
     public Guid? ProviderId { get; set; }

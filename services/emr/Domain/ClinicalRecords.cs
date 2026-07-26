@@ -17,6 +17,7 @@ public enum MedicationStatus { Active, Stopped }
 public sealed class EmrNote
 {
     public Guid NoteId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid EncounterId { get; set; }
     public NoteType NoteType { get; set; } = NoteType.SOAP;
     public string? Subjective { get; set; }
@@ -35,6 +36,7 @@ public sealed class EmrNote
 public sealed class Diagnosis
 {
     public Guid DiagnosisId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid EncounterId { get; set; }
     public string IcdCode { get; set; } = default!;
     public DiagnosisRank DiagnosisRank { get; set; } = DiagnosisRank.Primary;
@@ -49,6 +51,7 @@ public sealed class Diagnosis
 public sealed class Vital
 {
     public Guid VitalId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid EncounterId { get; set; }
     public VitalType VitalType { get; set; }
     public decimal? ValueNum { get; set; }
@@ -63,6 +66,7 @@ public sealed class Vital
 public sealed class Allergy
 {
     public Guid AllergyId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid BeneficiaryId { get; set; }
     public Guid AllergenId { get; set; }
     public string? Reaction { get; set; }
@@ -77,6 +81,7 @@ public sealed class Allergy
 public sealed class MedicationHistory
 {
     public Guid MedHistoryId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid BeneficiaryId { get; set; }
     public Guid DrugId { get; set; }
     public MedicationSource Source { get; set; } = MedicationSource.SelfReported;

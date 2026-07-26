@@ -35,6 +35,7 @@ public class QueueMinNecessaryTests
         {
             "QueueId", "AppointmentId", "BeneficiaryId", "ProviderId", "LocationId", "BranchId", "DoctorId",
             "MemberNo", "DisplayName", "AppointmentType", "Priority", "State", "EnqueuedAt", "CalledAt",
+            "TenantId", // RLS tenant scope (ADR-0011) — infra field, not clinical/PII
         });
     }
 }
