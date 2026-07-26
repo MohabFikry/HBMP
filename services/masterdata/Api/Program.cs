@@ -1,4 +1,6 @@
+using Mersal.Audit.Client;
 using Mersal.Auth;
+using Mersal.Events;
 using Mersal.MasterData.Api;
 using Mersal.MasterData.Domain;
 using Mersal.MasterData.Infrastructure;
@@ -10,9 +12,13 @@ using OpenTelemetry.Trace;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
+builder.Services.AddHbmpAuditClient("masterdata-service");
 builder.Services.AddDbContext<MasterDataDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("MasterData")
                 ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential.")).UseSnakeCaseNamingConvention());
+builder.Services.AddHbmpEvents(builder.Configuration);
+builder.Services.AddHbmpDurableOutbox<MasterDataDbContext>();
+builder.Services.AddHbmpOutboxRelay();
 
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(r => r.AddService("masterdata-service"))
@@ -164,7 +170,7 @@ v1.MapGet("/drugs/by-id/{id:guid}/alternatives", async (Guid id, MasterDataDbCon
 });
 
 // Highest-severity interaction among a set of drug codes (order-insensitive).
-v1.MapPost("/drug-interactions/check", async (DrugCheckRequest req, MasterDataDbContext db, CancellationToken ct) =>
+v1.MapPost("/drug-interactions/check", async (DrugCheckRequest req, MasterDataDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
     var drugs = await db.Drugs.AsNoTracking().Where(d => req.DrugCodes.Contains(d.DrugCode))
         .Select(d => new { d.DrugId, d.DrugCode }).ToListAsync(ct);
@@ -173,6 +179,7 @@ v1.MapPost("/drug-interactions/check", async (DrugCheckRequest req, MasterDataDb
         .Where(i => ids.Contains(i.DrugAId) && ids.Contains(i.DrugBId))
         .ToListAsync(ct);
     var top = hits.Count == 0 ? (InteractionSeverity?)null : hits.Max(h => h.Severity);
+    await Screen(audit, me, "drug-interaction-screening", $"{{\"drugCount\":{drugs.Count},\"highestSeverity\":\"{top}\"}}", ct);
     return Results.Ok(new
     {
         checkedDrugs = drugs.Select(d => d.DrugCode),
@@ -183,13 +190,14 @@ v1.MapPost("/drug-interactions/check", async (DrugCheckRequest req, MasterDataDb
 
 // By-id interaction check the pharmacy uses (prescription_line.drug_id are uuids). Highest-severity interaction
 // among a set of drug ids (order-insensitive).
-v1.MapPost("/drug-interactions/check-by-ids", async (DrugIdCheckRequest req, MasterDataDbContext db, CancellationToken ct) =>
+v1.MapPost("/drug-interactions/check-by-ids", async (DrugIdCheckRequest req, MasterDataDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
     var ids = (req.DrugIds ?? []).ToHashSet();
     var hits = await db.DrugInteractions.AsNoTracking()
         .Where(i => ids.Contains(i.DrugAId) && ids.Contains(i.DrugBId))
         .ToListAsync(ct);
     var top = hits.Count == 0 ? (InteractionSeverity?)null : hits.Max(h => h.Severity);
+    await Screen(audit, me, "drug-interaction-screening", $"{{\"drugCount\":{ids.Count},\"highestSeverity\":\"{top}\"}}", ct);
     return Results.Ok(new
     {
         checkedDrugIds = ids,
@@ -200,7 +208,7 @@ v1.MapPost("/drug-interactions/check-by-ids", async (DrugIdCheckRequest req, Mas
 
 // By-id allergy check the pharmacy uses: flag a drug (uuid) against a beneficiary's allergen ids (uuids). A
 // conflict is raised when the drug's ATC code (or an ancestor) matches a Drug-category allergen's code.
-v1.MapPost("/allergies/check-by-ids", async (AllergyIdCheckRequest req, MasterDataDbContext db, CancellationToken ct) =>
+v1.MapPost("/allergies/check-by-ids", async (AllergyIdCheckRequest req, MasterDataDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
     var drug = await db.Drugs.AsNoTracking().FirstOrDefaultAsync(x => x.DrugId == req.DrugId, ct);
     if (drug is null) return Results.NotFound(new { req.DrugId, resolved = false });
@@ -211,11 +219,12 @@ v1.MapPost("/allergies/check-by-ids", async (AllergyIdCheckRequest req, MasterDa
     var codes = await db.Allergens.AsNoTracking()
         .Where(a => allergenIds.Contains(a.AllergenId)).Select(a => a.Code).ToListAsync(ct);
     var conflict = codes.Any(c => atcChain.Contains(c));
+    await Screen(audit, me, "allergy-screening", $"{{\"allergenCount\":{allergenIds.Count},\"conflict\":{conflict.ToString().ToLowerInvariant()}}}", ct);
     return Results.Ok(new { req.DrugId, conflict, matchedOn = conflict ? "atc-class" : null });
 });
 
 // Flag a drug against a patient's allergen codes/classes.
-v1.MapPost("/allergies/check", async (AllergyCheckRequest req, MasterDataDbContext db, CancellationToken ct) =>
+v1.MapPost("/allergies/check", async (AllergyCheckRequest req, MasterDataDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
     var drug = await db.Drugs.AsNoTracking().FirstOrDefaultAsync(x => x.DrugCode == req.DrugCode, ct);
     if (drug is null) return Results.NotFound(new { req.DrugCode, resolved = false });
@@ -224,10 +233,24 @@ v1.MapPost("/allergies/check", async (AllergyCheckRequest req, MasterDataDbConte
         ? new HashSet<string>()
         : MasterDataNormalize.AtcAncestors(drug.AtcCode).Append(drug.AtcCode).ToHashSet(StringComparer.Ordinal);
     var conflict = req.PatientAllergenCodes.Any(a => atcChain.Contains(a));
+    await Screen(audit, me, "allergy-screening", $"{{\"allergenCount\":{req.PatientAllergenCodes.Length},\"conflict\":{conflict.ToString().ToLowerInvariant()}}}", ct);
     return Results.Ok(new { req.DrugCode, conflict, matchedOn = conflict ? "atc-class" : null });
 });
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
+
+// 16.6 (H2/audit): every clinical-decision-support screening records who screened + a de-identified
+// summary (counts + outcome, never the patient's drug/allergen values) as an audited Read.
+static async Task Screen(IAuditClient audit, IHbmpPrincipalAccessor me, string entityType, string summary, CancellationToken ct) =>
+    await audit.EmitAsync(new AuditEventDraft
+    {
+        EntityType = entityType,
+        EntityId = "screening",
+        Action = AuditAction.Read,
+        ActorUserId = me.Principal?.Subject,
+        FieldClasses = ["clinical"],
+        AfterState = summary,
+    }, ct);
 
 app.Run();
 

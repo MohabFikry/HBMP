@@ -1,3 +1,4 @@
+using Mersal.Events;
 using Mersal.MasterData.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -66,5 +67,7 @@ public sealed class MasterDataDbContext(DbContextOptions<MasterDataDbContext> op
             e.HasIndex(x => x.Code).IsUnique();
             e.HasIndex(x => x.SensitivityLevel);
         });
+
+        b.AddOutbox(Schema); // 16.6 — durable outbox so screening-endpoint audit events are staged, not lost
     }
 }
