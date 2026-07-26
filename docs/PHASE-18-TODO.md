@@ -9,9 +9,9 @@ Mark `✅ YYYY-MM-DD` per id here **and** on the finding row in `AUDIT-R2-E2E.md
 | Sub | Id | Finding | Status |
 |---|---|---|---|
 | 18.A1 | X1 | `coverage_limit.consumed_value` never incremented → every member eligible forever | ✅ 2026-07-27 |
-| 18.A2 | X2 | Batch rollups erase applied adjustments at the freeze point | ☐ |
-| 18.A2 | X3 | Allowed amount can exceed contract tariff (`Math.Max`; `Adjust` uncapped) | ☐ |
-| 18.A2 | X8 | Contract price ignores line quantity | ☐ |
+| 18.A2 | X2 | Batch rollups erase applied adjustments at the freeze point | ✅ 2026-07-27 |
+| 18.A2 | X3 | Allowed amount can exceed contract tariff (`Math.Max`; `Adjust` uncapped) | ✅ 2026-07-27 |
+| 18.A2 | X8 | Contract price ignores line quantity | ✅ 2026-07-27 |
 | 18.A3 | X7 | Lost update on concurrent consume/dispense of different lines | ☐ |
 | 18.A3 | X9 | Eligibility cache key omits serviceCode/requiresPreAuth → pre-auth bypass | ☐ |
 | 18.A3 | X10 | First-ever limit reset wipes in-period consumption (test asserts the bug) | ☐ |

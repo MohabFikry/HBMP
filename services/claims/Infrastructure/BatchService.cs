@@ -27,7 +27,7 @@ public sealed record BatchSelector(
 /// drives the 23 §9 lifecycle with its guards. The single-open-batch guarantee is the DB index
 /// <c>ux_claim_one_open_batch</c> (a claim can never sit in two live batches); this class keeps the item's
 /// materialized batch_status in step on every transition and recomputes rollups (frozen at SettlementIssued).</summary>
-public sealed class BatchService(ClaimsDbContext db, BatchNoIssuer batchNo, TimeProvider clock)
+public sealed class BatchService(ClaimsDbContext db, BatchNoIssuer batchNo, BatchRollupService rollups, TimeProvider clock)
 {
     // ---- create -------------------------------------------------------------------------------------------
     public async Task<BatchResult> CreateAsync(string tenantId, string? actor, BatchSelector sel, CancellationToken ct)
@@ -68,7 +68,7 @@ public sealed class BatchService(ClaimsDbContext db, BatchNoIssuer batchNo, Time
             db.ClaimBatchItems.Add(NewItem(batch.BatchId, c.ClaimId, actor));
             c.BatchId = batch.BatchId;
         }
-        Recompute(batch, candidates);
+        await rollups.RecomputeAsync(batch, candidates.Select(c => c.ClaimId).ToList(), ct);
 
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateException ex) when (IsUnique(ex, "ux_claim_one_open_batch"))
@@ -100,7 +100,7 @@ public sealed class BatchService(ClaimsDbContext db, BatchNoIssuer batchNo, Time
             db.ChangeTracker.Clear();
             return BatchResult.Fail(BatchOutcome.AlreadyBatched);
         }
-        await RecomputeFromDbAsync(batch, ct);
+        await rollups.RecomputeAsync(batch, ct);
         return BatchResult.Ok(batch);
     }
 
@@ -124,7 +124,7 @@ public sealed class BatchService(ClaimsDbContext db, BatchNoIssuer batchNo, Time
         if (claim is not null) claim.BatchId = null;
 
         await db.SaveChangesAsync(ct);
-        await RecomputeFromDbAsync(batch, ct);
+        await rollups.RecomputeAsync(batch, ct);
         return BatchResult.Ok(batch);
     }
 
@@ -157,7 +157,7 @@ public sealed class BatchService(ClaimsDbContext db, BatchNoIssuer batchNo, Time
         foreach (var i in activeItems) i.BatchStatusSnapshot = to;
 
         if (to == BatchStatus.SettlementIssued) batch.FrozenAt = clock.GetUtcNow(); // rollups are frozen here
-        else await RecomputeFromDbAsync(batch, ct);
+        else await rollups.RecomputeAsync(batch, ct);
 
         await db.SaveChangesAsync(ct);
         return BatchResult.Ok(batch);
@@ -211,24 +211,6 @@ public sealed class BatchService(ClaimsDbContext db, BatchNoIssuer batchNo, Time
             .Select(i => i.ClaimId).ToListAsync(ct);
         var liveSet = live.ToHashSet();
         return rows.Where(c => !liveSet.Contains(c.ClaimId)).ToList();
-    }
-
-    private async Task RecomputeFromDbAsync(ClaimBatch batch, CancellationToken ct)
-    {
-        var claimIds = batch.Items.Where(i => i.RemovedAt is null).Select(i => i.ClaimId).ToList();
-        var claims = await db.Claims.Include(c => c.Lines).Where(c => claimIds.Contains(c.ClaimId)).ToListAsync(ct);
-        Recompute(batch, claims);
-    }
-
-    private static void Recompute(ClaimBatch batch, IReadOnlyCollection<Claim> claims)
-    {
-        var roll = BatchRollup.Compute(claims.SelectMany(c => c.Lines));
-        batch.TotalClaimed = roll.Claimed;
-        batch.TotalPriced = roll.Priced;
-        batch.TotalApproved = roll.Approved;
-        batch.TotalAdjusted = roll.Adjusted;
-        batch.TotalDenied = roll.Denied;
-        batch.NetPayable = roll.NetPayable;
     }
 
     private static bool IsUnique(DbUpdateException ex, string constraint)

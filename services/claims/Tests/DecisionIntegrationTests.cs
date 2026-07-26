@@ -16,7 +16,7 @@ public class DecisionIntegrationTests
     private static DbContextOptions<ClaimsDbContext> Options() =>
         new DbContextOptionsBuilder<ClaimsDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options;
     private static ClaimsDbContext Ctx() => new(Options());
-    private static DecisionService Svc(ClaimsDbContext db) => new(db, TimeProvider.System);
+    private static DecisionService Svc(ClaimsDbContext db) => new(db, new BatchRollupService(db), TimeProvider.System);
 
     private static async Task<(Guid claimId, Guid lineId, Guid provider)> Seed(
         string tenant, string createdBy, decimal billed = 200m, decimal contract = 180m)

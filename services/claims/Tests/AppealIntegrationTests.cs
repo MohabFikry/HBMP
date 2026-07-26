@@ -100,14 +100,14 @@ public class AppealIntegrationTests
             // officer-1 (the original decider) is blocked; a different reviewer may decide.
             await using (var db = Ctx())
             {
-                var svc = new DecisionService(db, TimeProvider.System);
+                var svc = new DecisionService(db, new BatchRollupService(db), TimeProvider.System);
                 var req = new DecisionRequest(ClaimDecisionKind.Approve, null, [], null, false, null);
                 (await svc.DecideAsync(tenant, "officer-1", null, claimId, lineId, req, "re-k1", 1_000_000m, "c")).Outcome
                     .Should().Be(DecisionOutcome.SoDSameDecider);
             }
             await using (var db = Ctx())
             {
-                var svc = new DecisionService(db, TimeProvider.System);
+                var svc = new DecisionService(db, new BatchRollupService(db), TimeProvider.System);
                 var req = new DecisionRequest(ClaimDecisionKind.Approve, null, [], null, false, null);
                 (await svc.DecideAsync(tenant, "reviewer-2", null, claimId, lineId, req, "re-k2", 1_000_000m, "c")).Outcome
                     .Should().Be(DecisionOutcome.Recorded);
@@ -159,7 +159,7 @@ public class AppealIntegrationTests
             await using (var db = Ctx())
             {
                 var adj = new AdjustmentRequest(AdjustmentType.Recovery, -50m, ReasonCodes.DuplicateClaim, "post-settlement recovery", lineId, null);
-                (await new AdjustmentService(db, TimeProvider.System).RaiseAsync(tenant, "reviewer-2", claimId, lineId, adj, "adj-appeal", "c")).Outcome
+                (await new AdjustmentService(db, new BatchRollupService(db), TimeProvider.System).RaiseAsync(tenant, "reviewer-2", claimId, lineId, adj, "adj-appeal", "c")).Outcome
                     .Should().Be(AdjustmentOutcome.Recorded);
             }
             (await verify.ClaimBatches.AsNoTracking().SingleAsync(b => b.BatchId == batchId)).NetPayable

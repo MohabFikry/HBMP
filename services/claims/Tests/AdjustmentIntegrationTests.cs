@@ -17,7 +17,7 @@ public class AdjustmentIntegrationTests
     private static DbContextOptions<ClaimsDbContext> Options() =>
         new DbContextOptionsBuilder<ClaimsDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options;
     private static ClaimsDbContext Ctx() => new(Options());
-    private static AdjustmentService Svc(ClaimsDbContext db) => new(db, TimeProvider.System);
+    private static AdjustmentService Svc(ClaimsDbContext db) => new(db, new BatchRollupService(db), TimeProvider.System);
 
     private static async Task<(Guid claimId, Guid lineId)> SeedApproved(string tenant, decimal allowed)
     {
@@ -61,7 +61,16 @@ public class AdjustmentIntegrationTests
             await using var verify = Ctx();
             var line = await verify.ClaimLines.AsNoTracking().SingleAsync(l => l.ClaimLineId == lineId);
             line.Status.Should().Be(ClaimLineStatus.Adjusted);
-            line.AllowedAmount.Should().Be(160m);
+            // 18.A2 (X2): the DECIDED amount stands; the signed delta carries the change and is summed
+            // separately into total_adjusted. Writing the delta into allowed_amount as well double-counted
+            // it against net payable (36 §8: approved + adjustments) and made the rollup depend on how
+            // many times it had run. This assertion previously encoded that bug.
+            line.AllowedAmount.Should().Be(180m, "adjustments never rewrite the decided allowed amount");
+
+            var claim = await verify.Claims.AsNoTracking().SingleAsync(c => c.ClaimId == claimId);
+            claim.ApprovedAmount.Should().Be(180m);
+            claim.AdjustedAmount.Should().Be(-20m);
+            claim.NetPayable.Should().Be(160m, "net payable = approved + adjustments, counted once");
 
             // append-only: a direct UPDATE on the adjustment ledger is rejected by the trigger.
             var act = async () => await verify.Database.ExecuteSqlRawAsync(

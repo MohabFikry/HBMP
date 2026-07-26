@@ -40,7 +40,7 @@ public sealed class ClaimIntakeExecutor(
 
         // (2) Price from the provider's contract tariff for the code on the service date (HTTP, outside the tx).
         var tariff = await tariffs.ResolveAsync(ev.ProviderId, ev.CodeSystem, ev.Code, ev.ServiceDate, bearerToken, ct);
-        var (price, recommendation, reasons) = AutoDerivePricing.Price(tariff);
+        var (price, recommendation, reasons) = AutoDerivePricing.Price(tariff, ev.Quantity); // 18.A2 (X8): extended, not unit
         var now = clock.GetUtcNow();
 
         await using var tx = await db.Database.BeginTransactionAsync(ct);

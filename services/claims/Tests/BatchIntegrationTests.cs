@@ -16,7 +16,7 @@ public class BatchIntegrationTests
     private static DbContextOptions<ClaimsDbContext> Options() =>
         new DbContextOptionsBuilder<ClaimsDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options;
     private static ClaimsDbContext Ctx() => new(Options());
-    private static BatchService Svc(ClaimsDbContext db) => new(db, new BatchNoIssuer(db), TimeProvider.System);
+    private static BatchService Svc(ClaimsDbContext db) => new(db, new BatchNoIssuer(db), new BatchRollupService(db), TimeProvider.System);
 
     private static async Task<Guid> SeedClaim(string tenant, Guid provider, ClaimLineStatus lineStatus, decimal allowed)
     {

@@ -22,7 +22,7 @@ public sealed record AdjustmentResult(
 /// NEGATIVE — the adjustment is recorded PENDING and takes effect only when a second, distinct approver confirms. Each
 /// row carries the BEFORE/AFTER payable amounts; adjustments net into the batch rollup. Reversal/Void voids the line
 /// (a compensating entry), every other type marks it Adjusted.</summary>
-public sealed class AdjustmentService(ClaimsDbContext db, TimeProvider clock)
+public sealed class AdjustmentService(ClaimsDbContext db, BatchRollupService rollups, TimeProvider clock)
 {
     public async Task<AdjustmentResult> RaiseAsync(
         string tenantId, string actor, Guid claimId, Guid lineId, AdjustmentRequest req,
@@ -47,6 +47,12 @@ public sealed class AdjustmentService(ClaimsDbContext db, TimeProvider clock)
         var before = CurrentPayable(line);
         var after = before + req.AmountDelta;
 
+        // 18.A2: the line's payable is no longer clamped to 0 while the ledger row records the true
+        // negative — the two used to disagree about the same money. The line's allowed_amount is now
+        // left at the decided figure and the signed delta carries the movement, so BeforeAmount /
+        // AfterAmount below are the single truthful record. A negative NET is still not silently
+        // permitted: it routes to dual control, which is the spec's sanctioned path (36 §7).
+
         // Dual control: if the scope (batch if batched, else claim) net payable would go negative, a second approver
         // must confirm before the adjustment takes effect. The row is recorded PENDING and the line is NOT changed.
         var wouldGoNegative = await ScopeNetWithDeltaAsync(claim, req.AmountDelta, ct) < 0m;
@@ -56,8 +62,9 @@ public sealed class AdjustmentService(ClaimsDbContext db, TimeProvider clock)
         if (wouldGoNegative)
             return await SaveAsync(AdjustmentOutcome.PendingSecondApproval, row, claim, line, ct);
 
-        ApplyEffect(claim, line, req.Type, after);
-        await RecomputeBatchAsync(claim, ct);
+        ApplyEffect(line, req.Type);
+        await rollups.RecomputeClaimTotalsAsync(claim, ct);
+        await rollups.RecomputeForClaimAsync(claim, ct);
         return await SaveAsync(AdjustmentOutcome.Recorded, row, claim, line, ct);
     }
 
@@ -75,8 +82,9 @@ public sealed class AdjustmentService(ClaimsDbContext db, TimeProvider clock)
             pending.BeforeAmount, pending.AfterAmount, pending: false, confirms: pending.AdjustmentId);
         db.ClaimAdjustments.Add(confirming);
 
-        ApplyEffect(claim, line, pending.AdjustmentType, pending.AfterAmount);
-        await RecomputeBatchAsync(claim, ct);
+        ApplyEffect(line, pending.AdjustmentType);
+        await rollups.RecomputeClaimTotalsAsync(claim, ct);
+        await rollups.RecomputeForClaimAsync(claim, ct);
         return await SaveAsync(AdjustmentOutcome.Confirmed, confirming, claim, line, ct);
     }
 
@@ -84,20 +92,20 @@ public sealed class AdjustmentService(ClaimsDbContext db, TimeProvider clock)
     private static decimal CurrentPayable(ClaimLine line) =>
         line.AllowedAmount ?? line.ContractPrice ?? line.BilledAmount;
 
-    private static void ApplyEffect(Claim claim, ClaimLine line, AdjustmentType type, decimal after)
-    {
+    /// <summary>18.A2 — the line's status moves, but its <c>allowed_amount</c> does NOT. The decided
+    /// amount is what the officer approved; the adjustment's signed delta carries the change and is
+    /// summed separately into <c>total_adjusted</c>. Writing the delta into <c>allowed_amount</c> as
+    /// well double-counted it (36 §8: claimed → priced → approved → adjustments → net payable), and made
+    /// the rollup depend on how many times it had run. The true before/after payable is recorded on the
+    /// adjustment row itself.</summary>
+    private static void ApplyEffect(ClaimLine line, AdjustmentType type) =>
         line.Status = AdjustmentRules.ResultingStatus(type);
-        if (line.Status == ClaimLineStatus.Adjusted) line.AllowedAmount = Math.Max(0m, after);
-        // recompute the claim's own rollup so its net payable stays consistent line-by-line.
-        var roll = BatchRollup.Compute(claim.Lines);
-        claim.ApprovedAmount = roll.Approved;
-        claim.AdjustedAmount = (claim.AdjustedAmount ?? 0m);
-    }
 
+    /// <summary>Net payable over the adjustment's scope (its batch if batched, else the claim) WITH the
+    /// proposed delta applied — the dual-control trigger. Uses the same disjoint approved + adjusted
+    /// components as the canonical rollup, so the threshold and the totals can never disagree.</summary>
     private async Task<decimal> ScopeNetWithDeltaAsync(Claim claim, decimal newDelta, CancellationToken ct)
     {
-        // Net payable = approved(lines) + adjusted(applied adjustment deltas) + newDelta, over the batch if batched,
-        // else this claim. Pending adjustments do not count until confirmed.
         List<Guid> claimIds;
         if (claim.BatchId is { } batchId)
         {
@@ -108,25 +116,7 @@ public sealed class AdjustmentService(ClaimsDbContext db, TimeProvider clock)
 
         var lines = await db.ClaimLines.AsNoTracking().Where(l => claimIds.Contains(l.ClaimId)).ToListAsync(ct);
         var approved = BatchRollup.Compute(lines).Approved;
-        var appliedAdjusted = await db.ClaimAdjustments.AsNoTracking()
-            .Where(a => claimIds.Contains(a.ClaimId) && !a.PendingSecondApproval)
-            .SumAsync(a => (decimal?)a.AmountDelta, ct) ?? 0m;
-        return approved + appliedAdjusted + newDelta;
-    }
-
-    private async Task RecomputeBatchAsync(Claim claim, CancellationToken ct)
-    {
-        if (claim.BatchId is not { } batchId) return;
-        var batch = await db.ClaimBatches.Include(b => b.Items).FirstOrDefaultAsync(b => b.BatchId == batchId, ct);
-        if (batch is null || batch.FrozenAt is not null) return;
-        var claimIds = batch.Items.Where(i => i.RemovedAt is null).Select(i => i.ClaimId).ToList();
-        var lines = await db.ClaimLines.AsNoTracking().Where(l => claimIds.Contains(l.ClaimId)).ToListAsync(ct);
-        var adjusted = await db.ClaimAdjustments.AsNoTracking()
-            .Where(a => claimIds.Contains(a.ClaimId) && !a.PendingSecondApproval)
-            .SumAsync(a => (decimal?)a.AmountDelta, ct) ?? 0m;
-        var roll = BatchRollup.Compute(lines, adjusted);
-        batch.TotalClaimed = roll.Claimed; batch.TotalPriced = roll.Priced; batch.TotalApproved = roll.Approved;
-        batch.TotalAdjusted = roll.Adjusted; batch.TotalDenied = roll.Denied; batch.NetPayable = roll.NetPayable;
+        return approved + await rollups.AppliedAdjustedAsync(claimIds, ct) + newDelta;
     }
 
     private async Task<AdjustmentResult> SaveAsync(

@@ -22,7 +22,7 @@ public sealed record DecisionResult(
 /// threshold (a second distinct approver), mandatory reason code + rationale on deny/adjust/override, allowed-amount
 /// bounds on partial. Line updates use optimistic concurrency (xmin) so two officers deciding the same line yield one
 /// winner + one 409. Line decisions roll up to the claim status and (when batched) to the batch rollups, in one tx.</summary>
-public sealed class DecisionService(ClaimsDbContext db, TimeProvider clock)
+public sealed class DecisionService(ClaimsDbContext db, BatchRollupService rollups, TimeProvider clock)
 {
     public async Task<DecisionResult> DecideAsync(
         string tenantId, string actor, string? callerProviderId, Guid claimId, Guid lineId,
@@ -78,8 +78,8 @@ public sealed class DecisionService(ClaimsDbContext db, TimeProvider clock)
         }
 
         ApplyEffect(claim, line, req.Kind, req.AllowedAmount);
-        var terminal = RecomputeClaim(claim, line);
-        await RecomputeBatchAsync(claim, ct);
+        var terminal = await RecomputeClaimAsync(claim, line, ct);
+        await rollups.RecomputeForClaimAsync(claim, ct);
         return await SaveAsync(DecisionOutcome.Recorded, decision, claim, line, terminal, ct);
     }
 
@@ -99,8 +99,8 @@ public sealed class DecisionService(ClaimsDbContext db, TimeProvider clock)
         db.ClaimDecisions.Add(confirming);
 
         ApplyEffect(claim, line, pending.Decision, pending.AllowedAmount);
-        var terminal = RecomputeClaim(claim, line);
-        await RecomputeBatchAsync(claim, ct);
+        var terminal = await RecomputeClaimAsync(claim, line, ct);
+        await rollups.RecomputeForClaimAsync(claim, ct);
         return await SaveAsync(DecisionOutcome.Confirmed, confirming, claim, line, terminal, ct);
     }
 
@@ -112,7 +112,7 @@ public sealed class DecisionService(ClaimsDbContext db, TimeProvider clock)
         else claim.Status = kind == ClaimDecisionKind.RequestInfo ? ClaimStatus.PendingInfo : ClaimStatus.ClinicalReview;
     }
 
-    private bool RecomputeClaim(Claim claim, ClaimLine line)
+    private async Task<bool> RecomputeClaimAsync(Claim claim, ClaimLine line, CancellationToken ct)
     {
         // RequestInfo/RouteToClinical set the claim status directly (line stays Pending); do not roll up over them.
         if (line.Status == ClaimLineStatus.Pending) return false;
@@ -121,22 +121,10 @@ public sealed class DecisionService(ClaimsDbContext db, TimeProvider clock)
         claim.Status = status;
         var terminal = status is ClaimStatus.Approved or ClaimStatus.PartiallyApproved or ClaimStatus.Denied;
         if (terminal) claim.DecidedAt = clock.GetUtcNow();
-        var roll = BatchRollup.Compute(claim.Lines);
-        claim.ApprovedAmount = roll.Approved;
-        claim.NetPayable = roll.NetPayable;
+        // 18.A2: claim totals go through the SAME canonical component split as the batch, so an
+        // adjustment is never erased by a later decision on a sibling line.
+        await rollups.RecomputeClaimTotalsAsync(claim, ct);
         return terminal;
-    }
-
-    private async Task RecomputeBatchAsync(Claim claim, CancellationToken ct)
-    {
-        if (claim.BatchId is not { } batchId) return;
-        var batch = await db.ClaimBatches.Include(b => b.Items).FirstOrDefaultAsync(b => b.BatchId == batchId, ct);
-        if (batch is null || batch.FrozenAt is not null) return; // frozen at SettlementIssued — never recompute
-        var claimIds = batch.Items.Where(i => i.RemovedAt is null).Select(i => i.ClaimId).ToList();
-        var claims = await db.Claims.Include(c => c.Lines).Where(c => claimIds.Contains(c.ClaimId)).ToListAsync(ct);
-        var roll = BatchRollup.Compute(claims.SelectMany(c => c.Lines));
-        batch.TotalClaimed = roll.Claimed; batch.TotalPriced = roll.Priced; batch.TotalApproved = roll.Approved;
-        batch.TotalAdjusted = roll.Adjusted; batch.TotalDenied = roll.Denied; batch.NetPayable = roll.NetPayable;
     }
 
     // ---- persistence --------------------------------------------------------------------------------------

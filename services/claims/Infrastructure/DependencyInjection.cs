@@ -29,6 +29,7 @@ public static class DependencyInjection
         services.AddScoped<ClaimIntakeExecutor>();
         services.AddScoped<ClaimsQueries>();
         services.AddScoped<BatchNoIssuer>();
+        services.AddScoped<BatchRollupService>();   // 18.A2 — the single rollup authority
         services.AddScoped<BatchService>();
         services.AddScoped<AdjudicationService>();
         services.AddScoped<DecisionService>();

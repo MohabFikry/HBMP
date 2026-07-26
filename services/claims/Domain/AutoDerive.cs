@@ -30,12 +30,21 @@ public static class AutoDerivePricing
 {
     public const string RuleVersion = "10b.1";
 
+    /// <summary>
+    /// 18.A2 (X8): the contract price of a line is the UNIT tariff × the delivered quantity. It used to
+    /// return the unit tariff verbatim while <c>ev.Quantity</c> was stored and never multiplied, so a
+    /// qty-3 line was priced as one unit — under-paying the provider and making
+    /// <c>ReconClassifier.PriceDiffers</c> flag every multi-unit line as a spurious PriceVariance
+    /// (billed total ≠ unit tariff). Reconciliation now compares extended price to extended price.
+    /// </summary>
     public static (decimal? ContractPrice, SystemRecommendation? Recommendation, IReadOnlyList<string> ReasonCodes)
-        Price(decimal? resolvedTariff)
+        Price(decimal? resolvedTariff, decimal quantity = 1m)
     {
         if (resolvedTariff is null)
             return (null, SystemRecommendation.RequiresManualReview, [ReasonCodes.NoTariff]);
+        if (quantity <= 0m)
+            return (null, SystemRecommendation.RequiresManualReview, [ReasonCodes.NoTariff]);
         // Priced cleanly: leave the recommendation for adjudication (10b.3) to compute against the full rule set.
-        return (resolvedTariff, null, []);
+        return (resolvedTariff.Value * quantity, null, []);
     }
 }
