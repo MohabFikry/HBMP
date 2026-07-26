@@ -1,3 +1,4 @@
+using Mersal.Events;
 using Mersal.Identity.Domain;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -29,6 +30,9 @@ public sealed class IdentityStoreDbContext(DbContextOptions<IdentityStoreDbConte
 
         // OpenIddict's application/authorization/scope/token entities live in the same context + schema (17.2).
         builder.UseOpenIddict();
+
+        // Durable transactional outbox for audit + domain events (admin actions audited, 17.4).
+        builder.AddOutbox(Schema);
 
         // Short, stable table names (the SQL migration creates exactly these).
         builder.Entity<ApplicationUser>(e =>

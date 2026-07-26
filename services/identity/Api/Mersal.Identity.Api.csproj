@@ -4,6 +4,8 @@
     <ProjectReference Include="../Domain/Mersal.Identity.Domain.csproj" />
     <ProjectReference Include="../Infrastructure/Mersal.Identity.Infrastructure.csproj" />
     <ProjectReference Include="../../../libs/auth/Mersal.Auth.csproj" />
+    <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" />
+    <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />

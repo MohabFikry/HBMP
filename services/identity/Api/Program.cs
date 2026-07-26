@@ -1,3 +1,5 @@
+using Mersal.Audit.Client;
+using Mersal.Events;
 using Mersal.Identity.Api.Auth;
 using Mersal.Identity.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -11,6 +13,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddIdentityInfrastructure(builder.Configuration);
 builder.Services.AddMersalIssuer(builder.Configuration, builder.Environment);
 builder.Services.AddAuthorization();
+// Phase 17.4 — audited admin actions (C3): durable outbox + hash-chained audit spine.
+builder.Services.AddHbmpAuditClient("identity-service");
+builder.Services.AddHbmpEvents(builder.Configuration);
+builder.Services.AddHbmpDurableOutbox<IdentityStoreDbContext>();
+builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddSingleton(TimeProvider.System);
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("identity-service"))
@@ -32,6 +39,7 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "id
 
 app.MapConnect();  // 17.2 — /connect/{authorize,token,userinfo,login,logout}
 app.MapAccount();  // 17.3 — /connect/{2fa,enroll-2fa} login UI + TOTP 2FA + recovery codes
+app.MapAdmin();    // 17.4 — /identity/admin/* user+role+scope admin (bearer admin scope + MFA, audited)
 
 // Read-only roles/scopes-as-data catalog (verification of the 17.1 seed). NOTE: the mutating admin surface
 // lands in 17.4 behind admin RBAC + SoD; these reads are non-sensitive catalog metadata (no user data).
