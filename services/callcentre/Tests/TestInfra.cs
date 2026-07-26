@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Mersal.CallCentre.Domain;
 using Mersal.CallCentre.Infrastructure;
+using Mersal.Events;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -21,6 +22,8 @@ public sealed class CallCentreFactory : WebApplicationFactory<Program>
 {
     public static readonly string? Db = Environment.GetEnvironmentVariable("CALLCENTRE_TEST_DB");
     public FakeMemberDirectory Directory { get; } = new();
+    public FakeAppointmentGateway Gateway { get; } = new();
+    public InMemoryOutbox Outbox { get; private set; } = default!;
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -33,7 +36,16 @@ public sealed class CallCentreFactory : WebApplicationFactory<Program>
                 .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.SchemeName, _ => { });
             services.RemoveAll<IMemberDirectory>();
             services.AddSingleton<IMemberDirectory>(Directory);
+            services.RemoveAll<IAppointmentGateway>();
+            services.AddSingleton<IAppointmentGateway>(Gateway);
         });
+    }
+
+    public new HttpClient CreateClient()
+    {
+        var c = base.CreateClient();
+        Outbox = (InMemoryOutbox)Services.GetRequiredService<InMemoryOutbox>();
+        return c;
     }
 
     public HttpClient AgentClient()
@@ -68,6 +80,40 @@ public sealed class FakeMemberDirectory : IMemberDirectory
             ],
             [new MemberReferral("REF-2026-000007", "Requested", "Endocrinology", DateTimeOffset.UtcNow)],
             []));
+}
+
+/// <summary>Deterministic emr gateway for endpoint tests — records what it received (headers, idempotency, If-Match)
+/// and returns a successful appointment id, so the callcentre delegation + linkage can be asserted without emr.</summary>
+public sealed class FakeAppointmentGateway : IAppointmentGateway
+{
+    public Guid BookedAppointmentId { get; } = Guid.NewGuid();
+    public string? LastIdempotencyKey { get; private set; }
+    public string? LastIfMatch { get; private set; }
+    public string? LastMethod { get; private set; }
+
+    public Task<GatewayResult> SearchSlotsAsync(string qs, string? bearer, CancellationToken ct = default)
+    {
+        LastMethod = "slots";
+        return Task.FromResult(new GatewayResult(200, "[]", null));
+    }
+
+    public Task<GatewayResult> BookAsync(object body, string? bearer, string? idem, CancellationToken ct = default)
+    {
+        LastMethod = "book"; LastIdempotencyKey = idem;
+        return Task.FromResult(new GatewayResult(201, $"{{\"appointmentId\":\"{BookedAppointmentId}\"}}", BookedAppointmentId));
+    }
+
+    public Task<GatewayResult> RescheduleAsync(Guid id, object body, string? bearer, string? idem, string? ifMatch, CancellationToken ct = default)
+    {
+        LastMethod = "reschedule"; LastIdempotencyKey = idem; LastIfMatch = ifMatch;
+        return Task.FromResult(new GatewayResult(200, $"{{\"appointmentId\":\"{id}\"}}", id));
+    }
+
+    public Task<GatewayResult> CancelAsync(Guid id, object body, string? bearer, string? idem, string? ifMatch, CancellationToken ct = default)
+    {
+        LastMethod = "cancel"; LastIdempotencyKey = idem; LastIfMatch = ifMatch;
+        return Task.FromResult(new GatewayResult(200, $"{{\"appointmentId\":\"{id}\"}}", id));
+    }
 }
 
 /// <summary>Test auth handler: builds a principal from X-Test-* headers (sub / role / scope / tenant / mfa).</summary>

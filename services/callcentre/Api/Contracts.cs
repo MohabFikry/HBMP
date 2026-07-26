@@ -42,3 +42,19 @@ public sealed record VerificationView(
 
 /// <summary>A page of interactions.</summary>
 public sealed record InteractionListResponse(IReadOnlyList<InteractionView> Items, string? NextCursor);
+
+// --- 15.3 appointment actions from the call ---------------------------------------------------------------
+
+/// <summary>Book an appointment from the call. Delegates to emr POST /appointments; the interaction must be
+/// verified for <paramref name="BeneficiaryId"/>. <paramref name="ReferralRef"/>/<paramref name="OriginEncounterId"/>
+/// convert a referral/follow-up in one step (15.4).</summary>
+public sealed record BookFromCallRequest(
+    Guid InteractionId, Guid BeneficiaryId, Guid SlotId, string AppointmentType,
+    Guid? BranchId, string? ReferralRef, Guid? OriginEncounterId);
+
+/// <summary>Reschedule an appointment from the call (delegates to emr; carries If-Match from the prior read).</summary>
+public sealed record RescheduleFromCallRequest(Guid InteractionId, Guid NewSlotId);
+
+/// <summary>Cancel an appointment from the call. <paramref name="ReasonCode"/> is MANDATORY (a cancel without one
+/// is 422).</summary>
+public sealed record CancelFromCallRequest(Guid InteractionId, CallCancelReason? ReasonCode, string? Note);

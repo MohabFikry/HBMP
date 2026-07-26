@@ -13,6 +13,7 @@ public sealed class CallCentreDbContext(DbContextOptions<CallCentreDbContext> op
 
     public DbSet<CallInteraction> Interactions => Set<CallInteraction>();
     public DbSet<CallerVerification> Verifications => Set<CallerVerification>();
+    public DbSet<AppointmentLink> AppointmentLinks => Set<AppointmentLink>();
     public DbSet<CallProcessedRequest> ProcessedRequests => Set<CallProcessedRequest>();
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -50,6 +51,16 @@ public sealed class CallCentreDbContext(DbContextOptions<CallCentreDbContext> op
                     v => JsonSerializer.Deserialize<List<string>>(v, Json) ?? new List<string>());
             e.HasIndex(x => x.InteractionId);
             e.HasIndex(x => new { x.BeneficiaryId, x.VerifiedAt }).IsDescending(false, true);
+        });
+
+        b.Entity<AppointmentLink>(e =>
+        {
+            e.ToTable("appointment_link");
+            e.HasKey(x => x.LinkId);
+            e.Property(x => x.Action).HasConversion<string>().HasColumnName("action");
+            e.Property(x => x.CancelReason).HasConversion<string?>().HasColumnName("cancel_reason");
+            e.HasIndex(x => x.InteractionId);
+            e.HasIndex(x => x.AppointmentId);
         });
 
         b.Entity<CallProcessedRequest>(e =>

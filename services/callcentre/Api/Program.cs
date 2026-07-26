@@ -26,6 +26,8 @@ builder.Services.AddScoped<CallDeps>();
 // authorization; defense in depth). Named clients per sibling; base URLs from config. The 360 projection is
 // clinical-free by construction (Member360 has no clinical field).
 builder.Services.AddScoped<Mersal.CallCentre.Infrastructure.IMemberDirectory, HttpMemberDirectory>();
+// 15.3 — appointment actions delegate to the emr engine (no-double-book/idempotency/If-Match preserved there).
+builder.Services.AddScoped<Mersal.CallCentre.Infrastructure.IAppointmentGateway, HttpAppointmentGateway>();
 foreach (var (name, url) in new[]
 {
     ("eligibility", builder.Configuration["Siblings:Eligibility"] ?? "http://eligibility-service:8080"),
@@ -59,6 +61,7 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "ca
 
 app.MapInteractions();   // phase 15.1 — call interactions + caller verification (the verification gate)
 app.MapMembers();        // phase 15.2 — member search + minimum-necessary, clinical-free 360 (verification-gated)
+app.MapCallAppointments(); // phase 15.3 — book/reschedule/cancel via the emr engine (verification-gated, linked)
 
 app.Run();
 
