@@ -2,6 +2,15 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# Alertmanager + SLO/burn-rate + operational alert rules (Phase 11.3, NFR-082/083).
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   - job_name: prometheus
     static_configs:
@@ -15,8 +24,28 @@ scrape_configs:
           - "minio:9000"
         labels: { tier: "1" }
 
-  # As .NET services expose /metrics (OpenTelemetry/Prometheus exporter), add them here:
-  # - job_name: services
-  #   metrics_path: /metrics
-  #   static_configs:
-  #     - targets: ["patient-service:8080", "orders-service:8080", "approvals-service:8080"]
+  # .NET services expose OpenTelemetry/Prometheus metrics at /metrics (Phase 11.3).
+  # Golden signals: http.server.request.duration (latency), *.count (traffic/errors),
+  # process/runtime.* (saturation).
+  - job_name: services
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - "masterdata-service:8080"
+          - "patient-service:8080"
+          - "policy-service:8080"
+          - "eligibility-service:8080"
+          - "emr-service:8080"
+          - "orders-service:8080"
+          - "pharmacy-service:8080"
+          - "approvals-service:8080"
+          - "provider-service:8080"
+          - "notification-service:8080"
+          - "reporting-service:8080"
+          - "admin-service:8080"
+          - "case-service:8080"
+          - "finance-service:8080"
+          - "claims-service:8080"
+          - "callcentre-service:8080"
+          - "audit-service:8080"
+        labels: { tier: "app" }

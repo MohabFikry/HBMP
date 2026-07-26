@@ -1,0 +1,38 @@
+# Alertmanager routing for Mersal HBMP (Phase 11.3). Pages route to on-call; tickets to the
+# ops queue; security-labelled alerts also fan out to the security channel. Receivers use
+# env-injected webhooks (no secrets in config) — set via ${...} in the deployment.
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: ops-tickets
+  group_by: ["alertname", "job"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: ['severity="page"']
+      receiver: oncall-page
+      continue: true
+    - matchers: ['security="true"']
+      receiver: security-oncall
+
+receivers:
+  - name: ops-tickets
+    webhook_configs:
+      - url: "${ALERT_OPS_WEBHOOK}"
+        send_resolved: true
+  - name: oncall-page
+    webhook_configs:
+      - url: "${ALERT_PAGER_WEBHOOK}"
+        send_resolved: true
+  - name: security-oncall
+    webhook_configs:
+      - url: "${ALERT_SECURITY_WEBHOOK}"
+        send_resolved: true
+
+inhibit_rules:
+  # A page suppresses the lower-severity ticket for the same job while firing.
+  - source_matchers: ['severity="page"']
+    target_matchers: ['severity="ticket"']
+    equal: ["job"]

@@ -6,6 +6,7 @@ using Mersal.Events;
 using Mersal.Orders.Api;
 using Mersal.Orders.Infrastructure;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -41,7 +42,8 @@ builder.Services.AddHttpClient<IBranchDirectory, HttpBranchDirectory>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Admin:BaseUrl"] ?? "http://admin-service:8080"));
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("orders-service"))
-    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 
 // Accept enum names (e.g. "Lab", "LOINC") in request bodies — matching the string enums we already emit on
 // responses. JsonStringEnumConverter still accepts numeric values too, so this is backward compatible.
@@ -93,6 +95,8 @@ app.MapQueue();      // phase 5.1 provider queue + search
 app.MapConsume();    // phase 5.2 atomic idempotent consume
 app.MapResults();    // phase 5.3 result upload + routing
 app.MapReportAccess(); // phase 14.7 sensitive-result release requests + grants
+
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
 app.Run();
 

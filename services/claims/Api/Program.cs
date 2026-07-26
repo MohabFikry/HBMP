@@ -6,6 +6,7 @@ using Mersal.Claims.Api;
 using Mersal.Claims.Infrastructure;
 using Mersal.Events;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -27,7 +28,8 @@ builder.Services.AddHttpClient<IContractTariffProvider, HttpContractTariffClient
     c.BaseAddress = new Uri(builder.Configuration["Siblings:Provider"] ?? "http://provider-service:8080"));
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("claims-service"))
-    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddProblemDetails();
@@ -51,6 +53,8 @@ app.MapReimbursements(); // phase 10b.6 — beneficiary reimbursement + OCR (ass
 app.MapReconciliation(); // phase 10b.7 — reconciliation worklist + append-only adjustments
 app.MapSettlement(); // phase 10b.8 — settlement advice + exports (NO payment execution)
 app.MapAppeals(); // phase 10b.9 — appeals (preserve decision thread) + claims KPI feed
+
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
 app.Run();
 

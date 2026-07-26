@@ -1,0 +1,38 @@
+{
+  "uid": "mersal-business-kpis",
+  "title": "Mersal — Business KPIs (from reporting-service)",
+  "tags": ["mersal", "business", "kpi"],
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "browser",
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "title": "Approval TAT p95 (minutes)", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "m" } },
+      "targets": [ { "datasource": "Prometheus", "expr": "approvals_tat_minutes_p95", "legendFormat": "TAT p95" } ]
+    },
+    {
+      "id": 2, "title": "Pending approvals (incl. over-SLA)", "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 20 }, { "color": "red", "value": 50 } ] } } },
+      "targets": [
+        { "datasource": "Prometheus", "expr": "approvals_pending_total", "legendFormat": "pending" },
+        { "datasource": "Prometheus", "expr": "approvals_pending_over_sla", "legendFormat": "over SLA" }
+      ]
+    },
+    {
+      "id": 3, "title": "Consume throughput (lines/min)", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [ { "datasource": "Prometheus", "expr": "sum(rate(orders_consume_committed_total[5m])) * 60", "legendFormat": "committed/min" } ]
+    },
+    {
+      "id": 4, "title": "No-show rate (%)", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "percent" } },
+      "targets": [ { "datasource": "Prometheus", "expr": "appointments_noshow_rate", "legendFormat": "no-show %" } ]
+    }
+  ]
+}

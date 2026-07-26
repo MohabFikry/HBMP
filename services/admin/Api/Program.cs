@@ -5,6 +5,7 @@ using Mersal.Auth;
 using Mersal.Authz;
 using Mersal.Events;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -29,7 +30,8 @@ builder.Services.AddScoped<DashboardService>();
 builder.Services.AddScoped<BranchAssignmentService>();   // 14.2
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("admin-service"))
-    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
@@ -50,6 +52,8 @@ app.MapPolicyConfig();   // 8b.1 session/device policy + staged policy proposals
 app.MapGovernance();     // 8b.2 master-data versioning + template linter + system config
 app.MapPlatform();       // 8b.3 tenant admin + break-glass lifecycle + governance dashboards
 app.MapBranchAssignments(); // 14.2 staff↔branch assignment + active-branch context
+
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
 app.Run();
 

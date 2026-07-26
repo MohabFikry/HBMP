@@ -5,6 +5,7 @@ using Mersal.Finance.Api;
 using Mersal.Finance.Infrastructure;
 using Mersal.Events;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -26,7 +27,8 @@ builder.Services.AddHttpClient<IContractPriceProvider, HttpContractPriceClient>(
     c.BaseAddress = new Uri(builder.Configuration["Siblings:Provider"] ?? "http://provider-service:8080"));
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("finance-service"))
-    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
@@ -42,6 +44,8 @@ if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "finance-service" })).AllowAnonymous();
 
 app.MapFinance(); // phase 10.2 — utilization + settlements + summaries + audited exports + projection seam
+
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
 app.Run();
 

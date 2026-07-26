@@ -7,6 +7,7 @@ using Mersal.Document.Infrastructure;
 using Mersal.Events;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -17,7 +18,8 @@ builder.Services.AddHbmpAuthorization();
 builder.Services.AddHbmpEvents(builder.Configuration, useInMemory: true);
 builder.Services.AddDocumentInfrastructure(builder.Configuration);
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("document-service"))
-    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -89,6 +91,8 @@ v1.MapGet("/beneficiaries/{beneficiaryId:guid}/documents", async (Guid beneficia
         d.CurrentVersionNo, versions = d.Versions.Select(v => new { v.VersionNo, v.ChecksumSha256, v.SizeBytes, v.UploadedAt, v.UploadedBy }),
     }));
 }).RequireAuthorization();
+
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
 app.Run();
 

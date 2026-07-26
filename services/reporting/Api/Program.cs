@@ -5,6 +5,7 @@ using Mersal.Events;
 using Mersal.Reporting.Api;
 using Mersal.Reporting.Infrastructure;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -23,7 +24,8 @@ builder.Services.AddScoped<ReportContext>();
 builder.Services.AddScoped<Mersal.Reporting.Infrastructure.DashboardBuilder>();
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("reporting-service"))
-    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
@@ -39,6 +41,8 @@ if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "reporting-service" })).AllowAnonymous();
 
 app.MapReports(); // phase 8.2 — KPI read-model APIs + projection seam + audited export
+
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
 app.Run();
 

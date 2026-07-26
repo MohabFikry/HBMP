@@ -8,6 +8,7 @@ using Mersal.Events;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -24,7 +25,8 @@ builder.Services.Configure<ConsumerOptions>(builder.Configuration.GetSection(Con
 builder.Services.AddHostedService<EventConsumer>();
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("eligibility-service"))
-    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
@@ -102,6 +104,8 @@ reception.MapGet("/search", async (
     var hint = cards.Count == 0 ? "No match — try another identifier (Passport / Card / Policy / Phone) or register the beneficiary." : null;
     return Results.Ok(new ReceptionSearchResponse(q, cards.Count, cards, hint));
 });
+
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
 app.Run();
 

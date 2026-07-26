@@ -8,6 +8,7 @@ using Mersal.Emr.Infrastructure;
 using Mersal.Events;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using System.Text.Json.Serialization;
 
@@ -50,7 +51,8 @@ builder.Services.AddHttpClient<IBranchDirectory, HttpBranchDirectory>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Admin:BaseUrl"] ?? "http://admin-service:8080"));
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("emr-service"))
-    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
@@ -184,6 +186,8 @@ v1.MapGet("/queue", async (EmrDbContext db, CancellationToken ct) =>
 app.MapAppointments();
 app.MapQueue();
 app.MapClinical();
+
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
 app.Run();
 

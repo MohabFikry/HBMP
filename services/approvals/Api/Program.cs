@@ -5,6 +5,7 @@ using Mersal.Auth;
 using Mersal.Authz;
 using Mersal.Events;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using System.Text.Json.Serialization;
 
@@ -32,7 +33,8 @@ builder.Services.AddHttpClient<IClinicalContextProvider, HttpClinicalContextClie
     c.BaseAddress = new Uri(builder.Configuration["Emr:BaseUrl"] ?? "http://emr-service:8080"));
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("approvals-service"))
-    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
@@ -51,6 +53,8 @@ app.MapWorklist();   // phase 7.1 ingestion + reviewer inbox + assign
 app.MapReview();     // phase 7.1 clinical review view (field-scoped, PHI-read audited)
 app.MapDecisions();  // phase 7.2 decisions (mandatory rationale) + downstream events + TAT/SLA
 app.MapBreakGlass(); // phase 7.3 emergency / override / manual + retrospective queue + TAT summary
+
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
 app.Run();
 

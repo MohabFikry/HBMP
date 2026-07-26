@@ -8,6 +8,7 @@ using Mersal.Policy.Domain;
 using Mersal.Policy.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using PolicyEntity = Mersal.Policy.Domain.Policy;
 
@@ -21,7 +22,8 @@ builder.Services.AddHbmpOutboxRelay();   // relay staged events (incl. audit) to
 builder.Services.AddPolicyInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("policy-service"))
-    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -123,6 +125,8 @@ v1.MapPost("/coverage-limits/reset-run", async (PolicyDbContext db, IAuditClient
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { evaluated = limits.Count, reset });
 });
+
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
 app.Run();
 

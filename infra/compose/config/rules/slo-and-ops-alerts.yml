@@ -1,0 +1,86 @@
+# Mersal HBMP SLO burn-rate + operational alert rules (Phase 11.3, NFR-082/083).
+# Wired into Prometheus via rule_files; routed to on-call by Alertmanager. Fire a synthetic
+# incident (see docs/runbooks/) to prove each routes to on-call.
+groups:
+  - name: slo-burn-rate
+    rules:
+      # Multi-window burn-rate on the request-error SLO (fast + slow burn).
+      - alert: ErrorBudgetBurnFast
+        expr: |
+          (sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m])) by (job)
+           / sum(rate(http_server_request_duration_seconds_count[5m])) by (job)) > 0.02
+        for: 2m
+        labels: { severity: page, slo: availability }
+        annotations:
+          summary: "Fast error-budget burn on {{ $labels.job }}"
+          runbook: docs/runbooks/auth-anomaly-and-incident.md
+
+      - alert: LatencySLOBreachPrimaryScreens
+        # p95 request latency over the NFR-001 primary-screen bar (1.5s) sustained.
+        expr: |
+          histogram_quantile(0.95, sum(rate(http_server_request_duration_seconds_bucket[5m])) by (le, job)) > 1.5
+        for: 10m
+        labels: { severity: ticket, slo: latency }
+        annotations:
+          summary: "p95 latency > 1.5s on {{ $labels.job }} (NFR-001)"
+          runbook: docs/runbooks/deploy-and-rollback.md
+
+  - name: saturation
+    rules:
+      - alert: EventBusBacklogGrowing
+        # RabbitMQ queue depth climbing → consumers not keeping up (NFR-014 buffer).
+        expr: sum(rabbitmq_queue_messages_ready) > 5000
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "Event-bus backlog > 5k ready messages"
+          runbook: docs/runbooks/event-bus-backlog.md
+
+      - alert: ServiceSaturationCPU
+        expr: rate(process_cpu_seconds_total[5m]) > 0.9
+        for: 10m
+        labels: { severity: ticket }
+        annotations:
+          summary: "{{ $labels.job }} sustained CPU saturation"
+          runbook: docs/runbooks/deploy-and-rollback.md
+
+  - name: business-and-security
+    rules:
+      - alert: FailedConsumeSpike
+        # Failed-consume events (Phase-5 fulfillment) — data/integration problem.
+        expr: increase(orders_consume_failed_total[10m]) > 5
+        for: 0m
+        labels: { severity: page }
+        annotations:
+          summary: "Failed-consume spike"
+          runbook: docs/runbooks/failed-consume-replay.md
+
+      - alert: ApprovalsSLABreach
+        # Approvals pending beyond SLA (from reporting-service KPI metric).
+        expr: approvals_pending_over_sla > 0
+        for: 0m
+        labels: { severity: ticket }
+        annotations:
+          summary: "Approvals pending over SLA"
+          runbook: docs/runbooks/approvals-backlog-tat.md
+
+      - alert: AuthAnomaly
+        # Burst of 401/403 → credential stuffing / authz probing (security anomaly).
+        expr: |
+          sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"401|403"}[5m])) > 20
+        for: 5m
+        labels: { severity: page, security: "true" }
+        annotations:
+          summary: "Auth anomaly: elevated 401/403 rate"
+          runbook: docs/runbooks/auth-anomaly-and-incident.md
+
+  - name: audit-durability
+    rules:
+      - alert: AuditChainStalled
+        # Hash-chained audit must keep advancing; a stall may indicate tampering/outage.
+        expr: increase(audit_events_appended_total[15m]) == 0 and on() (hour() > 6 < 22)
+        for: 15m
+        labels: { severity: page, security: "true" }
+        annotations:
+          summary: "Audit hash-chain not advancing"
+          runbook: docs/runbooks/auth-anomaly-and-incident.md

@@ -5,6 +5,7 @@ using Mersal.Case.Api;
 using Mersal.Case.Infrastructure;
 using Mersal.Events;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -36,7 +37,8 @@ foreach (var (name, url) in new[]
 }
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("case-service"))
-    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
@@ -53,6 +55,8 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "ca
 
 app.MapCases();           // phase 10.1 — case CRUD + My Cases + assign/unassign + tasks + escalations
 app.MapBeneficiary360();  // phase 10.1 — coordination-360 (field-scoped, PHI-read audited) + eligibility override
+
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
 app.Run();
 

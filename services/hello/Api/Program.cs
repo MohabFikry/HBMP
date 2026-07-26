@@ -4,6 +4,7 @@ using Mersal.Auth.Authorization;
 using Mersal.Authz;
 using Mersal.Events;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -29,7 +30,8 @@ builder.Services.AddHbmpEvents(builder.Configuration, useInMemory: true); // 0.5
 
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(r => r.AddService("hello-service"))
-    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
@@ -85,6 +87,8 @@ app.MapGet("/api/v1/hello", async (
     })
     // hello:read is a scope-protected (MFA-required) endpoint; the greeting rule is in the authz bundle.
     .RequireAuthorization(HbmpPolicies.Scope("hello:read"));
+
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
 app.Run();
 

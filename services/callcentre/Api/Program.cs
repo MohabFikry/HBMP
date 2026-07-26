@@ -4,6 +4,7 @@ using Mersal.Authz;
 using Mersal.CallCentre.Api;
 using Mersal.CallCentre.Infrastructure;
 using Mersal.Events;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
@@ -42,7 +43,10 @@ foreach (var (name, url) in new[]
 }
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("callcentre-service"))
-    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
+    // Golden-signal metrics (latency/traffic/errors via ASP.NET Core; saturation via runtime),
+    // exposed at /metrics for Prometheus scrape (Phase 11.3 observability, NFR-082).
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 
 // Enums travel as strings on the wire (the SPA sends "Inbound"/"BookAppointment"/…).
 builder.Services.ConfigureHttpJsonOptions(o =>
@@ -60,6 +64,7 @@ app.UseAuthorization();
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "callcentre-service" })).AllowAnonymous();
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals for Prometheus (in-cluster scrape only)
 
 app.MapInteractions();   // phase 15.1 — call interactions + caller verification (the verification gate)
 app.MapMembers();        // phase 15.2 — member search + minimum-necessary, clinical-free 360 (verification-gated)

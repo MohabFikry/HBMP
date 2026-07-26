@@ -4,6 +4,7 @@ using Mersal.MasterData.Domain;
 using Mersal.MasterData.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,7 +16,8 @@ builder.Services.AddDbContext<MasterDataDbContext>(o =>
 
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(r => r.AddService("masterdata-service"))
-    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
@@ -223,6 +225,8 @@ v1.MapPost("/allergies/check", async (AllergyCheckRequest req, MasterDataDbConte
     var conflict = req.PatientAllergenCodes.Any(a => atcChain.Contains(a));
     return Results.Ok(new { req.DrugCode, conflict, matchedOn = conflict ? "atc-class" : null });
 });
+
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
 app.Run();
 

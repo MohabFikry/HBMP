@@ -6,6 +6,7 @@ using Mersal.Events;
 using Mersal.Pharmacy.Api;
 using Mersal.Pharmacy.Infrastructure;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -40,7 +41,8 @@ builder.Services.AddHttpClient<IDrugValidator, HttpDrugValidator>(c => c.BaseAdd
 builder.Services.AddHttpClient<ITreatingRelationshipClient, HttpTreatingRelationshipClient>(c => c.BaseAddress = new Uri(emrUrl));
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("pharmacy-service"))
-    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 
 // Accept enum names in request bodies (matches the string enums we emit on responses); numeric values still work.
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
@@ -60,6 +62,8 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "ph
 app.MapPrescriptions();
 app.MapDispensing();
 app.MapReferrals();
+
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
 app.Run();
 

@@ -5,6 +5,7 @@ using Mersal.Auth;
 using Mersal.Auth.Authorization;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -24,7 +25,8 @@ builder.Services.AddOpenTelemetry()
     .ConfigureResource(r => r.AddService("audit-service"))
     .WithTracing(t => t
         .AddAspNetCoreInstrumentation()
-        .AddOtlpExporter());
+        .AddOtlpExporter())
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -85,6 +87,8 @@ reads.MapGet("/verify/{partitionKey}", async (string partitionKey, AuditVerifier
     var result = await verifier.VerifyPartitionAsync(partitionKey, ct);
     return Results.Ok(result);
 });
+
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
 app.Run();
 

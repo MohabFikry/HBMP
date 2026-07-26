@@ -8,6 +8,7 @@ using Mersal.Patient.Domain;
 using Mersal.Patient.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -23,7 +24,8 @@ builder.Services.AddSingleton(TimeProvider.System);
 
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(r => r.AddService("patient-service"))
-    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 
 builder.Services.AddProblemDetails();
 // Accept string enum values (e.g. identifier "type":"UNHCRNo") in request/response JSON.
@@ -218,6 +220,8 @@ v1.MapPost("/{id:guid}/status", async (Guid id, StatusChange req, PatientDbConte
     await outbox.EnqueueAsync("BeneficiaryStatusChanged", "patient.events", new { beneficiaryId = id, from = from.ToString(), to = to.ToString(), reason = req.Reason }, ct);
     return Results.Ok(new { beneficiaryId = id, from = from.ToString(), to = to.ToString() });
 }).RequireAuthorization(HbmpPolicies.Scope("patient:write"));
+
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
 app.Run();
 

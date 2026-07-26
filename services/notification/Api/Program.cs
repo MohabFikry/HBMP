@@ -5,6 +5,7 @@ using Mersal.Events;
 using Mersal.Notification.Api;
 using Mersal.Notification.Infrastructure;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,7 +22,8 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<NotificationGate>();
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("notification-service"))
-    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+    .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
@@ -37,6 +39,8 @@ if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "notification-service" })).AllowAnonymous();
 
 app.MapNotifications(); // phase 8.1 — inbox + delivery + mark-read + fan-out seam
+
+app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
 app.Run();
 
