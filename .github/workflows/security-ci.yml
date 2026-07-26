@@ -1,0 +1,71 @@
+name: security-ci
+
+# Security gates (Phase 11.2). BLOCK release on any Critical/High vuln or exposed secret
+# (NFR-034/035/037). SAST + SCA + container-image scan (Trivy), secret-scan (gitleaks),
+# and DAST (OWASP ZAP baseline) against staging. Runs on push/PR + nightly.
+on:
+  push:
+    branches: ["master", "main"]
+  pull_request:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write # upload SARIF to code scanning
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: gitleaks (secret hygiene — 100% secrets outside code, NFR-034)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  sca-sast-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # SCA + SAST (IaC/config/filesystem) — fail on Critical/High
+      - name: Trivy filesystem (SCA + config/SAST)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: "1" # block release (NFR-035/037)
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-fs.sarif
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: trivy-fs.sarif }
+
+  codeql-dotnet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with: { languages: csharp }
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: "8.0.x" }
+      - run: dotnet build HbmpPlatform.sln -c Release
+      - uses: github/codeql-action/analyze@v3
+
+  dast-zap:
+    # DAST against a running staging origin (manual/nightly — needs a reachable target).
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: OWASP ZAP baseline scan (staging via Kong)
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ secrets.STAGING_BASE_URL }}
+          rules_file_name: .zap/rules.tsv
+          fail_action: true

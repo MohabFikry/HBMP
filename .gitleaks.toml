@@ -1,0 +1,25 @@
+# gitleaks config for Mersal HBMP (Phase 11.2 secret hygiene, NFR-034).
+# Policy: zero secrets in code/config/images. All runtime secrets are injected via env
+# (${VAR} interpolation from a gitignored .env locally; OpenBao/Vault + SOPS in prod).
+title = "mersal-hbmp-gitleaks"
+
+[extend]
+useDefault = true # inherit the default rule pack (AWS keys, private keys, tokens, etc.)
+
+[allowlist]
+description = "Non-secret matches: env-var placeholders and build artifacts."
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)bin/''',
+  '''(^|/)obj/''',
+  '''\.deps\.json$''',      # NuGet hash paths, not secrets
+  '''pnpm-lock\.yaml$''',
+  '''package-lock\.json$''',
+]
+# ${VAR} interpolation in compose/config is a placeholder, not a secret — the value lives in
+# the gitignored .env (local) / OpenBao (prod). Allow those specific shapes only.
+regexes = [
+  '''\$\{[A-Z0-9_]+\}''',              # ${POSTGRES_PASSWORD} etc.
+  '''password=\$\{[A-Z0-9_]+\}''',
+  '''secretKeyRef:''',                 # k8s secret references
+]

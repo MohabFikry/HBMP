@@ -1,0 +1,8 @@
+# OWASP ZAP baseline rule tuning for Mersal HBMP staging DAST (Phase 11.2).
+# Columns: <ruleId>	<WARN|IGNORE|FAIL>	<comment>
+# Default posture: FAIL on real findings. Only documented, justified false-positives are tuned.
+# The API is bearer-authenticated JSON; ZAP baseline is passive — auth'd active scan is a
+# separate ZAP full-scan job driven by the staging load client's token.
+10096	IGNORE	Timestamp disclosure — RFC7807 problem+json carries server time, not sensitive.
+10027	IGNORE	Info disclosure (suspicious comments) — checked separately in code review.
+# Everything else stays at default (WARN/FAIL). Do NOT blanket-IGNORE to pass the gate.
