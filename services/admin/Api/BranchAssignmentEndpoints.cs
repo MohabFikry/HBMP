@@ -20,14 +20,14 @@ public static class BranchAssignmentEndpoints
             if (denied is not null) return denied;
             var p = gate.Principal!;
             var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return Results.BadRequest(new { error = "no-tenant" });
+            if (tenant is null) return ProblemResults.Invalid("no-tenant");
             if (!Enum.TryParse<BranchAssignmentType>(req.AssignmentType, out var type))
-                return Results.BadRequest(new { error = "unknown-assignment-type" });
+                return ProblemResults.Invalid("unknown-assignment-type");
 
             var r = await svc.AssignAsync(AdminContracts.Actor(p), tenant, subject, req.BranchId, type, req.ValidFrom, req.ValidTo, ct);
             if (r.Ok)
                 return Results.Created($"/api/v1/admin/users/{subject}/branches/{r.Assignment!.AssignmentId}", BranchAssignmentView.Of(r.Assignment));
-            return Results.Conflict(new { error = r.ReasonCode, detail = "the user already has an active home branch" });
+            return ProblemResults.Conflict(r.ReasonCode ?? "conflict", "the user already has an active home branch");
         });
 
         // Revoke a branch assignment (soft — effective on the user's next request).
@@ -37,7 +37,7 @@ public static class BranchAssignmentEndpoints
             if (denied is not null) return denied;
             var p = gate.Principal!;
             var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return Results.BadRequest(new { error = "no-tenant" });
+            if (tenant is null) return ProblemResults.Invalid("no-tenant");
 
             var ok = await svc.RevokeAsync(AdminContracts.Actor(p), tenant, req.AssignmentId, ct);
             return ok ? Results.NoContent() : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
@@ -49,7 +49,7 @@ public static class BranchAssignmentEndpoints
             var denied = await gate.CheckAsync(AdminPolicies.ReadAccess, ct);
             if (denied is not null) return denied;
             var t = AdminContracts.ResolveTenant(gate.Principal!, tenant);
-            if (t is null) return Results.BadRequest(new { error = "no-tenant" });
+            if (t is null) return ProblemResults.Invalid("no-tenant");
             var rows = await svc.ListAsync(t, subject, ct);
             return Results.Ok(rows.Select(BranchAssignmentView.Of));
         });

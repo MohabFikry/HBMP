@@ -34,8 +34,8 @@ public static class GovernanceEndpoints
         {
             var denied = await gate.CheckAsync(AdminPolicies.EditMasterData, ct);
             if (denied is not null) return denied;
-            if (!req.SystemValid) return Results.BadRequest(new { error = "unknown-code-system" });
-            if (string.IsNullOrWhiteSpace(req.Rationale)) return Results.BadRequest(new { error = "rationale-required" });
+            if (!req.SystemValid) return ProblemResults.Invalid("unknown-code-system");
+            if (string.IsNullOrWhiteSpace(req.Rationale)) return ProblemResults.Invalid("rationale-required");
 
             var v = await svc.UpsertMasterDataAsync(AdminContracts.Actor(gate.Principal!), req.SystemEnum, req.Code,
                 req.Attributes, req.Rationale, req.Retired, ct);
@@ -49,7 +49,7 @@ public static class GovernanceEndpoints
         {
             var denied = await gate.CheckAsync(AdminPolicies.ReadAccess, ct);
             if (denied is not null) return denied;
-            if (!Enum.TryParse<CodeSystem>(system, ignoreCase: true, out var sys)) return Results.BadRequest(new { error = "unknown-code-system" });
+            if (!Enum.TryParse<CodeSystem>(system, ignoreCase: true, out var sys)) return ProblemResults.Invalid("unknown-code-system");
 
             var v = await svc.ResolveAsOfAsync(sys, code, at, ct);
             return v is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(new { v.VersionId, v.VersionNo, v.AttributesJson, v.EffectiveFrom, v.EffectiveTo });
@@ -88,14 +88,14 @@ public static class GovernanceEndpoints
             if (denied is not null) return denied;
             var p = gate.Principal!;
             var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return Results.BadRequest(new { error = "no-tenant" });
+            if (tenant is null) return ProblemResults.Invalid("no-tenant");
 
             var result = await svc.SaveTemplateAsync(AdminContracts.Actor(p), tenant, req.TemplateKey, req.Channel,
                 req.SubjectEn, req.SubjectAr, req.BodyEn, req.BodyAr, ct);
             if (result.Ok)
                 return Results.Created($"/api/v1/admin/templates/{result.Version!.TemplateVersionId}",
                     new { result.Version.TemplateVersionId, result.Version.TemplateKey, result.Version.Channel, result.Version.VersionNo });
-            return Results.UnprocessableEntity(new { error = "template-lint", errors = result.Errors });
+            return ProblemResults.Unprocessable("template-lint", extra: new Dictionary<string, object?> { ["errors"] = result.Errors });
         });
 
         // System configuration — typed + validated + effective-dated.
@@ -105,13 +105,13 @@ public static class GovernanceEndpoints
             if (denied is not null) return denied;
             var p = gate.Principal!;
             var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return Results.BadRequest(new { error = "no-tenant" });
-            if (!req.TypeValid) return Results.BadRequest(new { error = "unknown-value-type" });
+            if (tenant is null) return ProblemResults.Invalid("no-tenant");
+            if (!req.TypeValid) return ProblemResults.Invalid("unknown-value-type");
 
             var (ok, error, config) = await svc.SetConfigAsync(AdminContracts.Actor(p), tenant, req.Key, req.TypeEnum, req.Value, ct);
             return ok
                 ? Results.Ok(new { config!.ConfigId, config.Key, value = config.Value, type = config.ValueType.ToString(), config.VersionNo })
-                : Results.BadRequest(new { error });
+                : ProblemResults.Invalid(error ?? "error");
         });
     }
 }

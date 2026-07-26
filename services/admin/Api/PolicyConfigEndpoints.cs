@@ -16,7 +16,7 @@ public static class PolicyConfigEndpoints
             if (denied is not null) return denied;
             var p = gate.Principal!;
             var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return Results.BadRequest(new { error = "no-tenant" });
+            if (tenant is null) return ProblemResults.Invalid("no-tenant");
 
             var policy = await svc.SetSessionPolicyAsync(AdminContracts.Actor(p), tenant, req.Tier,
                 req.AccessTokenTtlSeconds, req.IdleTimeoutSeconds, req.AbsoluteCapSeconds,
@@ -30,7 +30,7 @@ public static class PolicyConfigEndpoints
             if (denied is not null) return denied;
             var p = gate.Principal!;
             var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return Results.BadRequest(new { error = "no-tenant" });
+            if (tenant is null) return ProblemResults.Invalid("no-tenant");
 
             var policy = await svc.SetDevicePolicyAsync(AdminContracts.Actor(p), tenant, req.Role,
                 req.RequireManagedDevice, req.IpAllowList, ct);

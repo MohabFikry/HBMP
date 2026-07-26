@@ -1,5 +1,6 @@
 using Mersal.Audit.Client;
 using Mersal.Auth;
+using Mersal.Authz;
 using Mersal.Events;
 using Mersal.MasterData.Api;
 using Mersal.MasterData.Domain;
@@ -112,7 +113,7 @@ v1.MapGet("/examination-types/{id:guid}", async (Guid id, MasterDataDbContext db
 // ------------------------------------------------------------------ Typeahead search (Tier 1: DB ILIKE; OpenSearch indexer is a follow-up)
 v1.MapGet("/search", async (string domain, string q, MasterDataDbContext db, CancellationToken ct) =>
 {
-    if (string.IsNullOrWhiteSpace(q)) return Results.BadRequest(new { error = "q required" });
+    if (string.IsNullOrWhiteSpace(q)) return ProblemResults.Invalid("q-required");
     object results = domain.ToLowerInvariant() switch
     {
         "icd" => await db.IcdCodes.AsNoTracking().Where(x => x.Code.StartsWith(q) || EF.Functions.ILike(x.Title, $"%{q}%"))

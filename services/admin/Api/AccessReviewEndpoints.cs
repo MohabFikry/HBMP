@@ -16,7 +16,7 @@ public static class AccessReviewEndpoints
             if (denied is not null) return denied;
             var p = gate.Principal!;
             var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return Results.BadRequest(new { error = "no-tenant" });
+            if (tenant is null) return ProblemResults.Invalid("no-tenant");
 
             var c = await svc.CreateCampaignAsync(AdminContracts.Actor(p), tenant, req.Name, req.Tier, req.DueAt, ct);
             return Results.Created($"/api/v1/admin/access-reviews/{c.CampaignId}",
@@ -29,7 +29,7 @@ public static class AccessReviewEndpoints
             if (denied is not null) return denied;
             var p = gate.Principal!;
             var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return Results.BadRequest(new { error = "no-tenant" });
+            if (tenant is null) return ProblemResults.Invalid("no-tenant");
 
             var ok = await svc.RecertifyAsync(AdminContracts.Actor(p), tenant, itemId, req.Note, ct);
             return ok ? Results.NoContent() : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
@@ -41,7 +41,7 @@ public static class AccessReviewEndpoints
             if (denied is not null) return denied;
             var p = gate.Principal!;
             var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return Results.BadRequest(new { error = "no-tenant" });
+            if (tenant is null) return ProblemResults.Invalid("no-tenant");
 
             var ok = await svc.ReviewRevokeAsync(AdminContracts.Actor(p), tenant, itemId, req.Note, ct);
             return ok ? Results.NoContent() : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
@@ -54,7 +54,7 @@ public static class AccessReviewEndpoints
             if (denied is not null) return denied;
             var p = gate.Principal!;
             var t = AdminContracts.ResolveTenant(p, tenant);
-            if (t is null) return Results.BadRequest(new { error = "no-tenant" });
+            if (t is null) return ProblemResults.Invalid("no-tenant");
 
             var expired = await svc.SweepExpiredAsync(AdminContracts.Actor(p), t, campaignId, ct);
             return Results.Ok(new { campaignId, autoExpired = expired });

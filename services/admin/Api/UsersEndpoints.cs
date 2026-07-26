@@ -21,9 +21,9 @@ public static class UsersEndpoints
             if (denied is not null) return denied;
             var p = gate.Principal!;
             var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return Results.BadRequest(new { error = "no-tenant" });
+            if (tenant is null) return ProblemResults.Invalid("no-tenant");
             if (string.IsNullOrWhiteSpace(req.Justification))
-                return Results.BadRequest(new { error = "justification-required" });
+                return ProblemResults.Invalid("justification-required");
 
             var result = await svc.GrantAsync(AdminContracts.Actor(p), tenant, req.SubjectUserId, req.Role,
                 req.ScopeType, req.ProviderId, req.Justification, ct);
@@ -42,7 +42,7 @@ public static class UsersEndpoints
             if (denied is not null) return denied;
             var p = gate.Principal!;
             var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return Results.BadRequest(new { error = "no-tenant" });
+            if (tenant is null) return ProblemResults.Invalid("no-tenant");
 
             var ok = await svc.RevokeAsync(AdminContracts.Actor(p), tenant, req.BindingId, req.Reason, ct);
             return ok ? Results.NoContent() : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
@@ -55,7 +55,7 @@ public static class UsersEndpoints
             if (denied is not null) return denied;
             var p = gate.Principal!;
             var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return Results.BadRequest(new { error = "no-tenant" });
+            if (tenant is null) return ProblemResults.Invalid("no-tenant");
 
             await svc.DeprovisionAsync(AdminContracts.Actor(p), tenant, req.SubjectUserId, req.Reason, ct);
             return Results.NoContent();
@@ -68,7 +68,7 @@ public static class UsersEndpoints
             if (denied is not null) return denied;
             var p = gate.Principal!;
             var t = AdminContracts.ResolveTenant(p, tenant);
-            if (t is null) return Results.BadRequest(new { error = "no-tenant" });
+            if (t is null) return ProblemResults.Invalid("no-tenant");
 
             var rows = await svc.ReadAccessMatrixAsync(AdminContracts.Actor(p), t, ct);
             return Results.Ok(rows.Select(BindingView.Of));
@@ -82,7 +82,7 @@ public static class UsersEndpoints
             if (denied is not null) return denied;
             var p = gate.Principal!;
             var t = AdminContracts.ResolveTenant(p, tenant);
-            if (t is null) return Results.BadRequest(new { error = "no-tenant" });
+            if (t is null) return ProblemResults.Invalid("no-tenant");
 
             var roles = await svc.EffectiveRolesAsync(t, subject, ct);
             return Results.Ok(new { subject, tenant = t, roles });
