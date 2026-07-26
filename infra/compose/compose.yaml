@@ -623,6 +623,30 @@ services:
       rabbitmq: { condition: service_started }
     networks: [hbmp]
 
+  # --- callcentre-service (15): contact centre — caller verification + call log + member 360 (MemberScoped). ---
+  callcentre-service:
+    build: { context: ../.., dockerfile: services/callcentre/Dockerfile }
+    <<: *restart
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__CallCentre: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Auth__Authority: "http://keycloak:8080/realms/mersal"
+      Auth__Audience: "hbmp-api"
+      Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
+      Siblings__Eligibility: "http://eligibility-service:8080"
+      Siblings__Emr: "http://emr-service:8080"
+      Siblings__Patient: "http://patient-service:8080"
+      Siblings__Pharmacy: "http://pharmacy-service:8080"
+      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    ports: ["8107:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      keycloak: { condition: service_started }
+      rabbitmq: { condition: service_started }
+    networks: [hbmp]
+
   # web:  # React portals (phase 9) — served behind Kong/Traefik
   #   build: { context: ../.., dockerfile: apps/web/Dockerfile }
   #   <<: *restart
