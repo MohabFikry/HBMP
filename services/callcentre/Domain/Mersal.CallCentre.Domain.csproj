@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>Mersal.CallCentre.Domain</RootNamespace></PropertyGroup>
+</Project>
