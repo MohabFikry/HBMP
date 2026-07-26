@@ -21,6 +21,9 @@ public static class DependencyInjection
         services.AddScoped<ClaimsQueries>();
         services.AddScoped<BatchNoIssuer>();
         services.AddScoped<BatchService>();
+        services.AddScoped<AdjudicationService>();
+        // Permissive fact source by default; the HTTP-backed eligibility/policy/approvals/provider wiring lands later.
+        services.AddScoped<IExternalAdjudicationFacts, PermissiveAdjudicationFacts>();
         return services;
     }
 }

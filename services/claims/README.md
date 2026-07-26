@@ -43,9 +43,14 @@ data (tariffs, authorizations, eligibility, fulfillment) comes over the API/even
   the 23 §9 lifecycle (Open→UnderReview→Decided→SettlementIssued→Closed + Cancelled) with its guards (≥1 claim to
   review, every line decided to Decide, reason to cancel/exception-remove), and rollups recomputed on every change and
   frozen at SettlementIssued. Emits `BatchCreated` / `BatchUnderReview` / `BatchDecided` via the outbox.
-- 10b.3 9-step pre-adjudication · 10b.4 officer line decisions (SoD + dual control) · 10b.5 provider-submitted ·
-  10b.6 reimbursement + OCR · 10b.7 reconciliation + adjustments · 10b.8 settlement advice + exports · 10b.9 appeals
-  + KPIs. *(built in subsequent slices)*
+- **10b.3 — automated pre-adjudication.** The `Adjudicator` runs the fixed 9-step order (eligibility → coverage →
+  pre-auth → fulfillment → duplicate → network → tariff → limit → co-pay) per line, **collects ALL applicable reason
+  codes** (never stops at the first failure), and computes `system_recommendation` + `allowed_amount` (capped by
+  auth scope and limit remaining, minus member share) + `rule_version`. Hard blocks ⇒ Deny; `NO_TARIFF` ⇒
+  RequiresManualReview (price stays null); caps ⇒ Partial. Coverage accumulators are **read, never written**.
+  `POST /claims/{id}/adjudicate`; emits `ClaimAdjudicated`; the append-only per-run history is the audit event.
+- 10b.4 officer line decisions (SoD + dual control) · 10b.5 provider-submitted · 10b.6 reimbursement + OCR · 10b.7
+  reconciliation + adjustments · 10b.8 settlement advice + exports · 10b.9 appeals + KPIs. *(built in subsequent slices)*
 
 ## Endpoints (10b.1)
 

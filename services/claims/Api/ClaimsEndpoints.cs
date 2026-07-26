@@ -46,6 +46,36 @@ public static class ClaimsEndpoints
             return Results.Ok(ClaimView.From(claim));
         }).RequireAuthorization(HbmpPolicies.Scope("claims:read"));
 
+        // --- Pre-adjudication (10b.3) ----------------------------------------------------------------------
+        v1.MapPost("/{id:guid}/adjudicate", async (Guid id, HttpRequest http, ClaimsDeps deps,
+            AdjudicationService adjudicator, CancellationToken ct) =>
+        {
+            var denied = await deps.Gate.CheckAsync(ClaimsPolicies.Adjudicate, ct);
+            if (denied is not null) return denied;
+
+            var results = await adjudicator.AdjudicateAsync(deps.Tenant, id, http.Headers.Authorization.ToString(), ct);
+            if (results is null) return Results.NotFound();
+
+            await deps.Outbox.EnqueueAsync("ClaimAdjudicated.v1", "claims.events",
+                new { claimId = id, lines = results.Count, ruleVersion = Domain.Adjudicator.RuleVersion, tenantId = deps.Tenant }, ct);
+            await deps.Audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "claim", EntityId = id.ToString(), Action = AuditAction.StateChange,
+                ActorUserId = deps.Subject, ActorRole = deps.Roles, TenantId = deps.Tenant, ProviderId = deps.ProviderId,
+                DecisionOutcome = "ClaimAdjudicated", DecisionPolicyId = Domain.Adjudicator.RuleVersion,
+                AfterState = "UnderAdjudication", FieldClasses = ["financials"],
+            }, ct);
+            return Results.Ok(results.Select(r => new
+            {
+                r.ClaimLineId,
+                recommendation = r.Result.Recommendation.ToString(),
+                reasonCodes = r.Result.ReasonCodes,
+                allowedAmount = r.Result.AllowedAmount,
+                r.Result.MemberShare,
+                ruleVersion = r.Result.RuleVersion,
+            }).ToList());
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:adjudicate"));
+
         // --- Auto-derive intake seam (system) --------------------------------------------------------------
         // Mirrors finance /projections: pending the fanout bus, delivery events are ingested through this endpoint.
         v1.MapPost("/intake", async (ClaimIntakeRequest req, HttpRequest http, ClaimsDeps deps, CancellationToken ct) =>
