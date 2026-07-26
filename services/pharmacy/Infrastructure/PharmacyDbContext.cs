@@ -83,6 +83,7 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
 public sealed class PrescriptionAlert
 {
     public Guid AlertId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid PrescriptionId { get; set; }
     public string Kind { get; set; } = default!;
     public string Severity { get; set; } = default!;

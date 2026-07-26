@@ -12,6 +12,7 @@ public enum RxLineStatus { Active, PartiallyDispensed, Dispensed, Cancelled }
 public sealed class Prescription
 {
     public Guid PrescriptionId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public string RxNo { get; set; } = default!;         // RX-YYYY-NNNNNN
     public Guid BeneficiaryId { get; set; }
     public Guid EncounterId { get; set; }
@@ -29,6 +30,7 @@ public sealed class Prescription
 public sealed class PrescriptionLine
 {
     public Guid PrescriptionLineId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid PrescriptionId { get; set; }
     public Guid DrugId { get; set; }
     public string? Dose { get; set; }
@@ -51,6 +53,7 @@ public sealed class PrescriptionLine
 public sealed class DispenseEvent
 {
     public Guid DispenseId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid PrescriptionLineId { get; set; }
     public Guid DispensingPharmacyId { get; set; }
     public decimal Quantity { get; set; }
@@ -70,6 +73,7 @@ public enum ReferralStatus { Requested, Accepted, Scheduled, Completed, Cancelle
 public sealed class Referral
 {
     public Guid ReferralId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public string ReferralNo { get; set; } = default!;   // REF-YYYY-NNNNNN
     public Guid BeneficiaryId { get; set; }
     public Guid EncounterId { get; set; }

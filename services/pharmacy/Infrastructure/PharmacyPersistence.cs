@@ -1,4 +1,5 @@
 using System.Globalization;
+using Mersal.Data;
 using Mersal.Pharmacy.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -74,10 +75,12 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddPharmacyInfrastructure(this IServiceCollection services, IConfiguration config)
     {
-        services.AddDbContext<PharmacyDbContext>(o =>
+        services.AddHbmpRls();
+        services.AddDbContext<PharmacyDbContext>((sp, o) =>
             o.UseNpgsql(config.GetConnectionString("Pharmacy")
                         ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential."))
-             .UseSnakeCaseNamingConvention());
+             .UseSnakeCaseNamingConvention()
+             .AddHbmpRlsInterceptors(sp));
         services.AddScoped<SequenceIssuer>();
 
         // Routing policy from configuration (Pharmacy:Routing) — gated drug ids + high-cost threshold.
