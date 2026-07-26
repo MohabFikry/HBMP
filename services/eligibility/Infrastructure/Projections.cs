@@ -8,6 +8,7 @@ namespace Mersal.Eligibility.Infrastructure;
 /// Carries NO clinical/EMR data (11-permission-matrix): reception ≠ EMR.</summary>
 public sealed class MemberProjection
 {
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid BeneficiaryId { get; set; }
     public string? MemberNo { get; set; }
     public string GivenName { get; set; } = "";
@@ -24,6 +25,7 @@ public sealed class MemberProjection
 /// <summary>A coverage + its limits (limits denormalized as JSON) for the decision engine.</summary>
 public sealed class CoverageProjection
 {
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid CoverageId { get; set; }
     public Guid BeneficiaryId { get; set; }
     public string BenefitCategory { get; set; } = "";
@@ -38,6 +40,7 @@ public sealed class CoverageProjection
 /// <summary>A persisted, derived eligibility decision. Cached in Valkey; invalidated by events.</summary>
 public sealed class EligibilitySnapshot
 {
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid SnapshotId { get; set; }
     public Guid BeneficiaryId { get; set; }
     public string BenefitCategory { get; set; } = "";

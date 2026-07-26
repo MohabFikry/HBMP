@@ -1,3 +1,4 @@
+using Mersal.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,10 +15,12 @@ public static class DependencyInjection
     /// </summary>
     public static IServiceCollection AddEligibilityInfrastructure(this IServiceCollection services, IConfiguration config)
     {
-        services.AddDbContext<EligibilityDbContext>(o =>
+        services.AddHbmpRls();
+        services.AddDbContext<EligibilityDbContext>((sp, o) =>
             o.UseNpgsql(config.GetConnectionString("Eligibility")
                         ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential."))
-             .UseSnakeCaseNamingConvention());
+             .UseSnakeCaseNamingConvention()
+             .AddHbmpRlsInterceptors(sp));
 
         var valkey = config["Cache:Valkey"];
         if (!string.IsNullOrWhiteSpace(valkey))

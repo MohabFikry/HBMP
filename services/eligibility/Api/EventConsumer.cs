@@ -1,4 +1,5 @@
 using System.Text;
+using Mersal.Data;
 using Mersal.Eligibility.Infrastructure;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
@@ -26,6 +27,10 @@ public sealed class EventConsumer(
 {
     private IConnection? _connection;
     private IModel? _channel;
+
+    /// <summary>The sole tenant (ADR-0011); the platform is single-tenant, so background projections are
+    /// stamped with it. Matches the DB column DEFAULT and the RLS GUC the read path derives from the principal.</summary>
+    private const string SoleTenantId = "11111111-1111-1111-1111-111111111111";
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -64,6 +69,11 @@ public sealed class EventConsumer(
             var payload = Encoding.UTF8.GetString(ea.Body.Span);
 
             using var scope = scopeFactory.CreateScope();
+            // This is a background consumer — no HTTP principal — so bind the RLS tenant GUC ourselves, else
+            // the FORCE-RLS projection writes are denied (no app.tenant_id set). The platform is single-tenant
+            // (ADR-0011): stamp the sole Mersal tenant. When a second tenant is onboarded, source this from the
+            // event's tenant claim instead.
+            scope.ServiceProvider.GetRequiredService<RlsContext>().TenantId = SoleTenantId;
             var updater = scope.ServiceProvider.GetRequiredService<ProjectionUpdater>();
             await updater.ApplyAsync(eventId, eventType, payload, ct);
 
