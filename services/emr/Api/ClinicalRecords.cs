@@ -254,7 +254,8 @@ public static class ClinicalEndpoints
         // item carries SensitivityLevel + CallerHasAccess so the approvals projection enforces design 37 §6. emr's
         // own clinical records are Standard (the sensitive investigation RESULTS are orders-owned + gated there). ----
         ben.MapGet("/{beneficiaryId:guid}/clinical-context", async (
-            Guid beneficiaryId, EmrDbContext db, ClinicalGate gate, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+            Guid beneficiaryId, EmrDbContext db, ClinicalGate gate, FieldProjector projector,
+            IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync("emr:read", EmrPolicies.Resources.Encounter, beneficiaryId.ToString(), beneficiaryId, ct);
             if (denied is not null) return denied;
@@ -271,15 +272,25 @@ public static class ClinicalEndpoints
             await EmitAsync(audit, "clinical_context", beneficiaryId, AuditAction.Read, me,
                 $"{{\"encounters\":{encIds.Count},\"notes\":{notes.Count},\"activeDx\":{activeDx.Count}}}", ct);
 
+            // H2: each note's assessment is CLINICAL-class; route it through the FieldProjector so a caller without
+            // the clinical field-class (e.g. an operational role) receives the note's existence but not its content.
+            var p = me.Principal!;
+            var projected = new List<IReadOnlyDictionary<string, object?>>();
+            foreach (var n in notes)
+                projected.Add(await projector.ProjectAsync(p, "clinical_note", new Dictionary<string, (object?, string)>(StringComparer.Ordinal)
+                {
+                    ["type"] = (n.NoteType.ToString(), "operational"),
+                    ["author"] = (n.AuthoredBy, "operational"),
+                    ["authoredAt"] = (n.AuthoredAt, "operational"),
+                    ["summary"] = (n.Assessment ?? n.Plan ?? "(no assessment recorded)", DefaultPolicies.Classes.Clinical),
+                    ["sensitivityLevel"] = ("Standard", "operational"),
+                    ["callerHasAccess"] = (true, "operational"),
+                }, ct));
+
             return Results.Ok(new
             {
                 EmrSummary = $"{encIds.Count} encounter(s); {notes.Count} signed note(s); {activeDx.Count} active diagnosis(es).",
-                Notes = notes.Select(n => new
-                {
-                    Type = n.NoteType.ToString(), Author = n.AuthoredBy, AuthoredAt = n.AuthoredAt,
-                    Summary = n.Assessment ?? n.Plan ?? "(no assessment recorded)",
-                    SensitivityLevel = "Standard", CallerHasAccess = true,
-                }),
+                Notes = projected,
                 Documents = Array.Empty<object>(), // emr owns no documents; sensitive results are orders-owned + gated there
             });
         });

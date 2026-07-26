@@ -39,6 +39,21 @@ public class FieldProjectorTests
                 e.DecisionOutcome == "field-strip" && e.FieldClasses.Contains("diagnosis"));
     }
 
+    [Theory]
+    [InlineData("reception")]
+    [InlineData("finance")]
+    [InlineData("call_center")]
+    public async Task Operational_roles_never_receive_clinical_content(string role)
+    {
+        // 16.6 (H2): the emr clinical-context projection routes note content through this matrix — an
+        // operational role gets the record's existence but never the clinical/diagnosis field content.
+        var result = await Projector().ProjectAsync(With(role), "clinical_note", EmrRecord());
+
+        result.Should().NotContainKey("note");          // clinical class stripped
+        result.Should().NotContainKey("diagnosisCode"); // diagnosis class stripped
+        result.Should().ContainKey("memberNo");         // identity (baseline) retained
+    }
+
     [Fact]
     public async Task Finance_never_receives_diagnosis()
     {
