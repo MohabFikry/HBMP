@@ -20,6 +20,7 @@ builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("provider-service");
 // Provider-service authorizes with the platform bundle plus the provider-ownership rules (2b.3).
 builder.Services.AddHbmpAuthorization(ProviderPolicies.Bundle());
+builder.Services.AddHbmpBreakGlass(builder.Configuration); // live break-glass elevation (16.6, H5)
 builder.Services.AddHbmpEvents(builder.Configuration);
 builder.Services.AddHbmpDurableOutbox<ProviderDbContext>();
 builder.Services.AddHbmpOutboxRelay();

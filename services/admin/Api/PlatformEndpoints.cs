@@ -34,6 +34,17 @@ public static class PlatformEndpoints
         // -------------------------------------------------- Break-glass lifecycle
         var bg = app.MapGroup("/api/v1/admin/break-glass").WithTags("admin-break-glass");
 
+        // 16.6 (H5): the runtime seam — every service's break-glass provider reads the CALLER's own active grants
+        // here (caller's token forwarded) to widen access at decision time. Self-scoped (subject from the token),
+        // so it needs authentication only, not the admin role; min-necessary (window + scope, no justification).
+        bg.MapGet("/active", async (Mersal.Auth.IHbmpPrincipalAccessor me, BreakGlassAdminService svc, CancellationToken ct) =>
+        {
+            var p = me.Principal;
+            if (p is null) return Results.Unauthorized();
+            if (string.IsNullOrEmpty(p.TenantId)) return Results.Ok(Array.Empty<ActiveGrantView>());
+            return Results.Ok(await svc.ActiveForSubjectAsync(p.Subject, p.TenantId, ct));
+        }).RequireAuthorization();
+
         bg.MapPost("/", async (BreakGlassRequestBody req, AdminGate gate, BreakGlassAdminService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.BreakGlassRequest, ct);

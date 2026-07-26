@@ -9,6 +9,11 @@ namespace Mersal.Admin.Api;
 /// <summary>Outcome of a break-glass lifecycle step.</summary>
 public sealed record BreakGlassResult(bool Ok, string? ReasonCode, BreakGlassGrantRecord? Grant);
 
+/// <summary>An active grant as the runtime break-glass provider consumes it (16.6, H5) — window + scope only, no
+/// requester justification (min-necessary; the reading service just needs to know what is widened, and until when).</summary>
+public sealed record ActiveGrantView(Guid GrantId, DateTimeOffset NotBefore, DateTimeOffset ExpiresAt,
+    IReadOnlyList<string> ScopedResourceTypes, IReadOnlyList<string> ScopedResourceIds);
+
 /// <summary>
 /// Break-glass administration (phase 8b.3, FR-IAM-009 / 18-security-model §11). The full flow: request (reason
 /// code + justification, scoped resources) → dual-control approval (approver ≠ requester, SoD-enforced) → step-up
@@ -137,6 +142,20 @@ public sealed class BreakGlassAdminService(AdminDbContext db, IAuditClient audit
         foreach (var g in due) g.Status = BreakGlassStatus.Expired;
         if (due.Count > 0) await db.SaveChangesAsync(ct);
         return due.Count;
+    }
+
+    /// <summary>16.6 (H5): the currently-active grants for a subject in a tenant — the runtime break-glass
+    /// provider in every service reads this (caller's own token) to decide whether to widen access now.</summary>
+    public async Task<IReadOnlyList<ActiveGrantView>> ActiveForSubjectAsync(string subject, string tenant, CancellationToken ct = default)
+    {
+        var now = clock.GetUtcNow();
+        var grants = await db.BreakGlassGrants.AsNoTracking()
+            .Where(g => g.TenantId == tenant && g.RequesterUserId == subject && g.Status == BreakGlassStatus.Active
+                        && g.NotBefore != null && g.NotBefore <= now && g.ExpiresAt != null && g.ExpiresAt > now)
+            .ToListAsync(ct);
+        return grants.Select(g => new ActiveGrantView(
+            g.GrantId, g.NotBefore!.Value, g.ExpiresAt!.Value,
+            Deserialize(g.ScopedResourceTypesJson), Deserialize(g.ScopedResourceIdsJson))).ToList();
     }
 
     private Task<BreakGlassGrantRecord?> Load(string tenant, Guid grantId, CancellationToken ct) =>

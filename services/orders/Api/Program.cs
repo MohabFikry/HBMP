@@ -16,6 +16,7 @@ builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("orders-service");
 // Orders authorizes with the order overlay: treating-relationship on create/read (+ provider PO for phase-5 reads).
 builder.Services.AddHbmpAuthorization(OrdersPolicies.Bundle());
+builder.Services.AddHbmpBreakGlass(builder.Configuration); // live break-glass elevation (16.6, H5)
 builder.Services.AddHbmpEvents(builder.Configuration);
 builder.Services.AddHbmpDurableOutbox<OrdersDbContext>();
 builder.Services.AddHbmpOutboxRelay();

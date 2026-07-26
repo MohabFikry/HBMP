@@ -16,6 +16,7 @@ builder.Services.AddHbmpAuditClient("case-service");
 // case-service authorizes with the case overlay: the case-assignment ABAC condition scopes every case/360 action
 // to an active assignment (10 §3.11); assign/unassign is supervisory; 360 assembly is a PHI-read (audited).
 builder.Services.AddHbmpAuthorization(CasePolicies.Bundle());
+builder.Services.AddHbmpBreakGlass(builder.Configuration); // live break-glass elevation (16.6, H5)
 builder.Services.AddHbmpEvents(builder.Configuration);
 builder.Services.AddHbmpDurableOutbox<CaseDbContext>();
 builder.Services.AddHbmpOutboxRelay();

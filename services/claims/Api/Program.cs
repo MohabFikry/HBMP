@@ -16,6 +16,7 @@ builder.Services.AddHbmpAuditClient("claims-service");
 // claims-service authorizes with the claims overlay: the claims roles hold ONLY the claims actions, so a
 // diagnosis/EMR read is default-denied (claims ≠ diagnosis). SoD + dual control are enforced in the handlers.
 builder.Services.AddHbmpAuthorization(ClaimsPolicies.Bundle());
+builder.Services.AddHbmpBreakGlass(builder.Configuration); // live break-glass elevation (16.6, H5)
 builder.Services.AddHbmpEvents(builder.Configuration);
 builder.Services.AddHbmpDurableOutbox<ClaimsDbContext>();
 builder.Services.AddHbmpOutboxRelay();

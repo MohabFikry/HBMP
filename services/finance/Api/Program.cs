@@ -16,6 +16,7 @@ builder.Services.AddHbmpAuditClient("finance-service");
 // finance-service authorizes with the finance overlay: Finance holds ONLY the finance actions, so a diagnosis/EMR
 // read is default-denied (finance ≠ diagnosis). Settlement approve is SoD-split; exports are audited.
 builder.Services.AddHbmpAuthorization(FinancePolicies.Bundle());
+builder.Services.AddHbmpBreakGlass(builder.Configuration); // live break-glass elevation (16.6, H5)
 builder.Services.AddHbmpEvents(builder.Configuration);
 builder.Services.AddHbmpDurableOutbox<FinanceDbContext>();
 builder.Services.AddHbmpOutboxRelay();

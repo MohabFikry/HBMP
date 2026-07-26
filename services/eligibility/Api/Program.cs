@@ -17,6 +17,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("eligibility-service");
 builder.Services.AddHbmpAuthorization();
+builder.Services.AddHbmpBreakGlass(builder.Configuration); // live break-glass elevation (16.6, H5)
 builder.Services.AddHbmpEvents(builder.Configuration);
 builder.Services.AddHbmpDurableOutbox<EligibilityDbContext>();
 builder.Services.AddHbmpOutboxRelay();   // relay staged audit events to RabbitMQ

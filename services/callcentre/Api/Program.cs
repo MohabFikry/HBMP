@@ -15,6 +15,7 @@ builder.Services.AddHbmpAuditClient("callcentre-service");
 // callcentre authorizes with the call-centre overlay: coarse role+tenant scopes. The DEFINING control — "verify
 // before you disclose" — is enforced by VerificationService on the disclose/act endpoints, not by the engine.
 builder.Services.AddHbmpAuthorization(CallCentrePolicies.Bundle());
+builder.Services.AddHbmpBreakGlass(builder.Configuration); // live break-glass elevation (16.6, H5)
 builder.Services.AddHbmpEvents(builder.Configuration);
 builder.Services.AddHbmpDurableOutbox<CallCentreDbContext>();
 builder.Services.AddHbmpOutboxRelay();

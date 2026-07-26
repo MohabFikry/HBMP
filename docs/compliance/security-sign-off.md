@@ -23,7 +23,7 @@ Legend: ✅ Pass · 🟡 Pending (harness/gate wired; needs staging or an extern
 | SEC-NETPOL | k3s default-deny NetworkPolicies | Least-privilege per-service; negative connectivity test (pod cannot reach data tier out of policy) | 🟡 needs k3s |
 | SEC-CLAMAV | Upload malware scan before access | ClamAV on document ingest | 🟡 verify wired on ingest path |
 | SEC-PENTEST | External pen test + retest High/Crit | Commissioned against staging; report + retest in `docs/security/` | 🟡 external engagement |
-| SEC-BREAKGLASS | Break-glass time-boxed + immutably audited + auto-revoked | Admin-service break-glass (dual-control, step-up MFA, scoped auto-expiring window, HIGH audit); drill | ✅ (built+tested) / 🟡 prod drill |
+| SEC-BREAKGLASS | Break-glass time-boxed + immutably audited + auto-revoked + **runtime elevation** | Admin-service lifecycle (dual-control, step-up MFA, scoped auto-expiring window, HIGH audit) + 16.6/H5 runtime: every service's `HttpBreakGlassProvider` reads admin `/break-glass/active` (caller token forwarded, 30s cache, FAIL-CLOSED) so a grant actually widens access at decision time — the engine allows the otherwise-denied read with HIGH audit + ends it on expiry (AuthorizationEngineTests, HttpBreakGlassProviderTests). Prior ✅ was an overclaim (NullBreakGlassProvider was wired everywhere ⇒ grants never elevated). | ✅ (built+tested) / 🟡 live cross-service e2e drill on staging |
 | SEC-AUDIT-WORM | Audit hash-chain + WORM durability | Append-only hash-chained `audit_event`; MinIO object-lock; survives failover (see DR drill 11.3) | ✅ chain / 🟡 WORM in target infra |
 
 ## Acceptance (Given/When/Then)
