@@ -184,6 +184,62 @@
       "attributes": {
         "include.in.token.scope": "true"
       }
+    },
+    {
+      "name": "callcentre:read",
+      "protocol": "openid-connect",
+      "description": "Call-centre read (verify-before-disclose, PHI-free 360)",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "callcentre:act",
+      "protocol": "openid-connect",
+      "description": "Call-centre actions (book/reschedule/cancel via EMR engine)",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "callcentre:interaction",
+      "protocol": "openid-connect",
+      "description": "Call-centre interaction logging",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "callcentre:verify",
+      "protocol": "openid-connect",
+      "description": "Call-centre identity verification",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "claims:read",
+      "protocol": "openid-connect",
+      "description": "Claims worklist + reconciliation read (codes+amounts, no diagnosis)",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "claims:reconcile",
+      "protocol": "openid-connect",
+      "description": "Claims reconciliation actions",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    },
+    {
+      "name": "claims:export",
+      "protocol": "openid-connect",
+      "description": "Claims audited CSV export",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
     }
   ],
   "clients": [
@@ -277,7 +333,14 @@
         "auth:emergency",
         "auth:override",
         "reception:read",
-        "finance:read"
+        "finance:read",
+        "callcentre:read",
+        "callcentre:act",
+        "callcentre:interaction",
+        "callcentre:verify",
+        "claims:read",
+        "claims:reconcile",
+        "claims:export"
       ]
     }
   ]

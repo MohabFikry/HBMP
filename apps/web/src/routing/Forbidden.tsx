@@ -29,7 +29,7 @@ export function Forbidden({ path }: { path: string }) {
     });
   }, [path, session]);
 
-  const home = session ? `/${portalForRole(session.role).base}` : "/login";
+  const home = session?.role ? `/${portalForRole(session.role).base}` : "/login";
 
   return (
     <Card style={{ padding: "var(--sp6)", maxWidth: 560, margin: "var(--sp8) auto" }}>
@@ -57,7 +57,7 @@ export function NotFound() {
   const { lang } = useTheme();
   const navigate = useNavigate();
   const { session } = useAuth();
-  const home = session ? `/${portalForRole(session.role).base}` : "/login";
+  const home = session?.role ? `/${portalForRole(session.role).base}` : "/login";
   return (
     <Card style={{ padding: "var(--sp6)", maxWidth: 560, margin: "var(--sp8) auto" }}>
       <h1 style={{ fontSize: "var(--fs-title-1)" }}>{L.notFoundTitle[lang]}</h1>
@@ -65,6 +65,43 @@ export function NotFound() {
       <Button variant="secondary" onClick={() => navigate(home)}>
         {L.backToPortal[lang]}
       </Button>
+    </Card>
+  );
+}
+
+/**
+ * Fail-closed landing (H6) for a caller who authenticated but whose realm role maps to no portal. It offers
+ * only "sign out" — never a portal — and logs the denied session so the gap is visible in the audit trail.
+ */
+export function NoPortal() {
+  const { lang } = useTheme();
+  const { session, logout } = useAuth();
+  const emitted = useRef(false);
+
+  useEffect(() => {
+    if (emitted.current) return;
+    emitted.current = true;
+    auditClient.emit({
+      type: "access.denied",
+      actorUserId: session?.userId ?? null,
+      actorRole: null,
+      path: window.location.pathname,
+      reason: "no-portal-role",
+    });
+  }, [session]);
+
+  return (
+    <Card role="region" aria-label="no portal assigned" style={{ padding: "var(--sp6)", maxWidth: 560, margin: "var(--sp8) auto" }}>
+      <div style={{ display: "flex", gap: "var(--sp3)", alignItems: "center", marginBottom: "var(--sp3)" }}>
+        <Icon name="cross" width={28} height={28} style={{ color: "var(--st-bad-fg)" }} />
+        <h1 style={{ fontSize: "var(--fs-title-1)" }}>{L.noPortalTitle[lang]}</h1>
+      </div>
+      <p className="muted">{L.noPortalBody[lang]}</p>
+      <div style={{ marginTop: "var(--sp5)" }}>
+        <Button variant="secondary" onClick={() => void logout()}>
+          {L.signOut[lang]}
+        </Button>
+      </div>
     </Card>
   );
 }

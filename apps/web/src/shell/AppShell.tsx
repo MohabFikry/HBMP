@@ -72,14 +72,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const tr = useLocalized();
   const searchRef = useRef<HTMLInputElement | null>(null);
 
-  const portal = session ? portalForRole(session.role) : null;
+  const portal = session?.role ? portalForRole(session.role) : null;
   const accessible: Section[] = useMemo(
     () => (portal ? portal.sections.filter((s) => can(s.permission)) : []),
     [portal, can],
   );
   const canNotify = !!portal && can("notification.read");
   // 14.8 — branch context for the app-bar switcher (fail-soft: renders only when the caller has branches).
-  const branchCtx = useBranchContext(session?.role);
+  const branchCtx = useBranchContext(session?.role ?? undefined);
   const [paneOpen, setPaneOpen] = useState(false);
   const [userPaneOpen, setUserPaneOpen] = useState(false);
   const [notifyRefresh, setNotifyRefresh] = useState(0);

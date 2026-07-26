@@ -49,14 +49,16 @@ async function pkceChallenge(verifier: string): Promise<string> {
 
 function sessionFrom(token: string): Session {
   const c = decodeJwt(token);
-  const role: Role = roleFromRealmRoles(c.realm_access?.roles ?? []) ?? "reception";
+  // FAIL CLOSED (H6): an unmapped realm role yields role=null (→ "no portal assigned" page). Never default
+  // to a portal — that would silently grant an authenticated stranger reception access.
+  const role: Role | null = roleFromRealmRoles(c.realm_access?.roles ?? []);
   const mfa = (c.acr && ["mfa", "aal2", "aal3", "loa2", "loa3", "2fa"].includes(c.acr)) ||
     (c.amr ?? []).some((m) => ["mfa", "otp", "hwk", "totp", "webauthn", "sms"].includes(m));
   return {
     userId: c.sub,
-    displayName: c.name ?? c.preferred_username ?? role,
+    displayName: c.name ?? c.preferred_username ?? c.sub,
     role,
-    permissions: permissionsForRole(role),
+    permissions: role ? permissionsForRole(role) : new Set(),
     mfaSatisfied: Boolean(mfa),
     expiresAt: c.exp * 1000,
   };

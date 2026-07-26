@@ -103,6 +103,12 @@ export const L = {
   backToPortal: { en: "Back to my portal", ar: "العودة إلى بوابتي" },
   notFoundTitle: { en: "Page not found", ar: "الصفحة غير موجودة" },
   notFoundBody: { en: "The page you're looking for doesn't exist.", ar: "الصفحة التي تبحث عنها غير موجودة." },
+  // Authenticated but no portal role mapped (fail-closed)
+  noPortalTitle: { en: "No portal assigned", ar: "لا توجد بوابة مخصّصة" },
+  noPortalBody: {
+    en: "You are signed in, but your account has no role that maps to a portal. Ask an administrator to grant you a role, then sign in again.",
+    ar: "لقد سجّلت الدخول، لكن حسابك لا يملك دورًا مرتبطًا بأي بوابة. اطلب من المسؤول منحك دورًا ثم سجّل الدخول مرة أخرى.",
+  },
   // Section placeholder
   sectionStub: {
     en: "This screen is wired in Phase 9.3 (flagship screens). The portal shell, permission routing and min-necessary navigation are live.",

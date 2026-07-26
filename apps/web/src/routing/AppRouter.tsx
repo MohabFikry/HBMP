@@ -4,14 +4,14 @@ import { useAuth } from "../auth/AuthProvider";
 import { AppShell } from "../shell/AppShell";
 import { LoginPage } from "../pages/LoginPage";
 import { SectionPage } from "../pages/SectionPage";
-import { Forbidden, NotFound } from "./Forbidden";
+import { Forbidden, NotFound, NoPortal } from "./Forbidden";
 import { ALL_ROUTES, portalForRole } from "../portals/catalog";
 import { screenFor } from "../screens/registry";
 
 /** Home = the first section of the signed-in user's portal that they can access. */
 function useHomePath(): string {
   const { session, can } = useAuth();
-  if (!session) return "/login";
+  if (!session?.role) return "/login";
   const portal = portalForRole(session.role);
   const first = portal.sections.find((s) => can(s.permission));
   return first ? `/${portal.base}/${first.path}` : `/${portal.base}`;
@@ -33,6 +33,7 @@ function ResolveRoute() {
   const path = location.pathname.replace(/\/+$/, "") || "/";
 
   if (!session) return <Navigate to="/login" replace />;
+  if (!session.role) return <NoPortal />;
   const portal = portalForRole(session.role);
 
   // Bare portal base → home.
@@ -81,6 +82,10 @@ export function AppRouter() {
       </div>
     );
   }
+
+  // Authenticated but no portal role (fail-closed): show the bare "no portal assigned" page — not the shell,
+  // not a default portal, not a login loop.
+  if (session && !session.role) return <NoPortal />;
 
   return (
     <Routes>

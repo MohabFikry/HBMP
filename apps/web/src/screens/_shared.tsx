@@ -21,7 +21,7 @@ const STR = {
 export function PageHeader({ title, actions }: { title: string; actions?: ReactNode }) {
   const { session } = useAuth();
   const t = useLoc();
-  if (!session) return null;
+  if (!session?.role) return null;
   const portal = portalForRole(session.role);
   return (
     <div className="pagehead">

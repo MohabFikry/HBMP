@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { PORTALS, ALL_ROUTES, portalForRole } from "../src/portals/catalog";
 import { screenFor } from "../src/screens/registry";
 import { permissionsForRole, rolePermissions, type Role } from "../src/authz/permissions";
+import { roleFromRealmRoles } from "../src/config";
 
 /**
  * Portal-access audit (US-070/071). Proves every role's portal is reachable end-to-end: each declared section
@@ -49,5 +50,15 @@ describe("Portal access — every role reaches every one of its sections", () =>
     for (const forbidden of ["emr.read", "emr.write", "results.inbox", "prescriptions.write"] as const) {
       expect(claims.has(forbidden as never)).toBe(false);
     }
+  });
+
+  it("maps the call-centre and claims realm roles to their portals", () => {
+    expect(roleFromRealmRoles(["call_center"])).toBe("call_center");
+    expect(roleFromRealmRoles(["claims_officer"])).toBe("claims_officer");
+  });
+
+  it("FAILS CLOSED (H6): an authenticated caller with no mapped realm role gets NO portal (never reception)", () => {
+    expect(roleFromRealmRoles([])).toBeNull();
+    expect(roleFromRealmRoles(["default-roles-mersal", "offline_access", "some_unmapped_role"])).toBeNull();
   });
 });

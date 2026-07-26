@@ -7,7 +7,11 @@ import { permissionsForRole, type Permission, type Role } from "../authz/permiss
 export interface Session {
   userId: string;
   displayName: string;
-  role: Role;
+  /**
+   * Portal role. `null` means the caller authenticated at the IdP but carries no realm role that maps to a
+   * portal — a valid, fail-closed state that renders the "no portal assigned" page (never a default portal).
+   */
+  role: Role | null;
   permissions: ReadonlySet<Permission>;
   mfaSatisfied: boolean;
   /** Epoch ms when the access token expires (drives the idle/absolute session guard). */

@@ -11,7 +11,7 @@ import { L } from "../i18n/strings";
 export function SectionPage({ section }: { section: Section }) {
   const { session } = useAuth();
   const { lang } = useTheme();
-  if (!session) return null;
+  if (!session?.role) return null;
   const portal = portalForRole(session.role);
 
   return (
