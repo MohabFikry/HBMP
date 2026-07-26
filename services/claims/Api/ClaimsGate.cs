@@ -14,16 +14,13 @@ public sealed class ClaimsGate(IHbmpPrincipalAccessor me, IAuthorizationEngine e
     {
         var p = me.Principal;
         if (p is null)
-            return Results.Problem(statusCode: 401, title: "unauthenticated", type: "urn:hbmp:unauthenticated");
+            return GateResults.Unauthenticated();
 
         var resource = new ResourceRef { Type = ClaimsPolicies.Resource, TenantId = p.TenantId, ProviderId = p.ProviderId };
         var decision = await engine.EvaluateAsync(new AuthzRequest(p, action, resource), ct);
         if (decision.IsAllowed) return null;
 
-        return Results.Problem(
-            statusCode: 403, title: "access-denied", type: "urn:hbmp:claims-access-denied",
-            detail: "You are not permitted to perform this claims action.",
-            extensions: new Dictionary<string, object?> { ["reason"] = decision.ReasonCode });
+        return GateResults.Forbidden("urn:hbmp:claims-access-denied", detail: "You are not permitted to perform this claims action.", reason: decision.ReasonCode);
     }
 
     public string? Tenant => me.Principal?.TenantId;

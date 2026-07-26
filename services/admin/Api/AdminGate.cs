@@ -18,7 +18,7 @@ public sealed class AdminGate(IHbmpPrincipalAccessor me, IAuthorizationEngine en
     {
         var p = me.Principal;
         if (p is null)
-            return Results.Problem(statusCode: 401, title: "unauthenticated", type: "urn:hbmp:unauthenticated");
+            return GateResults.Unauthenticated();
 
         // Super Admin operates globally → resource has no tenant (TenantMatch passes cross-tenant). Org Admin is
         // pinned to its own tenant.
@@ -28,9 +28,6 @@ public sealed class AdminGate(IHbmpPrincipalAccessor me, IAuthorizationEngine en
         var decision = await engine.EvaluateAsync(new AuthzRequest(p, action, resource, "ADM"), ct);
         if (decision.IsAllowed) return null;
 
-        return Results.Problem(
-            statusCode: 403, title: "access-denied", type: "urn:hbmp:admin-access-denied",
-            detail: "You are not permitted to perform this administrative action.",
-            extensions: new Dictionary<string, object?> { ["reason"] = decision.ReasonCode });
+        return GateResults.Forbidden("urn:hbmp:admin-access-denied", detail: "You are not permitted to perform this administrative action.", reason: decision.ReasonCode);
     }
 }

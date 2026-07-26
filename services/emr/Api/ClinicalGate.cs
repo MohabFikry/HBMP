@@ -15,7 +15,7 @@ public sealed class ClinicalGate(IHbmpPrincipalAccessor me, IAuthorizationEngine
     {
         var p = me.Principal;
         if (p is null)
-            return Results.Problem(statusCode: 401, title: "unauthenticated", type: "urn:hbmp:unauthenticated");
+            return GateResults.Unauthenticated();
 
         var treats = await treating.TreatsAsync(p.Subject, p.ProviderId, beneficiaryId, ct);
         var treatingSet = new HashSet<string>(StringComparer.Ordinal);
@@ -38,9 +38,6 @@ public sealed class ClinicalGate(IHbmpPrincipalAccessor me, IAuthorizationEngine
         if (decision.IsAllowed) return null;
 
         // Denied — the engine already wrote the (attempted-PHI-access) audit event. Surface 403.
-        return Results.Problem(
-            statusCode: 403, title: "access-denied", type: "urn:hbmp:emr-access-denied",
-            detail: "You do not have a treating relationship with this patient.",
-            extensions: new Dictionary<string, object?> { ["reason"] = decision.ReasonCode });
+        return GateResults.Forbidden("urn:hbmp:emr-access-denied", detail: "You do not have a treating relationship with this patient.", reason: decision.ReasonCode);
     }
 }

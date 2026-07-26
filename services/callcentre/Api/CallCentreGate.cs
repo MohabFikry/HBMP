@@ -14,16 +14,13 @@ public sealed class CallCentreGate(IHbmpPrincipalAccessor me, IAuthorizationEngi
     {
         var p = me.Principal;
         if (p is null)
-            return Results.Problem(statusCode: 401, title: "unauthenticated", type: "urn:hbmp:unauthenticated");
+            return GateResults.Unauthenticated();
 
         var resource = new ResourceRef { Type = CallCentrePolicies.Resource, TenantId = p.TenantId };
         var decision = await engine.EvaluateAsync(new AuthzRequest(p, action, resource, purpose), ct);
         if (decision.IsAllowed) return null;
 
-        return Results.Problem(
-            statusCode: 403, title: "access-denied", type: "urn:hbmp:callcentre-access-denied",
-            detail: "You are not permitted to perform this call-centre action.",
-            extensions: new Dictionary<string, object?> { ["reason"] = decision.ReasonCode });
+        return GateResults.Forbidden("urn:hbmp:callcentre-access-denied", detail: "You are not permitted to perform this call-centre action.", reason: decision.ReasonCode);
     }
 
     public HbmpPrincipal? Principal => me.Principal;

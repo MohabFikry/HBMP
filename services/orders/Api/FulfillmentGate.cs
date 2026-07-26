@@ -15,7 +15,7 @@ public sealed class FulfillmentGate(IHbmpPrincipalAccessor me, IAuthorizationEng
     public async Task<IResult?> AuthorizeQueueAsync(CancellationToken ct)
     {
         var p = me.Principal;
-        if (p is null) return Results.Problem(statusCode: 401, title: "unauthenticated", type: "urn:hbmp:unauthenticated");
+        if (p is null) return GateResults.Unauthenticated();
         if (string.IsNullOrWhiteSpace(p.ProviderId))
             return Deny("You are not associated with a fulfilling provider.");
 
@@ -29,7 +29,7 @@ public sealed class FulfillmentGate(IHbmpPrincipalAccessor me, IAuthorizationEng
     public async Task<IResult?> AuthorizeConsumeAsync(OrderType orderType, CancellationToken ct)
     {
         var p = me.Principal;
-        if (p is null) return Results.Problem(statusCode: 401, title: "unauthenticated", type: "urn:hbmp:unauthenticated");
+        if (p is null) return GateResults.Unauthenticated();
         if (string.IsNullOrWhiteSpace(p.ProviderId))
             return Deny("You are not associated with a fulfilling provider.");
 
@@ -42,8 +42,5 @@ public sealed class FulfillmentGate(IHbmpPrincipalAccessor me, IAuthorizationEng
         return null;
     }
 
-    private static IResult Deny(string reason) => Results.Problem(
-        statusCode: 403, title: "access-denied", type: "urn:hbmp:orders-access-denied",
-        detail: "You are not authorized to fulfil this order.",
-        extensions: new Dictionary<string, object?> { ["reason"] = reason });
+    private static IResult Deny(string reason) => GateResults.Forbidden("urn:hbmp:orders-access-denied", detail: "You are not authorized to fulfil this order.", reason: reason);
 }

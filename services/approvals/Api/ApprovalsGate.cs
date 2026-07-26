@@ -14,7 +14,7 @@ public sealed class ApprovalsGate(IHbmpPrincipalAccessor me, IAuthorizationEngin
     {
         var p = me.Principal;
         if (p is null)
-            return Results.Problem(statusCode: 401, title: "unauthenticated", type: "urn:hbmp:unauthenticated");
+            return GateResults.Unauthenticated();
 
         var resource = new ResourceRef
         {
@@ -23,9 +23,6 @@ public sealed class ApprovalsGate(IHbmpPrincipalAccessor me, IAuthorizationEngin
         var decision = await engine.EvaluateAsync(new AuthzRequest(p, action, resource, purpose), ct);
         if (decision.IsAllowed) return null;
 
-        return Results.Problem(
-            statusCode: 403, title: "access-denied", type: "urn:hbmp:approvals-access-denied",
-            detail: "You are not permitted to perform this approvals action.",
-            extensions: new Dictionary<string, object?> { ["reason"] = decision.ReasonCode });
+        return GateResults.Forbidden("urn:hbmp:approvals-access-denied", detail: "You are not permitted to perform this approvals action.", reason: decision.ReasonCode);
     }
 }

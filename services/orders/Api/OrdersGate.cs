@@ -14,7 +14,7 @@ public sealed class OrdersGate(IHbmpPrincipalAccessor me, IAuthorizationEngine e
     {
         var p = me.Principal;
         if (p is null)
-            return Results.Problem(statusCode: 401, title: "unauthenticated", type: "urn:hbmp:unauthenticated");
+            return GateResults.Unauthenticated();
 
         var treats = await treating.TreatsAsync(beneficiaryId, bearerToken, ct);
         var treatingSet = new HashSet<string>(StringComparer.Ordinal);
@@ -28,9 +28,6 @@ public sealed class OrdersGate(IHbmpPrincipalAccessor me, IAuthorizationEngine e
         var decision = await engine.EvaluateAsync(new AuthzRequest(p, action, resource, "ordering"), ct);
         if (decision.IsAllowed) return null;
 
-        return Results.Problem(
-            statusCode: 403, title: "access-denied", type: "urn:hbmp:orders-access-denied",
-            detail: "You do not have a treating relationship with this patient.",
-            extensions: new Dictionary<string, object?> { ["reason"] = decision.ReasonCode });
+        return GateResults.Forbidden("urn:hbmp:orders-access-denied", detail: "You do not have a treating relationship with this patient.", reason: decision.ReasonCode);
     }
 }

@@ -17,7 +17,7 @@ public sealed class CaseGate(IHbmpPrincipalAccessor me, IAuthorizationEngine eng
     {
         var p = me.Principal;
         if (p is null)
-            return Results.Problem(statusCode: 401, title: "unauthenticated", type: "urn:hbmp:unauthenticated");
+            return GateResults.Unauthenticated();
 
         // Supervisory oversight: a Manager / Medical Director (who is not the assigned Case Manager) reads a case
         // via the distinct oversight action (tenant-only). The engine matches one rule per action+resource, so the
@@ -42,10 +42,7 @@ public sealed class CaseGate(IHbmpPrincipalAccessor me, IAuthorizationEngine eng
         var decision = await engine.EvaluateAsync(new AuthzRequest(p, action, resource, purpose), ct);
         if (decision.IsAllowed) return null;
 
-        return Results.Problem(
-            statusCode: 403, title: "access-denied", type: "urn:hbmp:case-access-denied",
-            detail: "You are not permitted to perform this case action (no active assignment?).",
-            extensions: new Dictionary<string, object?> { ["reason"] = decision.ReasonCode });
+        return GateResults.Forbidden("urn:hbmp:case-access-denied", detail: "You are not permitted to perform this case action (no active assignment?).", reason: decision.ReasonCode);
     }
 
     public string? Tenant => me.Principal?.TenantId;

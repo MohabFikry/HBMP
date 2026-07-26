@@ -15,7 +15,7 @@ public sealed class DispensingGate(IHbmpPrincipalAccessor me, IAuthorizationEngi
     public async Task<IResult?> AuthorizeSearchAsync(CancellationToken ct)
     {
         var p = me.Principal;
-        if (p is null) return Results.Problem(statusCode: 401, title: "unauthenticated", type: "urn:hbmp:unauthenticated");
+        if (p is null) return GateResults.Unauthenticated();
         if (string.IsNullOrWhiteSpace(p.ProviderId))
             return Deny("You are not associated with a dispensing pharmacy.");
 
@@ -28,7 +28,7 @@ public sealed class DispensingGate(IHbmpPrincipalAccessor me, IAuthorizationEngi
     public async Task<IResult?> AuthorizeDispenseAsync(CancellationToken ct)
     {
         var p = me.Principal;
-        if (p is null) return Results.Problem(statusCode: 401, title: "unauthenticated", type: "urn:hbmp:unauthenticated");
+        if (p is null) return GateResults.Unauthenticated();
         if (string.IsNullOrWhiteSpace(p.ProviderId))
             return Deny("You are not associated with a dispensing pharmacy.");
 
@@ -37,8 +37,5 @@ public sealed class DispensingGate(IHbmpPrincipalAccessor me, IAuthorizationEngi
         return decision.IsAllowed ? null : Deny(decision.ReasonCode);
     }
 
-    private static IResult Deny(string reason) => Results.Problem(
-        statusCode: 403, title: "access-denied", type: "urn:hbmp:pharmacy-access-denied",
-        detail: "You are not authorized to dispense this prescription.",
-        extensions: new Dictionary<string, object?> { ["reason"] = reason });
+    private static IResult Deny(string reason) => GateResults.Forbidden("urn:hbmp:pharmacy-access-denied", detail: "You are not authorized to dispense this prescription.", reason: reason);
 }

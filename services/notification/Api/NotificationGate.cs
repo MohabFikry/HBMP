@@ -13,15 +13,12 @@ public sealed class NotificationGate(IHbmpPrincipalAccessor me, IAuthorizationEn
     {
         var p = me.Principal;
         if (p is null)
-            return Results.Problem(statusCode: 401, title: "unauthenticated", type: "urn:hbmp:unauthenticated");
+            return GateResults.Unauthenticated();
 
         var resource = new ResourceRef { Type = NotificationPolicies.Resource, TenantId = p.TenantId };
         var decision = await engine.EvaluateAsync(new AuthzRequest(p, action, resource), ct);
         if (decision.IsAllowed) return null;
 
-        return Results.Problem(
-            statusCode: 403, title: "access-denied", type: "urn:hbmp:notification-access-denied",
-            detail: "You are not permitted to perform this notification action.",
-            extensions: new Dictionary<string, object?> { ["reason"] = decision.ReasonCode });
+        return GateResults.Forbidden("urn:hbmp:notification-access-denied", detail: "You are not permitted to perform this notification action.", reason: decision.ReasonCode);
     }
 }
