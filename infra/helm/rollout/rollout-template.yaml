@@ -1,0 +1,56 @@
+# Argo Rollouts canary for an HBMP service (phase 12.2). Rendered per service by Helm.
+# Traffic shifting via Linkerd (SMI TrafficSplit); analysis at each step gates progression and
+# auto-aborts on an SLO breach (analysis-slo.yaml). No :latest — image is a git-SHA tag from Harbor.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: hbmp-{{ .Values.service }}
+  namespace: hbmp
+spec:
+  replicas: {{ .Values.replicas | default 3 }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: hbmp-{{ .Values.service }}
+  template:
+    metadata:
+      labels:
+        app: hbmp-{{ .Values.service }}
+      annotations:
+        linkerd.io/inject: enabled          # service-to-service mTLS (SEC-MTLS)
+    spec:
+      containers:
+        - name: {{ .Values.service }}
+          image: {{ .Values.image }}         # harbor.mersal.internal/hbmp/<svc>:<git-sha>
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8080 }
+            periodSeconds: 15
+  strategy:
+    canary:
+      canaryService: hbmp-{{ .Values.service }}-canary
+      stableService: hbmp-{{ .Values.service }}-stable
+      trafficRouting:
+        smi:
+          rootService: hbmp-{{ .Values.service }}
+      # Progress only while the SLO analysis passes; a failed analysis aborts + reverts to stable.
+      analysis:
+        templates:
+          - templateName: hbmp-slo
+        args:
+          - name: service
+            value: hbmp-{{ .Values.service }}
+        startingStep: 1
+      steps:
+        - setWeight: 10
+        - pause: { duration: 5m }
+        - setWeight: 25
+        - pause: { duration: 5m }
+        - setWeight: 50
+        - pause: { duration: 10m }
+        - setWeight: 100

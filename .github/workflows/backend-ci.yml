@@ -79,6 +79,11 @@ jobs:
       - name: Build (Release, warnings-as-errors)
         run: dotnet build HbmpPlatform.sln -c Release --no-restore
 
+      - name: Expand/contract migration-compat gate (12.2)
+        run: |
+          python3 tools/ci/check-migration-compat.py --selftest
+          python3 tools/ci/check-migration-compat.py --all
+
       - name: Apply migrations + provision hbmp_app role
         run: bash tools/ci/apply-migrations.sh
 

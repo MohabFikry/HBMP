@@ -1,0 +1,36 @@
+# SLO analysis for the canary (phase 12.2). Argo Rollouts runs this at each canary step; if a metric
+# leaves its phase-11 threshold the AnalysisRun fails -> the Rollout aborts and reverts to stable
+# (automated rollback, no manual step). Queries hit the same Prometheus the phase-11 dashboards use.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: hbmp-slo
+  namespace: hbmp
+spec:
+  args:
+    - name: service
+  metrics:
+    - name: success-rate
+      interval: 1m
+      count: 5
+      # 3 consecutive failures aborts the rollout.
+      failureLimit: 3
+      successCondition: "result[0] >= 0.99"     # phase-11 SLO: >= 99% success
+      provider:
+        prometheus:
+          address: http://prometheus.hbmp:9090
+          query: |
+            sum(rate(http_server_request_duration_seconds_count{app="{{args.service}}",http_response_status_code!~"5.."}[5m]))
+            /
+            sum(rate(http_server_request_duration_seconds_count{app="{{args.service}}"}[5m]))
+    - name: p99-latency
+      interval: 1m
+      count: 5
+      failureLimit: 3
+      successCondition: "result[0] <= 1.0"       # phase-11 SLO: p99 <= 1s (read paths)
+      provider:
+        prometheus:
+          address: http://prometheus.hbmp:9090
+          query: |
+            histogram_quantile(0.99,
+              sum(rate(http_server_request_duration_seconds_bucket{app="{{args.service}}"}[5m])) by (le))

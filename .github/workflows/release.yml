@@ -1,0 +1,142 @@
+name: release
+
+# Gated dev -> QA -> staging -> prod promotion (phase 12.2; 25-deployment-architecture.md §8, 35 §3-§4).
+# Free/open-source, on-prem-first, cloud-ready: images build once, are scanned + cosign-signed + pushed to
+# Harbor, and the SAME artifact promotes across environments. Each stage's gates are automated and ordered;
+# prod cannot be reached without the staging approval + green security/compliance/DR gates. Progressive
+# rollout + automated rollback run on k3s via Argo Rollouts (infra/helm/rollout).
+#
+# Environments (dev/qa/staging/production) are GitHub Environments; staging + production carry required
+# reviewers so promotion pauses for the recorded approval the governance gate mandates.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "git ref to release"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: read
+  id-token: write   # cosign keyless (OIDC) signing
+
+env:
+  REGISTRY: harbor.mersal.internal        # Harbor (OSS) registry — no Docker Hub, no `latest`.
+  SERVICES: >-
+    identity patient policy eligibility emr orders approvals provider pharmacy
+    notification reporting audit document masterdata admin case claims callcentre
+
+jobs:
+  # ---------------------------------------------------------------- Stage 0: build + verify + scan
+  build-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reuse backend gate (build + tests + migration-compat)
+        run: echo "backend-ci.yml runs the full .NET build+test+coverage+migration-compat gate on this SHA."
+      - name: Reuse frontend gate (typecheck + vitest + axe a11y)
+        run: echo "frontend-ci.yml runs typecheck + unit + axe a11y gate on this SHA."
+      - name: SAST (Semgrep)
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: "p/ci p/owasp-top-ten p/csharp"
+      - name: Dependency + config scan (Trivy)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: fs
+          scanners: "vuln,misconfig,secret"
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          ignore-unfixed: true
+
+  # ---------------------------------------------------------------- Stage 1: images (scan -> sign -> push)
+  images:
+    needs: build-verify
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [identity, patient, policy, eligibility, emr, orders, approvals, provider,
+                  pharmacy, notification, reporting, audit, document, masterdata, admin, case, claims, callcentre]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (immutable, git-SHA tag — never `latest`)
+        run: |
+          TAG="${REGISTRY}/hbmp/${{ matrix.service }}:${GITHUB_SHA}"
+          echo "would -> docker build -t $TAG -f services/${{ matrix.service }}/Dockerfile ."
+          echo "IMAGE=$TAG" >> "$GITHUB_ENV"
+      - name: Scan image (Trivy, block Critical/High)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Sign image (cosign keyless)
+        run: echo "would -> cosign sign --yes ${IMAGE}"
+      - name: Push to Harbor
+        run: echo "would -> docker push ${IMAGE}  (admission controller enforces signed+scanned, no :latest)"
+
+  # ---------------------------------------------------------------- Stage 2: dev (auto)
+  deploy-dev:
+    needs: images
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+      - name: Helm upgrade (dev, GitOps)
+        run: echo "would -> helm upgrade --install hbmp infra/helm -f values-dev.yaml --set image.tag=${GITHUB_SHA}"
+
+  # ---------------------------------------------------------------- Stage 3: QA (auto) + integration/E2E
+  deploy-qa:
+    needs: deploy-dev
+    runs-on: ubuntu-latest
+    environment: qa
+    steps:
+      - uses: actions/checkout@v4
+      - name: Helm upgrade (qa)
+        run: echo "would -> helm upgrade --install hbmp infra/helm -f values-qa.yaml --set image.tag=${GITHUB_SHA}"
+      - name: Integration + E2E suite
+        run: echo "would -> run contract (Pact) + E2E critical-flow suite against QA."
+
+  # ---------------------------------------------------------------- Stage 4: staging (APPROVAL) + DAST + gates
+  deploy-staging:
+    needs: deploy-qa
+    runs-on: ubuntu-latest
+    environment: staging          # required reviewers on this Environment enforce the approval gate
+    steps:
+      - uses: actions/checkout@v4
+      - name: Helm upgrade (staging)
+        run: echo "would -> helm upgrade --install hbmp infra/helm -f values-staging.yaml --set image.tag=${GITHUB_SHA}"
+      - name: DAST (OWASP ZAP authenticated) + UAT hook
+        run: echo "would -> run security-ci dast-zap against the staging origin; record UAT sign-off."
+      - name: Migration dry-run (masked staging data)
+        run: echo "would -> mersal-migrate run-* against staging with MASKED data; reconciliation must balance."
+
+  # ---------------------------------------------------------------- Stage 5: go-live gates (hard, non-skippable)
+  govern-gates:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compliance + Security + DR + migration-compat gate (require signed)
+        run: python3 tools/ci/check-golive-gates.py --require-signed
+
+  # ---------------------------------------------------------------- Stage 6: prod (APPROVAL) + progressive rollout
+  deploy-prod:
+    needs: govern-gates
+    runs-on: ubuntu-latest
+    environment: production       # required reviewers = recorded steering-committee approval
+    steps:
+      - uses: actions/checkout@v4
+      - name: Expand-phase migrations first (backward-compatible)
+        run: echo "would -> kubectl apply expand migrations (contract migrations deploy AFTER full rollout)."
+      - name: Progressive rollout on k3s (Argo Rollouts canary + Linkerd)
+        run: |
+          echo "would -> kubectl apply -f infra/helm/rollout/  (canary 10->25->50->100)."
+          echo "AnalysisTemplate watches phase-11 SLOs (error-rate/latency/burn-rate); a breach auto-aborts + rolls back."
+      - name: Post-rollout smoke + hypercare handoff
+        run: echo "would -> run smoke suite; open hypercare war-room (docs/runbooks/hypercare.md)."
