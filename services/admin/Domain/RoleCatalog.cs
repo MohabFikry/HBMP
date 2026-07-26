@@ -13,6 +13,7 @@ public static class RoleCatalog
             ["beneficiary_mgmt"] = SensitivityTier.T2,
             ["finance"] = SensitivityTier.T2,
             ["network_team"] = SensitivityTier.T2,
+            ["claims_officer"] = SensitivityTier.T2,
             ["case_manager"] = SensitivityTier.T3,
             ["doctor"] = SensitivityTier.T3,
             ["nurse"] = SensitivityTier.T3,

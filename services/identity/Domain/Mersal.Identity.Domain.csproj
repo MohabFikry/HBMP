@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>Mersal.Identity.Domain</RootNamespace></PropertyGroup>
+  <ItemGroup>
+    <!-- IdentityUser<TKey> / IdentityRole<TKey> base types (no EF dependency in the domain layer). -->
+    <PackageReference Include="Microsoft.Extensions.Identity.Stores" />
+  </ItemGroup>
+</Project>
