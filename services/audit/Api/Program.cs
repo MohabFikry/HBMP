@@ -34,6 +34,7 @@ builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
 
 var app = builder.Build();
+app.UseHbmpTransportSecurity(); // HSTS + HTTPS redirect outside Development (16.5, H8)
 
 app.UseExceptionHandler();
 app.UseStatusCodePages();

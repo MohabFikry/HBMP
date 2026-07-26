@@ -1,11 +1,16 @@
 _format_version: "3.0"
 # Kong DB-less declarative config (Tier 1). Single public API origin at :8000 for the SPA.
-# Kong routes /api/v1/<area> to the owning service and applies a permissive dev CORS policy
+# Kong routes /api/v1/<area> to the owning service and applies a dev CORS policy
 # (SPA origin http://localhost:5173). Services ALSO fully validate the JWT (defense in depth,
-# libs/auth) — Kong here does routing + CORS + correlation-id, not auth.
+# libs/auth) — Kong here does routing + CORS + correlation-id.
 #
-# Routing is by the service's REAL path prefix (see each service's MapGroup). Where the frontend
-# HttpApiClient used a different prefix, the frontend path is being reconciled to these real routes.
+# Edge auth (global JWT/OIDC plugin validating the realm JWKS) is deferred to Phase 17.6, when the
+# issuer moves in-house (ASP.NET Identity + OpenIddict) and the JWKS URL is stable; until then services
+# remain the enforcement point. See docs/adr and phase-17-identity-openiddict.md.
+#
+# Routing is by the service's REAL path prefix (see each service's MapGroup). Sub-paths under
+# /api/v1/beneficiaries are owned by MULTIPLE services (patient, emr, eligibility, document); the
+# regex routes below out-prioritise the patient catch-all so each lands on its true owner.
 
 services:
   # --- masterdata-service: reference data (owns several bare /api/v1 resources) ---
@@ -20,9 +25,59 @@ services:
           - /api/v1/drugs
           - /api/v1/drug-interactions
           - /api/v1/allergens
+          - /api/v1/allergies
+          - /api/v1/examination-types
+          - /api/v1/search
         strip_path: false
 
-  # --- patient-service: beneficiary registration + identifiers ---
+  # --- emr-service: encounters, appointments, clinical docs, queue ---
+  # The /beneficiaries/{id}/allergies + /medication-history sub-resources belong to emr, NOT patient.
+  - name: emr-service
+    url: http://emr-service:8080
+    routes:
+      - name: emr-beneficiary-clinical-routes
+        paths:
+          - "~/api/v1/beneficiaries/[^/]+/allergies$"
+          - "~/api/v1/beneficiaries/[^/]+/allergies/.*"
+          - "~/api/v1/beneficiaries/[^/]+/medication-history$"
+          - "~/api/v1/beneficiaries/[^/]+/medication-history/.*"
+        regex_priority: 200
+        strip_path: false
+      - name: emr-routes
+        paths:
+          - /api/v1/encounters
+          - /api/v1/appointments
+          - /api/v1/appointment-slots
+          - /api/v1/queue
+          - /api/v1/queues
+          - /api/v1/treating-relationship
+        strip_path: false
+
+  # --- eligibility-service: reception search + eligibility check + coverage-summary card ---
+  - name: eligibility-service
+    url: http://eligibility-service:8080
+    routes:
+      - name: eligibility-beneficiary-coverage-route
+        paths:
+          - "~/api/v1/beneficiaries/[^/]+/coverage-summary$"
+        regex_priority: 200
+        strip_path: false
+      - name: eligibility-routes
+        paths: ["/api/v1/eligibility", "/api/v1/reception"]
+        strip_path: false
+
+  # --- document-service: beneficiary documents (upload/list under /beneficiaries/{id}/documents) ---
+  - name: document-service
+    url: http://document-service:8080
+    routes:
+      - name: document-beneficiary-routes
+        paths:
+          - "~/api/v1/beneficiaries/[^/]+/documents$"
+          - "~/api/v1/beneficiaries/[^/]+/documents/.*"
+        regex_priority: 200
+        strip_path: false
+
+  # --- patient-service: beneficiary registration + identifiers (catch-all for /beneficiaries) ---
   - name: patient-service
     url: http://patient-service:8080
     routes:
@@ -38,42 +93,29 @@ services:
         paths: ["/api/v1/policies", "/api/v1/coverages", "/api/v1/coverage-limits"]
         strip_path: false
 
-  # --- eligibility-service: reception search + eligibility check ---
-  - name: eligibility-service
-    url: http://eligibility-service:8080
-    routes:
-      - name: eligibility-routes
-        paths: ["/api/v1/eligibility", "/api/v1/reception"]
-        strip_path: false
-
-  # --- emr-service: encounters, appointments, clinical docs, queue ---
-  - name: emr-service
-    url: http://emr-service:8080
-    routes:
-      - name: emr-routes
-        paths:
-          - /api/v1/encounters
-          - /api/v1/appointments
-          - /api/v1/appointment-slots
-          - /api/v1/queue
-          - /api/v1/queues
-          - /api/v1/treating-relationship
-        strip_path: false
-
-  # --- provider-service: provider network + contracts ---
+  # --- provider-service: provider network + contracts + branches + practitioners + specialties ---
   - name: provider-service
     url: http://provider-service:8080
     routes:
       - name: provider-routes
-        paths: ["/api/v1/providers", "/api/v1/contracts"]
+        paths:
+          - /api/v1/providers
+          - /api/v1/contracts
+          - /api/v1/branches
+          - /api/v1/practitioners
+          - /api/v1/specialties
         strip_path: false
 
-  # --- orders-service: investigation orders + lab/imaging fulfillment ---
+  # --- orders-service: investigation orders + lab/imaging fulfillment + report-access ---
   - name: orders-service
     url: http://orders-service:8080
     routes:
       - name: orders-routes
-        paths: ["/api/v1/investigation-orders"]
+        paths:
+          - /api/v1/investigation-orders
+          - /api/v1/report-access-requests
+          - /api/v1/report-access-grants
+          - /api/v1/report-access
         strip_path: false
 
   # --- pharmacy-service: prescriptions + dispensing + referrals ---
@@ -108,12 +150,12 @@ services:
         paths: ["/api/v1/reports", "/api/v1/dashboards"]
         strip_path: false
 
-  # --- admin-service: platform administration ---
+  # --- admin-service: platform administration + caller's own branch context (/me) ---
   - name: admin-service
     url: http://admin-service:8080
     routes:
       - name: admin-routes
-        paths: ["/api/v1/admin"]
+        paths: ["/api/v1/admin", "/api/v1/me"]
         strip_path: false
 
   # --- case-service: case management + beneficiary-360 (Phase 10.1) ---
@@ -148,23 +190,17 @@ services:
         paths: ["/api/v1/call-interactions", "/api/v1/call-centre"]
         strip_path: false
 
-  # --- hello-service: phase-0.5 vertical slice ---
-  - name: hello-service
-    url: http://hello-service:8080
-    routes:
-      - name: hello-routes
-        paths: ["/api/v1/hello"]
-        strip_path: false
-
 plugins:
   # Dev CORS: allow the Vite SPA origin to call the API with a bearer token.
+  # credentials:false — the SPA sends the token in the Authorization header, not cookies, so we do not
+  # need (and must not advertise) credentialed CORS. If-Match/ETag support optimistic concurrency.
   - name: cors
     config:
       origins: ["http://localhost:5173", "http://127.0.0.1:5173"]
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-      headers: ["Authorization", "Content-Type", "Idempotency-Key", "Accept-Language", "X-Correlation-Id"]
-      exposed_headers: ["X-Correlation-Id"]
-      credentials: true
+      headers: ["Authorization", "Content-Type", "Idempotency-Key", "Accept-Language", "X-Correlation-Id", "If-Match"]
+      exposed_headers: ["X-Correlation-Id", "ETag"]
+      credentials: false
       max_age: 3600
   # Global correlation IDs (W3C-style) on every request.
   - name: correlation-id

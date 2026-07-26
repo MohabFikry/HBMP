@@ -37,7 +37,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: postgres
-    ports: ["55432:5432"]  # 55432 on host (local PG16 owns 5432); services use hostname "postgres"
+    ports: ["127.0.0.1:55432:5432"]  # 55432 on host (local PG16 owns 5432); services use hostname "postgres"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./config/postgres-init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
@@ -65,7 +65,7 @@ services:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
       KC_HEALTH_ENABLED: "true"
-    ports: ["8080:8080"]
+    ports: ["127.0.0.1:8080:8080"]
     volumes:
       # Realm-as-code — see ../keycloak/realm-mersal.json (mersal realm, hbmp-api + hbmp-web).
       - ../keycloak/realm-mersal.json:/opt/keycloak/data/import/realm-mersal.json:ro
@@ -144,7 +144,7 @@ services:
     image: valkey/valkey:8
     <<: *restart
     command: ["valkey-server", "--requirepass", "${VALKEY_PASSWORD}", "--save", "60", "1"]
-    ports: ["6379:6379"]
+    ports: ["127.0.0.1:6379:6379"]
     healthcheck:
       test: ["CMD", "valkey-cli", "-a", "${VALKEY_PASSWORD}", "ping"]
       interval: 15s
@@ -161,12 +161,13 @@ services:
       bootstrap.memory_lock: "true"
       OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
       OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_ADMIN_PASSWORD}
-      # STARTER ONLY: disable the security plugin for first boot. TURN THIS OFF (=false) before real data.
-      DISABLE_SECURITY_PLUGIN: "${OPENSEARCH_DISABLE_SECURITY:-true}"
+      # Secure by default: the security plugin stays ON unless a dev explicitly opts out via
+      # OPENSEARCH_DISABLE_SECURITY=true in their (gitignored) .env. Never disable with real data.
+      DISABLE_SECURITY_PLUGIN: "${OPENSEARCH_DISABLE_SECURITY:-false}"
     ulimits:
       memlock: { soft: -1, hard: -1 }
       nofile: { soft: 65536, hard: 65536 }
-    ports: ["9200:9200"]
+    ports: ["127.0.0.1:9200:9200"]
     volumes:
       - opensearchdata:/usr/share/opensearch/data
     networks: [hbmp]
@@ -181,7 +182,7 @@ services:
     environment:
       BAO_DEV_ROOT_TOKEN_ID: ${OPENBAO_ROOT_TOKEN}
       BAO_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
-    ports: ["8200:8200"]
+    ports: ["127.0.0.1:8200:8200"]
     volumes:
       - baodata:/openbao/file
     networks: [hbmp]
@@ -190,7 +191,7 @@ services:
   clamav:
     image: clamav/clamav:latest
     <<: *restart
-    ports: ["3310:3310"]
+    ports: ["127.0.0.1:3310:3310"]
     healthcheck:
       test: ["CMD", "/usr/local/bin/clamdcheck.sh"]
       interval: 60s
@@ -204,7 +205,7 @@ services:
     image: prom/prometheus:latest
     <<: *restart
     command: ["--config.file=/etc/prometheus/prometheus.yml"]
-    ports: ["9090:9090"]
+    ports: ["127.0.0.1:9090:9090"]
     volumes:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./config/rules:/etc/prometheus/rules:ro
@@ -215,7 +216,7 @@ services:
     image: prom/alertmanager:latest
     <<: *restart
     command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
-    ports: ["9093:9093"]
+    ports: ["127.0.0.1:9093:9093"]
     volumes:
       - ./config/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     networks: [hbmp]
@@ -224,7 +225,7 @@ services:
     image: grafana/loki:3.1.0
     <<: *restart
     command: ["-config.file=/etc/loki/local-config.yaml"]
-    ports: ["3100:3100"]
+    ports: ["127.0.0.1:3100:3100"]
     volumes:
       - lokidata:/loki
     networks: [hbmp]
@@ -247,7 +248,7 @@ services:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
-    ports: ["3000:3000"]
+    ports: ["127.0.0.1:3000:3000"]
     volumes:
       - grafanadata:/var/lib/grafana
       - ./config/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
@@ -286,25 +287,8 @@ services:
       keycloak: { condition: service_started }
     networks: [hbmp]
 
-  # --- hello-service (0.5): the vertical-slice proof (auth+authz+audit+events+OTel). ---
-  hello-service:
-    build:
-      context: ../..
-      dockerfile: services/hello/Dockerfile
-    <<: *restart
-    environment:
-      ASPNETCORE_ENVIRONMENT: Development
-      Auth__Authority: "http://keycloak:8080/realms/mersal"
-      Auth__Audience: "hbmp-api"
-      Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
-      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8090:8080"]   # also reachable via Kong at :8000/api/v1/hello
-    depends_on:
-      keycloak: { condition: service_started }
-      rabbitmq: { condition: service_healthy }
-    networks: [hbmp]
+  # hello-service (phase-0.5 vertical-slice proof) removed from the prod topology in 16.5 — no demo
+  # endpoint in a deployable stack. Source retained under services/hello for reference/tests only.
 
   # --- masterdata-service (0b): reference data (ICD/CPT/ATC/drugs) + validation APIs. ---
   masterdata-service:
@@ -320,7 +304,7 @@ services:
       Auth__RequireHttpsMetadata: "false"
       Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8091:8080"]
+    ports: ["127.0.0.1:8091:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_started }
@@ -341,7 +325,7 @@ services:
       Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8092:8080"]
+    ports: ["127.0.0.1:8092:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_started }
@@ -360,7 +344,7 @@ services:
       Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8093:8080"]
+    ports: ["127.0.0.1:8093:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_started }
@@ -383,7 +367,7 @@ services:
       Blob__SecretKey: "${MINIO_ROOT_PASSWORD}"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8094:8080"]
+    ports: ["127.0.0.1:8094:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_started }
@@ -404,7 +388,7 @@ services:
       Cache__Valkey: "valkey:6379,password=${VALKEY_PASSWORD}"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8095:8080"]
+    ports: ["127.0.0.1:8095:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_started }
@@ -426,7 +410,7 @@ services:
       Eligibility__BaseUrl: "http://eligibility-service:8080"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8096:8080"]
+    ports: ["127.0.0.1:8096:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_started }
@@ -447,7 +431,7 @@ services:
       Masterdata__BaseUrl: "http://masterdata-service:8080"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8097:8080"]
+    ports: ["127.0.0.1:8097:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_started }
@@ -467,7 +451,7 @@ services:
       Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8098:8080"]
+    ports: ["127.0.0.1:8098:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_started }
@@ -487,7 +471,7 @@ services:
       Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8099:8080"]
+    ports: ["127.0.0.1:8099:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_started }
@@ -507,7 +491,7 @@ services:
       Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8100:8080"]
+    ports: ["127.0.0.1:8100:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_started }
@@ -527,7 +511,7 @@ services:
       Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8101:8080"]
+    ports: ["127.0.0.1:8101:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_started }
@@ -547,7 +531,7 @@ services:
       Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8102:8080"]
+    ports: ["127.0.0.1:8102:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_started }
@@ -567,7 +551,7 @@ services:
       Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8103:8080"]
+    ports: ["127.0.0.1:8103:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_started }
@@ -587,7 +571,7 @@ services:
       Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8104:8080"]
+    ports: ["127.0.0.1:8104:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_started }
@@ -607,7 +591,7 @@ services:
       Auth__ValidIssuers__0: "http://localhost:8080/realms/mersal"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8105:8080"]
+    ports: ["127.0.0.1:8105:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_started }
@@ -628,7 +612,7 @@ services:
       Siblings__Provider: "http://provider-service:8080"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8106:8080"]
+    ports: ["127.0.0.1:8106:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_started }
@@ -652,7 +636,7 @@ services:
       Siblings__Pharmacy: "http://pharmacy-service:8080"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
-    ports: ["8107:8080"]
+    ports: ["127.0.0.1:8107:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_started }

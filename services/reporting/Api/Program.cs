@@ -34,6 +34,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
+app.UseHbmpTransportSecurity(); // HSTS + HTTPS redirect outside Development (16.5, H8)
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseAuthentication();
