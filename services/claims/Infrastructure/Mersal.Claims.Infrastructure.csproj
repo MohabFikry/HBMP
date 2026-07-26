@@ -2,6 +2,7 @@
   <PropertyGroup><RootNamespace>Mersal.Claims.Infrastructure</RootNamespace></PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Claims.Domain.csproj" />
+    <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
     <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" />
   </ItemGroup>
   <ItemGroup>

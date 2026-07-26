@@ -15,7 +15,8 @@ builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("orders-service");
 // Orders authorizes with the order overlay: treating-relationship on create/read (+ provider PO for phase-5 reads).
 builder.Services.AddHbmpAuthorization(OrdersPolicies.Bundle());
-builder.Services.AddHbmpEvents(builder.Configuration, useInMemory: true);
+builder.Services.AddHbmpEvents(builder.Configuration);
+builder.Services.AddHbmpDurableOutbox<OrdersDbContext>();
 builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddOrdersInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);

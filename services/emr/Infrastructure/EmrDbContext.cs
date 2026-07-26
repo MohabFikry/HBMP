@@ -1,5 +1,6 @@
 using Mersal.Emr.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Events;
 
 namespace Mersal.Emr.Infrastructure;
 
@@ -22,6 +23,7 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.AddOutbox("emr");
         b.HasDefaultSchema(Schema);
 
         b.Entity<Appointment>(e =>

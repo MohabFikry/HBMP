@@ -22,7 +22,8 @@ builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("emr-service");
 // EMR authorizes with the clinical overlay: treating-relationship on all clinical resources (phase 4.1).
 builder.Services.AddHbmpAuthorization(EmrPolicies.Bundle());
-builder.Services.AddHbmpEvents(builder.Configuration, useInMemory: true);
+builder.Services.AddHbmpEvents(builder.Configuration);
+builder.Services.AddHbmpDurableOutbox<EmrDbContext>();
 builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddEmrInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);

@@ -30,7 +30,11 @@ public sealed class CallCentreFactory : WebApplicationFactory<Program>
     {
         builder.UseEnvironment("Development");
         builder.ConfigureAppConfiguration((_, cfg) =>
-            cfg.AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:CallCentre"] = Db }));
+            cfg.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:CallCentre"] = Db,
+                ["Events:UseInMemoryOutbox"] = "true", // tests assert on the in-memory outbox (16.2)
+            }));
         builder.ConfigureTestServices(services =>
         {
             services.AddAuthentication(TestAuthHandler.SchemeName)

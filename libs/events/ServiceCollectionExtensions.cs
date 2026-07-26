@@ -1,4 +1,5 @@
 using Mersal.Audit.Client;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -6,30 +7,51 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Mersal.Events;
 
 /// <summary>
-/// Wires the transactional outbox + relay. With <paramref name="useInMemory"/> (Tier 1 dev / tests)
-/// an in-memory outbox is used; otherwise a service registers its EF/DB-backed IOutbox + IOutboxReader
-/// and this adds the RabbitMQ publisher + relay. Also binds the audit client's durable outbox
+/// Wires the transactional outbox + relay. The outbox is <b>durable by default</b> (EF-backed
+/// <see cref="EfOutbox"/>, C1): a service registers it with <see cref="AddHbmpDurableOutbox{TContext}"/>
+/// alongside its DbContext. The process-local <see cref="InMemoryOutbox"/> is used ONLY when
+/// <c>Events:UseInMemoryOutbox=true</c> (appsettings.Development.json / tests) or the explicit
+/// <paramref name="useInMemory"/> override. Also binds the audit client's durable outbox
 /// (OutboxAuditSink), closing the 0.3 placeholder.
 /// </summary>
 public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddHbmpEvents(
-        this IServiceCollection services, IConfiguration configuration, bool useInMemory = false)
+        this IServiceCollection services, IConfiguration configuration, bool? useInMemory = null)
     {
         services.Configure<EventsOptions>(configuration.GetSection(EventsOptions.SectionName));
         services.TryAddSingleton<IProcessedEventStore, InMemoryProcessedEventStore>();
         services.TryAddScoped<IdempotentConsumer>();
 
-        if (useInMemory)
+        // Default = durable. In-memory only when explicitly opted in (dev/test), never in production.
+        var inMemory = useInMemory ?? configuration.GetValue<bool>($"{EventsOptions.SectionName}:UseInMemoryOutbox");
+        if (inMemory)
         {
             services.TryAddSingleton<InMemoryOutbox>();
             services.TryAddSingleton<IOutbox>(sp => sp.GetRequiredService<InMemoryOutbox>());
             services.TryAddSingleton<IOutboxReader>(sp => sp.GetRequiredService<InMemoryOutbox>());
         }
+        // else: durable — the service must call AddHbmpDurableOutbox<TContext>() to bind EfOutbox to its context.
 
-        // Route audit emits through the durable outbox (replaces the in-memory audit placeholder).
+        // Route audit emits through the transactional outbox (replaces the in-memory audit placeholder).
         services.Replace(ServiceDescriptor.Scoped<IAuditOutbox, OutboxAuditSink>());
 
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the durable EF outbox bound to the service's <typeparamref name="TContext"/> — the event
+    /// row is written through the same context the handler uses. No-op registration is skipped when an
+    /// in-memory outbox is already registered (dev/test), so both paths coexist. Pair with
+    /// <c>modelBuilder.AddOutbox(schema)</c> in the context's OnModelCreating + the outbox migration.
+    /// </summary>
+    public static IServiceCollection AddHbmpDurableOutbox<TContext>(this IServiceCollection services)
+        where TContext : DbContext
+    {
+        services.TryAddScoped<IOutbox>(sp => new EfOutbox(sp.GetRequiredService<TContext>()));
+        services.TryAddScoped<IOutboxReader>(sp => new EfOutboxReader(
+            sp.GetRequiredService<TContext>(),
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<EventsOptions>>()));
         return services;
     }
 

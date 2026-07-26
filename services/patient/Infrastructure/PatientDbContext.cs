@@ -1,5 +1,6 @@
 using Mersal.Patient.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Events;
 
 namespace Mersal.Patient.Infrastructure;
 
@@ -17,6 +18,7 @@ public sealed class PatientDbContext(DbContextOptions<PatientDbContext> options)
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.AddOutbox("patient");
         b.HasDefaultSchema(Schema);
 
         b.Entity<Registration>(e =>

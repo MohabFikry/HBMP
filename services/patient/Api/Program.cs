@@ -16,7 +16,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("patient-service");
 builder.Services.AddHbmpAuthorization();
-builder.Services.AddHbmpEvents(builder.Configuration, useInMemory: true);
+builder.Services.AddHbmpEvents(builder.Configuration);
+builder.Services.AddHbmpDurableOutbox<PatientDbContext>();
 builder.Services.AddHbmpOutboxRelay();   // relay staged events (incl. audit) to RabbitMQ
 builder.Services.AddPatientInfrastructure(builder.Configuration);
 builder.Services.AddScoped<BeneficiaryRegistrar>();

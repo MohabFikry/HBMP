@@ -1,5 +1,6 @@
 using Mersal.Pharmacy.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Events;
 
 namespace Mersal.Pharmacy.Infrastructure;
 
@@ -17,6 +18,7 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.AddOutbox("pharmacy");
         b.HasDefaultSchema(Schema);
 
         b.Entity<Prescription>(e =>

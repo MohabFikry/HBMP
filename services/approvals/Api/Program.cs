@@ -20,7 +20,8 @@ builder.Services.AddHbmpAuditClient("approvals-service");
 // Approvals authorizes with the approvals overlay: tenant-scoped oversight reads (no treating relationship);
 // review/decision/break-glass actions are flagged sensitive → PHI-read/decision audit.
 builder.Services.AddHbmpAuthorization(ApprovalsPolicies.Bundle());
-builder.Services.AddHbmpEvents(builder.Configuration, useInMemory: true);
+builder.Services.AddHbmpEvents(builder.Configuration);
+builder.Services.AddHbmpDurableOutbox<ApprovalsDbContext>();
 builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddApprovalsInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);

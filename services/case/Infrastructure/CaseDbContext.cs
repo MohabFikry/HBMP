@@ -1,5 +1,6 @@
 using Mersal.Case.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Events;
 
 namespace Mersal.Case.Infrastructure;
 
@@ -18,6 +19,7 @@ public sealed class CaseDbContext(DbContextOptions<CaseDbContext> options) : DbC
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.AddOutbox("case");
         b.HasDefaultSchema(Schema);
 
         b.Entity<CaseFile>(e =>

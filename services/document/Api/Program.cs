@@ -15,7 +15,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("document-service");
 builder.Services.AddHbmpAuthorization();
-builder.Services.AddHbmpEvents(builder.Configuration, useInMemory: true);
+builder.Services.AddHbmpEvents(builder.Configuration);
+builder.Services.AddHbmpDurableOutbox<DocumentDbContext>();
 builder.Services.AddDocumentInfrastructure(builder.Configuration);
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("document-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())

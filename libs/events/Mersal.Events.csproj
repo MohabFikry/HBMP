@@ -12,6 +12,8 @@
   <ItemGroup>
     <PackageReference Include="RabbitMQ.Client" />
     <PackageReference Include="CloudNative.CloudEvents.SystemTextJson" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
   </ItemGroup>
   <ItemGroup>
     <Compile Remove="Tests/**/*.cs" />

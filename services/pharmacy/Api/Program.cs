@@ -19,7 +19,8 @@ builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("pharmacy-service");
 // Pharmacy authorizes with the pharmacy overlay: treating-relationship on prescribe/refer (+ provider PO phase-6).
 builder.Services.AddHbmpAuthorization(PharmacyPolicies.Bundle());
-builder.Services.AddHbmpEvents(builder.Configuration, useInMemory: true);
+builder.Services.AddHbmpEvents(builder.Configuration);
+builder.Services.AddHbmpDurableOutbox<PharmacyDbContext>();
 builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddPharmacyInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);

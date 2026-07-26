@@ -1,5 +1,6 @@
 using Mersal.Claims.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Events;
 
 namespace Mersal.Claims.Infrastructure;
 
@@ -28,6 +29,7 @@ public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options) :
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.AddOutbox("claims");
         b.HasDefaultSchema(Schema);
 
         b.Entity<Claim>(e =>

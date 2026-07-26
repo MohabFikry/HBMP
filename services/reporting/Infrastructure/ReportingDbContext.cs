@@ -1,5 +1,6 @@
 using Mersal.Reporting.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Events;
 
 namespace Mersal.Reporting.Infrastructure;
 
@@ -20,6 +21,7 @@ public sealed class ReportingDbContext(DbContextOptions<ReportingDbContext> opti
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.AddOutbox("reporting");
         b.HasDefaultSchema(Schema);
 
         b.Entity<AuthorizationFact>(e =>

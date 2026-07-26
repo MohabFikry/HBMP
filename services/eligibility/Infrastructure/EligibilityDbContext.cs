@@ -1,3 +1,4 @@
+using Mersal.Events;
 using Microsoft.EntityFrameworkCore;
 
 namespace Mersal.Eligibility.Infrastructure;
@@ -14,6 +15,7 @@ public sealed class EligibilityDbContext(DbContextOptions<EligibilityDbContext> 
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.AddOutbox("eligibility");
         b.HasDefaultSchema(Schema);
 
         b.Entity<MemberProjection>(e =>

@@ -1,5 +1,6 @@
 using Mersal.Approvals.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Events;
 
 namespace Mersal.Approvals.Infrastructure;
 
@@ -16,6 +17,7 @@ public sealed class ApprovalsDbContext(DbContextOptions<ApprovalsDbContext> opti
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.AddOutbox("approvals");
         b.HasDefaultSchema(Schema);
 
         b.Entity<Authorization>(e =>

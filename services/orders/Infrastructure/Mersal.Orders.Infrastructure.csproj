@@ -2,6 +2,7 @@
   <PropertyGroup><RootNamespace>Mersal.Orders.Infrastructure</RootNamespace></PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Orders.Domain.csproj" />
+    <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" />

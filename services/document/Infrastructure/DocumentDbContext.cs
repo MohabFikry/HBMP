@@ -1,5 +1,6 @@
 using Mersal.Document.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Events;
 
 namespace Mersal.Document.Infrastructure;
 
@@ -11,6 +12,7 @@ public sealed class DocumentDbContext(DbContextOptions<DocumentDbContext> option
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.AddOutbox("document");
         b.HasDefaultSchema(Schema);
         b.Entity<Document.Domain.Document>(e =>
         {

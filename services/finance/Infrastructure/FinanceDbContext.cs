@@ -1,5 +1,6 @@
 using Mersal.Finance.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Events;
 
 namespace Mersal.Finance.Infrastructure;
 
@@ -18,6 +19,7 @@ public sealed class FinanceDbContext(DbContextOptions<FinanceDbContext> options)
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.AddOutbox("finance");
         b.HasDefaultSchema(Schema);
 
         b.Entity<UtilizationFact>(e =>

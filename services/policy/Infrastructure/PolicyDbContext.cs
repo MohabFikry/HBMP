@@ -1,6 +1,7 @@
 using Mersal.Policy.Domain;
 using PolicyEntity = Mersal.Policy.Domain.Policy;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Events;
 
 namespace Mersal.Policy.Infrastructure;
 
@@ -15,6 +16,7 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.AddOutbox("policy");
         b.HasDefaultSchema(Schema);
 
         b.Entity<PolicyEntity>(e =>

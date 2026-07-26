@@ -83,7 +83,7 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 11 | Hardening/NFR | 11.2 STRIDE + CI security gates + OWASP API Top10 + sign-off | ☑ | c9d20c7 |
 | 11 | Hardening/NFR | 11.3 Fleet metrics + dashboards/alerts + DR/restore + runbooks | ☑ | eb9c339 |
 | 16 | Audit Remediation | 16.1 Secrets purge + doc reconciliation | ☐ | |
-| 16 | Audit Remediation | 16.2 Durable transactional outbox (C1) | ☐ | |
+| 16 | Audit Remediation | 16.2 Durable transactional outbox (C1) | ☑ | EfOutbox + FOR UPDATE SKIP LOCKED reader + `outbox_message` per schema (16 svcs, live-applied) + env-driven default-durable + ADR-0013; 726 tests green |
 | 16 | Audit Remediation | 16.3 Admin authz middleware + MFA + idempotency (C3) | ☐ | |
 | 16 | Audit Remediation | 16.4 RLS everywhere as `hbmp_app` (H1) | ☐ | |
 | 16 | Audit Remediation | 16.5 Kong JWT + missing routes + transport hardening (H3/H8) | ☐ | |

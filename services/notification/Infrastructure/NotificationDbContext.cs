@@ -1,5 +1,6 @@
 using Mersal.Notification.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Events;
 
 namespace Mersal.Notification.Infrastructure;
 
@@ -15,6 +16,7 @@ public sealed class NotificationDbContext(DbContextOptions<NotificationDbContext
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.AddOutbox("notification");
         b.HasDefaultSchema(Schema);
 
         b.Entity<Domain.Notification>(e =>

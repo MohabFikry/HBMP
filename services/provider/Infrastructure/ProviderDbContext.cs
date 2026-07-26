@@ -1,6 +1,7 @@
 using Mersal.Provider.Domain;
 using Microsoft.EntityFrameworkCore;
 using ProviderEntity = Mersal.Provider.Domain.Provider;
+using Mersal.Events;
 
 namespace Mersal.Provider.Infrastructure;
 
@@ -22,6 +23,7 @@ public sealed class ProviderDbContext(DbContextOptions<ProviderDbContext> option
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.AddOutbox("provider");
         b.HasDefaultSchema(Schema);
 
         b.Entity<ProviderEntity>(e =>

@@ -20,7 +20,8 @@ builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("provider-service");
 // Provider-service authorizes with the platform bundle plus the provider-ownership rules (2b.3).
 builder.Services.AddHbmpAuthorization(ProviderPolicies.Bundle());
-builder.Services.AddHbmpEvents(builder.Configuration, useInMemory: true);
+builder.Services.AddHbmpEvents(builder.Configuration);
+builder.Services.AddHbmpDurableOutbox<ProviderDbContext>();
 builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddProviderInfrastructure(builder.Configuration);
 builder.Services.AddHttpContextAccessor();

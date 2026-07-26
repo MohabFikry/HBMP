@@ -15,7 +15,8 @@ builder.Services.AddHbmpAuditClient("notification-service");
 // notification-service authorizes with the notification overlay: self-service inbox reads (row-filtered by
 // recipient) + the system fan-out seam. Bodies carry no clinical payload; sensitive-context sends are audited.
 builder.Services.AddHbmpAuthorization(NotificationPolicies.Bundle());
-builder.Services.AddHbmpEvents(builder.Configuration, useInMemory: true);
+builder.Services.AddHbmpEvents(builder.Configuration);
+builder.Services.AddHbmpDurableOutbox<NotificationDbContext>();
 builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddNotificationInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);

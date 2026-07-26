@@ -10,6 +10,13 @@ public sealed class EventsOptions
     public string RabbitUri { get; set; } = "amqp://guest:guest@rabbitmq:5672";
     public int RelayBatchSize { get; set; } = 50;
     public int RelayIntervalMs { get; set; } = 1000;
+    /// <summary>Poison-message cap: a row that fails this many publish attempts is quarantined (skipped).</summary>
+    public int MaxAttempts { get; set; } = 8;
+    /// <summary>
+    /// Dev/test escape hatch: use the process-local <see cref="InMemoryOutbox"/> instead of the durable
+    /// EF outbox. Default false = durable (C1). Set true only in appsettings.Development.json / tests.
+    /// </summary>
+    public bool UseInMemoryOutbox { get; set; }
 }
 
 /// <summary>Publishes a relayed outbox message to a durable RabbitMQ queue (ordered domain events).</summary>

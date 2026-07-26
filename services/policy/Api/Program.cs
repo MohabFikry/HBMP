@@ -17,7 +17,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("policy-service");
 builder.Services.AddHbmpAuthorization();
-builder.Services.AddHbmpEvents(builder.Configuration, useInMemory: true);
+builder.Services.AddHbmpEvents(builder.Configuration);
+builder.Services.AddHbmpDurableOutbox<PolicyDbContext>();
 builder.Services.AddHbmpOutboxRelay();   // relay staged events (incl. audit) to RabbitMQ
 builder.Services.AddPolicyInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);

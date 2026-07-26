@@ -15,7 +15,8 @@ builder.Services.AddHbmpAuditClient("reporting-service");
 // reporting-service authorizes with the reporting overlay: zone-split reads (operational / clinical-coded /
 // financial) so finance ≠ diagnosis is enforced in authz; a system projection seam; audited exports.
 builder.Services.AddHbmpAuthorization(ReportingPolicies.Bundle());
-builder.Services.AddHbmpEvents(builder.Configuration, useInMemory: true);
+builder.Services.AddHbmpEvents(builder.Configuration);
+builder.Services.AddHbmpDurableOutbox<ReportingDbContext>();
 builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddReportingInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);

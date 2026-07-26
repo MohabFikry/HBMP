@@ -15,7 +15,8 @@ builder.Services.AddHbmpAuditClient("admin-service");
 // The admin overlay: Org Admin (tenant:own) + Super Admin (global) administer access, not content. Every admin
 // action is Sensitive → the allow is audited (grants, revocations, config, review decisions, access-matrix reads).
 builder.Services.AddHbmpAuthorization(AdminPolicies.Bundle());
-builder.Services.AddHbmpEvents(builder.Configuration, useInMemory: true);
+builder.Services.AddHbmpEvents(builder.Configuration);
+builder.Services.AddHbmpDurableOutbox<AdminDbContext>();
 builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddAdminInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mersal.CallCentre.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Events;
 
 namespace Mersal.CallCentre.Infrastructure;
 
@@ -20,6 +21,7 @@ public sealed class CallCentreDbContext(DbContextOptions<CallCentreDbContext> op
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.AddOutbox("callcentre");
         b.HasDefaultSchema(Schema);
 
         b.Entity<CallInteraction>(e =>

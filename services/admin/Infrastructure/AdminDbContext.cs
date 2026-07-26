@@ -1,5 +1,6 @@
 using Mersal.Admin.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Events;
 
 namespace Mersal.Admin.Infrastructure;
 
@@ -28,6 +29,7 @@ public sealed class AdminDbContext(DbContextOptions<AdminDbContext> options) : D
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.AddOutbox("admin");
         b.HasDefaultSchema(Schema);
 
         b.Entity<RoleBinding>(e =>

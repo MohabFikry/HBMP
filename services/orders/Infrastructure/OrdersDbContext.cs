@@ -1,5 +1,6 @@
 using Mersal.Orders.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Events;
 
 namespace Mersal.Orders.Infrastructure;
 
@@ -17,6 +18,7 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.AddOutbox("orders");
         b.HasDefaultSchema(Schema);
 
         b.Entity<InvestigationOrder>(e =>
