@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button, Card, Icon, InputField, StatusChip, useTheme } from "@mersal/design-system";
 import { L } from "../i18n/strings";
 import { API_BASE } from "../config";
@@ -36,6 +36,7 @@ export interface CcApi {
   search(q: string): Promise<CcMatch[]>;
   summary(beneficiaryId: string, interactionId: string): Promise<Cc360 | null>;
   book(interactionId: string, beneficiaryId: string): Promise<"ok" | "conflict" | "error">;
+  reschedule(interactionId: string, appointmentId: string): Promise<"ok" | "conflict" | "error">;
   cancel(interactionId: string, appointmentId: string, reasonCode: string): Promise<"ok" | "error">;
   close(interactionId: string, outcome: string, notes: string): Promise<void>;
   history(): Promise<CcCallRow[]>;
@@ -98,6 +99,13 @@ export function createHttpCcApi(): CcApi {
     },
     async book(interactionId, beneficiaryId) {
       const r = await req("POST", "/call-centre/appointments", { interactionId, beneficiaryId, slotId: crypto.randomUUID(), appointmentType: "Consultation" });
+      if (r.status === 409) return "conflict";
+      return r.status >= 200 && r.status < 300 ? "ok" : "error";
+    },
+    async reschedule(interactionId, appointmentId) {
+      // Slot discovery is not yet surfaced in this workspace, so — like book — a placeholder slot id is sent;
+      // the emr engine holds the no-double-book invariant and returns 409 on a taken slot.
+      const r = await req("POST", `/call-centre/appointments/${appointmentId}/reschedule`, { interactionId, newSlotId: crypto.randomUUID() });
       if (r.status === 409) return "conflict";
       return r.status >= 200 && r.status < 300 ? "ok" : "error";
     },
@@ -194,6 +202,12 @@ export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }
     setAnnounce(r === "ok" ? t(L.ccBooked) : t(L.ccFailed));
     setCancelFor(null);
   }, [api, interactionId, cancelReason, t]);
+
+  const reschedule = useCallback(async (appointmentId: string) => {
+    if (!interactionId) return;
+    const r = await api.reschedule(interactionId, appointmentId);
+    setAnnounce(r === "ok" ? t(L.ccRescheduled) : r === "conflict" ? t(L.ccSlotTaken) : t(L.ccFailed));
+  }, [api, interactionId, t]);
 
   const isVerified = !!selected && verifiedFor === selected.beneficiaryId;
 
@@ -302,6 +316,9 @@ export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }
                     {summary.appointments.map((a) => (
                       <li key={a.appointmentId}>
                         <span>{a.appointmentType} · {new Date(a.scheduledStart).toLocaleDateString()} · {a.branchName ?? "—"} · {a.doctorName ?? "—"}{a.specialty ? ` (${a.specialty})` : ""}</span>
+                        {a.canReschedule && (
+                          <Button variant="ghost" onClick={() => reschedule(a.appointmentId)}>{t(L.ccReschedule)}</Button>
+                        )}
                         {a.canCancel && (
                           cancelFor === a.appointmentId ? (
                             <span className="cc-cancel">
@@ -357,12 +374,30 @@ export function CallHistory({ api = createHttpCcApi() }: { api?: CcApi }) {
   const { lang } = useTheme();
   const t = (l: { en: string; ar: string }) => l[lang];
   const [rows, setRows] = useState<CcCallRow[] | null>(null);
-  if (rows === null) void api.history().then(setRows).catch(() => setRows([]));
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    api.history()
+      .then((r) => { if (live) { setRows(r); setFailed(false); } })
+      .catch(() => { if (live) setFailed(true); });
+    return () => { live = false; };
+  }, [api]);
+
   return (
     <div>
       <PageHeader title={t(L.ccHistoryTitle)} />
-      {rows && rows.length === 0 && <p role="status">{t(L.ccHistoryEmpty)}</p>}
-      {rows && rows.length > 0 && (
+      {/* An error is distinct from an empty history — never render a failed load as "no calls". */}
+      {failed && (
+        <p role="alert" className="cc-error">
+          {t(L.ccHistoryError)}{" "}
+          <button type="button" onClick={() => { setFailed(false); setRows(null); void api.history().then((r) => setRows(r)).catch(() => setFailed(true)); }}>
+            {t(L.retry)}
+          </button>
+        </p>
+      )}
+      {!failed && rows && rows.length === 0 && <p role="status">{t(L.ccHistoryEmpty)}</p>}
+      {!failed && rows && rows.length > 0 && (
         <ul className="cc-history">
           {rows.map((r) => (
             <li key={r.callRef}>{r.callRef} · {new Date(r.startedAt).toLocaleString()} · {r.status}{r.outcome ? ` · ${r.outcome}` : ""}</li>

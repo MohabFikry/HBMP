@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
 import { renderNode } from "./helpers";
-import { CallCentreWorkspace, type CcApi, type Cc360 } from "../src/screens/CallCentre";
+import { CallCentreWorkspace, CallHistory, type CcApi, type Cc360 } from "../src/screens/CallCentre";
 
 const BEN = "b-amal";
 
@@ -27,6 +27,7 @@ function fakeApi(over: Partial<CcApi> = {}): CcApi {
     search: vi.fn().mockResolvedValue([{ beneficiaryId: BEN, displayName: "Amal Hassan", memberNo: "MRS-M-1001", challengeableIdentifierTypes: ["MemberNo", "DateOfBirth", "Phone"] }]),
     summary: vi.fn().mockResolvedValue(make360()),
     book: vi.fn().mockResolvedValue("ok"),
+    reschedule: vi.fn().mockResolvedValue("ok"),
     cancel: vi.fn().mockResolvedValue("ok"),
     close: vi.fn().mockResolvedValue(undefined),
     history: vi.fn().mockResolvedValue([]),
@@ -115,6 +116,50 @@ describe("15.5 — Call Centre workspace: act", () => {
     await user.click(screen.getByRole("button", { name: /cancel appointment/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/reason is required/i);
     expect(api.cancel).not.toHaveBeenCalled();
+  });
+
+  it("reschedules a changeable appointment and announces the confirmation", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi();
+    renderNode(<CallCentreWorkspace api={api} />);
+    await startAndSelect(user);
+    await user.click(screen.getByLabelText("MemberNo"));
+    await user.click(screen.getByLabelText("Phone"));
+    await user.click(screen.getByRole("button", { name: /verify — pass/i }));
+    await screen.findByTestId("cc-360");
+
+    // Only the changeable appointment (a1) offers Reschedule.
+    await user.click(screen.getByRole("button", { name: /^reschedule$/i }));
+    expect(api.reschedule).toHaveBeenCalledWith("i1", "a1");
+    await waitFor(() => expect(screen.getByTestId("cc-live")).toHaveTextContent(/rescheduled/i));
+  });
+
+  it("surfaces a recoverable state when the new slot was just taken (409)", async () => {
+    const user = userEvent.setup();
+    renderNode(<CallCentreWorkspace api={fakeApi({ reschedule: vi.fn().mockResolvedValue("conflict") })} />);
+    await startAndSelect(user);
+    await user.click(screen.getByLabelText("MemberNo"));
+    await user.click(screen.getByLabelText("Phone"));
+    await user.click(screen.getByRole("button", { name: /verify — pass/i }));
+    await screen.findByTestId("cc-360");
+
+    await user.click(screen.getByRole("button", { name: /^reschedule$/i }));
+    await waitFor(() => expect(screen.getByTestId("cc-live")).toHaveTextContent(/just taken/i));
+  });
+});
+
+describe("15.5 — Call history: load failure is distinct from empty", () => {
+  it("renders an error + retry (not 'no calls') when history fails to load", async () => {
+    const user = userEvent.setup();
+    const history = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce([]);
+    renderNode(<CallHistory api={fakeApi({ history })} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/couldn't load call history/i);
+    expect(screen.queryByText(/no calls yet/i)).not.toBeInTheDocument();
+
+    // Retry recovers to the empty state.
+    await user.click(screen.getByRole("button", { name: /retry/i }));
+    expect(await screen.findByText(/no calls yet/i)).toBeInTheDocument();
   });
 });
 
