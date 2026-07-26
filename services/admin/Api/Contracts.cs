@@ -20,6 +20,19 @@ public static class AdminContracts
     }
 }
 
+// --- 14.2 branch assignment + active-branch context -------------------------------------------
+public sealed record AssignBranchRequest(Guid BranchId, string AssignmentType, DateOnly ValidFrom, DateOnly? ValidTo, string? Tenant = null);
+
+public sealed record RevokeBranchRequest(Guid AssignmentId, string? Tenant = null);
+
+public sealed record SwitchBranchRequest(Guid BranchId);
+
+public sealed record BranchAssignmentView(Guid AssignmentId, Guid BranchId, string AssignmentType, DateOnly ValidFrom, DateOnly? ValidTo, string Status)
+{
+    public static BranchAssignmentView Of(Mersal.Admin.Domain.UserBranchAssignment a) =>
+        new(a.AssignmentId, a.BranchId, a.AssignmentType.ToString(), a.ValidFrom, a.ValidTo, a.Status.ToString());
+}
+
 public sealed record GrantRoleRequest(string SubjectUserId, string Role, string Justification,
     string? Tenant = null, string Scope = "Tenant", string? ProviderId = null)
 {

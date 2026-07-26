@@ -26,6 +26,7 @@ builder.Services.AddScoped<GovernanceService>();
 builder.Services.AddScoped<BreakGlassAdminService>();
 builder.Services.AddScoped<TenantAdminService>();
 builder.Services.AddScoped<DashboardService>();
+builder.Services.AddScoped<BranchAssignmentService>();   // 14.2
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("admin-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
@@ -48,6 +49,7 @@ app.MapAccessReview();   // 8b.1 access-review campaigns (recertify/revoke/auto-
 app.MapPolicyConfig();   // 8b.1 session/device policy + staged policy proposals
 app.MapGovernance();     // 8b.2 master-data versioning + template linter + system config
 app.MapPlatform();       // 8b.3 tenant admin + break-glass lifecycle + governance dashboards
+app.MapBranchAssignments(); // 14.2 staff↔branch assignment + active-branch context
 
 app.Run();
 

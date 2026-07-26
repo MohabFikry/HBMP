@@ -24,6 +24,7 @@ public sealed class AdminDbContext(DbContextOptions<AdminDbContext> options) : D
     public DbSet<BreakGlassGrantRecord> BreakGlassGrants => Set<BreakGlassGrantRecord>();
     public DbSet<BreakGlassAccess> BreakGlassAccesses => Set<BreakGlassAccess>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<UserBranchAssignment> UserBranchAssignments => Set<UserBranchAssignment>();   // 14.2
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -142,6 +143,18 @@ public sealed class AdminDbContext(DbContextOptions<AdminDbContext> options) : D
         {
             e.ToTable("tenant");
             e.HasKey(x => x.TenantId);
+        });
+
+        // 14.2 — staff↔branch assignments. Enums map to text; the one-active-Home invariant is a partial
+        // unique index in the migration. Soft-lifecycle (revoke stamps metadata), tenant-scoped + RLS.
+        b.Entity<UserBranchAssignment>(e =>
+        {
+            e.ToTable("user_branch_assignment");
+            e.HasKey(x => x.AssignmentId);
+            e.Property(x => x.AssignmentType).HasConversion<string>().HasColumnName("assignment_type");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.HasIndex(x => new { x.TenantId, x.SubjectUserId, x.Status });
+            e.HasIndex(x => x.BranchId);
         });
     }
 }
