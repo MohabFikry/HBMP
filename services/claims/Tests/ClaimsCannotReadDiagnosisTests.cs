@@ -42,7 +42,10 @@ public class ClaimsCannotReadDiagnosisTests
         };
         foreach (var t in types)
         {
-            var props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name.ToLowerInvariant());
+            var props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name.ToLowerInvariant())
+                // A result/report *existence* boolean is explicitly allowed (36 §9) — it proves the service was
+                // rendered without exposing any clinical value. Only the VALUE fields are forbidden.
+                .Where(p => !p.EndsWith("exists", StringComparison.Ordinal));
             props.Should().NotContain(p => Forbidden.Any(p.Contains), $"{t.Name} must carry no clinical field (claims ≠ diagnosis)");
         }
     }
