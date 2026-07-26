@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Finance.Domain.csproj" />
     <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
+    <ProjectReference Include="../../../libs/data/Mersal.Data.csproj" />
     <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" />
   </ItemGroup>
   <ItemGroup>

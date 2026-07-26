@@ -1,3 +1,4 @@
+using Mersal.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,10 +11,12 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddFinanceInfrastructure(this IServiceCollection services, IConfiguration config)
     {
-        services.AddDbContext<FinanceDbContext>(o =>
+        services.AddHbmpRls();
+        services.AddDbContext<FinanceDbContext>((sp, o) =>
             o.UseNpgsql(config.GetConnectionString("Finance")
                         ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential."))
-             .UseSnakeCaseNamingConvention());
+             .UseSnakeCaseNamingConvention()
+             .AddHbmpRlsInterceptors(sp));
 
         services.AddScoped<FinanceEventProjector>();
         services.AddScoped<FinanceQueries>();

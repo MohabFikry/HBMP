@@ -36,6 +36,7 @@ public sealed class Settlement
 public sealed class SettlementLine
 {
     public Guid SettlementLineId { get; set; }
+    public string TenantId { get; set; } = "";              // RLS tenant scope (ADR-0011)
     public Guid SettlementId { get; set; }
     public string ServiceCode { get; set; } = default!;     // billing code (CPT/LOINC/ATC)
     public string ServiceLine { get; set; } = "General";
