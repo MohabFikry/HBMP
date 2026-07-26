@@ -27,7 +27,7 @@ public static class SettlementEndpoints
             var r = await settlement.GenerateAsync(deps.Tenant, id, deps.Subject ?? "unknown", bearer, ct);
             switch (r.Outcome)
             {
-                case SettlementOutcome.NotFound: return Results.NotFound();
+                case SettlementOutcome.NotFound: return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
                 case SettlementOutcome.BatchNotDecided:
                     return Results.Problem(statusCode: 409, title: "batch-not-decided", type: "urn:hbmp:conflict",
                         detail: "A settlement advice can only be generated for a Decided batch.");
@@ -66,7 +66,7 @@ public static class SettlementEndpoints
             var r = await settlement.ExportAsync(deps.Tenant, id, fmt, deps.ProviderId, deps.Subject ?? "unknown", ct);
             switch (r.Outcome)
             {
-                case ExportOutcome.NotFound: return Results.NotFound();
+                case ExportOutcome.NotFound: return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
                 case ExportOutcome.ProviderDenied:
                     await deps.Audit.EmitAsync(new AuditEventDraft
                     {
@@ -100,7 +100,7 @@ public static class SettlementEndpoints
             var outcome = await settlement.RecordPaymentReferenceAsync(deps.Tenant, id, body.Reference, body.PaymentDate, deps.Subject ?? "unknown", ct);
             switch (outcome)
             {
-                case PaymentRefOutcome.NotFound: return Results.NotFound();
+                case PaymentRefOutcome.NotFound: return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
                 case PaymentRefOutcome.BatchNotSettled:
                     return Results.Problem(statusCode: 409, title: "batch-not-settled", type: "urn:hbmp:conflict",
                         detail: "A payment reference can only be recorded once a settlement advice has been issued.");

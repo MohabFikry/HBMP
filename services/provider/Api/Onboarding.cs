@@ -21,7 +21,7 @@ public static class OnboardingEndpoints
         write.MapPost("/providers/{id:guid}/activate", async (Guid id, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
             var (p, tenant) = await Load(db, id, me, ct);
-            if (p is null) return Results.NotFound();
+            if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var readiness = ReadinessOf(p, Today(clock));
             var guard = OnboardingWorkflow.GuardActivation(readiness);
@@ -45,7 +45,7 @@ public static class OnboardingEndpoints
         {
             if (string.IsNullOrWhiteSpace(req.Reason)) return Results.Problem(statusCode: 400, title: "a reason is required");
             var (p, tenant) = await Load(db, id, me, ct);
-            if (p is null) return Results.NotFound();
+            if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             p.Status = ProviderStatus.Suspended;
             p.OnboardingState = OnboardingState.Suspended;
@@ -67,7 +67,7 @@ public static class OnboardingEndpoints
                 return Results.Problem(statusCode: 422, title: "terminate is dual-controlled", detail: "a distinct second approver is required");
 
             var (p, tenant) = await Load(db, id, me, ct);
-            if (p is null) return Results.NotFound();
+            if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             p.Status = ProviderStatus.Terminated;
             p.OnboardingState = OnboardingState.Terminated;
@@ -84,7 +84,7 @@ public static class OnboardingEndpoints
         write.MapPost("/providers/{id:guid}/users", async (Guid id, ProvisionUser req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
             var (p, tenant) = await Load(db, id, me, ct);
-            if (p is null) return Results.NotFound();
+            if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var actorRoles = me.Principal?.Roles ?? new HashSet<string>();
             var sod = ProviderUserRules.CanProvision(actorRoles, req.Role);

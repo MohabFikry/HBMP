@@ -45,7 +45,7 @@ public static class UsersEndpoints
             if (tenant is null) return Results.BadRequest(new { error = "no-tenant" });
 
             var ok = await svc.RevokeAsync(AdminContracts.Actor(p), tenant, req.BindingId, req.Reason, ct);
-            return ok ? Results.NoContent() : Results.NotFound();
+            return ok ? Results.NoContent() : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
         });
 
         // De-provision a user everywhere (FR-IAM-010).

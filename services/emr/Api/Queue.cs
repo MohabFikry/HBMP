@@ -114,7 +114,7 @@ public static class QueueModule
         Guid queueId, Func<QueueTicketState, bool> guard, Action<QueueTicket> mutate, EmrDbContext db, CancellationToken ct)
     {
         var t = await db.Set<QueueTicket>().FirstOrDefaultAsync(x => x.QueueId == queueId, ct);
-        if (t is null) return Results.NotFound();
+        if (t is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
         if (!guard(t.State))
             return Results.Problem(statusCode: 409, title: "Queue action not allowed", type: "urn:hbmp:queue-transition-denied");
         mutate(t);

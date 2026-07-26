@@ -52,7 +52,7 @@ public static class ClinicalEndpoints
             Guid id, EmrDbContext db, ClinicalGate gate, HttpContext http, CancellationToken ct) =>
         {
             var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
-            if (enc0 is null) return Results.NotFound();
+            if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var denied = await gate.CheckAsync("emr:read", EmrPolicies.Resources.Encounter, id.ToString(), enc0.BeneficiaryId, ct);
             if (denied is not null) return denied;
@@ -78,7 +78,7 @@ public static class ClinicalEndpoints
             IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
             var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
-            if (enc0 is null) return Results.NotFound();
+            if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             var denied = await gate.CheckAsync("emr:write", EmrPolicies.Resources.Note, id.ToString(), enc0.BeneficiaryId, ct);
             if (denied is not null) return denied;
 
@@ -103,12 +103,12 @@ public static class ClinicalEndpoints
             IHbmpPrincipalAccessor me, CancellationToken ct) =>
         {
             var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
-            if (enc0 is null) return Results.NotFound();
+            if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             var denied = await gate.CheckAsync("emr:write", EmrPolicies.Resources.Note, noteId.ToString(), enc0.BeneficiaryId, ct);
             if (denied is not null) return denied;
 
             var note = await db.Notes.FirstOrDefaultAsync(n => n.NoteId == noteId && n.EncounterId == id && !n.IsDeleted, ct);
-            if (note is null) return Results.NotFound();
+            if (note is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             switch (SoapNoteRules.CanEdit(note, me.Principal!.Subject))
             {
@@ -133,12 +133,12 @@ public static class ClinicalEndpoints
             IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
             var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
-            if (enc0 is null) return Results.NotFound();
+            if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             var denied = await gate.CheckAsync("emr:write", EmrPolicies.Resources.Note, noteId.ToString(), enc0.BeneficiaryId, ct);
             if (denied is not null) return denied;
 
             var note = await db.Notes.FirstOrDefaultAsync(n => n.NoteId == noteId && n.EncounterId == id && !n.IsDeleted, ct);
-            if (note is null) return Results.NotFound();
+            if (note is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             switch (SoapNoteRules.CanSign(note, me.Principal!.Subject))
             {
@@ -162,12 +162,12 @@ public static class ClinicalEndpoints
             IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
             var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
-            if (enc0 is null) return Results.NotFound();
+            if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             var denied = await gate.CheckAsync("emr:write", EmrPolicies.Resources.Note, noteId.ToString(), enc0.BeneficiaryId, ct);
             if (denied is not null) return denied;
 
             var original = await db.Notes.AsNoTracking().FirstOrDefaultAsync(n => n.NoteId == noteId && n.EncounterId == id, ct);
-            if (original is null) return Results.NotFound();
+            if (original is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var addendum = new EmrNote
             {
@@ -189,7 +189,7 @@ public static class ClinicalEndpoints
             IAuditClient audit, IHbmpPrincipalAccessor me, HttpContext http, TimeProvider clock, CancellationToken ct) =>
         {
             var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
-            if (enc0 is null) return Results.NotFound();
+            if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             var denied = await gate.CheckAsync("emr:write", EmrPolicies.Resources.Diagnosis, id.ToString(), enc0.BeneficiaryId, ct);
             if (denied is not null) return denied;
 
@@ -215,7 +215,7 @@ public static class ClinicalEndpoints
             IAuditClient audit, IHbmpPrincipalAccessor me, HttpContext http, TimeProvider clock, CancellationToken ct) =>
         {
             var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
-            if (enc0 is null) return Results.NotFound();
+            if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             var denied = await gate.CheckAsync("emr:write", EmrPolicies.Resources.Vital, id.ToString(), enc0.BeneficiaryId, ct);
             if (denied is not null) return denied;
 
@@ -346,7 +346,7 @@ public static class ClinicalEndpoints
             Guid id, EmrDbContext db, ClinicalGate gate, CancellationToken ct) =>
         {
             var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
-            if (enc0 is null) return Results.NotFound();
+            if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             var denied = await gate.CheckAsync("emr:read", EmrPolicies.Resources.Encounter, id.ToString(), enc0.BeneficiaryId, ct);
             if (denied is not null) return denied;
 

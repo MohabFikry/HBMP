@@ -111,7 +111,7 @@ public static class Worklist
             if (denied is not null) return denied;
 
             var a = await db.Authorizations.AsNoTracking().FirstOrDefaultAsync(x => x.AuthorizationId == id, ct);
-            return a is null ? Results.NotFound() : Results.Ok(WorklistItemView.From(a, clock.GetUtcNow()));
+            return a is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(WorklistItemView.From(a, clock.GetUtcNow()));
         }).RequireAuthorization(HbmpPolicies.Scope("auth:read"));
 
         // ---- Assign: pick up a request (Submitted → UnderReview), start the SLA timer. ----
@@ -123,7 +123,7 @@ public static class Worklist
             if (denied is not null) return denied;
 
             var auth = await db.Authorizations.FirstOrDefaultAsync(a => a.AuthorizationId == id, ct);
-            if (auth is null) return Results.NotFound();
+            if (auth is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             if (!AuthorizationWorkflow.CanTransition(auth.Status, AuthStatus.UnderReview))
                 return Results.Problem(statusCode: 409, title: "illegal-transition",

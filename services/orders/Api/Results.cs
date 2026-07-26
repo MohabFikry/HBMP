@@ -27,9 +27,9 @@ public static class ResultEndpoints
             TimeProvider clock, CancellationToken ct) =>
         {
             var order = await db.Orders.Include(o => o.Lines).FirstOrDefaultAsync(o => o.OrderId == orderId, ct);
-            if (order is null) return Results.NotFound();
+            if (order is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             var line = order.Lines.FirstOrDefault(l => l.OrderLineId == lineId);
-            if (line is null) return Results.NotFound();
+            if (line is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var denied = await gate.AuthorizeConsumeAsync(order.OrderType, ct);
             if (denied is not null) return denied;
@@ -107,7 +107,7 @@ public static class ResultEndpoints
         {
             var order = await db.Orders.AsNoTracking().Include(o => o.Lines).FirstOrDefaultAsync(o => o.OrderId == orderId, ct);
             var line = order?.Lines.FirstOrDefault(l => l.OrderLineId == lineId);
-            if (order is null || line is null) return Results.NotFound();
+            if (order is null || line is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             // 14.7 — a NON-Standard result is default-deny except the authoring doctor or an active grant holder.
             // This deliberately OVERRIDES the approval team's standing EMR oversight (design 37 §6).

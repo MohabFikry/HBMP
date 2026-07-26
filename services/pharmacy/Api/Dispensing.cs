@@ -78,7 +78,7 @@ public static class DispensingEndpoints
             if (denied is not null) return denied;
 
             var rx = await db.Prescriptions.AsNoTracking().Include(p => p.Lines).FirstOrDefaultAsync(p => p.PrescriptionId == id, ct);
-            if (rx is null) return Results.NotFound();
+            if (rx is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var reject = RejectReason(rx, clock.GetUtcNow());
             if (reject is not null)
@@ -118,7 +118,7 @@ public static class DispensingEndpoints
             var lineHead = await db.PrescriptionLines.AsNoTracking()
                 .Where(l => l.PrescriptionLineId == lineId && l.PrescriptionId == rxId)
                 .Select(l => new { l.DrugId }).FirstOrDefaultAsync(ct);
-            if (lineHead is null) return Results.NotFound();
+            if (lineHead is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var bearer = http.Headers.Authorization.ToString();
 
@@ -170,7 +170,7 @@ public static class DispensingEndpoints
                     return Results.Ok(DispenseResponse.From(result.Prescription!, result.Event!, replayed: true));
 
                 case DispenseOutcome.NotFound:
-                    return Results.NotFound();
+                    return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
                 case DispenseOutcome.LineNotFound:
                     return Results.Problem(statusCode: 404, title: "line-not-found", type: "urn:hbmp:line-not-found",
                         detail: "No such prescription line on this prescription.");
@@ -206,9 +206,9 @@ public static class DispensingEndpoints
             if (denied is not null) return denied;
 
             var rx = await db.Prescriptions.AsNoTracking().Include(p => p.Lines).FirstOrDefaultAsync(p => p.PrescriptionId == rxId, ct);
-            if (rx is null) return Results.NotFound();
+            if (rx is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             var line = rx.Lines.FirstOrDefault(l => l.PrescriptionLineId == lineId);
-            if (line is null) return Results.NotFound();
+            if (line is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             // No accumulator change — the line stays available for backorder / a later visit. Notify + audit only.
             await outbox.EnqueueAsync("RxLineOutOfStock", "pharmacy.events", new

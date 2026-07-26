@@ -95,7 +95,7 @@ public static class BatchEndpoints
             if (denied is not null) return denied;
             var b = await deps.Db.ClaimBatches.AsNoTracking().Include(x => x.Items)
                 .FirstOrDefaultAsync(x => x.BatchId == id && x.TenantId == deps.Tenant, ct);
-            if (b is null) return Results.NotFound();
+            if (b is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             if (deps.ProviderId is { } pid && Guid.TryParse(pid, out var pg) && b.PayeeProviderId != pg)
                 return Results.Problem(statusCode: 403, title: "access-denied", type: "urn:hbmp:claims-access-denied");
             return Results.Ok(BatchView.From(b));
@@ -119,7 +119,7 @@ public static class BatchEndpoints
 
     private static IResult Map(BatchResult r) => r.Outcome switch
     {
-        BatchOutcome.NotFound => Results.NotFound(),
+        BatchOutcome.NotFound => Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found"),
         BatchOutcome.IllegalTransition => Conflict("illegal-transition", "That batch transition is not allowed from the current status."),
         BatchOutcome.AlreadyBatched => Conflict("claim-already-batched", "This claim already sits in a live batch.", "CLAIM_ALREADY_BATCHED"),
         BatchOutcome.MembershipLocked => Conflict("membership-locked", "The batch is decided/settled/closed; membership is locked."),

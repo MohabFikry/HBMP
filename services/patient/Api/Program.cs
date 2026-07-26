@@ -129,7 +129,7 @@ v1.MapGet("/{id:guid}", async (Guid id, PatientDbContext db, CancellationToken c
 {
     var b = await db.Beneficiaries.AsNoTracking().Include(x => x.Identifiers).Include(x => x.Contacts)
         .FirstOrDefaultAsync(x => x.BeneficiaryId == id && !x.IsDeleted, ct);
-    return b is null ? Results.NotFound() : Results.Ok(BeneficiaryDto.From(b));
+    return b is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(BeneficiaryDto.From(b));
 }).RequireAuthorization();
 
 // ================================================================ REGISTRATION WORKFLOW (1.4, US-003/004)
@@ -154,7 +154,7 @@ reg.MapPost("", async (CreateRegistration req, HttpRequest http, PatientDbContex
 reg.MapPatch("/{id:guid}", async (Guid id, PatchRegistration req, PatientDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
     var r = await db.Registrations.FirstOrDefaultAsync(x => x.RegistrationId == id, ct);
-    if (r is null) return Results.NotFound();
+    if (r is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
     var before = $"{{\"documentsVerified\":{r.DocumentsVerified.ToString().ToLowerInvariant()},\"coverageBound\":{r.CoverageBound.ToString().ToLowerInvariant()}}}";
     if (req.DocumentsVerified is { } dv) r.DocumentsVerified = dv;
     if (req.CoverageBound is { } cb) r.CoverageBound = cb;
@@ -172,7 +172,7 @@ reg.MapPost("/{id:guid}/decision", async (Guid id, DecisionRequest req, PatientD
     if (!Enum.TryParse<RegistrationDecision>(req.Decision, ignoreCase: true, out var decision))
         return Results.Problem(statusCode: 400, title: $"invalid decision '{req.Decision}'");
     var r = await db.Registrations.FirstOrDefaultAsync(x => x.RegistrationId == id, ct);
-    if (r is null) return Results.NotFound();
+    if (r is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
     var error = RegistrationRules.ValidateDecision(r, decision, req.Notes);
     if (error is not null) return Results.Problem(statusCode: 422, title: "decision-rejected", detail: error);
@@ -213,7 +213,7 @@ v1.MapPost("/{id:guid}/status", async (Guid id, StatusChange req, PatientDbConte
     if (!Enum.TryParse<BeneficiaryStatus>(req.ToStatus, ignoreCase: true, out var to))
         return Results.Problem(statusCode: 400, title: $"invalid status '{req.ToStatus}'");
     var b = await db.Beneficiaries.FirstOrDefaultAsync(x => x.BeneficiaryId == id && !x.IsDeleted, ct);
-    if (b is null) return Results.NotFound();
+    if (b is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
     var error = BeneficiaryLifecycle.Validate(b.Status, to, req.Reason);
     if (error is not null)

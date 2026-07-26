@@ -32,7 +32,7 @@ public static class AccessReviewEndpoints
             if (tenant is null) return Results.BadRequest(new { error = "no-tenant" });
 
             var ok = await svc.RecertifyAsync(AdminContracts.Actor(p), tenant, itemId, req.Note, ct);
-            return ok ? Results.NoContent() : Results.NotFound();
+            return ok ? Results.NoContent() : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
         });
 
         g.MapPost("/items/{itemId:guid}/revoke", async (Guid itemId, ReviewDecisionRequest req, AdminGate gate, AccessReviewService svc, CancellationToken ct) =>
@@ -44,7 +44,7 @@ public static class AccessReviewEndpoints
             if (tenant is null) return Results.BadRequest(new { error = "no-tenant" });
 
             var ok = await svc.ReviewRevokeAsync(AdminContracts.Actor(p), tenant, itemId, req.Note, ct);
-            return ok ? Results.NoContent() : Results.NotFound();
+            return ok ? Results.NoContent() : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
         });
 
         // Sweep the campaign: any grant still unconfirmed past the deadline auto-expires (revoked).

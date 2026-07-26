@@ -196,7 +196,7 @@ public static class AppointmentsModule
         read.MapGet("/appointments/{id:guid}", async (Guid id, HttpResponse resp, BranchScopeState branch, EmrDbContext db, CancellationToken ct) =>
         {
             var a = await db.Appointments.AsNoTracking().FirstOrDefaultAsync(x => x.AppointmentId == id, ct);
-            if (a is null) return Results.NotFound();
+            if (a is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             // 14.4 — a BranchScoped caller reaching a row in another branch is DENIED (not 404-empty).
             if (branch.Context.ActiveBranchId is { } active && a.BranchId is not null && a.BranchId != active)
                 return Results.Problem(statusCode: 403, title: "branch-scope-denied", detail: "this appointment is not in your active branch");

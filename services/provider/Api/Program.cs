@@ -120,7 +120,7 @@ read.MapGet("/providers/{id:guid}", async (Guid id, ProviderDbContext db, Provid
 {
     var tenant = me.Principal?.TenantId;
     var p = await db.Providers.AsNoTracking().FirstOrDefaultAsync(x => x.ProviderId == id && x.TenantId == tenant && !x.IsDeleted, ct);
-    if (p is null) return Results.NotFound();
+    if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
     // ABAC provider-ownership: a provider user reading another provider is denied AND audited.
     var decision = await guard.AuthorizeAsync(me.Require(), p.TenantId, p.ProviderId.ToString(), ct);
     if (!decision.IsAllowed) return Results.Problem(statusCode: 403, title: "provider access denied", detail: decision.ReasonCode);
@@ -132,7 +132,7 @@ write.MapPost("/providers/{id:guid}/locations", async (Guid id, CreateLocation r
 {
     var tenant = me.Principal?.TenantId;
     var p = await db.Providers.FirstOrDefaultAsync(x => x.ProviderId == id && x.TenantId == tenant && !x.IsDeleted, ct);
-    if (p is null) return Results.NotFound();
+    if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
     var loc = new ProviderLocation
     {
@@ -152,7 +152,7 @@ write.MapPost("/providers/{id:guid}/contracts", async (Guid id, CreateContract r
 {
     var tenant = me.Principal?.TenantId;
     var p = await db.Providers.Include(x => x.Contracts).FirstOrDefaultAsync(x => x.ProviderId == id && x.TenantId == tenant && !x.IsDeleted, ct);
-    if (p is null) return Results.NotFound();
+    if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
     if (ContractRules.OverlapsAny(p.Contracts, req.EffectiveFrom, req.EffectiveTo))
         return Results.Problem(statusCode: 409, title: "contract effective range overlaps an existing contract");
 
@@ -173,7 +173,7 @@ write.MapPost("/contracts/{contractId:guid}/service-lines", async (Guid contract
 {
     var tenant = me.Principal?.TenantId;
     var c = await db.Contracts.FirstOrDefaultAsync(x => x.ContractId == contractId && x.TenantId == tenant && !x.IsDeleted, ct);
-    if (c is null) return Results.NotFound();
+    if (c is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
     if (!Enum.TryParse<ServiceType>(req.ServiceType, out var st)) return Results.Problem(statusCode: 400, title: $"unknown service_type '{req.ServiceType}'");
     if (!Enum.TryParse<CodeSystem>(req.CodeSystem, out var cs)) return Results.Problem(statusCode: 400, title: $"unknown code_system '{req.CodeSystem}'");
     if (req.AgreedPrice < 0) return Results.Problem(statusCode: 400, title: "agreed_price must be >= 0");
@@ -197,7 +197,7 @@ write.MapPost("/contracts/{contractId:guid}/activate", async (Guid contractId, P
 {
     var tenant = me.Principal?.TenantId;
     var c = await db.Contracts.Include(x => x.ServiceLines).FirstOrDefaultAsync(x => x.ContractId == contractId && x.TenantId == tenant && !x.IsDeleted, ct);
-    if (c is null) return Results.NotFound();
+    if (c is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
     if (c.ServiceLines.Count == 0) return Results.Problem(statusCode: 422, title: "cannot activate a contract with no service lines");
     c.Status = ContractStatus.Active;
     await db.SaveChangesAsync(ct);
@@ -211,7 +211,7 @@ write.MapPost("/providers/{id:guid}/credentials", async (Guid id, AddCredential 
 {
     var tenant = me.Principal?.TenantId;
     var p = await db.Providers.FirstOrDefaultAsync(x => x.ProviderId == id && x.TenantId == tenant && !x.IsDeleted, ct);
-    if (p is null) return Results.NotFound();
+    if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
     var cred = new ProviderCredential
     {
         CredentialId = Guid.NewGuid(), ProviderId = id, TenantId = tenant!, CredentialType = req.CredentialType,
@@ -231,7 +231,7 @@ read.MapGet("/providers/{id:guid}/capabilities", async (Guid id, ProviderDbConte
     var p = await db.Providers.AsNoTracking()
         .Include(x => x.Contracts).ThenInclude(c => c.ServiceLines)
         .FirstOrDefaultAsync(x => x.ProviderId == id && x.TenantId == tenant && !x.IsDeleted, ct);
-    if (p is null) return Results.NotFound();
+    if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
     var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
     var canSeePrice = me.Principal?.HasScope("provider:finance") ?? false;
@@ -251,7 +251,7 @@ read.MapGet("/providers/{id:guid}/locations", async (Guid id, ProviderDbContext 
 {
     var tenant = me.Principal?.TenantId;
     var p = await db.Providers.AsNoTracking().FirstOrDefaultAsync(x => x.ProviderId == id && x.TenantId == tenant && !x.IsDeleted, ct);
-    if (p is null) return Results.NotFound();
+    if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
     var decision = await guard.AuthorizeAsync(me.Require(), p.TenantId, p.ProviderId.ToString(), ct);
     if (!decision.IsAllowed) return Results.Problem(statusCode: 403, title: "provider access denied", detail: decision.ReasonCode);
     var rows = await db.Locations.AsNoTracking().Where(l => l.ProviderId == id && !l.IsDeleted).OrderByDescending(l => l.IsPrimary).ToListAsync(ct);
@@ -263,7 +263,7 @@ read.MapGet("/providers/{id:guid}/contracts", async (Guid id, ProviderDbContext 
 {
     var tenant = me.Principal?.TenantId;
     var p = await db.Providers.AsNoTracking().FirstOrDefaultAsync(x => x.ProviderId == id && x.TenantId == tenant && !x.IsDeleted, ct);
-    if (p is null) return Results.NotFound();
+    if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
     var decision = await guard.AuthorizeAsync(me.Require(), p.TenantId, p.ProviderId.ToString(), ct);
     if (!decision.IsAllowed) return Results.Problem(statusCode: 403, title: "provider access denied", detail: decision.ReasonCode);
     var rows = await db.Contracts.AsNoTracking().Include(c => c.ServiceLines).Where(c => c.ProviderId == id && !c.IsDeleted).OrderByDescending(c => c.EffectiveFrom).ToListAsync(ct);

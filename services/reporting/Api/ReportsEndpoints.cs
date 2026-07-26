@@ -81,7 +81,7 @@ public static class ReportsEndpoints
             var denied = await cx.Gate.CheckAsync(ReportingPolicies.ReadOperational, ct);
             if (denied is not null) return denied;
             var job = await cx.Db.ReportJobs.AsNoTracking().FirstOrDefaultAsync(j => j.JobId == id && j.TenantId == cx.Tenant, ct);
-            if (job is null) return Results.NotFound();
+            if (job is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             JsonElement? result = job.ResultJson is null ? null : JsonSerializer.Deserialize<JsonElement>(job.ResultJson);
             return Results.Ok(new { job.JobId, job.Report, job.Status, job.ProgressPercent, result });
         }).RequireAuthorization(HbmpPolicies.Scope("reporting:read"));

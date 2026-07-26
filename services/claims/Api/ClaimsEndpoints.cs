@@ -37,7 +37,7 @@ public static class ClaimsEndpoints
             if (denied is not null) return denied;
 
             var claim = await deps.Queries.GetAsync(deps.Tenant, id, ct);
-            if (claim is null) return Results.NotFound();
+            if (claim is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             // Provider isolation defence-in-depth: a provider may not read another provider's claim.
             if (deps.ProviderId is { } pid && Guid.TryParse(pid, out var pg) && claim.ProviderId != pg)
                 return Results.Problem(statusCode: 403, title: "access-denied", type: "urn:hbmp:claims-access-denied",
@@ -54,7 +54,7 @@ public static class ClaimsEndpoints
             if (denied is not null) return denied;
 
             var results = await adjudicator.AdjudicateAsync(deps.Tenant, id, http.Headers.Authorization.ToString(), ct);
-            if (results is null) return Results.NotFound();
+            if (results is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             await deps.Outbox.EnqueueAsync("ClaimAdjudicated.v1", "claims.events",
                 new { claimId = id, lines = results.Count, ruleVersion = Domain.Adjudicator.RuleVersion, tenantId = deps.Tenant }, ct);

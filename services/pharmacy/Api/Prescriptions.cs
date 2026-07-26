@@ -107,7 +107,7 @@ public static class PrescriptionEndpoints
         v1.MapGet("/{id:guid}", async (Guid id, HttpRequest http, PharmacyDbContext db, PharmacyGate gate, CancellationToken ct) =>
         {
             var rx = await db.Prescriptions.AsNoTracking().Include(p => p.Lines).FirstOrDefaultAsync(p => p.PrescriptionId == id, ct);
-            if (rx is null) return Results.NotFound();
+            if (rx is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             var denied = await gate.CheckAsync(PharmacyPolicies.RxRead, "prescription", id.ToString(), rx.BeneficiaryId, http.Headers.Authorization.ToString(), ct);
             if (denied is not null) return denied;
             return Results.Ok(PrescriptionResponse.From(rx));
@@ -131,7 +131,7 @@ public static class PrescriptionEndpoints
             IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, CancellationToken ct) =>
         {
             var rx = await db.Prescriptions.Include(p => p.Lines).FirstOrDefaultAsync(p => p.PrescriptionId == id, ct);
-            if (rx is null) return Results.NotFound();
+            if (rx is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             var denied = await gate.CheckAsync(PharmacyPolicies.RxCreate, "prescription", id.ToString(), rx.BeneficiaryId, http.Headers.Authorization.ToString(), ct);
             if (denied is not null) return denied;
 

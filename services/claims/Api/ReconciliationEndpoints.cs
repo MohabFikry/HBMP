@@ -59,7 +59,7 @@ public static class ReconciliationEndpoints
 
             switch (r.Outcome)
             {
-                case AdjustmentOutcome.NotFound: return Results.NotFound();
+                case AdjustmentOutcome.NotFound: return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
                 case AdjustmentOutcome.Validation:
                     return Results.Problem(statusCode: 422, title: r.ValidationError, type: "urn:hbmp:validation",
                         detail: "The adjustment is missing a mandatory field or violates a rule.");

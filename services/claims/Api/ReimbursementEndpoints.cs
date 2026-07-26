@@ -77,7 +77,7 @@ public static class ReimbursementEndpoints
                 body.LinkedOrderId, body.LinkedPrescriptionId, BearerOf(http), ct);
             switch (r.Outcome)
             {
-                case ConfirmOutcome.NotFound: return Results.NotFound();
+                case ConfirmOutcome.NotFound: return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
                 case ConfirmOutcome.NotConfirmable:
                     return Results.Problem(statusCode: 409, title: "not-confirmable", type: "urn:hbmp:conflict", detail: "This request is not awaiting confirmation.");
                 case ConfirmOutcome.NoAuthorizedService:
@@ -99,7 +99,7 @@ public static class ReimbursementEndpoints
 
             var r = await deps.Db.ReimbursementRequests.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.RequestId == id && x.TenantId == deps.Tenant, ct);
-            if (r is null) return Results.NotFound();
+            if (r is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             await deps.Audit.EmitAsync(new AuditEventDraft
             {

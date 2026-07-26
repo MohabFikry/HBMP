@@ -70,7 +70,7 @@ public static class ReferralEndpoints
         v1.MapGet("/{id:guid}", async (Guid id, HttpRequest http, PharmacyDbContext db, PharmacyGate gate, CancellationToken ct) =>
         {
             var r = await db.Referrals.AsNoTracking().FirstOrDefaultAsync(x => x.ReferralId == id, ct);
-            if (r is null) return Results.NotFound();
+            if (r is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             var denied = await gate.CheckAsync(PharmacyPolicies.ReferralCreate, "referral", id.ToString(), r.BeneficiaryId, http.Headers.Authorization.ToString(), ct);
             if (denied is not null) return denied;
             return Results.Ok(ReferralResponse.From(r));

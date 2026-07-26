@@ -30,7 +30,7 @@ public static class Review
             if (denied is not null) return denied;
 
             var auth = await db.Authorizations.AsNoTracking().FirstOrDefaultAsync(a => a.AuthorizationId == id, ct);
-            if (auth is null) return Results.NotFound();
+            if (auth is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var bearer = http.Headers.Authorization.ToString();
             var ctx = await clinical.GetAsync(auth.BeneficiaryId, auth.SourceRef, bearer, ct);

@@ -29,7 +29,7 @@ public static class AppealEndpoints
             var r = await appeals.RaiseAsync(deps.Tenant, deps.Subject ?? "unknown", id, body.ClaimLineId, appellant, body.Reason, actingFor, ct);
             switch (r.Outcome)
             {
-                case AppealOutcome.NotFound: return Results.NotFound();
+                case AppealOutcome.NotFound: return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
                 case AppealOutcome.NotAppealable:
                     return Results.Problem(statusCode: 409, title: "not-appealable", type: "urn:hbmp:conflict",
                         detail: "Only a decided claim (Approved / PartiallyApproved / Denied) can be appealed.");

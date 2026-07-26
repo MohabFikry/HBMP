@@ -176,7 +176,7 @@ v1.MapPost("", async (
 v1.MapGet("/{id:guid}", async (Guid id, EmrDbContext db, CancellationToken ct) =>
 {
     var e = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(x => x.EncounterId == id, ct);
-    return e is null ? Results.NotFound() : Results.Ok(EncounterResponse.From(e));
+    return e is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(EncounterResponse.From(e));
 }).RequireAuthorization();
 
 // Clinician worklist — beneficiaries who have checked in and are waiting.

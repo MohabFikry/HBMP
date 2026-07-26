@@ -71,7 +71,7 @@ public static class FinanceEndpoints
             if (denied is not null) return denied;
             var s = await deps.Db.Settlements.AsNoTracking().Include(x => x.Lines)
                 .FirstOrDefaultAsync(x => x.SettlementId == id && x.TenantId == deps.Tenant, ct);
-            return s is null ? Results.NotFound() : Results.Ok(SettlementView.From(s));
+            return s is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(SettlementView.From(s));
         }).RequireAuthorization(HbmpPolicies.Scope("finance:read"));
 
         v1.MapPost("/settlements/{id:guid}/submit", async (Guid id, FinanceDeps deps, CancellationToken ct) =>
@@ -79,7 +79,7 @@ public static class FinanceEndpoints
             var denied = await deps.Gate.CheckAsync(FinancePolicies.SubmitSettlement, ct);
             if (denied is not null) return denied;
             var s = await deps.Db.Settlements.FirstOrDefaultAsync(x => x.SettlementId == id && x.TenantId == deps.Tenant, ct);
-            if (s is null) return Results.NotFound();
+            if (s is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             if (s.Status != SettlementStatus.Draft) return Conflict($"Only a Draft settlement can be submitted (is {s.Status}).");
 
             s.Status = SettlementStatus.Submitted;
@@ -98,7 +98,7 @@ public static class FinanceEndpoints
             var denied = await deps.Gate.CheckAsync(FinancePolicies.ApproveSettlement, ct);
             if (denied is not null) return denied;
             var s = await deps.Db.Settlements.FirstOrDefaultAsync(x => x.SettlementId == id && x.TenantId == deps.Tenant, ct);
-            if (s is null) return Results.NotFound();
+            if (s is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             if (s.Status != SettlementStatus.Submitted) return Conflict($"Only a Submitted settlement can be approved (is {s.Status}).");
             if (string.Equals(s.SubmittedBy, deps.Subject, StringComparison.Ordinal))
                 return Results.Problem(statusCode: 409, title: "segregation-of-duties",

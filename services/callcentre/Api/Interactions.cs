@@ -56,7 +56,7 @@ public static class Interactions
             if (req.BeneficiaryId == Guid.Empty) return Unprocessable("beneficiary-required", "A beneficiary id is required.");
 
             var i = await deps.Db.Interactions.FirstOrDefaultAsync(x => x.InteractionId == id, ct);
-            if (i is null) return Results.NotFound();
+            if (i is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             if (i.Status != InteractionStatus.Open)
                 return Conflict("This interaction is closed; open a new call to verify.");
 
@@ -112,7 +112,7 @@ public static class Interactions
             var denied = await deps.Gate.CheckAsync(CallCentrePolicies.Interaction, "update-interaction", ct);
             if (denied is not null) return denied;
             var i = await deps.Db.Interactions.FirstOrDefaultAsync(x => x.InteractionId == id, ct);
-            if (i is null) return Results.NotFound();
+            if (i is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             if (i.Status != InteractionStatus.Open) return Conflict("This interaction is already closed.");
 
             if (req.ReasonCode is not null) i.ReasonCode = req.ReasonCode;
@@ -132,7 +132,7 @@ public static class Interactions
             var denied = await deps.Gate.CheckAsync(CallCentrePolicies.Interaction, "close-interaction", ct);
             if (denied is not null) return denied;
             var i = await deps.Db.Interactions.FirstOrDefaultAsync(x => x.InteractionId == id, ct);
-            if (i is null) return Results.NotFound();
+            if (i is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             if (i.Status == InteractionStatus.Closed) return Results.Ok(InteractionView.From(i, false));
 
             var now = deps.Clock.GetUtcNow();

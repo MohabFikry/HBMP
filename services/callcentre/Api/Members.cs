@@ -51,7 +51,7 @@ public static class Members
             }
 
             var summary = await directory.AssembleAsync(beneficiaryId, http.Headers.Authorization, ct);
-            if (summary is null) return Results.NotFound();
+            if (summary is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var interaction = await deps.Db.Interactions.FindAsync([interactionId], ct);
             await deps.AuditAsync("call_centre_360", beneficiaryId.ToString(), AuditAction.Read, "Read360",

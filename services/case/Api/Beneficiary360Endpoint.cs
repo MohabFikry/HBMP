@@ -26,7 +26,7 @@ public static class Beneficiary360Endpoint
             if (denied is not null) return denied;
 
             var c = await deps.Db.Cases.AsNoTracking().FirstOrDefaultAsync(x => x.CaseId == id, ct);
-            if (c is null) return Results.NotFound();
+            if (c is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var bearer = http.Headers.Authorization.ToString();
             var view = await assembler.AssembleAsync(c, bearer, ct);
@@ -58,7 +58,7 @@ public static class Beneficiary360Endpoint
                     detail: "A reason is mandatory for a manual eligibility override (FR-ELG-007).", type: "urn:hbmp:validation");
 
             var c = await deps.Db.Cases.AsNoTracking().FirstOrDefaultAsync(x => x.CaseId == id, ct);
-            if (c is null) return Results.NotFound();
+            if (c is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             await deps.Outbox.EnqueueAsync("EligibilityOverrideRequested", "case.events", new
             {

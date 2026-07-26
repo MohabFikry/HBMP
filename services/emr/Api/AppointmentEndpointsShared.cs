@@ -17,7 +17,7 @@ internal static class AppointmentEndpointsShared
     public static IResult? MapFailure(TransitionOutcome outcome) => outcome switch
     {
         TransitionOutcome.Ok => null,
-        TransitionOutcome.NotFound => Results.NotFound(),
+        TransitionOutcome.NotFound => Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found"),
         TransitionOutcome.IllegalTransition => Results.Problem(statusCode: 409, title: "Transition not allowed",
             type: "urn:hbmp:transition-denied", detail: "The appointment is not in a state that allows this action."),
         TransitionOutcome.SlotTaken => Results.Problem(statusCode: 409, title: "Slot already booked", type: "urn:hbmp:slot-taken"),

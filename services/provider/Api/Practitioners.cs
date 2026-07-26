@@ -50,7 +50,7 @@ public static class PractitionerEndpoints
         {
             var tenant = me.Principal?.TenantId;
             var p = await db.Practitioners.FirstOrDefaultAsync(x => x.PractitionerId == id && x.TenantId == tenant && !x.IsDeleted, ct);
-            if (p is null) return Results.NotFound();
+            if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             if (!await db.Specialties.AnyAsync(s => s.SpecialtyCode == req.SpecialtyCode && !s.IsDeleted, ct))
                 return Results.Problem(statusCode: 400, title: $"unknown specialty '{req.SpecialtyCode}'");
 
@@ -66,7 +66,7 @@ public static class PractitionerEndpoints
         {
             var tenant = me.Principal?.TenantId;
             var p = await db.Practitioners.FirstOrDefaultAsync(x => x.PractitionerId == id && x.TenantId == tenant && !x.IsDeleted, ct);
-            if (p is null) return Results.NotFound();
+            if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             db.PractitionerBranchAssignments.Add(new PractitionerBranchAssignment
             {

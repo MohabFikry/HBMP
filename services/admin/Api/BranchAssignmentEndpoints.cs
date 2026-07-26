@@ -40,7 +40,7 @@ public static class BranchAssignmentEndpoints
             if (tenant is null) return Results.BadRequest(new { error = "no-tenant" });
 
             var ok = await svc.RevokeAsync(AdminContracts.Actor(p), tenant, req.AssignmentId, ct);
-            return ok ? Results.NoContent() : Results.NotFound();
+            return ok ? Results.NoContent() : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
         });
 
         // List a user's branch assignments (audited admin read).

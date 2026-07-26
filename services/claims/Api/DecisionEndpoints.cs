@@ -75,7 +75,7 @@ public static class DecisionEndpoints
 
             switch (r.Outcome)
             {
-                case DecisionOutcome.NotFound: return Results.NotFound();
+                case DecisionOutcome.NotFound: return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
                 case DecisionOutcome.SoDOriginator: return await SoD(deps, claimId, "SOD_ORIGINATOR_CANNOT_ADJUDICATE", "You created this claim.");
                 case DecisionOutcome.SoDProviderAffiliated: return await SoD(deps, claimId, "SOD_PROVIDER_AFFILIATED", "You are affiliated with the claiming provider.");
                 case DecisionOutcome.SoDSameDecider: return await SoD(deps, claimId, "SOD_SAME_DECIDER", "A second, distinct approver is required.");

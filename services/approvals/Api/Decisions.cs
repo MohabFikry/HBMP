@@ -32,7 +32,7 @@ public static class Decisions
                 return Unprocessable("rationale-required", "A rationale is required for a partial approval.");
 
             var auth = await deps.Db.Authorizations.AsNoTracking().FirstOrDefaultAsync(a => a.AuthorizationId == id, ct);
-            if (auth is null) return Results.NotFound();
+            if (auth is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var err = DecisionRules.ValidatePartialScope(Codes.Parse(auth.ServiceCodes), req.ApprovedScope ?? []);
             if (err != PartialScopeError.None)
@@ -72,7 +72,7 @@ public static class Decisions
             if (denied is not null) return denied;
 
             var auth = await db.Authorizations.FirstOrDefaultAsync(a => a.AuthorizationId == id, ct);
-            if (auth is null) return Results.NotFound();
+            if (auth is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             if (!AuthorizationWorkflow.CanTransition(auth.Status, AuthStatus.UnderReview))
                 return IllegalTransition(auth.Status);
 
@@ -129,7 +129,7 @@ public static class Decisions
         }
 
         var auth = await deps.Db.Authorizations.FirstOrDefaultAsync(a => a.AuthorizationId == id, ct);
-        if (auth is null) return Results.NotFound();
+        if (auth is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
         var target = AuthorizationWorkflow.ResultOf(decision);
         if (!AuthorizationWorkflow.CanTransition(auth.Status, target))

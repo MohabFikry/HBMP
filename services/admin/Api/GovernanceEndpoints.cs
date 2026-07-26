@@ -52,7 +52,7 @@ public static class GovernanceEndpoints
             if (!Enum.TryParse<CodeSystem>(system, ignoreCase: true, out var sys)) return Results.BadRequest(new { error = "unknown-code-system" });
 
             var v = await svc.ResolveAsOfAsync(sys, code, at, ct);
-            return v is null ? Results.NotFound() : Results.Ok(new { v.VersionId, v.VersionNo, v.AttributesJson, v.EffectiveFrom, v.EffectiveTo });
+            return v is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(new { v.VersionId, v.VersionNo, v.AttributesJson, v.EffectiveFrom, v.EffectiveTo });
         });
 
         // List the master-data versions currently in force (effective_to IS NULL) — the governance read surface.

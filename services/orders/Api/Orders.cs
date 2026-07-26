@@ -120,7 +120,7 @@ public static class OrdersEndpoints
         v1.MapGet("/{id:guid}", async (Guid id, HttpRequest http, OrdersDbContext db, OrdersGate gate, CancellationToken ct) =>
         {
             var order = await db.Orders.AsNoTracking().Include(o => o.Lines).FirstOrDefaultAsync(o => o.OrderId == id, ct);
-            if (order is null) return Results.NotFound();
+            if (order is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             var denied = await gate.CheckAsync(OrdersPolicies.Read, id.ToString(), order.BeneficiaryId, http.Headers.Authorization.ToString(), ct);
             if (denied is not null) return denied;
             return Results.Ok(OrderResponse.From(order));
@@ -149,7 +149,7 @@ public static class OrdersEndpoints
             IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, CancellationToken ct) =>
         {
             var order = await db.Orders.Include(o => o.Lines).FirstOrDefaultAsync(o => o.OrderId == id, ct);
-            if (order is null) return Results.NotFound();
+            if (order is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             var denied = await gate.CheckAsync(OrdersPolicies.Create, id.ToString(), order.BeneficiaryId, http.Headers.Authorization.ToString(), ct);
             if (denied is not null) return denied;
 

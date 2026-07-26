@@ -24,7 +24,7 @@ public static class MetricsEndpoints
                 .Include(x => x.Contracts).ThenInclude(c => c.ServiceLines)
                 .Include(x => x.Credentials)
                 .FirstOrDefaultAsync(x => x.ProviderId == id && x.TenantId == tenant && !x.IsDeleted, ct);
-            if (p is null) return Results.NotFound();
+            if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             var decision = await guard.AuthorizeAsync(me.Require(), p.TenantId, p.ProviderId.ToString(), ct);
             if (!decision.IsAllowed) return Results.Problem(statusCode: 403, title: "metrics access denied", detail: decision.ReasonCode);
 

@@ -82,7 +82,7 @@ public static class Cases
             if (denied is not null) return denied;
             var c = await deps.Db.Cases.AsNoTracking().Include(x => x.Assignments)
                 .FirstOrDefaultAsync(x => x.CaseId == id, ct);
-            return c is null ? Results.NotFound() : Results.Ok(CaseView.From(c));
+            return c is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(CaseView.From(c));
         }).RequireAuthorization(HbmpPolicies.Scope("case:read"));
 
         // --- Update case status -----------------------------------------------------------------------------
@@ -91,7 +91,7 @@ public static class Cases
             var denied = await deps.Gate.CheckAsync(CasePolicies.Write, id, "update-case", ct);
             if (denied is not null) return denied;
             var c = await deps.Db.Cases.FirstOrDefaultAsync(x => x.CaseId == id, ct);
-            if (c is null) return Results.NotFound();
+            if (c is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             if (!CaseWorkflow.CanTransition(c.Status, req.Status))
                 return Conflict($"No legal case transition {c.Status} → {req.Status}.");
 
@@ -110,7 +110,7 @@ public static class Cases
             var denied = await deps.Gate.CheckAsync(CasePolicies.Manage, id, "assign", ct);
             if (denied is not null) return denied;
             var c = await deps.Db.Cases.FirstOrDefaultAsync(x => x.CaseId == id, ct);
-            if (c is null) return Results.NotFound();
+            if (c is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var already = await deps.Db.Assignments
                 .FirstOrDefaultAsync(a => a.CaseId == id && a.CaseManagerId == req.CaseManagerId && a.Active, ct);
@@ -138,7 +138,7 @@ public static class Cases
             if (denied is not null) return denied;
             var a = await deps.Db.Assignments
                 .FirstOrDefaultAsync(x => x.CaseId == id && x.CaseManagerId == req.CaseManagerId && x.Active, ct);
-            if (a is null) return Results.NotFound();
+            if (a is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var now = deps.Clock.GetUtcNow();
             a.Active = false;
@@ -177,7 +177,7 @@ public static class Cases
             var denied = await deps.Gate.CheckAsync(CasePolicies.Write, id, "create-task", ct);
             if (denied is not null) return denied;
             if (string.IsNullOrWhiteSpace(req.Title)) return Unprocessable("title-required", "A task title is required.");
-            if (!await deps.Db.Cases.AnyAsync(c => c.CaseId == id, ct)) return Results.NotFound();
+            if (!await deps.Db.Cases.AnyAsync(c => c.CaseId == id, ct)) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var now = deps.Clock.GetUtcNow();
             var t = new CoordinationTask
@@ -196,7 +196,7 @@ public static class Cases
             var denied = await deps.Gate.CheckAsync(CasePolicies.Write, id, "update-task", ct);
             if (denied is not null) return denied;
             var t = await deps.Db.Tasks.FirstOrDefaultAsync(x => x.TaskId == taskId && x.CaseId == id, ct);
-            if (t is null) return Results.NotFound();
+            if (t is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             if (req.Status is { } to)
             {
@@ -261,7 +261,7 @@ public static class Cases
             if (string.IsNullOrWhiteSpace(req.RaisedToRole)) return Unprocessable("role-required", "A target role is required.");
             if (string.IsNullOrWhiteSpace(req.Reason)) return Unprocessable("reason-required", "An escalation reason is required.");
             var c = await deps.Db.Cases.FirstOrDefaultAsync(x => x.CaseId == id, ct);
-            if (c is null) return Results.NotFound();
+            if (c is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var now = deps.Clock.GetUtcNow();
             var e = new Escalation
@@ -291,7 +291,7 @@ public static class Cases
             var denied = await deps.Gate.CheckAsync(CasePolicies.Write, id, "update-escalation", ct);
             if (denied is not null) return denied;
             var e = await deps.Db.Escalations.FirstOrDefaultAsync(x => x.EscalationId == escId && x.CaseId == id, ct);
-            if (e is null) return Results.NotFound();
+            if (e is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             if (!CaseWorkflow.CanTransition(e.Status, req.Status))
                 return Conflict($"No legal escalation transition {e.Status} → {req.Status}.");
 

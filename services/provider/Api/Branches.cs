@@ -32,7 +32,7 @@ public static class BranchEndpoints
         read.MapGet("/{id:guid}", async (Guid id, ProviderDbContext db, CancellationToken ct) =>
         {
             var b = await db.Branches.AsNoTracking().FirstOrDefaultAsync(x => x.BranchId == id && !x.IsDeleted, ct);
-            return b is null ? Results.NotFound() : Results.Ok(ToView(b));
+            return b is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(ToView(b));
         });
 
         // --- Create branch → BranchCreated -------------------------------------------------------
@@ -65,7 +65,7 @@ public static class BranchEndpoints
         write.MapPut("/{id:guid}", async (Guid id, UpdateBranch req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
             var b = await db.Branches.FirstOrDefaultAsync(x => x.BranchId == id && !x.IsDeleted, ct);
-            if (b is null) return Results.NotFound();
+            if (b is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             if (req.NameEn is not null) b.NameEn = req.NameEn;
             if (req.NameAr is not null) b.NameAr = req.NameAr;
@@ -90,7 +90,7 @@ public static class BranchEndpoints
             if (!Enum.TryParse<BranchStatus>(req.Status, out var status))
                 return Results.Problem(statusCode: 400, title: $"unknown status '{req.Status}'");
             var b = await db.Branches.FirstOrDefaultAsync(x => x.BranchId == id && !x.IsDeleted, ct);
-            if (b is null) return Results.NotFound();
+            if (b is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var from = b.Status;
             b.Status = status;

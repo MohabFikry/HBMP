@@ -43,7 +43,7 @@ public static class NotificationsEndpoints
             var uid = me.Principal!.Subject;
             var n = await db.Notifications.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.NotificationId == id && x.RecipientUserId == uid, ct);
-            return n is null ? Results.NotFound() : Results.Ok(DeliveryView.From(n));
+            return n is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(DeliveryView.From(n));
         }).RequireAuthorization(HbmpPolicies.Scope("notification:read"));
 
         // Mark read — acting on the notification (stops its escalation timer).
@@ -55,7 +55,7 @@ public static class NotificationsEndpoints
 
             var uid = me.Principal!.Subject;
             var n = await db.Notifications.FirstOrDefaultAsync(x => x.NotificationId == id && x.RecipientUserId == uid, ct);
-            if (n is null) return Results.NotFound();
+            if (n is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             if (n.ReadAt is null) { n.ReadAt = clock.GetUtcNow(); await db.SaveChangesAsync(ct); }
             return Results.Ok(InboxItemView.From(n));
         }).RequireAuthorization(HbmpPolicies.Scope("notification:read"));

@@ -92,7 +92,7 @@ public static class SubmissionEndpoints
                 return Results.Problem(statusCode: 422, title: "bad-doc-type", type: "urn:hbmp:validation", detail: "Unknown document type.");
 
             var doc = await submissions.AttachDocumentAsync(id, deps.Tenant, body.DocumentId, docType, deps.Subject ?? "unknown", ct);
-            if (doc is null) return Results.NotFound();
+            if (doc is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             await deps.Audit.EmitAsync(new AuditEventDraft
             {
@@ -114,7 +114,7 @@ public static class SubmissionEndpoints
                 .FirstOrDefaultAsync(x => x.SubmissionId == id && x.TenantId == deps.Tenant, ct);
             // Provider isolation at the app layer (RLS is the second line): a provider sees only its own submissions.
             if (s is null || (deps.ProviderId is { } pid && Guid.TryParse(pid, out var cp) && s.ProviderId != cp))
-                return Results.NotFound();
+                return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             await deps.Audit.EmitAsync(new AuditEventDraft
             {

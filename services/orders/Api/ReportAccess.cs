@@ -27,7 +27,7 @@ public static class ReportAccessEndpoints
 
             var order = await db.Orders.AsNoTracking().Include(o => o.Lines).FirstOrDefaultAsync(o => o.OrderId == req.OrderId, ct);
             var line = order?.Lines.FirstOrDefault(l => l.OrderLineId == req.OrderLineId);
-            if (order is null || line is null) return Results.NotFound();
+            if (order is null || line is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var r = new ReportAccessRequest
             {
@@ -48,7 +48,7 @@ public static class ReportAccessEndpoints
         v1.MapPost("/report-access-requests/{id:guid}/decision", async (Guid id, AccessDecision dec, OrdersDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
             var r = await db.ReportAccessRequests.FirstOrDefaultAsync(x => x.RequestId == id, ct);
-            if (r is null) return Results.NotFound();
+            if (r is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             if (r.Status is not (ReportAccessStatus.Requested or ReportAccessStatus.UnderReview or ReportAccessStatus.InfoRequested))
                 return Results.Problem(statusCode: 409, title: "already-decided");
 
@@ -105,7 +105,7 @@ public static class ReportAccessEndpoints
         v1.MapPost("/report-access-grants/{id:guid}/revoke", async (Guid id, OrdersDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
             var g = await db.ReportAccessGrants.FirstOrDefaultAsync(x => x.GrantId == id && x.RevokedAt == null, ct);
-            if (g is null) return Results.NotFound();
+            if (g is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             g.RevokedAt = clock.GetUtcNow(); g.RevokedBy = me.Principal?.Subject;
             await db.SaveChangesAsync(ct);
             await audit.EmitAsync(Draft(g.GrantId, AuditAction.StateChange, me, Guid.Empty, "ReportAccessGrantRevoked", null, AuditSeverity.High), ct);

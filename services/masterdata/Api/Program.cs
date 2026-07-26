@@ -56,7 +56,7 @@ v1.MapGet("/icd-codes", async (string? chapter, bool? billable, string? q, int? 
     return Results.Ok(new { page = p, pageSize = ps, items });
 });
 v1.MapGet("/icd-codes/{code}", async (string code, MasterDataDbContext db, CancellationToken ct) =>
-    await db.IcdCodes.FindAsync([code], ct) is { } e ? Results.Ok(e) : Results.NotFound());
+    await db.IcdCodes.FindAsync([code], ct) is { } e ? Results.Ok(e) : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found"));
 
 // ------------------------------------------------------------------ CPT
 v1.MapGet("/cpt-codes", async (string? category, string? q, int? page, int? pageSize, MasterDataDbContext db, CancellationToken ct) =>
@@ -88,7 +88,7 @@ v1.MapGet("/drugs", async (string? atcCode, string? q, int? page, int? pageSize,
     return Results.Ok(new { page = p, pageSize = ps, items });
 });
 v1.MapGet("/drugs/{drugCode}", async (string drugCode, MasterDataDbContext db, CancellationToken ct) =>
-    await db.Drugs.AsNoTracking().FirstOrDefaultAsync(x => x.DrugCode == drugCode, ct) is { } d ? Results.Ok(d) : Results.NotFound());
+    await db.Drugs.AsNoTracking().FirstOrDefaultAsync(x => x.DrugCode == drugCode, ct) is { } d ? Results.Ok(d) : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found"));
 
 v1.MapGet("/allergens", async (MasterDataDbContext db, CancellationToken ct) =>
     Results.Ok(await db.Allergens.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct)));
@@ -106,7 +106,7 @@ v1.MapGet("/examination-types", async (string? category, string? sensitivity, Ma
 v1.MapGet("/examination-types/{id:guid}", async (Guid id, MasterDataDbContext db, CancellationToken ct) =>
 {
     var x = await db.ExaminationTypes.AsNoTracking().FirstOrDefaultAsync(e => e.ExaminationTypeId == id && e.Status == "Active", ct);
-    return x is null ? Results.NotFound() : Results.Ok(ExamView.Of(x));
+    return x is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(ExamView.Of(x));
 });
 
 // ------------------------------------------------------------------ Typeahead search (Tier 1: DB ILIKE; OpenSearch indexer is a follow-up)

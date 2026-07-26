@@ -32,7 +32,7 @@ public static class ConsumeEndpoints
 
             var head = await db.Orders.AsNoTracking().Where(o => o.OrderId == orderId)
                 .Select(o => new { o.OrderType }).FirstOrDefaultAsync(ct);
-            if (head is null) return Results.NotFound();
+            if (head is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             // Provider-ownership + Lab/Imaging capability (audited 403 on refusal).
             var denied = await gate.AuthorizeConsumeAsync(head.OrderType, ct);
@@ -67,7 +67,7 @@ public static class ConsumeEndpoints
                     return Results.Ok(ConsumeResponse.From(result.Order!, result.Fulfillments, replayed: true));
 
                 case ConsumeOutcome.NotFound:
-                    return Results.NotFound();
+                    return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
                 case ConsumeOutcome.LineNotFound:
                     return Results.Problem(statusCode: 404, title: "line-not-found", type: "urn:hbmp:line-not-found",
                         detail: "No such order line on this order.");
