@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Mersal.Migration</RootNamespace>
+    <AssemblyName>mersal-migrate</AssemblyName>
+    <!-- "Stream" is this phase's domain vocabulary (migration STREAM A/B/C, ../35 §5), not
+         System.IO.Stream; CA1711's reserved-suffix rule doesn't apply to the concept here. -->
+    <NoWarn>$(NoWarn);CA1711</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../libs/audit-client/Mersal.Audit.Client.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Dapper" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="CsvHelper" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Migrations/*.sql" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The Tests/ subfolder is its own project; don't compile it into the tool. -->
+    <Compile Remove="Tests/**/*.cs" />
+  </ItemGroup>
+</Project>

@@ -43,4 +43,18 @@ for mig_dir in services/*/Infrastructure/Migrations; do
   done
 done
 
+# The migration toolkit (phase 12.1) owns the `migration` schema (staging/prod onboarding); it lives
+# under tools/, not services/, so apply it explicitly.
+if [ -d tools/migration/Migrations ]; then
+  mapfile -t mfiles < <(find tools/migration/Migrations -maxdepth 1 -name '*.sql' | sort)
+  if [ ${#mfiles[@]} -gt 0 ]; then
+    echo "==> [migration-toolkit] applying ${#mfiles[@]} migration(s)…"
+    for f in "${mfiles[@]}"; do
+      echo "     - $(basename "$f")"
+      run -f "$f"
+      total=$((total + 1))
+    done
+  fi
+fi
+
 echo "==> Done: $total migration file(s) applied across all services."
