@@ -1,21 +1,23 @@
 using System.Data.Common;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
-namespace Mersal.Provider.Infrastructure;
+namespace Mersal.Data;
 
 /// <summary>Per-request holder for the RLS session variables. Populated from the authenticated principal
-/// by middleware (Api layer) at the start of each request; read by <see cref="RlsConnectionInterceptor"/>
-/// when a pooled connection opens. Empty provider id ⇒ tenant-wide access (the Network Team).</summary>
+/// by <c>UseHbmpRls</c> middleware at the start of each request; read by <see cref="RlsConnectionInterceptor"/>
+/// when a pooled connection opens. Empty <see cref="TenantId"/> ⇒ the datastore denies every tenant-scoped
+/// row (fail-closed). Empty <see cref="ProviderId"/> ⇒ tenant-wide access (e.g. the Network Team).</summary>
 public sealed class RlsContext
 {
     public string TenantId { get; set; } = "";
     public string ProviderId { get; set; } = "";
 }
 
-/// <summary>Layer 4 of provider isolation (2b.3): binds PostgreSQL RLS session GUCs (<c>app.tenant_id</c>,
-/// <c>app.provider_id</c>) on every connection so the datastore denies cross-tenant / cross-provider rows
-/// independently of any application predicate. Uses <c>set_config</c> (parameterized) — never string
-/// interpolation. Because connections are pooled, the GUCs are (re)set on each open.</summary>
+/// <summary>Platform-wide RLS binder (audit H1 / ADR-0011): sets the PostgreSQL session GUCs
+/// (<c>app.tenant_id</c>, <c>app.provider_id</c>) on every connection so the datastore denies cross-tenant /
+/// cross-provider rows independently of any application predicate. Uses <c>set_config</c> (parameterized) —
+/// never string interpolation. Because connections are pooled, the GUCs are (re)set on each open. Lifted from
+/// provider-service (2b.3) into <c>libs/data</c> so every service shares one implementation.</summary>
 public sealed class RlsConnectionInterceptor(RlsContext context) : DbConnectionInterceptor
 {
     public override async Task ConnectionOpenedAsync(DbConnection connection, ConnectionEndEventData eventData, CancellationToken ct = default)

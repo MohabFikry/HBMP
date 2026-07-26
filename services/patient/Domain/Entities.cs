@@ -14,6 +14,7 @@ public enum DependentRelationship { Child, Spouse, Parent, Other }
 public sealed class Beneficiary
 {
     public Guid BeneficiaryId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011); stamped from principal
     public string? MemberNo { get; set; }                 // MRS-M-* issued at activation (1.4)
     public string GivenName { get; set; } = default!;
     public string FamilyName { get; set; } = default!;
@@ -38,6 +39,7 @@ public sealed class Beneficiary
 public sealed class BeneficiaryIdentifier
 {
     public Guid IdentifierId { get; set; }
+    public string TenantId { get; set; } = "";
     public Guid BeneficiaryId { get; set; }
     public IdentifierType IdentifierType { get; set; }
     public string IdentifierValue { get; set; } = default!;
@@ -51,6 +53,7 @@ public sealed class BeneficiaryIdentifier
 public sealed class Contact
 {
     public Guid ContactId { get; set; }
+    public string TenantId { get; set; } = "";
     public Guid BeneficiaryId { get; set; }
     public ContactType ContactType { get; set; }
     public string Value { get; set; } = default!;
@@ -62,6 +65,7 @@ public sealed class Contact
 public sealed class FamilyGroup
 {
     public Guid FamilyGroupId { get; set; }
+    public string TenantId { get; set; } = "";
     public string FamilyCode { get; set; } = default!;
     public Guid? HeadBeneficiaryId { get; set; }
 }
@@ -69,6 +73,7 @@ public sealed class FamilyGroup
 public sealed class DependentLink
 {
     public Guid DependentLinkId { get; set; }
+    public string TenantId { get; set; } = "";
     public Guid FamilyGroupId { get; set; }
     public Guid GuardianBeneficiaryId { get; set; }
     public Guid DependentBeneficiaryId { get; set; }

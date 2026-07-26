@@ -1,3 +1,4 @@
+using Mersal.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -9,8 +10,7 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddProviderInfrastructure(this IServiceCollection services, IConfiguration config)
     {
-        services.AddScoped<RlsContext>();
-        services.AddScoped<RlsConnectionInterceptor>();
+        services.AddHbmpRls();
         services.AddDbContext<ProviderDbContext>((sp, o) =>
             o.UseNpgsql(config.GetConnectionString("Provider") ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential."))
                 .UseSnakeCaseNamingConvention()

@@ -1,3 +1,4 @@
+using Mersal.Data;
 using Mersal.Patient.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -45,10 +46,12 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddPatientInfrastructure(this IServiceCollection services, IConfiguration config)
     {
-        services.AddDbContext<PatientDbContext>(o =>
+        services.AddHbmpRls();
+        services.AddDbContext<PatientDbContext>((sp, o) =>
             o.UseNpgsql(config.GetConnectionString("Patient")
                         ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential."))
-             .UseSnakeCaseNamingConvention());
+             .UseSnakeCaseNamingConvention()
+             .AddHbmpRlsInterceptors(sp));
         services.AddScoped<IIdentifierLookup, IdentifierLookup>();
         services.AddScoped<MemberNoIssuer>();
         return services;

@@ -58,7 +58,7 @@ app.Use(async (ctx, next) =>
             await ctx.Response.WriteAsJsonAsync(new { title = "provider-scoped token is missing a provider_id claim" });
             return;
         }
-        var rls = ctx.RequestServices.GetRequiredService<Mersal.Provider.Infrastructure.RlsContext>();
+        var rls = ctx.RequestServices.GetRequiredService<Mersal.Data.RlsContext>();
         rls.TenantId = principal.TenantId ?? "";
         rls.ProviderId = principal.ProviderId ?? "";
     }

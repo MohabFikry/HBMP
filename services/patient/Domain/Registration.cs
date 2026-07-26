@@ -11,6 +11,7 @@ public enum RegistrationDecision { Approve, RequestInfo, Reject }
 public sealed class Registration
 {
     public Guid RegistrationId { get; set; }
+    public string TenantId { get; set; } = "";
     public Guid BeneficiaryId { get; set; }
     public RegistrationStatus Status { get; set; } = RegistrationStatus.Pending;
 
