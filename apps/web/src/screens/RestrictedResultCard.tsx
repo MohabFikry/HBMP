@@ -30,7 +30,7 @@ export function RestrictedResultCard({ result, onRequestAccess }: RestrictedResu
     <section
       className="restricted-card"
       aria-label={t(L.restrictedResult)}
-      style={{ border: "1px solid var(--border, #cbd5e1)", borderRadius: 12, padding: 16, background: "var(--surface-muted, #f8fafc)" }}
+      style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 16, background: "var(--surface-2)" }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {/* Four cues: lock icon (shape) + ghost pill (border) + text — no colour dependency. */}
@@ -38,7 +38,7 @@ export function RestrictedResultCard({ result, onRequestAccess }: RestrictedResu
           className="chip chip--restricted"
           data-testid="restricted-chip"
           role="status"
-          style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border, #94a3b8)", borderRadius: 999, padding: "2px 10px", fontWeight: 600 }}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", borderRadius: 999, padding: "2px 10px", fontWeight: 600 }}
         >
           <span aria-hidden>🔒</span>
           {t(L.restricted)}
@@ -114,7 +114,7 @@ export function RequestAccessDialog({ onSubmit, onCancel }: RequestAccessDialogP
           <option value="">—</option>
           {PURPOSES.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
-        {purposeInvalid && <p id="ra-purpose-err" role="alert" style={{ color: "var(--danger, #b91c1c)" }}>{t(L.purposeRequired)}</p>}
+        {purposeInvalid && <p id="ra-purpose-err" role="alert" style={{ color: "var(--st-bad-fg)" }}>{t(L.purposeRequired)}</p>}
       </div>
 
       <div>
@@ -128,7 +128,7 @@ export function RequestAccessDialog({ onSubmit, onCancel }: RequestAccessDialogP
           rows={3}
           style={{ width: "100%" }}
         />
-        {justInvalid && <p id="ra-just-err" role="alert" style={{ color: "var(--danger, #b91c1c)" }}>{t(L.justificationRequired)}</p>}
+        {justInvalid && <p id="ra-just-err" role="alert" style={{ color: "var(--st-bad-fg)" }}>{t(L.justificationRequired)}</p>}
       </div>
 
       <div>

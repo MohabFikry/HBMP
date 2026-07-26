@@ -305,7 +305,7 @@ export function FinanceExports() {
               <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} style={{ minHeight: 44 }} />
             </label>
           </div>
-          {badRange && <p role="alert" style={{ color: "var(--danger, #b91c1c)" }}>{t(S.badRange)}</p>}
+          {badRange && <p role="alert" style={{ color: "var(--st-bad-fg)" }}>{t(S.badRange)}</p>}
         </fieldset>
         <div>
           <Button variant="primary" loading={busy} disabled={badRange} onClick={run}>{t(S.runExport)}</Button>

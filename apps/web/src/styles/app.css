@@ -97,7 +97,7 @@
   block-size: 18px;
   padding: 0 4px;
   border-radius: 999px;
-  background: var(--danger, #c1362f);
+  background: var(--st-bad-fg);
   color: #fff;
   font-size: 11px;
   font-weight: 700;
