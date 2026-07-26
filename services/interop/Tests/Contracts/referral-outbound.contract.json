@@ -1,0 +1,18 @@
+{
+  "name": "An internal ReferralCreated event maps to a FHIR ServiceRequest(referral) for the partner",
+  "partner": "digital-referral-network",
+  "direction": "outbound",
+  "internalEvent": {
+    "type": "ReferralCreated",
+    "payload": {
+      "beneficiaryId": "MRS-M-9",
+      "requestedSpecialtyCode": "394579002",
+      "requestedSpecialtyDisplay": "Cardiology",
+      "referralRef": "REF-2026-000007"
+    }
+  },
+  "expect": {
+    "format": "fhir+json",
+    "contains": [ "ServiceRequest", "Patient/MRS-M-9", "394579002", "REF-2026-000007", "306206005" ]
+  }
+}

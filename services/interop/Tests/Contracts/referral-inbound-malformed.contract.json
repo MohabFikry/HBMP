@@ -1,0 +1,17 @@
+{
+  "name": "A referral message missing the subject is quarantined, never applied",
+  "partner": "digital-referral-network",
+  "direction": "inbound",
+  "message": {
+    "format": "fhir+json",
+    "body": {
+      "resourceType": "ServiceRequest",
+      "intent": "order",
+      "code": { "coding": [ { "code": "394579002" } ] }
+    }
+  },
+  "expect": {
+    "quarantine": true,
+    "reasonContains": "subject"
+  }
+}

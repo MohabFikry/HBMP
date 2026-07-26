@@ -16,4 +16,5 @@
     <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" />
   </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
+  <ItemGroup><None Include="Contracts/**/*.json" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
 </Project>

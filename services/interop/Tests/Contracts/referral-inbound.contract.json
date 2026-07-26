@@ -1,0 +1,20 @@
+{
+  "name": "Digital referral network posts a FHIR ServiceRequest(referral)",
+  "partner": "digital-referral-network",
+  "direction": "inbound",
+  "message": {
+    "format": "fhir+json",
+    "body": {
+      "resourceType": "ServiceRequest",
+      "intent": "order",
+      "category": [ { "coding": [ { "system": "http://snomed.info/sct", "code": "306206005", "display": "Referral to service" } ] } ],
+      "subject": { "reference": "Patient/MRS-M-9" },
+      "code": { "coding": [ { "code": "394579002", "display": "Cardiology" } ] },
+      "identifier": [ { "value": "EXT-REF-77" } ]
+    }
+  },
+  "expect": {
+    "type": "ReferralReceived",
+    "contains": [ "MRS-M-9", "394579002", "EXT-REF-77" ]
+  }
+}

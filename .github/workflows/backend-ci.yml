@@ -84,6 +84,11 @@ jobs:
           python3 tools/ci/check-migration-compat.py --selftest
           python3 tools/ci/check-migration-compat.py --all
 
+      - name: Integration DPIA / data-sharing gate (13.3)
+        run: |
+          python3 tools/ci/check-integration-dpia.py --selftest
+          python3 tools/ci/check-integration-dpia.py
+
       - name: Apply migrations + provision hbmp_app role
         run: bash tools/ci/apply-migrations.sh
 

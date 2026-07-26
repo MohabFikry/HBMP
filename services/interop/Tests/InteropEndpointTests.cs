@@ -117,7 +117,7 @@ public class InteropEndpointTests(InteropFactory factory) : IClassFixture<Intero
     {
         Skip.If(InteropFactory.Db is null, "test DB not configured — set INTEROP_TEST_DB to run this DB integration test.");
         var client = factory.ClientFor("doctor", "fhir:write:Observation");
-        client.DefaultRequestHeaders.Add("If-None-Exist", "obs-key-1");
+        client.DefaultRequestHeaders.Add("If-None-Exist", $"obs-{Guid.NewGuid()}"); // unique per run → always a fresh first-create
         var payload = """
         {
           "resourceType": "Observation",
