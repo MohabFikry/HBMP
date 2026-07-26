@@ -4,6 +4,7 @@ using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Events;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Admin.Api;
 
@@ -15,7 +16,8 @@ public sealed record AssignResult(bool Ok, string? ReasonCode, UserBranchAssignm
 /// SoD-neutral identity data; every mutation is audited and emits a domain event. The active-branch resolver
 /// enforces THE INVARIANT: a requested branch outside the permitted set is denied and audited
 /// (BranchScopeDenied). Assignments are soft-lifecycle (revoke stamps metadata, effective next request).</summary>
-public sealed class BranchAssignmentService(AdminDbContext db, IAuditClient audit, IOutbox outbox, TimeProvider clock)
+public sealed class BranchAssignmentService(AdminDbContext db, IAuditClient audit, IOutbox outbox, TimeProvider clock,
+    IBusinessCalendar calendar)
 {
     public async Task<AssignResult> AssignAsync(ActorContext actor, string tenant, string subject, Guid branchId,
         BranchAssignmentType type, DateOnly validFrom, DateOnly? validTo, CancellationToken ct = default)
@@ -69,7 +71,7 @@ public sealed class BranchAssignmentService(AdminDbContext db, IAuditClient audi
     /// current rows — the caller decides the HTTP outcome from <see cref="BranchAssignmentRules.Resolution"/>.</summary>
     public async Task<BranchAssignmentRules.Resolution> ResolveAsync(string tenant, string subject, Guid? requested, CancellationToken ct = default)
     {
-        var on = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+        var on = calendar.Today();   // 18.A3 — assignment validity is a Cairo date
         var rows = await db.UserBranchAssignments.AsNoTracking()
             .Where(x => x.TenantId == tenant && x.SubjectUserId == subject).ToListAsync(ct);
         return BranchAssignmentRules.ResolveActiveBranch(rows.Select(r => r.ToAssignment()), requested, on);
@@ -91,7 +93,7 @@ public sealed class BranchAssignmentService(AdminDbContext db, IAuditClient audi
             return res;
         }
 
-        var on = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+        var on = calendar.Today();   // 18.A3 — assignment validity is a Cairo date
         var rows = await db.UserBranchAssignments.AsNoTracking()
             .Where(x => x.TenantId == tenant && x.SubjectUserId == subject).ToListAsync(ct);
         var home = BranchAssignmentRules.HomeBranch(rows.Select(r => r.ToAssignment()), on);

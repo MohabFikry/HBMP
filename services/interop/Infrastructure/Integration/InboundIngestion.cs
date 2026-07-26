@@ -17,7 +17,8 @@ public sealed class InboundIngestionService(
     InteropDbContext db,
     IExternalPartnerRegistry registry,
     IOutbox outbox,
-    IEnumerable<IInboundIntegrationAdapter> adapters)
+    IEnumerable<IInboundIntegrationAdapter> adapters,
+    TimeProvider clock)
 {
     private readonly Dictionary<string, IInboundIntegrationAdapter> _adapters =
         adapters.ToDictionary(a => a.PartnerId, StringComparer.Ordinal);
@@ -46,7 +47,7 @@ public sealed class InboundIngestionService(
             Body = message.Body,
             State = result.IsMapped ? "Mapped" : "Quarantined",
             Reason = result.QuarantineReason,
-            ReceivedAt = DateTimeOffset.UtcNow,
+            ReceivedAt = clock.GetUtcNow(),
         });
 
         if (result.IsMapped)

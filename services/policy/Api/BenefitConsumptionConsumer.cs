@@ -8,6 +8,7 @@ using Mersal.Policy.Infrastructure;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using Mersal.Time;
 
 namespace Mersal.Policy.Api;
 
@@ -34,6 +35,8 @@ public sealed class ConsumptionConsumerOptions
 /// </summary>
 public sealed class BenefitConsumptionConsumer(
     IServiceScopeFactory scopeFactory,
+    IBusinessCalendar calendar,
+    TimeProvider clock,
     IOptions<ConsumptionConsumerOptions> options,
     ILogger<BenefitConsumptionConsumer> logger) : BackgroundService
 {
@@ -77,7 +80,7 @@ public sealed class BenefitConsumptionConsumer(
             var eventType = ea.BasicProperties.Type ?? "";
             var payload = Encoding.UTF8.GetString(ea.Body.Span);
 
-            var instructions = Translate(eventId, eventType, payload);
+            var instructions = Translate(eventId, eventType, payload, calendar.Today());
             if (instructions.Count > 0)
             {
                 using var scope = scopeFactory.CreateScope();
@@ -112,7 +115,7 @@ public sealed class BenefitConsumptionConsumer(
                                 result.Outcome, instruction.SourceRef);
                     }
 
-                    db.ProcessedEvents.Add(new ProcessedEvent { EventId = eventId, ProcessedAt = DateTimeOffset.UtcNow });
+                    db.ProcessedEvents.Add(new ProcessedEvent { EventId = eventId, ProcessedAt = clock.GetUtcNow() });
                     await db.SaveChangesAsync(ct);
                 }
             }
@@ -129,7 +132,8 @@ public sealed class BenefitConsumptionConsumer(
     /// <summary>Turn one fulfillment event into zero or more accumulator instructions. Unknown event
     /// types and events without a tenant produce nothing (the latter is dead-lettered by the caller's
     /// ack path only after being logged — we never guess a tenant on a write path).</summary>
-    public static IReadOnlyList<ConsumptionInstruction> Translate(Guid eventId, string eventType, string payload)
+    public static IReadOnlyList<ConsumptionInstruction> Translate(
+        Guid eventId, string eventType, string payload, DateOnly today)
     {
         using var doc = JsonDocument.Parse(payload);
         var root = doc.RootElement;
@@ -142,7 +146,7 @@ public sealed class BenefitConsumptionConsumer(
 
         var category = Str(root, "benefitCategory");
         var key = Str(root, "idempotencyKey") ?? eventId.ToString();
-        var onDate = Date(root, "serviceDate") ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var onDate = Date(root, "serviceDate") ?? today;
 
         var direction = eventType is "OrderFulfillmentVoided" or "RxDispenseVoided"
             ? ConsumptionDirection.Reversed

@@ -2,6 +2,7 @@ using FluentAssertions;
 using Mersal.Finance.Domain;
 using Mersal.Finance.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Finance.Tests;
 
@@ -31,7 +32,7 @@ public class FinanceIntegrationTests
         try
         {
             await using var db = new FinanceDbContext(Options());
-            var proj = new FinanceEventProjector(db, TimeProvider.System);
+            var proj = new FinanceEventProjector(db, TimeProvider.System, new BusinessCalendar(TimeProvider.System));
             // A delivery event that ALSO (wrongly) carries a diagnosis key — the projector must not persist it.
             await proj.ProjectAsync(Ev("OrderLineConsumed", tenant, day,
                 ("serviceCode", "80053"), ("serviceLine", "Lab"), ("authorizedQty", "2"), ("deliveredQty", "2"),
@@ -58,7 +59,7 @@ public class FinanceIntegrationTests
         try
         {
             await using var db = new FinanceDbContext(Options());
-            var proj = new FinanceEventProjector(db, TimeProvider.System);
+            var proj = new FinanceEventProjector(db, TimeProvider.System, new BusinessCalendar(TimeProvider.System));
             await proj.ProjectAsync(Ev("OrderLineConsumed", tenant, day,
                 ("serviceCode", "70450"), ("serviceLine", "Radiology"), ("deliveredQty", "2"),
                 ("providerId", provider.ToString()), ("unitCost", "300")));
@@ -90,7 +91,7 @@ public class FinanceIntegrationTests
         try
         {
             await using var db = new FinanceDbContext(Options());
-            var proj = new FinanceEventProjector(db, TimeProvider.System);
+            var proj = new FinanceEventProjector(db, TimeProvider.System, new BusinessCalendar(TimeProvider.System));
             await proj.ProjectAsync(Ev("OrderLineConsumed", tenant, day,
                 ("serviceCode", "80053"), ("authorizedQty", "5"), ("deliveredQty", "4"), ("lineCost", "200")));
 

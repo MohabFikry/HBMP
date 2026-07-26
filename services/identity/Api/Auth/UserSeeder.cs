@@ -9,7 +9,8 @@ namespace Mersal.Identity.Api.Auth;
 /// only when <c>Issuer:SeedDemoUsers</c> is enabled (default: Development). Idempotent. NEVER enable in a real
 /// environment — production users are provisioned through the 17.4 admin surface.
 /// </summary>
-public sealed class UserSeeder(IServiceProvider services, IConfiguration config, IWebHostEnvironment env, ILogger<UserSeeder> log)
+public sealed class UserSeeder(IServiceProvider services, IConfiguration config, IWebHostEnvironment env,
+    TimeProvider clock, ILogger<UserSeeder> log)
     : IHostedService
 {
     private const string DemoPassword = "Mersal2026!";
@@ -31,7 +32,7 @@ public sealed class UserSeeder(IServiceProvider services, IConfiguration config,
             {
                 Id = Guid.NewGuid(), UserName = role, Email = $"{role}@mersal.local",
                 EmailConfirmed = true, TenantId = DemoTenant, DisplayName = Title(role),
-                CreatedAt = DateTimeOffset.UtcNow, IsActive = true,
+                CreatedAt = clock.GetUtcNow(), IsActive = true,
             };
             // Set the hash directly so the documented demo password is used regardless of the admin policy.
             user.PasswordHash = hasher.HashPassword(user, DemoPassword);

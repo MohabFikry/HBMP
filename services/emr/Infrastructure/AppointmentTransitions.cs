@@ -113,78 +113,123 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
         });
     }
 
+    /// <summary>
+    /// 18.A3: cancel is ONE transaction. It used to be three unwrapped SaveChanges (status, queue
+    /// tickets, waitlist promotion), so a failure between them left an appointment cancelled with a
+    /// live queue ticket, or a waitlist entry promoted against a cancel that never landed.
+    /// </summary>
     public async Task<TransitionResult> CancelAsync(
         Guid appointmentId, string? reason, uint? ifMatch, DateTimeOffset now, CancellationToken ct = default)
     {
-        var appt = await db.Appointments.FirstOrDefaultAsync(a => a.AppointmentId == appointmentId, ct);
-        if (appt is null) return TransitionResult.Fail(TransitionOutcome.NotFound);
-        if (!AppointmentWorkflow.CanCancel(appt.Status)) return TransitionResult.Fail(TransitionOutcome.IllegalTransition);
+        return await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            var appt = await db.Appointments.FirstOrDefaultAsync(a => a.AppointmentId == appointmentId, ct);
+            if (appt is null) return TransitionResult.Fail(TransitionOutcome.NotFound);
+            if (!AppointmentWorkflow.CanCancel(appt.Status)) return TransitionResult.Fail(TransitionOutcome.IllegalTransition);
 
-        var freedSlot = appt.SlotId is not null;
-        appt.Status = AppointmentStatus.Cancelled;
-        appt.CancelReason = reason;
-        appt.UpdatedAt = now;
-        ApplyIfMatch(appt, ifMatch);
-        try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateConcurrencyException) { return TransitionResult.Fail(TransitionOutcome.PreconditionFailed); }
+            var freedSlot = appt.SlotId is not null;
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            appt.Status = AppointmentStatus.Cancelled;
+            appt.CancelReason = reason;
+            appt.UpdatedAt = now;
+            ApplyIfMatch(appt, ifMatch);
+            MarkQueueTicketsRemoved(await ActiveQueueTicketsAsync(appointmentId, ct));   // cancel clears the queue (3.3)
 
-        await RemoveQueueTicketsAsync(appointmentId, ct);   // cancel removes any queue ticket (3.3)
-        var promoted = freedSlot ? await PromoteWaitlistAsync(appt, now, ct) : null;
-        return new TransitionResult(TransitionOutcome.Ok, appt, promoted);
+            try { await db.SaveChangesAsync(ct); }
+            catch (DbUpdateConcurrencyException)
+            {
+                await tx.RollbackAsync(ct); db.ChangeTracker.Clear();
+                return TransitionResult.Fail(TransitionOutcome.PreconditionFailed);
+            }
+
+            var promoted = freedSlot ? await PromoteWaitlistAsync(appt, ct) : null;
+            await tx.CommitAsync(ct);
+            return new TransitionResult(TransitionOutcome.Ok, appt, promoted);
+        });
     }
 
+    /// <summary>18.A3: no-show is ONE transaction, for the same reason as <see cref="CancelAsync"/>.</summary>
     public async Task<TransitionResult> NoShowAsync(
         Guid appointmentId, uint? ifMatch, DateTimeOffset now, TimeSpan grace, CancellationToken ct = default)
     {
-        var appt = await db.Appointments.FirstOrDefaultAsync(a => a.AppointmentId == appointmentId, ct);
-        if (appt is null) return TransitionResult.Fail(TransitionOutcome.NotFound);
-        if (!AppointmentWorkflow.CanNoShow(appt, now, grace)) return TransitionResult.Fail(TransitionOutcome.IllegalTransition);
+        return await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            var appt = await db.Appointments.FirstOrDefaultAsync(a => a.AppointmentId == appointmentId, ct);
+            if (appt is null) return TransitionResult.Fail(TransitionOutcome.NotFound);
+            if (!AppointmentWorkflow.CanNoShow(appt, now, grace)) return TransitionResult.Fail(TransitionOutcome.IllegalTransition);
 
-        appt.Status = AppointmentStatus.NoShow;
-        appt.NoShow = true;                       // reporting flag (US-022)
-        appt.UpdatedAt = now;
-        ApplyIfMatch(appt, ifMatch);
-        try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateConcurrencyException) { return TransitionResult.Fail(TransitionOutcome.PreconditionFailed); }
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            appt.Status = AppointmentStatus.NoShow;
+            appt.NoShow = true;                       // reporting flag (US-022)
+            appt.UpdatedAt = now;
+            ApplyIfMatch(appt, ifMatch);
+            MarkQueueTicketsRemoved(await ActiveQueueTicketsAsync(appointmentId, ct));   // no-show clears the queue (3.3)
 
-        await RemoveQueueTicketsAsync(appointmentId, ct);           // no-show removes any queue ticket (3.3)
-        var promoted = await PromoteWaitlistAsync(appt, now, ct);   // free the slot for backfill
-        var noShowCount = await db.Appointments.CountAsync(
-            a => a.BeneficiaryId == appt.BeneficiaryId && a.Status == AppointmentStatus.NoShow, ct);
-        return new TransitionResult(TransitionOutcome.Ok, appt, promoted, noShowCount);
+            try { await db.SaveChangesAsync(ct); }
+            catch (DbUpdateConcurrencyException)
+            {
+                await tx.RollbackAsync(ct); db.ChangeTracker.Clear();
+                return TransitionResult.Fail(TransitionOutcome.PreconditionFailed);
+            }
+
+            var promoted = await PromoteWaitlistAsync(appt, ct);   // free the slot for backfill
+            var noShowCount = await db.Appointments.CountAsync(
+                a => a.BeneficiaryId == appt.BeneficiaryId && a.Status == AppointmentStatus.NoShow, ct);
+            await tx.CommitAsync(ct);
+            return new TransitionResult(TransitionOutcome.Ok, appt, promoted, noShowCount);
+        });
     }
 
-    /// <summary>Promote the earliest waiting entry for the freed provider/location (23 §6 Waitlisted→Scheduled).
-    /// Marks it Promoted; the appointment team completes the re-booking. Null if the waitlist is empty.</summary>
-    private async Task<WaitlistEntry?> PromoteWaitlistAsync(Appointment freed, DateTimeOffset now, CancellationToken ct)
+    /// <summary>
+    /// Promote the earliest waiting entry for the freed provider/location (23 §6 Waitlisted→Scheduled).
+    /// Marks it Promoted; the appointment team completes the re-booking. Null if the waitlist is empty.
+    ///
+    /// 18.A3: the row is claimed with <c>FOR UPDATE SKIP LOCKED</c> inside the caller's transaction and
+    /// the status change is a guarded UPDATE. Unlocked, two concurrent cancels both read the SAME head
+    /// of the queue and promoted it twice — one freed slot, two people told they had it, and the second
+    /// waiting beneficiary silently skipped. SKIP LOCKED means the second cancel takes the NEXT entry
+    /// instead of blocking on the first.
+    /// </summary>
+    private async Task<WaitlistEntry?> PromoteWaitlistAsync(Appointment freed, CancellationToken ct)
     {
-        var next = await db.WaitlistEntries
-            .Where(w => w.ProviderId == freed.ProviderId && w.LocationId == freed.LocationId
-                        && w.Status == WaitlistStatus.Waitlisted)
-            .OrderByDescending(w => w.PriorityScore).ThenBy(w => w.CreatedAt)
-            .FirstOrDefaultAsync(ct);
-        if (next is null) return null;
-        next.Status = WaitlistStatus.Promoted;
-        await db.SaveChangesAsync(ct);
-        return next;
+        var claimed = await db.WaitlistEntries.FromSqlRaw(
+            """
+            SELECT * FROM emr.waitlist_entry
+            WHERE provider_id = {0} AND location_id = {1} AND status = 'Waitlisted'
+            ORDER BY priority_score DESC, created_at ASC
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+            """, freed.ProviderId, freed.LocationId).FirstOrDefaultAsync(ct);
+        if (claimed is null) return null;
+
+        // Guarded write: even if the lock were somehow not held, the status predicate makes the
+        // promotion a compare-and-set rather than a blind overwrite.
+        var affected = await db.WaitlistEntries
+            .Where(w => w.WaitlistId == claimed.WaitlistId && w.Status == WaitlistStatus.Waitlisted)
+            .ExecuteUpdateAsync(s => s.SetProperty(w => w.Status, WaitlistStatus.Promoted), ct);
+        if (affected == 0) return null;
+
+        claimed.Status = WaitlistStatus.Promoted;
+        return claimed;
     }
 
-    /// <summary>Remove any active (Waiting/InConsultation) queue tickets for an appointment (3.3) — keeps the
-    /// reception queue consistent when the appointment is cancelled or marked no-show.</summary>
-    private async Task RemoveQueueTicketsAsync(Guid appointmentId, CancellationToken ct)
-    {
-        var tickets = await db.Set<QueueTicket>()
+    /// <summary>Active (Waiting/InConsultation) queue tickets for an appointment (3.3).</summary>
+    private Task<List<QueueTicket>> ActiveQueueTicketsAsync(Guid appointmentId, CancellationToken ct) =>
+        db.Set<QueueTicket>()
             .Where(t => t.AppointmentId == appointmentId
                         && (t.State == QueueTicketState.Waiting || t.State == QueueTicketState.InConsultation))
             .ToListAsync(ct);
-        if (tickets.Count == 0) return;
+
+    /// <summary>Mark tickets removed in the change tracker — saved with the transition, never separately,
+    /// so the reception queue can never disagree with the appointment's status.</summary>
+    private static void MarkQueueTicketsRemoved(List<QueueTicket> tickets)
+    {
         foreach (var t in tickets) t.State = QueueTicketState.Removed;
-        await db.SaveChangesAsync(ct);
     }
 }
 
 /// <summary>Idempotency ledger for mutating endpoints. A seen key short-circuits with the prior status.</summary>
-public sealed class IdempotencyStore(EmrDbContext db)
+public sealed class IdempotencyStore(EmrDbContext db, TimeProvider clock)
 {
     public Task<ProcessedRequest?> FindAsync(string key, CancellationToken ct = default) =>
         db.Set<ProcessedRequest>().AsNoTracking().FirstOrDefaultAsync(p => p.IdempotencyKey == key, ct)!;
@@ -194,7 +239,7 @@ public sealed class IdempotencyStore(EmrDbContext db)
         db.Set<ProcessedRequest>().Add(new ProcessedRequest
         {
             IdempotencyKey = key, Operation = operation, AppointmentId = appointmentId,
-            StatusCode = statusCode, CreatedAt = DateTimeOffset.UtcNow,
+            StatusCode = statusCode, CreatedAt = clock.GetUtcNow(),
         });
         await db.SaveChangesAsync(ct);
     }

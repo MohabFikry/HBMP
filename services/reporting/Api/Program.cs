@@ -5,6 +5,7 @@ using Mersal.Data;
 using Mersal.Events;
 using Mersal.Reporting.Api;
 using Mersal.Reporting.Infrastructure;
+using Mersal.Time;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -12,6 +13,7 @@ using OpenTelemetry.Trace;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
+builder.Services.AddHbmpBusinessCalendar();   // 18.A3 — Africa/Cairo business dates + injected clock
 builder.Services.AddHbmpAuditClient("reporting-service");
 // reporting-service authorizes with the reporting overlay: zone-split reads (operational / clinical-coded /
 // financial) so finance ≠ diagnosis is enforced in authz; a system projection seam; audited exports.

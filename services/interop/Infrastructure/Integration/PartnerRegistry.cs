@@ -9,7 +9,7 @@ namespace Mersal.Interop.Infrastructure.Integration;
 /// reference both exist. A DB CHECK constraint backs this so an out-of-band UPDATE can't enable an integration
 /// without both artifacts either. Enablement attempts are audited by the caller (admin endpoint).
 /// </summary>
-public sealed class DbExternalPartnerRegistry(InteropDbContext db) : IExternalPartnerRegistry
+public sealed class DbExternalPartnerRegistry(InteropDbContext db, TimeProvider clock) : IExternalPartnerRegistry
 {
     public async Task<IReadOnlyList<PartnerDescriptor>> ListAsync(CancellationToken ct = default) =>
         (await db.Partners.AsNoTracking().OrderBy(p => p.PartnerId).ToListAsync(ct)).Select(ToDescriptor).ToList();
@@ -36,7 +36,7 @@ public sealed class DbExternalPartnerRegistry(InteropDbContext db) : IExternalPa
         row.Dpia = d.Dpia.ToString();
         row.DataSharingAgreementRef = d.DataSharingAgreementRef;
         row.CrossBorder = d.CrossBorder;
-        row.UpdatedAt = DateTimeOffset.UtcNow;
+        row.UpdatedAt = clock.GetUtcNow();
         await db.SaveChangesAsync(ct);
     }
 
@@ -49,7 +49,7 @@ public sealed class DbExternalPartnerRegistry(InteropDbContext db) : IExternalPa
         if (!gate.Allowed) return gate; // refused, no state change
 
         row.Status = IntegrationStatus.Enabled.ToString();
-        row.UpdatedAt = DateTimeOffset.UtcNow;
+        row.UpdatedAt = clock.GetUtcNow();
         await db.SaveChangesAsync(ct);
         return gate;
     }
@@ -59,7 +59,7 @@ public sealed class DbExternalPartnerRegistry(InteropDbContext db) : IExternalPa
         var row = await db.Partners.FirstOrDefaultAsync(p => p.PartnerId == partnerId, ct);
         if (row is null) return;
         row.Status = IntegrationStatus.Disabled.ToString();
-        row.UpdatedAt = DateTimeOffset.UtcNow;
+        row.UpdatedAt = clock.GetUtcNow();
         await db.SaveChangesAsync(ct);
     }
 

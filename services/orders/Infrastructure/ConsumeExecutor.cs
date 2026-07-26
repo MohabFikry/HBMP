@@ -1,3 +1,4 @@
+using Mersal.Events;
 using Mersal.Orders.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,6 +9,11 @@ namespace Mersal.Orders.Infrastructure;
 public enum ConsumeOutcome
 {
     Applied, Replayed, Conflict, NotFound, AlreadyUsed, OverConsume, OrderNotConsumable, LineNotFound, InvalidQuantity,
+    /// <summary>18.A3 — the header is empty, over-length, or contains the reserved <c>::</c> separator.</summary>
+    InvalidIdempotencyKey,
+    /// <summary>18.A3 — the key was already used for a DIFFERENT request body. Answering it with the
+    /// original fulfillments would tell the caller work had been done that never happened.</summary>
+    IdempotencyKeyReuse,
 }
 
 public sealed record ConsumeResult(ConsumeOutcome Outcome, InvestigationOrder? Order, IReadOnlyList<OrderFulfillment> Fulfillments)
@@ -34,14 +40,24 @@ public sealed class ConsumeExecutor(OrdersDbContext db)
         Func<InvestigationOrder, IReadOnlyList<OrderFulfillment>, CancellationToken, Task>? insideTransaction = null,
         CancellationToken ct = default)
     {
+        // 18.A3: the reserved "::" separator may not appear in a caller's key, which is what makes the
+        // per-line composed key (and therefore the prefix match below) unambiguous.
+        if (IdempotencyKeyRules.Validate(idempotencyKey) is not null)
+            return ConsumeResult.Fail(ConsumeOutcome.InvalidIdempotencyKey);
+
         var order = await db.Orders.Include(o => o.Lines).FirstOrDefaultAsync(o => o.OrderId == orderId, ct);
         if (order is null) return ConsumeResult.Fail(ConsumeOutcome.NotFound);
 
-        var keyPrefix = idempotencyKey + "::";
+        var keyPrefix = idempotencyKey + IdempotencyKeyRules.Separator;
+        var requestHash = HashRequest(orderId, requests);
 
-        // (3) Idempotent replay: this key already produced fulfillment rows → return them unchanged.
+        // (3) Idempotent replay: this key already produced fulfillment rows → return them unchanged,
+        // but ONLY if it was the same request. A key reused with a different body is rejected.
         var prior = await db.Fulfillments.AsNoTracking().Where(f => f.IdempotencyKey.StartsWith(keyPrefix)).ToListAsync(ct);
-        if (prior.Count > 0) return new ConsumeResult(ConsumeOutcome.Replayed, order, prior);
+        if (prior.Count > 0)
+            return prior.All(f => IdempotencyKeyRules.Matches(f.RequestHash, requestHash))
+                ? new ConsumeResult(ConsumeOutcome.Replayed, order, prior)
+                : ConsumeResult.Fail(ConsumeOutcome.IdempotencyKeyReuse);
 
         var error = OrderConsume.Validate(order, requests);
         if (error != ConsumeError.None) return ConsumeResult.Fail(Map(error));
@@ -55,7 +71,8 @@ public sealed class ConsumeExecutor(OrdersDbContext db)
             var f = new OrderFulfillment
             {
                 FulfillmentId = Guid.NewGuid(), OrderLineId = line.OrderLineId, PerformingProviderId = performingProviderId,
-                Quantity = r.Quantity, IdempotencyKey = keyPrefix + line.OrderLineId, ConsumedAt = now, ConsumedBy = actorId,
+                Quantity = r.Quantity, IdempotencyKey = keyPrefix + line.OrderLineId, RequestHash = requestHash,
+                ConsumedAt = now, ConsumedBy = actorId,
             };
             fulfillments.Add(f);
             db.Fulfillments.Add(f);
@@ -78,6 +95,8 @@ public sealed class ConsumeExecutor(OrdersDbContext db)
             db.ChangeTracker.Clear();
             // A concurrent request with the SAME key won the insert race → idempotent: return its outcome.
             var winner = await db.Fulfillments.AsNoTracking().Where(f => f.IdempotencyKey.StartsWith(keyPrefix)).ToListAsync(ct);
+            if (!winner.All(f => IdempotencyKeyRules.Matches(f.RequestHash, requestHash)))
+                return ConsumeResult.Fail(ConsumeOutcome.IdempotencyKeyReuse);
             var fresh = await db.Orders.AsNoTracking().Include(o => o.Lines).FirstAsync(o => o.OrderId == orderId, ct);
             return new ConsumeResult(ConsumeOutcome.Replayed, fresh, winner);
         }
@@ -93,6 +112,19 @@ public sealed class ConsumeExecutor(OrdersDbContext db)
         if (insideTransaction is not null) await insideTransaction(order, fulfillments, ct);
         await tx.CommitAsync(ct);
         return new ConsumeResult(ConsumeOutcome.Applied, order, fulfillments);
+    }
+
+    /// <summary>Canonical hash of what this consume asks for: the order plus every (line, quantity),
+    /// sorted so two orderings of the same work hash alike.</summary>
+    private static string HashRequest(Guid orderId, IReadOnlyList<ConsumeLineRequest> requests)
+    {
+        var parts = new List<string> { orderId.ToString() };
+        foreach (var r in requests.OrderBy(x => x.OrderLineId))
+        {
+            parts.Add(r.OrderLineId.ToString());
+            parts.Add(IdempotencyKeyRules.Amount(r.Quantity));
+        }
+        return IdempotencyKeyRules.Hash([.. parts]);
     }
 
     /// <summary>Re-read the order's lines inside the transaction, recompute the aggregate status from

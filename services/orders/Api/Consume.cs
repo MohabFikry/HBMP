@@ -5,6 +5,7 @@ using Mersal.Events;
 using Mersal.Orders.Domain;
 using Mersal.Orders.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Orders.Api;
 
@@ -21,7 +22,7 @@ public static class ConsumeEndpoints
 
         v1.MapPost("/{orderId:guid}/consume", async (
             Guid orderId, ConsumeRequest req, HttpRequest http, OrdersDbContext db, ConsumeExecutor executor,
-            FulfillmentGate gate, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock,
+            FulfillmentGate gate, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar,
             CancellationToken ct) =>
         {
             var idem = http.Headers["Idempotency-Key"].ToString();
@@ -55,7 +56,7 @@ public static class ConsumeEndpoints
                             tenantId = order.TenantId,
                             beneficiaryId = order.BeneficiaryId,
                             benefitCategory = BenefitCategoryMap.ForOrderType(order.OrderType),
-                            serviceDate = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime),
+                            serviceDate = calendar.Today(),   // 18.A3 — Cairo service date
                             lines = fulfillments.Select(f => new { f.OrderLineId, f.Quantity }),
                             idempotencyKey = idem,
                         }, c);
@@ -95,6 +96,12 @@ public static class ConsumeEndpoints
                 case ConsumeOutcome.OrderNotConsumable:
                     return Results.Problem(statusCode: 409, title: "order-not-consumable", type: "urn:hbmp:order-not-consumable",
                         detail: "This order is not in a consumable state.");
+                case ConsumeOutcome.InvalidIdempotencyKey:
+                    return Results.Problem(statusCode: 400, title: "invalid-idempotency-key", type: "urn:hbmp:invalid-idempotency-key",
+                        detail: "The Idempotency-Key must be non-empty, at most 80 characters, and must not contain '::'.");
+                case ConsumeOutcome.IdempotencyKeyReuse:
+                    return Results.Problem(statusCode: 422, title: "idempotency-key-reuse", type: "urn:hbmp:idempotency-key-reuse",
+                        detail: "This Idempotency-Key was already used for a different request. Use a new key for a changed request.");
                 case ConsumeOutcome.Conflict:
                     return Results.Problem(statusCode: 409, title: "concurrent-consume", type: "urn:hbmp:concurrent-consume",
                         detail: "The line was concurrently consumed by another request; re-read and retry.");

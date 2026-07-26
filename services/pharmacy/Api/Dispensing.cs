@@ -5,6 +5,7 @@ using Mersal.Events;
 using Mersal.Pharmacy.Domain;
 using Mersal.Pharmacy.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Pharmacy.Api;
 
@@ -23,7 +24,7 @@ public static class DispensingEndpoints
         // dispensing-relevant fields as search, without requiring a patient identifier — the pharmacist's worklist. ----
         v1.MapGet("/queue", async (
             PharmacyDbContext db, DispensingGate gate, IAuditClient audit, IHbmpPrincipalAccessor me,
-            TimeProvider clock, CancellationToken ct) =>
+            TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
         {
             var denied = await gate.AuthorizeSearchAsync(ct);
             if (denied is not null) return denied;
@@ -72,7 +73,7 @@ public static class DispensingEndpoints
         // ---- 6.1 Open one prescription for dispensing — enforces the reject rule with a clear reason ----
         v1.MapGet("/{id:guid}/dispensing", async (
             Guid id, PharmacyDbContext db, DispensingGate gate, IAuditClient audit, IHbmpPrincipalAccessor me,
-            TimeProvider clock, CancellationToken ct) =>
+            TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
         {
             var denied = await gate.AuthorizeSearchAsync(ct);
             if (denied is not null) return denied;
@@ -100,7 +101,7 @@ public static class DispensingEndpoints
         v1.MapPost("/{rxId:guid}/lines/{lineId:guid}/dispense", async (
             Guid rxId, Guid lineId, DispenseRequest req, HttpRequest http, PharmacyDbContext db, DispenseExecutor executor,
             DispensingGate gate, IFormularyService formulary, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me,
-            TimeProvider clock, CancellationToken ct) =>
+            TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
         {
             var idem = http.Headers["Idempotency-Key"].ToString();
             if (string.IsNullOrWhiteSpace(idem))
@@ -158,7 +159,7 @@ public static class DispensingEndpoints
                             tenantId = rx.TenantId,
                             beneficiaryId = rx.BeneficiaryId,
                             benefitCategory = "PHARMACY",
-                            serviceDate = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime),
+                            serviceDate = calendar.Today(),   // 18.A3 — Cairo service date
                             evt.Quantity,
                             evt.BatchNo,
                             idempotencyKey = idem,
@@ -199,6 +200,12 @@ public static class DispensingEndpoints
                 case DispenseOutcome.RxNotDispensable:
                     return Results.Problem(statusCode: 409, title: "not-dispensable", type: "urn:hbmp:rx-not-dispensable",
                         detail: "This prescription is expired, cancelled, rejected, or already fully dispensed.");
+                case DispenseOutcome.InvalidIdempotencyKey:
+                    return Results.Problem(statusCode: 400, title: "invalid-idempotency-key", type: "urn:hbmp:invalid-idempotency-key",
+                        detail: "The Idempotency-Key must be non-empty, at most 80 characters, and must not contain '::'.");
+                case DispenseOutcome.IdempotencyKeyReuse:
+                    return Results.Problem(statusCode: 422, title: "idempotency-key-reuse", type: "urn:hbmp:idempotency-key-reuse",
+                        detail: "This Idempotency-Key was already used for a different dispense. Use a new key for a changed request.");
                 case DispenseOutcome.ExpiredLot:
                     return Results.Problem(statusCode: 422, title: "expired-lot", type: "urn:hbmp:expired-lot",
                         detail: "The batch/lot expiry date is in the past; expired stock cannot be dispensed.");

@@ -6,6 +6,7 @@ using Mersal.Events;
 using Mersal.Provider.Api;
 using Mersal.Provider.Domain;
 using Mersal.Provider.Infrastructure;
+using Mersal.Time;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,6 +18,7 @@ using ProviderEntity = Mersal.Provider.Domain.Provider;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
+builder.Services.AddHbmpBusinessCalendar();   // 18.A3 — Africa/Cairo business dates + injected clock
 builder.Services.AddHbmpAuditClient("provider-service");
 // Provider-service authorizes with the platform bundle plus the provider-ownership rules (2b.3).
 builder.Services.AddHbmpAuthorization(ProviderPolicies.Bundle());
@@ -82,14 +84,14 @@ var write = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("pro
 var read = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("provider:read"));
 
 // --- Create provider (Draft) → ProviderCreated -------------------------------------------------
-write.MapPost("/providers", async (CreateProvider req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+write.MapPost("/providers", async (CreateProvider req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
 {
     var tenant = me.Principal?.TenantId;
     if (string.IsNullOrEmpty(tenant)) return Results.Problem(statusCode: 403, title: "no tenant scope on principal");
     if (!Enum.TryParse<ProviderType>(req.ProviderType, out var type))
         return Results.Problem(statusCode: 400, title: $"unknown provider_type '{req.ProviderType}'");
 
-    var now = DateTimeOffset.UtcNow;
+    var now = clock.GetUtcNow();
     var p = new ProviderEntity
     {
         ProviderId = Guid.NewGuid(), TenantId = tenant, ProviderCode = req.ProviderCode, LegalName = req.LegalName,
@@ -225,7 +227,7 @@ write.MapPost("/providers/{id:guid}/credentials", async (Guid id, AddCredential 
 });
 
 // --- Capabilities (routable codes; agreed_price masked without provider:finance) ---------------
-read.MapGet("/providers/{id:guid}/capabilities", async (Guid id, ProviderDbContext db, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+read.MapGet("/providers/{id:guid}/capabilities", async (Guid id, ProviderDbContext db, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
 {
     var tenant = me.Principal?.TenantId;
     var p = await db.Providers.AsNoTracking()
@@ -233,7 +235,7 @@ read.MapGet("/providers/{id:guid}/capabilities", async (Guid id, ProviderDbConte
         .FirstOrDefaultAsync(x => x.ProviderId == id && x.TenantId == tenant && !x.IsDeleted, ct);
     if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
-    var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+    var today = calendar.Today();   // 18.A3
     var canSeePrice = me.Principal?.HasScope("provider:finance") ?? false;
     // Join derived capabilities back to their priced service lines for the (masked) price view.
     var lines = p.Contracts.Where(c => ContractRules.InEffect(c, today)).SelectMany(c => c.ServiceLines);

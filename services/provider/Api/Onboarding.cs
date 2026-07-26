@@ -5,6 +5,7 @@ using Mersal.Events;
 using Mersal.Provider.Domain;
 using Mersal.Provider.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Provider.Api;
 
@@ -18,12 +19,12 @@ public static class OnboardingEndpoints
         var write = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("provider:write"));
 
         // --- Activate: guarded by contract + valid mandatory credentials + primary location (FR-NET-004) ---
-        write.MapPost("/providers/{id:guid}/activate", async (Guid id, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        write.MapPost("/providers/{id:guid}/activate", async (Guid id, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
         {
             var (p, tenant) = await Load(db, id, me, ct);
             if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
-            var readiness = ReadinessOf(p, Today(clock));
+            var readiness = ReadinessOf(p, Today(calendar));
             var guard = OnboardingWorkflow.GuardActivation(readiness);
             if (!guard.Allowed)
             {
@@ -41,7 +42,7 @@ public static class OnboardingEndpoints
         });
 
         // --- Suspend: stop routing + revoke all provider users (FR-IAM-010) --------------------------------
-        write.MapPost("/providers/{id:guid}/suspend", async (Guid id, StateChange req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        write.MapPost("/providers/{id:guid}/suspend", async (Guid id, StateChange req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(req.Reason)) return Results.Problem(statusCode: 400, title: "a reason is required");
             var (p, tenant) = await Load(db, id, me, ct);
@@ -59,7 +60,7 @@ public static class OnboardingEndpoints
         });
 
         // --- Terminate: dual-controlled (second approver must differ from actor) ---------------------------
-        write.MapPost("/providers/{id:guid}/terminate", async (Guid id, StateChange req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        write.MapPost("/providers/{id:guid}/terminate", async (Guid id, StateChange req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(req.Reason)) return Results.Problem(statusCode: 400, title: "a reason is required");
             var actor = me.Principal?.Subject;
@@ -81,7 +82,7 @@ public static class OnboardingEndpoints
         });
 
         // --- Provision a provider-scoped user (SoD: no self-elevation / no clinical / no cross-provider) ----
-        write.MapPost("/providers/{id:guid}/users", async (Guid id, ProvisionUser req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        write.MapPost("/providers/{id:guid}/users", async (Guid id, ProvisionUser req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
         {
             var (p, tenant) = await Load(db, id, me, ct);
             if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
@@ -109,10 +110,10 @@ public static class OnboardingEndpoints
         });
 
         // --- Credential-expiry reminder sweep → ProviderCredentialExpiring (FR-NET-007) --------------------
-        write.MapPost("/providers/credentials/reminder-run", async (ProviderDbContext db, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, int? windowDays, CancellationToken ct) =>
+        write.MapPost("/providers/credentials/reminder-run", async (ProviderDbContext db, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, int? windowDays, CancellationToken ct) =>
         {
             var tenant = me.Principal?.TenantId;
-            var today = Today(clock);
+            var today = Today(calendar);
             var window = windowDays ?? 30;
             var creds = await db.Credentials.AsNoTracking().Where(c => c.TenantId == tenant && !c.IsDeleted && c.ValidTo != null).ToListAsync(ct);
             var due = creds.Where(c => CredentialRules.ExpiryReminderDue(c, today, window)).ToList();
@@ -122,7 +123,7 @@ public static class OnboardingEndpoints
         });
     }
 
-    private static DateOnly Today(TimeProvider clock) => DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+    private static DateOnly Today(IBusinessCalendar calendar) => calendar.Today();   // 18.A3
 
     private static async Task<(Domain.Provider? provider, string? tenant)> Load(ProviderDbContext db, Guid id, IHbmpPrincipalAccessor me, CancellationToken ct)
     {

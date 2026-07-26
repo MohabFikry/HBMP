@@ -7,6 +7,7 @@ using Mersal.Events;
 using Mersal.Policy.Api;
 using Mersal.Policy.Domain;
 using Mersal.Policy.Infrastructure;
+using Mersal.Time;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Metrics;
@@ -16,6 +17,7 @@ using PolicyEntity = Mersal.Policy.Domain.Policy;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
+builder.Services.AddHbmpBusinessCalendar();   // 18.A3 — Africa/Cairo business dates + injected clock
 builder.Services.AddHbmpAuditClient("policy-service");
 builder.Services.AddHbmpAuthorization();
 builder.Services.AddHbmpBreakGlass(builder.Configuration); // live break-glass elevation (16.6, H5)
@@ -49,9 +51,9 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "po
 var v1 = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("policy:write"));
 
 // Create a policy → PolicyChanged.
-v1.MapPost("/policies", async (CreatePolicy req, PolicyDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+v1.MapPost("/policies", async (CreatePolicy req, PolicyDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
 {
-    var now = DateTimeOffset.UtcNow;
+    var now = clock.GetUtcNow();
     var p = new PolicyEntity
     {
         PolicyId = Guid.NewGuid(), PolicyNo = req.PolicyNo, Sponsor = req.Sponsor,
@@ -121,9 +123,9 @@ v1.MapGet("/coverages", async (Guid beneficiaryId, PolicyDbContext db, Cancellat
 }).RequireAuthorization();
 
 // Reset job: apply any due resets → each reset audited + CoverageLimitChanged (idempotent).
-v1.MapPost("/coverage-limits/reset-run", async (PolicyDbContext db, IAuditClient audit, IOutbox outbox, TimeProvider clock, CancellationToken ct) =>
+v1.MapPost("/coverage-limits/reset-run", async (PolicyDbContext db, IAuditClient audit, IOutbox outbox, IBusinessCalendar calendar, CancellationToken ct) =>
 {
-    var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+    var today = calendar.Today();   // 18.A3 — reset boundaries are Cairo days
     var limits = await db.CoverageLimits.Where(l => l.ResetPeriod != ResetPeriod.None && l.LimitType != LimitType.Lifetime).ToListAsync(ct);
     var reset = 0;
     foreach (var l in limits)

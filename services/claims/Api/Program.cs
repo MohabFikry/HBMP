@@ -5,6 +5,7 @@ using Mersal.Authz;
 using Mersal.Claims.Api;
 using Mersal.Claims.Infrastructure;
 using Mersal.Events;
+using Mersal.Time;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -12,6 +13,7 @@ using OpenTelemetry.Trace;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
+builder.Services.AddHbmpBusinessCalendar();   // 18.A3 — Africa/Cairo business dates + injected clock
 builder.Services.AddHbmpAuditClient("claims-service");
 // claims-service authorizes with the claims overlay: the claims roles hold ONLY the claims actions, so a
 // diagnosis/EMR read is default-denied (claims ≠ diagnosis). SoD + dual control are enforced in the handlers.

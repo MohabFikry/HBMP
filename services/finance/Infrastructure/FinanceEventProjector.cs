@@ -1,6 +1,7 @@
 using System.Globalization;
 using Mersal.Finance.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Finance.Infrastructure;
 
@@ -19,7 +20,7 @@ public sealed record FinanceEvent(
 /// event id. It reads ONLY the whitelisted keys (service_code, quantities, amounts, provider, coverage) — any
 /// clinical key present on the incoming event is ignored, never persisted (finance ≠ diagnosis). It never writes to
 /// a source domain.</summary>
-public sealed class FinanceEventProjector(FinanceDbContext db, TimeProvider clock)
+public sealed class FinanceEventProjector(FinanceDbContext db, TimeProvider clock, IBusinessCalendar calendar)
 {
     public async Task<bool> ProjectAsync(FinanceEvent ev, CancellationToken ct = default)
     {
@@ -78,7 +79,7 @@ public sealed class FinanceEventProjector(FinanceDbContext db, TimeProvider cloc
             DeliveredQty = delivered,
             UnitCost = unit,
             LineCost = line,
-            Period = DateOnly.FromDateTime(ev.OccurredAt.UtcDateTime),
+            Period = calendar.DateOf(ev.OccurredAt),   // 18.A3 — the Cairo day the event happened on
             OccurredAt = ev.OccurredAt,
         });
     }

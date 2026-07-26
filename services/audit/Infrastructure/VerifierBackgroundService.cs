@@ -11,6 +11,7 @@ namespace Mersal.Audit.Infrastructure;
 /// </summary>
 public sealed class VerifierBackgroundService(
     IServiceScopeFactory scopeFactory,
+    TimeProvider clock,
     ILogger<VerifierBackgroundService> logger) : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromMinutes(15);
@@ -22,7 +23,7 @@ public sealed class VerifierBackgroundService(
         {
             try
             {
-                var now = DateTimeOffset.UtcNow;
+                var now = clock.GetUtcNow();
                 foreach (var key in new[] { AuditPartition.KeyFor(now), AuditPartition.KeyFor(now.AddMonths(-1)) })
                 {
                     using var scope = scopeFactory.CreateScope();

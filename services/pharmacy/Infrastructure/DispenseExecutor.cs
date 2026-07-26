@@ -1,3 +1,4 @@
+using Mersal.Events;
 using Mersal.Pharmacy.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,6 +9,12 @@ namespace Mersal.Pharmacy.Infrastructure;
 public enum DispenseOutcome
 {
     Applied, Replayed, Conflict, NotFound, AlreadyDispensed, OverDispense, RxNotDispensable, LineNotFound, InvalidQuantity, ExpiredLot,
+    /// <summary>18.A3 — the header is empty, over-length, or contains the reserved <c>::</c> separator.</summary>
+    InvalidIdempotencyKey,
+    /// <summary>18.A3 — the key was already used for a DIFFERENT dispense (changed quantity, batch or
+    /// substitution). Returning the original event would tell the pharmacist a correction had been
+    /// dispensed when nothing changed.</summary>
+    IdempotencyKeyReuse,
 }
 
 public sealed record DispenseResult(DispenseOutcome Outcome, Prescription? Prescription, DispenseEvent? Event)
@@ -36,12 +43,21 @@ public sealed class DispenseExecutor(PharmacyDbContext db)
         Func<Prescription, DispenseEvent, CancellationToken, Task>? insideTransaction = null,
         CancellationToken ct = default)
     {
+        if (IdempotencyKeyRules.Validate(idempotencyKey) is not null)
+            return DispenseResult.Fail(DispenseOutcome.InvalidIdempotencyKey);
+
         var rx = await db.Prescriptions.Include(p => p.Lines).FirstOrDefaultAsync(p => p.PrescriptionId == prescriptionId, ct);
         if (rx is null) return DispenseResult.Fail(DispenseOutcome.NotFound);
 
-        // (3) Idempotent replay: this key already produced a dispense_event → return it unchanged.
+        var requestHash = HashRequest(prescriptionId, lineId, quantity, batchNo, expiryDate, substitutedDrugId);
+
+        // (3) Idempotent replay: this key already produced a dispense_event → return it unchanged, but
+        // ONLY if it was the same request. A key reused with a different body is rejected (18.A3).
         var prior = await db.DispenseEvents.AsNoTracking().FirstOrDefaultAsync(d => d.IdempotencyKey == idempotencyKey, ct);
-        if (prior is not null) return new DispenseResult(DispenseOutcome.Replayed, rx, prior);
+        if (prior is not null)
+            return IdempotencyKeyRules.Matches(prior.RequestHash, requestHash)
+                ? new DispenseResult(DispenseOutcome.Replayed, rx, prior)
+                : DispenseResult.Fail(DispenseOutcome.IdempotencyKeyReuse);
 
         var error = Domain.Dispensing.Validate(rx, lineId, quantity, expiryDate, now);
         if (error != DispenseError.None) return DispenseResult.Fail(Map(error));
@@ -52,7 +68,8 @@ public sealed class DispenseExecutor(PharmacyDbContext db)
         var evt = new DispenseEvent
         {
             DispenseId = Guid.NewGuid(), PrescriptionLineId = lineId, DispensingPharmacyId = dispensingPharmacyId,
-            Quantity = quantity, IdempotencyKey = idempotencyKey, BatchNo = batchNo, ExpiryDate = expiryDate,
+            Quantity = quantity, IdempotencyKey = idempotencyKey, RequestHash = requestHash,
+            BatchNo = batchNo, ExpiryDate = expiryDate,
             SubstitutedDrugId = substitutedDrugId, SubstitutionReason = substitutionReason,
             DispensedAt = now, DispensedBy = actorId,
         };
@@ -76,6 +93,8 @@ public sealed class DispenseExecutor(PharmacyDbContext db)
             db.ChangeTracker.Clear();
             // A concurrent request with the SAME key won the insert race → idempotent: return its outcome.
             var winner = await db.DispenseEvents.AsNoTracking().FirstAsync(d => d.IdempotencyKey == idempotencyKey, ct);
+            if (!IdempotencyKeyRules.Matches(winner.RequestHash, requestHash))
+                return DispenseResult.Fail(DispenseOutcome.IdempotencyKeyReuse);
             var fresh = await db.Prescriptions.AsNoTracking().Include(p => p.Lines).FirstAsync(p => p.PrescriptionId == prescriptionId, ct);
             return new DispenseResult(DispenseOutcome.Replayed, fresh, winner);
         }
@@ -91,6 +110,14 @@ public sealed class DispenseExecutor(PharmacyDbContext db)
         await tx.CommitAsync(ct);
         return new DispenseResult(DispenseOutcome.Applied, rx, evt);
     }
+
+    /// <summary>Canonical hash of what this dispense asks for — everything that changes the medication
+    /// actually handed over, so a corrected quantity or a different batch cannot reuse the same key.</summary>
+    private static string HashRequest(
+        Guid prescriptionId, Guid lineId, decimal quantity, string batchNo, DateOnly expiryDate, Guid? substitutedDrugId) =>
+        IdempotencyKeyRules.Hash(
+            prescriptionId.ToString(), lineId.ToString(), IdempotencyKeyRules.Amount(quantity),
+            batchNo, expiryDate.ToString("O"), substitutedDrugId?.ToString() ?? "-");
 
     /// <summary>Re-read the prescription's lines inside the transaction, recompute the aggregate status
     /// from them, and apply it as a compare-and-set. A racer that moved the Rx between our read and our

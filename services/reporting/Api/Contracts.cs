@@ -1,4 +1,5 @@
 using System.Globalization;
+using Mersal.Time;
 
 namespace Mersal.Reporting.Api;
 
@@ -20,9 +21,9 @@ public static class Period
 {
     public const int LongRangeDays = 92;
 
-    public static (DateOnly From, DateOnly To) Parse(string? from, string? to, TimeProvider clock)
+    public static (DateOnly From, DateOnly To) Parse(string? from, string? to, IBusinessCalendar calendar)
     {
-        var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+        var today = calendar.Today();   // 18.A3
         var t = TryDate(to) ?? today;
         var f = TryDate(from) ?? t.AddDays(-30);
         return (f, t);

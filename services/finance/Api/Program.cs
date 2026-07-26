@@ -5,6 +5,7 @@ using Mersal.Data;
 using Mersal.Finance.Api;
 using Mersal.Finance.Infrastructure;
 using Mersal.Events;
+using Mersal.Time;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -12,6 +13,7 @@ using OpenTelemetry.Trace;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
+builder.Services.AddHbmpBusinessCalendar();   // 18.A3 — Africa/Cairo business dates + injected clock
 builder.Services.AddHbmpAuditClient("finance-service");
 // finance-service authorizes with the finance overlay: Finance holds ONLY the finance actions, so a diagnosis/EMR
 // read is default-denied (finance ≠ diagnosis). Settlement approve is SoD-split; exports are audited.

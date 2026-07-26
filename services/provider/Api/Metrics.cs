@@ -3,6 +3,7 @@ using Mersal.Auth.Authorization;
 using Mersal.Provider.Domain;
 using Mersal.Provider.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Provider.Api;
 
@@ -17,7 +18,7 @@ public static class MetricsEndpoints
         var read = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("provider:read"));
 
         // Per-provider, provider-scoped.
-        read.MapGet("/providers/{id:guid}/metrics", async (Guid id, ProviderDbContext db, ProviderAccessGuard guard, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        read.MapGet("/providers/{id:guid}/metrics", async (Guid id, ProviderDbContext db, ProviderAccessGuard guard, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
         {
             var tenant = me.Principal?.TenantId;
             var p = await db.Providers.AsNoTracking()
@@ -28,7 +29,7 @@ public static class MetricsEndpoints
             var decision = await guard.AuthorizeAsync(me.Require(), p.TenantId, p.ProviderId.ToString(), ct);
             if (!decision.IsAllowed) return Results.Problem(statusCode: 403, title: "metrics access denied", detail: decision.ReasonCode);
 
-            var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+            var today = calendar.Today();   // 18.A3
             var inEffect = p.Contracts.Where(c => ContractRules.InEffect(c, today)).ToList();
             return Results.Ok(new
             {
@@ -49,7 +50,7 @@ public static class MetricsEndpoints
         });
 
         // Network-wide roll-up — Network Team only (provider-scoped users are blocked at the token layer).
-        read.MapGet("/metrics", async (ProviderDbContext db, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        read.MapGet("/metrics", async (ProviderDbContext db, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
         {
             var principal = me.Require();
             if (ProviderAccessGuard.IsProviderScoped(principal))

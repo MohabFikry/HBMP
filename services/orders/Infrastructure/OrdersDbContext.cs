@@ -57,6 +57,7 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
             e.ToTable("order_fulfillment");
             e.HasKey(x => x.FulfillmentId);
             e.Property(x => x.IdempotencyKey).HasMaxLength(80);
+            e.Property(x => x.RequestHash).HasColumnName("request_hash");
             e.HasIndex(x => x.IdempotencyKey).IsUnique();
             e.HasIndex(x => x.OrderLineId);
         });

@@ -8,6 +8,7 @@ using Mersal.Authz;
 using Mersal.Reporting.Domain;
 using Mersal.Reporting.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Reporting.Api;
 
@@ -91,7 +92,7 @@ public static class ReportsEndpoints
         {
             var denied = await cx.Gate.CheckAsync(ReportingPolicies.Export, ct);
             if (denied is not null) return denied;
-            var (f, t) = Api.Period.Parse(from, to, cx.Clock);
+            var (f, t) = Api.Period.Parse(from, to, cx.Calendar);
 
             (string csv, int rows) = report switch
             {
@@ -122,7 +123,7 @@ public static class ReportsEndpoints
             if (denied is not null) return denied;
             var clinical = await cx.Gate.CheckAsync(ReportingPolicies.ReadClinical, ct) is null;
             var financial = await cx.Gate.CheckAsync(ReportingPolicies.ReadFinancial, ct) is null;
-            var (f, t) = Api.Period.Parse(from, to, cx.Clock);
+            var (f, t) = Api.Period.Parse(from, to, cx.Calendar);
             var payload = await builder.BuildAsync(cx.Tenant, f, t, clinical, financial, ct);
             return Results.Ok(payload);
         }).RequireAuthorization(HbmpPolicies.Scope("reporting:read"));
@@ -162,7 +163,8 @@ public static class ReportsEndpoints
 /// endpoints take one injected object, and centralizes the inline-or-async decision (NFR-006).</summary>
 public sealed class ReportContext(
     ReportingGate gate, ReportingDbContext db, ReportQueries q, EventProjector projector,
-    IHbmpPrincipalAccessor me, IAuditClient audit, TimeProvider clock)
+    IHbmpPrincipalAccessor me, IAuditClient audit, TimeProvider clock,
+    IBusinessCalendar calendar)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -173,6 +175,8 @@ public sealed class ReportContext(
     public IHbmpPrincipalAccessor Me { get; } = me;
     public IAuditClient Audit { get; } = audit;
     public TimeProvider Clock { get; } = clock;
+    /// <summary>18.A3 — Africa/Cairo business dates; never derive a date from Clock directly.</summary>
+    public IBusinessCalendar Calendar { get; } = calendar;
 
     public string Tenant => Me.Principal?.TenantId ?? "";
 
@@ -184,7 +188,7 @@ public sealed class ReportContext(
         var denied = await Gate.CheckAsync(action, ct);
         if (denied is not null) return denied;
 
-        var (f, t) = Api.Period.Parse(from, to, Clock);
+        var (f, t) = Api.Period.Parse(from, to, Calendar);
         if (!Api.Period.IsLongRange(f, t))
             return Results.Ok(await run(f, t));
 

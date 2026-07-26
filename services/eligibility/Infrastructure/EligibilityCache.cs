@@ -65,14 +65,17 @@ public sealed class ValkeyEligibilityCache(IConnectionMultiplexer mux) : IEligib
 }
 
 /// <summary>In-memory fallback for tests / single-node dev without Valkey.</summary>
-public sealed class InMemoryEligibilityCache : IEligibilityCache
+public sealed class InMemoryEligibilityCache(TimeProvider clock) : IEligibilityCache
 {
+    /// <summary>Parameterless ctor for the DI default; tests may pin the clock.</summary>
+    public InMemoryEligibilityCache() : this(TimeProvider.System) { }
+
     private readonly ConcurrentDictionary<string, (string Json, DateTimeOffset Expires)> _store = new();
 
     public Task<string?> GetAsync(EligibilityCacheKey key, CancellationToken ct = default)
     {
         var k = CacheKey.For(key);
-        if (_store.TryGetValue(k, out var e) && e.Expires > DateTimeOffset.UtcNow)
+        if (_store.TryGetValue(k, out var e) && e.Expires > clock.GetUtcNow())
             return Task.FromResult<string?>(e.Json);
         _store.TryRemove(k, out _);
         return Task.FromResult<string?>(null);
@@ -80,7 +83,7 @@ public sealed class InMemoryEligibilityCache : IEligibilityCache
 
     public Task SetAsync(EligibilityCacheKey key, string json, TimeSpan ttl, CancellationToken ct = default)
     {
-        _store[CacheKey.For(key)] = (json, DateTimeOffset.UtcNow.Add(ttl));
+        _store[CacheKey.For(key)] = (json, clock.GetUtcNow().Add(ttl));
         return Task.CompletedTask;
     }
 

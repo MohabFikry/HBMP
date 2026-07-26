@@ -7,10 +7,12 @@ using Mersal.Events;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using Mersal.Time;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
+builder.Services.AddHbmpBusinessCalendar();   // 18.A3 — Africa/Cairo business dates + injected clock
 builder.Services.AddHbmpAuditClient("interop-service");
 // The FHIR façade authorizes with the interop overlay: role + SMART scope + tenant per FHIR interaction, run at
 // the POLICY layer (every deny audited). Field/record-level ABAC is enforced by the owning service under the

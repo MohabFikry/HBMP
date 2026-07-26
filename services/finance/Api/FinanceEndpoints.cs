@@ -4,6 +4,7 @@ using Mersal.Authz;
 using Mersal.Finance.Domain;
 using Mersal.Finance.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Finance.Api;
 
@@ -23,7 +24,7 @@ public static class FinanceEndpoints
         {
             var denied = await deps.Gate.CheckAsync(FinancePolicies.ReadUtilization, ct);
             if (denied is not null) return denied;
-            var (f, t) = Window(from, to);
+            var (f, t) = Window(from, to, deps.Calendar);
             var view = await deps.Queries.UtilizationAsync(deps.Tenant, f, t, category, providerId, beneficiaryId, ct);
             return Results.Ok(view);
         }).RequireAuthorization(HbmpPolicies.Scope("finance:read"));
@@ -34,7 +35,7 @@ public static class FinanceEndpoints
         {
             var denied = await deps.Gate.CheckAsync(FinancePolicies.ReadSummary, ct);
             if (denied is not null) return denied;
-            var (f, t) = Window(from, to);
+            var (f, t) = Window(from, to, deps.Calendar);
             var view = await deps.Queries.SummaryAsync(deps.Tenant, f, t, dimension ?? "serviceline", ct);
             return Results.Ok(view);
         }).RequireAuthorization(HbmpPolicies.Scope("finance:read"));
@@ -189,9 +190,9 @@ public static class FinanceEndpoints
         }).RequireAuthorization(HbmpPolicies.Scope("finance:project"));
     }
 
-    private static (DateOnly From, DateOnly To) Window(DateOnly? from, DateOnly? to)
+    private static (DateOnly From, DateOnly To) Window(DateOnly? from, DateOnly? to, IBusinessCalendar calendar)
     {
-        var t = to ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var t = to ?? calendar.Today();   // 18.A3 — Cairo business date
         var f = from ?? t.AddMonths(-1);
         return (f, t);
     }

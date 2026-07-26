@@ -5,6 +5,7 @@ using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Events;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Admin.Tests;
 
@@ -25,7 +26,7 @@ public class BranchAssignmentIntegrationTests
         var events = new InMemoryOutbox();
         var auditOut = new InMemoryAuditOutbox();
         var audit = new AuditClient(auditOut, new AuditClientContext("admin-test"), TimeProvider.System);
-        return (new BranchAssignmentService(db, audit, events, TimeProvider.System), events, auditOut);
+        return (new BranchAssignmentService(db, audit, events, TimeProvider.System, new BusinessCalendar(TimeProvider.System)), events, auditOut);
     }
 
     private static readonly ActorContext Admin = new("admin-1", "org_admin", null, Mfa: true);

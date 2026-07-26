@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Mersal.Interop.Api;
+using Mersal.Time;
 
 namespace Mersal.Interop.Tests;
 
@@ -10,7 +11,7 @@ public class CapabilityTests
     [Fact]
     public void Statement_lists_nine_resources_with_read_and_search()
     {
-        var stmt = FhirCapability.Statement("https://x/fhir/r4");
+        var stmt = FhirCapability.Statement("https://x/fhir/r4", new BusinessCalendar(TimeProvider.System));
         stmt["resourceType"]!.GetValue<string>().Should().Be("CapabilityStatement");
         stmt["fhirVersion"]!.GetValue<string>().Should().Be("4.0.1");
         var resources = stmt["rest"]!.AsArray()[0]!["resource"]!.AsArray();
@@ -20,7 +21,7 @@ public class CapabilityTests
     [Fact]
     public void Only_the_safe_creates_advertise_create()
     {
-        var stmt = FhirCapability.Statement("https://x/fhir/r4");
+        var stmt = FhirCapability.Statement("https://x/fhir/r4", new BusinessCalendar(TimeProvider.System));
         var resources = stmt["rest"]!.AsArray()[0]!["resource"]!.AsArray();
 
         bool CanCreate(string type) => resources.First(r => r!["type"]!.GetValue<string>() == type)!["interaction"]!

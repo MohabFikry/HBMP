@@ -51,7 +51,7 @@ public static class AdminEndpoints
         });
 
         g.MapPost("/users", async (HttpContext http, CreateUserRequest req,
-            UserManager<ApplicationUser> users, IAuditClient audit) =>
+            UserManager<ApplicationUser> users, IAuditClient audit, TimeProvider clock) =>
         {
             var (me, err) = await Guard(http, "admin:write");
             if (err is not null) return err;
@@ -63,7 +63,7 @@ public static class AdminEndpoints
             {
                 Id = Guid.NewGuid(), UserName = req.Username, NormalizedUserName = req.Username.ToUpperInvariant(),
                 Email = req.Email, DisplayName = req.DisplayName, TenantId = req.TenantId, ProviderId = req.ProviderId,
-                CreatedAt = DateTimeOffset.UtcNow, IsActive = true,
+                CreatedAt = clock.GetUtcNow(), IsActive = true,
             };
             var created = await users.CreateAsync(user, req.Password);
             if (!created.Succeeded)

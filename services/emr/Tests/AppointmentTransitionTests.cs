@@ -164,7 +164,7 @@ public class AppointmentTransitionTests
         try
         {
             await using var ctx = new EmrDbContext(Options());
-            var store = new IdempotencyStore(ctx);
+            var store = new IdempotencyStore(ctx, TimeProvider.System);
             (await store.FindAsync(key)).Should().BeNull();
             await store.RecordAsync(key, "cancel", apptId, 200);
             var found = await store.FindAsync(key);
@@ -220,6 +220,69 @@ public class AppointmentTransitionTests
         cmd.Parameters.AddWithValue(status.ToString());
         await cmd.ExecuteNonQueryAsync();
         return id;
+    }
+
+    // ── 18.A3 — waitlist promotion must be locked, and cancel must be one transaction ─────────────
+
+    [SkippableFact]
+    public async Task Two_concurrent_cancels_promote_two_distinct_waitlist_entries()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var scope = Guid.NewGuid();
+        var (provider, location) = (Guid.NewGuid(), Guid.NewGuid());
+        var slotA = await SeedSlot(provider, location, scope, hoursAhead: 24);
+        var slotB = await SeedSlot(provider, location, scope, hoursAhead: 48);
+        try
+        {
+            var apptA = await SeedAppointment(provider, location, slotA, AppointmentStatus.Booked, scope);
+            var apptB = await SeedAppointment(provider, location, slotB, AppointmentStatus.Booked, scope);
+            var wl1 = await SeedWaitlist(provider, location, scope);
+            var wl2 = await SeedWaitlist(provider, location, scope);
+
+            // Two slots free at once. Unlocked, both cancels read the SAME head of the waitlist and
+            // promoted it twice — one freed slot, two people told they had it, and the second waiting
+            // beneficiary silently skipped. FOR UPDATE SKIP LOCKED makes the second cancel take the NEXT entry.
+            var results = await Task.WhenAll(new[] { apptA, apptB }.Select(async id =>
+            {
+                await using var ctx = new EmrDbContext(Options());
+                return await new AppointmentTransitionService(ctx)
+                    .CancelAsync(id, "clinic closed", ifMatch: null, DateTimeOffset.UtcNow);
+            }));
+
+            results.Should().OnlyContain(r => r.Outcome == TransitionOutcome.Ok);
+            var promoted = results.Select(r => r.Promoted!.WaitlistId).ToList();
+            promoted.Should().HaveCount(2);
+            promoted.Should().OnlyHaveUniqueItems("one freed slot may promote only one waitlist entry");
+            promoted.Should().BeEquivalentTo(new[] { wl1, wl2 });
+
+            (await WaitlistStatusOf(wl1)).Should().Be("Promoted");
+            (await WaitlistStatusOf(wl2)).Should().Be("Promoted");
+        }
+        finally { await CleanupScope(scope); }
+    }
+
+    [SkippableFact]
+    public async Task A_cancel_with_a_stale_If_Match_leaves_the_waitlist_untouched()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var scope = Guid.NewGuid();
+        var (provider, location) = (Guid.NewGuid(), Guid.NewGuid());
+        var slot = await SeedSlot(provider, location, scope, hoursAhead: 24);
+        try
+        {
+            var appt = await SeedAppointment(provider, location, slot, AppointmentStatus.Booked, scope);
+            var wl = await SeedWaitlist(provider, location, scope);
+
+            await using var ctx = new EmrDbContext(Options());
+            var r = await new AppointmentTransitionService(ctx)
+                .CancelAsync(appt, "typo", ifMatch: 1u, DateTimeOffset.UtcNow);   // stale xmin
+
+            r.Outcome.Should().Be(TransitionOutcome.PreconditionFailed);
+            // Cancel is ONE transaction (18.A3): a failed status change cannot leave a promoted waitlist
+            // entry behind. This used to be three unwrapped SaveChanges.
+            (await WaitlistStatusOf(wl)).Should().Be("Waitlisted");
+        }
+        finally { await CleanupScope(scope); }
     }
 
     private static async Task<Guid> SeedWaitlist(Guid provider, Guid location, Guid scope)

@@ -6,6 +6,7 @@ using Mersal.Data;
 using Mersal.Events;
 using Mersal.Pharmacy.Api;
 using Mersal.Pharmacy.Infrastructure;
+using Mersal.Time;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -17,6 +18,7 @@ var emrUrl = builder.Configuration["Emr:BaseUrl"] ?? "http://emr-service:8080";
 var patientUrl = builder.Configuration["Patient:BaseUrl"] ?? "http://patient-service:8080";
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
+builder.Services.AddHbmpBusinessCalendar();   // 18.A3 — Africa/Cairo business dates + injected clock
 builder.Services.AddHbmpAuditClient("pharmacy-service");
 // Pharmacy authorizes with the pharmacy overlay: treating-relationship on prescribe/refer (+ provider PO phase-6).
 builder.Services.AddHbmpAuthorization(PharmacyPolicies.Bundle());

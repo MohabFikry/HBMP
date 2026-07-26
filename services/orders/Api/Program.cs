@@ -6,6 +6,7 @@ using Mersal.Data;
 using Mersal.Events;
 using Mersal.Orders.Api;
 using Mersal.Orders.Infrastructure;
+using Mersal.Time;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -13,6 +14,7 @@ using OpenTelemetry.Trace;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
+builder.Services.AddHbmpBusinessCalendar();   // 18.A3 — Africa/Cairo business dates + injected clock
 builder.Services.AddHbmpAuditClient("orders-service");
 // Orders authorizes with the order overlay: treating-relationship on create/read (+ provider PO for phase-5 reads).
 builder.Services.AddHbmpAuthorization(OrdersPolicies.Bundle());

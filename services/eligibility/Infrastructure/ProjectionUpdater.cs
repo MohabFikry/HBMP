@@ -8,7 +8,7 @@ namespace Mersal.Eligibility.Infrastructure;
 /// for the affected beneficiary, so the next eligibility check recomputes. Idempotent: each event id
 /// is recorded in <see cref="ProcessedEvent"/> and re-applied at-most-once.
 /// </summary>
-public sealed class ProjectionUpdater(EligibilityDbContext db, IEligibilityCache cache)
+public sealed class ProjectionUpdater(EligibilityDbContext db, IEligibilityCache cache, TimeProvider clock)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -32,7 +32,7 @@ public sealed class ProjectionUpdater(EligibilityDbContext db, IEligibilityCache
             default: break; // unrelated event → still recorded as processed to keep the ledger dense
         }
 
-        db.ProcessedEvents.Add(new ProcessedEvent { EventId = eventId, ProcessedAt = DateTimeOffset.UtcNow });
+        db.ProcessedEvents.Add(new ProcessedEvent { EventId = eventId, ProcessedAt = clock.GetUtcNow() });
         await db.SaveChangesAsync(ct);
         return true;
     }
@@ -48,7 +48,7 @@ public sealed class ProjectionUpdater(EligibilityDbContext db, IEligibilityCache
         m.PrimaryPhone = Str(p, "primaryPhone") ?? m.PrimaryPhone;
         m.Status = Str(p, "status") ?? m.Status;
         ApplyIdentifiers(m, p);
-        m.UpdatedAt = DateTimeOffset.UtcNow;
+        m.UpdatedAt = clock.GetUtcNow();
         await cache.InvalidateAsync(id, ct);
     }
 
@@ -61,7 +61,7 @@ public sealed class ProjectionUpdater(EligibilityDbContext db, IEligibilityCache
         m.MemberNo = Str(p, "memberNo") ?? m.MemberNo;
         m.GivenName = Str(p, "givenName") ?? m.GivenName;
         m.FamilyName = Str(p, "familyName") ?? m.FamilyName;
-        m.UpdatedAt = DateTimeOffset.UtcNow;
+        m.UpdatedAt = clock.GetUtcNow();
         await cache.InvalidateAsync(id, ct);
     }
 
@@ -71,7 +71,7 @@ public sealed class ProjectionUpdater(EligibilityDbContext db, IEligibilityCache
         var m = await db.Members.FirstOrDefaultAsync(x => x.BeneficiaryId == id, ct);
         if (m is null) return;
         m.Status = Str(p, "to") ?? m.Status;
-        m.UpdatedAt = DateTimeOffset.UtcNow;
+        m.UpdatedAt = clock.GetUtcNow();
         await cache.InvalidateAsync(id, ct);
     }
 
@@ -91,7 +91,7 @@ public sealed class ProjectionUpdater(EligibilityDbContext db, IEligibilityCache
             c.EffectiveTo = DateOnly.Parse(et.GetString()!, System.Globalization.CultureInfo.InvariantCulture);
         if (p.TryGetProperty("limits", out var limits) && limits.ValueKind == JsonValueKind.Array)
             c.LimitsJson = limits.GetRawText();
-        c.UpdatedAt = DateTimeOffset.UtcNow;
+        c.UpdatedAt = clock.GetUtcNow();
         await cache.InvalidateAsync(beneficiaryId, ct);
     }
 
@@ -111,7 +111,7 @@ public sealed class ProjectionUpdater(EligibilityDbContext db, IEligibilityCache
             list.RemoveAll(x => string.Equals(x.LimitType, type, StringComparison.OrdinalIgnoreCase));
             list.Add(new LimitStateDto(type, value, consumed));
             c.LimitsJson = JsonSerializer.Serialize(list, Json);
-            c.UpdatedAt = DateTimeOffset.UtcNow;
+            c.UpdatedAt = clock.GetUtcNow();
         }
         await cache.InvalidateAsync(c.BeneficiaryId, ct);
     }
@@ -126,7 +126,7 @@ public sealed class ProjectionUpdater(EligibilityDbContext db, IEligibilityCache
         {
             if (status is not null && !string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase))
                 c.Status = status;   // a suspended/expired policy cascades to its coverages
-            c.UpdatedAt = DateTimeOffset.UtcNow;
+            c.UpdatedAt = clock.GetUtcNow();
             await cache.InvalidateAsync(c.BeneficiaryId, ct);
         }
     }

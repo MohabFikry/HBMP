@@ -4,6 +4,7 @@ using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Authz;
 using Mersal.Events;
+using Mersal.Time;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -11,6 +12,7 @@ using OpenTelemetry.Trace;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
+builder.Services.AddHbmpBusinessCalendar();   // 18.A3 — Africa/Cairo business dates + injected clock
 builder.Services.AddHbmpAuditClient("admin-service");
 // The admin overlay: Org Admin (tenant:own) + Super Admin (global) administer access, not content. Every admin
 // action is Sensitive → the allow is audited (grants, revocations, config, review decisions, access-matrix reads).

@@ -4,6 +4,7 @@ using Mersal.Interop.Api;
 using Mersal.Interop.Domain.Fhir;
 using Mersal.Interop.Domain.Mapping;
 using Mersal.Interop.Domain.Model;
+using Mersal.Time;
 
 namespace Mersal.Interop.Tests;
 
@@ -61,7 +62,7 @@ public class FhirConformanceTests
     [Fact]
     public void CapabilityStatement_matches_the_implemented_interactions_exactly()
     {
-        var stmt = FhirCapability.Statement("https://x/fhir/r4");
+        var stmt = FhirCapability.Statement("https://x/fhir/r4", new BusinessCalendar(TimeProvider.System));
         var advertised = stmt["rest"]!.AsArray()[0]!["resource"]!.AsArray();
 
         // Every advertised resource + its create flag must equal the registry the endpoints are wired from.

@@ -250,6 +250,88 @@ public class OrderConsumeConcurrencyTests
         finally { await Cleanup(beneficiary); }
     }
 
+    // ── 18.A3 — the idempotency key is bound to its payload and cannot false-replay by prefix ─────
+
+    [SkippableFact]
+    public async Task Replaying_a_key_with_a_different_payload_is_rejected()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var beneficiary = Guid.NewGuid();
+        try
+        {
+            var (orderId, lineId, _) = await SeedActiveOrder(beneficiary, orderedQty: 3);
+            var provider = Guid.NewGuid();
+
+            await using (var ctx = Ctx())
+                (await new ConsumeExecutor(ctx).ConsumeAsync(orderId, "bind-key", provider, provider,
+                    [new ConsumeLineRequest(lineId, 1)], DateTimeOffset.UtcNow)).Outcome.Should().Be(ConsumeOutcome.Applied);
+
+            // Same key, DIFFERENT quantity. This used to return the original fulfillment, telling the
+            // caller a 2-unit consume had happened when only 1 unit ever was.
+            await using (var ctx = Ctx())
+                (await new ConsumeExecutor(ctx).ConsumeAsync(orderId, "bind-key", provider, provider,
+                    [new ConsumeLineRequest(lineId, 2)], DateTimeOffset.UtcNow)).Outcome
+                    .Should().Be(ConsumeOutcome.IdempotencyKeyReuse);
+
+            await using var verify = Ctx();
+            (await verify.OrderLines.AsNoTracking().SingleAsync(l => l.OrderLineId == lineId))
+                .QuantityConsumed.Should().Be(1, "the rejected replay must not consume anything");
+        }
+        finally { await Cleanup(beneficiary); }
+    }
+
+    [SkippableFact]
+    public async Task An_identical_replay_is_still_a_replay()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var beneficiary = Guid.NewGuid();
+        try
+        {
+            var (orderId, lineId, _) = await SeedActiveOrder(beneficiary, orderedQty: 3);
+            var provider = Guid.NewGuid();
+
+            await using (var ctx = Ctx())
+                (await new ConsumeExecutor(ctx).ConsumeAsync(orderId, "same-body", provider, provider,
+                    [new ConsumeLineRequest(lineId, 1)], DateTimeOffset.UtcNow)).Outcome.Should().Be(ConsumeOutcome.Applied);
+            await using (var ctx = Ctx())
+                (await new ConsumeExecutor(ctx).ConsumeAsync(orderId, "same-body", provider, provider,
+                    [new ConsumeLineRequest(lineId, 1)], DateTimeOffset.UtcNow)).Outcome.Should().Be(ConsumeOutcome.Replayed);
+        }
+        finally { await Cleanup(beneficiary); }
+    }
+
+    [SkippableFact]
+    public async Task A_prefix_key_does_not_false_replay()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var beneficiary = Guid.NewGuid();
+        try
+        {
+            var (orderId, lineId, _) = await SeedActiveOrder(beneficiary, orderedQty: 3);
+            var provider = Guid.NewGuid();
+
+            await using (var ctx = Ctx())
+                (await new ConsumeExecutor(ctx).ConsumeAsync(orderId, "abc", provider, provider,
+                    [new ConsumeLineRequest(lineId, 1)], DateTimeOffset.UtcNow)).Outcome.Should().Be(ConsumeOutcome.Applied);
+
+            // "::" is reserved for the composed per-line key, so a caller can never craft a header that
+            // collides with another key's namespace. Rejected at the edge, not silently prefix-matched.
+            await using (var ctx = Ctx())
+                (await new ConsumeExecutor(ctx).ConsumeAsync(orderId, $"abc::{lineId}", provider, provider,
+                    [new ConsumeLineRequest(lineId, 1)], DateTimeOffset.UtcNow)).Outcome
+                    .Should().Be(ConsumeOutcome.InvalidIdempotencyKey);
+
+            // A genuinely different key that merely SHARES a prefix is a fresh request, not a replay.
+            await using (var ctx = Ctx())
+                (await new ConsumeExecutor(ctx).ConsumeAsync(orderId, "abcd", provider, provider,
+                    [new ConsumeLineRequest(lineId, 1)], DateTimeOffset.UtcNow)).Outcome.Should().Be(ConsumeOutcome.Applied);
+
+            await using var verify = Ctx();
+            (await verify.Fulfillments.CountAsync(f => f.OrderLineId == lineId)).Should().Be(2);
+        }
+        finally { await Cleanup(beneficiary); }
+    }
+
     private static async Task<(Guid orderId, Guid lineId, Guid otherLineId)> SeedActiveOrder(
         Guid beneficiary, decimal orderedQty, int extraLines = 0)
     {

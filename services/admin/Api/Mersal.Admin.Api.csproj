@@ -2,6 +2,7 @@
   <PropertyGroup><RootNamespace>Mersal.Admin.Api</RootNamespace></PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Admin.Domain.csproj" />
+    <ProjectReference Include="../../../libs/time/Mersal.Time.csproj" />
     <ProjectReference Include="../Infrastructure/Mersal.Admin.Infrastructure.csproj" />
     <ProjectReference Include="../../../libs/auth/Mersal.Auth.csproj" />
     <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" />

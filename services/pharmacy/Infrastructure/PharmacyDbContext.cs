@@ -50,6 +50,7 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
             e.ToTable("dispense_event");
             e.HasKey(x => x.DispenseId);
             e.Property(x => x.IdempotencyKey).HasMaxLength(80);
+            e.Property(x => x.RequestHash).HasColumnName("request_hash");
             e.HasIndex(x => x.IdempotencyKey).IsUnique();
             e.HasIndex(x => x.PrescriptionLineId);
         });

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Mersal.Eligibility.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Eligibility.Infrastructure;
 
@@ -17,7 +18,8 @@ public sealed record CheckOutcome(EligibilityResult Result, DateTimeOffset Expir
 /// member + coverage projections owned by this service, computes via the pure engine, persists the
 /// derived snapshot, and caches it under the configured TTL.
 /// </summary>
-public sealed class EligibilityChecker(EligibilityDbContext db, IEligibilityCache cache, TimeProvider clock)
+public sealed class EligibilityChecker(EligibilityDbContext db, IEligibilityCache cache, TimeProvider clock,
+    IBusinessCalendar calendar)
 {
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     public static readonly TimeSpan Ttl = TimeSpan.FromMinutes(15);
@@ -84,7 +86,7 @@ public sealed class EligibilityChecker(EligibilityDbContext db, IEligibilityCach
                 .Select(l => new LimitState(Enum.Parse<LimitType>(l.LimitType), l.LimitValue, l.ConsumedValue))
                 .ToList())).ToList();
 
-        var onDate = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+        var onDate = calendar.Today();   // 18.A3 — coverage validity is a Cairo date
         return EligibilityEngine.Evaluate(new EligibilityRequest(
             status, benefitCategory, serviceCode, serviceRequiresPreAuth, coverages, onDate));
     }

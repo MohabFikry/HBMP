@@ -6,6 +6,7 @@ using Mersal.Interop.Domain.Mapping;
 using Mersal.Interop.Domain.Model;
 using Mersal.Interop.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Interop.Api;
 
@@ -24,8 +25,8 @@ public static class FhirEndpoints
         var g = app.MapGroup("/fhir/r4");
 
         // Capability statement — public metadata (advertises exactly the implemented interactions + SMART scopes).
-        g.MapGet("/metadata", (HttpContext http) =>
-            FhirResults.Ok(FhirCapability.Statement(BaseUrl(http)))).AllowAnonymous();
+        g.MapGet("/metadata", (HttpContext http, IBusinessCalendar calendar) =>
+            FhirResults.Ok(FhirCapability.Statement(BaseUrl(http), calendar))).AllowAnonymous();
 
         // ---- Reads + searches (all nine resources) ----
         Wire<BeneficiarySource>(g, InteropPolicies.Patient,
@@ -184,7 +185,7 @@ public static class FhirEndpoints
                 deps.Db.FhirCreates.Add(new FhirCreateRecord
                 {
                     DedupeKey = key, ResourceType = resource, CreatedResourceId = write.CreatedId,
-                    TenantId = tenant, StatusCode = write.Status, CreatedAt = DateTimeOffset.UtcNow,
+                    TenantId = tenant, StatusCode = write.Status, CreatedAt = deps.Clock.GetUtcNow(),
                 });
                 await deps.Db.SaveChangesAsync(ct);
                 await deps.Audit.CreateAsync(deps.Gate.Principal!, resource, write.CreatedId, ct);

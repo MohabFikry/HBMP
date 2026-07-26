@@ -6,6 +6,7 @@ using Mersal.Data;
 using Mersal.Eligibility.Api;
 using Mersal.Eligibility.Infrastructure;
 using Mersal.Events;
+using Mersal.Time;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using OpenTelemetry.Resources;
@@ -15,6 +16,7 @@ using OpenTelemetry.Trace;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
+builder.Services.AddHbmpBusinessCalendar();   // 18.A3 — Africa/Cairo business dates + injected clock
 builder.Services.AddHbmpAuditClient("eligibility-service");
 builder.Services.AddHbmpAuthorization();
 builder.Services.AddHbmpBreakGlass(builder.Configuration); // live break-glass elevation (16.6, H5)

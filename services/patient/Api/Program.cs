@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
+using Mersal.Time;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,6 +25,7 @@ builder.Services.AddHbmpOutboxRelay();   // relay staged events (incl. audit) to
 builder.Services.AddPatientInfrastructure(builder.Configuration);
 builder.Services.AddScoped<BeneficiaryRegistrar>();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddHbmpBusinessCalendar();   // 18.A3 — Africa/Cairo business dates + injected clock
 
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(r => r.AddService("patient-service"))
@@ -54,7 +56,7 @@ var v1 = app.MapGroup("/api/v1/beneficiaries").RequireAuthorization(HbmpPolicies
 v1.MapPost("", async (
     RegisterBeneficiaryRequest req, HttpRequest http,
     BeneficiaryRegistrar registrar, PatientDbContext db, IAuditClient audit, IOutbox outbox,
-    IHbmpPrincipalAccessor me, CancellationToken ct) =>
+    IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(http.Headers["Idempotency-Key"]))
         return Results.Problem(statusCode: 400, title: "Idempotency-Key header is required", type: "urn:hbmp:idempotency-required");
@@ -136,13 +138,13 @@ v1.MapGet("/{id:guid}", async (Guid id, PatientDbContext db, CancellationToken c
 var reg = app.MapGroup("/api/v1/registrations").RequireAuthorization(HbmpPolicies.Scope("patient:write"));
 
 // Create a registration for an existing (Pending) beneficiary.
-reg.MapPost("", async (CreateRegistration req, HttpRequest http, PatientDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+reg.MapPost("", async (CreateRegistration req, HttpRequest http, PatientDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(http.Headers["Idempotency-Key"]))
         return Results.Problem(statusCode: 400, title: "Idempotency-Key header is required");
     if (!await db.Beneficiaries.AnyAsync(x => x.BeneficiaryId == req.BeneficiaryId && !x.IsDeleted, ct))
         return Results.NotFound(new { req.BeneficiaryId });
-    var now = DateTimeOffset.UtcNow;
+    var now = clock.GetUtcNow();
     var r = new Registration { RegistrationId = Guid.NewGuid(), BeneficiaryId = req.BeneficiaryId, Status = RegistrationStatus.Pending, CreatedAt = now, UpdatedAt = now };
     db.Registrations.Add(r);
     await db.SaveChangesAsync(ct);
@@ -151,7 +153,7 @@ reg.MapPost("", async (CreateRegistration req, HttpRequest http, PatientDbContex
 });
 
 // Set step data (documents verified / coverage bound / notes).
-reg.MapPatch("/{id:guid}", async (Guid id, PatchRegistration req, PatientDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+reg.MapPatch("/{id:guid}", async (Guid id, PatchRegistration req, PatientDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
 {
     var r = await db.Registrations.FirstOrDefaultAsync(x => x.RegistrationId == id, ct);
     if (r is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
@@ -159,7 +161,7 @@ reg.MapPatch("/{id:guid}", async (Guid id, PatchRegistration req, PatientDbConte
     if (req.DocumentsVerified is { } dv) r.DocumentsVerified = dv;
     if (req.CoverageBound is { } cb) r.CoverageBound = cb;
     if (req.Notes is not null) r.Notes = req.Notes;
-    r.UpdatedAt = DateTimeOffset.UtcNow;
+    r.UpdatedAt = clock.GetUtcNow();
     await db.SaveChangesAsync(ct);
     var after = $"{{\"documentsVerified\":{r.DocumentsVerified.ToString().ToLowerInvariant()},\"coverageBound\":{r.CoverageBound.ToString().ToLowerInvariant()}}}";
     await audit.EmitAsync(new AuditEventDraft { EntityType = "registration", EntityId = r.RegistrationId.ToString(), Action = AuditAction.Update, ActorUserId = me.Principal?.Subject, BeforeState = before, AfterState = after }, ct);
@@ -167,7 +169,7 @@ reg.MapPatch("/{id:guid}", async (Guid id, PatchRegistration req, PatientDbConte
 });
 
 // Decision: Approve → activate (issue Member No + BeneficiaryActivated); RequestInfo/Reject (reason mandatory).
-reg.MapPost("/{id:guid}/decision", async (Guid id, DecisionRequest req, PatientDbContext db, MemberNoIssuer memberNos, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+reg.MapPost("/{id:guid}/decision", async (Guid id, DecisionRequest req, PatientDbContext db, MemberNoIssuer memberNos, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
 {
     if (!Enum.TryParse<RegistrationDecision>(req.Decision, ignoreCase: true, out var decision))
         return Results.Problem(statusCode: 400, title: $"invalid decision '{req.Decision}'");
@@ -181,16 +183,17 @@ reg.MapPost("/{id:guid}/decision", async (Guid id, DecisionRequest req, PatientD
     var actor = me.Principal?.Subject;
     r.Status = RegistrationRules.ResultOf(decision);
     r.Notes = req.Notes;
-    r.UpdatedAt = DateTimeOffset.UtcNow;
+    r.UpdatedAt = clock.GetUtcNow();
 
     if (decision == RegistrationDecision.Approve)
     {
         // Transactional activation: beneficiary Active + Member No + MemberNo identifier + BeneficiaryActivated.
-        var memberNo = await memberNos.NextAsync(DateTime.UtcNow.Year, ct);
+        // 18.A3 — member numbers are stamped with the Cairo year, not the UTC year.
+        var memberNo = await memberNos.NextAsync(calendar.Today().Year, ct);
         beneficiary.Status = BeneficiaryStatus.Active;
         beneficiary.MemberNo = memberNo;
         beneficiary.UpdatedBy = actor;
-        beneficiary.UpdatedAt = DateTimeOffset.UtcNow;
+        beneficiary.UpdatedAt = clock.GetUtcNow();
         db.Identifiers.Add(new BeneficiaryIdentifier
         {
             IdentifierId = Guid.NewGuid(), BeneficiaryId = beneficiary.BeneficiaryId,
@@ -208,7 +211,7 @@ reg.MapPost("/{id:guid}/decision", async (Guid id, DecisionRequest req, PatientD
 });
 
 // ================================================================ LIFECYCLE TRANSITIONS (US-004)
-v1.MapPost("/{id:guid}/status", async (Guid id, StatusChange req, PatientDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+v1.MapPost("/{id:guid}/status", async (Guid id, StatusChange req, PatientDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
 {
     if (!Enum.TryParse<BeneficiaryStatus>(req.ToStatus, ignoreCase: true, out var to))
         return Results.Problem(statusCode: 400, title: $"invalid status '{req.ToStatus}'");
@@ -222,7 +225,7 @@ v1.MapPost("/{id:guid}/status", async (Guid id, StatusChange req, PatientDbConte
         return Results.Problem(statusCode: 409, title: "transition-denied", detail: error);
     }
     var from = b.Status;
-    b.Status = to; b.UpdatedBy = me.Principal?.Subject; b.UpdatedAt = DateTimeOffset.UtcNow;
+    b.Status = to; b.UpdatedBy = me.Principal?.Subject; b.UpdatedAt = clock.GetUtcNow();
     await db.SaveChangesAsync(ct);
     await audit.EmitAsync(new AuditEventDraft { EntityType = "beneficiary", EntityId = id.ToString(), Action = AuditAction.StateChange, ActorUserId = me.Principal?.Subject, BeforeState = $"{{\"status\":\"{from}\"}}", AfterState = $"{{\"status\":\"{to}\"}}", DecisionReasonCode = req.Reason }, ct);
     await outbox.EnqueueAsync("BeneficiaryStatusChanged", "patient.events", new { beneficiaryId = id, from = from.ToString(), to = to.ToString(), reason = req.Reason }, ct);

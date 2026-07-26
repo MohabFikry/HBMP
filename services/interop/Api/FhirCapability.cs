@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Mersal.Interop.Domain.Fhir;
+using Mersal.Time;
 
 namespace Mersal.Interop.Api;
 
@@ -35,7 +36,7 @@ public static class FhirCapability
         Resources.FirstOrDefault(r => string.Equals(r.Name, name, StringComparison.Ordinal));
 
     /// <summary>Build the CapabilityStatement advertising exactly the implemented interactions + SMART scopes.</summary>
-    public static JsonObject Statement(string baseUrl)
+    public static JsonObject Statement(string baseUrl, IBusinessCalendar calendar)
     {
         var resources = new JsonArray();
         foreach (var r in Resources)
@@ -61,7 +62,7 @@ public static class FhirCapability
         {
             ["resourceType"] = "CapabilityStatement",
             ["status"] = "active",
-            ["date"] = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd"),
+            ["date"] = calendar.Today().ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
             ["publisher"] = "Mersal Foundation — HBMP",
             ["kind"] = "instance",
             ["fhirVersion"] = FhirVersion,

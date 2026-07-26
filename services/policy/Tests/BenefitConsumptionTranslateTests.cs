@@ -15,6 +15,7 @@ namespace Mersal.Policy.Tests;
 public class BenefitConsumptionTranslateTests
 {
     private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
+    private static readonly DateOnly Today = new(2026, 7, 27);
     private const string Tenant = "11111111-1111-1111-1111-111111111111";
     private static readonly Guid Beneficiary = new("bbbbbbbb-1111-4111-8111-111111111111");
     private static readonly Guid LineId = new("11111111-2222-4222-8222-222222222222");
@@ -34,7 +35,7 @@ public class BenefitConsumptionTranslateTests
     [Fact]
     public void An_order_consume_event_becomes_one_instruction_per_line()
     {
-        var result = BenefitConsumptionConsumer.Translate(Guid.NewGuid(), "OrderLinesConsumed", ConsumePayload());
+        var result = BenefitConsumptionConsumer.Translate(Guid.NewGuid(), "OrderLinesConsumed", ConsumePayload(), Today);
 
         result.Should().ContainSingle();
         var i = result[0];
@@ -56,7 +57,7 @@ public class BenefitConsumptionTranslateTests
             quantity = 5m, batchNo = "B-1", idempotencyKey = "idem-2",
         }, Web);
 
-        var result = BenefitConsumptionConsumer.Translate(Guid.NewGuid(), "RxLinesDispensed", payload);
+        var result = BenefitConsumptionConsumer.Translate(Guid.NewGuid(), "RxLinesDispensed", payload, Today);
 
         result.Should().ContainSingle();
         result[0].BenefitCategory.Should().Be("PHARMACY");
@@ -66,7 +67,7 @@ public class BenefitConsumptionTranslateTests
     [Fact]
     public void A_void_event_translates_to_a_symmetric_reversal()
     {
-        var result = BenefitConsumptionConsumer.Translate(Guid.NewGuid(), "OrderFulfillmentVoided", ConsumePayload());
+        var result = BenefitConsumptionConsumer.Translate(Guid.NewGuid(), "OrderFulfillmentVoided", ConsumePayload(), Today);
 
         result.Should().ContainSingle();
         result[0].Direction.Should().Be(ConsumptionDirection.Reversed);
@@ -80,21 +81,21 @@ public class BenefitConsumptionTranslateTests
         new ConsumptionConsumerOptions().FulfillmentQueues.Should().NotContain("claims.events");
 
         foreach (var claimEvent in new[] { "ClaimAdjudicated", "ClaimDecided", "ClaimBatchSettled", "ClaimAdjusted" })
-            BenefitConsumptionConsumer.Translate(Guid.NewGuid(), claimEvent, ConsumePayload())
+            BenefitConsumptionConsumer.Translate(Guid.NewGuid(), claimEvent, ConsumePayload(), Today)
                 .Should().BeEmpty("the claims path must never move coverage_limit.consumed_value");
     }
 
     [Fact]
     public void An_event_without_a_tenant_produces_no_instruction()
     {
-        BenefitConsumptionConsumer.Translate(Guid.NewGuid(), "OrderLinesConsumed", ConsumePayload(tenant: null))
+        BenefitConsumptionConsumer.Translate(Guid.NewGuid(), "OrderLinesConsumed", ConsumePayload(tenant: null), Today)
             .Should().BeEmpty("a write path must never guess a tenant");
     }
 
     [Fact]
     public void A_procedure_order_carries_no_category_and_is_left_for_the_applier_to_record()
     {
-        var result = BenefitConsumptionConsumer.Translate(Guid.NewGuid(), "OrderLinesConsumed", ConsumePayload(category: null));
+        var result = BenefitConsumptionConsumer.Translate(Guid.NewGuid(), "OrderLinesConsumed", ConsumePayload(category: null), Today);
 
         result.Should().ContainSingle();
         result[0].BenefitCategory.Should().BeNull();

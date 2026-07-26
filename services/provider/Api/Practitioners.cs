@@ -4,6 +4,7 @@ using Mersal.Auth.Authorization;
 using Mersal.Provider.Domain;
 using Mersal.Provider.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Provider.Api;
 
@@ -24,7 +25,7 @@ public static class PractitionerEndpoints
                 .Select(s => new { s.SpecialtyCode, s.NameEn, s.NameAr, s.ParentCode })));
 
         // --- Create a practitioner ---------------------------------------------------------------
-        write.MapPost("/practitioners", async (CreatePractitioner req, ProviderDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        write.MapPost("/practitioners", async (CreatePractitioner req, ProviderDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
         {
             var tenant = me.Principal?.TenantId;
             if (string.IsNullOrEmpty(tenant)) return Results.Problem(statusCode: 403, title: "no tenant scope on principal");
@@ -93,9 +94,9 @@ public static class PractitionerEndpoints
         });
 
         // --- serves-branch probe: emr calls this to enforce booking/availability (422 if not) -----
-        read.MapGet("/practitioners/{id:guid}/serves-branch", async (Guid id, Guid branchId, ProviderDbContext db, TimeProvider clock, CancellationToken ct) =>
+        read.MapGet("/practitioners/{id:guid}/serves-branch", async (Guid id, Guid branchId, ProviderDbContext db, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
         {
-            var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+            var today = calendar.Today();   // 18.A3
             var serves = await db.PractitionerBranchAssignments.AsNoTracking().AnyAsync(a =>
                 a.PractitionerId == id && a.BranchId == branchId && a.Status == "Active"
                 && a.ValidFrom <= today && (a.ValidTo == null || a.ValidTo >= today), ct);

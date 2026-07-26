@@ -103,7 +103,8 @@ public static class ResultEndpoints
         // ---- Read a line's result (ordering doctor [treating] or approval team) ----
         v1.MapGet("/{orderId:guid}/lines/{lineId:guid}/result", async (
             Guid orderId, Guid lineId, HttpRequest http, OrdersDbContext db, OrdersGate gate,
-            IAuthorizationEngine engine, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+            IAuthorizationEngine engine, IAuditClient audit, IHbmpPrincipalAccessor me, TimeProvider clock,
+            CancellationToken ct) =>
         {
             var order = await db.Orders.AsNoTracking().Include(o => o.Lines).FirstOrDefaultAsync(o => o.OrderId == orderId, ct);
             var line = order?.Lines.FirstOrDefault(l => l.OrderLineId == lineId);
@@ -115,7 +116,7 @@ public static class ResultEndpoints
             {
                 var subject = me.Principal?.Subject;
                 var isAuthor = order.CreatedBy == subject;
-                var now = DateTimeOffset.UtcNow;
+                var now = clock.GetUtcNow();
                 var activeGrant = subject is null ? null : await db.ReportAccessGrants.AsNoTracking()
                     .Where(g => g.GranteeUserId == subject && g.OrderLineId == lineId && g.RevokedAt == null && now < g.ExpiresAt)
                     .OrderByDescending(g => g.GrantedAt).FirstOrDefaultAsync(ct);

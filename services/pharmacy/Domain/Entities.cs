@@ -58,6 +58,10 @@ public sealed class DispenseEvent
     public Guid DispensingPharmacyId { get; set; }
     public decimal Quantity { get; set; }
     public string IdempotencyKey { get; set; } = default!;   // UNIQUE — dedup guarantee
+    /// <summary>18.A3 — SHA-256 of the canonical dispense request this row came from, so a replay with a
+    /// changed quantity/batch/substitution is rejected rather than silently answered with the original.
+    /// NULL on rows written before the column existed (unverifiable, replay allowed).</summary>
+    public string? RequestHash { get; set; }
     public string BatchNo { get; set; } = default!;
     public DateOnly ExpiryDate { get; set; }
     public Guid? SubstitutedDrugId { get; set; }             // phase 6.3 — policy-approved alternative actually dispensed

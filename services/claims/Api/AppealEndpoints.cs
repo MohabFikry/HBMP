@@ -2,6 +2,7 @@ using Mersal.Audit.Client;
 using Mersal.Auth.Authorization;
 using Mersal.Authz;
 using Mersal.Claims.Domain;
+using Mersal.Time;
 using Mersal.Claims.Infrastructure;
 
 namespace Mersal.Claims.Api;
@@ -63,8 +64,10 @@ public static class AppealEndpoints
             var denied = await deps.Gate.CheckAsync(ClaimsPolicies.Reconcile, ct);
             if (denied is not null) return denied;
 
-            var f = from ?? DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-90));
-            var t = to ?? DateOnly.FromDateTime(DateTime.UtcNow);
+            // 18.A3: the default window is Cairo days, not UTC days — a report opened at 23:30 local
+            // used to silently exclude the day the operator is actually looking at.
+            var t = to ?? deps.Calendar.Today();
+            var f = from ?? t.AddDays(-90);
             var result = await kpis.ComputeAsync(deps.Tenant, f, t, ct);
 
             await deps.Audit.EmitAsync(new AuditEventDraft

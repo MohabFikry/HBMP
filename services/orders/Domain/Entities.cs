@@ -73,6 +73,10 @@ public sealed class OrderFulfillment
     public Guid PerformingProviderId { get; set; }
     public decimal Quantity { get; set; }
     public string IdempotencyKey { get; set; } = default!;   // UNIQUE — dedup guarantee
+    /// <summary>18.A3 — SHA-256 of the canonical request this row came from. A replay of the same key
+    /// with a DIFFERENT payload is rejected instead of being answered with someone else's work. NULL on
+    /// rows written before the column existed (treated as unverifiable, replay allowed).</summary>
+    public string? RequestHash { get; set; }
     public Guid? ResultDocumentId { get; set; }              // phase 5.3 result blob ref
     public string? ResultValue { get; set; }                 // phase 5.3 structured result summary
     public DateTimeOffset? ResultUploadedAt { get; set; }

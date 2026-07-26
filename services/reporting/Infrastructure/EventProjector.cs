@@ -1,6 +1,7 @@
 using System.Globalization;
 using Mersal.Reporting.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Reporting.Infrastructure;
 
@@ -18,7 +19,7 @@ public sealed record ReportingEvent(
 /// (redelivery is a no-op). It never writes to source domains and never stores row-level PHI — only coded
 /// aggregates, counts, amounts and timings. Financial facts are built from service codes/amounts only (no
 /// diagnosis).</summary>
-public sealed class EventProjector(ReportingDbContext db, TimeProvider clock)
+public sealed class EventProjector(ReportingDbContext db, TimeProvider clock, IBusinessCalendar calendar)
 {
     /// <summary>Returns true if the event was projected, false if it was a duplicate / unmapped.</summary>
     public async Task<bool> ProjectAsync(ReportingEvent ev, CancellationToken ct = default)
@@ -27,7 +28,7 @@ public sealed class EventProjector(ReportingDbContext db, TimeProvider clock)
         if (await db.ProcessedEvents.AnyAsync(p => p.EventId == ev.EventId, ct))
             return false;
 
-        var period = DateOnly.FromDateTime(ev.OccurredAt.UtcDateTime);
+        var period = calendar.DateOf(ev.OccurredAt);   // 18.A3 — the Cairo day the event happened on
         var handled = Apply(ev, period);
 
         db.ProcessedEvents.Add(new ProcessedEvent { EventId = ev.EventId, EventType = ev.EventType, ConsumedAt = clock.GetUtcNow() });
