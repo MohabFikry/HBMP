@@ -12,4 +12,5 @@
     <PackageReference Include="EFCore.NamingConventions" />
     <PackageReference Include="StackExchange.Redis" />
   </ItemGroup>
+  <ItemGroup><None Update="Migrations/*.sql" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
 </Project>
