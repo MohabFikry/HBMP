@@ -58,6 +58,9 @@ const S = {
   exported: { en: "Export ready — a data.export audit event was recorded.", ar: "التصدير جاهز — تم تسجيل حدث تدقيق." },
   expFail: { en: "Export failed.", ar: "فشل التصدير." },
   rows: { en: "rows", ar: "صفوف" },
+  dateFrom: { en: "From", ar: "من" },
+  dateTo: { en: "To", ar: "إلى" },
+  badRange: { en: "The From date must be on or before the To date.", ar: "يجب أن يكون تاريخ (من) مساويًا أو قبل تاريخ (إلى)." },
 } satisfies Record<string, Localized>;
 
 /** Utilization — authorized-vs-delivered + spend by billing code. A table (no chart needed); totals footer. */
@@ -242,12 +245,19 @@ export function FinanceExports() {
   const [format, setFormat] = useState<ExportRequest["format"]>("csv");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ExportResult | null>(null);
+  // Default to the trailing 30 days (ISO yyyy-MM-dd), operator-adjustable below.
+  const today = new Date();
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const [from, setFrom] = useState(iso(new Date(today.getTime() - 30 * 864e5)));
+  const [to, setTo] = useState(iso(today));
+  const badRange = from > to;
 
   async function run() {
+    if (badRange) return;
     if (!window.confirm(t(S.confirm))) return;
     setBusy(true);
     try {
-      const res = await api.exportReport({ report, format, from: "2026-06-22", to: "2026-07-22" });
+      const res = await api.exportReport({ report, format, from, to });
       setResult(res);
       toast(t(S.exported), "ok");
     } catch {
@@ -283,8 +293,22 @@ export function FinanceExports() {
             segments={[{ value: "csv", label: "CSV" }, { value: "xlsx", label: "XLSX" }]}
           />
         </fieldset>
+        <fieldset className="fieldset">
+          <legend>{t(S.period)}</legend>
+          <div style={{ display: "flex", gap: "var(--sp4)", flexWrap: "wrap" }}>
+            <label style={{ display: "grid", gap: "var(--sp2)" }}>
+              {t(S.dateFrom)}
+              <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} style={{ minHeight: 44 }} />
+            </label>
+            <label style={{ display: "grid", gap: "var(--sp2)" }}>
+              {t(S.dateTo)}
+              <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} style={{ minHeight: 44 }} />
+            </label>
+          </div>
+          {badRange && <p role="alert" style={{ color: "var(--danger, #b91c1c)" }}>{t(S.badRange)}</p>}
+        </fieldset>
         <div>
-          <Button variant="primary" loading={busy} onClick={run}>{t(S.runExport)}</Button>
+          <Button variant="primary" loading={busy} disabled={badRange} onClick={run}>{t(S.runExport)}</Button>
         </div>
         {result && (
           <div aria-live="polite">
