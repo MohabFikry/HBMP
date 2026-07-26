@@ -25,6 +25,7 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
             e.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
             e.Property(x => x.OrderingBranchId).HasColumnName("ordering_branch_id");   // phase 14.4
+            e.Property(x => x.SensitivityLevel).HasConversion<string>().HasColumnName("sensitivity_level");   // phase 14.6
             e.HasIndex(x => x.OrderNo).IsUnique();
             e.HasIndex(x => new { x.BeneficiaryId, x.Status });
             e.HasIndex(x => x.OrderingBranchId);
@@ -41,6 +42,8 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
             // xmin optimistic-concurrency guard: the consume UPDATE only applies when the line hasn't moved,
             // so exactly one racer wins under parallel consume (23 §2 atomic-consume guard).
             e.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
+            e.Property(x => x.ExaminationTypeId).HasColumnName("examination_type_id");   // phase 14.6
+            e.Property(x => x.SensitivityLevel).HasConversion<string>().HasColumnName("sensitivity_level");   // phase 14.6
             e.Ignore(x => x.QuantityRemaining);
             e.HasIndex(x => x.OrderId);
         });

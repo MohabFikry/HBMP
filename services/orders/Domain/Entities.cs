@@ -12,6 +12,10 @@ public enum OrderStatus { Requested, PendingApproval, Approved, Rejected, Active
 
 public enum OrderLineStatus { Active, PartiallyUsed, Completed, Cancelled }
 
+/// <summary>Clinical sensitivity ladder (phase 14.6, design 37 §5). Pinned from the examination type at order
+/// creation so later reclassification cannot retroactively unlock already-restricted data.</summary>
+public enum SensitivityLevel { Standard, Sensitive, HighlySensitive }
+
 public sealed class InvestigationOrder
 {
     public Guid OrderId { get; set; }
@@ -24,6 +28,9 @@ public sealed class InvestigationOrder
     public Guid? OrderingBranchId { get; set; }
     public Guid? AuthorizationId { get; set; }
     public OrderType OrderType { get; set; }
+    /// <summary>Pinned sensitivity for the order = max of its lines (phase 14.6). Denormalized so read-time
+    /// gating (14.7) never needs a cross-service join. Pre-existing rows default to Standard.</summary>
+    public SensitivityLevel SensitivityLevel { get; set; } = SensitivityLevel.Standard;
     public OrderStatus Status { get; set; } = OrderStatus.Requested;
     public DateTimeOffset RequestedAt { get; set; }
     public DateTimeOffset? ExpiresAt { get; set; }
@@ -40,6 +47,10 @@ public sealed class OrderLine
     public CodeSystem CodeSystem { get; set; }
     public string Code { get; set; } = default!;
     public string? Description { get; set; }
+    /// <summary>The classified examination type this line represents (phase 14.6). NULL for legacy lines.</summary>
+    public Guid? ExaminationTypeId { get; set; }
+    /// <summary>Pinned sensitivity from the examination type (phase 14.6). Default Standard; results inherit it.</summary>
+    public SensitivityLevel SensitivityLevel { get; set; } = SensitivityLevel.Standard;
     public decimal QuantityOrdered { get; set; }
     public decimal QuantityConsumed { get; set; }        // accumulator, 0 ≤ consumed ≤ ordered (phase 5)
     public OrderLineStatus Status { get; set; } = OrderLineStatus.Active;

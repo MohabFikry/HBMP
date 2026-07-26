@@ -84,6 +84,22 @@ v1.MapGet("/drugs/{drugCode}", async (string drugCode, MasterDataDbContext db, C
 v1.MapGet("/allergens", async (MasterDataDbContext db, CancellationToken ct) =>
     Results.Ok(await db.Allergens.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct)));
 
+// 14.6 — examination types (filter by category / sensitivity) + a single fetch orders uses to pin sensitivity.
+v1.MapGet("/examination-types", async (string? category, string? sensitivity, MasterDataDbContext db, CancellationToken ct) =>
+{
+    var q = db.ExaminationTypes.AsNoTracking().Where(x => x.Status == "Active");
+    if (Enum.TryParse<ExamCategory>(category, out var c)) q = q.Where(x => x.Category == c);
+    if (Enum.TryParse<SensitivityLevel>(sensitivity, out var s)) q = q.Where(x => x.SensitivityLevel == s);
+    var rows = await q.OrderBy(x => x.NameEn).ToListAsync(ct);
+    return Results.Ok(rows.Select(ExamView.Of));
+});
+
+v1.MapGet("/examination-types/{id:guid}", async (Guid id, MasterDataDbContext db, CancellationToken ct) =>
+{
+    var x = await db.ExaminationTypes.AsNoTracking().FirstOrDefaultAsync(e => e.ExaminationTypeId == id && e.Status == "Active", ct);
+    return x is null ? Results.NotFound() : Results.Ok(ExamView.Of(x));
+});
+
 // ------------------------------------------------------------------ Typeahead search (Tier 1: DB ILIKE; OpenSearch indexer is a follow-up)
 v1.MapGet("/search", async (string domain, string q, MasterDataDbContext db, CancellationToken ct) =>
 {

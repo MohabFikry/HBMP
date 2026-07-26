@@ -78,7 +78,17 @@ public static class ResultEndpoints
                 orderId, lineId, fulfillmentId = target.FulfillmentId, order.OrderNo,
                 orderingProviderId = order.OrderingProviderId, beneficiaryId = order.BeneficiaryId,
                 approvalGated = order.AuthorizationId is not null, resultDocumentId = target.ResultDocumentId,
+                sensitivityLevel = line.SensitivityLevel.ToString(),
             }, ct);
+
+            // 14.6 — a result against a non-Standard line is content-restricted; announce it so downstream
+            // (14.7 gate) and notifications treat it as special-category from the moment it lands.
+            if (line.SensitivityLevel != SensitivityLevel.Standard)
+                await outbox.EnqueueAsync("SensitiveResultRestricted", "orders.events", new
+                {
+                    orderId, lineId, order.OrderNo, beneficiaryId = order.BeneficiaryId,
+                    orderingProviderId = order.OrderingProviderId, sensitivityLevel = line.SensitivityLevel.ToString(),
+                }, ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {

@@ -15,6 +15,7 @@ public sealed class MasterDataDbContext(DbContextOptions<MasterDataDbContext> op
     public DbSet<Drug> Drugs => Set<Drug>();
     public DbSet<DrugInteraction> DrugInteractions => Set<DrugInteraction>();
     public DbSet<Allergen> Allergens => Set<Allergen>();
+    public DbSet<ExaminationType> ExaminationTypes => Set<ExaminationType>();   // 14.6
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -51,6 +52,19 @@ public sealed class MasterDataDbContext(DbContextOptions<MasterDataDbContext> op
             e.HasKey(x => x.AllergenId);
             e.Property(x => x.Category).HasConversion<string>();
             e.HasIndex(x => x.Code).IsUnique();
+        });
+
+        b.Entity<ExaminationType>(e =>
+        {
+            e.ToTable("examination_type");
+            e.HasKey(x => x.ExaminationTypeId);
+            e.Property(x => x.Category).HasConversion<string>();
+            e.Property(x => x.SensitivityLevel).HasConversion<string>().HasColumnName("sensitivity_level");
+            e.Property(x => x.SensitiveCategory).HasConversion<string>().HasColumnName("sensitive_category");
+            e.Property(x => x.DefaultCodeSystem).HasColumnName("default_code_system");
+            e.Property(x => x.DefaultCode).HasColumnName("default_code");
+            e.HasIndex(x => x.Code).IsUnique();
+            e.HasIndex(x => x.SensitivityLevel);
         });
     }
 }

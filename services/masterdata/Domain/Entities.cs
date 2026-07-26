@@ -83,3 +83,30 @@ public sealed class Allergen
     public AllergenCategory Category { get; set; }
     public string? SourceRelease { get; set; }
 }
+
+// --- 14.6 examination type + sensitivity classification (design 37 §5) --------------------------
+public enum ExamCategory { Lab, Imaging, Procedure, Consultation, Assessment }
+
+/// <summary>Sensitivity ladder (design 37 §5). Standard = ordinary min-necessary rules; Sensitive/
+/// HighlySensitive are content-restricted with a justified release request (enforced in 14.7).</summary>
+public enum SensitivityLevel { Standard, Sensitive, HighlySensitive }
+
+/// <summary>Special-category class (design 37 §5). MentalHealth is the confirmed requirement; the rest are
+/// configuration for the Medical Director + DPO to ratify — not policy hard-coded in code.</summary>
+public enum SensitiveCategory { MentalHealth, HivSti, Genetic, SubstanceUse, ReproductiveHealth, GbvForensic, Other }
+
+/// <summary>A classified examination type — reference data whose sensitivity is denormalized onto orders/
+/// results so read-time gating never needs a cross-service join (design 37 §5).</summary>
+public sealed class ExaminationType
+{
+    public Guid ExaminationTypeId { get; set; }
+    public string Code { get; set; } = default!;                 // UK
+    public string NameEn { get; set; } = default!;
+    public string NameAr { get; set; } = default!;
+    public ExamCategory Category { get; set; }
+    public string DefaultCodeSystem { get; set; } = "CPT";       // CPT | LOINC | LOCAL
+    public string? DefaultCode { get; set; }
+    public SensitivityLevel SensitivityLevel { get; set; } = SensitivityLevel.Standard;
+    public SensitiveCategory? SensitiveCategory { get; set; }
+    public string Status { get; set; } = "Active";
+}

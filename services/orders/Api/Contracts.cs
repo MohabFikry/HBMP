@@ -7,7 +7,7 @@ namespace Mersal.Orders.Api;
 public sealed record CreateOrderRequest(
     Guid BeneficiaryId, Guid EncounterId, OrderType OrderType, DateTimeOffset? ExpiresAt, List<CreateOrderLine> Lines);
 
-public sealed record CreateOrderLine(CodeSystem CodeSystem, string Code, string? Description, decimal QuantityOrdered);
+public sealed record CreateOrderLine(CodeSystem CodeSystem, string Code, string? Description, decimal QuantityOrdered, Guid? ExaminationTypeId = null);
 
 public sealed record CancelOrderRequest(string? Reason);
 

@@ -25,6 +25,9 @@ builder.Services.AddScoped<FulfillmentGate>();
 // Line codes validated against masterdata; treating relationship verified via emr-service (both fail-closed).
 builder.Services.AddHttpClient<ICodeValidator, HttpCodeValidator>(c =>
     c.BaseAddress = new Uri(builder.Configuration["MasterData:BaseUrl"] ?? "http://masterdata-service:8080"));
+// 14.6 — examination-type sensitivity resolved + pinned at order creation (fail-closed).
+builder.Services.AddHttpClient<IExaminationTypeResolver, HttpExaminationTypeResolver>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["MasterData:BaseUrl"] ?? "http://masterdata-service:8080"));
 builder.Services.AddHttpClient<ITreatingRelationshipClient, HttpTreatingRelationshipClient>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Emr:BaseUrl"] ?? "http://emr-service:8080"));
 // Result reports are stored in document-service (scanned, CMK blob); we keep only the returned blob ref.

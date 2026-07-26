@@ -22,8 +22,8 @@ public static class OrdersEndpoints
         // ---- Create (US-032) ----
         v1.MapPost("", async (
             CreateOrderRequest req, HttpRequest http, OrdersDbContext db, OrdersGate gate, ICodeValidator codes,
-            OrderRoutingOptions routing, OrderNoIssuer orderNos, IAuditClient audit, IOutbox outbox,
-            IHbmpPrincipalAccessor me, BranchScopeState branch, TimeProvider clock, CancellationToken ct) =>
+            IExaminationTypeResolver examTypes, OrderRoutingOptions routing, OrderNoIssuer orderNos, IAuditClient audit,
+            IOutbox outbox, IHbmpPrincipalAccessor me, BranchScopeState branch, TimeProvider clock, CancellationToken ct) =>
         {
             var idem = http.Headers["Idempotency-Key"].ToString();
             if (string.IsNullOrWhiteSpace(idem))
@@ -54,6 +54,17 @@ public static class OrdersEndpoints
                         detail: $"{line.CodeSystem} code '{line.Code}' is not present in master data.");
             }
 
+            // 14.6 — resolve + PIN examination-type sensitivity (fail-closed: unknown → 422).
+            var classifications = new Dictionary<Guid, ExaminationClassification>();
+            foreach (var et in req.Lines.Where(l => l.ExaminationTypeId is not null).Select(l => l.ExaminationTypeId!.Value).Distinct())
+            {
+                var cls = await examTypes.ResolveAsync(et, bearer, ct);
+                if (cls is null)
+                    return Results.Problem(statusCode: 422, title: "unknown-examination-type", type: "urn:hbmp:unknown-examination-type",
+                        detail: $"examination type '{et}' is not present in master data.");
+                classifications[et] = cls;
+            }
+
             var now = clock.GetUtcNow();
             var actor = me.Principal?.Subject;
             var providerId = Guid.TryParse(me.Principal?.ProviderId, out var pg) ? pg : Guid.Empty;
@@ -69,8 +80,12 @@ public static class OrdersEndpoints
                 {
                     OrderLineId = Guid.NewGuid(), CodeSystem = l.CodeSystem, Code = l.Code,
                     Description = l.Description, QuantityOrdered = l.QuantityOrdered, Status = OrderLineStatus.Active,
+                    ExaminationTypeId = l.ExaminationTypeId,
+                    SensitivityLevel = l.ExaminationTypeId is { } etId ? classifications[etId].SensitivityLevel : SensitivityLevel.Standard,
                 }).ToList(),
             };
+            // Order sensitivity = the strictest of its lines (14.6).
+            order.SensitivityLevel = order.Lines.Select(x => x.SensitivityLevel).DefaultIfEmpty(SensitivityLevel.Standard).Max();
 
             // Route: gated → PendingApproval; else auto-activate.
             var route = OrderRoutingPolicy.Evaluate(order, routing);
