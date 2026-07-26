@@ -15,6 +15,7 @@ public sealed class QueueTicket
     public Guid BeneficiaryId { get; set; }
     public Guid ProviderId { get; set; }
     public Guid LocationId { get; set; }
+    public Guid? BranchId { get; set; }   // phase 14 — Mersal branch (NULL = external provider location)
     public Guid? DoctorId { get; set; }
     public string? MemberNo { get; set; }
     public string? DisplayName { get; set; }

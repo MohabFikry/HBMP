@@ -1,6 +1,7 @@
 using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Auth.Authorization;
+using Mersal.Authz;
 using Mersal.Emr.Domain;
 using Mersal.Emr.Infrastructure;
 using Mersal.Events;
@@ -177,7 +178,7 @@ public static class AppointmentsModule
         // GET /appointments — reception's day board (US-020). Defaults to today's appointments; an optional
         // ?status= filters to a single status (e.g. Scheduled for the check-in worklist). Ordered by start time.
         read.MapGet("/appointments", async (
-            DateTimeOffset? date, string? status, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
+            DateTimeOffset? date, string? status, Guid? branchId, BranchScopeState branch, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var day = (date ?? clock.GetUtcNow()).Date;
             var lo = new DateTimeOffset(day, TimeSpan.Zero);
@@ -185,14 +186,20 @@ public static class AppointmentsModule
             var q = db.Appointments.AsNoTracking().Where(a => a.ScheduledStart >= lo && a.ScheduledStart < hi);
             if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<AppointmentStatus>(status, ignoreCase: true, out var st))
                 q = q.Where(a => a.Status == st);
+            // 14.4 — BranchScoped callers see ONLY their active branch; member-scoped may optionally filter.
+            if (branch.Context.ActiveBranchId is { } active) q = q.Where(a => a.BranchId == active);
+            else if (branchId is { } bid) q = q.Where(a => a.BranchId == bid);
             var rows = await q.OrderBy(a => a.ScheduledStart).Take(200).ToListAsync(ct);
             return Results.Ok(rows.Select(AppointmentResponse.From));
         });
 
-        read.MapGet("/appointments/{id:guid}", async (Guid id, HttpResponse resp, EmrDbContext db, CancellationToken ct) =>
+        read.MapGet("/appointments/{id:guid}", async (Guid id, HttpResponse resp, BranchScopeState branch, EmrDbContext db, CancellationToken ct) =>
         {
             var a = await db.Appointments.AsNoTracking().FirstOrDefaultAsync(x => x.AppointmentId == id, ct);
             if (a is null) return Results.NotFound();
+            // 14.4 — a BranchScoped caller reaching a row in another branch is DENIED (not 404-empty).
+            if (branch.Context.ActiveBranchId is { } active && a.BranchId is not null && a.BranchId != active)
+                return Results.Problem(statusCode: 403, title: "branch-scope-denied", detail: "this appointment is not in your active branch");
             resp.Headers.ETag = $"\"{a.RowVersion}\"";   // clients echo this back as If-Match on transitions
             return Results.Ok(AppointmentResponse.From(a));
         });

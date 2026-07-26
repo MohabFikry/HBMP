@@ -42,6 +42,13 @@ builder.Services.AddScoped<ReminderDispatcher>();
 builder.Services.AddHttpClient<IMemberStatusProvider, HttpMemberStatusProvider>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Eligibility:BaseUrl"] ?? "http://eligibility-service:8080"));
 
+// 14.4 — active-branch context: the permitted set is resolved from admin-service; a scoped state holder is
+// populated per request by the branch-scope middleware below and read by the worklist endpoints.
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<BranchScopeState>();
+builder.Services.AddHttpClient<IBranchDirectory, HttpBranchDirectory>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Admin:BaseUrl"] ?? "http://admin-service:8080"));
+
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("emr-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
 
@@ -55,6 +62,36 @@ app.UseStatusCodePages();
 app.UseAuthentication();
 app.UseAuthorization();
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
+
+// 14.4 — resolve the active-branch context per request (design 37 §3). BranchScoped callers are narrowed to
+// a validated active branch; an X-Active-Branch outside the permitted set is rejected 403 + audited
+// (THE INVARIANT: never trust the header). Member/provider-scoped callers are branch-unrestricted.
+app.Use(async (ctx, next) =>
+{
+    var principal = ctx.RequestServices.GetRequiredService<IHbmpPrincipalAccessor>().Principal;
+    if (principal is not null && ctx.Request.Path.StartsWithSegments("/api/v1"))
+    {
+        var header = ctx.Request.Headers[BranchHeaders.ActiveBranch].FirstOrDefault();
+        var directory = ctx.RequestServices.GetRequiredService<IBranchDirectory>();
+        var state = await BranchScopeResolver.ResolveAsync(principal, header, directory, ctx.RequestAborted);
+        if (state.Denied)
+        {
+            var audit = ctx.RequestServices.GetRequiredService<IAuditClient>();
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "branch_scope", EntityId = header ?? "(none)", Action = AuditAction.Grant,
+                ActorUserId = principal.Subject, TenantId = principal.TenantId, ActorMfa = principal.MfaSatisfied,
+                DecisionOutcome = "BranchScopeDenied", DecisionReasonCode = "branch-not-permitted", Severity = AuditSeverity.High,
+            }, ctx.RequestAborted);
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await ctx.Response.WriteAsJsonAsync(new { title = "branch-not-permitted", detail = "the requested active branch is not in your permitted set" });
+            return;
+        }
+        ctx.RequestServices.GetRequiredService<BranchScopeState>().Context = state.Context;
+        if (state.Context.ActiveBranchId is { } a) ctx.Response.Headers["X-Active-Branch"] = a.ToString();
+    }
+    await next();
+});
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "emr-service" })).AllowAnonymous();
 

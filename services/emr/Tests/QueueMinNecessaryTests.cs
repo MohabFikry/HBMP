@@ -33,7 +33,7 @@ public class QueueMinNecessaryTests
         var names = typeof(QueueTicket).GetProperties().Select(p => p.Name).ToHashSet();
         names.Should().BeEquivalentTo(new[]
         {
-            "QueueId", "AppointmentId", "BeneficiaryId", "ProviderId", "LocationId", "DoctorId",
+            "QueueId", "AppointmentId", "BeneficiaryId", "ProviderId", "LocationId", "BranchId", "DoctorId",
             "MemberNo", "DisplayName", "AppointmentType", "Priority", "State", "EnqueuedAt", "CalledAt",
         });
     }

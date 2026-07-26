@@ -35,12 +35,15 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             // At most one active appointment per slot (partial unique index created in SQL).
             e.HasIndex(x => x.SlotId);
             e.HasIndex(x => x.IdempotencyKey);
+            e.Property(x => x.BranchId).HasColumnName("branch_id");   // phase 14
+            e.HasIndex(x => new { x.BranchId, x.ScheduledStart });
         });
 
         b.Entity<AppointmentSlot>(e =>
         {
             e.ToTable("appointment_slot");
             e.HasKey(x => x.SlotId);
+            e.Property(x => x.BranchId).HasColumnName("branch_id");   // phase 14
             e.HasIndex(x => new { x.ProviderId, x.LocationId, x.SlotStart });
         });
 
@@ -51,6 +54,7 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             e.Property(x => x.DayOfWeek).HasConversion<int>().HasColumnName("day_of_week");
             e.Property(x => x.StartTime).HasColumnName("start_time");
             e.Property(x => x.EndTime).HasColumnName("end_time");
+            e.Property(x => x.BranchId).HasColumnName("branch_id");   // phase 14
         });
 
         b.Entity<WaitlistEntry>(e =>
@@ -59,6 +63,7 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             e.HasKey(x => x.WaitlistId);
             e.Property(x => x.AppointmentType).HasConversion<string>().HasColumnName("appointment_type");
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.BranchId).HasColumnName("branch_id");   // phase 14
             e.HasIndex(x => new { x.ProviderId, x.LocationId, x.Status });
         });
 
@@ -74,6 +79,8 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             e.HasKey(x => x.QueueId);
             e.Property(x => x.AppointmentType).HasConversion<string>().HasColumnName("appointment_type");
             e.Property(x => x.State).HasConversion<string>().HasColumnName("state");
+            e.Property(x => x.BranchId).HasColumnName("branch_id");   // phase 14
+            e.HasIndex(x => new { x.BranchId, x.State });
             e.HasIndex(x => new { x.LocationId, x.ProviderId, x.State });
         });
 

@@ -22,6 +22,9 @@ public sealed class Appointment
     public Guid BeneficiaryId { get; set; }
     public Guid ProviderId { get; set; }
     public Guid LocationId { get; set; }
+    /// <summary>The Mersal branch this appointment belongs to (phase 14). NULL for a booking at an external
+    /// provider location — branch scoping applies only to branch-bound rows (design 37 §3).</summary>
+    public Guid? BranchId { get; set; }
     public Guid? SlotId { get; set; }
     public AppointmentType AppointmentType { get; set; }
     public AppointmentStatus Status { get; set; } = AppointmentStatus.Booked;
@@ -53,6 +56,7 @@ public sealed class ProviderAvailability
     public Guid AvailabilityId { get; set; }
     public Guid ProviderId { get; set; }
     public Guid LocationId { get; set; }
+    public Guid? BranchId { get; set; }   // phase 14 — Mersal branch (NULL = external provider location)
     public Guid? DoctorId { get; set; }
     public DayOfWeek DayOfWeek { get; set; }
     public TimeOnly StartTime { get; set; }
@@ -67,6 +71,7 @@ public sealed class AppointmentSlot
     public Guid SlotId { get; set; }
     public Guid ProviderId { get; set; }
     public Guid LocationId { get; set; }
+    public Guid? BranchId { get; set; }   // phase 14 — Mersal branch (NULL = external provider location)
     public Guid? DoctorId { get; set; }
     public DateTimeOffset SlotStart { get; set; }
     public DateTimeOffset SlotEnd { get; set; }
@@ -81,6 +86,7 @@ public sealed class WaitlistEntry
     public Guid BeneficiaryId { get; set; }
     public Guid ProviderId { get; set; }
     public Guid LocationId { get; set; }
+    public Guid? BranchId { get; set; }   // phase 14 — Mersal branch (NULL = external provider location)
     public AppointmentType AppointmentType { get; set; }
     public int PriorityScore { get; set; }
     public WaitlistStatus Status { get; set; } = WaitlistStatus.Waitlisted;

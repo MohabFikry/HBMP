@@ -1,6 +1,7 @@
 using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Auth.Authorization;
+using Mersal.Authz;
 using Mersal.Emr.Domain;
 using Mersal.Emr.Infrastructure;
 using Mersal.Events;
@@ -41,14 +42,16 @@ public static class QueueModule
 
         // GET /queues — ordered, minimum-necessary queue for a clinic/doctor.
         read.MapGet("/queues", async (
-            Guid locationId, Guid providerId, Guid? doctorId, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
+            Guid locationId, Guid providerId, Guid? doctorId, BranchScopeState branch, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var now = clock.GetUtcNow();
-            var tickets = await db.Set<QueueTicket>().AsNoTracking()
+            var q = db.Set<QueueTicket>().AsNoTracking()
                 .Where(t => t.LocationId == locationId && t.ProviderId == providerId
                             && (doctorId == null || t.DoctorId == doctorId)
-                            && t.State == QueueTicketState.Waiting)
-                .ToListAsync(ct);
+                            && t.State == QueueTicketState.Waiting);
+            // 14.4 — BranchScoped callers see only their active branch's queue.
+            if (branch.Context.ActiveBranchId is { } active) q = q.Where(t => t.BranchId == active);
+            var tickets = await q.ToListAsync(ct);
             var ordered = QueueRules.Ordered(tickets).ToList();
             return Results.Ok(ordered.Select((t, i) => QueueItemView.From(t, i + 1, now)));
         });
