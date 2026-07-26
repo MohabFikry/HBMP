@@ -50,6 +50,7 @@ app.MapSubmissions(); // phase 10b.5 — provider-submitted claims + document ma
 app.MapReimbursements(); // phase 10b.6 — beneficiary reimbursement + OCR (assistive, human-gated)
 app.MapReconciliation(); // phase 10b.7 — reconciliation worklist + append-only adjustments
 app.MapSettlement(); // phase 10b.8 — settlement advice + exports (NO payment execution)
+app.MapAppeals(); // phase 10b.9 — appeals (preserve decision thread) + claims KPI feed
 
 app.Run();
 

@@ -102,7 +102,17 @@ data (tariffs, authorizations, eligibility, fulfillment) comes over the API/even
   `claims:decide`) **records an external payment fact only** → `Closed`. **THE PLATFORM NEVER MOVES MONEY** — no payout
   path exists (enforced by a source-scan test); see [ADR 0007](../../docs/adr/0007-claims-never-executes-payment.md).
   Renderers are dependency-free (self-hostable). Emits `SettlementAdviceIssued`.
-- 10b.9 appeals + KPIs. *(built in the next slice)*
+- **10b.9 — appeals + claims KPIs.** `claim_appeal` (append-only). `POST /claims/{id}/appeals` re-enters a live decided
+  claim into UnderAdjudication (appealed lines return to Pending for a fresh decision) while the **original
+  `claim_decision` thread is preserved byte-identical** and the appeal links to it; the re-decision **cannot be made by
+  the original decider** (SoD enforced in the decision handler — a person may not decide the same line twice). An appeal
+  on an **already-settled batch** is recorded as `RoutedToAdjustment` — the settled batch is never reopened; the
+  correction flows as a compensating adjustment/recovery (10b.7) in a later batch. `GET /claims/kpis` exposes the
+  aggregate read-model feed (`ClaimsKpiCalculator`): TAT, approval/denial rate, top denial reasons, adjustment value by
+  type, provider variance league, OCR auto-match rate, aged unbilled, recovery outstanding — **aggregate-only, no
+  clinical fields**. reporting-service (phase 8) consumes it. Emits `ClaimAppealed`.
+
+**Phase 10b is COMPLETE** — all nine slices (10b.1–10b.9) landed, 153 tests green against real Postgres.
 
 ## Endpoints (10b.1)
 

@@ -23,6 +23,7 @@ public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options) :
     public DbSet<OcrExtraction> OcrExtractions => Set<OcrExtraction>();
     public DbSet<SettlementAdvice> SettlementAdvices => Set<SettlementAdvice>();
     public DbSet<SettlementPaymentReference> SettlementPaymentReferences => Set<SettlementPaymentReference>();
+    public DbSet<ClaimAppeal> ClaimAppeals => Set<ClaimAppeal>();
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -162,6 +163,15 @@ public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options) :
             e.ToTable("settlement_payment_reference");
             e.HasKey(x => x.PaymentReferenceId);
             e.HasIndex(x => x.BatchId);
+        });
+
+        b.Entity<ClaimAppeal>(e =>
+        {
+            e.ToTable("claim_appeal");
+            e.HasKey(x => x.AppealId);
+            e.Property(x => x.AppellantType).HasConversion<string>().HasColumnName("appellant_type");
+            e.Property(x => x.Resolution).HasConversion<string>().HasColumnName("resolution");
+            e.HasIndex(x => new { x.ClaimId, x.CreatedAt });
         });
 
         b.Entity<ProcessedEvent>(e =>

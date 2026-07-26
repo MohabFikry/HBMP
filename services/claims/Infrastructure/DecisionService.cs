@@ -55,6 +55,12 @@ public sealed class DecisionService(ClaimsDbContext db, TimeProvider clock)
         string tenantId, string actor, Claim claim, ClaimLine line, DecisionRequest req,
         string? idempotencyKey, decimal threshold, string correlationId, CancellationToken ct)
     {
+        // SoD on re-decision (10b.9 appeals): a person may not decide the SAME line twice — an appealed line must be
+        // escalated to a DIFFERENT reviewer. A prior terminal (non-pending) decision by this actor ⇒ 403.
+        if (await db.ClaimDecisions.AsNoTracking()
+            .AnyAsync(d => d.ClaimLineId == line.ClaimLineId && d.DecidedBy == actor && !d.PendingSecondApproval, ct))
+            return Fail(DecisionOutcome.SoDSameDecider);
+
         var err = DecisionRules.Validate(req.Kind, req.AllowedAmount, req.ReasonCodes, req.Rationale,
             line.BilledAmount, line.ContractPrice, req.IsOverride);
         if (err is not null) return new DecisionResult(DecisionOutcome.Validation, null, claim, line, err);

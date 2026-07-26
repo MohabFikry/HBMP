@@ -37,6 +37,8 @@ public static class DependencyInjection
         services.AddScoped<AdjustmentService>();
         services.AddScoped<ReconciliationQueries>();
         services.AddScoped<SettlementService>();
+        services.AddScoped<AppealService>();
+        services.AddScoped<KpiQueries>();
         // WORM document store seam — the physical MinIO object-lock upload lands with document-service integration;
         // immutability on the claims side is the append-only settlement_advice row + content hash.
         services.AddScoped<ISettlementDocumentStore, NullWormStore>();
