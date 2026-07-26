@@ -54,4 +54,39 @@ public class LimitResetTests
         LimitReset.ApplyIfDue(l, new DateOnly(2026, 7, 20)).Should().BeFalse();
         l.ConsumedValue.Should().Be(300m); // unchanged
     }
+
+    // ── 18.A3 / audit R2 X10 — the first-ever reset must not wipe in-period consumption ────────────
+
+    [Fact]
+    public void A_reset_is_not_due_within_the_same_period_when_last_reset_is_null()
+    {
+        // This used to return TRUE for any consumed > 0, so the first run of the reset job handed a
+        // member who had used 8 of their 10 annual visits all 10 back.
+        var l = Limit(LimitType.Annual, ResetPeriod.Yearly, 10m, 8m, lastReset: null);
+
+        LimitReset.IsResetDue(l, new DateOnly(2026, 7, 27)).Should().BeFalse();
+        LimitReset.ApplyIfDue(l, new DateOnly(2026, 7, 27)).Should().BeFalse();
+        l.ConsumedValue.Should().Be(8m, "in-period consumption survives");
+    }
+
+    [Fact]
+    public void A_seeded_limit_resets_only_once_its_own_period_boundary_passes()
+    {
+        var effectiveFrom = new DateOnly(2026, 7, 10);
+        var seeded = LimitReset.SeedLastResetOn(ResetPeriod.Monthly, LimitType.Annual, effectiveFrom);
+        seeded.Should().Be(new DateOnly(2026, 7, 1), "the anchor is the start of the period containing the effective date");
+
+        var l = Limit(LimitType.Annual, ResetPeriod.Monthly, 500m, 300m, lastReset: seeded);
+
+        LimitReset.IsResetDue(l, new DateOnly(2026, 7, 31)).Should().BeFalse(); // still the seeded period
+        LimitReset.IsResetDue(l, new DateOnly(2026, 8, 1)).Should().BeTrue();   // genuinely a new period
+    }
+
+    [Fact]
+    public void Non_resetting_limits_are_seeded_with_no_anchor()
+    {
+        var on = new DateOnly(2026, 7, 10);
+        LimitReset.SeedLastResetOn(ResetPeriod.None, LimitType.Annual, on).Should().BeNull();
+        LimitReset.SeedLastResetOn(ResetPeriod.Yearly, LimitType.Lifetime, on).Should().BeNull();
+    }
 }

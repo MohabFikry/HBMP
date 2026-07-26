@@ -179,6 +179,77 @@ public class OrderConsumeConcurrencyTests
         finally { await Cleanup(beneficiary); }
     }
 
+    // ── 18.A3 / audit R2 X7 — the aggregate roll-up must not be a lost update ─────────────────────
+
+    [SkippableFact]
+    public async Task Parallel_consume_of_different_lines_completes_the_order()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var beneficiary = Guid.NewGuid();
+        try
+        {
+            // Two lines, one unit each. Both racers succeed (different lines, no xmin collision), so the
+            // order IS fully consumed. Before X7 both computed the aggregate from the graph they loaded
+            // BEFORE the other committed, both wrote PartiallyUsed unguarded, and the order was stranded
+            // there forever — OrderCompleted never emitted and the fulfilment saga never closed.
+            //
+            // The structural guarantee is the guarded compare-and-set in the executor, which converges
+            // for EVERY interleaving. This test is the regression net: several rounds, because a run
+            // that happens to serialize would also pass under the old code.
+            for (var round = 0; round < 5; round++)
+            {
+                var (orderId, lineA, lineB) = await SeedActiveOrder(beneficiary, orderedQty: 1, extraLines: 1);
+
+                var tasks = new[] { lineA, lineB }.Select(async (lineId, i) =>
+                {
+                    await using var ctx = Ctx();
+                    return await new ConsumeExecutor(ctx).ConsumeAsync(
+                        orderId, $"x7-{round}-{i}", Guid.NewGuid(), Guid.NewGuid(),
+                        [new ConsumeLineRequest(lineId, 1)], DateTimeOffset.UtcNow);
+                });
+                var outcomes = await Task.WhenAll(tasks);
+
+                outcomes.Should().OnlyContain(o => o.Outcome == ConsumeOutcome.Applied,
+                    "the two racers touch DIFFERENT lines, so neither may lose");
+
+                await using var verify = Ctx();
+                (await verify.OrderLines.AsNoTracking().Where(l => l.OrderId == orderId).ToListAsync())
+                    .Should().OnlyContain(l => l.Status == OrderLineStatus.Completed);
+                (await verify.Orders.AsNoTracking().SingleAsync(o => o.OrderId == orderId)).Status
+                    .Should().Be(OrderStatus.Completed,
+                        "round {0}: every line is consumed, so the order must not be stranded in PartiallyUsed", round);
+            }
+        }
+        finally { await Cleanup(beneficiary); }
+    }
+
+    [SkippableFact]
+    public async Task A_partially_consumed_order_still_settles_on_PartiallyUsed_under_concurrency()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var beneficiary = Guid.NewGuid();
+        try
+        {
+            // Three lines, two consumed concurrently: the recompute must land on PartiallyUsed, not
+            // over-shoot to Completed just because each racer saw only its own line.
+            var (orderId, lineA, lineB) = await SeedActiveOrder(beneficiary, orderedQty: 1, extraLines: 2);
+
+            var tasks = new[] { lineA, lineB }.Select(async (lineId, i) =>
+            {
+                await using var ctx = Ctx();
+                return await new ConsumeExecutor(ctx).ConsumeAsync(
+                    orderId, $"x7-partial-{i}", Guid.NewGuid(), Guid.NewGuid(),
+                    [new ConsumeLineRequest(lineId, 1)], DateTimeOffset.UtcNow);
+            });
+            (await Task.WhenAll(tasks)).Should().OnlyContain(o => o.Outcome == ConsumeOutcome.Applied);
+
+            await using var verify = Ctx();
+            (await verify.Orders.AsNoTracking().SingleAsync(o => o.OrderId == orderId)).Status
+                .Should().Be(OrderStatus.PartiallyUsed);
+        }
+        finally { await Cleanup(beneficiary); }
+    }
+
     private static async Task<(Guid orderId, Guid lineId, Guid otherLineId)> SeedActiveOrder(
         Guid beneficiary, decimal orderedQty, int extraLines = 0)
     {

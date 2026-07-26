@@ -60,8 +60,6 @@ public sealed class ConsumeExecutor(OrdersDbContext db)
             fulfillments.Add(f);
             db.Fulfillments.Add(f);
         }
-        var newOrderStatus = OrderConsume.RecomputeOrderStatus(order);
-
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         try
         {
@@ -84,18 +82,45 @@ public sealed class ConsumeExecutor(OrdersDbContext db)
             return new ConsumeResult(ConsumeOutcome.Replayed, fresh, winner);
         }
 
-        if (newOrderStatus != order.Status)
-        {
-            // Order status is updated out of the line's optimistic guard so concurrent consumes of DIFFERENT lines
-            // never falsely collide on the order row.
-            await db.Orders.Where(o => o.OrderId == orderId)
-                .ExecuteUpdateAsync(s => s.SetProperty(o => o.Status, newOrderStatus), ct);
-            order.Status = newOrderStatus;
-        }
+        // 18.A3 (audit R2 X7): the aggregate status is recomputed from the lines as they are NOW, read
+        // back inside this transaction — not from the in-memory graph loaded before the racers ran — and
+        // applied with a guarded UPDATE (WHERE status = @expected) with bounded retry. Two racers on
+        // DIFFERENT lines used to both write PartiallyUsed from their own stale snapshot, stranding a
+        // fully-consumed order in PartiallyUsed forever so OrderCompleted never emitted. The per-line
+        // xmin guard above is untouched — this only fixes the roll-up.
+        order.Status = await ApplyAggregateStatusAsync(orderId, ct);
 
         if (insideTransaction is not null) await insideTransaction(order, fulfillments, ct);
         await tx.CommitAsync(ct);
         return new ConsumeResult(ConsumeOutcome.Applied, order, fulfillments);
+    }
+
+    /// <summary>Re-read the order's lines inside the transaction, recompute the aggregate status from
+    /// them, and apply it with a guarded UPDATE. The guard makes the write a compare-and-set: a racer
+    /// that moved the order between our read and our write loses, and we retry against the value it
+    /// wrote. Returns the status the order actually holds.</summary>
+    private async Task<OrderStatus> ApplyAggregateStatusAsync(Guid orderId, CancellationToken ct)
+    {
+        const int maxAttempts = 5;
+        for (var attempt = 0; ; attempt++)
+        {
+            var fresh = await db.Orders.AsNoTracking().Include(o => o.Lines)
+                .FirstAsync(o => o.OrderId == orderId, ct);
+            var current = fresh.Status;
+            var recomputed = OrderConsume.RecomputeOrderStatus(fresh);
+            if (recomputed == current) return current;
+
+            var affected = await db.Orders
+                .Where(o => o.OrderId == orderId && o.Status == current)
+                .ExecuteUpdateAsync(s => s.SetProperty(o => o.Status, recomputed), ct);
+            if (affected == 1) return recomputed;
+
+            // Lost the compare-and-set: another consume moved the order. Re-read and try again. The
+            // recompute is a pure function of the line rows, so this converges.
+            if (attempt >= maxAttempts - 1)
+                return (await db.Orders.AsNoTracking().Where(o => o.OrderId == orderId)
+                    .Select(o => o.Status).FirstAsync(ct));
+        }
     }
 
     private static ConsumeOutcome Map(ConsumeError error) => error switch

@@ -12,9 +12,9 @@ Mark `✅ YYYY-MM-DD` per id here **and** on the finding row in `AUDIT-R2-E2E.md
 | 18.A2 | X2 | Batch rollups erase applied adjustments at the freeze point | ✅ 2026-07-27 |
 | 18.A2 | X3 | Allowed amount can exceed contract tariff (`Math.Max`; `Adjust` uncapped) | ✅ 2026-07-27 |
 | 18.A2 | X8 | Contract price ignores line quantity | ✅ 2026-07-27 |
-| 18.A3 | X7 | Lost update on concurrent consume/dispense of different lines | ☐ |
-| 18.A3 | X9 | Eligibility cache key omits serviceCode/requiresPreAuth → pre-auth bypass | ☐ |
-| 18.A3 | X10 | First-ever limit reset wipes in-period consumption (test asserts the bug) | ☐ |
+| 18.A3 | X7 | Lost update on concurrent consume/dispense of different lines | ✅ 2026-07-27 |
+| 18.A3 | X9 | Eligibility cache key omits serviceCode/requiresPreAuth → pre-auth bypass | ✅ 2026-07-27 |
+| 18.A3 | X10 | First-ever limit reset wipes in-period consumption (test asserts the bug) | ✅ 2026-07-27 |
 | 18.A3 | — | Waitlist promotion unlocked; cancel/no-show 3 unwrapped SaveChanges; prefix idempotency keys | ☐ |
 | 18.A3 | — | `IBusinessCalendar.Today()` Africa/Cairo + TimeProvider injection + UtcNow ban | ☐ |
 | 18.A4 | F10–F12,F19,F20,F27,F30 | Report-access TTL cap + missing transitions; settlement SoD + frozen snapshot; adjustment TOCTOU; policy reactivation; voided claim terminal; TransitionDenied audit | ☐ |

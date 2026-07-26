@@ -4,22 +4,34 @@ using StackExchange.Redis;
 namespace Mersal.Eligibility.Infrastructure;
 
 /// <summary>
-/// Cache-first eligibility snapshot store, keyed by (beneficiaryId, benefitCategory). A check serves
-/// the cached snapshot within TTL; upstream policy/coverage/status events invalidate it so the next
-/// check recomputes. Snapshots are derived — the cache is an optimization, never a source of truth.
+/// Every input the decision depends on. 18.A3 (audit R2 X9): the key used to be
+/// (beneficiaryId, benefitCategory) alone, but <c>EligibilityEngine</c> also branches on the service
+/// code and whether the service is pre-auth GATED. A cached non-gated <c>Eligible</c> was therefore
+/// served for a gated service for the full 15-minute TTL — a silent pre-authorization bypass. The key
+/// now carries the whole decision input, so two different questions can never share an answer.
+/// </summary>
+public readonly record struct EligibilityCacheKey(
+    Guid BeneficiaryId, string BenefitCategory, string? ServiceCode, bool RequiresPreAuth);
+
+/// <summary>
+/// Cache-first eligibility snapshot store. A check serves the cached snapshot within TTL; upstream
+/// policy/coverage/status events invalidate every entry for the beneficiary so the next check
+/// recomputes. Snapshots are derived — the cache is an optimization, never a source of truth.
 /// </summary>
 public interface IEligibilityCache
 {
-    Task<string?> GetAsync(Guid beneficiaryId, string benefitCategory, CancellationToken ct = default);
-    Task SetAsync(Guid beneficiaryId, string benefitCategory, string json, TimeSpan ttl, CancellationToken ct = default);
-    /// <summary>Invalidate every cached snapshot for a beneficiary (all categories).</summary>
+    Task<string?> GetAsync(EligibilityCacheKey key, CancellationToken ct = default);
+    Task SetAsync(EligibilityCacheKey key, string json, TimeSpan ttl, CancellationToken ct = default);
+    /// <summary>Invalidate every cached snapshot for a beneficiary (all categories and services).</summary>
     Task InvalidateAsync(Guid beneficiaryId, CancellationToken ct = default);
 }
 
 public static class CacheKey
 {
-    public static string For(Guid beneficiaryId, string benefitCategory) =>
-        $"elig:{beneficiaryId:N}:{benefitCategory.ToUpperInvariant()}";
+    public static string For(EligibilityCacheKey k) =>
+        $"elig:{k.BeneficiaryId:N}:{k.BenefitCategory.ToUpperInvariant()}" +
+        $":{(string.IsNullOrWhiteSpace(k.ServiceCode) ? "-" : k.ServiceCode.ToUpperInvariant())}" +
+        $":{(k.RequiresPreAuth ? "gated" : "open")}";
 
     public static string Set(Guid beneficiaryId) => $"elig:set:{beneficiaryId:N}";
 }
@@ -29,18 +41,18 @@ public sealed class ValkeyEligibilityCache(IConnectionMultiplexer mux) : IEligib
 {
     private IDatabase Db => mux.GetDatabase();
 
-    public async Task<string?> GetAsync(Guid beneficiaryId, string benefitCategory, CancellationToken ct = default)
+    public async Task<string?> GetAsync(EligibilityCacheKey key, CancellationToken ct = default)
     {
-        var v = await Db.StringGetAsync(CacheKey.For(beneficiaryId, benefitCategory));
+        var v = await Db.StringGetAsync(CacheKey.For(key));
         return v.IsNullOrEmpty ? null : v.ToString();
     }
 
-    public async Task SetAsync(Guid beneficiaryId, string benefitCategory, string json, TimeSpan ttl, CancellationToken ct = default)
+    public async Task SetAsync(EligibilityCacheKey key, string json, TimeSpan ttl, CancellationToken ct = default)
     {
-        var key = CacheKey.For(beneficiaryId, benefitCategory);
-        await Db.StringSetAsync(key, json, ttl);
-        await Db.SetAddAsync(CacheKey.Set(beneficiaryId), key);
-        await Db.KeyExpireAsync(CacheKey.Set(beneficiaryId), ttl + TimeSpan.FromMinutes(5));
+        var k = CacheKey.For(key);
+        await Db.StringSetAsync(k, json, ttl);
+        await Db.SetAddAsync(CacheKey.Set(key.BeneficiaryId), k);
+        await Db.KeyExpireAsync(CacheKey.Set(key.BeneficiaryId), ttl + TimeSpan.FromMinutes(5));
     }
 
     public async Task InvalidateAsync(Guid beneficiaryId, CancellationToken ct = default)
@@ -57,18 +69,18 @@ public sealed class InMemoryEligibilityCache : IEligibilityCache
 {
     private readonly ConcurrentDictionary<string, (string Json, DateTimeOffset Expires)> _store = new();
 
-    public Task<string?> GetAsync(Guid beneficiaryId, string benefitCategory, CancellationToken ct = default)
+    public Task<string?> GetAsync(EligibilityCacheKey key, CancellationToken ct = default)
     {
-        var key = CacheKey.For(beneficiaryId, benefitCategory);
-        if (_store.TryGetValue(key, out var e) && e.Expires > DateTimeOffset.UtcNow)
+        var k = CacheKey.For(key);
+        if (_store.TryGetValue(k, out var e) && e.Expires > DateTimeOffset.UtcNow)
             return Task.FromResult<string?>(e.Json);
-        _store.TryRemove(key, out _);
+        _store.TryRemove(k, out _);
         return Task.FromResult<string?>(null);
     }
 
-    public Task SetAsync(Guid beneficiaryId, string benefitCategory, string json, TimeSpan ttl, CancellationToken ct = default)
+    public Task SetAsync(EligibilityCacheKey key, string json, TimeSpan ttl, CancellationToken ct = default)
     {
-        _store[CacheKey.For(beneficiaryId, benefitCategory)] = (json, DateTimeOffset.UtcNow.Add(ttl));
+        _store[CacheKey.For(key)] = (json, DateTimeOffset.UtcNow.Add(ttl));
         return Task.CompletedTask;
     }
 

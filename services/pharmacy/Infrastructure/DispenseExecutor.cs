@@ -57,7 +57,6 @@ public sealed class DispenseExecutor(PharmacyDbContext db)
             DispensedAt = now, DispensedBy = actorId,
         };
         db.DispenseEvents.Add(evt);
-        var newRxStatus = Domain.Dispensing.RecomputePrescriptionStatus(rx);
 
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         try
@@ -81,18 +80,41 @@ public sealed class DispenseExecutor(PharmacyDbContext db)
             return new DispenseResult(DispenseOutcome.Replayed, fresh, winner);
         }
 
-        if (newRxStatus != rx.Status)
-        {
-            // Prescription status is updated out of the line's optimistic guard so concurrent dispenses of DIFFERENT
-            // lines never falsely collide on the prescription row.
-            await db.Prescriptions.Where(p => p.PrescriptionId == prescriptionId)
-                .ExecuteUpdateAsync(s => s.SetProperty(p => p.Status, newRxStatus), ct);
-            rx.Status = newRxStatus;
-        }
+        // 18.A3 (audit R2 X7): recompute the prescription's status from the lines as they are NOW,
+        // read back inside this transaction, and apply it with a guarded UPDATE + bounded retry. Two
+        // pharmacists dispensing DIFFERENT lines used to both write PartiallyDispensed from their own
+        // stale snapshot, stranding a fully-dispensed Rx so RxDispensed never emitted. The per-line xmin
+        // guard above is untouched — this only fixes the roll-up.
+        rx.Status = await ApplyAggregateStatusAsync(prescriptionId, ct);
 
         if (insideTransaction is not null) await insideTransaction(rx, evt, ct);
         await tx.CommitAsync(ct);
         return new DispenseResult(DispenseOutcome.Applied, rx, evt);
+    }
+
+    /// <summary>Re-read the prescription's lines inside the transaction, recompute the aggregate status
+    /// from them, and apply it as a compare-and-set. A racer that moved the Rx between our read and our
+    /// write loses; we retry against the value it wrote. Returns the status the Rx actually holds.</summary>
+    private async Task<RxStatus> ApplyAggregateStatusAsync(Guid prescriptionId, CancellationToken ct)
+    {
+        const int maxAttempts = 5;
+        for (var attempt = 0; ; attempt++)
+        {
+            var fresh = await db.Prescriptions.AsNoTracking().Include(p => p.Lines)
+                .FirstAsync(p => p.PrescriptionId == prescriptionId, ct);
+            var current = fresh.Status;
+            var recomputed = Domain.Dispensing.RecomputePrescriptionStatus(fresh);
+            if (recomputed == current) return current;
+
+            var affected = await db.Prescriptions
+                .Where(p => p.PrescriptionId == prescriptionId && p.Status == current)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.Status, recomputed), ct);
+            if (affected == 1) return recomputed;
+
+            if (attempt >= maxAttempts - 1)
+                return await db.Prescriptions.AsNoTracking().Where(p => p.PrescriptionId == prescriptionId)
+                    .Select(p => p.Status).FirstAsync(ct);
+        }
     }
 
     private static DispenseOutcome Map(DispenseError error) => error switch

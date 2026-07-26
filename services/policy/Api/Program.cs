@@ -85,6 +85,10 @@ v1.MapPost("/policies/{policyId:guid}/coverages", async (Guid policyId, CreateCo
             LimitValue = l.LimitValue, ConsumedValue = 0m,   // accumulator starts at 0
             CurrencyCode = l.CurrencyCode ?? "EGP",
             ResetPeriod = Enum.Parse<ResetPeriod>(l.ResetPeriod ?? "None"),
+            // 18.A3 (X10): anchor the reset window to this coverage's own period, so the first boundary
+            // crossing is a real reset and the first run of the job never wipes in-period consumption.
+            LastResetOn = LimitReset.SeedLastResetOn(
+                Enum.Parse<ResetPeriod>(l.ResetPeriod ?? "None"), Enum.Parse<LimitType>(l.LimitType), req.EffectiveFrom),
         }).ToList(),
     };
     db.Coverages.Add(cov);

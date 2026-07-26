@@ -26,7 +26,10 @@ public sealed class EligibilityChecker(EligibilityDbContext db, IEligibilityCach
         Guid beneficiaryId, string benefitCategory, string? serviceCode, bool serviceRequiresPreAuth,
         CancellationToken ct = default)
     {
-        var cached = await cache.GetAsync(beneficiaryId, benefitCategory, ct);
+        // 18.A3 (X9): the key carries every input the engine branches on — a non-gated answer can no
+        // longer be served for a gated service.
+        var cacheKey = new EligibilityCacheKey(beneficiaryId, benefitCategory, serviceCode, serviceRequiresPreAuth);
+        var cached = await cache.GetAsync(cacheKey, ct);
         if (cached is not null)
         {
             var snap = JsonSerializer.Deserialize<EligibilitySnapshot>(cached, Json)!;
@@ -59,7 +62,7 @@ public sealed class EligibilityChecker(EligibilityDbContext db, IEligibilityCach
         db.Snapshots.Add(snapshot);
         await db.SaveChangesAsync(ct);
 
-        await cache.SetAsync(beneficiaryId, benefitCategory, JsonSerializer.Serialize(snapshot, Json), Ttl, ct);
+        await cache.SetAsync(cacheKey, JsonSerializer.Serialize(snapshot, Json), Ttl, ct);
         return new CheckOutcome(result, expires, FromCache: false);
     }
 

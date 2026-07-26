@@ -196,6 +196,50 @@ public class DispenseConcurrencyTests
         finally { await Cleanup(beneficiary); }
     }
 
+    // ── 18.A3 / audit R2 X7 — the aggregate roll-up must not be a lost update ─────────────────────
+
+    [SkippableFact]
+    public async Task Parallel_dispense_of_different_lines_completes_the_prescription()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var beneficiary = Guid.NewGuid();
+        try
+        {
+            // Two lines, one unit each, dispensed concurrently by two pharmacists. Both succeed (different
+            // lines, no xmin collision), so the Rx IS fully dispensed. Before X7 both computed the
+            // aggregate from the graph they loaded BEFORE the other committed, both wrote
+            // PartiallyDispensed unguarded, and the Rx was stranded — RxDispensed never emitted.
+            //
+            // The structural guarantee is the guarded compare-and-set in the executor; this is the
+            // regression net, run several rounds because a serialized run would also pass under the old code.
+            for (var round = 0; round < 5; round++)
+            {
+                var (rxId, lineA, lineB) = await SeedApprovedRx(beneficiary, prescribed: 1, extraLines: 1);
+
+                var tasks = new[] { lineA, lineB }.Select(async (lineId, i) =>
+                {
+                    await using var ctx = Ctx();
+                    return await new DispenseExecutor(ctx).DispenseAsync(
+                        rxId, lineId, $"x7-{round}-{i}", Guid.NewGuid(), Guid.NewGuid(),
+                        quantity: 1, batchNo: "B-1", expiryDate: FutureLot,
+                        substitutedDrugId: null, substitutionReason: null, DateTimeOffset.UtcNow);
+                });
+                var outcomes = await Task.WhenAll(tasks);
+
+                outcomes.Should().OnlyContain(o => o.Outcome == DispenseOutcome.Applied,
+                    "the two pharmacists touch DIFFERENT lines, so neither may lose");
+
+                await using var verify = Ctx();
+                (await verify.PrescriptionLines.AsNoTracking().Where(l => l.PrescriptionId == rxId).ToListAsync())
+                    .Should().OnlyContain(l => l.Status == RxLineStatus.Dispensed);
+                (await verify.Prescriptions.AsNoTracking().SingleAsync(p => p.PrescriptionId == rxId)).Status
+                    .Should().Be(RxStatus.Dispensed,
+                        "round {0}: every line is dispensed, so the Rx must not be stranded in PartiallyDispensed", round);
+            }
+        }
+        finally { await Cleanup(beneficiary); }
+    }
+
     private static async Task<(Guid rxId, Guid lineId, Guid otherLineId)> SeedApprovedRx(
         Guid beneficiary, decimal prescribed, int extraLines = 0)
     {
