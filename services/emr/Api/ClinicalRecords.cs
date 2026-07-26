@@ -248,6 +248,42 @@ public static class ClinicalEndpoints
             return Results.Ok(allergies.Select(AllergyResponse.From));
         });
 
+        // ---- Clinical-context oversight projection (16.6, H4) — the seam approvals /review calls to assemble the
+        // reviewer's field-scoped context. Gated as an oversight read (medical_approval/director → emr:read-oversight,
+        // Sensitive → engine-audited); min-necessary (a summary + signed-note assessments, no raw SOAP dump). Each
+        // item carries SensitivityLevel + CallerHasAccess so the approvals projection enforces design 37 §6. emr's
+        // own clinical records are Standard (the sensitive investigation RESULTS are orders-owned + gated there). ----
+        ben.MapGet("/{beneficiaryId:guid}/clinical-context", async (
+            Guid beneficiaryId, EmrDbContext db, ClinicalGate gate, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync("emr:read", EmrPolicies.Resources.Encounter, beneficiaryId.ToString(), beneficiaryId, ct);
+            if (denied is not null) return denied;
+
+            var encIds = await db.Encounters.AsNoTracking()
+                .Where(e => e.BeneficiaryId == beneficiaryId).Select(e => e.EncounterId).ToListAsync(ct);
+            var notes = await db.Notes.AsNoTracking()
+                .Where(n => encIds.Contains(n.EncounterId) && n.IsSigned && !n.IsDeleted)
+                .OrderByDescending(n => n.AuthoredAt).ToListAsync(ct);
+            var activeDx = await db.Diagnoses.AsNoTracking()
+                .Where(d => encIds.Contains(d.EncounterId) && d.ClinicalStatus == ClinicalStatus.Active && !d.IsDeleted)
+                .ToListAsync(ct);
+
+            await EmitAsync(audit, "clinical_context", beneficiaryId, AuditAction.Read, me,
+                $"{{\"encounters\":{encIds.Count},\"notes\":{notes.Count},\"activeDx\":{activeDx.Count}}}", ct);
+
+            return Results.Ok(new
+            {
+                EmrSummary = $"{encIds.Count} encounter(s); {notes.Count} signed note(s); {activeDx.Count} active diagnosis(es).",
+                Notes = notes.Select(n => new
+                {
+                    Type = n.NoteType.ToString(), Author = n.AuthoredBy, AuthoredAt = n.AuthoredAt,
+                    Summary = n.Assessment ?? n.Plan ?? "(no assessment recorded)",
+                    SensitivityLevel = "Standard", CallerHasAccess = true,
+                }),
+                Documents = Array.Empty<object>(), // emr owns no documents; sensitive results are orders-owned + gated there
+            });
+        });
+
         // ---- Allergy (beneficiary-level): allergen validated vs masterdata ----
         ben.MapPost("/{beneficiaryId:guid}/allergies", async (
             Guid beneficiaryId, AddAllergyRequest req, EmrDbContext db, ClinicalGate gate, IClinicalCodeValidator codes,
