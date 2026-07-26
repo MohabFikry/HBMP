@@ -30,7 +30,8 @@ if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "identity-service" })).AllowAnonymous();
 
-app.MapConnect(); // 17.2 — /connect/{authorize,token,userinfo,login,logout}
+app.MapConnect();  // 17.2 — /connect/{authorize,token,userinfo,login,logout}
+app.MapAccount();  // 17.3 — /connect/{2fa,enroll-2fa} login UI + TOTP 2FA + recovery codes
 
 // Read-only roles/scopes-as-data catalog (verification of the 17.1 seed). NOTE: the mutating admin surface
 // lands in 17.4 behind admin RBAC + SoD; these reads are non-sensitive catalog metadata (no user data).

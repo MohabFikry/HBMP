@@ -43,8 +43,10 @@ public static class ConnectEndpoints
                 return Results.Forbid(properties: null, [IdentityConstants.ApplicationScheme]);
 
             var facts = await claims.ForAsync(user, http.RequestAborted);
-            // 17.3 adds "otp" when a second factor was performed; the minimal login is password-only.
-            var principal = factory.ForUser(facts, request.GetScopes(), ["pwd"]);
+            // The factors performed were stamped on the application cookie at sign-in (pwd, and otp when 2FA
+            // was completed); carry them onto the token so MfaEvaluator can gate protected scopes.
+            var amr = auth.Principal!.FindAll(AccountPages.AmrClaim).Select(c => c.Value).ToArray();
+            var principal = factory.ForUser(facts, request.GetScopes(), amr.Length > 0 ? amr : ["pwd"]);
             return Results.SignIn(principal, properties: null, Scheme);
         });
 
@@ -107,23 +109,32 @@ public static class ConnectEndpoints
             });
         }).RequireAuthorization();
 
-        // ---- Minimal password sign-in (REPLACED by the 17.3 login UI + 2FA) -------------------------------
-        app.MapGet("/connect/login", (string? returnUrl) => Results.Content(LoginForm(returnUrl), "text/html"));
+        // ---- Password sign-in (17.3 login UI); routes to TOTP when the account has 2FA enabled -------------
+        app.MapGet("/connect/login", (HttpContext http, string? returnUrl) =>
+            Results.Content(AccountPages.LoginPage(LangOf(http), returnUrl), "text/html"));
 
         app.MapPost("/connect/login", async (
             HttpContext http, [FromForm] string username, [FromForm] string password, [FromForm] string? returnUrl,
             SignInManager<ApplicationUser> signIn, UserManager<ApplicationUser> users) =>
         {
+            var lang = LangOf(http);
             var user = await users.FindByNameAsync(username);
             if (user is null || !user.IsActive)
-                return Results.Content(LoginForm(returnUrl, "Invalid credentials."), "text/html");
+                return Results.Content(AccountPages.LoginPage(lang, returnUrl, error: true), "text/html");
 
             var result = await signIn.PasswordSignInAsync(user, password, isPersistent: false, lockoutOnFailure: true);
-            // NOTE: 17.3 handles result.RequiresTwoFactor (TOTP) + recovery + step-up. Here, success = signed in.
+            if (result.RequiresTwoFactor)
+            {
+                var q = string.IsNullOrEmpty(returnUrl) ? "" : $"?returnUrl={Uri.EscapeDataString(AccountPages.SafeReturn(returnUrl))}";
+                return Results.Redirect($"/connect/2fa{q}");
+            }
             if (!result.Succeeded)
-                return Results.Content(LoginForm(returnUrl, result.IsLockedOut ? "Account locked." : "Invalid credentials."), "text/html");
+                return Results.Content(AccountPages.LoginPage(lang, returnUrl, error: true), "text/html");
 
-            return Results.Redirect(SafeReturn(returnUrl));
+            // Single-factor success: stamp amr=pwd. Protected scopes will still be denied downstream until the
+            // user enrols a second factor (/connect/enroll-2fa) — that is the MFA gate (C3) on the new issuer.
+            await AccountPages.StampSignIn(http, signIn, user, ["pwd"]);
+            return Results.Redirect(AccountPages.SafeReturn(returnUrl));
         }).DisableAntiforgery();
 
         app.MapPost("/connect/logout", async (HttpContext http, SignInManager<ApplicationUser> signIn) =>
@@ -141,25 +152,5 @@ public static class ConnectEndpoints
         }),
         [Scheme]);
 
-    // A relative, same-app return path only (no open redirect).
-    private static string SafeReturn(string? returnUrl) =>
-        !string.IsNullOrEmpty(returnUrl) && returnUrl.StartsWith('/') && !returnUrl.StartsWith("//", StringComparison.Ordinal)
-            ? returnUrl : "/";
-
-    private static string LoginForm(string? returnUrl, string? error = null)
-    {
-        var ret = System.Net.WebUtility.HtmlEncode(SafeReturn(returnUrl));
-        var err = error is null ? "" : $"<p role=\"alert\" style=\"color:#b91c1c\">{System.Net.WebUtility.HtmlEncode(error)}</p>";
-        // Minimal, unstyled bootstrap form — the accessible bilingual login UI lands in 17.3.
-        return $$"""
-        <!doctype html><html><head><meta charset="utf-8"><title>Mersal — Sign in</title></head>
-        <body><h1>Mersal — Sign in</h1>{{err}}
-        <form method="post" action="/connect/login">
-          <input type="hidden" name="returnUrl" value="{{ret}}" />
-          <p><label>Username <input name="username" autocomplete="username" required></label></p>
-          <p><label>Password <input name="password" type="password" autocomplete="current-password" required></label></p>
-          <button type="submit">Sign in</button>
-        </form></body></html>
-        """;
-    }
+    private static string LangOf(HttpContext http) => http.Request.Query["lang"] == "ar" ? "ar" : "en";
 }
