@@ -79,7 +79,9 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 10b | Claims Mgmt | 10b.7 Reconciliation + append-only adjustments | ☐ | |
 | 10b | Claims Mgmt | 10b.8 Settlement advice + exports (no payment execution) | ☐ | |
 | 10b | Claims Mgmt | 10b.9 Appeals + claims KPIs | ☐ | |
-| 11 | Hardening/NFR | 11.1 Perf/scale · 11.2 Security sign-off · 11.3 DR/observability | ☐ | |
+| 11 | Hardening/NFR | 11.1 Perf/scale harness + baseline + index/cache ADR | ☑ | cac6e7a |
+| 11 | Hardening/NFR | 11.2 STRIDE + CI security gates + OWASP API Top10 + sign-off | ☑ | c9d20c7 |
+| 11 | Hardening/NFR | 11.3 Fleet metrics + dashboards/alerts + DR/restore + runbooks | ☑ | e5581c1 |
 | 12 | Migration/Go-live | 12.1 Migration pipelines · 12.2 Release mgmt · 12.3 Pilot + hypercare | ☐ | |
 | 13 | Interoperability | 13.1 FHIR R4 façade · 13.2 Adapters/ACL · 13.3 Interop test harness | ☐ | |
 
@@ -109,5 +111,18 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
   content) and the phase-9 portals (branch switcher, locked-result state). Migrations are additive only and the
   full existing suite must stay green. Design: `HBMP-Design/37-branch-scoping-and-clinical-sensitivity.md`;
   prompt: `HBMP-Design/claude-code-prompts/phase-14-branch-scoping-and-sensitivity.md`.
+- **Phase 11 (Hardening & NFR assurance)** is cross-cutting evidence, not new features. **11.1** `/perf` k6 suite
+  (eligibility/consume-race/worklists/dashboards/mixed-soak, thresholds = NFR §1/§2 targets → CI-gated) + deterministic
+  synthetic volume generator (NFR-012, no PHI, verified runnable) + `docs/PERFORMANCE-BASELINE.md` (measured cols
+  = PENDING-staging, not fabricated) + ADR 0009 (RLS-first indexes + Valkey invalidation) + `perf-ci.yml`. **11.2**
+  `docs/security/` STRIDE model + OWASP API Top 10 sweep; `security-ci.yml` (gitleaks + Trivy SCA/config/image +
+  CodeQL + ZAP, block on Critical/High); `docs/compliance/security-sign-off.md` (✅ code/CI/tests vs 🟡
+  operational-gate-on-target-infra). **11.3** Prometheus `/metrics` now live on **all 17 services** (OTel Prometheus
+  exporter + runtime instrumentation, solution 0-warning) + `services` scrape job + Alertmanager + Grafana
+  dashboards-as-code (golden-signals + business-kpis) + alert rules (SLO burn / event-bus / failed-consume /
+  approvals-SLA / auth-anomaly / audit-chain) + 7 runbooks + `infra/dr/restore-rehearsal.sh` **executed** (138
+  tables/18 schemas reconciled exactly, audit chain-linkage intact → PASS; second-site failover pending target k3s).
+  The ✅ items gate now; the 🟡 items need staging/k3s/OpenBao/external-pentest to sign off. Prompt:
+  `HBMP-Design/claude-code-prompts/phase-11-hardening-and-nfr.md`.
 - Docker/Compose, Helm, OpenTofu: **not yet installed** (Docker needs root). Tier 1 infra authored in `infra/compose`; run once Docker is installed.
 - Repo initialized in place at `/home/mohab/Mersal` with `HBMP-Design/` as a subfolder.
