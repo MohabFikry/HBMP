@@ -1,5 +1,6 @@
 using System.Globalization;
 using Mersal.Approvals.Domain;
+using Mersal.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -71,10 +72,12 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddApprovalsInfrastructure(this IServiceCollection services, IConfiguration config)
     {
-        services.AddDbContext<ApprovalsDbContext>(o =>
+        services.AddHbmpRls();
+        services.AddDbContext<ApprovalsDbContext>((sp, o) =>
             o.UseNpgsql(config.GetConnectionString("Approvals")
                         ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential."))
-             .UseSnakeCaseNamingConvention());
+             .UseSnakeCaseNamingConvention()
+             .AddHbmpRlsInterceptors(sp));
         services.AddScoped<AuthNoIssuer>();
 
         var sla = new SlaOptions();

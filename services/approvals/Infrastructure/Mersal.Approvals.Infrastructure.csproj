@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Approvals.Domain.csproj" />
     <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
+    <ProjectReference Include="../../../libs/data/Mersal.Data.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" />

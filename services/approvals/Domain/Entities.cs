@@ -29,6 +29,7 @@ public enum AuthDecision
 public sealed class Authorization
 {
     public Guid AuthorizationId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public string AuthNo { get; set; } = default!;              // AUTH-YYYY-NNNNNN
     public Guid BeneficiaryId { get; set; }
     public AuthSource Source { get; set; }
@@ -61,6 +62,7 @@ public sealed class Authorization
 public sealed class AuthorizationDecision
 {
     public Guid DecisionId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid AuthorizationId { get; set; }
     public AuthDecision Decision { get; set; }
     public Guid ReviewerId { get; set; }
