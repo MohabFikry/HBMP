@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><RootNamespace>Mersal.Policy.Infrastructure</RootNamespace></PropertyGroup>
   <ItemGroup><ProjectReference Include="../Domain/Mersal.Policy.Domain.csproj" />
-    <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" /></ItemGroup>
+    <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
+    <ProjectReference Include="../../../libs/data/Mersal.Data.csproj" /></ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />

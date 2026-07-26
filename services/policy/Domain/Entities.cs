@@ -11,6 +11,7 @@ public enum ResetPeriod { None, Monthly, Quarterly, Yearly }
 public sealed class Policy
 {
     public Guid PolicyId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public string PolicyNo { get; set; } = default!;
     public string? Sponsor { get; set; }
     public DateOnly EffectiveFrom { get; set; }
@@ -25,6 +26,7 @@ public sealed class Policy
 public sealed class BenefitCategory
 {
     public Guid BenefitCategoryId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public string Code { get; set; } = default!;   // LAB|IMAGING|PHARMACY|CONSULT|REFERRAL
     public string Name { get; set; } = default!;
 }
@@ -32,6 +34,7 @@ public sealed class BenefitCategory
 public sealed class Coverage
 {
     public Guid CoverageId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid PolicyId { get; set; }
     public Guid BeneficiaryId { get; set; }         // logical FK (value)
     public Guid BenefitCategoryId { get; set; }
@@ -45,6 +48,7 @@ public sealed class Coverage
 public sealed class CoverageLimit
 {
     public Guid CoverageLimitId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid CoverageId { get; set; }
     public LimitType LimitType { get; set; }
     public decimal LimitValue { get; set; }
