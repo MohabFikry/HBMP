@@ -82,10 +82,10 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 11 | Hardening/NFR | 11.1 Perf/scale harness + baseline + index/cache ADR | ☑ | cac6e7a |
 | 11 | Hardening/NFR | 11.2 STRIDE + CI security gates + OWASP API Top10 + sign-off | ☑ | c9d20c7 |
 | 11 | Hardening/NFR | 11.3 Fleet metrics + dashboards/alerts + DR/restore + runbooks | ☑ | eb9c339 |
-| 16 | Audit Remediation | 16.1 Secrets purge + doc reconciliation | ☐ | |
+| 16 | Audit Remediation | 16.1 Secrets purge + doc reconciliation (C2) | ☑ | hbmp_app pw rotated + purged from git history; base-appsettings connstrings removed; ~14 code fallbacks fail-fast; gitleaks prose-password rule; doc reconciliation |
 | 16 | Audit Remediation | 16.2 Durable transactional outbox (C1) | ☑ | EfOutbox + FOR UPDATE SKIP LOCKED reader + `outbox_message` per schema (16 svcs, live-applied) + env-driven default-durable + ADR-0013; 726 tests green |
-| 16 | Audit Remediation | 16.3 Admin authz middleware + MFA + idempotency (C3) | ☐ | |
-| 16 | Audit Remediation | 16.4 RLS everywhere as `hbmp_app` (H1) | ☐ | |
+| 16 | Audit Remediation | 16.3 Admin authz middleware + MFA + idempotency (C3) | ☐ | deferred → Phase 17.4 (MFA lands on the new in-app issuer; do not do twice) |
+| 16 | Audit Remediation | 16.4 RLS everywhere as `hbmp_app` (H1) | ☑ | full multi-tenant retrofit — `tenant_id` on ~45 tables + history twins; shared `libs/data` binder + stamping interceptor; all 13 svcs → NOBYPASSRLS hbmp_app + ENABLE/FORCE RLS (live-applied); per-svc 2-role isolation tests; ADR-0011 |
 | 16 | Audit Remediation | 16.5 Kong JWT + missing routes + transport hardening (H3/H8) | ☐ | |
 | 16 | Audit Remediation | 16.6 Approvals sensitivity + break-glass runtime + FieldProjector + document fixes (H2/H4/H5/H9) | ☐ | |
 | 16 | Audit Remediation | 16.7 Live frontend wiring (scopes/roles/env/errors/i18n) (H6/H10) | ◐ | identity slice: live KC roles/users/scopes (call_center + claims_officer) + fail-closed role map (no-portal page) + provision-identity.sh; env/errors/i18n/idempotency remain |
