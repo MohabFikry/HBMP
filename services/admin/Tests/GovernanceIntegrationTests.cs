@@ -27,10 +27,10 @@ public class GovernanceIntegrationTests
 
     private static readonly ActorContext Gov = new("gov-1", "medical_director", "t0", Mfa: true);
 
-    [Fact]
+    [SkippableFact]
     public async Task A_master_data_edit_appends_a_version_and_history_resolves_the_old_one()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var code = "TST" + Guid.NewGuid().ToString("N")[..8];
         try
         {
@@ -59,10 +59,10 @@ public class GovernanceIntegrationTests
         finally { await CleanupMasterData(code); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_template_with_phi_in_an_sms_body_is_rejected_and_audited()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var key = "tpl-" + Guid.NewGuid().ToString("N")[..8];
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         try
@@ -86,10 +86,10 @@ public class GovernanceIntegrationTests
         finally { await CleanupTemplates(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_config_change_is_typed_and_versioned()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var key = "approval.high_cost_threshold";
         try
@@ -118,21 +118,21 @@ public class GovernanceIntegrationTests
 
     private static async Task CleanupMasterData(string code)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         await db.MasterDataVersions.Where(v => v.Code == code).ExecuteDeleteAsync();
     }
 
     private static async Task CleanupTemplates(string tenant)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         await db.TemplateVersions.Where(t => t.TenantId == tenant).ExecuteDeleteAsync();
     }
 
     private static async Task CleanupConfig(string tenant)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         await db.SystemConfigs.Where(c => c.TenantId == tenant).ExecuteDeleteAsync();
     }

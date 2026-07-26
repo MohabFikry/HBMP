@@ -17,10 +17,10 @@ public class RlsIsolationTests
     private static readonly Guid FactA = new("aaaaaaaa-4ac0-0000-0000-000000000001");
     private static readonly Guid FactB = new("bbbbbbbb-4ac0-0000-0000-000000000002");
 
-    [Fact]
+    [SkippableFact]
     public async Task Raw_query_under_tenant_A_guc_cannot_see_tenant_B_or_unscoped()
     {
-        if (Owner is null || App is null) return;
+        Skip.If(Owner is null || App is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
 
         await Seed();
         try

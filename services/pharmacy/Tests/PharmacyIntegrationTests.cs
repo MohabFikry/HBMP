@@ -15,10 +15,10 @@ public class PharmacyIntegrationTests
     private static DbContextOptions<PharmacyDbContext> Options() =>
         new DbContextOptionsBuilder<PharmacyDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options;
 
-    [Fact]
+    [SkippableFact]
     public async Task Prescription_with_lines_persists_approved()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {
@@ -46,10 +46,10 @@ public class PharmacyIntegrationTests
         finally { await Cleanup(beneficiary); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Referral_persists_requested()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {
@@ -73,10 +73,10 @@ public class PharmacyIntegrationTests
         finally { await Cleanup(beneficiary); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Dispensed_over_prescribed_is_rejected_by_db()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {

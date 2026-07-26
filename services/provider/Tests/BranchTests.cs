@@ -36,10 +36,10 @@ public class BranchTests
         b.Timezone.Should().Be("Africa/Cairo");
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task The_six_branches_are_seeded_with_en_and_ar_names_and_active_status()
     {
-        if (Owner is null) return;
+        Skip.If(Owner is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         var branches = await db.Branches.AsNoTracking().Where(b => SeededCodes.Contains(b.BranchCode)).ToListAsync();
 
@@ -52,10 +52,10 @@ public class BranchTests
         branches.Single(b => b.BranchCode == "ASW").NameAr.Should().Be("أسوان");
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Re_running_the_seed_creates_no_duplicates()
     {
-        if (Owner is null) return;
+        Skip.If(Owner is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         await db.Database.ExecuteSqlRawAsync(SeedSql);   // run the seed a second (and third) time
         await db.Database.ExecuteSqlRawAsync(SeedSql);
@@ -64,10 +64,10 @@ public class BranchTests
         count.Should().Be(6, "the seed is idempotent (ON CONFLICT DO NOTHING)");
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_branch_round_trips_arabic_and_english_names_through_the_datastore()
     {
-        if (Owner is null) return;
+        Skip.If(Owner is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var code = "T" + Guid.NewGuid().ToString("N")[..4].ToUpperInvariant();
         try
         {

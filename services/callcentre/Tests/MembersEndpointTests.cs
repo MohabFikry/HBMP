@@ -17,10 +17,10 @@ public class MembersEndpointTests(CallCentreFactory factory) : IClassFixture<Cal
     private static readonly string[] Clinical =
         ["diagnos", "icd", "prescription", "medication", "vital", "examination", "soap", "allerg"];
 
-    [Fact]
+    [SkippableFact]
     public async Task Search_before_verification_is_thin_then_360_gates_on_verification()
     {
-        if (CallCentreFactory.Db is null) return;
+        Skip.If(CallCentreFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var client = factory.AgentClient();
         var ben = factory.Directory.BeneficiaryId;
         try
@@ -59,10 +59,10 @@ public class MembersEndpointTests(CallCentreFactory factory) : IClassFixture<Cal
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task One_identifier_type_pass_is_rejected_422()
     {
-        if (CallCentreFactory.Db is null) return;
+        Skip.If(CallCentreFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var client = factory.AgentClient();
         try
         {

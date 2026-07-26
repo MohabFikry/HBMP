@@ -62,10 +62,10 @@ public class ReimbursementIntegrationTests
         new(OcrFields.ServiceDate, "2026-07-10", 0.93m, 1, null),
     ];
 
-    [Fact]
+    [SkippableFact]
     public async Task Ocr_extractions_are_persisted_appendonly_with_confidence_and_region()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var beneficiary = Guid.NewGuid();
         try
@@ -90,10 +90,10 @@ public class ReimbursementIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_second_ocr_provider_is_used_with_no_code_change()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var beneficiary = Guid.NewGuid();
         try
@@ -108,10 +108,10 @@ public class ReimbursementIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task High_confidence_unambiguous_match_is_auto_matched_but_stays_unpayable_until_a_human_decides()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var (beneficiary, orderId, provider) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         try
@@ -151,10 +151,10 @@ public class ReimbursementIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Low_confidence_routes_to_manual_assessment()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var (beneficiary, orderId, provider) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         try
@@ -170,10 +170,10 @@ public class ReimbursementIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_malware_scan_failure_is_rejected_with_nothing_stored()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var beneficiary = Guid.NewGuid();
         try
@@ -188,7 +188,7 @@ public class ReimbursementIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public void The_claims_schema_carries_no_bank_or_payout_field()
     {
         string[] forbidden = ["bank", "iban", "account", "payout", "swift", "cardnumber"];
@@ -204,7 +204,7 @@ public class ReimbursementIntegrationTests
 
     private static async Task Cleanup(string tenant)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         // ocr_extraction is append-only (trigger blocks DELETE); disable user triggers for this cleanup only.
         await db.Database.ExecuteSqlRawAsync(

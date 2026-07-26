@@ -17,10 +17,10 @@ public class AdjudicationIntegrationTests
         new DbContextOptionsBuilder<ClaimsDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options;
     private static ClaimsDbContext Ctx() => new(Options());
 
-    [Fact]
+    [SkippableFact]
     public async Task Adjudicate_persists_the_recommendation_and_leaves_pricing_untouched()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         try
         {

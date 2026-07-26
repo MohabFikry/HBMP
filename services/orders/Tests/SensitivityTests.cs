@@ -48,10 +48,10 @@ public class SensitivityTests
         new[] { SensitivityLevel.Sensitive, SensitivityLevel.HighlySensitive }.Max().Should().Be(SensitivityLevel.HighlySensitive);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Pinned_sensitivity_round_trips_at_the_datastore()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {

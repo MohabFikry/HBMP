@@ -22,10 +22,10 @@ public class ProjectionTests
     private static ReportingEvent Ev(string type, string tenant, DateTimeOffset at, params (string, string)[] fields) =>
         new(Guid.NewGuid(), type, tenant, fields.ToDictionary(f => f.Item1, f => f.Item2), at);
 
-    [Fact]
+    [SkippableFact]
     public async Task Approval_decisions_project_into_tat_with_p95_and_breach_counts()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var day = new DateTimeOffset(2026, 7, 1, 12, 0, 0, TimeSpan.Zero);
         try
@@ -48,10 +48,10 @@ public class ProjectionTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Pending_snapshot_tracks_in_flight_and_drops_on_decision()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var authId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
@@ -74,10 +74,10 @@ public class ProjectionTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Projection_is_idempotent_a_redelivered_event_does_not_double_count()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var day = DateTimeOffset.UtcNow;
         try
@@ -95,10 +95,10 @@ public class ProjectionTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task No_show_and_workload_project_from_appointment_and_encounter_events()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var day = new DateTimeOffset(2026, 7, 10, 9, 0, 0, TimeSpan.Zero);
         try
@@ -123,10 +123,10 @@ public class ProjectionTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Financial_summary_projects_from_service_valued_events_only()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var day = new DateTimeOffset(2026, 7, 5, 9, 0, 0, TimeSpan.Zero);
         try
@@ -144,10 +144,10 @@ public class ProjectionTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Financial_fact_table_has_no_diagnosis_column_in_the_live_schema()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = new ReportingDbContext(Options());
         var conn = db.Database.GetDbConnection();
         await conn.OpenAsync();
@@ -165,7 +165,7 @@ public class ProjectionTests
 
     private static async Task Cleanup(string tenant)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = new ReportingDbContext(Options());
         // gather base event ids (processed_event holds only base ids) then remove facts by tenant.
         var af = await db.AuthorizationFacts.Where(f => f.TenantId == tenant).ToListAsync();

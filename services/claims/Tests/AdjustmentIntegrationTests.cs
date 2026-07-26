@@ -40,10 +40,10 @@ public class AdjustmentIntegrationTests
         return (claim.ClaimId, claim.Lines[0].ClaimLineId);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Price_correction_records_appendonly_with_before_after_and_renets_the_line()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         try
         {
@@ -71,10 +71,10 @@ public class AdjustmentIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_recovery_without_an_original_line_is_rejected_and_records_nothing()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         try
         {
@@ -89,10 +89,10 @@ public class AdjustmentIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_negative_net_adjustment_needs_a_second_distinct_approver()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         try
         {
@@ -133,7 +133,7 @@ public class AdjustmentIntegrationTests
 
     private static async Task Cleanup(string tenant)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         // claim_adjustment is append-only (trigger blocks DELETE); disable user triggers for this cleanup only.
         await db.Database.ExecuteSqlRawAsync(

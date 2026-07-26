@@ -31,10 +31,10 @@ public class BranchAssignmentIntegrationTests
     private static readonly ActorContext Admin = new("admin-1", "org_admin", null, Mfa: true);
     private static readonly DateOnly From = new(2026, 1, 1);
 
-    [Fact]
+    [SkippableFact]
     public async Task A_second_active_home_is_rejected_and_the_permitted_set_is_home_union_additional()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var subject = "user-" + Guid.NewGuid().ToString("N")[..8];
         var maadi = Guid.NewGuid();
@@ -61,10 +61,10 @@ public class BranchAssignmentIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_revoked_assignment_drops_out_of_the_permitted_set_on_the_next_request()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var subject = "user-" + Guid.NewGuid().ToString("N")[..8];
         var maadi = Guid.NewGuid();
@@ -87,10 +87,10 @@ public class BranchAssignmentIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Switching_to_a_non_permitted_branch_is_denied_and_audited_but_an_in_set_switch_is_recorded()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var subject = "user-" + Guid.NewGuid().ToString("N")[..8];
         var maadi = Guid.NewGuid();
@@ -119,7 +119,7 @@ public class BranchAssignmentIntegrationTests
 
     private static async Task Cleanup(string tenant)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         await db.Database.ExecuteSqlRawAsync("DELETE FROM admin.user_branch_assignment WHERE tenant_id = {0}", tenant);
     }

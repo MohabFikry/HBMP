@@ -14,10 +14,10 @@ public class ClinicalIntegrationTests
     private static DbContextOptions<EmrDbContext> Options() =>
         new DbContextOptionsBuilder<EmrDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options;
 
-    [Fact]
+    [SkippableFact]
     public async Task Owning_clinician_treats_but_another_does_not()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {
@@ -31,10 +31,10 @@ public class ClinicalIntegrationTests
         finally { await Cleanup(beneficiary); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Encounter_note_and_diagnosis_persist_and_read_back()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {

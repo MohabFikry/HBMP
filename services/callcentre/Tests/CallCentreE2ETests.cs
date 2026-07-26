@@ -16,10 +16,10 @@ public class CallCentreE2ETests(CallCentreFactory factory) : IClassFixture<CallC
 {
     private static readonly string[] Clinical = ["diagnos", "prescription", "medication", "vital", "examination", "soap", "allerg"];
 
-    [Fact]
+    [SkippableFact]
     public async Task Full_call_journey_is_correlated_clinical_free_and_reflected_in_kpis()
     {
-        if (CallCentreFactory.Db is null) return;
+        Skip.If(CallCentreFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         factory.Outbox.Clear();
         var client = factory.AgentClient();
         var ben = factory.Directory.BeneficiaryId;
@@ -93,10 +93,10 @@ public class CallCentreE2ETests(CallCentreFactory factory) : IClassFixture<CallC
         finally { await CleanAsync(); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Agent_cannot_read_team_kpis()
     {
-        if (CallCentreFactory.Db is null) return;
+        Skip.If(CallCentreFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         // A plain agent (not supervisor/manager) is denied the team KPI view.
         (await factory.AgentClient().GetAsync("/api/v1/call-centre/kpis"))
             .StatusCode.Should().Be(HttpStatusCode.Forbidden);

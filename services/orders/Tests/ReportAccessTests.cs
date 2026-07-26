@@ -55,10 +55,10 @@ public class ReportAccessTests
     }
 
     // ---- grant lifecycle at the datastore -------------------------------------------------------
-    [Fact]
+    [SkippableFact]
     public async Task A_grant_is_single_result_non_transferable_time_boxed_and_revocable()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         var lineX = Guid.NewGuid();
         var lineY = Guid.NewGuid();
@@ -122,10 +122,10 @@ public class ReportAccessTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task An_expired_grant_is_no_longer_active()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         var line = Guid.NewGuid();
         var grantee = "user-" + Guid.NewGuid().ToString("N")[..6];

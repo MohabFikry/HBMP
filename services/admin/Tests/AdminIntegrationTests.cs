@@ -29,10 +29,10 @@ public class AdminIntegrationTests
 
     private static readonly ActorContext Admin = new("admin-1", "org_admin", null, Mfa: true);
 
-    [Fact]
+    [SkippableFact]
     public async Task An_sod_incompatible_grant_is_rejected_and_audited()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var subject = "user-" + Guid.NewGuid().ToString("N")[..8];
         try
@@ -56,10 +56,10 @@ public class AdminIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_deprovisioned_user_has_no_effective_roles_denied_everywhere()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var subject = "user-" + Guid.NewGuid().ToString("N")[..8];
         try
@@ -83,10 +83,10 @@ public class AdminIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task An_unrecertified_grant_auto_expires_at_the_review_deadline()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var keep = "user-" + Guid.NewGuid().ToString("N")[..8];
         var drop = "user-" + Guid.NewGuid().ToString("N")[..8];
@@ -128,7 +128,7 @@ public class AdminIntegrationTests
 
     private static async Task Cleanup(string tenant)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         // FK order: items → campaigns; bindings/deprovision are independent. Test-only scoped teardown.
         var campaignIds = await db.Campaigns.Where(c => c.TenantId == tenant).Select(c => c.CampaignId).ToListAsync();

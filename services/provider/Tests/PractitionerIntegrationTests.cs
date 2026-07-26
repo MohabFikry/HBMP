@@ -18,19 +18,19 @@ public class PractitionerIntegrationTests
 
     private static readonly DateOnly From = new(2026, 1, 1);
 
-    [Fact]
+    [SkippableFact]
     public async Task Specialty_seed_includes_the_mental_health_specialties()
     {
-        if (Owner is null) return;
+        Skip.If(Owner is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         var codes = await db.Specialties.AsNoTracking().Select(s => s.SpecialtyCode).ToListAsync();
         codes.Should().Contain(["PSYCH", "CPSY", "GP"]);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_second_primary_specialty_is_rejected()
     {
-        if (Owner is null) return;
+        Skip.If(Owner is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         try
         {
@@ -50,10 +50,10 @@ public class PractitionerIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Serves_branch_is_true_only_for_an_assigned_in_window_branch()
     {
-        if (Owner is null) return;
+        Skip.If(Owner is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var maadi = Guid.NewGuid();
         var dokki = Guid.NewGuid();
@@ -98,7 +98,7 @@ public class PractitionerIntegrationTests
 
     private static async Task Cleanup(string tenant)
     {
-        if (Owner is null) return;
+        Skip.If(Owner is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         await db.Database.ExecuteSqlRawAsync(
             "DELETE FROM provider.practitioner_branch_assignment WHERE practitioner_id IN (SELECT practitioner_id FROM provider.practitioner WHERE tenant_id = {0}); " +

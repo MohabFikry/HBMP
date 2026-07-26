@@ -15,10 +15,10 @@ public class OrdersIntegrationTests
     private static DbContextOptions<OrdersDbContext> Options() =>
         new DbContextOptionsBuilder<OrdersDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options;
 
-    [Fact]
+    [SkippableFact]
     public async Task Order_with_lines_persists_with_routed_status()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {
@@ -47,10 +47,10 @@ public class OrdersIntegrationTests
         finally { await Cleanup(beneficiary); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Consume_over_ordered_is_rejected_by_db()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {

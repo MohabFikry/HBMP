@@ -28,10 +28,10 @@ public class BreakGlassIntegrationTests
 
     private static ActorContext Actor(string id, string role = "doctor") => new(id, role, "t0", true);
 
-    [Fact]
+    [SkippableFact]
     public async Task Full_lifecycle_request_dual_approve_step_up_scoped_access_auto_expire()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         try
         {
@@ -71,10 +71,10 @@ public class BreakGlassIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Dashboards_are_tenant_scoped_and_audit_their_own_reads()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var mine = "t-" + Guid.NewGuid().ToString("N")[..10];
         var other = "t-" + Guid.NewGuid().ToString("N")[..10];
         try
@@ -96,10 +96,10 @@ public class BreakGlassIntegrationTests
         finally { await Cleanup(mine); await Cleanup(other); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Sod_dashboard_surfaces_a_latent_conflict_across_active_bindings()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var subject = "user-" + Guid.NewGuid().ToString("N")[..8];
         try
@@ -128,7 +128,7 @@ public class BreakGlassIntegrationTests
 
     private static async Task Cleanup(string tenant)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         var grantIds = await db.BreakGlassGrants.Where(g => g.TenantId == tenant).Select(g => g.GrantId).ToListAsync();
         await db.BreakGlassAccesses.Where(a => grantIds.Contains(a.GrantId)).ExecuteDeleteAsync();

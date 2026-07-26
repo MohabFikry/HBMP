@@ -16,10 +16,10 @@ public class ApprovalsIntegrationTests
     private static DbContextOptions<ApprovalsDbContext> Options() =>
         new DbContextOptionsBuilder<ApprovalsDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options;
 
-    [Fact]
+    [SkippableFact]
     public async Task Authorization_round_trips_as_submitted_with_a_monotonic_number()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {
@@ -52,10 +52,10 @@ public class ApprovalsIntegrationTests
         finally { await Cleanup(beneficiary); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_manual_authorization_may_omit_the_requesting_provider()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {
@@ -74,10 +74,10 @@ public class ApprovalsIntegrationTests
         finally { await Cleanup(beneficiary); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_non_manual_authorization_without_a_provider_is_rejected_by_db()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {
@@ -96,10 +96,10 @@ public class ApprovalsIntegrationTests
         finally { await Cleanup(beneficiary); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task The_decision_ledger_is_append_only()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {
@@ -142,7 +142,7 @@ public class ApprovalsIntegrationTests
 
     private static async Task Cleanup(Guid beneficiary)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var ctx = new ApprovalsDbContext(Options());
         // Decisions are FK children; the trigger blocks DELETE, so drop it transiently for teardown only.
         await ctx.Database.ExecuteSqlRawAsync("ALTER TABLE approvals.authorization_decision DISABLE TRIGGER trg_auth_decision_no_mutate;");

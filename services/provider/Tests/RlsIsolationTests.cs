@@ -18,11 +18,11 @@ public class RlsIsolationTests
     private static readonly Guid ProviderA = new("aaaaaaaa-0000-0000-0000-000000000001");
     private static readonly Guid ProviderB = new("bbbbbbbb-0000-0000-0000-000000000002");
 
-    [Fact]
+    [SkippableFact]
     public async Task Raw_query_under_provider_A_gucs_cannot_see_provider_B_or_other_tenants()
     {
         // Skips in DB-less CI; run with both env conn strings set to exercise the real datastore guarantee.
-        if (Owner is null || App is null) return;
+        Skip.If(Owner is null || App is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
 
         await Seed();
         try

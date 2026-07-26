@@ -55,10 +55,10 @@ public class SettlementIntegrationTests
         return batch.BatchId;
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Decided_batch_generates_an_immutable_frozen_settlement_advice()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var provider = Guid.NewGuid();
         try
@@ -89,10 +89,10 @@ public class SettlementIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Regeneration_writes_a_new_version_and_preserves_the_old()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var provider = Guid.NewGuid();
         try
@@ -111,10 +111,10 @@ public class SettlementIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task An_export_is_provider_isolated_and_carries_no_clinical_field()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var provider = Guid.NewGuid();
         try
@@ -133,10 +133,10 @@ public class SettlementIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task An_external_payment_reference_records_a_fact_and_closes_the_batch()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var provider = Guid.NewGuid();
         try
@@ -157,7 +157,7 @@ public class SettlementIntegrationTests
 
     private static async Task Cleanup(string tenant)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         // settlement_advice + settlement_payment_reference are append-only (trigger blocks DELETE).
         await db.Database.ExecuteSqlRawAsync(

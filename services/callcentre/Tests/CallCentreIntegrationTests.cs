@@ -17,10 +17,10 @@ public class CallCentreIntegrationTests
     private static DbContextOptions<CallCentreDbContext> Options() =>
         new DbContextOptionsBuilder<CallCentreDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options;
 
-    [Fact]
+    [SkippableFact]
     public async Task Call_ref_is_monotonic_per_year()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = new CallCentreDbContext(Options());
         var a = await new CallRefIssuer(db).NextAsync(2026);
         var b = await new CallRefIssuer(db).NextAsync(2026);
@@ -28,10 +28,10 @@ public class CallCentreIntegrationTests
         string.CompareOrdinal(b, a).Should().BeGreaterThan(0);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Pass_binds_beneficiary_and_gate_opens_then_closing_expires_it()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..8];
         var beneficiary = Guid.NewGuid();
         var agent = Guid.NewGuid();
@@ -88,10 +88,10 @@ public class CallCentreIntegrationTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Failed_verification_never_opens_the_gate()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..8];
         var beneficiary = Guid.NewGuid();
         Guid interactionId;
@@ -129,10 +129,10 @@ public class CallCentreIntegrationTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Only_identifier_types_are_persisted_never_values()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..8];
         try
         {

@@ -39,10 +39,10 @@ public class SubmissionIntegrationTests
     private static SubmissionLineInput Line(string code, decimal billed) =>
         new(ClaimCodeSystem.CPT, code, "svc", new DateOnly(2026, 7, 10), 1, billed, null);
 
-    [Fact]
+    [SkippableFact]
     public async Task Matched_line_records_billed_and_contract_and_flags_variance()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var (provider, beneficiary) = (Guid.NewGuid(), Guid.NewGuid());
         try
@@ -71,10 +71,10 @@ public class SubmissionIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Unmatched_line_lands_in_the_manual_queue_and_is_never_auto_approved()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var (provider, beneficiary) = (Guid.NewGuid(), Guid.NewGuid());
         try
@@ -101,10 +101,10 @@ public class SubmissionIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Resubmission_of_an_already_claimed_fulfillment_is_a_duplicate_with_no_second_line()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var (provider, beneficiary) = (Guid.NewGuid(), Guid.NewGuid());
         var fulfillment = Guid.NewGuid();
@@ -149,10 +149,10 @@ public class SubmissionIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Same_idempotency_key_yields_one_submission()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var (provider, beneficiary) = (Guid.NewGuid(), Guid.NewGuid());
         try
@@ -170,10 +170,10 @@ public class SubmissionIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_submission_is_visible_only_to_its_owning_provider()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         var (providerA, providerB, beneficiary) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         try
@@ -196,7 +196,7 @@ public class SubmissionIntegrationTests
 
     private static async Task Cleanup(string tenant)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         await db.Database.ExecuteSqlRawAsync(
             "DELETE FROM claims.claim_submission_line WHERE submission_id IN " +

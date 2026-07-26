@@ -71,10 +71,10 @@ public class NotificationDispatchTests
         public Task SendAsync(string r, string s, string b, string l, CancellationToken ct = default) => Task.CompletedTask;
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Approval_decision_fans_out_to_the_provider_on_in_app_and_email_in_locale_with_no_clinical_payload()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var provider = "prov-" + Guid.NewGuid().ToString("N")[..8];
         try
         {
@@ -104,10 +104,10 @@ public class NotificationDispatchTests
         finally { await Cleanup(provider); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_redelivered_event_creates_exactly_one_set_of_notifications()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var provider = "prov-" + Guid.NewGuid().ToString("N")[..8];
         try
         {
@@ -135,10 +135,10 @@ public class NotificationDispatchTests
         finally { await Cleanup(provider); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_failed_email_retries_with_backoff_and_the_delivery_state_reflects_the_outcome()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var provider = "prov-" + Guid.NewGuid().ToString("N")[..8];
         try
         {
@@ -178,10 +178,10 @@ public class NotificationDispatchTests
         finally { await Cleanup(provider); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task An_unacted_actionable_notification_escalates_on_the_timer()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var provider = "prov-" + Guid.NewGuid().ToString("N")[..8];
         var director = "dir-" + Guid.NewGuid().ToString("N")[..8];
         try
@@ -220,10 +220,10 @@ public class NotificationDispatchTests
         finally { await Cleanup(provider); await Cleanup(director); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_disabled_sms_channel_performs_no_live_send()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         // Route a channel set that includes SMS by dispatching directly through the SMS stub — proves no live send.
         var opts = new NotificationOptions { EnableSms = false };
         var sms = new SmsChannel(opts, NullLogger<SmsChannel>.Instance);
@@ -234,10 +234,10 @@ public class NotificationDispatchTests
         await Task.CompletedTask;
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_sensitive_context_send_is_audited()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var provider = "prov-" + Guid.NewGuid().ToString("N")[..8];
         try
         {
@@ -256,7 +256,7 @@ public class NotificationDispatchTests
 
     private static async Task Cleanup(string userId)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = new NotificationDbContext(Options());
         var rows = await db.Notifications.Where(n => n.RecipientUserId == userId).ToListAsync();
         // also remove processed_event rows for these events so re-runs start clean

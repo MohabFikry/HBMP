@@ -52,10 +52,10 @@ public class AppealIntegrationTests
         return (claim.ClaimId, line.ClaimLineId, decision.DecisionId);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task An_appeal_re_enters_adjudication_preserving_the_original_decision_thread()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         try
         {
@@ -85,10 +85,10 @@ public class AppealIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task The_original_decider_cannot_re_decide_the_appealed_line()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         try
         {
@@ -116,10 +116,10 @@ public class AppealIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task An_appeal_on_a_settled_batch_routes_to_adjustment_and_leaves_the_batch_untouched()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         try
         {
@@ -172,7 +172,7 @@ public class AppealIntegrationTests
 
     private static async Task Cleanup(string tenant)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         await db.Database.ExecuteSqlRawAsync(
             "SET session_replication_role = replica; " +

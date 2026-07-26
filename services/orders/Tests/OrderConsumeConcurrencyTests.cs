@@ -17,10 +17,10 @@ public class OrderConsumeConcurrencyTests
         new DbContextOptionsBuilder<OrdersDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options;
     private static OrdersDbContext Ctx() => new(Options());
 
-    [Fact]
+    [SkippableFact]
     public async Task Parallel_consume_of_one_line_lets_exactly_one_win()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {
@@ -55,10 +55,10 @@ public class OrderConsumeConcurrencyTests
         finally { await Cleanup(beneficiary); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Replaying_the_same_key_adds_no_row_and_returns_the_original()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {
@@ -87,10 +87,10 @@ public class OrderConsumeConcurrencyTests
         finally { await Cleanup(beneficiary); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Partial_then_remainder_moves_order_to_completed()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {
@@ -120,10 +120,10 @@ public class OrderConsumeConcurrencyTests
         finally { await Cleanup(beneficiary); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_used_line_cannot_be_consumed_again()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {
@@ -142,10 +142,10 @@ public class OrderConsumeConcurrencyTests
         finally { await Cleanup(beneficiary); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Result_document_ref_and_value_pin_onto_the_consumed_fulfillment()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {

@@ -44,10 +44,10 @@ public class DecisionIntegrationTests
 
     private static DecisionRequest Approve() => new(ClaimDecisionKind.Approve, null, [], null, false, null);
 
-    [Fact]
+    [SkippableFact]
     public async Task Originator_cannot_adjudicate_their_own_claim()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         try
         {
@@ -59,10 +59,10 @@ public class DecisionIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Provider_affiliated_user_cannot_decide_their_own_providers_claim()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         try
         {
@@ -74,10 +74,10 @@ public class DecisionIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Deny_without_rationale_is_rejected_and_records_nothing()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         try
         {
@@ -92,10 +92,10 @@ public class DecisionIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Approve_records_an_appendonly_decision_and_rolls_up_to_the_claim()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         try
         {
@@ -120,10 +120,10 @@ public class DecisionIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Dual_control_needs_a_second_distinct_approver()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         try
         {
@@ -156,10 +156,10 @@ public class DecisionIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Two_officers_deciding_the_same_line_yield_one_winner()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = T();
         try
         {
@@ -180,7 +180,7 @@ public class DecisionIntegrationTests
 
     private static async Task Cleanup(string tenant)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         // claim_decision is append-only (trigger blocks DELETE); disable user triggers for this cleanup session only.
         await db.Database.ExecuteSqlRawAsync(

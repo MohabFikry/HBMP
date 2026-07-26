@@ -17,10 +17,10 @@ public class DecisionConcurrencyTests
     private static DbContextOptions<ApprovalsDbContext> Options() =>
         new DbContextOptionsBuilder<ApprovalsDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options;
 
-    [Fact]
+    [SkippableFact]
     public async Task Two_reviewers_deciding_the_same_case_exactly_one_wins()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var beneficiary = Guid.NewGuid();
         try
         {
@@ -86,7 +86,7 @@ public class DecisionConcurrencyTests
 
     private static async Task Cleanup(Guid beneficiary)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var ctx = new ApprovalsDbContext(Options());
         await ctx.Database.ExecuteSqlRawAsync("ALTER TABLE approvals.authorization_decision DISABLE TRIGGER trg_auth_decision_no_mutate;");
         try

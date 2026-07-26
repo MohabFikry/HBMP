@@ -22,10 +22,10 @@ public class FinanceIntegrationTests
     private static FinanceEvent Ev(string type, string tenant, DateTimeOffset at, params (string, string)[] fields) =>
         new(Guid.NewGuid(), type, tenant, fields.ToDictionary(f => f.Item1, f => f.Item2), at);
 
-    [Fact]
+    [SkippableFact]
     public async Task Projector_builds_utilization_from_billing_fields_and_ignores_clinical_keys()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var day = new DateTimeOffset(2026, 7, 1, 10, 0, 0, TimeSpan.Zero);
         try
@@ -48,10 +48,10 @@ public class FinanceIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Settlement_is_priced_from_the_contract_price_book_with_correct_totals()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var provider = Guid.NewGuid();
         var day = new DateTimeOffset(2026, 7, 5, 9, 0, 0, TimeSpan.Zero);
@@ -81,10 +81,10 @@ public class FinanceIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Utilization_aggregates_authorized_vs_delivered_and_spend()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var day = new DateTimeOffset(2026, 7, 9, 9, 0, 0, TimeSpan.Zero);
         try

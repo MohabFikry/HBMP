@@ -24,10 +24,10 @@ public class DashboardContractTests
     private static readonly DateOnly From = new(2026, 1, 1);
     private static readonly DateOnly To = new(2026, 12, 31);
 
-    [Fact]
+    [SkippableFact]
     public async Task Every_widget_has_a_data_table_and_bilingual_labels()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         var dash = await Builder(db).BuildAsync("t-empty-" + Guid.NewGuid().ToString("N")[..6], From, To, clinical: true, financial: true);
 
@@ -42,10 +42,10 @@ public class DashboardContractTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Clinical_and_financial_widgets_are_included_only_when_authorized()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         var tenant = "t-empty-" + Guid.NewGuid().ToString("N")[..6];
 

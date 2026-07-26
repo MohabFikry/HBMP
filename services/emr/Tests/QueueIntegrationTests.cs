@@ -15,10 +15,10 @@ public class QueueIntegrationTests
     private static DbContextOptions<EmrDbContext> Options() =>
         new DbContextOptionsBuilder<EmrDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options;
 
-    [Fact]
+    [SkippableFact]
     public async Task CheckIn_enqueues_and_order_is_priority_then_arrival()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var scope = Guid.NewGuid();
         var (provider, location) = (Guid.NewGuid(), Guid.NewGuid());
         try
@@ -46,10 +46,10 @@ public class QueueIntegrationTests
         finally { await Cleanup(scope); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Cancelling_a_checked_in_appointment_removes_its_ticket()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var scope = Guid.NewGuid();
         var (provider, location) = (Guid.NewGuid(), Guid.NewGuid());
         try

@@ -17,10 +17,10 @@ public class ClaimsConcurrencyTests
         new DbContextOptionsBuilder<ClaimsDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options;
     private static ClaimsDbContext Ctx() => new(Options());
 
-    [Fact]
+    [SkippableFact]
     public async Task Parallel_intake_of_one_fulfillment_ref_lets_exactly_one_win()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var fref = Guid.NewGuid();
         var beneficiary = Guid.NewGuid();

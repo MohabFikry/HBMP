@@ -23,10 +23,10 @@ public class CallAppointmentsTests(CallCentreFactory factory) : IClassFixture<Ca
         return id;
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Verified_booking_delegates_links_and_notifies()
     {
-        if (CallCentreFactory.Db is null) return;
+        Skip.If(CallCentreFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var client = factory.AgentClient();
         var ben = factory.Directory.BeneficiaryId;
         try
@@ -50,10 +50,10 @@ public class CallAppointmentsTests(CallCentreFactory factory) : IClassFixture<Ca
         finally { await CleanAsync(); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Unverified_booking_is_403()
     {
-        if (CallCentreFactory.Db is null) return;
+        Skip.If(CallCentreFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var client = factory.AgentClient();
         var ben = factory.Directory.BeneficiaryId;
         try
@@ -67,10 +67,10 @@ public class CallAppointmentsTests(CallCentreFactory factory) : IClassFixture<Ca
         finally { await CleanAsync(); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Cancel_without_reason_is_422()
     {
-        if (CallCentreFactory.Db is null) return;
+        Skip.If(CallCentreFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var client = factory.AgentClient();
         try
         {
@@ -82,10 +82,10 @@ public class CallAppointmentsTests(CallCentreFactory factory) : IClassFixture<Ca
         finally { await CleanAsync(); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Reschedule_forwards_if_match()
     {
-        if (CallCentreFactory.Db is null) return;
+        Skip.If(CallCentreFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var client = factory.AgentClient();
         try
         {

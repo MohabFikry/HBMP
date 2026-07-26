@@ -17,10 +17,10 @@ public class CaseIntegrationTests
     private static DbContextOptions<CaseDbContext> Options() =>
         new DbContextOptionsBuilder<CaseDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options;
 
-    [Fact]
+    [SkippableFact]
     public async Task Case_number_is_monotonic_per_year()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = new CaseDbContext(Options());
         var a = await new CaseNoIssuer(db).NextAsync(2026);
         var b = await new CaseNoIssuer(db).NextAsync(2026);
@@ -28,10 +28,10 @@ public class CaseIntegrationTests
         string.CompareOrdinal(b, a).Should().BeGreaterThan(0);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Assignment_grants_then_unassignment_revokes_in_the_resolver()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..8];
         var manager = Guid.NewGuid();
         Guid caseId;

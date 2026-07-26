@@ -43,10 +43,10 @@ public class BatchIntegrationTests
     private static BatchSelector Manual(string _, DateOnly period, Guid provider, params Guid[] claimIds) =>
         new(BatchType.Provider, BatchSelectionMode.Manual, provider, null, null, period, period, null, null, claimIds);
 
-    [Fact]
+    [SkippableFact]
     public async Task Full_lifecycle_recomputes_then_freezes_rollups()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var provider = Guid.NewGuid();
         try
@@ -76,10 +76,10 @@ public class BatchIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Decided_is_blocked_while_a_line_is_undecided()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var provider = Guid.NewGuid();
         try
@@ -98,10 +98,10 @@ public class BatchIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Illegal_transition_is_rejected()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var provider = Guid.NewGuid();
         try
@@ -117,10 +117,10 @@ public class BatchIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Parallel_add_of_the_same_claim_lets_exactly_one_win()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var provider = Guid.NewGuid();
         try
@@ -158,7 +158,7 @@ public class BatchIntegrationTests
 
     private static async Task Cleanup(string tenant)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         await db.Database.ExecuteSqlRawAsync(
             "DELETE FROM claims.claim_batch_item WHERE batch_id IN (SELECT batch_id FROM claims.claim_batch WHERE tenant_id = {0}); " +

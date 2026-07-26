@@ -43,10 +43,10 @@ public class EfOutboxDurabilityTests
     private static EfOutboxReader Reader(DbContext db, int maxAttempts = 8) =>
         new(db, Options.Create(new EventsOptions { MaxAttempts = maxAttempts }));
 
-    [Fact]
+    [SkippableFact]
     public async Task Enqueued_row_is_durable_and_claimed_by_a_fresh_context_then_drains()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await ResetSchemaAsync();
 
         // Enqueue through context A, then dispose it entirely (simulates the request/process ending).
@@ -71,10 +71,10 @@ public class EfOutboxDurabilityTests
         (await reader.DequeueBatchAsync(10)).Should().BeEmpty(); // drained
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Broker_down_leaves_row_pending_then_poison_is_quarantined_after_max_attempts()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await ResetSchemaAsync();
 
         await using var db = NewContext();

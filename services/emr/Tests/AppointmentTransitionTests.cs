@@ -16,10 +16,10 @@ public class AppointmentTransitionTests
     private static DbContextOptions<EmrDbContext> Options() =>
         new DbContextOptionsBuilder<EmrDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options;
 
-    [Fact]
+    [SkippableFact]
     public async Task Reschedule_frees_old_slot_and_holds_new_atomically()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var scope = Guid.NewGuid();
         var (provider, location) = (Guid.NewGuid(), Guid.NewGuid());
         var oldSlot = await SeedSlot(provider, location, scope, hoursAhead: 24);
@@ -42,10 +42,10 @@ public class AppointmentTransitionTests
         finally { await CleanupScope(scope); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Cancel_releases_slot_and_promotes_waitlist()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var scope = Guid.NewGuid();
         var (provider, location) = (Guid.NewGuid(), Guid.NewGuid());
         var slot = await SeedSlot(provider, location, scope, hoursAhead: 24);
@@ -67,10 +67,10 @@ public class AppointmentTransitionTests
         finally { await CleanupScope(scope); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task NoShow_guarded_then_sets_flag_and_promotes()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var scope = Guid.NewGuid();
         var (provider, location) = (Guid.NewGuid(), Guid.NewGuid());
         // Slot in the PAST so the no-show window has elapsed.
@@ -94,10 +94,10 @@ public class AppointmentTransitionTests
         finally { await CleanupScope(scope); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task NoShow_rejected_before_window_and_when_checked_in()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var scope = Guid.NewGuid();
         var (provider, location) = (Guid.NewGuid(), Guid.NewGuid());
         var future = await SeedSlot(provider, location, scope, hoursAhead: 24);
@@ -118,10 +118,10 @@ public class AppointmentTransitionTests
         finally { await CleanupScope(scope); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Cancel_on_completed_is_illegal()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var scope = Guid.NewGuid();
         var (provider, location) = (Guid.NewGuid(), Guid.NewGuid());
         var slot = await SeedSlot(provider, location, scope, hoursAhead: 24);
@@ -136,10 +136,10 @@ public class AppointmentTransitionTests
         finally { await CleanupScope(scope); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Stale_IfMatch_fails_precondition()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var scope = Guid.NewGuid();
         var (provider, location) = (Guid.NewGuid(), Guid.NewGuid());
         var slot = await SeedSlot(provider, location, scope, hoursAhead: 24);
@@ -155,10 +155,10 @@ public class AppointmentTransitionTests
         finally { await CleanupScope(scope); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Idempotency_store_replays_a_seen_key()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var key = $"idem-{Guid.NewGuid()}";
         var apptId = Guid.NewGuid();
         try

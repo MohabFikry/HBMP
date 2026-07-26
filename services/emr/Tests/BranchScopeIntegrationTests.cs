@@ -15,10 +15,10 @@ public class BranchScopeIntegrationTests
     private static EmrDbContext Ctx() =>
         new(new DbContextOptionsBuilder<EmrDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options);
 
-    [Fact]
+    [SkippableFact]
     public async Task Worklist_query_filtered_to_the_active_branch_returns_only_that_branch()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var provider = Guid.NewGuid();
         var maadi = Guid.NewGuid();
         var dokki = Guid.NewGuid();
@@ -59,7 +59,7 @@ public class BranchScopeIntegrationTests
 
     private static async Task Cleanup(Guid provider)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         await db.Database.ExecuteSqlRawAsync("DELETE FROM emr.appointment WHERE provider_id = {0}", provider);
     }

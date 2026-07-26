@@ -37,10 +37,10 @@ public class ContactsEndpointTests(CallCentreFactory factory) : IClassFixture<Ca
         return id;
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Verified_contact_correction_is_delegated()
     {
-        if (CallCentreFactory.Db is null) return;
+        Skip.If(CallCentreFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var client = factory.AgentClient();
         var ben = factory.Directory.BeneficiaryId;
         try
@@ -54,10 +54,10 @@ public class ContactsEndpointTests(CallCentreFactory factory) : IClassFixture<Ca
         finally { await CleanAsync(); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Invalid_phone_is_422_before_delegation()
     {
-        if (CallCentreFactory.Db is null) return;
+        Skip.If(CallCentreFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var client = factory.AgentClient();
         var ben = factory.Directory.BeneficiaryId;
         try
@@ -70,10 +70,10 @@ public class ContactsEndpointTests(CallCentreFactory factory) : IClassFixture<Ca
         finally { await CleanAsync(); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Unverified_contact_edit_is_403()
     {
-        if (CallCentreFactory.Db is null) return;
+        Skip.If(CallCentreFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var client = factory.AgentClient();
         var ben = factory.Directory.BeneficiaryId;
         try
@@ -87,10 +87,10 @@ public class ContactsEndpointTests(CallCentreFactory factory) : IClassFixture<Ca
         finally { await CleanAsync(); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Booking_from_a_referral_sets_type_Referral()
     {
-        if (CallCentreFactory.Db is null) return;
+        Skip.If(CallCentreFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var client = factory.AgentClient();
         var ben = factory.Directory.BeneficiaryId;
         try

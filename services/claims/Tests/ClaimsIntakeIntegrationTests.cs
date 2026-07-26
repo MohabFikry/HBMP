@@ -29,10 +29,10 @@ public class ClaimsIntakeIntegrationTests
     private static ClaimIntakeExecutor Exec(ClaimsDbContext db, decimal? tariff) =>
         new(db, new ClaimNoIssuer(db), new FixedTariff(tariff), TimeProvider.System);
 
-    [Fact]
+    [SkippableFact]
     public async Task Intake_creates_one_priced_line_anchored_to_the_fulfillment_ref()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var fref = Guid.NewGuid();
         try
@@ -53,10 +53,10 @@ public class ClaimsIntakeIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Same_event_redelivered_creates_no_second_line()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var fref = Guid.NewGuid();
         try
@@ -72,10 +72,10 @@ public class ClaimsIntakeIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task No_tariff_records_manual_review_and_a_null_price()
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         var tenant = "t-" + Guid.NewGuid().ToString("N")[..10];
         var fref = Guid.NewGuid();
         try
@@ -94,7 +94,7 @@ public class ClaimsIntakeIntegrationTests
 
     private static async Task Cleanup(string tenant)
     {
-        if (Db is null) return;
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
         await using var db = Ctx();
         await db.Database.ExecuteSqlRawAsync(
             "DELETE FROM claims.claim_line WHERE claim_id IN (SELECT claim_id FROM claims.claim WHERE tenant_id = {0}); " +
