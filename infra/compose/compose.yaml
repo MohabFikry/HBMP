@@ -520,7 +520,7 @@ services:
     <<: *restart
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Notification: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__Notification: "Host=postgres;Database=hbmp;Username=hbmp_app;Password=${HBMP_APP_PASSWORD}"
       Auth__Authority: "http://keycloak:8080/realms/mersal"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"

@@ -82,6 +82,7 @@ public sealed class Notification
 public sealed class NotificationTemplate
 {
     public Guid TemplateId { get; set; } = Guid.NewGuid();
+    public string TenantId { get; set; } = "";              // RLS tenant scope (ADR-0011)
     public string TemplateKey { get; set; } = default!;
     public string Locale { get; set; } = default!;
     public int Version { get; set; } = 1;
