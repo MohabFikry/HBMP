@@ -22,8 +22,27 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<CallCentreGate>();
 builder.Services.AddScoped<CallDeps>();
 
+// 15.2 — the member view is COMPOSED from sibling services under the caller's bearer token (each enforces its own
+// authorization; defense in depth). Named clients per sibling; base URLs from config. The 360 projection is
+// clinical-free by construction (Member360 has no clinical field).
+builder.Services.AddScoped<Mersal.CallCentre.Infrastructure.IMemberDirectory, HttpMemberDirectory>();
+foreach (var (name, url) in new[]
+{
+    ("eligibility", builder.Configuration["Siblings:Eligibility"] ?? "http://eligibility-service:8080"),
+    ("emr", builder.Configuration["Siblings:Emr"] ?? "http://emr-service:8080"),
+    ("patient", builder.Configuration["Siblings:Patient"] ?? "http://patient-service:8080"),
+    ("pharmacy", builder.Configuration["Siblings:Pharmacy"] ?? "http://pharmacy-service:8080"),
+})
+{
+    builder.Services.AddHttpClient(name, c => c.BaseAddress = new Uri(url));
+}
+
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("callcentre-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter());
+
+// Enums travel as strings on the wire (the SPA sends "Inbound"/"BookAppointment"/…).
+builder.Services.ConfigureHttpJsonOptions(o =>
+    o.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
@@ -39,6 +58,7 @@ if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "callcentre-service" })).AllowAnonymous();
 
 app.MapInteractions();   // phase 15.1 — call interactions + caller verification (the verification gate)
+app.MapMembers();        // phase 15.2 — member search + minimum-necessary, clinical-free 360 (verification-gated)
 
 app.Run();
 
