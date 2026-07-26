@@ -16,6 +16,12 @@ public static class AbacConditions
     /// coordination view) ONLY while they hold an ACTIVE assignment to it. Unassignment revokes it (10 §3.11).</summary>
     public const string CaseAssignment = "case-assignment";
 
+    /// <summary>Branch-scope (phase 14, design 37 §3): a BranchScoped operational caller (reception, nurse,
+    /// doctor worklists, branch manager) may act on a resource only when its <c>branch_id</c> is in the caller's
+    /// permitted set AND equals the active branch. It NARROWS — never replaces the other conditions (a doctor
+    /// still needs treating-relationship). MemberScoped roles omit this condition entirely.</summary>
+    public const string BranchScope = "branch-scope";
+
     /// <summary>Tenant isolation: principal.tenant == resource.tenant (or resource has no tenant scope).</summary>
     public static bool TenantMatches(AuthzRequest r) =>
         r.Resource.TenantId is null || string.Equals(r.Principal.TenantId, r.Resource.TenantId, StringComparison.Ordinal);
@@ -36,4 +42,12 @@ public static class AbacConditions
     /// treating-relationship is resolved. Unassignment empties the set → immediate revocation.</summary>
     public static bool HasCaseAssignment(AuthzRequest r) =>
         r.Resource.Id is not null && r.Resource.AssignedCaseIds.Contains(r.Resource.Id);
+
+    /// <summary>Branch-scope: the resource's branch is in the caller's permitted set and (when an active branch
+    /// is set) equals it. The permitted set + active branch are resolved onto the <see cref="ResourceRef"/>
+    /// before evaluation, mirroring how treating-relationship / case-assignment are resolved.</summary>
+    public static bool InBranchScope(AuthzRequest r) =>
+        r.Resource.BranchId is { } b
+        && r.Resource.PermittedBranchIds.Contains(b)
+        && (r.Resource.ActiveBranchId is null || r.Resource.ActiveBranchId == b);
 }

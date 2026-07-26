@@ -86,6 +86,7 @@ public sealed class DefaultAuthorizationEngine(
         AbacConditions.ProviderOwnership => AbacConditions.ProviderOwns(r),
         AbacConditions.TreatingRelationship => AbacConditions.HasTreatingRelationship(r),
         AbacConditions.CaseAssignment => AbacConditions.HasCaseAssignment(r),
+        AbacConditions.BranchScope => AbacConditions.InBranchScope(r),
         AbacConditions.ResourceStatusActive => string.Equals(r.Resource.Status, "Active", StringComparison.OrdinalIgnoreCase),
         _ => false, // unknown condition → not satisfied (default-deny)
     };

@@ -37,6 +37,15 @@ public sealed record ResourceRef
     /// <summary>Case ids the principal holds an ACTIVE assignment to (case-assignment ABAC, phase 10). Resolved
     /// from the <c>case_assignment</c> rows before evaluation; unassignment removes the id → access revoked.</summary>
     public IReadOnlySet<string> AssignedCaseIds { get; init; } = new HashSet<string>();
+
+    /// <summary>The branch this resource belongs to (branch-scope ABAC, phase 14). Null ⇒ not branch-bound.</summary>
+    public Guid? BranchId { get; init; }
+
+    /// <summary>The caller's permitted branch set, resolved before evaluation (Home ∪ Additional, effective).</summary>
+    public IReadOnlySet<Guid> PermittedBranchIds { get; init; } = new HashSet<Guid>();
+
+    /// <summary>The caller's active branch (from X-Active-Branch, validated). Null ⇒ member-scoped / no context.</summary>
+    public Guid? ActiveBranchId { get; init; }
 }
 
 public enum AuthzEffect { Deny, Allow }
