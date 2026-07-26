@@ -39,6 +39,7 @@ public static class DependencyInjection
         // the ASP.NET Core framework assembly, wired at the Api/host layer alongside the login endpoints.
 
         services.AddScoped<RoleScopeResolver>();
+        services.AddScoped<UserClaimsService>();
         return services;
     }
 }

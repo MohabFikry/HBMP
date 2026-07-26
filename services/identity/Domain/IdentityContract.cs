@@ -14,4 +14,37 @@ public static class IdentityContract
         "case_manager", "doctor", "nurse", "lab_tech", "imaging_tech", "pharmacist",
         "medical_approval", "medical_director", "provider_admin", "org_admin", "super_admin",
     ];
+
+    /// <summary>The frozen OAuth scope vocabulary (docs/security/token-contract.md §2). Kept here so the
+    /// OpenIddict issuer can register it and a test can assert it equals the DB seed (`identity.scope`).</summary>
+    public static readonly IReadOnlyList<string> Scopes =
+    [
+        "admin:read", "admin:write", "admin:break-glass",
+        "orders:read", "orders:consume", "orders:write",
+        "pharmacy:read", "pharmacy:dispense",
+        "auth:read", "auth:review", "auth:decide", "auth:emergency", "auth:override", "auth:manual", "auth:ingest",
+        "reception:search",
+        "emr:read", "emr:write", "encounter:write",
+        "rx:write", "patient:write", "eligibility:check",
+        "appointment:read", "appointment:write",
+        "document:write",
+        "case:read", "case:write", "case:manage",
+        "finance:read", "finance:write", "finance:approve", "finance:export", "finance:project",
+        "provider:read", "provider:write", "provider:finance",
+        "policy:write", "referral:write",
+        "callcentre:read", "callcentre:act", "callcentre:interaction", "callcentre:verify",
+        "claims:read", "claims:reconcile", "claims:export",
+        "reporting:read", "reporting:project", "reporting:export",
+        "notification:read", "notification:ingest",
+        "audit:read",
+    ];
+
+    /// <summary>The audience/resource the frozen contract pins — services validate <c>aud = hbmp-api</c>.</summary>
+    public const string ApiResource = "hbmp-api";
+
+    /// <summary>The SPA's public client id (PKCE), carried forward from the Keycloak realm.</summary>
+    public const string WebClientId = "hbmp-web";
+
+    /// <summary>The confidential service-to-service client id (client-credentials).</summary>
+    public const string ServiceClientId = "hbmp-services";
 }

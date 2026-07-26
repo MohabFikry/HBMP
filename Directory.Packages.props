@@ -29,9 +29,12 @@
   </ItemGroup>
 
   <ItemGroup Label="Identity (Phase 17 — in-app issuer, ADR-0015)">
-    <!-- ASP.NET Core Identity EF store (users/roles) + password hashing. OpenIddict lands in 17.2. -->
+    <!-- ASP.NET Core Identity EF store (users/roles) + password hashing. -->
     <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="8.0.8" />
     <PackageVersion Include="Microsoft.Extensions.Identity.Stores" Version="8.0.8" />
+    <!-- OpenIddict — the in-app OAuth2/OIDC authorization server (17.2). .NET 8 → OpenIddict 5.x. -->
+    <PackageVersion Include="OpenIddict.AspNetCore" Version="5.8.0" />
+    <PackageVersion Include="OpenIddict.EntityFrameworkCore" Version="5.8.0" />
   </ItemGroup>
 
   <ItemGroup Label="Messaging / events (RabbitMQ + NATS)">

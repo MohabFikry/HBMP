@@ -20,6 +20,17 @@ public class RoleScopeMatrixTests
     }
 
     [SkippableFact]
+    public async Task Seed_scope_catalog_equals_the_frozen_vocabulary()
+    {
+        Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
+        await using var db = IdentityTestDb.NewContext();
+
+        var seeded = await db.Scopes.AsNoTracking().Select(s => s.Name).ToListAsync();
+        seeded.Should().BeEquivalentTo(IdentityContract.Scopes,
+            "the DB scope catalog must equal the frozen contract vocabulary the issuer registers");
+    }
+
+    [SkippableFact]
     public async Task Seed_contains_exactly_the_frozen_roles()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");

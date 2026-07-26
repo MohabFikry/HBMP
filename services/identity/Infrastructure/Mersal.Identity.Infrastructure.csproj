@@ -9,6 +9,7 @@
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="EFCore.NamingConventions" />
+    <PackageReference Include="OpenIddict.EntityFrameworkCore" />
   </ItemGroup>
   <ItemGroup><None Update="Migrations/*.sql" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
 </Project>

@@ -27,6 +27,9 @@ public sealed class IdentityStoreDbContext(DbContextOptions<IdentityStoreDbConte
         base.OnModelCreating(builder);
         builder.HasDefaultSchema(Schema);
 
+        // OpenIddict's application/authorization/scope/token entities live in the same context + schema (17.2).
+        builder.UseOpenIddict();
+
         // Short, stable table names (the SQL migration creates exactly these).
         builder.Entity<ApplicationUser>(e =>
         {

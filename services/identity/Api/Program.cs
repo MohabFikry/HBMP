@@ -1,3 +1,4 @@
+using Mersal.Identity.Api.Auth;
 using Mersal.Identity.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Metrics;
@@ -6,9 +7,10 @@ using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Phase 17.1 — the identity STORE. The OpenIddict issuer + login/2FA endpoints are added in 17.2/17.3;
-// this host stands the store up and exposes read-only catalog endpoints for verification.
+// Phase 17.1 — the identity STORE; Phase 17.2 — the OpenIddict issuer on top of it.
 builder.Services.AddIdentityInfrastructure(builder.Configuration);
+builder.Services.AddMersalIssuer(builder.Configuration, builder.Environment);
+builder.Services.AddAuthorization();
 builder.Services.AddSingleton(TimeProvider.System);
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("identity-service"))
@@ -22,9 +24,13 @@ builder.Services.AddSwaggerGen();
 var app = builder.Build();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
+app.UseAuthentication();
+app.UseAuthorization();
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "identity-service" })).AllowAnonymous();
+
+app.MapConnect(); // 17.2 — /connect/{authorize,token,userinfo,login,logout}
 
 // Read-only roles/scopes-as-data catalog (verification of the 17.1 seed). NOTE: the mutating admin surface
 // lands in 17.4 behind admin RBAC + SoD; these reads are non-sensitive catalog metadata (no user data).
