@@ -31,7 +31,16 @@ public sealed class MinioWormStore : IWormStore, IDisposable
 
     public MinioWormStore(IOptions<WormStoreOptions> options)
     {
+        ArgumentNullException.ThrowIfNull(options);
         _opt = options.Value;
+        // 18.B1: the WORM bucket holds the immutable audit trail — the evidence that everything else is
+        // trustworthy. Its credentials were committed in the base appsettings.json (the same MinIO key as
+        // the PHI document bucket), so anyone with the repo could read or tamper with it. Configuration
+        // only now, and a missing credential fails at STARTUP.
+        if (string.IsNullOrWhiteSpace(_opt.AccessKey) || string.IsNullOrWhiteSpace(_opt.SecretKey))
+            throw new InvalidOperationException(
+                "WORM store credentials are not configured — inject Worm__AccessKey / Worm__SecretKey via " +
+                "environment or OpenBao. They are never baked into appsettings (this bucket is the audit trail).");
         var config = new AmazonS3Config
         {
             ServiceURL = _opt.Endpoint,

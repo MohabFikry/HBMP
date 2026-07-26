@@ -63,6 +63,7 @@ services:
       Issuer__WebRedirectUri: "http://localhost:5173/"
       Issuer__WebPostLogoutUri: "http://localhost:5173/"
       Issuer__ServiceClientSecret: "${IDENTITY_SERVICE_SECRET}"
+      Issuer__DemoPassword: "${IDENTITY_DEMO_PASSWORD}"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8090:8080"]

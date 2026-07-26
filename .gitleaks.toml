@@ -16,6 +16,34 @@ description = "Mersal dev/prose password literal (Dev_*_20YY)"
 regex = '''Dev_[A-Za-z0-9]+_20\d\d'''
 tags = ["password", "mersal"]
 
+# 18.B1 (audit R2 X4/X5): the R1 purge missed TWO shapes, and both then regressed — a credential sitting in
+# a JSON config VALUE (the MinIO key for the PHI blob bucket, in services/document/Api/appsettings.json)
+# and a `?? "literal"` C# fallback for a client secret (identity ClientSeeder) or a password (UserSeeder).
+# Neither looks like a secret to the default rule pack; both are now a red build.
+[[rules]]
+id = "mersal-config-credential-value"
+description = "Credential-shaped VALUE in a tracked appsettings file (secrets come from env/OpenBao only)"
+regex = '''"(?i:secret_?key|access_?key|client_?secret|password|api_?key)"[ \t]*:[ \t]*"[^"$\n]{6,}"'''
+path = '''appsettings.*\.json$'''
+tags = ["password", "config", "mersal"]
+
+# A credential embedded in a connection URI hides from key-based rules because the secret is not next to a
+# recognisable field name. This is how the dev broker password stayed in audit + hello appsettings through
+# the R1 purge. `guest:guest` is allow-listed below: it is RabbitMQ's own published default, overridden by
+# compose, not a Mersal secret.
+[[rules]]
+id = "mersal-uri-embedded-credential"
+description = "Credential embedded in a connection URI (amqp/redis/postgres/http) in a tracked file"
+regex = '''(?i:amqp|amqps|redis|postgres|postgresql|mongodb|https?)://[A-Za-z0-9._%-]+:[^@\s"/]{4,}@'''
+tags = ["password", "config", "mersal"]
+
+[[rules]]
+id = "mersal-code-secret-fallback"
+description = "C# ?? fallback to a literal secret/password — a missing secret must fail fast, never default"
+regex = '''(?i:secret|password|apikey)[^\n;]{0,40}\?\?[ \t]*"[^"\n]{6,}"'''
+path = '''\.cs$'''
+tags = ["password", "mersal"]
+
 [allowlist]
 description = "Non-secret matches: env-var placeholders and build artifacts."
 paths = [
@@ -32,4 +60,6 @@ regexes = [
   '''\$\{[A-Z0-9_]+\}''',              # ${POSTGRES_PASSWORD} etc.
   '''password=\$\{[A-Z0-9_]+\}''',
   '''secretKeyRef:''',                 # k8s secret references
+  '''change-me[-a-z0-9]*''',           # documented placeholders in *.env.example, never live values
+  '''//guest:guest@''',                # RabbitMQ's own published default; compose overrides it
 ]

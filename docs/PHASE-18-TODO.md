@@ -24,8 +24,8 @@ Mark `✅ YYYY-MM-DD` per id here **and** on the finding row in `AUDIT-R2-E2E.md
 
 | Sub | Id | Finding | Status |
 |---|---|---|---|
-| 18.B1 | X4 | MinIO PHI-bucket credential committed in `document/Api/appsettings.json` | ☐ |
-| 18.B1 | X5 | identity m2m secret defaults to a public literal, all scopes, unrotatable | ☐ |
+| 18.B1 | X4 | MinIO PHI-bucket credential committed in `document/Api/appsettings.json` | ✅ 2026-07-27 (+ WORM bucket, found by the new rule) |
+| 18.B1 | X5 | identity m2m secret defaults to a public literal, all scopes, unrotatable | ✅ 2026-07-27 |
 | 18.B2 | X6 | RLS deny-all trap armed in claims, callcentre, admin | ☐ |
 | 18.B2 | S1 | provider-service still connects as superuser | ☐ |
 | 18.B2 | S2 | interop RLS policy is fail-**open**; GUC never bound | ☐ |

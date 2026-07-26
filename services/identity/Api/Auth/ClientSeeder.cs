@@ -10,7 +10,7 @@ namespace Mersal.Identity.Api.Auth;
 /// client-credentials), and every frozen scope. Redirect/origin URIs come from config so the deployed tiers
 /// override the dev defaults. Runs at startup; safe to re-run.
 /// </summary>
-public sealed class ClientSeeder(IServiceProvider services, IConfiguration config) : IHostedService
+public sealed class ClientSeeder(IServiceProvider services, IConfiguration config, IWebHostEnvironment env) : IHostedService
 {
     public async Task StartAsync(CancellationToken ct)
     {
@@ -50,29 +50,57 @@ public sealed class ClientSeeder(IServiceProvider services, IConfiguration confi
                 },
                 Requirements = { Requirements.Features.ProofKeyForCodeExchange },
             };
-            foreach (var s in IdentityContract.Scopes) web.Permissions.Add(Permissions.Prefixes.Scope + s);
+            // 18.B1: the SPA is a PUBLIC client (no secret, anyone can impersonate it), so it may only ever
+            // request the INTERACTIVE scope set — never the machine ingest/projection scopes.
+            foreach (var s in IdentityContract.InteractiveScopes) web.Permissions.Add(Permissions.Prefixes.Scope + s);
             await apps.CreateAsync(web, ct);
         }
 
-        var serviceSecret = config["Issuer:ServiceClientSecret"] ?? "dev-service-secret-change-me";
-        if (await apps.FindByClientIdAsync(IdentityContract.ServiceClientId, ct) is null)
+        await SeedServiceClientAsync(apps, ct);
+    }
+
+    /// <summary>
+    /// 18.B1 (audit R2 X5) — the machine-to-machine client. Three defects, all closed here:
+    ///
+    /// (1) The secret fell back to a hard-coded development literal published in this very file, so
+    ///     anyone reaching <c>/connect/token</c> minted a platform-wide PHI token. Outside Development a
+    ///     missing secret is now a STARTUP FAILURE, not a known default.
+    /// (2) It held EVERY scope, so one leaked secret reached every beneficiary record. It is now limited
+    ///     to <see cref="IdentityContract.ServiceScopes"/> — ingest and projections only.
+    /// (3) Seeding was SKIPPED whenever the client already existed, so a rotated secret in config was
+    ///     never applied and the compromised one kept working forever. The descriptor is now RECONCILED
+    ///     on every start, which is what makes rotation a restart rather than a manual DB edit.
+    /// </summary>
+    private async Task SeedServiceClientAsync(IOpenIddictApplicationManager apps, CancellationToken ct)
+    {
+        var serviceSecret = config["Issuer:ServiceClientSecret"];
+        if (string.IsNullOrWhiteSpace(serviceSecret))
         {
-            var svc = new OpenIddictApplicationDescriptor
-            {
-                ClientId = IdentityContract.ServiceClientId,
-                ClientSecret = serviceSecret,
-                ClientType = ClientTypes.Confidential,
-                DisplayName = "Mersal service-to-service",
-                Permissions =
-                {
-                    Permissions.Endpoints.Token,
-                    Permissions.GrantTypes.ClientCredentials,
-                },
-            };
-            // Service clients may request the machine-oriented scopes (ingest, projections, reads).
-            foreach (var s in IdentityContract.Scopes) svc.Permissions.Add(Permissions.Prefixes.Scope + s);
-            await apps.CreateAsync(svc, ct);
+            if (!env.IsDevelopment())
+                throw new InvalidOperationException(
+                    "Issuer:ServiceClientSecret is not configured. The service-to-service client mints tokens " +
+                    "that reach PHI; it must never fall back to a baked-in default. Inject it via environment " +
+                    "or OpenBao.");
+            serviceSecret = "dev-only-" + Guid.NewGuid().ToString("N");   // random per run, never a known value
         }
+
+        var descriptor = new OpenIddictApplicationDescriptor
+        {
+            ClientId = IdentityContract.ServiceClientId,
+            ClientSecret = serviceSecret,
+            ClientType = ClientTypes.Confidential,
+            DisplayName = "Mersal service-to-service",
+            Permissions =
+            {
+                Permissions.Endpoints.Token,
+                Permissions.GrantTypes.ClientCredentials,
+            },
+        };
+        foreach (var s in IdentityContract.ServiceScopes) descriptor.Permissions.Add(Permissions.Prefixes.Scope + s);
+
+        var existing = await apps.FindByClientIdAsync(IdentityContract.ServiceClientId, ct);
+        if (existing is null) await apps.CreateAsync(descriptor, ct);
+        else await apps.UpdateAsync(existing, descriptor, ct);   // rotation + scope narrowing take effect on restart
     }
 
     public Task StopAsync(CancellationToken ct) => Task.CompletedTask;

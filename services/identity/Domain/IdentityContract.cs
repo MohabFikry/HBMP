@@ -39,6 +39,30 @@ public static class IdentityContract
         "audit:read",
     ];
 
+    /// <summary>
+    /// 18.B1 (audit R2 X5) — the ONLY scopes the machine-to-machine client may hold.
+    ///
+    /// <c>hbmp-services</c> was seeded with every scope in <see cref="Scopes"/>, so a single leaked client
+    /// secret minted a token that could read and write every beneficiary's PHI across the platform. A
+    /// background worker never needs a clinician's or an administrator's authority: it ingests events and
+    /// rebuilds projections. Anything a human does travels on that human's own bearer token.
+    ///
+    /// Adding a scope here is a reviewable change with a stated reason — it widens the blast radius of the
+    /// service secret.
+    /// </summary>
+    public static readonly IReadOnlyList<string> ServiceScopes =
+    [
+        "auth:ingest",           // approvals: order/rx routed to the approval queue
+        "notification:ingest",   // notification: enqueue from domain events
+        "reporting:project",     // reporting: rebuild KPI read models
+        "finance:project",       // finance: rebuild settlement projections
+    ];
+
+    /// <summary>Scopes an INTERACTIVE user session (the SPA public client) may request — everything except
+    /// the machine-only ingest/projection scopes. A browser never rebuilds a projection.</summary>
+    public static readonly IReadOnlyList<string> InteractiveScopes =
+        [.. Scopes.Where(s => !ServiceScopes.Contains(s))];
+
     /// <summary>The audience/resource the frozen contract pins — services validate <c>aud = hbmp-api</c>.</summary>
     public const string ApiResource = "hbmp-api";
 

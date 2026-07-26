@@ -13,13 +13,23 @@ public sealed class UserSeeder(IServiceProvider services, IConfiguration config,
     TimeProvider clock, ILogger<UserSeeder> log)
     : IHostedService
 {
-    private const string DemoPassword = "Mersal2026!";
     private const string DemoTenant = "11111111-1111-1111-1111-111111111111";
 
     public async Task StartAsync(CancellationToken ct)
     {
         var enabled = config.GetValue<bool?>("Issuer:SeedDemoUsers") ?? env.IsDevelopment();
         if (!enabled) return;
+
+        // 18.B1: the shared demo password was a literal in this file — a real, working credential for
+        // seventeen accounts (one per role), committed and greppable. It comes from configuration now, with
+        // NO default: seeding without one is a startup failure rather than a silent well-known password.
+        var demoPassword = config["Issuer:DemoPassword"];
+        if (string.IsNullOrWhiteSpace(demoPassword))
+            throw new InvalidOperationException(
+                "Issuer:SeedDemoUsers is enabled but Issuer:DemoPassword is not set. Demo accounts exist for " +
+                "every role; their password must be supplied by the environment, never baked into the image.");
+        if (!env.IsDevelopment())
+            log.LogWarning("SEEDING DEMO USERS OUTSIDE DEVELOPMENT — one account per role with a shared password");
 
         using var scope = services.CreateScope();
         var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
@@ -35,7 +45,7 @@ public sealed class UserSeeder(IServiceProvider services, IConfiguration config,
                 CreatedAt = clock.GetUtcNow(), IsActive = true,
             };
             // Set the hash directly so the documented demo password is used regardless of the admin policy.
-            user.PasswordHash = hasher.HashPassword(user, DemoPassword);
+            user.PasswordHash = hasher.HashPassword(user, demoPassword);
             var created = await users.CreateAsync(user);
             if (!created.Succeeded)
             {

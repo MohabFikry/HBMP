@@ -26,7 +26,16 @@ public sealed class MinioBlobStore : IBlobStore, IDisposable
 
     public MinioBlobStore(IOptions<BlobStoreOptions> options)
     {
+        ArgumentNullException.ThrowIfNull(options);
         _opt = options.Value;
+        // 18.B1 (audit R2 X4): the access key and secret for the PHI blob bucket were committed in the
+        // BASE appsettings.json — the .env.example default, in a tracked file — so any run outside compose
+        // reached every beneficiary document with a published credential. They are configuration-only now,
+        // and a missing one fails at STARTUP rather than silently falling back to a known value.
+        if (string.IsNullOrWhiteSpace(_opt.AccessKey) || string.IsNullOrWhiteSpace(_opt.SecretKey))
+            throw new InvalidOperationException(
+                "Blob storage credentials are not configured — inject Blob__AccessKey / Blob__SecretKey via " +
+                "environment or OpenBao. They are never baked into appsettings (the bucket holds PHI).");
         _s3 = new AmazonS3Client(_opt.AccessKey, _opt.SecretKey, new AmazonS3Config
         {
             ServiceURL = _opt.Endpoint,
