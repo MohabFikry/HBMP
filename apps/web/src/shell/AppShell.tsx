@@ -16,6 +16,8 @@ import { portalForRole, type Localized, type Section } from "../portals/catalog"
 import { L } from "../i18n/strings";
 import { NotificationPane } from "./NotificationPane";
 import { UserPane } from "./UserPane";
+import { BranchSwitcher } from "./BranchSwitcher";
+import { useBranchContext } from "./useBranchContext";
 
 /** Two-letter initials for the app-bar avatar placeholder. */
 function initials(name: string): string {
@@ -76,6 +78,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     [portal, can],
   );
   const canNotify = !!portal && can("notification.read");
+  // 14.8 — branch context for the app-bar switcher (fail-soft: renders only when the caller has branches).
+  const branchCtx = useBranchContext(session?.role);
   const [paneOpen, setPaneOpen] = useState(false);
   const [userPaneOpen, setUserPaneOpen] = useState(false);
   const [notifyRefresh, setNotifyRefresh] = useState(0);
@@ -137,6 +141,14 @@ export function AppShell({ children }: { children: ReactNode }) {
           <SearchField aria-label={L.search[lang]} placeholder={L.search[lang]} ref={searchRef} />
         </div>
         <div className="app-actions">
+          {!branchCtx.memberScoped && branchCtx.branches.length > 0 && (
+            <BranchSwitcher
+              memberScoped={false}
+              branches={branchCtx.branches}
+              activeBranchId={branchCtx.activeBranchId}
+              onSwitch={branchCtx.switchBranch}
+            />
+          )}
           {canNotify && (
             <button
               ref={bellRef}
