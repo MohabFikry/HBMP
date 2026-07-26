@@ -58,17 +58,9 @@ public static class IssuerSetup
                  .SetRefreshTokenLifetime(TimeSpan.FromHours(10));  // frozen: SSO max 36000s
 
                 // RS256 signing; DO NOT encrypt access tokens — services validate a plain signed JWT via JWKS.
-                // Dev/test use ephemeral keys (no cert-store friction); production certs come from OpenBao at 17.6.
-                if (env.IsDevelopment())
-                {
-                    o.AddEphemeralEncryptionKey();  // wraps auth codes / refresh tokens (JWE)
-                    o.AddEphemeralSigningKey();      // RS256 access-token signature, published via JWKS
-                }
-                else
-                {
-                    o.AddDevelopmentEncryptionCertificate();
-                    o.AddDevelopmentSigningCertificate();
-                }
+                // Dev/test use ephemeral keys; production uses persistent RS256 keys from OpenBao (fail-fast
+                // if unconfigured — no dev-cert fallback). See IssuerKeys + docs/adr/0015 (phase-12 update).
+                IssuerKeys.Configure(o, config, env.IsDevelopment());
                 o.DisableAccessTokenEncryption();
 
                 var aspnet = o.UseAspNetCore()

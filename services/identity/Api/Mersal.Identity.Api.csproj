@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup><RootNamespace>Mersal.Identity.Api</RootNamespace></PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Mersal.Identity.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Identity.Domain.csproj" />
     <ProjectReference Include="../Infrastructure/Mersal.Identity.Infrastructure.csproj" />
     <ProjectReference Include="../../../libs/auth/Mersal.Auth.csproj" />

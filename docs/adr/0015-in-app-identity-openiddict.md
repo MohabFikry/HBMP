@@ -107,5 +107,16 @@ authenticate against it (services' `Auth:Authority` → `http://identity-service
 `/.well-known/*` to the issuer; edge JWKS validation stays at the service layer in Tier 1 (community Kong
 cannot do JWKS discovery with rotating RS256 keys) with the openid-connect plugin noted for Tier 2/3.
 Demo staff accounts (one per role, dev-only) are seeded by `UserSeeder`. Dev/test use ephemeral signing
-keys; **production must supply persistent RS256 keys from OpenBao** (tracked as the one remaining prod-hardening
-follow-up for go-live, Phase 12).
+keys; **production must supply persistent RS256 keys from OpenBao**.
+
+## Update — persistent production signing keys (Phase 12, 2026-07-26)
+
+The prod-key follow-up is now implemented (`services/identity/Api/Auth/IssuerKeys.cs`). Outside
+Development the issuer loads **persistent RS256 signing + encryption keys** from configuration
+(`Issuer:SigningKeyPem`/`…PemPath`, `Issuer:EncryptionKeyPem`/`…PemPath`) — PEM material provisioned by
+**OpenBao/Vault** (transit-exported or KV, mounted into the pod) and, in GitOps, sealed via SOPS. Keys
+are stable across restarts, so the published JWKS + `kid` are stable and tokens survive a pod recycle
+(the `kid` is derived deterministically from the public key). There is **no dev-certificate fallback**
+outside Development: a misconfigured prod issuer **fails fast** rather than signing with a throwaway
+self-signed cert (RSA-2048 minimum enforced). Verified by `IssuerKeysTests` (fail-fast, PEM/file load,
+weak-key rejection, deterministic kid); identity 17/17 real-PG.

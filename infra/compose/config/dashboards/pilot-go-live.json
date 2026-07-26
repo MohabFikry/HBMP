@@ -1,0 +1,102 @@
+{
+  "uid": "mersal-pilot-golive",
+  "title": "Mersal — Pilot Go-Live & Hypercare (success metrics)",
+  "tags": ["mersal", "pilot", "go-live", "hypercare"],
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "browser",
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": {
+    "list": [
+      { "name": "clinic", "type": "custom", "query": "pilot", "current": { "text": "pilot", "value": "pilot" } }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1, "title": "Adoption — % visits processed digitally", "type": "gauge",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 60 }, { "color": "green", "value": 80 } ] } } },
+      "targets": [ { "datasource": "Prometheus", "expr": "pilot_visits_digital_ratio{clinic=\"$clinic\"} * 100", "legendFormat": "digital %" } ]
+    },
+    {
+      "id": 2, "title": "Active users per role", "type": "bargauge",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 0 },
+      "targets": [ { "datasource": "Prometheus", "expr": "sum by (role) (pilot_active_users{clinic=\"$clinic\"})", "legendFormat": "{{role}}" } ]
+    },
+    {
+      "id": 3, "title": "Paper reduction (%)", "type": "stat",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percent", "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 50 }, { "color": "green", "value": 80 } ] } } },
+      "targets": [ { "datasource": "Prometheus", "expr": "pilot_paper_reduction_ratio{clinic=\"$clinic\"} * 100", "legendFormat": "paper reduction %" } ]
+    },
+
+    {
+      "id": 4, "title": "Eligibility check time p95 (s)", "type": "timeseries",
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 7 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [ { "datasource": "Prometheus", "expr": "histogram_quantile(0.95, sum(rate(eligibility_check_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95" } ]
+    },
+    {
+      "id": 5, "title": "Registration time p95 (s)", "type": "timeseries",
+      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 7 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [ { "datasource": "Prometheus", "expr": "histogram_quantile(0.95, sum(rate(registration_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95" } ]
+    },
+    {
+      "id": 6, "title": "Approval TAT p95 (min)", "type": "timeseries",
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 7 },
+      "fieldConfig": { "defaults": { "unit": "m" } },
+      "targets": [ { "datasource": "Prometheus", "expr": "approvals_tat_minutes_p95", "legendFormat": "TAT p95" } ]
+    },
+    {
+      "id": 7, "title": "No-show rate (%)", "type": "timeseries",
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 7 },
+      "fieldConfig": { "defaults": { "unit": "percent" } },
+      "targets": [ { "datasource": "Prometheus", "expr": "appointments_noshow_rate", "legendFormat": "no-show %" } ]
+    },
+
+    {
+      "id": 8, "title": "Encounters with structured diagnosis (%)", "type": "stat",
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 14 },
+      "fieldConfig": { "defaults": { "unit": "percent", "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 80 }, { "color": "green", "value": 95 } ] } } },
+      "targets": [ { "datasource": "Prometheus", "expr": "encounters_structured_diagnosis_ratio * 100", "legendFormat": "structured %" } ]
+    },
+    {
+      "id": 9, "title": "Duplicate-order rate (target ~0)", "type": "stat",
+      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 14 },
+      "fieldConfig": { "defaults": { "unit": "percent", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 0.5 }, { "color": "red", "value": 1 } ] } } },
+      "targets": [ { "datasource": "Prometheus", "expr": "orders_duplicate_rate * 100", "legendFormat": "duplicate %" } ]
+    },
+    {
+      "id": 10, "title": "Audit completeness (%)", "type": "stat",
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 14 },
+      "fieldConfig": { "defaults": { "unit": "percent", "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 99 }, { "color": "green", "value": 100 } ] } } },
+      "targets": [ { "datasource": "Prometheus", "expr": "audit_mutation_coverage_ratio * 100", "legendFormat": "audited %" } ]
+    },
+    {
+      "id": 11, "title": "API success rate (SLO ≥ 99.5% in hypercare)", "type": "stat",
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 14 },
+      "fieldConfig": { "defaults": { "unit": "percent", "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 99 }, { "color": "green", "value": 99.5 } ] } } },
+      "targets": [ { "datasource": "Prometheus", "expr": "(1 - (sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~\"5..\"}[5m])) / sum(rate(http_server_request_duration_seconds_count[5m])))) * 100", "legendFormat": "success %" } ]
+    },
+
+    {
+      "id": 12, "title": "Unresolved Critical security findings (must be 0)", "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 21 },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } } },
+      "targets": [ { "datasource": "Prometheus", "expr": "security_findings_open{severity=\"critical\"}", "legendFormat": "open criticals" } ]
+    },
+    {
+      "id": 13, "title": "Failed consume/dispense (page immediately)", "type": "timeseries",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 21 },
+      "targets": [ { "datasource": "Prometheus", "expr": "sum(rate(orders_consume_failed_total[5m])) + sum(rate(pharmacy_dispense_failed_total[5m]))", "legendFormat": "failed/min" } ]
+    },
+    {
+      "id": 14, "title": "Last DR restore drill (age, days)", "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 21 },
+      "fieldConfig": { "defaults": { "unit": "d", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 30 }, { "color": "red", "value": 45 } ] } } },
+      "targets": [ { "datasource": "Prometheus", "expr": "(time() - dr_last_restore_success_timestamp_seconds) / 86400", "legendFormat": "days since drill" } ]
+    }
+  ]
+}
