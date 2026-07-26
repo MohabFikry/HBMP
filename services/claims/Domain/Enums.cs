@@ -50,6 +50,11 @@ public enum ReimbursementStatus { Submitted, OcrProcessing, AutoMatched, ManualA
 /// <summary>Provider-submission header lifecycle (10b.5). Set from the per-line matching outcome.</summary>
 public enum SubmissionStatus { Received, Matched, PartiallyMatched, Unmatched }
 
+/// <summary>Reconciliation discrepancy bucket (10b.7, 36 §7). Every discrepancy lands in exactly ONE bucket by the
+/// documented precedence: Duplicate &gt; BilledNotDelivered &gt; DeliveredNotBilled &gt; PriceVariance &gt;
+/// QuantityVariance &gt; Matched.</summary>
+public enum ReconBucket { Matched, BilledNotDelivered, DeliveredNotBilled, PriceVariance, QuantityVariance, Duplicate }
+
 /// <summary>Per-line matching outcome of a provider submission (10b.5).
 /// <c>Matched</c> — a delivered/authorized fulfillment was found, a priced payable line was created;
 /// <c>Unmatched</c> — no fulfillment record → NO_FULFILLMENT_RECORD, RequiresManualReview, manual queue;

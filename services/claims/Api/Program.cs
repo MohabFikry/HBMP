@@ -48,6 +48,7 @@ app.MapBatches();   // phase 10b.2 — batching + batch lifecycle (single-open-b
 app.MapDecisions(); // phase 10b.4 — officer worklist + line decisions (SoD + dual control)
 app.MapSubmissions(); // phase 10b.5 — provider-submitted claims + document matching
 app.MapReimbursements(); // phase 10b.6 — beneficiary reimbursement + OCR (assistive, human-gated)
+app.MapReconciliation(); // phase 10b.7 — reconciliation worklist + append-only adjustments
 
 app.Run();
 

@@ -81,8 +81,18 @@ data (tariffs, authorizations, eligibility, fulfillment) comes over the API/even
   structural test). Seams (`IDocumentOcrProvider` swappability-tested, `IDocumentScanner`, `IAuthorizedServiceResolver`)
   all DI-swappable. Emits `ReimbursementSubmitted` / `ReimbursementMatched` / `ReimbursementRequiresManualAssessment` /
   `ClaimCreated`.
-- 10b.7 reconciliation + adjustments · 10b.8 settlement advice + exports · 10b.9 appeals + KPIs.
-  *(built in subsequent slices)*
+- **10b.7 — reconciliation worklist + append-only adjustments.** `claim_adjustment` (append-only: the 0003 trigger +
+  no UPDATE/DELETE grant). `GET /reconciliation` buckets each discrepancy over a period by the pure
+  `ReconClassifier` with a fixed precedence (**Duplicate → BilledNotDelivered → DeliveredNotBilled → PriceVariance →
+  QuantityVariance → Matched** — every row lands in exactly one), a min-necessary clinical-free projection. `POST
+  /claims/{id}/lines/{lineId}/adjustments` records a signed entry with mandatory reason + rationale and BEFORE/AFTER
+  amounts; `AdjustmentRules` enforce sign-per-type (Deduction/Recovery/Clawback/Writeoff/Reversal/Void must reduce)
+  and that a **Recovery/Clawback references the original line** (422 without). Reversal/Void voids the line (a
+  compensating entry — the original decision is never mutated); every other type marks it Adjusted and re-nets the
+  rollup. **Dual control** when the batch/claim net payable would go NEGATIVE (recorded Pending → a second distinct
+  approver confirms). `Idempotency-Key` required; the before/after amounts ride the hash-chained audit event. Emits
+  `ClaimAdjusted` / `ClaimVoided`.
+- 10b.8 settlement advice + exports · 10b.9 appeals + KPIs. *(built in subsequent slices)*
 
 ## Endpoints (10b.1)
 

@@ -34,6 +34,8 @@ public static class DependencyInjection
         services.AddScoped<DecisionService>();
         services.AddScoped<SubmissionService>();
         services.AddScoped<ReimbursementService>();
+        services.AddScoped<AdjustmentService>();
+        services.AddScoped<ReconciliationQueries>();
         // Permissive fact source by default; the HTTP-backed eligibility/policy/approvals/provider wiring lands later.
         services.AddScoped<IExternalAdjudicationFacts, PermissiveAdjudicationFacts>();
         // No fulfillment resolver by default → provider-submitted lines land in manual assessment until the

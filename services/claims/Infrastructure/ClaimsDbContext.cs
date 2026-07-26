@@ -15,6 +15,7 @@ public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options) :
     public DbSet<ClaimBatch> ClaimBatches => Set<ClaimBatch>();
     public DbSet<ClaimBatchItem> ClaimBatchItems => Set<ClaimBatchItem>();
     public DbSet<ClaimDecision> ClaimDecisions => Set<ClaimDecision>();
+    public DbSet<ClaimAdjustment> ClaimAdjustments => Set<ClaimAdjustment>();
     public DbSet<ClaimSubmission> ClaimSubmissions => Set<ClaimSubmission>();
     public DbSet<ClaimSubmissionLine> ClaimSubmissionLines => Set<ClaimSubmissionLine>();
     public DbSet<ClaimDocument> ClaimDocuments => Set<ClaimDocument>();
@@ -88,6 +89,15 @@ public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options) :
             e.Property(x => x.Decision).HasConversion<string>().HasColumnName("decision");
             e.Property(x => x.ReasonCodes).HasColumnName("reason_codes").HasColumnType("text[]");
             e.HasIndex(x => new { x.ClaimLineId, x.DecidedAt });
+            e.HasIndex(x => x.IdempotencyKey).IsUnique();
+        });
+
+        b.Entity<ClaimAdjustment>(e =>
+        {
+            e.ToTable("claim_adjustment");
+            e.HasKey(x => x.AdjustmentId);
+            e.Property(x => x.AdjustmentType).HasConversion<string>().HasColumnName("adjustment_type");
+            e.HasIndex(x => new { x.ClaimLineId, x.AdjustedAt });
             e.HasIndex(x => x.IdempotencyKey).IsUnique();
         });
 
