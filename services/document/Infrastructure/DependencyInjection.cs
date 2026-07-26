@@ -10,7 +10,7 @@ public static class DependencyInjection
     public static IServiceCollection AddDocumentInfrastructure(this IServiceCollection services, IConfiguration config)
     {
         services.AddDbContext<DocumentDbContext>(o =>
-            o.UseNpgsql(config.GetConnectionString("Document") ?? "Host=postgres;Database=hbmp;Username=hbmp;Password=hbmp")
+            o.UseNpgsql(config.GetConnectionString("Document") ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential."))
              .UseSnakeCaseNamingConvention());
 
         services.Configure<ClamAvOptions>(config.GetSection(ClamAvOptions.SectionName));

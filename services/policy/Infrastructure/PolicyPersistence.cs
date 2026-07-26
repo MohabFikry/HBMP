@@ -10,7 +10,7 @@ public static class DependencyInjection
     public static IServiceCollection AddPolicyInfrastructure(this IServiceCollection services, IConfiguration config)
     {
         services.AddDbContext<PolicyDbContext>(o =>
-            o.UseNpgsql(config.GetConnectionString("Policy") ?? "Host=postgres;Database=hbmp;Username=hbmp;Password=hbmp").UseSnakeCaseNamingConvention());
+            o.UseNpgsql(config.GetConnectionString("Policy") ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential.")).UseSnakeCaseNamingConvention());
         return services;
     }
 }

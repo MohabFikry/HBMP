@@ -12,7 +12,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddDbContext<MasterDataDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("MasterData")
-                ?? "Host=postgres;Database=hbmp;Username=hbmp;Password=hbmp").UseSnakeCaseNamingConvention());
+                ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential.")).UseSnakeCaseNamingConvention());
 
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(r => r.AddService("masterdata-service"))

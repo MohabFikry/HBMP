@@ -11,10 +11,13 @@
 #   SRC_DSN=... SCRATCH_DSN=... infra/dr/restore-rehearsal.sh
 set -euo pipefail
 
-SRC_DSN="${SRC_DSN:-postgresql://hbmp:${POSTGRES_PASSWORD:-REDACTED_DEV_DB_PASSWORD}@localhost:55432/hbmp}"
+# Secrets come from the environment only — never a baked default. POSTGRES_PASSWORD is set out of band
+# (gitignored infra/compose/.env locally; OpenBao path secret/hbmp/db/app in real envs). Fail fast if unset.
+: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD out of band (OpenBao secret/hbmp/db/app) before running}"
+SRC_DSN="${SRC_DSN:-postgresql://hbmp:${POSTGRES_PASSWORD}@localhost:55432/hbmp}"
 SCRATCH_DB="${SCRATCH_DB:-hbmp_restore_check}"
-ADMIN_DSN="${ADMIN_DSN:-postgresql://hbmp:${POSTGRES_PASSWORD:-REDACTED_DEV_DB_PASSWORD}@localhost:55432/postgres}"
-SCRATCH_DSN="${SCRATCH_DSN:-postgresql://hbmp:${POSTGRES_PASSWORD:-REDACTED_DEV_DB_PASSWORD}@localhost:55432/${SCRATCH_DB}}"
+ADMIN_DSN="${ADMIN_DSN:-postgresql://hbmp:${POSTGRES_PASSWORD}@localhost:55432/postgres}"
+SCRATCH_DSN="${SCRATCH_DSN:-postgresql://hbmp:${POSTGRES_PASSWORD}@localhost:55432/${SCRATCH_DB}}"
 DUMP="${DUMP:-/tmp/hbmp-restore-rehearsal.dump}"
 
 echo "▶ 1/5 Backing up source (pg_dump, custom format)…"

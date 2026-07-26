@@ -6,6 +6,16 @@ title = "mersal-hbmp-gitleaks"
 [extend]
 useDefault = true # inherit the default rule pack (AWS keys, private keys, tokens, etc.)
 
+# Custom rule (16.1, C2): catch Mersal-style prose/dev password literals baked into code, config, docs or
+# scripts (the "Dev_<name>Pass_<year>!" shape used for DB / Keycloak / app-role dev secrets). Runtime
+# secrets are injected via env/OpenBao — the literal value must never appear in a tracked file. Default
+# rules miss these (prose). The regex below is the single source of truth for the pattern.
+[[rules]]
+id = "mersal-prose-password"
+description = "Mersal dev/prose password literal (Dev_*_20YY)"
+regex = '''Dev_[A-Za-z0-9]+_20\d\d'''
+tags = ["password", "mersal"]
+
 [allowlist]
 description = "Non-secret matches: env-var placeholders and build artifacts."
 paths = [

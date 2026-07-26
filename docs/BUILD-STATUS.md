@@ -70,15 +70,15 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 10 | Case + Finance | 10.1 `case-service` + beneficiary-360 | ☑ | c1e0c63 |
 | 10 | Case + Finance | 10.2 `finance-service` (no-diagnosis) | ☑ | e23c2fd |
 | 10 | Case + Finance | 10.3 Case + Finance portals | ☑ | (10.3) |
-| 10b | Claims Mgmt | 10b.1 `claims-service` + auto-derived claims (no double-billing) | ☐ | |
-| 10b | Claims Mgmt | 10b.2 Batching + batch lifecycle (single-open-batch) | ☐ | |
-| 10b | Claims Mgmt | 10b.3 Automated pre-adjudication (9-step, all reasons) | ☐ | |
-| 10b | Claims Mgmt | 10b.4 Officer review + line-level decisions (SoD, dual control) | ☐ | |
-| 10b | Claims Mgmt | 10b.5 Provider-submitted claims + document matching | ☐ | |
-| 10b | Claims Mgmt | 10b.6 Beneficiary reimbursement + OCR (assistive) | ☐ | |
-| 10b | Claims Mgmt | 10b.7 Reconciliation + append-only adjustments | ☐ | |
-| 10b | Claims Mgmt | 10b.8 Settlement advice + exports (no payment execution) | ☐ | |
-| 10b | Claims Mgmt | 10b.9 Appeals + claims KPIs | ☐ | |
+| 10b | Claims Mgmt | 10b.1 `claims-service` + auto-derived claims (no double-billing) | ☑ | 0278c0b |
+| 10b | Claims Mgmt | 10b.2 Batching + batch lifecycle (single-open-batch) | ☑ | e68a64e |
+| 10b | Claims Mgmt | 10b.3 Automated pre-adjudication (9-step, all reasons) | ☑ | 2323e2f |
+| 10b | Claims Mgmt | 10b.4 Officer review + line-level decisions (SoD, dual control) | ☑ | 735021a |
+| 10b | Claims Mgmt | 10b.5 Provider-submitted claims + document matching | ☑ | 6851e54 |
+| 10b | Claims Mgmt | 10b.6 Beneficiary reimbursement + OCR (assistive) | ☑ | fc2d76a |
+| 10b | Claims Mgmt | 10b.7 Reconciliation + append-only adjustments | ☑ | 2bac316 |
+| 10b | Claims Mgmt | 10b.8 Settlement advice + exports (no payment execution) | ☑ | acf86eb |
+| 10b | Claims Mgmt | 10b.9 Appeals + claims KPIs | ☑ | 7dc6ea7 |
 | 11 | Hardening/NFR | 11.1 Perf/scale harness + baseline + index/cache ADR | ☑ | cac6e7a |
 | 11 | Hardening/NFR | 11.2 STRIDE + CI security gates + OWASP API Top10 + sign-off | ☑ | c9d20c7 |
 | 11 | Hardening/NFR | 11.3 Fleet metrics + dashboards/alerts + DR/restore + runbooks | ☑ | e5581c1 |
@@ -91,8 +91,19 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 16 | Audit Remediation | 16.7 Live frontend wiring (scopes/roles/env/errors/i18n) (H6/H10) | ◐ | identity slice: live KC roles/users/scopes (call_center + claims_officer) + fail-closed role map (no-portal page) + provision-identity.sh; env/errors/i18n/idempotency remain |
 | 16 | Audit Remediation | 16.8 CI & test integrity (skippable tests, PG service, coverage, ESLint, OpenAPI) (H7) | ☐ | |
 | 16 | Audit Remediation | 16.9 Small items + ADRs 0010–0014 | ☐ | |
+| 17 | In-App Identity | 17.0 ADR-0015 + frozen token-contract snapshot | ☐ | |
+| 17 | In-App Identity | 17.1 ASP.NET Identity store + roles/scopes as data | ☐ | |
+| 17 | In-App Identity | 17.2 OpenIddict issuer (PKCE/CC/refresh, frozen claims) | ☐ | |
+| 17 | In-App Identity | 17.3 In-app login pages + TOTP 2FA + recovery + step-up | ☐ | |
+| 17 | In-App Identity | 17.4 In-app user/role/scope admin on the real store (closes C3) | ☐ | |
+| 17 | In-App Identity | 17.5 SPA rewire to new issuer (closes H6 by design) | ☐ | |
+| 17 | In-App Identity | 17.6 Cutover, Keycloak retirement, doc truth | ☐ | |
 | 12 | Migration/Go-live | 12.1 Migration pipelines · 12.2 Release mgmt · 12.3 Pilot + hypercare | ☐ | |
 | 13 | Interoperability | 13.1 FHIR R4 façade · 13.2 Adapters/ACL · 13.3 Interop test harness | ☐ | |
+
+> **Phase 17 (In-App Identity)** implements ADR-0015 (Keycloak → ASP.NET Identity + OpenIddict). Sequence:
+> 16.1–16.2 → **17.1–17.6** → remaining 16.x — phase 16's Keycloak-specific steps (16.3 MFA enforcement,
+> 16.7 realm/scope reconciliation) land on the NEW issuer instead; do not fix the realm twice.
 
 > **Phase 16 (Audit Remediation)** comes from `docs/AUDIT-2026-07-26.md` and **gates 12 (go-live)**. Note:
 > 11.1–11.3 were ticked after the audit snapshot; the audit's 11.x observations may be partially stale, but

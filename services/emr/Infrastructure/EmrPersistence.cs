@@ -44,7 +44,7 @@ public static class DependencyInjection
     {
         services.AddDbContext<EmrDbContext>(o =>
             o.UseNpgsql(config.GetConnectionString("Emr")
-                        ?? "Host=postgres;Database=hbmp;Username=hbmp;Password=hbmp")
+                        ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential."))
              .UseSnakeCaseNamingConvention());
         services.AddScoped<EncounterNoIssuer>();
         services.AddScoped<AppointmentBookingService>();

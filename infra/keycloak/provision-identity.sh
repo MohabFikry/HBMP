@@ -13,7 +13,9 @@ KC_CONTAINER="${KC_CONTAINER:-mersal-hbmp-keycloak-1}"
 REALM="${REALM:-mersal}"
 CLIENT_ID="${CLIENT_ID:-hbmp-web}"
 KC_ADMIN="${KC_ADMIN:-admin}"
-KC_ADMIN_PASSWORD="${KC_ADMIN_PASSWORD:-Dev_KcPass_2026!}"   # dev-only; override out of band in real envs
+# Secrets are injected, never baked. KC_ADMIN_PASSWORD is set out of band (gitignored infra/compose/.env
+# locally; OpenBao in real envs). USER_PASSWORD is the dev login password for the seeded portal users.
+: "${KC_ADMIN_PASSWORD:?set KC_ADMIN_PASSWORD out of band (see infra/compose/.env / OpenBao) before running}"
 USER_PASSWORD="${USER_PASSWORD:-Mersal2026!}"                # dev-only login password for seeded portal users
 TENANT_ID="${TENANT_ID:-11111111-1111-1111-1111-111111111111}"
 

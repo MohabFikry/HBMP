@@ -13,7 +13,7 @@ public static class DependencyInjection
     {
         services.AddDbContext<AuditDbContext>(o =>
             o.UseNpgsql(configuration.GetConnectionString("Audit")
-                        ?? "Host=postgres;Database=hbmp;Username=hbmp;Password=hbmp"));
+                        ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential.")));
 
         services.Configure<WormStoreOptions>(configuration.GetSection(WormStoreOptions.SectionName));
         services.Configure<RabbitMqOptions>(configuration.GetSection(RabbitMqOptions.SectionName));

@@ -11,7 +11,7 @@ public static class DependencyInjection
     {
         services.AddDbContext<ReportingDbContext>(o =>
             o.UseNpgsql(config.GetConnectionString("Reporting")
-                        ?? "Host=postgres;Database=hbmp;Username=hbmp;Password=hbmp")
+                        ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential."))
              .UseSnakeCaseNamingConvention());
 
         services.AddScoped<EventProjector>();
