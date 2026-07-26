@@ -1,0 +1,104 @@
+name: backend-ci
+
+# .NET microservice build + test gate (16.8, finding H7). Builds the whole solution with warnings-as-errors
+# (the repo enforces this — a warning fails the build), then runs the FULL suite against a real Postgres so
+# the env-gated integration + RLS isolation tests actually execute instead of skipping. A domain-coverage
+# floor guards against regression. Runs on backend-affecting changes.
+on:
+  push:
+    paths:
+      - "services/**"
+      - "libs/**"
+      - "Directory.Packages.props"
+      - "Directory.Build.props"
+      - "HbmpPlatform.sln"
+      - "tools/ci/**"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    paths:
+      - "services/**"
+      - "libs/**"
+      - "Directory.Packages.props"
+      - "HbmpPlatform.sln"
+      - "tools/ci/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    # Ephemeral Postgres for this job only. These credentials are throwaway CI values — NOT the real dev
+    # secrets (those live in the gitignored infra/compose/.env; prod uses OpenBao).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hbmp
+          POSTGRES_PASSWORD: ci_hbmp_pw
+          POSTGRES_DB: hbmp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hbmp -d hbmp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 24
+
+    env:
+      DOTNET_NOLOGO: "1"
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      # libpq connection used by the migration bootstrap (schema owner / superuser).
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: hbmp
+      PGPASSWORD: ci_hbmp_pw
+      PGDATABASE: hbmp
+      # Passwords the bootstrap + env-exporter set on / use for the two DB roles.
+      OWNER_PASSWORD: ci_hbmp_pw
+      APP_PASSWORD: ci_hbmp_app_pw
+      HBMP_APP_PASSWORD: ci_hbmp_app_pw
+      COVERAGE_MIN_DOMAIN: "55"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Restore
+        run: dotnet restore HbmpPlatform.sln
+
+      - name: Build (Release, warnings-as-errors)
+        run: dotnet build HbmpPlatform.sln -c Release --no-restore
+
+      - name: Apply migrations + provision hbmp_app role
+        run: bash tools/ci/apply-migrations.sh
+
+      - name: Wire *_TEST_DB env so integration + RLS suites run
+        run: bash tools/ci/print-test-db-env.sh >> "$GITHUB_ENV"
+
+      - name: Test (Release) with coverage
+        run: >-
+          dotnet test HbmpPlatform.sln -c Release --no-build
+          --collect:"XPlat Code Coverage"
+          --results-directory ./coverage
+          --logger "trx;LogFileName=test.trx"
+
+      - name: Domain-coverage gate
+        run: bash tools/ci/coverage-gate.sh ./coverage
+
+      - name: Upload coverage + test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: ./coverage
+          retention-days: 14
