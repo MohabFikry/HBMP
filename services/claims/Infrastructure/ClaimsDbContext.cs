@@ -14,6 +14,7 @@ public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options) :
     public DbSet<ClaimLine> ClaimLines => Set<ClaimLine>();
     public DbSet<ClaimBatch> ClaimBatches => Set<ClaimBatch>();
     public DbSet<ClaimBatchItem> ClaimBatchItems => Set<ClaimBatchItem>();
+    public DbSet<ClaimDecision> ClaimDecisions => Set<ClaimDecision>();
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -73,6 +74,16 @@ public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options) :
             e.Property(x => x.BatchStatusSnapshot).HasConversion<string>().HasColumnName("batch_status");
             e.HasIndex(x => x.BatchId);
             e.HasIndex(x => x.ClaimId);
+        });
+
+        b.Entity<ClaimDecision>(e =>
+        {
+            e.ToTable("claim_decision");
+            e.HasKey(x => x.DecisionId);
+            e.Property(x => x.Decision).HasConversion<string>().HasColumnName("decision");
+            e.Property(x => x.ReasonCodes).HasColumnName("reason_codes").HasColumnType("text[]");
+            e.HasIndex(x => new { x.ClaimLineId, x.DecidedAt });
+            e.HasIndex(x => x.IdempotencyKey).IsUnique();
         });
 
         b.Entity<ProcessedEvent>(e =>

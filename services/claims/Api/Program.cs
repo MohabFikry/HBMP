@@ -43,8 +43,9 @@ if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "claims-service" })).AllowAnonymous();
 
-app.MapClaims();  // phase 10b.1 — auto-derived claims + min-necessary reads + intake seam
-app.MapBatches(); // phase 10b.2 — batching + batch lifecycle (single-open-batch DB guard)
+app.MapClaims();    // phase 10b.1 — auto-derived claims + min-necessary reads + intake seam
+app.MapBatches();   // phase 10b.2 — batching + batch lifecycle (single-open-batch DB guard)
+app.MapDecisions(); // phase 10b.4 — officer worklist + line decisions (SoD + dual control)
 
 app.Run();
 

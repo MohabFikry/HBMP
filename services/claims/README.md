@@ -49,8 +49,16 @@ data (tariffs, authorizations, eligibility, fulfillment) comes over the API/even
   auth scope and limit remaining, minus member share) + `rule_version`. Hard blocks ⇒ Deny; `NO_TARIFF` ⇒
   RequiresManualReview (price stays null); caps ⇒ Partial. Coverage accumulators are **read, never written**.
   `POST /claims/{id}/adjudicate`; emits `ClaimAdjudicated`; the append-only per-run history is the audit event.
-- 10b.4 officer line decisions (SoD + dual control) · 10b.5 provider-submitted · 10b.6 reimbursement + OCR · 10b.7
-  reconciliation + adjustments · 10b.8 settlement advice + exports · 10b.9 appeals + KPIs. *(built in subsequent slices)*
+- **10b.4 — Claims Officer worklist + line-level decisions.** `claim_decision` (append-only: DB trigger + no
+  UPDATE/DELETE grant). The worklist is a min-necessary, clinical-free projection (codes, amounts, recommendation,
+  result EXISTENCE — never values), audited on read. Decisions (Approve/PartiallyApprove/Deny/RequestInfo/
+  RouteToClinical) enforce **SoD** (decider ≠ originator, not provider-affiliated → 403), **dual control** above a
+  configurable value threshold (a second distinct approver), mandatory reason code + rationale on deny/override, and
+  allowed-amount bounds on partial. Optimistic concurrency (line `xmin`) → two officers = one winner + one 409.
+  Decisions roll up to the claim status and batch rollups; `Idempotency-Key` required. Emits `ClaimLineDecided` +
+  `ClaimApproved`/`ClaimPartiallyApproved`/`ClaimDenied`.
+- 10b.5 provider-submitted · 10b.6 reimbursement + OCR · 10b.7 reconciliation + adjustments · 10b.8 settlement advice
+  + exports · 10b.9 appeals + KPIs. *(built in subsequent slices)*
 
 ## Endpoints (10b.1)
 

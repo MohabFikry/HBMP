@@ -37,8 +37,8 @@ public class ClaimsCannotReadDiagnosisTests
     {
         var types = new[]
         {
-            typeof(Claim), typeof(ClaimLine), typeof(ClaimIntakeEvent),
-            typeof(ClaimView), typeof(ClaimLineView), typeof(ClaimIntakeRequest),
+            typeof(Claim), typeof(ClaimLine), typeof(ClaimIntakeEvent), typeof(ClaimDecision),
+            typeof(ClaimView), typeof(ClaimLineView), typeof(ClaimIntakeRequest), typeof(WorklistRow), typeof(BatchView),
         };
         foreach (var t in types)
         {
