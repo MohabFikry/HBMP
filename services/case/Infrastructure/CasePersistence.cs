@@ -1,5 +1,6 @@
 using System.Globalization;
 using Mersal.Case.Domain;
+using Mersal.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -50,10 +51,12 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddCaseInfrastructure(this IServiceCollection services, IConfiguration config)
     {
-        services.AddDbContext<CaseDbContext>(o =>
+        services.AddHbmpRls();
+        services.AddDbContext<CaseDbContext>((sp, o) =>
             o.UseNpgsql(config.GetConnectionString("Case")
                         ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential."))
-             .UseSnakeCaseNamingConvention());
+             .UseSnakeCaseNamingConvention()
+             .AddHbmpRlsInterceptors(sp));
         services.AddScoped<AssignmentResolver>();
         services.AddScoped<CaseNoIssuer>();
         return services;

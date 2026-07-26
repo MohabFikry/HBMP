@@ -48,6 +48,7 @@ public sealed class CaseFile
 public sealed class CaseAssignment
 {
     public Guid AssignmentId { get; set; }
+    public string TenantId { get; set; } = "";                     // RLS tenant scope (ADR-0011)
     public Guid CaseId { get; set; }
     public Guid CaseManagerId { get; set; }                        // identity user id
     public DateTimeOffset AssignedAt { get; set; }
@@ -61,6 +62,7 @@ public sealed class CaseAssignment
 public sealed class CoordinationTask
 {
     public Guid TaskId { get; set; }
+    public string TenantId { get; set; } = "";
     public Guid CaseId { get; set; }
     public string Title { get; set; } = default!;
     public string? Description { get; set; }
@@ -78,6 +80,7 @@ public sealed class CoordinationTask
 public sealed class Escalation
 {
     public Guid EscalationId { get; set; }
+    public string TenantId { get; set; } = "";
     public Guid CaseId { get; set; }
     public string? RaisedBy { get; set; }
     public string RaisedToRole { get; set; } = default!;           // e.g. medical_approval / medical_director
