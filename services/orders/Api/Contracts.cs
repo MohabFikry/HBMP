@@ -16,6 +16,10 @@ public sealed record RaiseAccessRequest(Guid OrderId, Guid OrderLineId, string P
 
 public sealed record AccessDecision(string Decision, int? TtlHours, string? Reason);
 
+/// <summary>18.A4 — the requester answering an InfoRequested decision. The supplement is APPENDED to the
+/// original justification; nothing is overwritten (23 §11).</summary>
+public sealed record SupplyInfo(string Supplement);
+
 public sealed record OrderLineResponse(
     Guid OrderLineId, string CodeSystem, string Code, string? Description,
     decimal QuantityOrdered, decimal QuantityConsumed, string Status)

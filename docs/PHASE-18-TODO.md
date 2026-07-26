@@ -4,7 +4,7 @@ Source of truth for findings: [`AUDIT-R2-E2E.md`](AUDIT-R2-E2E.md) · gates: [`.
 
 Mark `✅ YYYY-MM-DD` per id here **and** on the finding row in `AUDIT-R2-E2E.md` as each closes.
 
-## Gate A — Benefit & money correctness (blocks any pilot with real data)
+## Gate A — Benefit & money correctness (blocks any pilot with real data) — ✅ COMPLETE 2026-07-27
 
 | Sub | Id | Finding | Status |
 |---|---|---|---|
@@ -17,8 +17,8 @@ Mark `✅ YYYY-MM-DD` per id here **and** on the finding row in `AUDIT-R2-E2E.md
 | 18.A3 | X10 | First-ever limit reset wipes in-period consumption (test asserts the bug) | ✅ 2026-07-27 |
 | 18.A3 | — | Waitlist promotion unlocked; cancel/no-show 3 unwrapped SaveChanges; prefix idempotency keys | ✅ 2026-07-27 |
 | 18.A3 | — | `IBusinessCalendar.Today()` Africa/Cairo + TimeProvider injection + UtcNow ban | ✅ 2026-07-27 |
-| 18.A4 | F10–F12,F19,F20,F27,F30 | Report-access TTL cap + missing transitions; settlement SoD + frozen snapshot; adjustment TOCTOU; policy reactivation; voided claim terminal; TransitionDenied audit | ☐ |
-| 18.A4 | — | State-machine conformance test generated from `23-state-machines.md` | ☐ |
+| 18.A4 | F10–F12,F19,F20,F27,F30 | Report-access TTL cap + missing transitions; settlement SoD + frozen snapshot; adjustment TOCTOU; policy reactivation; voided claim terminal; TransitionDenied audit | ✅ 2026-07-27 |
+| 18.A4 | — | State-machine conformance test generated from `23-state-machines.md` | ✅ 2026-07-27 |
 
 ## Gate B — Security closure (no pilot data before this)
 

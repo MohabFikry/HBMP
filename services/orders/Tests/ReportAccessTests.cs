@@ -47,6 +47,69 @@ public class ReportAccessTests
         SensitiveResultGate.DefaultTtlHours(SensitivityLevel.HighlySensitive).Should().Be(24);
     }
 
+    // ── 18.A4 — TTL cap + the lifecycle transitions that were unreachable ─────────────────────────
+
+    [Fact]
+    public void A_caller_supplied_ttl_can_never_exceed_the_policy_maximum()
+    {
+        // The decision endpoint used to pass dec.TtlHours straight through, so a year-long grant could be
+        // minted over a HighlySensitive result that policy caps at 24 hours.
+        SensitiveResultGate.EffectiveTtlHours(SensitivityLevel.HighlySensitive, 8760).Should().Be(24);
+        SensitiveResultGate.EffectiveTtlHours(SensitivityLevel.Sensitive, 8760).Should().Be(72);
+    }
+
+    [Fact]
+    public void A_shorter_ttl_than_policy_is_honoured_and_a_missing_one_falls_back_to_the_default()
+    {
+        SensitiveResultGate.EffectiveTtlHours(SensitivityLevel.Sensitive, 4).Should().Be(4);
+        SensitiveResultGate.EffectiveTtlHours(SensitivityLevel.Sensitive, null).Should().Be(72);
+        SensitiveResultGate.EffectiveTtlHours(SensitivityLevel.HighlySensitive, 0).Should().Be(24);
+        SensitiveResultGate.EffectiveTtlHours(SensitivityLevel.HighlySensitive, -5).Should().Be(24);
+    }
+
+    [Fact]
+    public void The_full_declared_lifecycle_is_reachable()
+    {
+        // Requested → UnderReview → InfoRequested ⇄ UnderReview → Approved → Expired|Revoked (23 §11).
+        ReportAccessWorkflow.CanTransition(ReportAccessStatus.Requested, ReportAccessStatus.UnderReview).Should().BeTrue();
+        ReportAccessWorkflow.CanTransition(ReportAccessStatus.UnderReview, ReportAccessStatus.InfoRequested).Should().BeTrue();
+        ReportAccessWorkflow.CanTransition(ReportAccessStatus.InfoRequested, ReportAccessStatus.UnderReview).Should().BeTrue();
+        ReportAccessWorkflow.CanTransition(ReportAccessStatus.UnderReview, ReportAccessStatus.Approved).Should().BeTrue();
+        ReportAccessWorkflow.CanTransition(ReportAccessStatus.UnderReview, ReportAccessStatus.Denied).Should().BeTrue();
+        ReportAccessWorkflow.CanTransition(ReportAccessStatus.Approved, ReportAccessStatus.Expired).Should().BeTrue();
+        ReportAccessWorkflow.CanTransition(ReportAccessStatus.Approved, ReportAccessStatus.Revoked).Should().BeTrue();
+    }
+
+    [Fact]
+    public void A_request_in_InfoRequested_is_no_longer_stuck()
+    {
+        // Before 18.A4 there was no supply-info path, so a request that entered InfoRequested could never
+        // be answered and the release was permanently blocked.
+        ReportAccessWorkflow.Validate(ReportAccessStatus.InfoRequested, ReportAccessStatus.UnderReview)
+            .Should().BeNull();
+        ReportAccessWorkflow.IsDecidable(ReportAccessStatus.InfoRequested).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(ReportAccessStatus.Denied)]
+    [InlineData(ReportAccessStatus.Expired)]
+    [InlineData(ReportAccessStatus.Revoked)]
+    public void A_terminal_request_can_never_move_again(ReportAccessStatus terminal)
+    {
+        ReportAccessWorkflow.IsTerminal(terminal).Should().BeTrue();
+        ReportAccessWorkflow.IsDecidable(terminal).Should().BeFalse();
+        foreach (var to in Enum.GetValues<ReportAccessStatus>())
+            if (to != terminal)
+                ReportAccessWorkflow.CanTransition(terminal, to).Should().BeFalse();
+    }
+
+    [Fact]
+    public void A_grant_cannot_be_approved_twice_or_reopened_after_denial()
+    {
+        ReportAccessWorkflow.Validate(ReportAccessStatus.Approved, ReportAccessStatus.Approved).Should().NotBeNull();
+        ReportAccessWorkflow.Validate(ReportAccessStatus.Denied, ReportAccessStatus.UnderReview).Should().NotBeNull();
+    }
+
     [Fact]
     public void A_request_requires_a_non_blank_justification()
     {

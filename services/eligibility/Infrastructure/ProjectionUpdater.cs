@@ -124,8 +124,10 @@ public sealed class ProjectionUpdater(EligibilityDbContext db, IEligibilityCache
         var affected = await db.Coverages.Where(c => c.PolicyNo == policyNo).ToListAsync(ct);
         foreach (var c in affected)
         {
-            if (status is not null && !string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase))
-                c.Status = status;   // a suspended/expired policy cascades to its coverages
+            // 18.A4: mirror the policy status UNCONDITIONALLY. Only non-Active was written before, so a
+            // suspended policy correctly cascaded to its coverages but REACTIVATING it never restored
+            // them — the member stayed ineligible with no way back short of a manual DB fix.
+            if (status is not null) c.Status = status;
             c.UpdatedAt = clock.GetUtcNow();
             await cache.InvalidateAsync(c.BeneficiaryId, ct);
         }

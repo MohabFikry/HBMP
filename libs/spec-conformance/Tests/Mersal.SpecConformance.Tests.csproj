@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>Mersal.SpecConformance.Tests</RootNamespace><IsPackable>false</IsPackable><IsTestProject>true</IsTestProject></PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" /><PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" /><PackageReference Include="coverlet.collector" />
+    <PackageReference Include="FluentAssertions" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The state machines under test. Domain projects only — no infrastructure, no DB. -->
+    <ProjectReference Include="../../../services/orders/Domain/Mersal.Orders.Domain.csproj" />
+    <ProjectReference Include="../../../services/pharmacy/Domain/Mersal.Pharmacy.Domain.csproj" />
+    <ProjectReference Include="../../../services/approvals/Domain/Mersal.Approvals.Domain.csproj" />
+    <ProjectReference Include="../../../services/emr/Domain/Mersal.Emr.Domain.csproj" />
+    <ProjectReference Include="../../../services/claims/Domain/Mersal.Claims.Domain.csproj" />
+    <ProjectReference Include="../../../services/patient/Domain/Mersal.Patient.Domain.csproj" />
+  </ItemGroup>
+  <ItemGroup><Using Include="Xunit" /></ItemGroup>
+</Project>

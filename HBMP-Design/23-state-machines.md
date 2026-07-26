@@ -236,6 +236,7 @@ stateDiagram-v2
     Waitlisted --> Expired: waitlist window lapsed
     Scheduled --> CheckedIn: beneficiary arrives
     Scheduled --> Cancelled: cancel
+    CheckedIn --> Cancelled: cancel after check-in
     Scheduled --> NoShow: window passed, absent
     NoShow --> Scheduled: rebook
     CheckedIn --> InConsultation: doctor starts

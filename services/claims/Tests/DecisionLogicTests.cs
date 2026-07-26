@@ -63,4 +63,28 @@ public class DecisionLogicTests
     [InlineData(new[] { ClaimLineStatus.Approved, ClaimLineStatus.Pending }, ClaimStatus.UnderAdjudication)]
     public void Line_statuses_roll_up_to_the_claim_status(ClaimLineStatus[] lines, ClaimStatus expected) =>
         DecisionRules.RollUp(lines).Should().Be(expected);
+
+    // ── 18.A4 — a fully-voided claim is finished, not stuck ───────────────────────────────────────
+
+    [Fact]
+    public void A_fully_voided_claim_is_Void_not_UnderAdjudication()
+    {
+        // It used to fall through to UnderAdjudication and sit on the officer worklist forever,
+        // un-actionable, because there was nothing left to decide (23 §7).
+        DecisionRules.RollUp([ClaimLineStatus.Void, ClaimLineStatus.Void]).Should().Be(ClaimStatus.Void);
+    }
+
+    [Fact]
+    public void A_partly_voided_claim_still_rolls_up_from_its_live_lines()
+    {
+        DecisionRules.RollUp([ClaimLineStatus.Void, ClaimLineStatus.Approved]).Should().Be(ClaimStatus.Approved);
+        DecisionRules.RollUp([ClaimLineStatus.Void, ClaimLineStatus.Pending]).Should().Be(ClaimStatus.UnderAdjudication);
+    }
+
+    [Fact]
+    public void A_claim_with_no_lines_at_all_is_still_UnderAdjudication()
+    {
+        // Distinct from "every line voided": an empty claim is unfinished intake, not a closed decision.
+        DecisionRules.RollUp([]).Should().Be(ClaimStatus.UnderAdjudication);
+    }
 }

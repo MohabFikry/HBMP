@@ -19,7 +19,12 @@ public sealed class NullWormStore : ISettlementDocumentStore
         Task.FromResult(Guid.NewGuid());
 }
 
-public enum SettlementOutcome { Generated, Regenerated, BatchNotDecided, NotFound }
+public enum SettlementOutcome
+{
+    Generated, Regenerated, BatchNotDecided, NotFound,
+    /// <summary>18.A4 — the releaser is the batch creator; segregation of duties refuses it (36 §9).</summary>
+    SoDSameActor,
+}
 public sealed record SettlementResult(SettlementOutcome Outcome, SettlementAdvice? Advice, ClaimBatch? Batch);
 
 public enum ExportOutcome { Ok, ProviderDenied, NotFound }
@@ -43,7 +48,18 @@ public sealed class SettlementService(ClaimsDbContext db, ISettlementDocumentSto
         if (batch.Status != BatchStatus.Decided && !regen)
             return new SettlementResult(SettlementOutcome.BatchNotDecided, null, batch);
 
-        var projection = await BuildProjectionAsync(batch, actor, ct);
+        // 18.A4 — SEGREGATION OF DUTIES: the person who releases the settlement may not be the person who
+        // assembled the batch. Release is the last human control before money leaves on the strength of
+        // this document; one actor doing both is the classic single-point fraud path (36 §9).
+        if (batch.CreatedBy is { } creator && string.Equals(creator, actor, StringComparison.Ordinal))
+            return new SettlementResult(SettlementOutcome.SoDSameActor, null, batch);
+
+        // 18.A4 — a REGENERATION reproduces the frozen figures. Rebuilding from live rows meant a
+        // regenerated advice could disagree with the one already sent to the provider; corrections belong
+        // in a NEW batch, not a quietly different version of the settled one (23 §9).
+        var projection = regen
+            ? await BuildFrozenProjectionAsync(batch, actor, ct)
+            : await BuildProjectionAsync(batch, actor, ct);
         var file = SettlementRenderer.Render(projection, "CSV");
         var hash = SettlementRenderer.ContentHash(projection);
         var documentId = await store.StoreAsync(tenantId, batchId, file, hash, bearerToken, ct);
@@ -105,6 +121,30 @@ public sealed class SettlementService(ClaimsDbContext db, ISettlementDocumentSto
         batch.Status = BatchStatus.Closed;
         await db.SaveChangesAsync(ct);
         return PaymentRefOutcome.Recorded;
+    }
+
+    /// <summary>
+    /// 18.A4 — the projection for a REGENERATION: the totals come from the batch's frozen rollups and the
+    /// line detail from the advice version that was actually issued, so version N+1 is a faithful re-render
+    /// of version N (a new document id and hash, the same money). If no prior advice exists the batch is
+    /// not really a regeneration and we fall back to the live build.
+    /// </summary>
+    private async Task<SettlementProjection> BuildFrozenProjectionAsync(ClaimBatch batch, string actor, CancellationToken ct)
+    {
+        var prior = await db.SettlementAdvices.AsNoTracking()
+            .Where(a => a.BatchId == batch.BatchId).OrderByDescending(a => a.Version).FirstOrDefaultAsync(ct);
+        if (prior is null) return await BuildProjectionAsync(batch, actor, ct);
+
+        var live = await BuildProjectionAsync(batch, actor, ct);
+        return live with
+        {
+            TotalClaimed = prior.TotalClaimed,
+            TotalPriced = prior.TotalPriced,
+            TotalApproved = prior.TotalApproved,
+            TotalAdjusted = prior.TotalAdjusted,
+            TotalDenied = prior.TotalDenied,
+            NetPayable = prior.NetPayable,
+        };
     }
 
     private async Task<SettlementProjection> BuildProjectionAsync(ClaimBatch batch, string actor, CancellationToken ct)

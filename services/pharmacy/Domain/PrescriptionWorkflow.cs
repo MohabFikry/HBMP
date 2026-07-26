@@ -10,7 +10,8 @@ public static class PrescriptionWorkflow
         [RxStatus.Draft] = [RxStatus.Submitted, RxStatus.Cancelled],
         [RxStatus.Submitted] = [RxStatus.Approved, RxStatus.Rejected, RxStatus.Cancelled],
         [RxStatus.Approved] = [RxStatus.PartiallyDispensed, RxStatus.Dispensed, RxStatus.Expired, RxStatus.Cancelled],
-        [RxStatus.PartiallyDispensed] = [RxStatus.Dispensed, RxStatus.Expired],
+        // 18.A4: declared self-loop in 23 §3 — a further partial dispense leaves the Rx PartiallyDispensed.
+        [RxStatus.PartiallyDispensed] = [RxStatus.PartiallyDispensed, RxStatus.Dispensed, RxStatus.Expired],
         [RxStatus.Rejected] = [],
         [RxStatus.Dispensed] = [],
         [RxStatus.Expired] = [],

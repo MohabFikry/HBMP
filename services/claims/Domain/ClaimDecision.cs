@@ -73,7 +73,12 @@ public static class DecisionRules
     /// <summary>Roll line statuses up to the claim status (23 §7). Any Pending line ⇒ still UnderAdjudication.</summary>
     public static ClaimStatus RollUp(IReadOnlyCollection<ClaimLineStatus> lineStatuses)
     {
-        var live = lineStatuses.Where(s => s != ClaimLineStatus.Void).ToList();
+        var all = lineStatuses.ToList();
+        var live = all.Where(s => s != ClaimLineStatus.Void).ToList();
+        // 18.A4: a claim whose every line has been voided is FINISHED. It used to fall through to
+        // UnderAdjudication and sit on the officer worklist forever, un-actionable, because there was
+        // nothing left to decide (23 §7).
+        if (all.Count > 0 && live.Count == 0) return ClaimStatus.Void;
         if (live.Count == 0 || live.Any(s => s == ClaimLineStatus.Pending)) return ClaimStatus.UnderAdjudication;
         if (live.All(s => s == ClaimLineStatus.Denied)) return ClaimStatus.Denied;
         if (live.All(s => s is ClaimLineStatus.Approved)) return ClaimStatus.Approved;

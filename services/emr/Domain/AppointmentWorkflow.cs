@@ -18,6 +18,11 @@ public static class AppointmentWorkflow
         (AppointmentStatus.Booked, AppointmentStatus.NoShow) => true,      // grace passed, absent
         (AppointmentStatus.CheckedIn, AppointmentStatus.Completed) => true,// encounter closed (phase 4)
         (AppointmentStatus.CheckedIn, AppointmentStatus.Cancelled) => true,// cancel after check-in
+        // 18.A4: rebook a no-show (23 §6 "NoShow --rebook--> Scheduled", within re-booking policy). This
+        // declared transition was missing, so a beneficiary who missed an appointment could not be put
+        // back on the same record — the only route was a brand-new appointment, which loses the link to
+        // the missed one and hides repeat no-shows from the Case Manager escalation the spec asks for.
+        (AppointmentStatus.NoShow, AppointmentStatus.Booked) => true,
         _ => false,
     };
 

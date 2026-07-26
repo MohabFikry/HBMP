@@ -11,7 +11,9 @@ public static class OrderWorkflow
         [OrderStatus.PendingApproval] = [OrderStatus.Approved, OrderStatus.Rejected, OrderStatus.Cancelled],
         [OrderStatus.Approved] = [OrderStatus.Active],
         [OrderStatus.Active] = [OrderStatus.PartiallyUsed, OrderStatus.Completed, OrderStatus.Expired, OrderStatus.Cancelled],
-        [OrderStatus.PartiallyUsed] = [OrderStatus.Completed, OrderStatus.Expired],
+        // 18.A4: the self-loop is declared in 23 §2 — consuming a further subset leaves the order
+        // PartiallyUsed and that is a legal, audited move, not a no-op.
+        [OrderStatus.PartiallyUsed] = [OrderStatus.PartiallyUsed, OrderStatus.Completed, OrderStatus.Expired],
         [OrderStatus.Rejected] = [],
         [OrderStatus.Completed] = [],
         [OrderStatus.Expired] = [],

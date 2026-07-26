@@ -31,6 +31,18 @@ public static class SettlementEndpoints
                 case SettlementOutcome.BatchNotDecided:
                     return Results.Problem(statusCode: 409, title: "batch-not-decided", type: "urn:hbmp:conflict",
                         detail: "A settlement advice can only be generated for a Decided batch.");
+                case SettlementOutcome.SoDSameActor:
+                    // 18.A4 — segregation of duties: release is the last human control before money moves
+                    // on this document, so it may not be performed by whoever assembled the batch (36 §9).
+                    await deps.Audit.EmitAsync(new AuditEventDraft
+                    {
+                        EntityType = "claim_batch", EntityId = id.ToString(), Action = AuditAction.Decision,
+                        ActorUserId = deps.Subject, ActorRole = deps.Roles, TenantId = deps.Tenant,
+                        DecisionOutcome = "TransitionDenied", DecisionReasonCode = "sod-releaser-is-batch-creator",
+                        Severity = AuditSeverity.High, FieldClasses = ["financials"],
+                    }, ct);
+                    return Results.Problem(statusCode: 409, title: "sod-violation", type: "urn:hbmp:sod-violation",
+                        detail: "The settlement must be released by someone other than the person who created the batch.");
                 default:
                     await deps.Outbox.EnqueueAsync("SettlementAdviceIssued.v1", "claims.events", new
                     {

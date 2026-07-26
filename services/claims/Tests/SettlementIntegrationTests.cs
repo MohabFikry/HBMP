@@ -55,6 +55,66 @@ public class SettlementIntegrationTests
         return batch.BatchId;
     }
 
+    // ── 18.A4 — segregation of duties + frozen regeneration ───────────────────────────────────────
+
+    [SkippableFact]
+    public async Task The_batch_creator_may_not_release_its_own_settlement()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var tenant = T();
+        try
+        {
+            var batchId = await SeedDecidedBatch(tenant, Guid.NewGuid());   // seeded with CreatedBy = "creator"
+
+            await using var db = Ctx();
+            // Release is the last human control before money moves on the strength of this document, so one
+            // actor doing both is the classic single-point fraud path (36 §9).
+            var r = await Svc(db).GenerateAsync(tenant, batchId, "creator", null);
+
+            r.Outcome.Should().Be(SettlementOutcome.SoDSameActor);
+            r.Advice.Should().BeNull();
+
+            await using var verify = Ctx();
+            (await verify.ClaimBatches.AsNoTracking().SingleAsync(b => b.BatchId == batchId)).Status
+                .Should().Be(BatchStatus.Decided, "a refused release must not move the batch");
+            (await verify.SettlementAdvices.CountAsync(a => a.BatchId == batchId)).Should().Be(0);
+        }
+        finally { await Cleanup(tenant); }
+    }
+
+    [SkippableFact]
+    public async Task A_regenerated_advice_reproduces_the_frozen_figures()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var tenant = T();
+        var provider = Guid.NewGuid();
+        try
+        {
+            var batchId = await SeedDecidedBatch(tenant, provider);
+            await using (var db = Ctx()) await Svc(db).GenerateAsync(tenant, batchId, "releaser", null);
+
+            // Mutate a line AFTER settlement. Regeneration used to rebuild from live rows, so version 2
+            // could quietly disagree with the version already sent to the provider. Corrections belong in
+            // a NEW batch (23 §9).
+            await using (var db = Ctx())
+            {
+                var line = await db.ClaimLines.FirstAsync(l => l.BilledAmount == 200m && l.AllowedAmount == 180m);
+                line.AllowedAmount = 5m;
+                await db.SaveChangesAsync();
+            }
+
+            await using (var db = Ctx())
+            {
+                var again = await Svc(db).GenerateAsync(tenant, batchId, "releaser", null);
+                again.Outcome.Should().Be(SettlementOutcome.Regenerated);
+                again.Advice!.Version.Should().Be(2);
+                again.Advice.TotalApproved.Should().Be(180m, "the frozen figure, not the mutated live row");
+                again.Advice.NetPayable.Should().Be(180m);
+            }
+        }
+        finally { await Cleanup(tenant); }
+    }
+
     [SkippableFact]
     public async Task Decided_batch_generates_an_immutable_frozen_settlement_advice()
     {

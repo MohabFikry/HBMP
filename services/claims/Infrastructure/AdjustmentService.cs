@@ -1,5 +1,6 @@
 using Mersal.Claims.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Mersal.Claims.Infrastructure;
 
@@ -44,6 +45,13 @@ public sealed class AdjustmentService(ClaimsDbContext db, BatchRollupService rol
         var err = AdjustmentRules.Validate(req.Type, req.AmountDelta, req.ReasonCode, req.Rationale, req.RecoversClaimLineId);
         if (err is not null) return new AdjustmentResult(AdjustmentOutcome.Validation, null, claim, line, err);
 
+        // 18.A4 — TOCTOU: the dual-control net used to be computed from an AsNoTracking read and acted on
+        // in a LATER transaction. Two adjustments racing each other both saw a positive net, both were
+        // recorded as applied, and the batch went negative with NO second approver anywhere. The scope is
+        // now locked for the duration of the decision.
+        await using var gate = await db.Database.BeginTransactionAsync(ct);
+        await LockScopeAsync(claim, ct);
+
         var before = CurrentPayable(line);
         var after = before + req.AmountDelta;
 
@@ -60,18 +68,29 @@ public sealed class AdjustmentService(ClaimsDbContext db, BatchRollupService rol
         db.ClaimAdjustments.Add(row);
 
         if (wouldGoNegative)
-            return await SaveAsync(AdjustmentOutcome.PendingSecondApproval, row, claim, line, ct);
+        {
+            var pendingResult = await SaveAsync(AdjustmentOutcome.PendingSecondApproval, row, claim, line, ct);
+            await gate.CommitAsync(ct);
+            return pendingResult;
+        }
 
         ApplyEffect(line, req.Type);
         await rollups.RecomputeClaimTotalsAsync(claim, ct);
         await rollups.RecomputeForClaimAsync(claim, ct);
-        return await SaveAsync(AdjustmentOutcome.Recorded, row, claim, line, ct);
+        var result = await SaveAsync(AdjustmentOutcome.Recorded, row, claim, line, ct);
+        await gate.CommitAsync(ct);
+        return result;
     }
 
     private async Task<AdjustmentResult> ConfirmAsync(
         string tenantId, string actor, Claim claim, ClaimLine line, Guid confirmId,
         string? idempotencyKey, string correlationId, CancellationToken ct)
     {
+        // 18.A4: same scope lock as the raise path — the confirming write must serialize against any
+        // other adjustment on this batch.
+        await using var gate = await db.Database.BeginTransactionAsync(ct);
+        await LockScopeAsync(claim, ct);
+
         var pending = await db.ClaimAdjustments.FirstOrDefaultAsync(
             a => a.AdjustmentId == confirmId && a.ClaimLineId == line.ClaimLineId && a.PendingSecondApproval, ct);
         if (pending is null) return Fail(AdjustmentOutcome.DualControlNotPending);
@@ -85,7 +104,9 @@ public sealed class AdjustmentService(ClaimsDbContext db, BatchRollupService rol
         ApplyEffect(line, pending.AdjustmentType);
         await rollups.RecomputeClaimTotalsAsync(claim, ct);
         await rollups.RecomputeForClaimAsync(claim, ct);
-        return await SaveAsync(AdjustmentOutcome.Confirmed, confirming, claim, line, ct);
+        var confirmed = await SaveAsync(AdjustmentOutcome.Confirmed, confirming, claim, line, ct);
+        if (confirmed.Outcome == AdjustmentOutcome.Confirmed) await gate.CommitAsync(ct);
+        return confirmed;
     }
 
     // ---- effect + rollup ----------------------------------------------------------------------------------
@@ -100,6 +121,22 @@ public sealed class AdjustmentService(ClaimsDbContext db, BatchRollupService rol
     /// adjustment row itself.</summary>
     private static void ApplyEffect(ClaimLine line, AdjustmentType type) =>
         line.Status = AdjustmentRules.ResultingStatus(type);
+
+    /// <summary>
+    /// 18.A4 — take a row lock over the adjustment's scope so the dual-control net cannot move underneath
+    /// the decision. The batch row is the natural serialization point when the claim is batched; an
+    /// unbatched claim locks its own row. Blocking (not SKIP LOCKED) is correct here: a concurrent
+    /// adjustment must WAIT and then see this one's effect, never bypass the threshold.
+    /// </summary>
+    private async Task LockScopeAsync(Claim claim, CancellationToken ct)
+    {
+        if (claim.BatchId is { } batchId)
+            await db.Database.ExecuteSqlRawAsync(
+                "SELECT 1 FROM claims.claim_batch WHERE batch_id = {0} FOR UPDATE", [batchId], ct);
+        else
+            await db.Database.ExecuteSqlRawAsync(
+                "SELECT 1 FROM claims.claim WHERE claim_id = {0} FOR UPDATE", [claim.ClaimId], ct);
+    }
 
     /// <summary>Net payable over the adjustment's scope (its batch if batched, else the claim) WITH the
     /// proposed delta applied — the dual-control trigger. Uses the same disjoint approved + adjusted
@@ -119,27 +156,43 @@ public sealed class AdjustmentService(ClaimsDbContext db, BatchRollupService rol
         return approved + await rollups.AppliedAdjustedAsync(claimIds, ct) + newDelta;
     }
 
+    /// <summary>
+    /// Persist within the AMBIENT transaction when the caller has one (18.A4 opens a scope lock before
+    /// the dual-control decision, and the write must land inside it), otherwise open a local one. Nesting
+    /// a second BeginTransaction inside the lock would throw.
+    /// </summary>
     private async Task<AdjustmentResult> SaveAsync(
         AdjustmentOutcome outcome, ClaimAdjustment adjustment, Claim claim, ClaimLine line, CancellationToken ct)
     {
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var ambient = db.Database.CurrentTransaction;
+        var tx = ambient is null ? await db.Database.BeginTransactionAsync(ct) : null;
         try
         {
             await db.SaveChangesAsync(ct);
-            await tx.CommitAsync(ct);
+            if (tx is not null) await tx.CommitAsync(ct);
             return new AdjustmentResult(outcome, adjustment, claim, line);
         }
         catch (DbUpdateConcurrencyException)
         {
-            await tx.RollbackAsync(ct); db.ChangeTracker.Clear();
+            await RollbackAsync(tx, ambient, ct);
             return Fail(AdjustmentOutcome.Conflict);
         }
         catch (DbUpdateException ex) when (IsUnique(ex, "ux_adjustment_idempotency"))
         {
-            await tx.RollbackAsync(ct); db.ChangeTracker.Clear();
+            await RollbackAsync(tx, ambient, ct);
             var prior = await db.ClaimAdjustments.AsNoTracking().FirstAsync(a => a.IdempotencyKey == adjustment.IdempotencyKey, ct);
             return new AdjustmentResult(AdjustmentOutcome.Replayed, prior, claim, line);
         }
+        finally
+        {
+            if (tx is not null) await tx.DisposeAsync();
+        }
+    }
+
+    private async Task RollbackAsync(IDbContextTransaction? owned, IDbContextTransaction? ambient, CancellationToken ct)
+    {
+        await (owned ?? ambient)!.RollbackAsync(ct);
+        db.ChangeTracker.Clear();
     }
 
     private ClaimAdjustment NewRow(
