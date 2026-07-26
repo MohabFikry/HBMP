@@ -150,15 +150,18 @@ reg.MapPost("", async (CreateRegistration req, HttpRequest http, PatientDbContex
 });
 
 // Set step data (documents verified / coverage bound / notes).
-reg.MapPatch("/{id:guid}", async (Guid id, PatchRegistration req, PatientDbContext db, CancellationToken ct) =>
+reg.MapPatch("/{id:guid}", async (Guid id, PatchRegistration req, PatientDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
     var r = await db.Registrations.FirstOrDefaultAsync(x => x.RegistrationId == id, ct);
     if (r is null) return Results.NotFound();
+    var before = $"{{\"documentsVerified\":{r.DocumentsVerified.ToString().ToLowerInvariant()},\"coverageBound\":{r.CoverageBound.ToString().ToLowerInvariant()}}}";
     if (req.DocumentsVerified is { } dv) r.DocumentsVerified = dv;
     if (req.CoverageBound is { } cb) r.CoverageBound = cb;
     if (req.Notes is not null) r.Notes = req.Notes;
     r.UpdatedAt = DateTimeOffset.UtcNow;
     await db.SaveChangesAsync(ct);
+    var after = $"{{\"documentsVerified\":{r.DocumentsVerified.ToString().ToLowerInvariant()},\"coverageBound\":{r.CoverageBound.ToString().ToLowerInvariant()}}}";
+    await audit.EmitAsync(new AuditEventDraft { EntityType = "registration", EntityId = r.RegistrationId.ToString(), Action = AuditAction.Update, ActorUserId = me.Principal?.Subject, BeforeState = before, AfterState = after }, ct);
     return Results.Ok(new { r.RegistrationId, status = r.Status.ToString(), r.DocumentsVerified, r.CoverageBound });
 });
 
