@@ -27,8 +27,13 @@ public sealed record ClinicalContext(
     public static readonly string[] FieldClasses = ["emr_summary", "clinical_note", "supporting_document"];
 }
 
-public sealed record ClinicalNote(string Type, string Author, DateTimeOffset AuthoredAt, string Summary);
-public sealed record SupportingDocument(Guid DocumentId, string Kind, string FileName);
+// SensitivityLevel + CallerHasAccess are supplied by the data owner (emr/orders) that assembled the item for
+// THIS caller (author or active report-access grant). The review projection reduces non-Standard items the caller
+// cannot access to existence-metadata-only via Mersal.Authz.SensitiveDisclosure (design 37 §6, H4).
+public sealed record ClinicalNote(string Type, string Author, DateTimeOffset AuthoredAt, string Summary,
+    string SensitivityLevel = "Standard", bool CallerHasAccess = true);
+public sealed record SupportingDocument(Guid DocumentId, string Kind, string FileName,
+    string SensitivityLevel = "Standard", bool CallerHasAccess = true);
 
 /// <summary>Priority-based SLA policy (hours to due), overridable from config (Approvals:Sla). Defaults mirror
 /// <see cref="AuthorizationWorkflow.SlaDue"/>.</summary>

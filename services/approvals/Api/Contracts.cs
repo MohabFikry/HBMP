@@ -1,5 +1,6 @@
 using Mersal.Approvals.Domain;
 using Mersal.Approvals.Infrastructure;
+using Mersal.Authz;
 
 namespace Mersal.Approvals.Api;
 
@@ -62,16 +63,36 @@ public sealed record ReviewView(
     string Status,
     bool ClinicalContextAvailable,
     string EmrSummary,
-    IReadOnlyList<ClinicalNote> Notes,
-    IReadOnlyList<SupportingDocument> Documents)
+    IReadOnlyList<ReviewNote> Notes,
+    IReadOnlyList<ReviewDocument> Documents)
 {
     public static ReviewView From(Authorization a, ClinicalContext? ctx) => new(
         a.AuthorizationId, a.AuthNo, a.BeneficiaryId, a.Source.ToString(), a.SourceRef,
         Codes.Parse(a.ServiceCodes), a.RequestedScope, a.Priority.ToString(), a.Status.ToString(),
         ctx is not null,
         ctx?.EmrSummary ?? "clinical context unavailable",
-        ctx?.Notes ?? [],
-        ctx?.Documents ?? []);
+        (ctx?.Notes ?? []).Select(ReviewNote.Of).ToList(),
+        (ctx?.Documents ?? []).Select(ReviewDocument.Of).ToList());
+}
+
+/// <summary>A note as the reviewer sees it. H4/design 37 §6: a non-Standard note the caller may not access is
+/// reduced to existence metadata only — its <see cref="Summary"/> is dropped and <see cref="Restricted"/> is set.</summary>
+public sealed record ReviewNote(string Type, string Author, DateTimeOffset AuthoredAt, string Summary, bool Restricted)
+{
+    public static ReviewNote Of(ClinicalNote n) =>
+        SensitiveDisclosure.IsRestricted(n.SensitivityLevel, n.CallerHasAccess)
+            ? new(n.Type, n.Author, n.AuthoredAt, "[RESTRICTED — sensitive result; request access]", true)
+            : new(n.Type, n.Author, n.AuthoredAt, n.Summary, false);
+}
+
+/// <summary>A supporting document/report as the reviewer sees it. A restricted item keeps its category (Kind) +
+/// existence but drops the fetchable ref (DocumentId) and file name so it cannot be retrieved without a grant.</summary>
+public sealed record ReviewDocument(Guid DocumentId, string Kind, string FileName, bool Restricted)
+{
+    public static ReviewDocument Of(SupportingDocument d) =>
+        SensitiveDisclosure.IsRestricted(d.SensitivityLevel, d.CallerHasAccess)
+            ? new(Guid.Empty, d.Kind, "", true)
+            : new(d.DocumentId, d.Kind, d.FileName, false);
 }
 
 // ---- Decisions (phase 7.2) ----

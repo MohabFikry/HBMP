@@ -10,6 +10,8 @@
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Approvals.Domain.csproj" />
     <ProjectReference Include="../Infrastructure/Mersal.Approvals.Infrastructure.csproj" />
+    <ProjectReference Include="../Api/Mersal.Approvals.Api.csproj" /> <!-- ReviewView projection (16.6, H4) -->
+
     <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
     <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" />
   </ItemGroup>

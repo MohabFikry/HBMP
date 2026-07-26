@@ -36,14 +36,20 @@ public sealed class HttpClinicalContextClient(HttpClient http) : IClinicalContex
 
             return new ClinicalContext(
                 dto.EmrSummary ?? "",
-                (dto.Notes ?? []).Select(n => new ClinicalNote(n.Type ?? "", n.Author ?? "", n.AuthoredAt, n.Summary ?? "")).ToList(),
-                (dto.Documents ?? []).Select(d => new SupportingDocument(d.DocumentId, d.Kind ?? "", d.FileName ?? "")).ToList());
+                (dto.Notes ?? []).Select(n => new ClinicalNote(n.Type ?? "", n.Author ?? "", n.AuthoredAt, n.Summary ?? "",
+                    n.SensitivityLevel ?? "Standard", n.CallerHasAccess ?? true)).ToList(),
+                (dto.Documents ?? []).Select(d => new SupportingDocument(d.DocumentId, d.Kind ?? "", d.FileName ?? "",
+                    d.SensitivityLevel ?? "Standard", d.CallerHasAccess ?? true)).ToList());
         }
         catch (HttpRequestException) { return null; }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested) { return null; }
     }
 
+    // The oversight owner (emr/orders) stamps each item's sensitivity + whether THIS caller may see full content
+    // (author or active report-access grant). The review projection enforces the disclosure rule regardless (H4).
     private sealed record ClinicalContextDto(string? EmrSummary, List<NoteDto>? Notes, List<DocDto>? Documents);
-    private sealed record NoteDto(string? Type, string? Author, DateTimeOffset AuthoredAt, string? Summary);
-    private sealed record DocDto(Guid DocumentId, string? Kind, string? FileName);
+    private sealed record NoteDto(string? Type, string? Author, DateTimeOffset AuthoredAt, string? Summary,
+        string? SensitivityLevel, bool? CallerHasAccess);
+    private sealed record DocDto(Guid DocumentId, string? Kind, string? FileName,
+        string? SensitivityLevel, bool? CallerHasAccess);
 }
