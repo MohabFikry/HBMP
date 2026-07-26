@@ -15,7 +15,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("document-service");
-builder.Services.AddHbmpAuthorization();
+builder.Services.AddHbmpAuthorization(DocumentPolicies.Bundle());
 builder.Services.AddHbmpEvents(builder.Configuration);
 builder.Services.AddHbmpDurableOutbox<DocumentDbContext>();
 builder.Services.AddDocumentInfrastructure(builder.Configuration);
@@ -37,11 +37,14 @@ if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "document-service" })).AllowAnonymous();
 
-var v1 = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("document:write"));
+// Writes require the write scope; reads no longer ride on the write scope (H9) — the read group is
+// authenticated + row/role-authorized per-request through the engine (see the GET below).
+var writes = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("document:write"));
+var reads = app.MapGroup("/api/v1").RequireAuthorization();
 
 // Upload a document for a beneficiary (US-002): validate type/size BEFORE storing → checksum →
 // malware scan (fail-closed) → store clean blob → create/version metadata. Every path is audited.
-v1.MapPost("/beneficiaries/{beneficiaryId:guid}/documents", async (
+writes.MapPost("/beneficiaries/{beneficiaryId:guid}/documents", async (
     Guid beneficiaryId, string docType, string? classification, IFormFile file,
     DocumentUploadService uploads, DocumentDbContext db, IAuditClient audit, IOutbox outbox,
     IHbmpPrincipalAccessor me, CancellationToken ct) =>
@@ -83,9 +86,24 @@ v1.MapPost("/beneficiaries/{beneficiaryId:guid}/documents", async (
 })
 .DisableAntiforgery();
 
-// List a beneficiary's document metadata (min-necessary; no blob bytes).
-v1.MapGet("/beneficiaries/{beneficiaryId:guid}/documents", async (Guid beneficiaryId, DocumentDbContext db, CancellationToken ct) =>
+// List a beneficiary's document metadata (min-necessary; no blob bytes). H9: row/role-authorized via the
+// engine (tenant + reader role; document read is Sensitive so the engine audits the PHI access) — previously
+// any document:write holder could list ANY beneficiary's documents with no authorization and no audit trail.
+reads.MapGet("/beneficiaries/{beneficiaryId:guid}/documents", async (
+    Guid beneficiaryId, DocumentDbContext db, IAuthorizationEngine engine, IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
+    var p = me.Principal;
+    if (p is null) return GateResults.Unauthenticated();
+    var resource = new ResourceRef
+    {
+        Type = DocumentPolicies.Resource, Id = beneficiaryId.ToString(),
+        TenantId = p.TenantId, BeneficiaryId = beneficiaryId.ToString(),
+    };
+    var decision = await engine.EvaluateAsync(new AuthzRequest(p, DocumentPolicies.Read, resource, "document-read"), ct);
+    if (!decision.IsAllowed) // engine already audited the attempted PHI access
+        return GateResults.Forbidden("urn:hbmp:document-access-denied",
+            detail: "You are not permitted to read this beneficiary's documents.", reason: decision.ReasonCode);
+
     var docs = await db.Documents.AsNoTracking().Include(d => d.Versions)
         .Where(d => d.OwnerBeneficiaryId == beneficiaryId && !d.IsDeleted)
         .ToListAsync(ct);
@@ -94,7 +112,7 @@ v1.MapGet("/beneficiaries/{beneficiaryId:guid}/documents", async (Guid beneficia
         d.DocumentId, docType = d.DocType.ToString(), classification = d.Classification.ToString(),
         d.CurrentVersionNo, versions = d.Versions.Select(v => new { v.VersionNo, v.ChecksumSha256, v.SizeBytes, v.UploadedAt, v.UploadedBy }),
     }));
-}).RequireAuthorization();
+});
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

@@ -21,6 +21,13 @@ scopes:
   auth:override:    { description: "Director override — break-glass", mfa: true }
   auth:manual:      { description: "Manual authorization (no provider submission)", mfa: true }
   finance:read:     { description: "Finance utilization/settlement reads (NO diagnoses)", mfa: true }
+  # 16.6 (H9) forward contract: split document/patient read from write. Runtime issuance (client-scope
+  # attach + SPA request) is reconciled with the new issuer in 17.5; until then document reads are gated by
+  # ROLE + tenant via the authz engine (DocumentPolicies), not by these scopes.
+  document:read:    { description: "Read a beneficiary's document metadata (PHI, min-necessary)", mfa: true }
+  document:write:   { description: "Upload/version a beneficiary's document", mfa: true }
+  patient:read:     { description: "Read beneficiary registration/identity (min-necessary)", mfa: true }
+  patient:write:    { description: "Create/patch beneficiary registration + decisions", mfa: true }
 
 roles:
   reception:        [reception:read]
