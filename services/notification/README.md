@@ -66,6 +66,8 @@ channel rows exist. Windows are per event type (`RoutingTable.Escalation`).
   filter), newest first. Row-filtered by recipient == caller — never another user's inbox.
 - `GET /notifications/{id}/delivery` — per-notification delivery state (`Queued → Sent → Delivered/Failed/Skipped`).
 - `POST /notifications/{id}/read` — mark read (acts on the notification → stops its escalation timer).
+- `POST /notifications/read-all` — mark the caller's whole unread in-app inbox read in one transaction; returns
+  `{ marked }`. Self-service like the single-item route (row-filtered by recipient == caller) and idempotent.
 - `POST /notifications/ingest` — the fan-out seam (above).
 
 Delivery lifecycle per row: `queued → sent → delivered | failed | skipped`; email failures retry with backoff. Sends
@@ -100,5 +102,8 @@ payload); the dispatcher audits sensitive-context sends.
   reflects the outcome; an unacted actionable notification **escalates on the timer** (idempotently); a disabled SMS
   channel performs **no live send**; a sensitive-context send is **audited**. Serialized via the `notification-db`
   collection.
+- `InboxOperationsTests` (env-gated `NOTIFICATION_TEST_DB`, live PG) — bulk mark-all-read clears **only the caller's**
+  unread in-app rows (another recipient's inbox is unreachable, email delivery rows untouched), leaves an
+  already-read row's original timestamp alone, and is idempotent.
 
-Total: 27 notification tests; full solution 456 green.
+Total: 28 notification tests; full solution 456 green.

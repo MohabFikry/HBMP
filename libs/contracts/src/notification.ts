@@ -29,3 +29,9 @@ export const zMarkReadResult = z.object({
   read: z.literal(true),
 });
 export type MarkReadResult = z.infer<typeof zMarkReadResult>;
+
+/** Result of clearing the caller's unread inbox — how many notifications the call actually marked. */
+export const zMarkAllReadResult = z.object({
+  marked: z.number().int().nonnegative(),
+});
+export type MarkAllReadResult = z.infer<typeof zMarkAllReadResult>;

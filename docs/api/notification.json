@@ -84,6 +84,18 @@
         }
       }
     },
+    "/api/v1/notifications/read-all": {
+      "post": {
+        "tags": [
+          "Mersal.Notification.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/notifications/ingest": {
       "post": {
         "tags": [

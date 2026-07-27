@@ -43,6 +43,9 @@ public sealed record InboxItemView(
             n.ReadAt is not null, n.CreatedAt);
 }
 
+/// <summary>Result of clearing the caller's unread inbox — how many notifications this call actually marked.</summary>
+public sealed record MarkAllReadView(int Marked);
+
 /// <summary>Per-notification delivery state.</summary>
 public sealed record DeliveryView(
     Guid NotificationId,

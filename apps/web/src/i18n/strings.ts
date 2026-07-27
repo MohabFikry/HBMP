@@ -15,6 +15,8 @@ export const L = {
   notificationsClose: { en: "Close notifications", ar: "إغلاق الإشعارات" },
   notificationsViewAll: { en: "View all notifications", ar: "عرض كل الإشعارات" },
   notificationsMarkRead: { en: "Mark read", ar: "تحديد كمقروء" },
+  notificationsMarkAllRead: { en: "Mark all read", ar: "تحديد الكل كمقروء" },
+  notificationsAllRead: { en: "All notifications marked read.", ar: "تم تحديد كل الإشعارات كمقروءة." },
   notificationsGoTo: { en: "Open", ar: "فتح" },
   notificationsActionNeeded: { en: "Action needed", ar: "يتطلب إجراء" },
   signOut: { en: "Sign out", ar: "تسجيل الخروج" },

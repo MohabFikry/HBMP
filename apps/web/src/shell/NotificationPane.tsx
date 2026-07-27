@@ -7,13 +7,17 @@ import type { Section } from "../portals/catalog";
 import { L } from "../i18n/strings";
 import { originSection } from "./notificationOrigin";
 
+/** Sentinel for the pane-wide busy state (the bulk mark-all action isn't tied to one row's id). */
+const ALL = "*";
+
 /**
  * The sliding notification pane (US-072). Opened from the app-bar bell, it slides in from the inline-end
  * edge as a modal drawer. Each notification is compacted into a single dense item — unread dot, subject,
  * a clamped body, its business reference + time, and (when resolvable) a targeted link to the section the
  * notification originates from, so the recipient can jump straight to where they take action or read more.
  * Opening an item marks it read (which also stops its escalation timer server-side) and, when an origin
- * section exists, navigates there. The pane traps focus, closes on Escape, and returns focus to the bell.
+ * section exists, navigates there. A header "Mark all read" clears the whole unread inbox in one call (shown
+ * only while something is unread). The pane traps focus, closes on Escape, and returns focus to the bell.
  */
 export function NotificationPane({
   open,
@@ -37,13 +41,17 @@ export function NotificationPane({
   const [state, setState] = useState<"loading" | "error" | "ready">("loading");
   const [rows, setRows] = useState<Notification[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  // Outcome of the bulk action, announced to assistive tech (the visual cue is the dots/chips clearing).
+  const [flash, setFlash] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const unread = rows.filter((r) => !r.read).length;
 
   // Load on open; re-load whenever the pane is (re)opened so the list is fresh.
   useEffect(() => {
     if (!open) return;
     let live = true;
     setState("loading");
+    setFlash(null);
     api
       .notifications(false)
       .then((n) => {
@@ -108,6 +116,18 @@ export function NotificationPane({
     onNavigate(target ? `/${portalBase}/${target.path}` : `/${portalBase}/notifications`);
   }
 
+  async function markAllRead() {
+    setBusy(ALL);
+    try {
+      await api.markAllNotificationsRead();
+      setRows((prev) => prev.map((r) => (r.read ? r : { ...r, read: true })));
+      setFlash(L.notificationsAllRead[lang]);
+      onChanged();
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function markRead(e: React.MouseEvent, id: string) {
     e.stopPropagation();
     setBusy(id);
@@ -132,10 +152,25 @@ export function NotificationPane({
       >
         <header className="npane-head">
           <h2 className="npane-title">{L.notifications[lang]}</h2>
-          <button type="button" className="npane-close" data-autofocus onClick={onClose} aria-label={L.notificationsClose[lang]}>
-            <Icon name="cross" />
-          </button>
+          <div className="npane-head-actions">
+            {unread > 0 && (
+              <button
+                type="button"
+                className="npane-markall"
+                disabled={busy !== null}
+                onClick={() => void markAllRead()}
+              >
+                {L.notificationsMarkAllRead[lang]}
+              </button>
+            )}
+            <button type="button" className="npane-close" data-autofocus onClick={onClose} aria-label={L.notificationsClose[lang]}>
+              <Icon name="cross" />
+            </button>
+          </div>
         </header>
+        <span className="sr-only" role="status" aria-live="polite">
+          {flash ?? ""}
+        </span>
 
         <div className="npane-body" aria-live="polite">
           {state === "loading" && <p className="muted npane-msg">…</p>}
@@ -147,23 +182,36 @@ export function NotificationPane({
             <ul className="npane-list">
               {rows.map((n) => {
                 const origin = originSection(n.sourceEventType, sections);
+                const needsAction = n.actionable && !n.read;
+                // One chip per idea: when the item already carries the "Action needed" chip, the service's own
+                // status chip is dropped if it only restates the same thing (a warn kind, or the same wording).
+                // Wording alone isn't enough — AR renders the two labels with different phrasing.
+                const showStatus =
+                  !needsAction ||
+                  (n.status.kind !== "warn" &&
+                    t(n.status.label).trim().toLowerCase() !==
+                      L.notificationsActionNeeded[lang].trim().toLowerCase());
                 return (
                   <li key={n.id} className={`npane-item${n.read ? "" : " is-unread"}`}>
                     <button
                       type="button"
                       className="npane-item-open"
                       onClick={() => void openItem(n)}
-                      disabled={busy === n.id}
+                      disabled={busy !== null}
                     >
                       <span className="npane-dot" aria-hidden="true" data-on={!n.read} />
                       <span className="npane-item-main">
                         <span className="npane-subject">{n.subject}</span>
                         <span className="npane-preview">{n.body}</span>
-                        <span className="npane-meta">
-                          <StatusChip kind={n.status.kind} label={t(n.status.label)} />
-                          {n.actionable && !n.read && (
+                        {/* Chips and the reference/time line are separate rows so a wrapping chip never
+                            strands the reference or the timestamp mid-row. */}
+                        <span className="npane-tags">
+                          {needsAction && (
                             <StatusChip kind="warn" label={L.notificationsActionNeeded[lang]} />
                           )}
+                          {showStatus && <StatusChip kind={n.status.kind} label={t(n.status.label)} />}
+                        </span>
+                        <span className="npane-meta">
                           {origin && <span className="npane-origin">▸ {t(origin.label)}</span>}
                           {n.entityRef && <span className="tnum npane-ref">{n.entityRef}</span>}
                           <span className="npane-time tnum">{fmt.dateTime(n.createdAt)}</span>
@@ -174,7 +222,7 @@ export function NotificationPane({
                       <button
                         type="button"
                         className="npane-markread"
-                        disabled={busy === n.id}
+                        disabled={busy !== null}
                         onClick={(e) => void markRead(e, n.id)}
                       >
                         {L.notificationsMarkRead[lang]}

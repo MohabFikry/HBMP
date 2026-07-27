@@ -39,6 +39,7 @@ import type {
   ExportResult,
   FinancialSummary,
   LabOrder,
+  MarkAllReadResult,
   MarkReadResult,
   Notification,
   OrderRow,
@@ -166,6 +167,8 @@ export interface ApiClient {
   // Notifications — the caller's own in-app inbox (Phase 8.1). Self-service, cross-portal.
   notifications(unreadOnly?: boolean): Promise<Notification[]>;
   markNotificationRead(id: string): Promise<MarkReadResult>;
+  /** Clears the caller's whole unread inbox in one call; resolves with how many rows it marked. */
+  markAllNotificationsRead(): Promise<MarkAllReadResult>;
 
   // Admin / platform governance (Phase 8b) — WHO can access, not content. Admin-role gated on the server.
   /** 18.C2 (W5) — users from the IDENTITY STORE (active + 2FA state), not the admin-service projection. */

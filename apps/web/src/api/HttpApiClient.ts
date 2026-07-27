@@ -28,6 +28,7 @@ import {
   zKpiWidget,
   zChartWidget,
   zLabOrder,
+  zMarkAllReadResult,
   zMarkReadResult,
   zNotification,
   zOrderRow,
@@ -1202,6 +1203,10 @@ export class HttpApiClient implements ApiClient {
   async markNotificationRead(id: string) {
     const r = (await postRaw(`/notifications/${encodeURIComponent(id)}/read`, {})) as any;
     return parseOr(zMarkReadResult, { id: r?.notificationId ?? id, read: true });
+  }
+  async markAllNotificationsRead() {
+    const r = (await postRaw(`/notifications/read-all`, {})) as any;
+    return parseOr(zMarkAllReadResult, { marked: Number(r?.marked ?? 0) });
   }
 
   // Admin / platform governance (Phase 8b). Every read is admin-role gated + audited server-side. Subject ids are

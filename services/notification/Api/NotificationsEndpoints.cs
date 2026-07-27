@@ -60,6 +60,20 @@ public static class NotificationsEndpoints
             return Results.Ok(InboxItemView.From(n));
         }).RequireAuthorization(HbmpPolicies.Scope("notification:read"));
 
+        // Mark ALL of the caller's unread in-app notifications read, in one transaction. Self-service like the
+        // single-item route (row-filtered by recipient == caller), and idempotent: a second call marks nothing
+        // and reports 0. Done server-side rather than by the client looping the per-id route, so clearing a
+        // full inbox is one request and one commit instead of up to 200 of each.
+        v1.MapPost("/read-all", async (NotificationDbContext db, NotificationGate gate,
+            IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(NotificationPolicies.Read, ct);
+            if (denied is not null) return denied;
+
+            var marked = await InboxOperations.MarkAllReadAsync(db, me.Principal!.Subject, clock.GetUtcNow(), ct);
+            return Results.Ok(new MarkAllReadView(marked));
+        }).RequireAuthorization(HbmpPolicies.Scope("notification:read"));
+
         // The fan-out seam — a routed domain event drives notification creation + dispatch (idempotent on event id).
         v1.MapPost("/ingest", async (IngestRequest req, NotificationDispatcher dispatcher, NotificationGate gate, CancellationToken ct) =>
         {
