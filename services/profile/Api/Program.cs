@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Authz;
+using Mersal.Events;
 using Mersal.Profile.Api;
 using Mersal.Profile.Infrastructure;
 using OpenTelemetry.Metrics;
@@ -23,6 +24,13 @@ builder.Services.AddHbmpAuditClient("profile-service");
 // second, finer layer and lives in the composer — one gate could not express "visible, but only your own rows".
 builder.Services.AddHbmpAuthorization(ProfilePolicies.Bundle());
 builder.Services.AddHbmpBreakGlass(builder.Configuration); // break-glass works, but loudly (design 39 §7.6)
+// Audit goes STRAIGHT to the broker, not through a transactional outbox — because there is no transaction to
+// be atomic with. The outbox exists so a state change cannot exist without its audit row; this service makes
+// no state change. Staging audit rows in a database would mean giving a service that owns no data a database
+// purely to hold them. The sink fails the request rather than completing a PHI read unaudited.
+builder.Services.AddHbmpEvents(builder.Configuration);
+builder.Services.AddHbmpOutboxRelay();
+builder.Services.AddHbmpDirectAuditSink();
 builder.Services.AddProfileComposition(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(TimeProvider.System);

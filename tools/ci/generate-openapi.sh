@@ -19,6 +19,9 @@ mkdir -p "$OUT"
 dummy="Host=localhost;Port=5432;Database=placeholder;Username=placeholder;Password=placeholder"
 # 18.E1 (audit R2 Q2): Identity and Interop added. Both were missing, so neither had an OpenAPI gate —
 # identity-service being the one that mints every token on the platform.
+# profile-service is deliberately ABSENT from this list: it owns no data and has no DbContext, so it reads no
+# ConnectionStrings key at all (phase 20, design 39 §7.4). Adding a dummy for it would imply a database it does
+# not have.
 for k in Admin Approvals Audit CallCentre Case Claims Document Eligibility Emr Finance \
          Identity Interop MasterData Notification Orders Patient Pharmacy Policy Provider Reporting; do
   var="ConnectionStrings__${k}"

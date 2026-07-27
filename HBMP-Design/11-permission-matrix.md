@@ -59,6 +59,8 @@ Resources map to microservices (see [0A](0A-DESIGN-FOUNDATIONS.md)). Object-leve
 
 | Resource | Owning service | Key sensitive fields |
 |---|---|---|
+| `patient-profile` *(Phase 20)* | **profile** *(composes; owns nothing)* | every class below — see the §3b section matrix, which is the hard rule for this resource |
+| `patient-photo` *(Phase 20)* | policy *(document link)* | `identity` — biometric-adjacent; a NARROWER allow-list than the profile itself |
 | `beneficiary` | patient | `pii`, `refugee_ref` |
 | `household` | patient | `pii` |
 | `policy` / `benefit_plan` | policy | `financials` (limits) |
@@ -278,6 +280,53 @@ The contact centre owns two resources in the `callcentre` schema: `call_interact
 > 3. **(c) Only identifier *types* may be persisted.** `caller_verification.verified_identifiers` stores **which identifier types** were confirmed (e.g. `["MemberNo","DateOfBirth"]`) — **never the values** the caller recited. Values remain in patient-service, are never copied into the `callcentre` schema, and are never rendered to the agent for read-out: the caller states the value, the agent confirms it.
 > 4. **MemberScoped / all branches.** The Call Centre is a central hotline: its bundle sets `RowScope.BranchUnrestricted`, so **no `BSC` predicate applies**. Branch and specialty are **selectors** on search/booking, never restrictions; a cross-branch read is normal, not a denial.
 > 5. **Reuse, don't fork.** Appointment writes delegate to the existing emr endpoints and inherit their guarantees (no double-booking, `Idempotency-Key`, `If-Match`); contact writes delegate to patient-service and inherit its one-primary rule and history. The call centre stores the **linkage** (`interaction_id` / `call_ref`), never a second copy of the record.
+
+---
+
+## 3b. Patient profile — the role × section matrix (Phase 20, HARD RULE)
+
+The unified patient profile ([39 §4](39-patient-profile.md)) deliberately aggregates every zone onto one
+screen, so **its section matrix is a hard rule of this document, not a UI concern.** `V` = visible ·
+`R` = restricted (existence only, with a reason and where applicable a request-access action) · `—` = **not
+returned at all** (the key is absent from the JSON, and the owning service is never called).
+
+| Role | 1 Hdr | 2 Alert | 3 Cov | 4 PMH | 5 Enc | 6 Inv | 7 Rx | 8 Auth | 9 Ref | 10 Doc | 11 Note | 12 Fin | 13 Case | 14 Time | 15 Calls |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **Reception** | V | V | V | — | V(meta) | — | — | V(status) | V | R | V(admin) | — | — | V(admin) | V(operational) |
+| **Call Centre** | V | V | V | — | V(meta) | — | — | V(status) | V | R | V(admin) | — | — | V(admin) | V (full) |
+| **Doctor/Nurse** (treating) | V | V | V | V | V | V | V | V | V | V | V | — | V | V | V(operational) |
+| **Doctor** (non-treating) | V | V | R | R | R | R | R | R | R | R | R | — | — | R | R |
+| **Lab / Imaging** | V(min) | V(allergy) | — | — | — | V(own orders) | — | — | — | — | — | — | — | — | — |
+| **Pharmacy** | V(min) | V(allergy) | V(pharmacy limit) | — | — | — | V(own Rx) | — | — | — | — | — | — | — | — |
+| **Medical Approval** | V | V | V | V | V | V\* | V | V | V | V | V | — | V | V | V(operational) |
+| **Medical Director** | V | V | V | V | V | V\* | V | V | V | V | V | V(summary) | V | V | V (full) |
+| **Case Manager** (assigned) | V | V | V | V(summary) | V | R | R | V | V | V(admin) | V | — | V | V | V (full) |
+| **Finance / Claims** | V(min) | — | V(amounts) | — | V(meta) | — | — | V(cost) | — | R | V(fin) | V | — | V(fin) | V(meta) |
+| **Beneficiary Mgmt** | V | V | V | R | V(meta) | — | — | V(status) | V | V(admin) | V | — | — | V(admin) | V (full) |
+| **Org/Super Admin** | V(min) | — | — | — | — | — | — | — | — | — | — | — | — | V(access) | — |
+
+\* Sensitive results stay **existence-only even for the approval team and the medical director** until a
+[37 §6](37-branch-scoping-and-clinical-sensitivity.md) grant exists. The profile is not a shortcut around that
+gate.
+
+Three properties make this enforceable rather than aspirational:
+
+1. **Projection is server-side.** A withheld field is ABSENT from the JSON — never hidden with CSS, never
+   present-but-unrendered. Proven by reflection tests over the serialized payload for every role.
+2. **Composition runs under the caller's own token**, so each owning service applies its own authorization to
+   the call. The section matrix is a second, independent layer; neither is sufficient alone.
+3. **It is an intersection, never a union.** Treating relationship, provider ownership, branch scope, payer
+   scope, call-centre verification and sensitive-result grants all still bind.
+
+**The photo has its own, narrower list.** Reception, call centre, treating clinicians and beneficiary
+management only. Finance, claims, labs, pharmacies and platform admins receive a header with **no photo field**
+— it is identity-sensitive, biometric-adjacent data for a refugee population ([39 §5](39-patient-profile.md)),
+and it is consent-gated, short-TTL signed, audited on every retrieval, and excluded from exports.
+
+**Call history projects at three levels, not two.** Full / Operational / Meta ([39 §5b](39-patient-profile.md)):
+Meta (finance/claims) carries **no summary text**; Operational carries the summary but no verification detail
+and no agent notes; only Full sees verification detail. The agent's `notes` column is **never** promoted to any
+other role at any level.
 
 ---
 

@@ -209,6 +209,27 @@ All DSAR actions are logged with `purpose = "dsar"` and reviewed.
 | `integrity.mismatch` | Security | critical | partition, expected/actual hash | audit verifier |
 | `dsar.action` | Compliance | high | actor, beneficiary_ref, request_type | patient/document |
 | `legalhold.set` | Compliance | high | actor, scope | audit |
+| `ProfileViewed` | PHI access | notice | actor, beneficiary_ref, **sections served + sections withheld**, purpose | profile |
+| `ProfileSummaryExported` | Export | high | actor, beneficiary_ref, sections served | profile |
+| `IdentityPhotoViewed` | PHI access | notice | actor, beneficiary_ref, link_id | profile/policy |
+| `CallSummaryCopied` | Export | high | actor, beneficiary_ref, call_refs[], level | callcentre |
+
+
+### Phase 20 — three events that are not "reads"
+
+**`ProfileViewed` names the sections WITHHELD as well as the ones served.** An event recording only what was
+returned cannot distinguish "did not look" from "was not allowed to look", and an access review asks the second
+question far more often than the first.
+
+**`CallSummaryCopied` and `ProfileSummaryExported` are logged as EXPORTS, not reads**, at high severity.
+Putting a patient's record on the clipboard or on paper is the moment it leaves the platform's control — it is
+the last event the platform will ever record about that data, and it is categorically different from looking at
+a screen. A copy triggered client-side from an already-served row still emits it: "the data was already on
+screen" is exactly the reasoning that would make the export trail incomplete.
+
+**`IdentityPhotoViewed` exists because a face is not an ordinary field.** Every retrieval is a disclosure of a
+person's likeness to a named user at a named time — precisely what a data-subject access request asks about,
+and for a refugee population precisely what a protection concern turns on.
 
 ---
 

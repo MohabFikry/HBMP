@@ -214,6 +214,34 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
   finance≠diagnosis + coordination-summary invariants are structural + contract-tested). Frontend suite:
   contracts 9 + design-system 18 + web 21 = **48 tests**. Backend: case-service 27 + finance-service 14.
   DB-integration tests env-gated (`CASE_TEST_DB` / `FINANCE_TEST_DB`, hbmp superuser conn).
+- **Phase 20 (Unified Patient Profile)** — design `HBMP-Design/39-patient-profile.md`, prompt
+  `claude-code-prompts/phase-20-patient-profile.md`, ADR **0026**.
+  **20.1** `libs/authz/ProfilePolicies` — design 39 §4's role × 15-section matrix as DATA (one cell per
+  role/section, naming the projection variant and the ABAC conditions), plus Full/Operational/Meta call-history
+  levels and a clamp that only narrows. **`services/profile`** — a composition service with **no DbContext, no
+  migrations and no schema**: 15 `ISectionProvider`s fan out in parallel under the CALLER'S bearer with
+  per-section timeouts, the matrix gates BEFORE fetch, variants narrow AFTER, and one `ProfileViewed` audit
+  event names served **and withheld** sections. Restricted / Unavailable / NotApplicable stay three distinct
+  states. An architecture test fails the build on a client-credentials path, a `DbContext` or a `.sql` file;
+  profile joins the RLS exemption register (no database to bind a tenant GUC on).
+  **20.3** beneficiary photo — `IdentityPhoto` on policy's `DocumentClass`, consent-gated at upload (refusal
+  permitted, never blocks care), short-TTL signed retrieval, audited, with an allow-list NARROWER than the
+  Administrative class it is filed under (`MayDownload` became class-aware).
+  **20.3b** `call_interaction.summary` — a NEW capped column, deliberately not a rename of `notes`; required at
+  close unless Abandoned; corrections write a revision row and set a visible edited marker; `copyText` is
+  generated from the NARROWED row so a Meta viewer's clipboard cannot carry a summary their JSON omitted.
+  **20.4** one role-driven profile screen + the patient context bar, three visually distinct states, four-cue
+  call direction (RTL-mirrored arrows), and an accessible copy button that copies the server's `copyText`
+  verbatim with an `aria-live` confirmation and a textarea fallback.
+  **20.5** Kong routes, a compose block with no connection string, three scopes (`profile:read`,
+  `profile:export`, `callcentre:history:read`), `docs/api/profile.json`, and docs 11/14/16/19/22 + the index.
+  Tests: authz **109**, profile-service **78**, callcentre **37**, web **145**. Four existing gates caught real
+  slips during the build — scope-integrity (a scope granted to roles with no call-history cell), the bare-clock
+  scanner, the OpenAPI-coverage gate, and the display-truth rule (a raw `toLocaleString`).
+  **NOT DONE — carried forward:** prompt **20.2** (re-pointing the four existing 360s at the new contract) and
+  the five beneficiary-scoped upstream reads the providers call (`emr /profile-context`,
+  `orders|pharmacy|approvals|case /for-beneficiary/{id}`). Until those land, those sections resolve to
+  `Unavailable` at runtime — which is the designed degradation, not a crash, but it is not "done".
 - **Phase 14 (Branch & Sensitivity)** is listed above **before 7** because it is a cross-cutting *retrofit* of
   `libs/authz`, identity, provider, emr and orders — that is its correct execution slot. Phases 7–10 were built
   ahead of it, so landing 14 also means revisiting the approvals worklist (member-scoped, no sensitive-result

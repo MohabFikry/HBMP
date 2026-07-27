@@ -220,6 +220,23 @@ flowchart TD
 - Contextual "back to list" preserves filters/scroll (state retained in URL query params).
 - **Branch-scoped deep links** carry the record's branch: opening one for a branch outside the user's permitted set returns the **403 page** (with "request access / contact admin"), and opening one for a *permitted but not active* branch prompts to **switch the active branch** rather than silently showing an empty record.
 - A deep link to a **restricted result** resolves to its existence-only view with the **"Request access"** affordance — never a blank screen, never the content.
+- **`/patients/{beneficiaryId}`** *(Phase 20)* is the unified patient profile's deep link. It resolves to **the caller's own projection** — one route for every role, because the server decides what comes back. An unauthorized deep link returns **403 + an audit event**, never a blank page and never a hidden route: a route the SPA hides is a route the SPA can be persuaded to unhide.
+- The profile is reachable from **global search, every worklist row, and the call-centre workspace after verification**. Within it, each section offers permission-gated deep links back INTO the modules (book appointment, start encounter, raise an order, new prescription, view authorization, open claim, upload document, add note) — and renders **nothing** rather than a link that would 403.
+
+---
+
+### 3b. The patient context bar (Phase 20) — a safety control, not a convenience
+
+A compact identity strip — photo or initials, name, member number, age/sex, status chip, alert count — that
+**follows the user into encounter, order, dispense, approval and call-centre screens**, so the record on screen
+is never ambiguous. Clicking it opens the full profile.
+
+It is fetched with `?sections=header,alerts` (p95 < 400ms) rather than the full profile, because it renders on
+every clinical screen. Treat it as a clinical-safety control: the failure it exists to prevent is prescribing,
+dispensing or approving against the wrong person's record.
+
+It renders **nothing** until it has an answer, and nothing if the header was withheld — a *partial* identity
+strip would be worse than none, since confirming which record is open is its entire job.
 
 ---
 

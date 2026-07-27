@@ -38,8 +38,30 @@ HBMP is a **microservices** platform of reusable core services (identity, patien
 | **reporting-service** | Read models, dashboards, exports | read replicas + OpenSearch | `/reports/*` | — | *(all domain events)* |
 | **audit-service** | Central append-only audit log | `audit` | `/audit/events` (query) | — | *(audit stream from all)* |
 | **document-service** | Document metadata + MinIO object-storage orchestration | `document` | `/documents`, `/documents/{id}/content` | `DocumentAttached` | — |
+| **profile-service** *(Phase 20)* | The unified patient profile ([39](39-patient-profile.md)) — **composition only; owns NO data and has no schema**. Fans out to ~8 services under the CALLER'S own token and projects the result to the design-39 §4 role × section matrix | **none** | `/patients/{id}/profile`, `/patients/{id}/profile/summary`, `/patients/{id}/photo` | `ProfileViewed`, `ProfileSummaryExported`, `IdentityPhotoViewed` *(audit stream)* | — |
+| **callcentre-service** *(Phase 15; call history added Phase 20.3b)* | Contact-centre interactions, caller verification, member 360, call actions — plus the member's **call history** projected Full / Operational / Meta with a server-generated clipboard block | `callcentre` | `/call-interactions`, `/call-centre/*`, `/beneficiaries/{id}/call-interactions`, `.../copy` | `CallInteractionOpened`, `CallerVerificationRecorded`, `CallInteractionClosed`, `CallSummaryCopied` *(audit stream)* | — |
 
 Supporting infra: **Event Bus** (NATS JetStream domain events), **Object Storage** (MinIO, S3-compatible, WORM), **Relational DB** (self-hosted PostgreSQL, Patroni HA), **Search Engine** (OpenSearch), **Caching** (Valkey), **Message Queue** (RabbitMQ durable/quorum queues for commands/outbox). Secrets/keys in **OpenBao**; orchestration on **k3s** (Docker Compose at Tier 1).
+
+### 2.0b profile-service: the one service that owns nothing (Phase 20)
+
+`profile-service` is the platform's only pure **composition** service, and the absence of a schema is the
+design rather than a stage it has not reached yet.
+
+- **It owns no data.** A local copy of clinical data here would be a second source of truth for the record a
+  clinician makes decisions from, and it would arrive innocently — as a cache. Design 39 §7.4 makes this an
+  invariant; an architecture test in its own test project fails the build on a `DbContext` or a `.sql` file.
+- **It has no database, so it binds no tenant GUC.** It is on the RLS exemption register in `libs/architecture`
+  with that reason recorded. Its isolation is the owning services' own RLS, reached under the caller's token.
+- **It cannot authenticate as itself.** There is no client-credentials path, and the composer refuses at runtime
+  when the caller's bearer is absent rather than falling back to anything. A privileged aggregator returns a
+  *complete* profile to someone entitled to a third of it, which looks healthier than the correct one — see
+  [ADR-0026](../docs/adr/0026-patient-profile-server-side-projection.md).
+- **It weakens no gate.** Treating relationship, provider ownership, branch scope, payer scope, call-centre
+  verification and sensitive-result grants all still bind: the profile is strictly an intersection of the rules
+  that already exist, never a union.
+
+Consequently it is stateless, horizontally scalable, and needs no migration in any environment.
 
 ### 2.1 claims-service boundaries & invariants (Phase 10b)
 

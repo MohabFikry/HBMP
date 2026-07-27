@@ -93,7 +93,7 @@ public static class PolicyDocumentEndpoints
     {
         read.MapGet("/beneficiaries/{beneficiaryId:guid}/identity-photo", async (
             Guid beneficiaryId, HttpRequest request, PolicyDbContext db, IDocumentStore store,
-            IHbmpPrincipalAccessor me, IAuditClient audit, CancellationToken ct) =>
+            IHbmpPrincipalAccessor me, IAuditClient audit, TimeProvider clock, CancellationToken ct) =>
         {
             var principal = me.Principal;
             if (principal is null) return GateResults.Unauthenticated();
@@ -148,9 +148,11 @@ public static class PolicyDocumentEndpoints
                 FieldClasses = ["identity"], Severity = AuditSeverity.Notice,
             }, ct);
 
+            // The injected clock rather than a bare wall-clock read: a TTL a test cannot pin is a TTL nobody
+            // can prove expires, and "the signed URL expires" is an acceptance criterion of design 39 §5.
             return Results.Ok(new IdentityPhotoView(
                 photo.LinkId, photo.VersionNo, url.ToString(),
-                DateTimeOffset.UtcNow.Add(IdentityPhotoRules.SignedUrlTtl)));
+                clock.GetUtcNow().Add(IdentityPhotoRules.SignedUrlTtl)));
         });
     }
 

@@ -888,6 +888,63 @@ Indexes added: `(branch_id, scheduled_start)` on `appointment`; `(branch_id, sta
 
 ---
 
+## 10C. Domain: Patient Profile & Call History (`callcentre`, `policy` schemas) — Phase 20
+
+`profile-service` appears in no table here, and that is the entry: it **owns no data**. The unified patient
+profile is composed at read time from the services that do (design 39 §7.4), so phase 20 adds exactly two
+things to the physical model — both to schemas that already existed.
+
+### 10C.1 `callcentre.call_interaction` — the `summary` column
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `summary` | `varchar(500)` | Y | The **operational account** of the call, written at wrap-up and read by OTHER roles through the patient profile. **Required at close unless `outcome = 'Abandoned'`** (422 otherwise). Capped so it stays a summary rather than becoming a second notes field. |
+| `summary_edited_at` | `timestamptz` | Y | Set on the first correction; drives the visible "edited" marker. |
+| `summary_edited_by` | `text` | Y | Who corrected it. |
+
+**Why this is a new column and not a reuse of `notes`.** Phase 20 widens the audience for call history to
+coordinators, approvers and clinicians. `notes` is the agent's working text — typed mid-call, unedited, written
+under the reasonable assumption that only the call centre would ever read it. Promoting that column to the new
+audience would have been a silent, retroactive disclosure of years of it. `notes` stays exactly where it was
+and is **never** projected to another role at any level.
+
+**Clinical content does not belong in `summary`.** Agents are not clinicians, and a summary reading "complained
+of chest pain" creates an unreviewed clinical record in an operational store. The UI states this at the point
+of writing; genuine clinical escalation goes through the case/escalation path.
+
+### 10C.2 `callcentre.call_summary_revision` — append-only corrections
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `revision_id` | `uuid` | N | PK. |
+| `interaction_id` | `uuid` | N | FK → `call_interaction`. |
+| `tenant_id` | `text` | N | RLS scope (fail-closed, matching callcentre 0003). |
+| `previous_value` | `varchar(500)` | Y | What it said before. |
+| `new_value` | `varchar(500)` | Y | What it says now. |
+| `edited_by` / `edited_at` | `text` / `timestamptz` | Y / N | Who and when. |
+
+There is no update or delete path in the API: the table is written to and read from, never rewritten. A summary
+other roles rely on that can be corrected without trace is worse than no summary, because it still reads as a
+record.
+
+### 10C.3 `policy.DocumentClass` — `IdentityPhoto`
+
+A new value on the phase-19.3b document-class enum (§10B): the beneficiary's identification photograph.
+`Administrative` by visibility class, but with **its own, much narrower role allow-list** — reception, the call
+centre, treating clinicians and beneficiary management. Finance, claims, labs, pharmacies and platform admins
+receive a header with **no photo field at all**.
+
+Three properties are enforced in code, not convention:
+
+1. **Consent-gated at upload** — an `IdentityPhoto` is only stored when an active `ConsentForm` is on file for
+   that member. Refusal is permitted and **must not block care**; the profile simply shows initials.
+2. **Never listed with other documents** — it has its own endpoint, so it is not handed to every role entitled
+   to see that a consent form exists.
+3. **Short-TTL signed retrieval, always audited** — five minutes, minted per request as the caller. A permanent
+   URL would outlive the session, the role and the consent that produced it.
+
+---
+
 ## 11. Enumerations (Canonical)
 
 ### 11.1 Lifecycle statuses (see [23-state-machines.md](23-state-machines.md))

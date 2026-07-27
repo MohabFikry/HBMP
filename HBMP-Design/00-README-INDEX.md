@@ -60,6 +60,8 @@ Read [`0A-DESIGN-FOUNDATIONS.md`](0A-DESIGN-FOUNDATIONS.md) **first** — it def
 | 35 | Implementation Plan | [35-implementation-plan.md](35-implementation-plan.md) | F |
 | 36 | Claims Management (Phase 10b) | [36-claims-management.md](36-claims-management.md) | E |
 | 37 | Branch Scoping, Practitioner Specialty & Clinical Sensitivity (Phase 14) | [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md) | D |
+| 38 | Policy & Member Administration (Phase 19) | [38-policy-member-administration.md](38-policy-member-administration.md) | D |
+| 39 | Unified Patient Profile — role-projected 360 (Phase 20) | [39-patient-profile.md](39-patient-profile.md) | D |
 
 ---
 
@@ -67,8 +69,8 @@ Read [`0A-DESIGN-FOUNDATIONS.md`](0A-DESIGN-FOUNDATIONS.md) **first** — it def
 
 - **Executives / Mersal leadership:** 01 → 28 → 29 → 27 → 33
 - **Product & BA:** 02 → 03 → 04 → 05 → 07 → 31 → 32
-- **Architects & Engineers:** 0A → 16 → 15 → 17 → 23 → 24 → 25 → 30 → **37**
-- **Security / DPO / Compliance:** 10 → 11 → 18 → 19 → 20 → **37** (branch scoping, special-category data, sensitive-result release)
+- **Architects & Engineers:** 0A → 16 → 15 → 17 → 23 → 24 → 25 → 30 → **37** → **39** (the profile is the one feature that aggregates every zone, so read it after the zones)
+- **Security / DPO / Compliance:** 10 → 11 → 18 → 19 → 20 → **37** (branch scoping, special-category data, sensitive-result release) → **39** (the aggregation surface: server-side projection, the photo as biometric-adjacent data, clipboard as a disclosure)
 - **Finance / Claims:** 10 → 11 → **36** → 31 (EPIC-13) → 32 (US-CLM-*) → 16
 - **UX / Accessibility:** 03 → 09 → 12 → 13 → 14 → 21
 
