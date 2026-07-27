@@ -21,6 +21,12 @@ services:
   # --- masterdata-service: reference data (owns several bare /api/v1 resources) ---
   - name: masterdata-service
     url: http://masterdata-service:8080
+    plugins: &edge_jwt
+      - name: jwt
+        config:
+          key_claim_name: iss
+          claims_to_verify: ["exp"]
+          run_on_preflight: false   # a CORS preflight carries no Authorization header by design
     routes:
       - name: masterdata-routes
         paths:
@@ -39,6 +45,7 @@ services:
   # The /beneficiaries/{id}/allergies + /medication-history sub-resources belong to emr, NOT patient.
   - name: emr-service
     url: http://emr-service:8080
+    plugins: *edge_jwt
     routes:
       - name: emr-beneficiary-clinical-routes
         paths:
@@ -61,6 +68,7 @@ services:
   # --- eligibility-service: reception search + eligibility check + coverage-summary card ---
   - name: eligibility-service
     url: http://eligibility-service:8080
+    plugins: *edge_jwt
     routes:
       - name: eligibility-beneficiary-coverage-route
         paths:
@@ -74,6 +82,7 @@ services:
   # --- document-service: beneficiary documents (upload/list under /beneficiaries/{id}/documents) ---
   - name: document-service
     url: http://document-service:8080
+    plugins: *edge_jwt
     routes:
       - name: document-beneficiary-routes
         paths:
@@ -91,6 +100,7 @@ services:
   # --- patient-service: beneficiary registration + identifiers (catch-all for /beneficiaries) ---
   - name: patient-service
     url: http://patient-service:8080
+    plugins: *edge_jwt
     routes:
       - name: patient-routes
         paths: ["/api/v1/beneficiaries", "/api/v1/registrations"]
@@ -99,6 +109,7 @@ services:
   # --- policy-service: the PAS — payers, plans, effective-dated benefit configuration, coverage + limits ---
   - name: policy-service
     url: http://policy-service:8080
+    plugins: *edge_jwt
     routes:
       - name: policy-routes
         paths:
@@ -143,6 +154,7 @@ services:
   # --- provider-service: provider network + contracts + branches + practitioners + specialties ---
   - name: provider-service
     url: http://provider-service:8080
+    plugins: *edge_jwt
     routes:
       - name: provider-routes
         paths:
@@ -158,6 +170,7 @@ services:
   # --- orders-service: investigation orders + lab/imaging fulfillment + report-access ---
   - name: orders-service
     url: http://orders-service:8080
+    plugins: *edge_jwt
     routes:
       - name: orders-routes
         paths:
@@ -170,6 +183,7 @@ services:
   # --- pharmacy-service: prescriptions + dispensing + referrals ---
   - name: pharmacy-service
     url: http://pharmacy-service:8080
+    plugins: *edge_jwt
     routes:
       - name: pharmacy-routes
         paths: ["/api/v1/prescriptions", "/api/v1/referrals"]
@@ -178,6 +192,7 @@ services:
   # --- approvals-service: authorization worklist + decisions ---
   - name: approvals-service
     url: http://approvals-service:8080
+    plugins: *edge_jwt
     routes:
       - name: approvals-routes
         paths: ["/api/v1/authorizations"]
@@ -186,6 +201,7 @@ services:
   # --- notification-service ---
   - name: notification-service
     url: http://notification-service:8080
+    plugins: *edge_jwt
     routes:
       - name: notification-routes
         paths: ["/api/v1/notifications"]
@@ -194,6 +210,7 @@ services:
   # --- reporting-service: KPIs + dashboards ---
   - name: reporting-service
     url: http://reporting-service:8080
+    plugins: *edge_jwt
     routes:
       - name: reporting-routes
         paths: ["/api/v1/reports", "/api/v1/dashboards"]
@@ -202,6 +219,7 @@ services:
   # --- admin-service: platform administration + caller's own branch context (/me) ---
   - name: admin-service
     url: http://admin-service:8080
+    plugins: *edge_jwt
     routes:
       - name: admin-routes
         paths: ["/api/v1/admin", "/api/v1/me"]
@@ -210,6 +228,7 @@ services:
   # --- case-service: case management + beneficiary-360 (Phase 10.1) ---
   - name: case-service
     url: http://case-service:8080
+    plugins: *edge_jwt
     routes:
       - name: case-routes
         paths: ["/api/v1/cases"]
@@ -218,6 +237,7 @@ services:
   # --- finance-service: utilization/settlements/summaries/exports (Phase 10.2) ---
   - name: finance-service
     url: http://finance-service:8080
+    plugins: *edge_jwt
     routes:
       - name: finance-routes
         paths: ["/api/v1/finance"]
@@ -226,6 +246,7 @@ services:
   # --- claims-service: claims capture/batching/adjudication/settlement (Phase 10b) ---
   - name: claims-service
     url: http://claims-service:8080
+    plugins: *edge_jwt
     routes:
       - name: claims-routes
         paths: ["/api/v1/claims", "/api/v1/claim-batches", "/api/v1/reconciliation", "/api/v1/reimbursement-requests"]
@@ -234,6 +255,7 @@ services:
   # --- callcentre-service: contact centre — verification + call log + member 360 + call actions (Phase 15) ---
   - name: callcentre-service
     url: http://callcentre-service:8080
+    plugins: *edge_jwt
     routes:
       - name: callcentre-routes
         paths: ["/api/v1/call-interactions", "/api/v1/call-centre"]
@@ -244,6 +266,7 @@ services:
   # the API coverage guard never flagged it — the guard only inspects /api/v1 paths.
   - name: interop-service
     url: http://interop-service:8080
+    plugins: *edge_jwt
     routes:
       # The CapabilityStatement is public by FHIR convention: a client fetches it BEFORE it has a token, to
       # discover which interactions and SMART scopes this server supports and where to authenticate. Gating it
@@ -270,17 +293,23 @@ services:
       - name: identity-admin-routes
         paths: ["/identity"]
         strip_path: false
+        # The admin surface is a normal protected API and carries the edge check like any other route.
+        plugins: *edge_jwt
+      # 18.B3 (S8) — the ONE surface with NO edge jwt: these routes are how a caller OBTAINS a token
+      # (/connect/authorize, /connect/token, the login + 2FA pages) and how a verifier fetches the signing
+      # keys (/.well-known/jwks, the discovery document). Requiring a token to reach them is a bootstrap
+      # deadlock, so the plugin is simply not attached here.
+      #
+      # It previously said `enabled: false` at route scope and claimed that "route scope beats global scope".
+      # It does not: in Kong a route-scoped plugin instance marked `enabled: false` is an INACTIVE INSTANCE,
+      # not an override, and a globally-scoped plugin keeps applying. Kong OSS has no way to switch a global
+      # plugin off for one route. So the exemption never took effect and the gateway answered 401 to the
+      # discovery document, JWKS and /connect/authorize alike — the SPA could not begin a login through Kong
+      # at all. The fix is structural: jwt is no longer global (see the `plugins:` block at the end of this
+      # file), it is attached per service via the `edge_jwt` anchor, and omitted here.
       - name: identity-oidc-routes
         paths: ["/connect", "/.well-known"]
         strip_path: false
-        # 18.B3 (S8) — the ONLY exemption from the global edge jwt plugin. These routes are how a caller
-        # OBTAINS a token (/connect/authorize, /connect/token, the login + 2FA pages) and how a verifier
-        # fetches the signing keys (/.well-known/jwks, the discovery document). Requiring a token to reach
-        # them would be a bootstrap deadlock. Route scope beats global scope in Kong, so `enabled: false`
-        # here overrides the global plugin for exactly these paths and nothing else.
-        plugins:
-          - name: jwt
-            enabled: false
 
 # 18.B3 (audit R2 S8) — EDGE authentication. Until now Kong did routing, CORS and correlation ids only:
 # an unauthenticated request was proxied all the way to a service and rejected there. Every service does
@@ -316,13 +345,11 @@ consumers:
         rsa_public_key: "__IDENTITY_JWKS_PUBLIC_KEY__"
 
 plugins:
-  # Global edge authentication (S8). Health and metrics are not routed through Kong at all (Prometheus
-  # scrapes services in-cluster), so they need no exemption; the OIDC routes carry an explicit disable above.
-  - name: jwt
-    config:
-      key_claim_name: iss
-      claims_to_verify: ["exp"]
-      run_on_preflight: false   # a CORS preflight carries no Authorization header by design
+  # NOTE: `jwt` is deliberately NOT here. A global plugin cannot be switched off for one route in Kong OSS,
+  # and the OIDC bootstrap routes (/connect, /.well-known) must be reachable without a token. It is attached
+  # per service instead, via the `edge_jwt` anchor defined on the first service above — so every service
+  # carries the edge check and the one exemption is expressed by simply not attaching it.
+  #
   # Dev CORS: allow the Vite SPA origin to call the API with a bearer token.
   # credentials:false — the SPA sends the token in the Authorization header, not cookies, so we do not
   # need (and must not advertise) credentialed CORS. If-Match/ETag support optimistic concurrency.
