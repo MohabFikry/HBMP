@@ -44,7 +44,7 @@ public sealed record PolicyDocumentView(
             d.UploadedByUsername, d.UploadedByDisplay, d.UploadedAt,
             d.Status.ToString(), d.WithdrawnByUsername, d.WithdrawnAt, d.WithdrawalReason,
             d.ExpiresOn, d.IsExpired(today), d.VerifiedByUsername, d.VerifiedAt,
-            DocumentAccess.MayDownload(d.VisibilityClass, roles, hasSensitiveGrant));
+            DocumentAccess.MayDownload(d.DocumentClass, d.VisibilityClass, roles, hasSensitiveGrant));
     }
 }
 
@@ -72,7 +72,86 @@ public static class PolicyDocumentEndpoints
         MapList(read, "/policies/{id:guid}/documents", NoteScope.Policy);
         MapList(read, "/enrollments/{id:guid}/documents", NoteScope.Member);
         MapDownload(read);
+        MapIdentityPhoto(read);
         MapLifecycle(write);
+    }
+
+    // ---- Identity photo (phase 20.3) ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Resolve the member's current identification photograph to a SHORT-TTL SIGNED URL.
+    ///
+    /// <para>Keyed on the beneficiary rather than a link id, because the caller (profile-service, on behalf of a
+    /// receptionist) knows who the patient is and should not have to enumerate their documents to find a face.
+    /// Enumerating documents is a wider read than looking at a photo, and asking for the wider one first would
+    /// be exactly backwards.</para>
+    ///
+    /// <para>404 when there is no photo — including when consent was refused. That is an ordinary answer, not an
+    /// error: the SPA renders initials, and nothing about care changes.</para>
+    /// </summary>
+    private static void MapIdentityPhoto(RouteGroupBuilder read)
+    {
+        read.MapGet("/beneficiaries/{beneficiaryId:guid}/identity-photo", async (
+            Guid beneficiaryId, HttpRequest request, PolicyDbContext db, IDocumentStore store,
+            IHbmpPrincipalAccessor me, IAuditClient audit, CancellationToken ct) =>
+        {
+            var principal = me.Principal;
+            if (principal is null) return GateResults.Unauthenticated();
+
+            // The photo's own allow-list, NARROWER than the administrative class it is filed under. Finance,
+            // claims, labs, pharmacies and platform admins are refused here even though they may read other
+            // administrative documents about the same member (design 39 §5).
+            if (!Mersal.Authz.ProfilePhotoAccess.MayView(principal.Roles))
+            {
+                await audit.EmitAsync(new AuditEventDraft
+                {
+                    EntityType = "identity_photo", EntityId = beneficiaryId.ToString(), Action = AuditAction.Read,
+                    ActorUserId = principal.Subject, ActorRole = string.Join(',', principal.Roles),
+                    TenantId = principal.TenantId, DecisionOutcome = "denied",
+                    DecisionReasonCode = "role-has-no-identification-need",
+                    FieldClasses = ["identity"], Severity = AuditSeverity.Warning,
+                }, ct);
+                return GateResults.Forbidden("urn:hbmp:photo-access-denied",
+                    detail: "Your role does not receive beneficiary photographs.",
+                    reason: "role-has-no-identification-need");
+            }
+
+            var enrollmentIds = await db.Enrollments.AsNoTracking()
+                .Where(e => e.BeneficiaryId == beneficiaryId && !e.IsDeleted)
+                .Select(e => e.EnrollmentId).ToListAsync(ct);
+
+            // Newest ACTIVE link wins. Superseded versions are retained (never silently overwritten) and are
+            // simply not the current face.
+            var photo = await db.PolicyDocuments.AsNoTracking()
+                .Where(d => d.Scope == NoteScope.Member && enrollmentIds.Contains(d.ScopeRef)
+                            && d.DocumentClass == DocumentClass.IdentityPhoto
+                            && d.Status == DocumentLinkStatus.Active)
+                .OrderByDescending(d => d.VersionNo).ThenByDescending(d => d.UploadedAt)
+                .FirstOrDefaultAsync(ct);
+            if (photo is null) return NotFound();
+
+            // Minted AS THE CALLER — a service token would let the store hand out bytes the caller's own
+            // authorization would have refused.
+            var url = await store.SignedDownloadUrlAsync(
+                photo.DocumentId, IdentityPhotoRules.SignedUrlTtl,
+                request.Headers.Authorization.FirstOrDefault(), ct);
+            if (url is null) return NotFound();
+
+            // Every retrieval is audited. A photo read is the disclosure of a person's face to a named user at a
+            // named time — precisely what a data-subject access request asks about.
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "identity_photo", EntityId = beneficiaryId.ToString(), Action = AuditAction.Read,
+                ActorUserId = principal.Subject, ActorRole = string.Join(',', principal.Roles),
+                TenantId = principal.TenantId, Purpose = "identification",
+                DecisionOutcome = "IdentityPhotoResolved", DecisionReasonCode = photo.LinkId.ToString(),
+                FieldClasses = ["identity"], Severity = AuditSeverity.Notice,
+            }, ct);
+
+            return Results.Ok(new IdentityPhotoView(
+                photo.LinkId, photo.VersionNo, url.ToString(),
+                DateTimeOffset.UtcNow.Add(IdentityPhotoRules.SignedUrlTtl)));
+        });
     }
 
     // ---- Attach ------------------------------------------------------------------------------------------
@@ -132,6 +211,22 @@ public static class PolicyDocumentEndpoints
                 ? await db.Policies.AnyAsync(p => p.PolicyId == id && !p.IsDeleted, ct)
                 : await db.Enrollments.AnyAsync(e => e.EnrollmentId == id && !e.IsDeleted, ct);
             if (!exists) return NotFound();
+
+            // THE CONSENT GATE (phase 20.3, design 39 §5). An identification photograph is only stored once a
+            // consent covering photography is on file. Enforced here, at the only door the bytes come through,
+            // rather than in the UI — a rule the client checks is a rule the next client forgets.
+            if (documentClass == DocumentClass.IdentityPhoto)
+            {
+                if (scope != NoteScope.Member)
+                    return ProblemResults.Invalid("PHOTO_IS_MEMBER_SCOPED",
+                        "An identification photograph belongs to a member, not to a policy.");
+
+                var onFile = await db.PolicyDocuments.AsNoTracking()
+                    .Where(d => d.Scope == NoteScope.Member && d.ScopeRef == id)
+                    .ToListAsync(ct);
+                if (!IdentityPhotoRules.ConsentSatisfied(onFile, DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime)))
+                    return ProblemResults.Unprocessable("PHOTO_CONSENT_REQUIRED", IdentityPhotoRules.ConsentMissing);
+            }
 
             // Hand the bytes to document-service: MIME/size validation, FAIL-CLOSED ClamAV scan, checksum,
             // MinIO. Nothing is linked until it comes back clean.
@@ -261,7 +356,11 @@ public static class PolicyDocumentEndpoints
             // Restricted material is existence-only until released through the design-37 §6 request/grant
             // flow. No role reaches it here — inventing a parallel unlock would be a side channel around the
             // one mechanism that exists.
-            var mayDownload = DocumentAccess.MayDownload(link.VisibilityClass, principal.Roles, hasSensitiveGrant: false);
+            // Class-aware: an IdentityPhoto is Administrative by visibility but carries its own, much narrower
+            // allow-list (design 39 §5), so the visibility class alone would hand a refugee's photograph to
+            // finance and claims.
+            var mayDownload = DocumentAccess.MayDownload(
+                link.DocumentClass, link.VisibilityClass, principal.Roles, hasSensitiveGrant: false);
             if (!mayDownload)
             {
                 // A DENIED download is audited too. Someone reaching for a clinical record they may not read
@@ -408,3 +507,7 @@ public static class PolicyDocumentEndpoints
         }
     }
 }
+
+/// <summary>A resolved identification photograph: which link and version, and a SHORT-TTL signed URL that is
+/// dead long before it can be pasted anywhere useful (design 39 §5).</summary>
+public sealed record IdentityPhotoView(Guid LinkId, int VersionNo, string SignedUrl, DateTimeOffset ExpiresAt);

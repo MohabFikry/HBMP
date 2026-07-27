@@ -46,7 +46,25 @@ public sealed class CallInteraction
     public DateTimeOffset? EndedAt { get; set; }
     public CallReasonCode? ReasonCode { get; set; }
     public CallOutcome? Outcome { get; set; }
+
+    /// <summary>The AGENT'S working text. Phase 20 deliberately did NOT promote this to other roles — see
+    /// <see cref="Summary"/>.</summary>
     public string? Notes { get; set; }
+
+    /// <summary>
+    /// The operational account of the call, written at wrap-up and read by OTHER roles through the patient
+    /// profile (design 39 §5b). Required at close unless the outcome is Abandoned; capped at 500 characters.
+    ///
+    /// <para>Separate from <see cref="Notes"/> on purpose, and the separation is the feature: widening the
+    /// audience for call history must not silently widen the audience for whatever an agent typed mid-call.</para>
+    /// </summary>
+    public string? Summary { get; set; }
+
+    /// <summary>Set on the first correction. Drives the visible "edited" marker — a summary other roles rely on
+    /// that can be rewritten without trace is worse than no summary, because it still reads as a record.</summary>
+    public DateTimeOffset? SummaryEditedAt { get; set; }
+    public string? SummaryEditedBy { get; set; }
+
     public InteractionStatus Status { get; set; } = InteractionStatus.Open;
     public string? CreatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
@@ -71,6 +89,19 @@ public sealed class CallerVerification
     public string? FailureReason { get; set; }
     public DateTimeOffset VerifiedAt { get; set; }
     public string? VerifiedBy { get; set; }
+}
+
+/// <summary>An append-only record of a summary correction (design 39 §5b: edits keep history and carry a
+/// visible "edited" marker, never a silent overwrite).</summary>
+public sealed class CallSummaryRevision
+{
+    public Guid RevisionId { get; set; }
+    public Guid InteractionId { get; set; }
+    public string TenantId { get; set; } = default!;
+    public string? PreviousValue { get; set; }
+    public string? NewValue { get; set; }
+    public string? EditedBy { get; set; }
+    public DateTimeOffset EditedAt { get; set; }
 }
 
 /// <summary>Pure verification rules (no I/O) so the gate + tests share one source of truth (design 37, US privacy).

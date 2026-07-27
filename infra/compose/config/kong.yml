@@ -139,6 +139,12 @@ services:
         paths:
           - "~/api/v1/beneficiaries/[^/]+/administrative-360$"
         strip_path: false
+      # 20.3 — resolve a member's identification photograph to a short-TTL signed URL. Same regex-route shape,
+      # same reason. profile-service is its only caller today, on behalf of a receptionist or a clinician.
+      - name: policy-identity-photo
+        paths:
+          - "~/api/v1/beneficiaries/[^/]+/identity-photo$"
+        strip_path: false
 
   # --- provider-service: provider network + contracts + branches + practitioners + specialties ---
   - name: provider-service
@@ -237,6 +243,25 @@ services:
     routes:
       - name: callcentre-routes
         paths: ["/api/v1/call-interactions", "/api/v1/call-centre"]
+        strip_path: false
+      # 20.3b — the member's call history, read BY BENEFICIARY by the patient profile's callHistory section
+      # (+ the copy-all endpoint). Under /beneficiaries, which patient-service owns as a catch-all, so it needs
+      # the same regex-route treatment as emr's allergies and policy's administrative-360.
+      - name: callcentre-history-routes
+        paths:
+          - "~/api/v1/beneficiaries/[^/]+/call-interactions$"
+          - "~/api/v1/beneficiaries/[^/]+/call-interactions/copy$"
+        strip_path: false
+
+  # --- profile-service: the unified patient profile (Phase 20, design 39). Composition only — it owns no data
+  # and holds no database; every section is fetched from its owning service under the CALLER'S token. ---
+  - name: profile-service
+    url: http://profile-service:8080
+    routes:
+      # /api/v1/patients is this service's own namespace: the profile, its role-projected print summary, and
+      # the consent-gated identity photo (which 302s to a short-TTL signed URL — the bytes never pass through).
+      - name: profile-routes
+        paths: ["/api/v1/patients"]
         strip_path: false
 
   # --- interop-service: the FHIR R4 façade (13.1) + partner integration registry (13.2). ---

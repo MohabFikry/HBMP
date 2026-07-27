@@ -506,6 +506,18 @@ public static class ProfilePolicies
     /// <summary>Every role the matrix names — the coarse RBAC gate. Section-level shaping is the second layer.</summary>
     private static readonly HashSet<string> ProfileReaders = [.. Matrix.Keys];
 
+    /// <summary>
+    /// The roles whose matrix row actually HAS a call-history cell — derived from the matrix rather than
+    /// re-listed.
+    ///
+    /// <para>Granting <c>callcentre:history:read</c> to every profile reader would hand the endpoint to labs,
+    /// pharmacies and platform admins, whose rows have no callHistory cell at all: a scope that returns nothing
+    /// today, and the sort of scope something else gets wired to later precisely because it looks harmless. The
+    /// scope-integrity test in libs/authz caught exactly this when the rule was written by hand.</para>
+    /// </summary>
+    private static readonly HashSet<string> CallHistoryReaders =
+        [.. Matrix.Where(row => row.Value.ContainsKey(ProfileSections.CallHistory)).Select(row => row.Key)];
+
     /// <summary>The profile rules on their own (spliceable into a service's bundle).</summary>
     public static IReadOnlyList<PolicyRule> Rules() =>
     [
@@ -540,7 +552,7 @@ public static class ProfilePolicies
         new PolicyRule
         {
             Action = CallHistoryRead, ResourceType = CallCentrePolicies.Resource,
-            Roles = ProfileReaders, Scopes = Set("callcentre:history:read"),
+            Roles = CallHistoryReaders, Scopes = Set("callcentre:history:read"),
             RequiredConditions = [AbacConditions.TenantMatch],
             Sensitive = true,
         },

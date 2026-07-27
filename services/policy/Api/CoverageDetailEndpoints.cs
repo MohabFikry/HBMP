@@ -263,7 +263,7 @@ public static class CoverageDetailEndpoints
                 [.. documents.Select(d => new DocumentSummaryView(
                     d.LinkId, d.DocumentId, d.DocumentClass.ToString(), d.VisibilityClass.ToString(), d.Title,
                     d.DocumentDate, d.UploadedAt, d.UploadedByDisplay, d.Status.ToString(),
-                    DocumentAccess.MayDownload(d.VisibilityClass, principal.Roles)))],
+                    DocumentAccess.MayDownload(d.DocumentClass, d.VisibilityClass, principal.Roles)))],
                 // Note bodies go through 19.3's rules: a caller without the class receives the note's
                 // EXISTENCE and an explicit withheld flag, never a silently empty record.
                 [.. notes.Select(n => NoteView.For(n, principal.Roles, subjectId, hasSupervisor))],

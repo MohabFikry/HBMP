@@ -139,6 +139,14 @@ public static class Interactions
             if (req?.ReasonCode is not null) i.ReasonCode = req.ReasonCode;
             if (req?.Outcome is not null) i.Outcome = req.Outcome;
             if (req?.Notes is not null) i.Notes = req.Notes;
+            if (req?.Summary is not null) i.Summary = req.Summary.Trim();
+
+            // Phase 20.3b — a summary is REQUIRED at close unless the call was abandoned. Other roles read this
+            // field through the patient profile; a call that closed "Resolved" with nothing recorded leaves a
+            // coordinator reading a row that says something happened and refuses to say what.
+            if (CallSummaryRules.Validate(i.Outcome, i.Summary) is { } problem)
+                return Unprocessable("summary-required", problem);
+
             i.Status = InteractionStatus.Closed;
             i.EndedAt = now;
             i.UpdatedAt = now;
@@ -148,6 +156,48 @@ public static class Interactions
             await deps.AuditAsync("call_interaction", id.ToString(), AuditAction.StateChange, "CallInteractionClosed",
                 i.CallRef, after: i.Outcome?.ToString());
             // Once closed the verification gate returns false → member detail is no longer disclosable on this call.
+            return Results.Ok(InteractionView.From(i, false));
+        }).RequireAuthorization(HbmpPolicies.Scope("callcentre:interaction"));
+
+        // --- Correct the summary (phase 20.3b) — an EDIT WITH HISTORY, never a silent overwrite -------------
+        // Available after close, unlike the rest of the call log: the summary is the one field other roles rely
+        // on, so a genuine correction must be possible — and must be visible as a correction.
+        v1.MapPatch("/{id:guid}/summary", async (Guid id, UpdateSummaryRequest req, CallDeps deps, CancellationToken ct) =>
+        {
+            var denied = await deps.Gate.CheckAsync(CallCentrePolicies.Interaction, "edit-summary", ct);
+            if (denied is not null) return denied;
+
+            var i = await deps.Db.Interactions.FirstOrDefaultAsync(x => x.InteractionId == id, ct);
+            if (i is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+            var next = req.Summary?.Trim();
+            if (string.IsNullOrWhiteSpace(next))
+                return Unprocessable("summary-required", "A summary correction cannot be empty — a summary other roles rely on must not be blankable.");
+            if (next.Length > CallSummaryRules.MaxLength)
+                return Unprocessable("summary-too-long", $"A call summary is capped at {CallSummaryRules.MaxLength} characters; got {next.Length}.");
+            if (string.Equals(next, i.Summary, StringComparison.Ordinal))
+                return Results.Ok(InteractionView.From(i, false));
+
+            var now = deps.Clock.GetUtcNow();
+            deps.Db.SummaryRevisions.Add(new CallSummaryRevision
+            {
+                RevisionId = Guid.NewGuid(),
+                InteractionId = id,
+                TenantId = deps.Tenant ?? "unknown",
+                PreviousValue = i.Summary,
+                NewValue = next,
+                EditedBy = deps.Subject,
+                EditedAt = now,
+            });
+            i.Summary = next;
+            i.SummaryEditedAt = now;
+            i.SummaryEditedBy = deps.Subject;
+            i.UpdatedAt = now;
+            await deps.Db.SaveChangesAsync(ct);
+
+            await deps.AuditAsync("call_interaction", id.ToString(), AuditAction.Update, "CallSummaryEdited",
+                i.CallRef, severity: AuditSeverity.Notice, before: "(previous summary retained in history)",
+                after: "edited");
             return Results.Ok(InteractionView.From(i, false));
         }).RequireAuthorization(HbmpPolicies.Scope("callcentre:interaction"));
 

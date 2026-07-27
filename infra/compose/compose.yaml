@@ -664,6 +664,35 @@ services:
       rabbitmq: { condition: service_started }
     networks: [hbmp]
 
+  # --- profile-service (20): the unified patient profile (design 39). ---
+  # NO ConnectionStrings entry, and that is not an omission: this service owns no data and has no DbContext.
+  # Every section is fetched from the service that owns it, under the CALLER'S bearer, so each one
+  # re-authorizes independently — a service account here would return a complete profile to someone entitled
+  # to a third of it, and it would look correct (ADR-0026).
+  profile-service:
+    build: { context: ../.., dockerfile: services/profile/Dockerfile }
+    <<: *restart
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Auth__Authority: "http://identity-service:8080"
+      Auth__Audience: "hbmp-api"
+      Auth__RequireHttpsMetadata: "false"
+      Auth__ValidIssuers__0: "http://localhost:8090"
+      Siblings__Policy: "http://policy-service:8080"
+      Siblings__Emr: "http://emr-service:8080"
+      Siblings__Orders: "http://orders-service:8080"
+      Siblings__Pharmacy: "http://pharmacy-service:8080"
+      Siblings__Approvals: "http://approvals-service:8080"
+      Siblings__Claims: "http://claims-service:8080"
+      Siblings__Case: "http://case-service:8080"
+      Siblings__Callcentre: "http://callcentre-service:8080"
+      Siblings__Document: "http://document-service:8080"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+    ports: ["127.0.0.1:8110:8080"]
+    depends_on:
+      identity-service: { condition: service_started }
+    networks: [hbmp]
+
   # --- interop-service (13): the FHIR R4 façade + DPIA-gated partner integration. ---
   # 18.C2 (audit R2 W3): phase 13 shipped complete and had NO compose block and NO Kong route, so nothing
   # outside the test suite could reach /fhir/r4 — the coverage guard never noticed because it only inspects

@@ -1,3 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><RootNamespace>Mersal.CallCentre.Domain</RootNamespace></PropertyGroup>
+  <ItemGroup>
+    <!-- Phase 20.3b: the call-history projection is expressed in the platform's shared CallHistoryLevel and
+         renders timestamps in the Africa/Cairo business zone. Both are library concerns, not EF ones — the
+         layering rule this keeps is "no Infrastructure", and neither of these is. -->
+    <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
+    <ProjectReference Include="../../../libs/time/Mersal.Time.csproj" />
+  </ItemGroup>
 </Project>

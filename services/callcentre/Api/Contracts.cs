@@ -16,18 +16,26 @@ public sealed record RecordVerificationRequest(
     VerificationResult Result,
     string? FailureReason);
 
-/// <summary>Update the call log (reason/outcome/notes).</summary>
-public sealed record UpdateInteractionRequest(CallReasonCode? ReasonCode, CallOutcome? Outcome, string? Notes);
+/// <summary>Update the call log. <paramref name="Summary"/> (phase 20.3b) is the operational account OTHER roles
+/// read; <paramref name="Notes"/> stays the agent's own working text and is never promoted.</summary>
+public sealed record UpdateInteractionRequest(
+    CallReasonCode? ReasonCode, CallOutcome? Outcome, string? Notes, string? Summary = null);
+
+/// <summary>Correct a summary after the fact. Kept separate from <see cref="UpdateInteractionRequest"/> because
+/// it is the one field editable after close, and it writes a revision every time.</summary>
+public sealed record UpdateSummaryRequest(string? Summary);
 
 /// <summary>The interaction as returned to the agent. No identifier values — only the bound beneficiary id.</summary>
 public sealed record InteractionView(
     Guid InteractionId, string CallRef, Guid? BeneficiaryId, CallDirection Direction,
     string Status, CallReasonCode? ReasonCode, CallOutcome? Outcome, string? Notes,
+    string? Summary, bool SummaryEdited,
     DateTimeOffset StartedAt, DateTimeOffset? EndedAt, bool Verified)
 {
     public static InteractionView From(CallInteraction i, bool verified) => new(
         i.InteractionId, i.CallRef, i.BeneficiaryId, i.Direction, i.Status.ToString(),
-        i.ReasonCode, i.Outcome, i.Notes, i.StartedAt, i.EndedAt, verified);
+        i.ReasonCode, i.Outcome, i.Notes, i.Summary, i.SummaryEditedAt is not null,
+        i.StartedAt, i.EndedAt, verified);
 }
 
 /// <summary>A verification attempt as returned (types only, never values).</summary>

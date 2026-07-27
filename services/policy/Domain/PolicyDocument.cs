@@ -13,6 +13,9 @@ public enum DocumentClass
     IdentityDocument, ProofOfEligibility, EnrolmentForm, ConsentForm,
     PastMedicalHistory, MedicalReport, LabResult, Prescription, DischargeSummary,
     Referral, InvoiceReceipt, MemberCorrespondence, Other,
+    /// <summary>Phase 20.3 — the beneficiary's identification photograph (design 39 §5). Administrative by
+    /// visibility, but with its OWN, much narrower role allow-list: see <see cref="DocumentAccess"/>.</summary>
+    IdentityPhoto,
 }
 
 /// <summary>
@@ -190,6 +193,30 @@ public static class DocumentAccess
     }
 
     /// <summary>
+    /// Whether this caller may fetch the bytes, taking the document CLASS into account as well as its
+    /// visibility.
+    ///
+    /// <para>One class needs this and the design says why. A beneficiary photograph is administrative by
+    /// visibility — it is not a clinical record — but for a refugee population it is identity-sensitive,
+    /// biometric-adjacent data (design 39 §5), and the administrative allow-list is far too wide for it: it
+    /// includes finance, claims and platform admins, none of whom has an identification need. So the photo
+    /// carries its own list, and the visibility class alone is not enough to answer the question.</para>
+    /// </summary>
+    public static bool MayDownload(
+        DocumentClass documentClass, NoteVisibility visibility, IReadOnlyCollection<string> roles,
+        bool hasSensitiveGrant = false)
+    {
+        ArgumentNullException.ThrowIfNull(roles);
+        // The photo's list is the NARROWER of the two, never the wider: it is an additional gate on top of the
+        // class rules, not an exemption from them.
+        if (documentClass == DocumentClass.IdentityPhoto)
+            return Mersal.Authz.ProfilePhotoAccess.MayView(roles)
+                   && MayDownload(visibility, roles, hasSensitiveGrant);
+
+        return MayDownload(visibility, roles, hasSensitiveGrant);
+    }
+
+    /// <summary>
     /// Whether this caller may UPLOAD a document of this class.
     ///
     /// <para>Separate from download on purpose: a finance user may attach an invoice to a member but must not
@@ -200,6 +227,17 @@ public static class DocumentAccess
     public static bool MayUpload(DocumentClass documentClass, IReadOnlyCollection<string> roles)
     {
         ArgumentNullException.ThrowIfNull(roles);
+
+        // A photograph is CAPTURED at the desk, with the person present and consenting — so the roles that may
+        // file one are the roles that meet them: registration and the front desk. Not clinicians (a photo is
+        // not a clinical act), not finance, not admins.
+        if (documentClass == DocumentClass.IdentityPhoto)
+        {
+            string[] photographers =
+                ["reception", "beneficiary_mgmt", "beneficiary_mgmt_supervisor", "super_admin"];
+            return roles.Any(r => photographers.Contains(r, StringComparer.Ordinal));
+        }
+
         var floor = DocumentClassification.DefaultFor(documentClass);
         if (floor is NoteVisibility.Administrative or NoteVisibility.Financial)
             return roles.Any(r => Downloaders[floor].Contains(r, StringComparer.Ordinal));

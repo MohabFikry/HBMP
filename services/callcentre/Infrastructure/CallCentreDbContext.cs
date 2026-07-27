@@ -15,6 +15,7 @@ public sealed class CallCentreDbContext(DbContextOptions<CallCentreDbContext> op
     public DbSet<CallInteraction> Interactions => Set<CallInteraction>();
     public DbSet<CallerVerification> Verifications => Set<CallerVerification>();
     public DbSet<AppointmentLink> AppointmentLinks => Set<AppointmentLink>();
+    public DbSet<CallSummaryRevision> SummaryRevisions => Set<CallSummaryRevision>();
     public DbSet<CallProcessedRequest> ProcessedRequests => Set<CallProcessedRequest>();
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -32,6 +33,8 @@ public sealed class CallCentreDbContext(DbContextOptions<CallCentreDbContext> op
             e.Property(x => x.ReasonCode).HasConversion<string?>().HasColumnName("reason_code");
             e.Property(x => x.Outcome).HasConversion<string?>().HasColumnName("outcome");
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            // Capped so a summary stays a summary rather than becoming a second, unbounded notes field.
+            e.Property(x => x.Summary).HasMaxLength(CallSummaryRules.MaxLength);
             e.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
             e.HasIndex(x => x.CallRef).IsUnique();
             e.HasIndex(x => new { x.TenantId, x.AgentUserId, x.StartedAt });
@@ -63,6 +66,17 @@ public sealed class CallCentreDbContext(DbContextOptions<CallCentreDbContext> op
             e.Property(x => x.CancelReason).HasConversion<string?>().HasColumnName("cancel_reason");
             e.HasIndex(x => x.InteractionId);
             e.HasIndex(x => x.AppointmentId);
+        });
+
+        // Phase 20.3b — append-only summary corrections. No update or delete path exists in the API; the table
+        // is written to and read from, never rewritten (design 39 §5b: edits keep history).
+        b.Entity<CallSummaryRevision>(e =>
+        {
+            e.ToTable("call_summary_revision");
+            e.HasKey(x => x.RevisionId);
+            e.Property(x => x.PreviousValue).HasMaxLength(CallSummaryRules.MaxLength);
+            e.Property(x => x.NewValue).HasMaxLength(CallSummaryRules.MaxLength);
+            e.HasIndex(x => new { x.InteractionId, x.EditedAt }).IsDescending(false, true);
         });
 
         b.Entity<CallProcessedRequest>(e =>

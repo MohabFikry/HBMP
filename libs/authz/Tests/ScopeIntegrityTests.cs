@@ -32,7 +32,7 @@ public class ScopeIntegrityTests
         OrdersPolicies.Bundle(), PharmacyPolicies.Bundle(), ApprovalsPolicies.Bundle(), CasePolicies.Bundle(),
         FinancePolicies.Bundle(), ProviderPolicies.Bundle(), ReportingPolicies.Bundle(),
         NotificationPolicies.Bundle(), DocumentPolicies.Bundle(), CallCentrePolicies.Bundle(),
-        PolicyPolicies.Bundle(),
+        PolicyPolicies.Bundle(), ProfilePolicies.Bundle(),
     ];
 
     /// <summary>
