@@ -41,15 +41,20 @@ app.UseStatusCodePages();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// 18.B2 moved audit-service onto its own least-privilege `hbmp_audit` login role. That role is
+// deliberately NOT the owner of schema `audit` — audit_event is FORCE ROW LEVEL SECURITY and the
+// REVOKE of UPDATE/DELETE in 0002 is only meaningful while the writer cannot re-grant itself. So
+// audit-service can no longer run its own DDL: `CREATE SCHEMA IF NOT EXISTS audit` in 0001 performs
+// the CREATE-on-database ACL check even when the schema already exists, which crash-looped the
+// service on every boot with `42501: permission denied for database hbmp`.
+//
+// Migrations are applied out of band by tools/ci/apply-migrations.sh, under a role that owns the
+// schema — the same path CI uses (.github/workflows/backend-ci.yml) and the same way the other
+// seventeen services have always been migrated. audit-service was the only one migrating at startup.
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
-    // Apply the hand-authored SQL migrations (partition/grants/RLS) on dev startup.
-    using var scope = app.Services.CreateScope();
-    var db = scope.ServiceProvider.GetRequiredService<AuditDbContext>();
-    var migrations = Path.Combine(AppContext.BaseDirectory, "Migrations");
-    await SqlFileMigrator.ApplyAsync(db, migrations);
 }
 
 app.MapHealthChecks("/health/ready");
