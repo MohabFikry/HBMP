@@ -1,5 +1,6 @@
 using Mersal.Audit.Client;
 using Mersal.Auth;
+using Mersal.Data;
 using Mersal.Auth.Authorization;
 using Mersal.Authz;
 using Mersal.Events;
@@ -49,25 +50,27 @@ app.UseStatusCodePages();
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Provider isolation, layers 1 & 4: reject provider-scoped tokens with no provider_id on provider routes,
-// and bind the RLS session GUCs (tenant_id / provider_id) for this request's DB connections.
+// Provider isolation, layer 1: reject provider-scoped tokens with no provider_id on provider routes.
+// 18.E2 — this used to ALSO hand-roll the RLS binding, duplicating UseHbmpRls line for line. A bespoke copy
+// of shared wiring is exactly what drifts: the shared helper gained behaviour over three phases and this
+// copy did not, and the architecture test could not tell "binds the GUC" from "does not" by reading it.
+// The guard stays here (it is provider-specific); the binding is the shared call below.
 app.Use(async (ctx, next) =>
 {
     var principal = ctx.RequestServices.GetRequiredService<IHbmpPrincipalAccessor>().Principal;
-    if (principal is not null && ctx.Request.Path.StartsWithSegments("/api/v1"))
+    if (principal is not null && ctx.Request.Path.StartsWithSegments("/api/v1")
+        && ProviderAccessGuard.TokenMissingProviderId(principal))
     {
-        if (ProviderAccessGuard.TokenMissingProviderId(principal))
-        {
-            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await ctx.Response.WriteAsJsonAsync(new { title = "provider-scoped token is missing a provider_id claim" });
-            return;
-        }
-        var rls = ctx.RequestServices.GetRequiredService<Mersal.Data.RlsContext>();
-        rls.TenantId = principal.TenantId ?? "";
-        rls.ProviderId = principal.ProviderId ?? "";
+        ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await ctx.Response.WriteAsJsonAsync(new { title = "provider-scoped token is missing a provider_id claim" });
+        return;
     }
     await next();
 });
+
+// Bind app.tenant_id / app.provider_id from the principal (RLS, ADR-0011) — the shared binder every other
+// service uses, so provider inherits the same behaviour rather than a snapshot of it.
+app.UseHbmpRls();
 
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 

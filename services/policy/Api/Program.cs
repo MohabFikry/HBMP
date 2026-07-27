@@ -72,7 +72,7 @@ v1.MapPost("/policies", async (CreatePolicy req, PolicyDbContext db, IAuditClien
 v1.MapPost("/policies/{policyId:guid}/coverages", async (Guid policyId, CreateCoverage req, PolicyDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
     var policy = await db.Policies.FirstOrDefaultAsync(x => x.PolicyId == policyId, ct);
-    if (policy is null) return Results.NotFound(new { policyId });
+    if (policy is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
     var cat = await db.BenefitCategories.FirstOrDefaultAsync(c => c.Code == req.BenefitCategoryCode, ct);
     if (cat is null) return Results.Problem(statusCode: 400, title: $"unknown benefit category '{req.BenefitCategoryCode}'");
 

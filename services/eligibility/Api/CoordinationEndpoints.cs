@@ -28,7 +28,7 @@ public static class CoordinationEndpoints
         {
             var member = await db.Members.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.BeneficiaryId == beneficiaryId, ct);
-            if (member is null) return Results.NotFound(new { beneficiaryId });
+            if (member is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             // Prefer an active coverage; fall back to the most recently updated one so the card is never empty
             // when only a lapsed coverage exists (the status field then communicates the lapse).

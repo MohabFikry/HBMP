@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>Mersal.Architecture.Tests</RootNamespace><IsPackable>false</IsPackable><IsTestProject>true</IsTestProject></PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" /><PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" /><PackageReference Include="coverlet.collector" />
+    <PackageReference Include="FluentAssertions" /><PackageReference Include="NetArchTest.Rules" />
+  </ItemGroup>
+  <!--
+    Referencing the DOMAIN assemblies only. The layering rule this project enforces is "Domain never
+    references Infrastructure", and the cleanest way to state that is to load the Domain assemblies and
+    assert what they depend on. The source-scan rules below need no references at all — they read the repo.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../../../services/claims/Domain/Mersal.Claims.Domain.csproj" />
+    <ProjectReference Include="../../../services/orders/Domain/Mersal.Orders.Domain.csproj" />
+    <ProjectReference Include="../../../services/emr/Domain/Mersal.Emr.Domain.csproj" />
+    <ProjectReference Include="../../../services/policy/Domain/Mersal.Policy.Domain.csproj" />
+    <ProjectReference Include="../../../services/patient/Domain/Mersal.Patient.Domain.csproj" />
+  </ItemGroup>
+  <ItemGroup><Using Include="Xunit" /></ItemGroup>
+</Project>

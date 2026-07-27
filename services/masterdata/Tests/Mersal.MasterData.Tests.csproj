@@ -9,8 +9,10 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../Api/Mersal.MasterData.Api.csproj" />
     <ProjectReference Include="../Domain/Mersal.MasterData.Domain.csproj" />
     <ProjectReference Include="../../../tools/masterdata-loader/Mersal.MasterData.Loader.csproj" />
   </ItemGroup>

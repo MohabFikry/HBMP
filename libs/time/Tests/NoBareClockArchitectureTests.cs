@@ -33,8 +33,6 @@ public class NoBareClockArchitectureTests
             "object-lock retention is computed against the storage backend's own clock",
         ["services/eligibility/Api/ConsumerHealth.cs"] =
             "liveness heartbeat ticks; never read as a business date",
-        ["services/hello/Api/Program.cs"] =
-            "reference/scaffold service, not a business path (slated for deletion in 18.E2)",
     };
 
     private static readonly Regex BareUtcNow =

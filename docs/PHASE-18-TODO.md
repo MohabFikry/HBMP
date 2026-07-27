@@ -74,8 +74,8 @@ Mark `✅ YYYY-MM-DD` per id here **and** on the finding row in `AUDIT-R2-E2E.md
 | 18.E1 | Q1 | Route-coverage guard, `IDENTITY_TEST_DB`, identity/interop OpenAPI claimed but not wired | ✅ 2026-07-27 (Kong guard wired + extended to all public prefixes; CI split-brain resolved, ADR-0001 amended) |
 | 18.E1 | Q2 | GitLab/GitHub CI split-brain | ✅ 2026-07-27 (IDENTITY_TEST_DB + Identity/Interop OpenAPI + specs committed + drift check; 2 silent-pass tests → SkippableFact) |
 | 18.E1 | Q4 | Coverage floor is 55%, documented as 80% | ✅ 2026-07-27 (domain floor 55→58 with a ratchet + target date; overall coverage now gated too) |
-| 18.E2 | Q3 | masterdata: 21 endpoints, 1 test file, no authz suite | ☐ |
-| 18.E2 | — | `libs/testing` extraction, gate consolidation, architecture tests, thin suites, 133 `any` | ☐ |
+| 18.E2 | Q3 | masterdata: 21 endpoints, 1 test file, no authz suite | ◐ 2026-07-27 — architecture tests + libs/data tests + masterdata authz + cleanups DONE; 3 refactors deferred (see note) |
+| 18.E2 | — | `libs/testing` extraction, gate consolidation, architecture tests, thin suites, 133 `any` | ◐ 2026-07-27 — architecture tests + libs/data tests + masterdata authz + cleanups DONE; 3 refactors deferred (see note) |
 
 ## Gate F — Enhancements
 
@@ -84,3 +84,15 @@ Mark `✅ YYYY-MM-DD` per id here **and** on the finding row in `AUDIT-R2-E2E.md
 | 18.F1 | Property-based executor tests · `Money` type · Stryker mutation testing | ☐ |
 | 18.F2 | Command palette · server-side worklist sort/filter/paginate · keyboard mode · offline · telemetry | ☐ |
 | 18.F3 | OpenBao dynamic creds · tenant-isolation fuzzing · audit anomaly detection · DAST · SBOM/cosign · Pact | ☐ |
+
+### 18.E2 — deferred, with reasons
+
+Three items are **not** done and are deliberately left rather than half-done:
+
+| Item | Why deferred |
+|---|---|
+| `libs/testing` extraction (HbmpDbFixture / RlsIsolationTheory / AuthedClientFactory) + refactor 13 RlsIsolationTests onto it | A pure-refactor of 13 passing safety-critical suites. The duplication is real, but these are the tests that prove tenant isolation — rewriting all of them at once trades a known-good state for a cosmetic gain, and any mistake is silent (a fixture that binds the wrong GUC makes every suite pass). Worth doing as its own reviewable change with the suites green on both sides. |
+| Consolidate 16 `*Gate.cs` into `libs/authz` `HbmpGate<TPolicy>` | Same shape, larger blast radius: the gates are the per-service authorization entry points. A pluggable result factory (problem+json vs FHIR OperationOutcome) is the right design; landing it alongside 40+ other changes is not. |
+| Burn down 66 `any` in `HttpApiClient.ts` + remove the file-wide eslint-disable | ~250 edits with **zero correctness impact** — every output is already zod-validated at runtime and that validation is tested. Pure type-hygiene, and the least valuable thing to risk regressions on at the end of a large phase. |
+
+Everything else in 18.E2 landed: architecture tests (7 rules), the provider RLS gap they found, `libs/data` interceptor tests, masterdata authz suite, 7 anonymous-object 404s → RFC-7807, `services/hello` deleted.

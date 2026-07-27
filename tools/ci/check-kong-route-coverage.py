@@ -16,7 +16,7 @@ Discovery rules (minimal-api style used across the codebase):
   * MapGroup("<prefix>/<seg>...")            -> resource <prefix>/<seg>
   * bare MapGroup("<prefix>") + child .Map*("/<seg>...")  -> resource <prefix>/<seg>
   * direct app.Map*("<prefix>/<seg>...")     -> resource <prefix>/<seg>
-Health/metrics/hello are ignored, as are prefixes outside PUBLIC_PREFIXES.
+Health/metrics are ignored, as are prefixes outside PUBLIC_PREFIXES.
 
 Coverage: a resource R is covered when some Kong route path P
   * plain: R == P or R starts with P + "/"  (Kong prefix match), or
@@ -26,7 +26,7 @@ from __future__ import annotations
 import re, sys, glob, pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-IGNORE_SEGMENTS = {"hello", "health", "metrics"}
+IGNORE_SEGMENTS = {"health", "metrics"}
 # Services intentionally NOT on the public gateway: audit-service is written via the internal audit
 # client and its read API is compliance-internal — it is not part of the single SPA origin.
 INTERNAL_SERVICES = {"audit"}
@@ -68,7 +68,7 @@ def served_resources() -> dict[str, str]:
     found: dict[str, str] = {}
     for cs in glob.glob(str(ROOT / "services/*/Api/**/*.cs"), recursive=True):
         svc = pathlib.Path(cs).relative_to(ROOT).parts[1]
-        if svc == "hello" or svc in INTERNAL_SERVICES:
+        if svc in INTERNAL_SERVICES:
             continue
         text = pathlib.Path(cs).read_text(encoding="utf-8", errors="ignore")
         groups = group_re.findall(text)

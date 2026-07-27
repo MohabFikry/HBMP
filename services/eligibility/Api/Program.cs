@@ -86,7 +86,7 @@ v1.MapGet("/members/{beneficiaryId:guid}/status", async (
 {
     var m = await db.Members.AsNoTracking().FirstOrDefaultAsync(x => x.BeneficiaryId == beneficiaryId, ct);
     return m is null
-        ? Results.NotFound(new { beneficiaryId })
+        ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found")
         : Results.Ok(new { beneficiaryId, status = m.Status, memberNo = m.MemberNo });
 });
 

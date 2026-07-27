@@ -143,7 +143,7 @@ v1.MapGet("/cpt-codes/{code}/exists", async (string code, MasterDataDbContext db
 v1.MapGet("/drugs/resolve", async (string code, MasterDataDbContext db, CancellationToken ct) =>
     await db.Drugs.AsNoTracking().FirstOrDefaultAsync(x => x.DrugCode == code, ct) is { } d
         ? Results.Ok(new { d.DrugCode, d.Name, d.Form, d.Strength, d.AtcCode })
-        : Results.NotFound(new { code, resolved = false }));
+        : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found"));
 
 // By-id existence checks the EMR uses to validate drug_id / allergen_id references (phase 4 medication
 // history & allergies). Return allow/deny only — no clinical payload.
@@ -212,7 +212,7 @@ v1.MapPost("/drug-interactions/check-by-ids", async (DrugIdCheckRequest req, Mas
 v1.MapPost("/allergies/check-by-ids", async (AllergyIdCheckRequest req, MasterDataDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
     var drug = await db.Drugs.AsNoTracking().FirstOrDefaultAsync(x => x.DrugId == req.DrugId, ct);
-    if (drug is null) return Results.NotFound(new { req.DrugId, resolved = false });
+    if (drug is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
     var atcChain = drug.AtcCode is null
         ? new HashSet<string>()
         : MasterDataNormalize.AtcAncestors(drug.AtcCode).Append(drug.AtcCode).ToHashSet(StringComparer.Ordinal);
@@ -228,7 +228,7 @@ v1.MapPost("/allergies/check-by-ids", async (AllergyIdCheckRequest req, MasterDa
 v1.MapPost("/allergies/check", async (AllergyCheckRequest req, MasterDataDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
     var drug = await db.Drugs.AsNoTracking().FirstOrDefaultAsync(x => x.DrugCode == req.DrugCode, ct);
-    if (drug is null) return Results.NotFound(new { req.DrugCode, resolved = false });
+    if (drug is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
     // Conflict when the drug's ATC code (or an ancestor) matches a patient drug-allergen code.
     var atcChain = drug.AtcCode is null
         ? new HashSet<string>()

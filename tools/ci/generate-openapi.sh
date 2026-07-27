@@ -37,7 +37,6 @@ fail=0
 count=0
 for api in services/*/Api; do
   svc=$(basename "$(dirname "$api")")
-  [ "$svc" = "hello" ] && continue                       # removed in 16.5
   grep -q AddSwaggerGen "$api"/*.cs 2>/dev/null || continue
   dll=$(ls "$api"/bin/Release/net8.0/Mersal.*.Api.dll 2>/dev/null | head -1)
   if [ -z "$dll" ]; then

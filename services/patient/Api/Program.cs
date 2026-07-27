@@ -170,7 +170,7 @@ reg.MapPost("", async (CreateRegistration req, HttpRequest http, PatientDbContex
     if (string.IsNullOrWhiteSpace(http.Headers["Idempotency-Key"]))
         return Results.Problem(statusCode: 400, title: "Idempotency-Key header is required");
     if (!await db.Beneficiaries.AnyAsync(x => x.BeneficiaryId == req.BeneficiaryId && !x.IsDeleted, ct))
-        return Results.NotFound(new { req.BeneficiaryId });
+        return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
     var now = clock.GetUtcNow();
     var r = new Registration { RegistrationId = Guid.NewGuid(), BeneficiaryId = req.BeneficiaryId, Status = RegistrationStatus.Pending, CreatedAt = now, UpdatedAt = now };
     db.Registrations.Add(r);
