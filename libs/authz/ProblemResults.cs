@@ -13,6 +13,12 @@ public static class ProblemResults
     public static IResult Invalid(string code, string? detail = null) =>
         Build(400, "bad-request", "urn:hbmp:bad-request", code, detail, null);
 
+    /// <summary>404 — no such entity. Distinct from a 403: "it does not exist" and "you may not see it" send an
+    /// administrator down completely different paths, and answering the second with the first sends them to
+    /// raise a data-loss incident over a permission setting (19.5).</summary>
+    public static IResult NotFound(string code, string? detail = null) =>
+        Build(404, "not-found", "https://mersal.foundation/problems/not-found", code, detail, null);
+
     /// <summary>409 — the request conflicts with current state (e.g. a uniqueness or lifecycle rule).</summary>
     public static IResult Conflict(string code, string? detail = null) =>
         Build(409, "conflict", "urn:hbmp:conflict", code, detail, null);

@@ -5,7 +5,10 @@
     <ProjectReference Include="../../../libs/data/Mersal.Data.csproj" />
     <!-- 19.4: utilization resolves the SAME network tier that priced the claim, through the SAME resolver
          eligibility/approvals/claims use. A second resolver here would let a report disagree with the money. -->
-    <ProjectReference Include="../../../libs/benefit-pricing/Mersal.BenefitPricing.csproj" /></ItemGroup>
+    <ProjectReference Include="../../../libs/benefit-pricing/Mersal.BenefitPricing.csproj" />
+    <!-- 19.5: payer scope is a PREDICATE inside the query, not a check at the edge — so the read paths need
+         the PermittedPayers primitive (libs/authz), including for the row count. -->
+    <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" /></ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />

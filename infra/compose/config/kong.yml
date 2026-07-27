@@ -115,6 +115,16 @@ services:
           - /api/v1/timeline
           # 19.4 — utilization for member · group · plan · policy · payer (read-only; no clinical fields).
           - /api/v1/utilization
+          # 19.5 — structured search + coverage detail. Payer-scoped server-side; page size capped.
+          - /api/v1/policy-query
+          - /api/v1/member-query
+        strip_path: false
+      # 19.5 — the administrative 360 lives under /beneficiaries, which patient-service owns as a
+      # catch-all. Same shape as emr's allergies and document-service's documents: a regex route for the
+      # ONE sub-resource, so the catch-all keeps everything else.
+      - name: policy-administrative-360
+        paths:
+          - "~/api/v1/beneficiaries/[^/]+/administrative-360$"
         strip_path: false
 
   # --- provider-service: provider network + contracts + branches + practitioners + specialties ---

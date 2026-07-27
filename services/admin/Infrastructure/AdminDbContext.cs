@@ -26,6 +26,7 @@ public sealed class AdminDbContext(DbContextOptions<AdminDbContext> options) : D
     public DbSet<BreakGlassAccess> BreakGlassAccesses => Set<BreakGlassAccess>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<UserBranchAssignment> UserBranchAssignments => Set<UserBranchAssignment>();   // 14.2
+    public DbSet<UserPayerAssignment> UserPayerAssignments => Set<UserPayerAssignment>();      // 19.5
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -157,6 +158,17 @@ public sealed class AdminDbContext(DbContextOptions<AdminDbContext> options) : D
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
             e.HasIndex(x => new { x.TenantId, x.SubjectUserId, x.Status });
             e.HasIndex(x => x.BranchId);
+        });
+
+        // 19.5 — payer scope. No Home/Additional distinction: a payer assignment answers "may you see this",
+        // never "where are you working today", so several rows simply union.
+        b.Entity<UserPayerAssignment>(e =>
+        {
+            e.ToTable("user_payer_assignment");
+            e.HasKey(x => x.AssignmentId);
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.HasIndex(x => new { x.TenantId, x.SubjectUserId, x.Status });
+            e.HasIndex(x => x.PayerId);
         });
     }
 }

@@ -106,6 +106,13 @@ public sealed class Enrollment
     /// entitlement explainable back to a dated, immutable configuration.</summary>
     public Guid? SourcePlanVersionId { get; set; }
 
+    /// <summary>19.5 — the branch the membership was ADMINISTERED at, taken from the enrolment request (which
+    /// already carried it for the plan's branch eligibility rule and then discarded it). Deliberately not "the
+    /// member's branch": care happens wherever the member turns up, emr records that on the encounter, and a
+    /// second staler answer to the same question is how two reports come to disagree. Null on rows written
+    /// before 0013.</summary>
+    public Guid? BranchId { get; set; }
+
     /// <summary>Replay guard. The overlap exclusion makes a double enrolment structurally impossible; this
     /// makes a RETRY return the row the caller already created rather than a 409.</summary>
     public string? IdempotencyKey { get; set; }

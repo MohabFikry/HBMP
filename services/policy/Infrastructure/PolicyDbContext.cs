@@ -297,6 +297,7 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
             e.Property(x => x.TerminationReason).HasColumnName("termination_reason");
             e.Property(x => x.SourcePlanVersionId).HasColumnName("source_plan_version_id");
+            e.Property(x => x.BranchId).HasColumnName("branch_id");   // 19.5 — the ENROLLING branch
             e.Property(x => x.IdempotencyKey).HasColumnName("idempotency_key");
             e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
             e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();

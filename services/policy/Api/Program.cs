@@ -64,6 +64,24 @@ builder.Services.AddHttpClient<IAuthorizationFactSource, HttpAuthorizationFactSo
     c.BaseAddress = new Uri(builder.Configuration["Approvals:BaseUrl"] ?? "http://approvals-service:8080"));
 builder.Services.AddHttpClient<IClaimFactSource, HttpClaimFactSource>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Claims:BaseUrl"] ?? "http://claims-service:8080"));
+// 19.5 — policy query, member query, coverage details, administrative 360.
+builder.Services.AddScoped<AdministrativeQuery>();
+builder.Services.AddScoped<IPlanVersionResolver, PlanVersionResolver>();
+builder.Services.AddMemoryCache();
+// Payer scope (design 38 §6). The token contract is frozen and carries no payer claim, so the restriction is
+// resolved per request from admin-service — and FAILS CLOSED to "restricted to nothing", because payer scope's
+// empty set means unrestricted and an outage must never widen access. See libs/authz/PayerScope.cs.
+builder.Services.AddHttpClient<IPayerDirectory, HttpPayerDirectory>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Admin:BaseUrl"] ?? "http://admin-service:8080"));
+// Branch scope, resolved ON DEMAND in member query rather than in middleware: policy administration is
+// member-scoped (all branches), so narrowing every route here would enforce a boundary the surface lacks.
+builder.Services.AddHttpClient<IBranchDirectory, HttpBranchDirectory>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Admin:BaseUrl"] ?? "http://admin-service:8080"));
+// The 360 AGGREGATES: patient-service is called with the CALLER's token so it applies its own projection and
+// writes its own PHI-read audit. An aggregator that calls with a service account is a way around the
+// min-necessary rules of every service it aggregates.
+builder.Services.AddHttpClient<IBeneficiaryAdministrativeSource, HttpBeneficiaryAdministrativeSource>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Patient:BaseUrl"] ?? "http://patient-service:8080"));
 // 19.2b — the plan-change consumption rule is a SETTING, not a constant: ADR-0020 is unsigned, and reversing
 // it later must not require migrating every member's accumulator.
 builder.Services.Configure<MembershipOptions>(builder.Configuration.GetSection(MembershipOptions.SectionName));
@@ -176,6 +194,8 @@ app.MapMembership();
 app.MapNotes();
 app.MapPolicyDocuments();
 app.MapUtilization();   // 19.4 — utilization for member · group · plan · policy · payer (read-only)
+app.MapAdministrativeQueries();   // 19.5 — policy query + member query (payer-scoped, audited, exportable)
+app.MapCoverageDetails();         // 19.5 — coverage details (version in force) + administrative 360
 app.MapTimeline();   // 19.3c — the change timeline (a projection over the audit stream)   // 19.3b — classified documents on policy + member   // 19.3 — signed, timestamped, append-only notes on policy + member   // 19.2 + 19.2b — policies, plans, groups, enrolment lifecycle   // 19.1 — payers, plans, effective-dated immutable plan versions
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)

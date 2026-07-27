@@ -329,6 +329,7 @@ public static class EnrollmentEndpoints
                 WaitingPeriodEndsOn = WaitingPeriod.EndsOn(version, req.EffectiveFrom),
                 Status = EnrollmentStatus.Active,
                 SourcePlanVersionId = version.PlanVersionId,
+                BranchId = req.BranchId,   // 19.5 — the enrolling branch, kept rather than discarded
                 IdempotencyKey = idempotencyKey,
                 CreatedAt = now, UpdatedAt = now, CreatedBy = gate.SubjectId, UpdatedBy = gate.SubjectId,
             };
