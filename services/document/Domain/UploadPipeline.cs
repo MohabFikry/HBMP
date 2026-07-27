@@ -18,6 +18,11 @@ public sealed record ScanResult(bool IsClean, string? Signature)
 public interface IBlobStore
 {
     Task<string> PutAsync(string container, string key, Stream content, string contentType, CancellationToken ct = default);
+
+    /// <summary>Read a stored blob back. 19.5b needs it so an operational file (a bulk error report, an
+    /// extract) can be DOWNLOADED through an authorized, audited endpoint rather than through a long-lived URL
+    /// that outlives the decision which granted it.</summary>
+    Task<Stream?> GetAsync(string blobPath, CancellationToken ct = default);
 }
 
 /// <summary>Outcome of an upload attempt.</summary>

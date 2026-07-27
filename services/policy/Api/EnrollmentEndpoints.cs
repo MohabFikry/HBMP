@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Mersal.Audit.Client;
 using Mersal.Auth.Authorization;
 using Mersal.Authz;
@@ -7,7 +6,6 @@ using Mersal.Policy.Domain;
 using Mersal.Policy.Infrastructure;
 using Mersal.Time;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 
 namespace Mersal.Policy.Api;
 
@@ -234,9 +232,12 @@ public static class EnrollmentEndpoints
     // ---- Enrolment ---------------------------------------------------------------------------------------
     private static void MapEnrollments(RouteGroupBuilder v1)
     {
-        v1.MapPost("/enrollments", async (CreateEnrollment req, HttpContext http, PolicyDbContext db,
-            PolicyGate gate, IBeneficiaryStatusProbe beneficiaries, IMemberNoIssuer memberNos,
-            IAuditClient audit, IOutbox outbox, TimeProvider clock, CancellationToken ct) =>
+        // 19.5b — the RULES now live in MembershipCommands, which the bulk engine also calls. What stays here
+        // is what is genuinely the HTTP layer's: authorization, the Idempotency-Key header, and turning a
+        // failure into an RFC 7807 body. A second copy of "is this plan in force" would let a file create
+        // memberships this form refuses.
+        v1.MapPost("/enrollments", async (CreateEnrollment req, HttpContext http, MembershipCommands membership,
+            PolicyGate gate, CancellationToken ct) =>
         {
             if (await gate.CheckAsync(PolicyPolicies.Write, ct) is { } denied) return denied;
 
@@ -245,128 +246,17 @@ public static class EnrollmentEndpoints
                 return ProblemResults.Invalid("IDEMPOTENCY_KEY_REQUIRED",
                     "Enrolment requires an Idempotency-Key: a retried request must not create a second membership.");
 
-            // Replay returns the row the caller already created rather than a 409 from the overlap exclusion.
-            var replay = await db.Enrollments.AsNoTracking()
-                .FirstOrDefaultAsync(e => e.IdempotencyKey == idempotencyKey && !e.IsDeleted, ct);
-            if (replay is not null)
-            {
-                var existingCoverages = await db.Coverages.AsNoTracking()
-                    .CountAsync(c => c.EnrollmentId == replay.EnrollmentId, ct);
-                return Results.Ok(EnrollmentView.From(replay, existingCoverages));
-            }
+            var command = new EnrollCommand(
+                req.BeneficiaryId, req.PolicyId, req.PolicyPlanId, req.GroupId, req.Relationship,
+                req.PrincipalEnrollmentId, req.EffectiveFrom, req.EffectiveTo, req.BranchId, req.AgeYears);
+            var result = await membership.EnrollAsync(command, idempotencyKey, Bearer(http), Actor(gate), ct);
+            if (!result.Ok) return Problem(result.Error!);
 
-            if (!Enum.TryParse<Relationship>(req.Relationship, out var relationship))
-                return ProblemResults.Invalid("UNKNOWN_RELATIONSHIP", $"'{req.Relationship}' is not a relationship.");
-
-            var policy = await db.Policies.AsNoTracking().FirstOrDefaultAsync(p => p.PolicyId == req.PolicyId && !p.IsDeleted, ct);
-            if (policy is null) return ProblemResults.Invalid("UNKNOWN_POLICY", $"Policy {req.PolicyId} does not exist.");
-            if (policy.Status != PolicyStatus.Active)
-                return ProblemResults.Conflict("POLICY_NOT_ACTIVE", $"Policy {policy.PolicyNo} is {policy.Status}.");
-            if (req.EffectiveFrom < policy.EffectiveFrom || (policy.EffectiveTo is { } pt && req.EffectiveFrom > pt))
-                return ProblemResults.Unprocessable("OUTSIDE_POLICY_WINDOW",
-                    "The enrolment start falls outside the policy's effective window.");
-
-            // The beneficiary must be a real, Active person. Enrolling a Pending or Blocked member would
-            // generate coverage that eligibility then refuses on every visit — a membership that looks live in
-            // every report and works nowhere.
-            var status = await beneficiaries.GetStatusAsync(req.BeneficiaryId, Bearer(http), ct);
-            if (status is null)
-                return ProblemResults.Invalid("UNKNOWN_BENEFICIARY", $"Beneficiary {req.BeneficiaryId} was not found.");
-            if (!string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase))
-                return ProblemResults.Unprocessable("BENEFICIARY_NOT_ACTIVE",
-                    $"The beneficiary is {status}; only an Active beneficiary can be enrolled.");
-
-            // 19.2b — resolve the plan: named explicitly, or the policy's default.
-            var plan = req.PolicyPlanId is { } explicitPlan
-                ? await db.PolicyPlans.AsNoTracking().FirstOrDefaultAsync(pp => pp.PolicyPlanId == explicitPlan && !pp.IsDeleted, ct)
-                : await db.PolicyPlans.AsNoTracking().FirstOrDefaultAsync(
-                    pp => pp.PolicyId == req.PolicyId && pp.IsDefault && pp.Status == PolicyPlanStatus.Active && !pp.IsDeleted, ct);
-            if (plan is null)
-                return ProblemResults.Unprocessable("NO_PLAN",
-                    req.PolicyPlanId is null
-                        ? "No plan was named and this policy has no default plan to fall back to."
-                        : $"Plan {req.PolicyPlanId} does not exist.");
-            if (plan.PolicyId != req.PolicyId)
-                return ProblemResults.Invalid("PLAN_NOT_OF_POLICY", "That plan belongs to a different policy.");
-            if (!plan.Covers(req.EffectiveFrom))
-                return ProblemResults.Unprocessable("PLAN_NOT_IN_FORCE",
-                    $"Plan '{plan.PlanLabel}' is not in force on {req.EffectiveFrom:yyyy-MM-dd}.");
-
-            // The declarative election rule. A failure names the criterion — "not eligible" alone sends an
-            // officer hunting through a plan definition they may not be able to see.
-            if (PlanEligibility.IsMalformed(plan.EligibilityRule))
-                return ProblemResults.Conflict("MALFORMED_ELIGIBILITY_RULE",
-                    $"Plan '{plan.PlanLabel}' has an unreadable eligibility rule; it cannot be elected onto until it is fixed.");
-            var failures = PlanEligibility.Evaluate(
-                PlanEligibility.Parse(plan.EligibilityRule),
-                new ElectionCandidate(req.GroupId, relationship, req.AgeYears, req.BranchId));
-            if (failures.Count > 0)
-                return ProblemResults.Unprocessable("PLAN_ELIGIBILITY_NOT_MET",
-                    $"The member does not meet plan '{plan.PlanLabel}'s election criteria.",
-                    new Dictionary<string, object?> { ["failures"] = failures });
-
-            if (plan.MaxMembers is { } cap)
-            {
-                var onPlan = await db.Enrollments.CountAsync(
-                    e => e.PolicyPlanId == plan.PolicyPlanId && !e.IsDeleted && e.Status == EnrollmentStatus.Active, ct);
-                if (onPlan >= cap)
-                    return ProblemResults.Conflict("PLAN_FULL", $"Plan '{plan.PlanLabel}' is at its {cap}-member cap.");
-            }
-
-            var version = await db.PlanVersions.AsNoTracking().Include(v => v.Rules)
-                .FirstOrDefaultAsync(v => v.PlanVersionId == plan.PlanVersionId, ct);
-            if (version is null)
-                return ProblemResults.Conflict("PLAN_VERSION_MISSING", "The plan's version could not be loaded.");
-
-            var now = clock.GetUtcNow();
-            var enrollment = new Enrollment
-            {
-                EnrollmentId = Guid.NewGuid(), BeneficiaryId = req.BeneficiaryId, PolicyId = req.PolicyId,
-                PolicyPlanId = plan.PolicyPlanId, GroupId = req.GroupId,
-                MemberNo = await memberNos.NextAsync(req.EffectiveFrom, ct),
-                Relationship = relationship, PrincipalEnrollmentId = req.PrincipalEnrollmentId,
-                EffectiveFrom = req.EffectiveFrom, EffectiveTo = req.EffectiveTo,
-                WaitingPeriodEndsOn = WaitingPeriod.EndsOn(version, req.EffectiveFrom),
-                Status = EnrollmentStatus.Active,
-                SourcePlanVersionId = version.PlanVersionId,
-                BranchId = req.BranchId,   // 19.5 — the enrolling branch, kept rather than discarded
-                IdempotencyKey = idempotencyKey,
-                CreatedAt = now, UpdatedAt = now, CreatedBy = gate.SubjectId, UpdatedBy = gate.SubjectId,
-            };
-            db.Enrollments.Add(enrollment);
-
-            // GENERATE the coverage. This is the join between the product layer and the benefit spine that
-            // eligibility and the phase-18 accumulator already run on.
-            var coverages = CoverageGenerator.Generate(version, enrollment, enrollment.TenantId);
-            foreach (var coverage in coverages)
-            {
-                coverage.SourcePlanVersionId = version.PlanVersionId;
-                coverage.EnrollmentId = enrollment.EnrollmentId;
-                db.Coverages.Add(coverage);
-            }
-
-            db.EnrollmentEvents.Add(Event(enrollment, EnrollmentEventType.Enrolled, req.EffectiveFrom, null, gate, now,
-                new { planLabel = plan.PlanLabel, coverages = coverages.Count }));
-
-            if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
-
-            await audit.EmitAsync(Draft("enrollment", enrollment.EnrollmentId, AuditAction.Create, gate), ct);
-            await outbox.EnqueueAsync("MemberEnrolled", "policy.events", new
-            {
-                tenantId = enrollment.TenantId, enrollmentId = enrollment.EnrollmentId,
-                beneficiaryId = enrollment.BeneficiaryId, policyId = enrollment.PolicyId,
-                policyPlanId = plan.PolicyPlanId, enrollment.MemberNo,
-                effectiveFrom = enrollment.EffectiveFrom, waitingPeriodEndsOn = enrollment.WaitingPeriodEndsOn,
-            }, ct);
-            await outbox.EnqueueAsync("CoverageGenerated", "policy.events", new
-            {
-                tenantId = enrollment.TenantId, enrollmentId = enrollment.EnrollmentId,
-                beneficiaryId = enrollment.BeneficiaryId, sourcePlanVersionId = version.PlanVersionId,
-                categories = coverages.Count,
-            }, ct);
-
-            return Results.Created($"/api/v1/enrollments/{enrollment.EnrollmentId}",
-                EnrollmentView.From(enrollment, coverages.Count));
+            var outcome = result.Value!;
+            return outcome.WasReplay
+                ? Results.Ok(EnrollmentView.From(outcome.Enrollment, outcome.CoverageCount))
+                : Results.Created($"/api/v1/enrollments/{outcome.Enrollment.EnrollmentId}",
+                    EnrollmentView.From(outcome.Enrollment, outcome.CoverageCount));
         });
 
         v1.MapGet("/enrollments/{id:guid}", async (Guid id, PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
@@ -390,199 +280,73 @@ public static class EnrollmentEndpoints
     // ---- Lifecycle: every one of these is an EVENT ---------------------------------------------------------
     private static void MapLifecycle(RouteGroupBuilder v1)
     {
-        v1.MapPost("/enrollments/{id:guid}/terminate", async (Guid id, TerminateEnrollment req, PolicyDbContext db,
-            PolicyGate gate, IAuditClient audit, IOutbox outbox, IBusinessCalendar calendar,
-            TimeProvider clock, CancellationToken ct) =>
+        v1.MapPost("/enrollments/{id:guid}/terminate", async (Guid id, TerminateEnrollment req,
+            MembershipCommands membership, PolicyGate gate, IBusinessCalendar calendar, CancellationToken ct) =>
         {
             if (await gate.CheckAsync(PolicyPolicies.Write, ct) is { } denied) return denied;
-            // MANDATORY. A termination is the change most likely to be disputed, and the reason is the only
-            // account of it the next person to open the record will have.
-            if (string.IsNullOrWhiteSpace(req.Reason))
-                return ProblemResults.Invalid("REASON_REQUIRED", "A reason is required to terminate a membership.");
 
-            var e = await db.Enrollments.FirstOrDefaultAsync(x => x.EnrollmentId == id && !x.IsDeleted, ct);
-            if (e is null) return NotFound();
-            if (e.Status == EnrollmentStatus.Terminated)
-                return ProblemResults.Conflict("ALREADY_TERMINATED", "This membership is already terminated.");
-            if (req.EffectiveDate < e.EffectiveFrom)
-                return ProblemResults.Unprocessable("BEFORE_ENROLMENT",
-                    "A termination cannot take effect before the membership began; cancel it instead.");
+            // The supervisory check is resolved HERE, where the caller's scope is known, and passed in as a
+            // capability. MembershipCommands then enforces it identically for a form and for a bulk row — a
+            // thousand back-dated terminations is the case that check matters most for.
+            var maySupervise = req.EffectiveDate >= calendar.Today()
+                               || await gate.CheckAsync(PolicyPolicies.Supervise, ct) is null;
 
-            // Retro-effective changes need the SUPERVISORY increment (design 38 §5.5) — back-dating a
-            // termination retroactively withdraws cover for care that may already have been delivered.
-            if (req.EffectiveDate < calendar.Today()
-                && await gate.CheckAsync(PolicyPolicies.Supervise, ct) is { } superviseDenied)
-                return superviseDenied;
-
-            var now = clock.GetUtcNow();
-            e.Status = EnrollmentStatus.Terminated;
-            e.EffectiveTo = req.EffectiveDate;      // INCLUSIVE: the member IS covered on this day
-            e.TerminationReason = req.Reason;
-            e.UpdatedAt = now;
-            e.UpdatedBy = gate.SubjectId;
-
-            // Close the generated coverage on the same day, so eligibility and the membership agree.
-            await db.Coverages.Where(c => c.EnrollmentId == id)
-                .ExecuteUpdateAsync(s => s.SetProperty(c => c.EffectiveTo, req.EffectiveDate), ct);
-
-            db.EnrollmentEvents.Add(Event(e, EnrollmentEventType.Terminated, req.EffectiveDate, req.Reason, gate, now, null));
-            if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
-
-            await audit.EmitAsync(Draft("enrollment", id, AuditAction.StateChange, gate, "terminated", req.Reason), ct);
-            await outbox.EnqueueAsync("MemberTerminated", "policy.events", new
-            {
-                tenantId = e.TenantId, enrollmentId = id, beneficiaryId = e.BeneficiaryId,
-                effectiveDate = req.EffectiveDate, reason = req.Reason,
-            }, ct);
-            return Results.Ok(EnrollmentView.From(e));
+            var result = await membership.TerminateAsync(id, req.EffectiveDate, req.Reason, maySupervise, Actor(gate), ct);
+            return result.Ok ? Results.Ok(EnrollmentView.From(result.Value!)) : Problem(result.Error!);
         });
 
-        v1.MapPost("/enrollments/{id:guid}/reinstate", async (Guid id, ReinstateEnrollment req, PolicyDbContext db,
-            PolicyGate gate, IAuditClient audit, IOutbox outbox, TimeProvider clock, CancellationToken ct) =>
+        v1.MapPost("/enrollments/{id:guid}/reinstate", async (Guid id, ReinstateEnrollment req,
+            MembershipCommands membership, PolicyGate gate, CancellationToken ct) =>
         {
             if (await gate.CheckAsync(PolicyPolicies.Write, ct) is { } denied) return denied;
-            var e = await db.Enrollments.FirstOrDefaultAsync(x => x.EnrollmentId == id && !x.IsDeleted, ct);
-            if (e is null) return NotFound();
-            if (e.Status is not (EnrollmentStatus.Terminated or EnrollmentStatus.Suspended))
-                return ProblemResults.Conflict("NOT_REINSTATABLE", $"A {e.Status} membership cannot be reinstated.");
-
-            var now = clock.GetUtcNow();
-            e.Status = EnrollmentStatus.Active;
-            e.EffectiveTo = null;                   // reopened
-            e.TerminationReason = null;
-            e.UpdatedAt = now;
-            e.UpdatedBy = gate.SubjectId;
-            await db.Coverages.Where(c => c.EnrollmentId == id)
-                .ExecuteUpdateAsync(s => s.SetProperty(c => c.EffectiveTo, (DateOnly?)null), ct);
-
-            db.EnrollmentEvents.Add(Event(e, EnrollmentEventType.Reinstated, req.EffectiveDate, req.Reason, gate, now, null));
-            if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
-
-            await audit.EmitAsync(Draft("enrollment", id, AuditAction.StateChange, gate, "reinstated", req.Reason), ct);
-            await outbox.EnqueueAsync("MemberReinstated", "policy.events",
-                new { tenantId = e.TenantId, enrollmentId = id, beneficiaryId = e.BeneficiaryId }, ct);
-            return Results.Ok(EnrollmentView.From(e));
+            var result = await membership.ReinstateAsync(id, req.EffectiveDate, req.Reason, Actor(gate), ct);
+            return result.Ok ? Results.Ok(EnrollmentView.From(result.Value!)) : Problem(result.Error!);
         });
 
-        v1.MapPost("/enrollments/{id:guid}/change-group", async (Guid id, ChangeGroup req, PolicyDbContext db,
-            PolicyGate gate, IAuditClient audit, TimeProvider clock, CancellationToken ct) =>
+        v1.MapPost("/enrollments/{id:guid}/change-group", async (Guid id, ChangeGroup req,
+            MembershipCommands membership, PolicyGate gate, CancellationToken ct) =>
         {
             if (await gate.CheckAsync(PolicyPolicies.Write, ct) is { } denied) return denied;
-            var e = await db.Enrollments.FirstOrDefaultAsync(x => x.EnrollmentId == id && !x.IsDeleted, ct);
-            if (e is null) return NotFound();
-            if (req.GroupId is { } g && !await db.MemberGroups.AnyAsync(
-                    x => x.GroupId == g && x.PolicyId == e.PolicyId && !x.IsDeleted, ct))
-                return ProblemResults.Invalid("UNKNOWN_GROUP", "That group does not belong to this policy.");
-
-            var now = clock.GetUtcNow();
-            var from = e.GroupId;
-            e.GroupId = req.GroupId;
-            e.UpdatedAt = now;
-            e.UpdatedBy = gate.SubjectId;
-            db.EnrollmentEvents.Add(Event(e, EnrollmentEventType.GroupChanged, req.EffectiveDate, req.Reason, gate, now,
-                new { from, to = req.GroupId }));
-            if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
-
-            await audit.EmitAsync(Draft("enrollment", id, AuditAction.Update, gate, "group-changed", req.Reason), ct);
-            return Results.Ok(EnrollmentView.From(e));
+            var result = await membership.ChangeGroupAsync(id, req.GroupId, req.EffectiveDate, req.Reason, Actor(gate), ct);
+            return result.Ok ? Results.Ok(EnrollmentView.From(result.Value!.Enrollment)) : Problem(result.Error!);
         });
 
         // 19.2b — the plan change. Coverage REGENERATES from the new plan version, and consumption is carried
         // across per ADR-0020 (a setting, not a hard-coded rule, because the decision is not yet signed off).
-        v1.MapPost("/enrollments/{id:guid}/change-plan", async (Guid id, ChangePlan req, PolicyDbContext db,
-            PolicyGate gate, IAuditClient audit, IOutbox outbox, IOptions<MembershipOptions> options,
-            TimeProvider clock, CancellationToken ct) =>
+        v1.MapPost("/enrollments/{id:guid}/change-plan", async (Guid id, ChangePlan req,
+            MembershipCommands membership, PolicyGate gate, CancellationToken ct) =>
         {
             if (await gate.CheckAsync(PolicyPolicies.Write, ct) is { } denied) return denied;
-            if (string.IsNullOrWhiteSpace(req.Reason))
-                return ProblemResults.Invalid("REASON_REQUIRED", "A reason is required to change a member's plan.");
+            var result = await membership.ChangePlanAsync(id, req.PolicyPlanId, req.EffectiveDate, req.Reason, Actor(gate), ct);
+            if (!result.Ok) return Problem(result.Error!);
 
-            var e = await db.Enrollments.FirstOrDefaultAsync(x => x.EnrollmentId == id && !x.IsDeleted, ct);
-            if (e is null) return NotFound();
-            if (e.PolicyPlanId == req.PolicyPlanId)
-                return ProblemResults.Conflict("ALREADY_ON_PLAN", "The member is already on that plan.");
-
-            var plan = await db.PolicyPlans.AsNoTracking()
-                .FirstOrDefaultAsync(pp => pp.PolicyPlanId == req.PolicyPlanId && !pp.IsDeleted, ct);
-            if (plan is null) return ProblemResults.Invalid("UNKNOWN_PLAN", "That plan does not exist.");
-            if (plan.PolicyId != e.PolicyId)
-                return ProblemResults.Invalid("PLAN_NOT_OF_POLICY", "That plan belongs to a different policy.");
-            if (!plan.Covers(req.EffectiveDate))
-                return ProblemResults.Unprocessable("PLAN_NOT_IN_FORCE",
-                    $"Plan '{plan.PlanLabel}' is not in force on {req.EffectiveDate:yyyy-MM-dd}.");
-
-            var version = await db.PlanVersions.AsNoTracking().Include(v => v.Rules)
-                .FirstOrDefaultAsync(v => v.PlanVersionId == plan.PlanVersionId, ct);
-            if (version is null) return ProblemResults.Conflict("PLAN_VERSION_MISSING", "The plan's version could not be loaded.");
-
-            // Read what the member has already used. READ ONLY — phase 18 owns consumed_value and remains its
-            // only writer; carrying forward changes the LIMIT, never the accumulator.
-            var existing = await db.Coverages.Include(c => c.Limits)
-                .Where(c => c.EnrollmentId == id && !c.IsDeleted).ToListAsync(ct);
-            var consumedByCategory = existing.ToDictionary(
-                c => c.BenefitCategoryId, c => c.Limits.Sum(l => l.ConsumedValue));
-
-            var policyChoice = options.Value.PlanChangeConsumption;
-            var carried = ConsumptionCarryForward.Apply(
-                version.Rules.Where(r => r.IsCovered).Select(r => new CategoryCarryForward(
-                    r.BenefitCategoryId,
-                    consumedByCategory.GetValueOrDefault(r.BenefitCategoryId),
-                    r.LimitValue)),
-                policyChoice);
-
-            var now = clock.GetUtcNow();
-            // Close the old coverage the day before the change, and generate the new set from the new version.
-            foreach (var coverage in existing)
-                coverage.EffectiveTo = req.EffectiveDate.AddDays(-1);
-
-            e.PolicyPlanId = plan.PolicyPlanId;
-            e.SourcePlanVersionId = version.PlanVersionId;
-            e.UpdatedAt = now;
-            e.UpdatedBy = gate.SubjectId;
-
-            var regenerated = CoverageGenerator.Generate(version, e, e.TenantId);
-            foreach (var coverage in regenerated)
-            {
-                coverage.EffectiveFrom = req.EffectiveDate;
-                coverage.SourcePlanVersionId = version.PlanVersionId;
-                coverage.EnrollmentId = e.EnrollmentId;
-                // Carry the accumulator forward onto the NEW rows so remaining = new limit − already consumed.
-                // This is initializing a fresh row from a value phase 18 already owns, not a second write to
-                // the accumulator — the old rows' consumed_value is untouched.
-                var carriedForCategory = carried.FirstOrDefault(c => c.BenefitCategoryId == coverage.BenefitCategoryId);
-                foreach (var limit in coverage.Limits)
-                    limit.ConsumedValue = carriedForCategory.ConsumedValue;
-                db.Coverages.Add(coverage);
-            }
-
-            db.EnrollmentEvents.Add(Event(e, EnrollmentEventType.PlanChanged, req.EffectiveDate, req.Reason, gate, now,
-                new { toPlan = plan.PlanLabel, planVersionId = version.PlanVersionId, consumptionPolicy = policyChoice.ToString() }));
-            if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
-
-            await audit.EmitAsync(Draft("enrollment", id, AuditAction.StateChange, gate, "plan-changed", req.Reason), ct);
-            await outbox.EnqueueAsync("MemberPlanChanged", "policy.events", new
-            {
-                tenantId = e.TenantId, enrollmentId = id, beneficiaryId = e.BeneficiaryId,
-                policyPlanId = plan.PolicyPlanId, planVersionId = version.PlanVersionId,
-                effectiveDate = req.EffectiveDate, consumptionPolicy = policyChoice.ToString(),
-            }, ct);
-
-            return Results.Ok(new PlanChangeView(id, plan.PolicyPlanId, version.PlanVersionId,
-                policyChoice.ToString(), [.. carried.Select(CarriedLimitView.From)]));
+            var outcome = result.Value!;
+            return Results.Ok(new PlanChangeView(id, outcome.Plan.PolicyPlanId, outcome.PlanVersionId,
+                outcome.ConsumptionPolicy, [.. outcome.Carried.Select(CarriedLimitView.From)]));
         });
     }
 
-    // ---- helpers -----------------------------------------------------------------------------------------
-
-    private static EnrollmentEvent Event(
-        Enrollment e, EnrollmentEventType type, DateOnly effectiveDate, string? reason,
-        PolicyGate gate, DateTimeOffset now, object? payload) => new()
+    /// <summary>Translate a domain failure into the RFC 7807 shape the API already speaks. One place, so the
+    /// bulk engine's row errors and the form's problem bodies cannot drift apart in meaning.</summary>
+    private static IResult Problem(MembershipError error) => error.Kind switch
     {
-        EventId = Guid.NewGuid(), TenantId = e.TenantId, EnrollmentId = e.EnrollmentId,
-        EventType = type, EffectiveDate = effectiveDate, Reason = reason,
-        Payload = payload is null ? "{}" : JsonSerializer.Serialize(payload),
-        ActorUserId = gate.SubjectId, OccurredAt = now,
+        MembershipFailureKind.Invalid => ProblemResults.Invalid(error.Code, Detail(error)),
+        MembershipFailureKind.Conflict => ProblemResults.Conflict(error.Code, error.Detail),
+        MembershipFailureKind.Unprocessable when error.Failures is { Count: > 0 } => ProblemResults.Unprocessable(
+            error.Code, error.Detail, new Dictionary<string, object?> { ["failures"] = error.Failures }),
+        MembershipFailureKind.Unprocessable => ProblemResults.Unprocessable(error.Code, error.Detail),
+        MembershipFailureKind.NotFound => NotFound(),
+        _ => GateResults.Forbidden("urn:hbmp:supervision-required", detail: error.Detail, reason: error.Code),
     };
+
+    /// <summary>Named criteria are folded into the sentence when the 400 shape carries no extensions bag —
+    /// "not eligible" without the reason is what sends an officer hunting through a plan they cannot read.</summary>
+    private static string Detail(MembershipError error) =>
+        error.Failures is { Count: > 0 } f ? $"{error.Detail} ({string.Join("; ", f)})" : error.Detail;
+
+    private static ActorRef Actor(PolicyGate gate) => new(gate.SubjectId, gate.Subject);
+
+    // ---- helpers -----------------------------------------------------------------------------------------
 
     private static AuditEventDraft Draft(
         string entityType, Guid id, AuditAction action, PolicyGate gate, string? outcome = null, string? reason = null) => new()
@@ -624,11 +388,6 @@ public static class EnrollmentEndpoints
     }
 }
 
-/// <summary>Settings the membership layer reads. <see cref="PlanChangeConsumption"/> is a setting rather than
-/// a constant because ADR-0020 is not signed off, and reversing it later must not require migrating every
-/// member's accumulator.</summary>
-public sealed class MembershipOptions
-{
-    public const string SectionName = "Membership";
-    public PlanChangeConsumptionPolicy PlanChangeConsumption { get; set; } = PlanChangeConsumptionPolicy.CarryForward;
-}
+// 19.5b — MembershipOptions moved to Mersal.Policy.Domain (ConsumptionCarryForward.cs) when the membership
+// rules moved into MembershipCommands. The setting belongs beside the rule it governs, not beside the HTTP
+// handler that used to hold both.

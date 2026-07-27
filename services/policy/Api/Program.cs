@@ -82,6 +82,30 @@ builder.Services.AddHttpClient<IBranchDirectory, HttpBranchDirectory>(c =>
 // min-necessary rules of every service it aggregates.
 builder.Services.AddHttpClient<IBeneficiaryAdministrativeSource, HttpBeneficiaryAdministrativeSource>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Patient:BaseUrl"] ?? "http://patient-service:8080"));
+// 19.5b — the bulk engine and the extract engine. MembershipCommands is registered FIRST because both the
+// single-member endpoints and the bulk appliers resolve it: the rules live in one place, so a file cannot
+// create a membership the form would refuse.
+builder.Services.AddScoped<MembershipCommands>();
+builder.Services.AddScoped<IBulkFileParser, BulkFileParser>();
+builder.Services.AddScoped<IBulkRowApplier, MemberEnrolmentApplier>();
+builder.Services.AddScoped<IBulkRowApplier, MemberTerminationApplier>();
+builder.Services.AddScoped<IBulkRowApplier, PlanChangeApplier>();
+builder.Services.AddScoped<IBulkRowApplier, GroupAssignmentApplier>();
+builder.Services.AddScoped<IBulkRowApplier, ContactUpdateApplier>();
+builder.Services.AddScoped<IBulkRowApplier, ProviderTierAssignmentApplier>();
+builder.Services.AddScoped<IBulkRowApplier, BenefitRuleImportApplier>();
+builder.Services.AddScoped<BulkJobEngine>();
+builder.Services.AddScoped<ExtractEngine>();
+// The uploaded file, the PHI-bearing error report and every stored extract go to document-service — same
+// validation, same FAIL-CLOSED ClamAV scan, same MinIO bucket. A second ingest path is a second way in.
+builder.Services.AddHttpClient<IOperationalDocumentStore, HttpOperationalDocumentStore>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Document:BaseUrl"] ?? "http://document-service:8080"));
+// Two job types change data this service does not own. Both are called with the CALLER's token so the owning
+// service applies its own authorization, validation and audit.
+builder.Services.AddHttpClient<IBeneficiaryContactWriter, HttpBeneficiaryContactWriter>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Patient:BaseUrl"] ?? "http://patient-service:8080"));
+builder.Services.AddHttpClient<INetworkTierAssignmentWriter, HttpNetworkTierAssignmentWriter>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Provider:BaseUrl"] ?? "http://provider-service:8080"));
 // 19.2b — the plan-change consumption rule is a SETTING, not a constant: ADR-0020 is unsigned, and reversing
 // it later must not require migrating every member's accumulator.
 builder.Services.Configure<MembershipOptions>(builder.Configuration.GetSection(MembershipOptions.SectionName));
@@ -196,6 +220,8 @@ app.MapPolicyDocuments();
 app.MapUtilization();   // 19.4 — utilization for member · group · plan · policy · payer (read-only)
 app.MapAdministrativeQueries();   // 19.5 — policy query + member query (payer-scoped, audited, exportable)
 app.MapCoverageDetails();         // 19.5 — coverage details (version in force) + administrative 360
+app.MapBulkJobs();   // 19.5b — bulk upload: template → scan → parse → validate → dry run → commit → reconcile
+app.MapExtracts();   // 19.5b — data extract: role-allow-listed columns, as-of reconstruction, audited runs
 app.MapTimeline();   // 19.3c — the change timeline (a projection over the audit stream)   // 19.3b — classified documents on policy + member   // 19.3 — signed, timestamped, append-only notes on policy + member   // 19.2 + 19.2b — policies, plans, groups, enrolment lifecycle   // 19.1 — payers, plans, effective-dated immutable plan versions
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)

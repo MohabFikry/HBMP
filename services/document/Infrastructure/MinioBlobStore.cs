@@ -59,6 +59,28 @@ public sealed class MinioBlobStore : IBlobStore, IDisposable
         return $"s3://{_opt.Bucket}/{objectKey}";
     }
 
+    public async Task<Stream?> GetAsync(string blobPath, CancellationToken ct = default)
+    {
+        // PutAsync returns "s3://{bucket}/{container}/{key}"; read the same shape back rather than storing a
+        // second copy of the location.
+        if (string.IsNullOrWhiteSpace(blobPath) || !blobPath.StartsWith("s3://", StringComparison.Ordinal)) return null;
+        var withoutScheme = blobPath["s3://".Length..];
+        var slash = withoutScheme.IndexOf('/', StringComparison.Ordinal);
+        if (slash <= 0) return null;
+        var bucket = withoutScheme[..slash];
+        var key = withoutScheme[(slash + 1)..];
+
+        try
+        {
+            var response = await _s3.GetObjectAsync(new GetObjectRequest { BucketName = bucket, Key = key }, ct);
+            return response.ResponseStream;
+        }
+        catch (AmazonS3Exception)
+        {
+            return null;
+        }
+    }
+
     private async Task EnsureBucketAsync(CancellationToken ct)
     {
         if (_bucketEnsured) return;

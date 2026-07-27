@@ -41,5 +41,28 @@ public sealed class DocumentDbContext(DbContextOptions<DocumentDbContext> option
             e.Property(x => x.UploadedBy).HasColumnName("uploaded_by");
             e.HasIndex(x => new { x.DocumentId, x.VersionNo }).IsUnique();
         });
+
+        // 19.5b — files that belong to an operation rather than to a person.
+        b.Entity<OperationalDocument>(e =>
+        {
+            e.ToTable("operational_document");
+            e.HasKey(x => x.DocumentId);
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.Kind).HasConversion<string>().HasColumnName("kind");
+            e.Property(x => x.OwnerRef).HasColumnName("owner_ref");
+            e.Property(x => x.OwnerService).HasColumnName("owner_service");
+            e.Property(x => x.Classification).HasConversion<string>().HasColumnName("classification");
+            e.Property(x => x.FileName).HasColumnName("file_name");
+            e.Property(x => x.ContentType).HasColumnName("content_type");
+            e.Property(x => x.BlobPath).HasColumnName("blob_path");
+            e.Property(x => x.ChecksumSha256).HasColumnName("checksum_sha256");
+            e.Property(x => x.SizeBytes).HasColumnName("size_bytes");
+            e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.CreatedBy).HasColumnName("created_by");
+            e.HasIndex(x => new { x.OwnerService, x.OwnerRef });
+        });
     }
+
+    public DbSet<OperationalDocument> OperationalDocuments => Set<OperationalDocument>();
 }

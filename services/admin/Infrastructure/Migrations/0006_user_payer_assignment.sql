@@ -42,13 +42,14 @@ BEGIN
     END IF;
 END $$;
 
--- Tenant-isolation RLS, matching 0004's pattern (dormant under superuser, enforced under hbmp_app).
+-- Tenant-isolation RLS, in 0005's FAIL-CLOSED form.
+--
+-- 0004 (the branch-assignment table this one mirrors) originally carried an "OR the GUC is unset" escape, and
+-- 0005 exists precisely to remove it: a policy that permits everything when app.tenant_id is not bound is
+-- worse than no policy, because it looks like one in review. This table is a scope RESTRICTION, so the
+-- permissive form would have been the worst place of all to keep it.
 ALTER TABLE admin.user_payer_assignment ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rls_tenant_isolation ON admin.user_payer_assignment;
 CREATE POLICY rls_tenant_isolation ON admin.user_payer_assignment
-    USING (tenant_id = current_setting('app.tenant_id', true)
-           OR current_setting('app.tenant_id', true) IS NULL
-           OR current_setting('app.tenant_id', true) = '')
-    WITH CHECK (tenant_id = current_setting('app.tenant_id', true)
-           OR current_setting('app.tenant_id', true) IS NULL
-           OR current_setting('app.tenant_id', true) = '');
+    USING (tenant_id = current_setting('app.tenant_id', true))
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true));

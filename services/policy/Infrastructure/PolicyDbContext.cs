@@ -29,6 +29,11 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
     public DbSet<Note> Notes => Set<Note>();   // 19.3
     public DbSet<PolicyDocument> PolicyDocuments => Set<PolicyDocument>();   // 19.3b
     public DbSet<TimelineEntry> TimelineEntries => Set<TimelineEntry>();     // 19.3c
+    // 19.5b — bulk upload in, data extract out (0014).
+    public DbSet<BulkJob> BulkJobs => Set<BulkJob>();
+    public DbSet<BulkJobRow> BulkJobRows => Set<BulkJobRow>();
+    public DbSet<ExtractDefinition> ExtractDefinitions => Set<ExtractDefinition>();
+    public DbSet<ExtractRun> ExtractRuns => Set<ExtractRun>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -78,6 +83,12 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.SourcePlanVersionId).HasColumnName("source_plan_version_id");
             e.Property(x => x.EnrollmentId).HasColumnName("enrollment_id");
             e.HasMany(x => x.Limits).WithOne().HasForeignKey(l => l.CoverageId);
+            // 19.5b — the FK to enrollment is DECLARED, not just present in the database. It already exists as
+            // coverage_enrollment_id_fkey (0008); without telling EF about it, an enrolment that adds the
+            // membership and its generated coverage in one SaveChanges has no ordering guarantee between the
+            // two inserts, and the coverage can reach the database first. It surfaced the moment the bulk
+            // engine exercised the write path under load rather than one row at a time.
+            e.HasOne<Enrollment>().WithMany().HasForeignKey(x => x.EnrollmentId).OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => x.BeneficiaryId);
         });
 
@@ -421,6 +432,111 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
             e.HasIndex(x => x.SourceEventId).IsUnique();
             e.HasIndex(x => new { x.Scope, x.ScopeRef, x.OccurredAt });
+        });
+
+        // 19.5b — the bulk engine (0014).
+        b.Entity<BulkJob>(e =>
+        {
+            e.ToTable("bulk_job");
+            e.HasKey(x => x.JobId);
+            e.Property(x => x.JobId).HasColumnName("job_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.JobType).HasConversion<string>().HasColumnName("job_type");
+            e.Property(x => x.FileName).HasColumnName("file_name").IsRequired();
+            e.Property(x => x.FileDocumentId).HasColumnName("file_document_id");
+            e.Property(x => x.ErrorDocumentId).HasColumnName("error_document_id");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.FailureCode).HasColumnName("failure_code");
+            e.Property(x => x.FailureDetail).HasColumnName("failure_detail");
+            e.Property(x => x.TotalRows).HasColumnName("total_rows");
+            e.Property(x => x.ValidRows).HasColumnName("valid_rows");
+            e.Property(x => x.InvalidRows).HasColumnName("invalid_rows");
+            e.Property(x => x.AppliedRows).HasColumnName("applied_rows");
+            e.Property(x => x.FailedRows).HasColumnName("failed_rows");
+            e.Property(x => x.SkippedRows).HasColumnName("skipped_rows");
+            e.Property(x => x.BatchId).HasColumnName("batch_id");
+            e.Property(x => x.SubmittedByUserId).HasColumnName("submitted_by_user_id");
+            e.Property(x => x.SubmittedByUsername).HasColumnName("submitted_by_username");
+            e.Property(x => x.SubmittedAt).HasColumnName("submitted_at");
+            e.Property(x => x.CompletedAt).HasColumnName("completed_at");
+            e.Property(x => x.RolledBackAt).HasColumnName("rolled_back_at");
+            e.Property(x => x.RolledBackBy).HasColumnName("rolled_back_by");
+            e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.CreatedBy).HasColumnName("created_by");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
+            e.Ignore(x => x.Balances);
+            e.HasIndex(x => x.BatchId);
+        });
+
+        b.Entity<BulkJobRow>(e =>
+        {
+            e.ToTable("bulk_job_row");
+            e.HasKey(x => x.RowId);
+            e.Property(x => x.RowId).HasColumnName("row_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.JobId).HasColumnName("job_id");
+            e.Property(x => x.RowNumber).HasColumnName("row_number");
+            e.Property(x => x.Raw).HasColumnName("raw").HasColumnType("jsonb");
+            e.Property(x => x.Normalized).HasColumnName("normalized").HasColumnType("jsonb");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.ErrorCode).HasColumnName("error_code");
+            e.Property(x => x.ErrorDetail).HasColumnName("error_detail");
+            e.Property(x => x.ErrorDetailAr).HasColumnName("error_detail_ar");
+            e.Property(x => x.TargetRef).HasColumnName("target_ref");
+            e.Property(x => x.BeforeSnapshot).HasColumnName("before_snapshot").HasColumnType("jsonb");
+            e.Property(x => x.AppliedAt).HasColumnName("applied_at");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.HasIndex(x => new { x.JobId, x.RowNumber }).IsUnique();
+        });
+
+        b.Entity<ExtractDefinition>(e =>
+        {
+            e.ToTable("extract_definition");
+            e.HasKey(x => x.DefinitionId);
+            e.Property(x => x.DefinitionId).HasColumnName("definition_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.Name).HasColumnName("name").IsRequired();
+            e.Property(x => x.Description).HasColumnName("description");
+            e.Property(x => x.Entity).HasConversion<string>().HasColumnName("entity");
+            e.Property(x => x.Filter).HasColumnName("filter").HasColumnType("jsonb");
+            e.Property(x => x.Columns).HasColumnName("columns").HasColumnType("jsonb");
+            e.Property(x => x.Format).HasConversion<string>().HasColumnName("format");
+            e.Property(x => x.OwnerUserId).HasColumnName("owner_user_id");
+            e.Property(x => x.IsShared).HasColumnName("is_shared");
+            e.Property(x => x.ScheduleCron).HasColumnName("schedule_cron");
+            e.Property(x => x.ServiceScopePayerIds).HasColumnName("service_scope_payer_ids");
+            e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
+            e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.CreatedBy).HasColumnName("created_by");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        b.Entity<ExtractRun>(e =>
+        {
+            e.ToTable("extract_run");
+            e.HasKey(x => x.RunId);
+            e.Property(x => x.RunId).HasColumnName("run_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.DefinitionId).HasColumnName("definition_id");
+            e.Property(x => x.Entity).HasConversion<string>().HasColumnName("entity");
+            e.Property(x => x.RequestedBy).HasColumnName("requested_by");
+            e.Property(x => x.RequestedByUsername).HasColumnName("requested_by_username");
+            e.Property(x => x.IsScheduled).HasColumnName("is_scheduled");
+            e.Property(x => x.FilterSnapshot).HasColumnName("filter_snapshot").HasColumnType("jsonb");
+            e.Property(x => x.ColumnSnapshot).HasColumnName("column_snapshot").HasColumnType("jsonb");
+            e.Property(x => x.WithheldSnapshot).HasColumnName("withheld_snapshot").HasColumnType("jsonb");
+            e.Property(x => x.Format).HasConversion<string>().HasColumnName("format");
+            e.Property(x => x.AsOf).HasColumnName("as_of");
+            e.Property(x => x.RowCount).HasColumnName("row_count");
+            e.Property(x => x.FileDocumentId).HasColumnName("file_document_id");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.FailureDetail).HasColumnName("failure_detail");
+            e.Property(x => x.StartedAt).HasColumnName("started_at");
+            e.Property(x => x.CompletedAt).HasColumnName("completed_at");
         });
 
         b.Entity<ProcessedEvent>(e =>

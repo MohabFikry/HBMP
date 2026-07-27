@@ -43,6 +43,9 @@ public class UploadPipelineTests
         public int Puts { get; private set; }
         public Task<string> PutAsync(string container, string key, Stream content, string contentType, CancellationToken ct = default)
         { Puts++; return Task.FromResult($"s3://bucket/{container}/{key}"); }
+
+        public Task<Stream?> GetAsync(string blobPath, CancellationToken ct = default)
+            => Task.FromResult<Stream?>(new MemoryStream(Encoding.ASCII.GetBytes(blobPath)));
     }
 
     private static byte[] Pdf() => Encoding.ASCII.GetBytes("%PDF-1.4 fake pdf bytes");

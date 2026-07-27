@@ -8,12 +8,20 @@
     <ProjectReference Include="../../../libs/benefit-pricing/Mersal.BenefitPricing.csproj" />
     <!-- 19.5: payer scope is a PREDICATE inside the query, not a check at the edge — so the read paths need
          the PermittedPayers primitive (libs/authz), including for the row count. -->
-    <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" /></ItemGroup>
+    <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
+    <!-- 19.5b: MembershipCommands moved the retro-effective date check down here with the rest of the rules,
+         and "is this back-dated" is a CAIRO business date (18.A3), never a UTC one. -->
+    <ProjectReference Include="../../../libs/time/Mersal.Time.csproj" />
+    <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" /></ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="EFCore.NamingConventions" />
+    <!-- 19.5b — bulk uploads arrive as CSV or XLSX. Both parsers already exist in the monorepo (the migration
+         toolkit and the master-data loader use them), so this is the same dependency, not a new one. -->
+    <PackageReference Include="CsvHelper" />
+    <PackageReference Include="ClosedXML" />
   </ItemGroup>
   <ItemGroup><None Update="Migrations/*.sql" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
 </Project>

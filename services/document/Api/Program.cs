@@ -3,6 +3,7 @@ using Mersal.Auth;
 using Mersal.Auth.Authorization;
 using Mersal.Authz;
 using Mersal.Data;
+using Mersal.Document.Api;
 using Mersal.Document.Domain;
 using Mersal.Document.Infrastructure;
 using Mersal.Events;
@@ -114,6 +115,8 @@ reads.MapGet("/beneficiaries/{beneficiaryId:guid}/documents", async (
         d.CurrentVersionNo, versions = d.Versions.Select(v => new { v.VersionNo, v.ChecksumSha256, v.SizeBytes, v.UploadedAt, v.UploadedBy }),
     }));
 });
+
+app.MapOperationalDocuments();   // 19.5b — bulk uploads, error reports and extracts; same scan, same store
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

@@ -74,3 +74,16 @@ public static class ConsumptionCarryForward
     private static decimal CarriedConsumption(CategoryCarryForward input, PlanChangeConsumptionPolicy policy) =>
         policy == PlanChangeConsumptionPolicy.CarryForward ? input.ConsumedValue : 0m;
 }
+
+/// <summary>Settings the membership layer reads. <see cref="PlanChangeConsumption"/> is a setting rather than
+/// a constant because ADR-0020 is not signed off, and reversing it later must not require migrating every
+/// member's accumulator.
+///
+/// <para>19.5b moved this from the API layer down beside the rule it governs: the bulk engine changes plans
+/// through the same code the form does, and a setting only the HTTP layer could read would have meant a bulk
+/// plan change silently using the default.</para></summary>
+public sealed class MembershipOptions
+{
+    public const string SectionName = "Membership";
+    public PlanChangeConsumptionPolicy PlanChangeConsumption { get; set; } = PlanChangeConsumptionPolicy.CarryForward;
+}

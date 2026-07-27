@@ -260,6 +260,7 @@ v1.MapPost("/{id:guid}/status", async (Guid id, StatusChange req, PatientDbConte
 }).RequireAuthorization(HbmpPolicies.Scope("patient:write"));
 
 app.MapBeneficiarySummaries();   // 19.5 — name-only batch for one page of policy-service's member query
+app.MapBeneficiaryContacts();    // 19.5b — read/upsert contacts; the owner of the field owns the write path
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
