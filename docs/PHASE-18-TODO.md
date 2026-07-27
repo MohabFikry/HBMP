@@ -81,9 +81,9 @@ Mark `✅ YYYY-MM-DD` per id here **and** on the finding row in `AUDIT-R2-E2E.md
 
 | Sub | Item | Status |
 |---|---|---|
-| 18.F1 | Property-based executor tests · `Money` type · Stryker mutation testing | ☐ |
-| 18.F2 | Command palette · server-side worklist sort/filter/paginate · keyboard mode · offline · telemetry | ☐ |
-| 18.F3 | OpenBao dynamic creds · tenant-isolation fuzzing · audit anomaly detection · DAST · SBOM/cosign · Pact | ☐ |
+| 18.F1 | Property-based executor tests · `Money` type · Stryker mutation testing | ☑ executor tests + Money landed; Stryker deferred (config-only value without a CI run) |
+| 18.F2 | Command palette · server-side worklist sort/filter/paginate · keyboard mode · offline · telemetry | ◐ palette + `g q` fix landed; rest deferred (see note below) |
+| 18.F3 | OpenBao dynamic creds · tenant-isolation fuzzing · audit anomaly detection · DAST · SBOM/cosign · Pact | ◐ tenant-isolation fuzzer landed (found a real disclosure); infra items deferred (see note below) |
 
 ### 18.E2 — deferred, with reasons
 
