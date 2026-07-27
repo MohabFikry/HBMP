@@ -23,14 +23,20 @@ COPY apps/web/ apps/web/
 COPY apps/design-system/ apps/design-system/
 COPY libs/contracts/ libs/contracts/
 
-ARG VITE_API_BASE=/api
+# Vite inlines these at BUILD time, so they must arrive as --build-arg (compose: `build.args`). Passing them
+# as runtime `environment:` hands them to nginx, which has no use for them, and the bundle keeps whatever was
+# baked here instead. The defaults are blank on purpose — src/config.ts treats blank as absent and falls back
+# — so an unparameterised `docker build` still produces a bundle that works against a default local stack.
+ARG VITE_API_BASE=
 ARG VITE_LIVE=1
 ARG VITE_OIDC_AUTHORITY=
 ARG VITE_OIDC_CLIENT_ID=
+ARG VITE_OIDC_REDIRECT=
 ENV VITE_API_BASE=$VITE_API_BASE \
     VITE_LIVE=$VITE_LIVE \
     VITE_OIDC_AUTHORITY=$VITE_OIDC_AUTHORITY \
-    VITE_OIDC_CLIENT_ID=$VITE_OIDC_CLIENT_ID
+    VITE_OIDC_CLIENT_ID=$VITE_OIDC_CLIENT_ID \
+    VITE_OIDC_REDIRECT=$VITE_OIDC_REDIRECT
 RUN pnpm --filter @mersal/web build
 
 FROM nginx:1.27-alpine AS runtime
