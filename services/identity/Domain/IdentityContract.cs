@@ -40,6 +40,10 @@ public static class IdentityContract
         // approve a retro-effective change). policy:read is broad because the benefit configuration is the
         // vocabulary the whole platform adjudicates against — and it carries no PHI.
         "policy:read", "policy:write", "policy:admin", "policy:supervise", "referral:write",
+        // 19.3 — notes are their own surface. note:read is deliberately wide (minimum-necessary bites at the
+        // BODY, by visibility class, not at the surface); note:write is narrower because a note is a signed
+        // statement. Cancelling another user's note additionally needs policy:supervise.
+        "note:read", "note:write",
         "callcentre:read", "callcentre:act", "callcentre:interaction", "callcentre:verify",
         // 18.B3/18.E1: the claims AUTHORITIES. Phase 10b's policy rules required these and the vocabulary
         // never listed them, so no token could carry one and the entire claims decision surface denied.

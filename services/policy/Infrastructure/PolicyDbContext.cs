@@ -26,6 +26,7 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
     public DbSet<MemberGroup> MemberGroups => Set<MemberGroup>();
     public DbSet<Enrollment> Enrollments => Set<Enrollment>();
     public DbSet<EnrollmentEvent> EnrollmentEvents => Set<EnrollmentEvent>();
+    public DbSet<Note> Notes => Set<Note>();   // 19.3
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -317,6 +318,35 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.OccurredAt).HasColumnName("occurred_at");
             e.Ignore(x => x.IsRetroEffective);
             e.HasIndex(x => new { x.EnrollmentId, x.OccurredAt });
+        });
+
+        // 19.3 — notes on policy and member (design 38 §5). Append-only + signed; see 0009.
+        b.Entity<Note>(e =>
+        {
+            e.ToTable("note");
+            e.HasKey(x => x.NoteId);
+            e.Property(x => x.NoteId).HasColumnName("note_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.Scope).HasConversion<string>().HasColumnName("scope");
+            e.Property(x => x.ScopeRef).HasColumnName("scope_ref");
+            e.Property(x => x.NoteType).HasConversion<string>().HasColumnName("note_type");
+            e.Property(x => x.Body).HasColumnName("body").IsRequired();
+            e.Property(x => x.VisibilityClass).HasConversion<string>().HasColumnName("visibility_class");
+            e.Property(x => x.AuthoredByUserId).HasColumnName("authored_by_user_id");
+            e.Property(x => x.AuthoredByUsername).HasColumnName("authored_by_username").IsRequired();
+            e.Property(x => x.AuthoredByDisplay).HasColumnName("authored_by_display").IsRequired();
+            e.Property(x => x.AuthoredAt).HasColumnName("authored_at");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.CancelledByUserId).HasColumnName("cancelled_by_user_id");
+            e.Property(x => x.CancelledByUsername).HasColumnName("cancelled_by_username");
+            e.Property(x => x.CancelledAt).HasColumnName("cancelled_at");
+            e.Property(x => x.CancellationReason).HasColumnName("cancellation_reason");
+            e.Property(x => x.SupersedesNoteId).HasColumnName("supersedes_note_id");
+            e.Property(x => x.Pinned).HasColumnName("pinned");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Ignore(x => x.ReadIsAuditable);
+            e.HasIndex(x => new { x.Scope, x.ScopeRef, x.AuthoredAt });
         });
 
         b.Entity<ProcessedEvent>(e =>

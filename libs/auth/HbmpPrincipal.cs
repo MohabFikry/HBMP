@@ -17,6 +17,13 @@ public sealed record HbmpPrincipal
     /// <summary>OAuth2 scopes granted to the token (from the space-delimited "scope" claim).</summary>
     public required IReadOnlySet<string> Scopes { get; init; }
 
+    /// <summary>19.3 — the human-readable name to SIGN a note or document with, from <c>name</c> or
+    /// <c>preferred_username</c>. Null when the token carries neither; callers that sign fall back to
+    /// <see cref="Subject"/>, because a signature that says "u-1042" is recoverable and an unsigned record is
+    /// not. Signatures are SNAPSHOTTED at write time, never joined — the point is that they survive the author
+    /// being renamed or de-provisioned.</summary>
+    public string? DisplayName { get; init; }
+
     public string? TenantId { get; init; }
     public string? ProviderId { get; init; }
     public string? SessionId { get; init; }
@@ -58,6 +65,7 @@ public sealed record HbmpPrincipal
             Subject = sub,
             Roles = roles,
             Scopes = scopes,
+            DisplayName = user.FindFirstValue("name") ?? user.FindFirstValue("preferred_username"),
             TenantId = user.FindFirstValue(HbmpClaimTypes.TenantId),
             ProviderId = user.FindFirstValue(HbmpClaimTypes.ProviderId),
             SessionId = user.FindFirstValue(HbmpClaimTypes.SessionId),

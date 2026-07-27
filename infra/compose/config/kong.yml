@@ -107,6 +107,8 @@ services:
           - /api/v1/policy-plans
           - /api/v1/member-groups
           - /api/v1/enrollments
+          # 19.3 — signed, append-only notes on policy + member.
+          - /api/v1/notes
         strip_path: false
 
   # --- provider-service: provider network + contracts + branches + practitioners + specialties ---

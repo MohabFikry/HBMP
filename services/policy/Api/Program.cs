@@ -147,7 +147,8 @@ v1.MapPost("/coverage-limits/reset-run", async (PolicyDbContext db, IAuditClient
 });
 
 app.MapPlanAdministration();
-app.MapMembership();   // 19.2 + 19.2b — policies, plans, groups, enrolment lifecycle   // 19.1 — payers, plans, effective-dated immutable plan versions
+app.MapMembership();
+app.MapNotes();   // 19.3 — signed, timestamped, append-only notes on policy + member   // 19.2 + 19.2b — policies, plans, groups, enrolment lifecycle   // 19.1 — payers, plans, effective-dated immutable plan versions
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
