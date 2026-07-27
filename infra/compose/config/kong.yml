@@ -297,12 +297,23 @@ services:
 consumers:
   - username: hbmp-issuer
     jwt_secrets:
-      # Kong 3.x env-vault references: read at boot from IDENTITY_ISSUER / IDENTITY_JWKS_PUBLIC_KEY on the
-      # Kong container. The public key is not a secret, but it is deployment-specific and must track whatever
-      # OpenBao holds — a mismatch here rejects every token at the edge, so it is injected, never committed.
-      - key: "{vault://env/identity-issuer}"
+      # Rendered at container start from IDENTITY_ISSUER / IDENTITY_JWKS_PUBLIC_KEY (see the kong service's
+      # entrypoint in compose.yaml). The public key is not a secret, but it is deployment-specific and must
+      # track whatever OpenBao holds — a mismatch here rejects every token at the edge, so it is injected
+      # rather than committed.
+      #
+      # This ORIGINALLY used Kong's `{vault://env/…}` references and could never have booted: only fields
+      # declared `referenceable` in a plugin's schema are resolved, and `jwt_secrets.rsa_public_key` is not
+      # one of them (Kong OSS marks only `secret`). Kong therefore kept the reference as a literal string and
+      # rejected the whole declarative file with "in 'rsa_public_key': invalid key" — so the edge-JWT block
+      # added in 18.B3 had never actually started. It went unnoticed because the running gateway predated it
+      # and Kong reads this file only at boot.
+      #
+      # The PEM is substituted as a DOUBLE-QUOTED YAML scalar with \n escapes, which YAML expands back into
+      # the real newlines a PEM needs — a plain sed cannot inject a multi-line value into one line.
+      - key: "__IDENTITY_ISSUER__"
         algorithm: RS256
-        rsa_public_key: "{vault://env/identity-jwks-public-key}"
+        rsa_public_key: "__IDENTITY_JWKS_PUBLIC_KEY__"
 
 plugins:
   # Global edge authentication (S8). Health and metrics are not routed through Kong at all (Prometheus

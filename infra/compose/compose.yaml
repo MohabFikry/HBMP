@@ -78,7 +78,7 @@ services:
     <<: *restart
     environment:
       KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_DECLARATIVE_CONFIG: /tmp/kong.yml
       KONG_PROXY_LISTEN: 0.0.0.0:8000
       # 18.B3 (S8) — edge JWT validation. Must match the issuer exactly: `iss` is the lookup key for the
       # registered signing key, so a trailing slash here rejects every token at the gateway.
@@ -90,7 +90,25 @@ services:
       - "8000:8000"          # public API proxy
       - "127.0.0.1:8001:8001" # admin — localhost only
     volumes:
-      - ./config/kong.yml:/etc/kong/kong.yml:ro
+      - ./config/kong.yml:/etc/kong/kong.template.yml:ro
+    # Render the two injected values into the declarative config before Kong reads it. Kong's own
+    # `{vault://env/…}` references cannot do this: only fields a plugin schema marks `referenceable` are
+    # resolved, and `jwt_secrets.rsa_public_key` is not one — Kong kept the literal reference and refused to
+    # boot. The PEM's newlines are re-encoded as \n so they survive the single-line substitution; the YAML
+    # double-quoted scalar in the template turns them back into a real PEM.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        # Four backslashes, not two: awk emits a literal \\n, which sed then unescapes to the \n that the YAML
+        # scalar wants. With only two, sed's own replacement handling turns \n into a REAL newline and splits
+        # the quoted scalar across lines — which is the same "invalid key" failure, one layer further in.
+        pem=$$(printf '%s' "$$IDENTITY_JWKS_PUBLIC_KEY" | awk '{printf "%s\\\\n", $$0}')
+        sed -e "s|__IDENTITY_ISSUER__|$$IDENTITY_ISSUER|" \
+            -e "s|__IDENTITY_JWKS_PUBLIC_KEY__|$$pem|" \
+            /etc/kong/kong.template.yml > /tmp/kong.yml
+        exec /docker-entrypoint.sh kong docker-start
     networks: [hbmp]
 
   # ---------------------------------------------------------------- MinIO (S3 object storage + WORM)
