@@ -12,5 +12,8 @@
     <ProjectReference Include="../Api/Mersal.Profile.Api.csproj" />
     <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
   </ItemGroup>
+  <!-- The DI container + logging come from the shared framework, not from packages (CPM: a
+       PackageReference here would need a PackageVersion nobody else pins). -->
+  <ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
 </Project>

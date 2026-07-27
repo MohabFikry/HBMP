@@ -400,6 +400,12 @@ public static class ProfilePolicies
     /// <summary>Every role the matrix names — the domain of the table-driven matrix test.</summary>
     public static IReadOnlyCollection<string> KnownRoles => (IReadOnlyCollection<string>)Matrix.Keys;
 
+    /// <summary>The roles whose matrix row has a cell for <paramref name="section"/> — derived, never re-listed,
+    /// so a policy rule elsewhere cannot drift from the matrix it is supposed to mirror.</summary>
+    public static IReadOnlySet<string> RolesWithSection(string section) =>
+        Matrix.Where(row => row.Value.ContainsKey(section)).Select(row => row.Key)
+              .ToHashSet(StringComparer.Ordinal);
+
     // ---------------------------------------------------------------- resolution
 
     /// <summary>

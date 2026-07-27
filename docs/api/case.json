@@ -17,6 +17,29 @@
         }
       }
     },
+    "/api/v1/cases/for-beneficiary/{beneficiaryId}": {
+      "get": {
+        "tags": [
+          "Mersal.Case.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "beneficiaryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/cases": {
       "post": {
         "tags": [

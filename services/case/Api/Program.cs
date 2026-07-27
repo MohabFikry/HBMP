@@ -25,19 +25,14 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<CaseGate>();
 builder.Services.AddScoped<CaseDeps>();
 
-// The beneficiary-360 coordination view is assembled from sibling services under the caller's bearer token (each
-// enforces its own authorization — defense in depth). Named clients per sibling; base URLs from config.
-builder.Services.AddScoped<IBeneficiary360Assembler, HttpBeneficiary360Assembler>();
-foreach (var (name, url) in new[]
-{
-    ("eligibility", builder.Configuration["Siblings:Eligibility"] ?? "http://eligibility-service:8080"),
-    ("approvals", builder.Configuration["Siblings:Approvals"] ?? "http://approvals-service:8080"),
-    ("appointments", builder.Configuration["Siblings:Appointments"] ?? "http://appointment-service:8080"),
-    ("emr", builder.Configuration["Siblings:Emr"] ?? "http://emr-service:8080"),
-})
-{
-    builder.Services.AddHttpClient(name, c => c.BaseAddress = new Uri(url));
-}
+// 20.2 — the beneficiary-360 is now a PROJECTION OF THE ONE CANONICAL PROFILE, not a second fan-out. It calls
+// profile-service under the caller's own bearer, so profile-service authorizes it and every owning service
+// authorizes profile-service's onward call. Design 39 §2: a fifth aggregate would guarantee drift, and this
+// service used to be the second one.
+builder.Services.AddScoped<IBeneficiary360Assembler, ProfileBackedBeneficiary360Assembler>();
+builder.Services.AddHttpClient(
+    "profile",
+    c => c.BaseAddress = new Uri(builder.Configuration["Siblings:Profile"] ?? "http://profile-service:8080"));
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("case-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
@@ -60,6 +55,7 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "ca
 
 app.MapCases();           // phase 10.1 — case CRUD + My Cases + assign/unassign + tasks + escalations
 app.MapBeneficiary360();  // phase 10.1 — coordination-360 (field-scoped, PHI-read audited) + eligibility override
+app.MapProfileCases();    // 20.2 — the profile's caseManagement section + the assignment fact
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

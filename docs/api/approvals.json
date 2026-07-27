@@ -40,6 +40,29 @@
         }
       }
     },
+    "/api/v1/authorizations/for-beneficiary/{beneficiaryId}": {
+      "get": {
+        "tags": [
+          "Mersal.Approvals.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "beneficiaryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/authorizations/utilization": {
       "get": {
         "tags": [

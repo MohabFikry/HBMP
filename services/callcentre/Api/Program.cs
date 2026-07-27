@@ -29,7 +29,12 @@ builder.Services.AddScoped<CallDeps>();
 // 15.2 — the member view is COMPOSED from sibling services under the caller's bearer token (each enforces its own
 // authorization; defense in depth). Named clients per sibling; base URLs from config. The 360 projection is
 // clinical-free by construction (Member360 has no clinical field).
-builder.Services.AddScoped<Mersal.CallCentre.Infrastructure.IMemberDirectory, HttpMemberDirectory>();
+// 20.2 — the member 360 is now a PROJECTION OF THE ONE CANONICAL PROFILE (design 39 §2). Identity, coverage
+// and open referrals come from profile-service; the call-centre ACTION affordances (appointments, contacts,
+// follow-ups) still come from the services that own them, because the profile contract has no section for
+// them. HttpMemberDirectory stays registered as the inner source for exactly those.
+builder.Services.AddScoped<HttpMemberDirectory>();
+builder.Services.AddScoped<Mersal.CallCentre.Infrastructure.IMemberDirectory, ProfileBackedMemberDirectory>();
 // 15.3 — appointment actions delegate to the emr engine (no-double-book/idempotency/If-Match preserved there).
 builder.Services.AddScoped<Mersal.CallCentre.Infrastructure.IAppointmentGateway, HttpAppointmentGateway>();
 // 15.4 — contact corrections delegate to patient-service (one-primary rule + history live there).
@@ -40,6 +45,7 @@ foreach (var (name, url) in new[]
     ("emr", builder.Configuration["Siblings:Emr"] ?? "http://emr-service:8080"),
     ("patient", builder.Configuration["Siblings:Patient"] ?? "http://patient-service:8080"),
     ("pharmacy", builder.Configuration["Siblings:Pharmacy"] ?? "http://pharmacy-service:8080"),
+    ("profile", builder.Configuration["Siblings:Profile"] ?? "http://profile-service:8080"),
 })
 {
     builder.Services.AddHttpClient(name, c => c.BaseAddress = new Uri(url));

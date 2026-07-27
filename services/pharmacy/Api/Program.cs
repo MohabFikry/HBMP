@@ -69,6 +69,7 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "ph
 app.MapPrescriptions();
 app.MapDispensing();
 app.MapReferrals();
+app.MapProfileSections();  // 20.2 — the profile's prescriptions + referrals sections (provider-ownership here)
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

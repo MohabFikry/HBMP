@@ -46,6 +46,8 @@ services:
           - "~/api/v1/beneficiaries/[^/]+/allergies/.*"
           - "~/api/v1/beneficiaries/[^/]+/medication-history$"
           - "~/api/v1/beneficiaries/[^/]+/medication-history/.*"
+          # 20.2 — the seam the patient profile's PMH + encounters sections read.
+          - "~/api/v1/beneficiaries/[^/]+/profile-context$"
         regex_priority: 200
         strip_path: false
       - name: emr-routes

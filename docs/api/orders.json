@@ -17,6 +17,36 @@
         }
       }
     },
+    "/api/v1/investigation-orders/for-beneficiary/{beneficiaryId}": {
+      "get": {
+        "tags": [
+          "Mersal.Orders.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "beneficiaryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/investigation-orders": {
       "post": {
         "tags": [

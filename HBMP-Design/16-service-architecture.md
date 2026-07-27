@@ -38,7 +38,7 @@ HBMP is a **microservices** platform of reusable core services (identity, patien
 | **reporting-service** | Read models, dashboards, exports | read replicas + OpenSearch | `/reports/*` | — | *(all domain events)* |
 | **audit-service** | Central append-only audit log | `audit` | `/audit/events` (query) | — | *(audit stream from all)* |
 | **document-service** | Document metadata + MinIO object-storage orchestration | `document` | `/documents`, `/documents/{id}/content` | `DocumentAttached` | — |
-| **profile-service** *(Phase 20)* | The unified patient profile ([39](39-patient-profile.md)) — **composition only; owns NO data and has no schema**. Fans out to ~8 services under the CALLER'S own token and projects the result to the design-39 §4 role × section matrix | **none** | `/patients/{id}/profile`, `/patients/{id}/profile/summary`, `/patients/{id}/photo` | `ProfileViewed`, `ProfileSummaryExported`, `IdentityPhotoViewed` *(audit stream)* | — |
+| **profile-service** *(Phase 20)* | The unified patient profile ([39](39-patient-profile.md)) — **composition only; owns NO data and has no schema**. The platform's ONLY beneficiary aggregation path: case-service's 360 and the call-centre's member 360 both delegate here (20.2). Fans out to ~8 services under the CALLER'S own token and projects the result to the design-39 §4 role × section matrix | **none** | `/patients/{id}/profile`, `/patients/{id}/profile/summary`, `/patients/{id}/photo` | `ProfileViewed`, `ProfileSummaryExported`, `IdentityPhotoViewed` *(audit stream)* | — |
 | **callcentre-service** *(Phase 15; call history added Phase 20.3b)* | Contact-centre interactions, caller verification, member 360, call actions — plus the member's **call history** projected Full / Operational / Meta with a server-generated clipboard block | `callcentre` | `/call-interactions`, `/call-centre/*`, `/beneficiaries/{id}/call-interactions`, `.../copy` | `CallInteractionOpened`, `CallerVerificationRecorded`, `CallInteractionClosed`, `CallSummaryCopied` *(audit stream)* | — |
 
 Supporting infra: **Event Bus** (NATS JetStream domain events), **Object Storage** (MinIO, S3-compatible, WORM), **Relational DB** (self-hosted PostgreSQL, Patroni HA), **Search Engine** (OpenSearch), **Caching** (Valkey), **Message Queue** (RabbitMQ durable/quorum queues for commands/outbox). Secrets/keys in **OpenBao**; orchestration on **k3s** (Docker Compose at Tier 1).
@@ -62,6 +62,34 @@ design rather than a stage it has not reached yet.
   that already exist, never a union.
 
 Consequently it is stateless, horizontally scalable, and needs no migration in any environment.
+
+### 2.0c The profile seams, and why the owning services kept their narrow rules (Phase 20.2)
+
+Five services gained one beneficiary-scoped read each, for the profile to compose from:
+
+| Service | Seam | Serves sections |
+|---|---|---|
+| emr | `GET /api/v1/beneficiaries/{id}/profile-context` | pastMedicalHistory, encounters |
+| orders | `GET /api/v1/investigation-orders/for-beneficiary/{id}` | investigations |
+| pharmacy | `GET /api/v1/prescriptions/for-beneficiary/{id}` · `GET /api/v1/referrals/for-beneficiary/{id}` | prescriptions, referrals |
+| approvals | `GET /api/v1/authorizations/for-beneficiary/{id}` | authorizations |
+| case | `GET /api/v1/cases/for-beneficiary/{id}` | caseManagement (+ the assignment fact) |
+
+**They do not reuse their service's ordinary read rule, and they do not get a laxer one.** `orders:read` is
+doctor + treating relationship; `rx:read` likewise; emr splits treating from medical-approval oversight. Those
+are correct and untouched — widening any of them so reception could read encounter *logistics* would have
+widened every clinical read in that service.
+
+Instead each seam consults the **same design-39 §4 matrix** through `ProfileSeam`, because the question has a
+different ABAC condition per role (a doctor needs treating, a case manager needs an assignment, reception needs
+neither because it only ever receives the meta variant) and a single `PolicyRule` carries one condition set.
+Crucially, **each owning service resolves its own facts**: emr the treating relationship, case the assignment,
+orders the sensitivity level and the release grant. profile-service cannot read emr's treating table and emr
+cannot see the composed payload, so the two layers still cannot stand in for each other — what they share is
+the answer to "which roles may see this section", which should have exactly one definition.
+
+The seams are scoped `profile:read` rather than the owning service's scope, because the roles that legitimately
+reach them (reception, finance, beneficiary management) hold no clinical scope at all.
 
 ### 2.1 claims-service boundaries & invariants (Phase 10b)
 

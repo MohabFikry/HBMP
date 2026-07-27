@@ -235,13 +235,25 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
   verbatim with an `aria-live` confirmation and a textarea fallback.
   **20.5** Kong routes, a compose block with no connection string, three scopes (`profile:read`,
   `profile:export`, `callcentre:history:read`), `docs/api/profile.json`, and docs 11/14/16/19/22 + the index.
-  Tests: authz **109**, profile-service **78**, callcentre **37**, web **145**. Four existing gates caught real
+  Tests: authz **109**, profile-service **82**, callcentre **37**, web **145**. Four existing gates caught real
   slips during the build — scope-integrity (a scope granted to roles with no call-history cell), the bare-clock
   scanner, the OpenAPI-coverage gate, and the display-truth rule (a raw `toLocaleString`).
-  **NOT DONE — carried forward:** prompt **20.2** (re-pointing the four existing 360s at the new contract) and
-  the five beneficiary-scoped upstream reads the providers call (`emr /profile-context`,
-  `orders|pharmacy|approvals|case /for-beneficiary/{id}`). Until those land, those sections resolve to
-  `Unavailable` at runtime — which is the designed degradation, not a crash, but it is not "done".
+  **20.2** the four partial 360s are consolidated onto the one contract. The case beneficiary-360 and the
+  call-centre member 360 now DELEGATE to profile-service under the caller's own bearer instead of fanning out
+  themselves; `HttpBeneficiary360Assembler` is deleted. Three of the five endpoints it used to call
+  (`/care-plan-summary`, `/coordination-summary`, `/beneficiaries/{id}/appointments`) never existed, so those
+  blocks had been silently empty in every environment — the coordination view's active-diagnosis list is
+  populated for the first time. Appointments/contacts/follow-ups stay with their owning services: they are
+  call-centre ACTION affordances, and design 39 §3 has no section for them; widening the contract to fit the
+  implementation would have been the wrong direction.
+  **Upstream seams** — five new beneficiary-scoped reads (`emr /profile-context`,
+  `orders|pharmacy|approvals|case /for-beneficiary/{id}`), each gated by `ProfileSeam`: the OWNING service
+  resolves the ABAC fact it owns (emr the treating relationship, case the assignment, orders the sensitivity
+  and the grant) and consults the SAME design-39 §4 matrix. The existing narrow rules (`orders:read` =
+  doctor+treating, `rx:read`, emr's treating/oversight split) are untouched and still guard every other
+  endpoint. `SectionWiringTests` now fails the build if a provider points at a route nothing serves — the
+  defect that hid here before, because a permanently-broken section and a momentarily-broken one look
+  identical at runtime by design.
 - **Phase 14 (Branch & Sensitivity)** is listed above **before 7** because it is a cross-cutting *retrofit* of
   `libs/authz`, identity, provider, emr and orders — that is its correct execution slot. Phases 7–10 were built
   ahead of it, so landing 14 also means revisiting the approvals worklist (member-scoped, no sensitive-result
