@@ -45,6 +45,9 @@ builder.Services.AddScoped<IMemberNoIssuer, SequentialMemberNoIssuer>();
 builder.Services.AddHttpClient<IDocumentStore, HttpDocumentStore>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Document:BaseUrl"] ?? "http://document-service:8080"));
 builder.Services.AddScoped<IPolicyDocumentOcr, DisabledPolicyDocumentOcr>();
+// 19.3c — the timeline projector. Nothing in the domain calls it as part of doing its work; it consumes
+// events that already exist, which is what keeps the timeline from drifting into a second log.
+builder.Services.AddScoped<TimelineProjector>();
 // 19.2b — the plan-change consumption rule is a SETTING, not a constant: ADR-0020 is unsigned, and reversing
 // it later must not require migrating every member's accumulator.
 builder.Services.Configure<MembershipOptions>(builder.Configuration.GetSection(MembershipOptions.SectionName));
@@ -155,7 +158,8 @@ v1.MapPost("/coverage-limits/reset-run", async (PolicyDbContext db, IAuditClient
 app.MapPlanAdministration();
 app.MapMembership();
 app.MapNotes();
-app.MapPolicyDocuments();   // 19.3b — classified documents on policy + member   // 19.3 — signed, timestamped, append-only notes on policy + member   // 19.2 + 19.2b — policies, plans, groups, enrolment lifecycle   // 19.1 — payers, plans, effective-dated immutable plan versions
+app.MapPolicyDocuments();
+app.MapTimeline();   // 19.3c — the change timeline (a projection over the audit stream)   // 19.3b — classified documents on policy + member   // 19.3 — signed, timestamped, append-only notes on policy + member   // 19.2 + 19.2b — policies, plans, groups, enrolment lifecycle   // 19.1 — payers, plans, effective-dated immutable plan versions
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

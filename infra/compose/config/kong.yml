@@ -111,6 +111,8 @@ services:
           - /api/v1/notes
           # 19.3b — classified documents on policy + member (linkage; bytes stay in document-service).
           - /api/v1/documents
+          # 19.3c — the change timeline (a projection over the audit stream).
+          - /api/v1/timeline
         strip_path: false
 
   # --- provider-service: provider network + contracts + branches + practitioners + specialties ---

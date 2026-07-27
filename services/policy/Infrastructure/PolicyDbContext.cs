@@ -28,6 +28,7 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
     public DbSet<EnrollmentEvent> EnrollmentEvents => Set<EnrollmentEvent>();
     public DbSet<Note> Notes => Set<Note>();   // 19.3
     public DbSet<PolicyDocument> PolicyDocuments => Set<PolicyDocument>();   // 19.3b
+    public DbSet<TimelineEntry> TimelineEntries => Set<TimelineEntry>();     // 19.3c
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -387,6 +388,35 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
             e.Ignore(x => x.IsPhi);
             e.HasIndex(x => new { x.Scope, x.ScopeRef, x.UploadedAt });
+        });
+
+        // 19.3c — the change timeline: a PROJECTION over the audit stream, never a second log.
+        b.Entity<TimelineEntry>(e =>
+        {
+            e.ToTable("entity_timeline");
+            e.HasKey(x => x.EntryId);
+            e.Property(x => x.EntryId).HasColumnName("entry_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.Scope).HasConversion<string>().HasColumnName("scope");
+            e.Property(x => x.ScopeRef).HasColumnName("scope_ref");
+            e.Property(x => x.OccurredAt).HasColumnName("occurred_at");
+            e.Property(x => x.EventType).HasColumnName("event_type").IsRequired();
+            e.Property(x => x.EventCategory).HasConversion<string>().HasColumnName("event_category");
+            e.Property(x => x.ActorUserId).HasColumnName("actor_user_id");
+            e.Property(x => x.ActorUsername).HasColumnName("actor_username");
+            e.Property(x => x.ActorDisplay).HasColumnName("actor_display");
+            e.Property(x => x.SummaryEn).HasColumnName("summary_en").IsRequired();
+            e.Property(x => x.SummaryAr).HasColumnName("summary_ar").IsRequired();
+            e.Property(x => x.ChangeDiff).HasColumnName("change_diff").HasColumnType("jsonb");
+            e.Property(x => x.VisibilityClass).HasConversion<string>().HasColumnName("visibility_class");
+            e.Property(x => x.SourceService).HasColumnName("source_service").IsRequired();
+            e.Property(x => x.CorrelationId).HasColumnName("correlation_id");
+            e.Property(x => x.SourceEventId).HasColumnName("source_event_id");
+            e.Property(x => x.TargetRef).HasColumnName("target_ref");
+            e.Property(x => x.TargetKind).HasColumnName("target_kind");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.HasIndex(x => x.SourceEventId).IsUnique();
+            e.HasIndex(x => new { x.Scope, x.ScopeRef, x.OccurredAt });
         });
 
         b.Entity<ProcessedEvent>(e =>
