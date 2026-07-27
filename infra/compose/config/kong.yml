@@ -109,6 +109,8 @@ services:
           - /api/v1/enrollments
           # 19.3 — signed, append-only notes on policy + member.
           - /api/v1/notes
+          # 19.3b — classified documents on policy + member (linkage; bytes stay in document-service).
+          - /api/v1/documents
         strip_path: false
 
   # --- provider-service: provider network + contracts + branches + practitioners + specialties ---

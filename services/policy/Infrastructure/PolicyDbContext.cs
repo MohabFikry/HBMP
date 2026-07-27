@@ -27,6 +27,7 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
     public DbSet<Enrollment> Enrollments => Set<Enrollment>();
     public DbSet<EnrollmentEvent> EnrollmentEvents => Set<EnrollmentEvent>();
     public DbSet<Note> Notes => Set<Note>();   // 19.3
+    public DbSet<PolicyDocument> PolicyDocuments => Set<PolicyDocument>();   // 19.3b
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -347,6 +348,45 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
             e.Ignore(x => x.ReadIsAuditable);
             e.HasIndex(x => new { x.Scope, x.ScopeRef, x.AuthoredAt });
+        });
+
+        // 19.3b — documents on policy and member (design 38 §5b). Bytes live in document-service/MinIO.
+        b.Entity<PolicyDocument>(e =>
+        {
+            e.ToTable("policy_document");
+            e.HasKey(x => x.LinkId);
+            e.Property(x => x.LinkId).HasColumnName("link_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.Scope).HasConversion<string>().HasColumnName("scope");
+            e.Property(x => x.ScopeRef).HasColumnName("scope_ref");
+            e.Property(x => x.DocumentId).HasColumnName("document_id");
+            e.Property(x => x.VersionNo).HasColumnName("version_no");
+            e.Property(x => x.SupersedesLinkId).HasColumnName("supersedes_link_id");
+            e.Property(x => x.DocumentClass).HasConversion<string>().HasColumnName("document_class");
+            e.Property(x => x.VisibilityClass).HasConversion<string>().HasColumnName("visibility_class");
+            e.Property(x => x.SensitiveCategory).HasConversion<string>().HasColumnName("sensitive_category");
+            e.Property(x => x.Title).HasColumnName("title").IsRequired();
+            e.Property(x => x.Description).HasColumnName("description");
+            e.Property(x => x.DocumentDate).HasColumnName("document_date");
+            e.Property(x => x.IssuingProvider).HasColumnName("issuing_provider");
+            e.Property(x => x.UploadedByUserId).HasColumnName("uploaded_by_user_id");
+            e.Property(x => x.UploadedByUsername).HasColumnName("uploaded_by_username").IsRequired();
+            e.Property(x => x.UploadedByDisplay).HasColumnName("uploaded_by_display").IsRequired();
+            e.Property(x => x.UploadedAt).HasColumnName("uploaded_at");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.WithdrawnByUserId).HasColumnName("withdrawn_by_user_id");
+            e.Property(x => x.WithdrawnByUsername).HasColumnName("withdrawn_by_username");
+            e.Property(x => x.WithdrawnAt).HasColumnName("withdrawn_at");
+            e.Property(x => x.WithdrawalReason).HasColumnName("withdrawal_reason");
+            e.Property(x => x.ExpiresOn).HasColumnName("expires_on");
+            e.Property(x => x.VerifiedByUserId).HasColumnName("verified_by_user_id");
+            e.Property(x => x.VerifiedByUsername).HasColumnName("verified_by_username");
+            e.Property(x => x.VerifiedAt).HasColumnName("verified_at");
+            e.Property(x => x.VerificationNote).HasColumnName("verification_note");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Ignore(x => x.IsPhi);
+            e.HasIndex(x => new { x.Scope, x.ScopeRef, x.UploadedAt });
         });
 
         b.Entity<ProcessedEvent>(e =>

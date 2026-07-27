@@ -39,6 +39,12 @@ builder.Services.AddHttpClient<INetworkTierCatalog, HttpNetworkTierCatalog>(c =>
 builder.Services.AddHttpClient<IBeneficiaryStatusProbe, HttpBeneficiaryStatusProbe>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Patient:BaseUrl"] ?? "http://patient-service:8080"));
 builder.Services.AddScoped<IMemberNoIssuer, SequentialMemberNoIssuer>();
+// 19.3b — documents. The bytes, the ClamAV scan and MinIO stay in document-service; policy-service adds only
+// the linkage and the classification. OCR is a WIRED SEAM, disabled: extraction becomes authoritative-looking
+// the moment it renders beside a real value, so it lands assistive and human-gated or not at all.
+builder.Services.AddHttpClient<IDocumentStore, HttpDocumentStore>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Document:BaseUrl"] ?? "http://document-service:8080"));
+builder.Services.AddScoped<IPolicyDocumentOcr, DisabledPolicyDocumentOcr>();
 // 19.2b — the plan-change consumption rule is a SETTING, not a constant: ADR-0020 is unsigned, and reversing
 // it later must not require migrating every member's accumulator.
 builder.Services.Configure<MembershipOptions>(builder.Configuration.GetSection(MembershipOptions.SectionName));
@@ -148,7 +154,8 @@ v1.MapPost("/coverage-limits/reset-run", async (PolicyDbContext db, IAuditClient
 
 app.MapPlanAdministration();
 app.MapMembership();
-app.MapNotes();   // 19.3 — signed, timestamped, append-only notes on policy + member   // 19.2 + 19.2b — policies, plans, groups, enrolment lifecycle   // 19.1 — payers, plans, effective-dated immutable plan versions
+app.MapNotes();
+app.MapPolicyDocuments();   // 19.3b — classified documents on policy + member   // 19.3 — signed, timestamped, append-only notes on policy + member   // 19.2 + 19.2b — policies, plans, groups, enrolment lifecycle   // 19.1 — payers, plans, effective-dated immutable plan versions
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
