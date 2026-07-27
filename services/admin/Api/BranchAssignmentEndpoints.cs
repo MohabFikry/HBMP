@@ -81,7 +81,7 @@ public static class BranchAssignmentEndpoints
         });
 
         // Switch the active branch (validated against the permitted set → ActiveBranchSwitched or 403).
-        me.MapPost("/active-branch", async (SwitchBranchRequest req, IHbmpPrincipalAccessor accessor, BranchAssignmentService svc, CancellationToken ct) =>
+        me.MapPost("/active-branch", async (SwitchBranchRequest req, HttpContext http, IHbmpPrincipalAccessor accessor, BranchAssignmentService svc, CancellationToken ct) =>
         {
             var p = accessor.Principal;
             if (p?.TenantId is null) return Results.Problem(statusCode: 403, title: "no tenant scope on principal");
@@ -89,7 +89,11 @@ public static class BranchAssignmentEndpoints
             if (!res.Allowed)
                 return Results.Problem(statusCode: 403, title: "branch-not-permitted", type: "urn:hbmp:branch-scope-denied",
                     detail: "the requested branch is not in your permitted set");
-            return Results.Ok(new { activeBranch = res.BranchId, permittedBranches = res.Permitted });
+            // 18.C1 (W2) — echo the branch the server ACTUALLY honoured, in the same header the client sends
+            // and emr already echoes. The switcher shows the confirmed value rather than its own optimistic
+            // one, so a request that was silently resolved elsewhere cannot look like a successful switch.
+            http.Response.Headers[BranchHeaders.ActiveBranch] = res.BranchId.ToString();
+            return Results.Ok(new { activeBranch = res.BranchId, activeBranchId = res.BranchId, permittedBranches = res.Permitted });
         });
     }
 }

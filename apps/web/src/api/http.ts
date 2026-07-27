@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import { API_BASE } from "../config";
 import { getToken } from "../auth/tokenStore";
+import { activeBranchHeader } from "./activeBranch";
 
 /** The RFC 7807 `application/problem+json` fields a service returns on a 4xx/5xx, when it supplies them. */
 export interface ProblemDetails {
@@ -69,11 +70,14 @@ async function request(path: string, init: RequestInit): Promise<unknown> {
   let res: Response;
   const token = getToken();
   const auth: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  // 18.C1 (W2) — the active branch travels with EVERY request. Phase 14 built the whole branch-scoping
+  // mechanism and this header was the one missing link, so the switcher changed nothing.
+  const branch = activeBranchHeader();
   // For FormData bodies, let the browser set `Content-Type` (with the multipart boundary) itself.
   const isForm = typeof FormData !== "undefined" && init.body instanceof FormData;
   const baseHeaders: Record<string, string> = isForm
-    ? { Accept: "application/json", ...auth }
-    : { "Content-Type": "application/json", Accept: "application/json", ...auth };
+    ? { Accept: "application/json", ...auth, ...branch }
+    : { "Content-Type": "application/json", Accept: "application/json", ...auth, ...branch };
   try {
     res = await fetch(`${API_BASE}${path}`, {
       ...init,

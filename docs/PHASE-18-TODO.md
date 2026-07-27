@@ -45,8 +45,8 @@ Mark `✅ YYYY-MM-DD` per id here **and** on the finding row in `AUDIT-R2-E2E.md
 
 | Sub | Id | Finding | Status |
 |---|---|---|---|
-| 18.C1 | W1 | Live sessions expire every 5 minutes (no refresh exchange) | ☐ |
-| 18.C1 | W2 | Branch scoping inert end-to-end (no `X-Active-Branch`, Kong CORS) | ☐ |
+| 18.C1 | W1 | Live sessions expire every 5 minutes (no refresh exchange) | ✅ 2026-07-27 (refresh + rotation + single-flight + silent renew) |
+| 18.C1 | W2 | Branch scoping inert end-to-end (no `X-Active-Branch`, Kong CORS) | ✅ 2026-07-27 (header on every request, Kong CORS both lists, server echo) |
 | 18.C2 | W3 | interop/FHIR has no compose entry and no Kong route | ☐ |
 | 18.C2 | W4 | Report-access grant/decision has no UI → sensitive gate is permanent-deny | ☐ |
 | 18.C2 | W5 | identity admin has no Kong route; console edits the legacy projection | ☐ |

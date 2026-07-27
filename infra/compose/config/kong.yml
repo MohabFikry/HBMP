@@ -248,8 +248,12 @@ plugins:
     config:
       origins: ["http://localhost:5173", "http://127.0.0.1:5173"]
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-      headers: ["Authorization", "Content-Type", "Idempotency-Key", "Accept-Language", "X-Correlation-Id", "If-Match"]
-      exposed_headers: ["X-Correlation-Id", "ETag"]
+      # 18.C1 (audit R2 W2) — X-Active-Branch on BOTH lists. Missing from `headers`, the browser's preflight
+      # rejects it and the request never leaves the page; missing from `exposed_headers`, the response echo is
+      # invisible to JS, so the switcher cannot tell the user which branch the server actually honoured.
+      # Branch scoping was built end to end in Phase 14 and sat inert for want of these two entries.
+      headers: ["Authorization", "Content-Type", "Idempotency-Key", "Accept-Language", "X-Correlation-Id", "If-Match", "X-Active-Branch"]
+      exposed_headers: ["X-Correlation-Id", "ETag", "X-Active-Branch"]
       credentials: false
       max_age: 3600
   # Global correlation IDs (W3C-style) on every request.

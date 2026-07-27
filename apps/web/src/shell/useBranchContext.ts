@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { API_BASE } from "../config";
 import { getToken } from "../auth/tokenStore";
+import { ACTIVE_BRANCH_HEADER, setActiveBranch } from "../api/activeBranch";
 import type { BranchOption } from "./BranchSwitcher";
 
 /** Operational roles that are branch-scoped (design 37 §3). Everyone else is member-scoped (all branches). */
@@ -11,6 +12,13 @@ interface BranchContextValue {
   branches: BranchOption[];
   activeBranchId: string | null;
   switchBranch: (id: string) => void;
+  /**
+   * 18.C1 (W2) — the branch the SERVER says is active, echoed back on the switch response. Until the echo
+   * arrives this is null and the switcher shows the optimistic local choice. If the two disagree the server
+   * wins and the switcher says so: a silent divergence here means the user is reading one branch's worklist
+   * while believing they are in another.
+   */
+  confirmedBranchId: string | null;
 }
 
 function authHeaders(json = false): Record<string, string> {
@@ -27,6 +35,7 @@ export function useBranchContext(role: string | undefined): BranchContextValue {
   const memberScoped = !role || !BRANCH_SCOPED.has(role);
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
+  const [confirmedBranchId, setConfirmedBranchId] = useState<string | null>(null);
 
   useEffect(() => {
     if (memberScoped) return;
@@ -47,7 +56,11 @@ export function useBranchContext(role: string | undefined): BranchContextValue {
           id, name: names.get(id) ?? id.slice(0, 8), isHome: id === home,
         }));
         setBranches(opts);
-        setActiveBranchId(home ?? opts[0]?.id ?? null);
+        const initial = home ?? opts[0]?.id ?? null;
+        setActiveBranchId(initial);
+        setConfirmedBranchId(initial);
+        // Publish to the API layer so every subsequent request carries X-Active-Branch.
+        setActiveBranch(initial);
       } catch {
         /* fail-soft: no switcher */
       }
@@ -59,14 +72,34 @@ export function useBranchContext(role: string | undefined): BranchContextValue {
 
   const switchBranch = useCallback((id: string) => {
     setActiveBranchId(id);
-    void fetch(`${API_BASE}/api/v1/me/active-branch`, {
-      method: "POST",
-      headers: authHeaders(true),
-      body: JSON.stringify({ branchId: id }),
-    }).catch(() => {
-      /* fail-soft */
-    });
-  }, []);
+    setConfirmedBranchId(null);        // unconfirmed until the server answers
+    setActiveBranch(id);               // subsequent requests carry the new branch immediately
+    void (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/me/active-branch`, {
+          method: "POST",
+          headers: authHeaders(true),
+          body: JSON.stringify({ branchId: id }),
+        });
+        if (!res.ok) {
+          // 403 = the branch is outside the caller's permitted set (and the server audited the attempt).
+          // Roll back rather than leaving the API layer sending a header the server will keep refusing.
+          setActiveBranchId((prev) => (prev === id ? confirmedBranchId : prev));
+          setActiveBranch(confirmedBranchId);
+          return;
+        }
+        // Prefer the server's echo — header first, then body — over our own optimistic value.
+        const echoed = res.headers.get(ACTIVE_BRANCH_HEADER)
+          ?? ((await res.json().catch(() => null)) as { activeBranchId?: string } | null)?.activeBranchId
+          ?? id;
+        setConfirmedBranchId(echoed);
+        setActiveBranchId(echoed);
+        setActiveBranch(echoed);
+      } catch {
+        /* fail-soft: keep the optimistic selection; the next request either works or 403s visibly */
+      }
+    })();
+  }, [confirmedBranchId]);
 
-  return { memberScoped, branches, activeBranchId, switchBranch };
+  return { memberScoped, branches, activeBranchId, switchBranch, confirmedBranchId };
 }

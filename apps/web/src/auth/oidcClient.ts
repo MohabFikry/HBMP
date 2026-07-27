@@ -1,6 +1,6 @@
 import { permissionsForRole, type Role } from "../authz/permissions";
 import { OIDC, roleFromClaimRoles } from "../config";
-import { getToken, setToken } from "./tokenStore";
+import { clearTokens, getRefreshToken, getToken, setRefreshToken, setToken } from "./tokenStore";
 import type { AuthClient, Session } from "./authClient";
 
 /**
@@ -95,7 +95,7 @@ export class OidcAuthClient implements AuthClient {
   }
 
   async logout(): Promise<void> {
-    setToken(null);
+    clearTokens();
     const url = new URL(`${OIDC.authority}/connect/logout`);
     url.search = new URLSearchParams({
       client_id: OIDC.clientId,
@@ -114,10 +114,10 @@ export class OidcAuthClient implements AuthClient {
       const verifier = sessionStorage.getItem(VERIFIER_KEY);
       cleanUrl();
       if (!verifier || returnedState !== expected) return null;
-      const token = await exchangeCode(code, verifier);
-      if (!token) return null;
-      setToken(token);
-      return sessionFrom(token);
+      const tokens = await exchangeCode(code, verifier);
+      if (!tokens) return null;
+      store(tokens);
+      return sessionFrom(tokens.accessToken);
     }
     // 2) Reload within the tab: reuse a still-valid token.
     const existing = getToken();
@@ -126,30 +126,98 @@ export class OidcAuthClient implements AuthClient {
         const s = sessionFrom(existing);
         if (s.expiresAt > Date.now()) return s;
       } catch {
-        /* fall through */
+        /* fall through to the refresh attempt */
       }
+      // 18.C1 — an EXPIRED access token is not the end of the session. Reloading a tab after more than five
+      // minutes used to drop the user at the login redirect even though the refresh token was still good.
       setToken(null);
+      const renewed = await this.renew();
+      if (renewed) return renewed;
+      clearTokens();
     }
     return null;
   }
+
+  /**
+   * Phase 18.C1 (audit R2 W1) — exchange the refresh token for a fresh access token.
+   *
+   * Returns the new session, or null when the session is genuinely over. Two failures are deliberately NOT
+   * distinguished: an expired refresh token and a REUSED one. The issuer rotates on every refresh, so
+   * presenting a token that has already been redeemed means either a benign race (two tabs renewing at once)
+   * or a stolen token being replayed. There is no way to tell them apart from here, and the safe response to
+   * both is the same — discard everything and make the user authenticate. Guessing "it was probably the other
+   * tab" and retrying is what turns a detected theft into an undetected one. The single-flight guard below
+   * removes the benign case, so a rejection really does mean something went wrong.
+   */
+  async renew(): Promise<Session | null> {
+    if (renewInFlight) return renewInFlight;
+    const token = getRefreshToken();
+    if (!token) return null;
+
+    renewInFlight = (async () => {
+      const tokens = await redeemRefreshToken(token);
+      if (!tokens) {
+        clearTokens();
+        return null;
+      }
+      store(tokens);
+      return sessionFrom(tokens.accessToken);
+    })();
+    try {
+      return await renewInFlight;
+    } finally {
+      renewInFlight = null;
+    }
+  }
 }
 
-async function exchangeCode(code: string, verifier: string): Promise<string | null> {
+/** In-flight renewal, shared so concurrent 401s or timers cannot each redeem the SINGLE-USE refresh token and
+ * have all but the first read as a reuse — which would log the user out mid-session for no reason. */
+let renewInFlight: Promise<Session | null> | null = null;
+
+interface TokenSet {
+  accessToken: string;
+  refreshToken: string | null;
+}
+
+function store(tokens: TokenSet): void {
+  setToken(tokens.accessToken);
+  // The issuer ROTATES: each response carries a new refresh token and invalidates the one just used. Failing
+  // to persist the replacement would make the NEXT renewal look exactly like a replay attack.
+  if (tokens.refreshToken) setRefreshToken(tokens.refreshToken);
+}
+
+async function exchangeCode(code: string, verifier: string): Promise<TokenSet | null> {
+  return postToken({
+    grant_type: "authorization_code",
+    client_id: OIDC.clientId,
+    code,
+    redirect_uri: OIDC.redirectUri,
+    code_verifier: verifier,
+  });
+}
+
+async function redeemRefreshToken(refreshToken: string): Promise<TokenSet | null> {
+  return postToken({
+    grant_type: "refresh_token",
+    client_id: OIDC.clientId,
+    refresh_token: refreshToken,
+  });
+}
+
+/** One shape for both grants. Returning null on ANY non-2xx keeps the caller from having to distinguish
+ * invalid_grant from a network blip — both mean "you do not have a usable token", and the caller re-auths. */
+async function postToken(form: Record<string, string>): Promise<TokenSet | null> {
   try {
     const res = await fetch(`${OIDC.authority}/connect/token`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        client_id: OIDC.clientId,
-        code,
-        redirect_uri: OIDC.redirectUri,
-        code_verifier: verifier,
-      }).toString(),
+      body: new URLSearchParams(form).toString(),
     });
     if (!res.ok) return null;
-    const json = (await res.json()) as { access_token?: string };
-    return json.access_token ?? null;
+    const json = (await res.json()) as { access_token?: string; refresh_token?: string };
+    if (!json.access_token) return null;
+    return { accessToken: json.access_token, refreshToken: json.refresh_token ?? null };
   } catch {
     return null;
   }

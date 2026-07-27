@@ -29,6 +29,12 @@ export interface AuthClient {
   logout(): Promise<void>;
   /** Restore a persisted session on reload (returns null if none/expired). */
   restore(): Promise<Session | null>;
+  /**
+   * Phase 18.C1 (audit R2 W1) — obtain a fresh access token without a redirect, or null when the session is
+   * over. Optional: the dev client has no issuer to renew against, and its `restore()` already returns a
+   * session with a full 30-minute window, so there is nothing to renew.
+   */
+  renew?(): Promise<Session | null>;
 }
 
 const STORAGE_KEY = "mersal-session";
