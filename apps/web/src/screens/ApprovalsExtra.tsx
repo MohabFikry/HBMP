@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useFormat } from "../i18n/useFormat";
 import { Button, Card, DataTable, InlineAlert, InputField, KpiCard, StatusChip, TextareaField, useTheme } from "@mersal/design-system";
 import { useWrite, writeErrorText } from "../api/useWrite";
 import type { Column } from "@mersal/design-system";
@@ -36,18 +37,19 @@ const S = {
   approved: { en: "Emergency approved.", ar: "تم الاعتماد الطارئ." },
 } satisfies Record<string, Localized>;
 
-const m = (n: number) => Math.round(n).toLocaleString();
+// 18.D2 (U7): grouped digits follow the app locale (Arabic-Indic in ar-EG), not the browser's.
 
 /** SLA / TAT board — turnaround + breach metrics across decided authorizations (PHI-free reporting read). */
 export function ApprovalsSla() {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
   const state = useAsync<TatSummary>(() => api.slaSummary(), []);
   const cols: Column<TatSummary["byStatus"][number]>[] = [
     { key: "status", header: t(S.status), cell: (r) => r.status },
     { key: "count", header: t(S.count), cell: (r) => <span className="tnum">{r.count}</span> },
-    { key: "avg", header: t(S.avg), cell: (r) => <span className="tnum">{m(r.avgMinutes)}</span> },
-    { key: "p95", header: t(S.p95), cell: (r) => <span className="tnum">{m(r.p95Minutes)}</span> },
+    { key: "avg", header: t(S.avg), cell: (r) => <span className="tnum">{fmt.number(Math.round(r.avgMinutes))}</span> },
+    { key: "p95", header: t(S.p95), cell: (r) => <span className="tnum">{fmt.number(Math.round(r.p95Minutes))}</span> },
     { key: "breaches", header: t(S.breaches), cell: (r) => <span className="tnum">{r.breaches}</span> },
   ];
   return (
@@ -57,10 +59,10 @@ export function ApprovalsSla() {
         {(d) => (
           <div className="stack" style={{ gap: "var(--sp4)" }}>
             <div className="kpi-row">
-              <KpiCard label={t(S.total)} value={m(d.total)} />
-              <KpiCard label={t(S.avg)} value={m(d.avgMinutes)} />
-              <KpiCard label={t(S.p95)} value={m(d.p95Minutes)} />
-              <KpiCard label={t(S.breaches)} value={m(d.breaches)} />
+              <KpiCard label={t(S.total)} value={fmt.number(Math.round(d.total))} />
+              <KpiCard label={t(S.avg)} value={fmt.number(Math.round(d.avgMinutes))} />
+              <KpiCard label={t(S.p95)} value={fmt.number(Math.round(d.p95Minutes))} />
+              <KpiCard label={t(S.breaches)} value={fmt.number(Math.round(d.breaches))} />
             </div>
             <Card as="section" style={{ padding: "var(--sp3)" }}>
               <DataTable columns={cols} rows={d.byStatus} rowKey={(r) => r.status} caption={t(S.slaTitle)} />

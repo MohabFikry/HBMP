@@ -32,7 +32,8 @@ export const zCoverage = z.object({
   validUntil: zDate.optional(),
   /** Beneficiary copay as a percentage (0–100). */
   copayPercent: z.number().min(0).max(100).optional(),
-  annualCapRemaining: z.string().optional(),
+  // 18.D2 (U7): raw number; formatted as EGP in the active locale at render.
+  annualCapRemaining: z.number().optional(),
 });
 export type Coverage = z.infer<typeof zCoverage>;
 

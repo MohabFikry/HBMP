@@ -15,7 +15,15 @@ export const zUtilizationRow = z.object({
   providerRef: z.string().optional(), // masked reference, never a name
   authorizedQty: z.number().int().nonnegative(),
   deliveredQty: z.number().int().nonnegative(),
-  spend: z.string(), // pre-formatted amount, e.g. "EGP 12,400"
+  /**
+   * 18.D2 (audit R2 U7) — a RAW number, formatted at render.
+   *
+   * This was a pre-formatted string built with `toLocaleString("en-US")` and an "EGP " prefix, so the Arabic
+   * UI showed Western digits and an English currency label inside an otherwise Arabic page. A formatted
+   * string also cannot be re-localised, summed, or sorted numerically by any consumer. The number crosses
+   * the wire; `useFormat().money()` turns it into EGP in the active locale at the point of display.
+   */
+  spend: z.number(),
 });
 export type UtilizationRow = z.infer<typeof zUtilizationRow>;
 
@@ -25,14 +33,14 @@ export const zUtilizationView = z.object({
   rows: z.array(zUtilizationRow),
   totalAuthorized: z.number().int().nonnegative(),
   totalDelivered: z.number().int().nonnegative(),
-  totalSpend: z.string(),
+  totalSpend: z.number(),
 });
 export type UtilizationView = z.infer<typeof zUtilizationView>;
 
 export const zSummaryBucket = z.object({
   key: zLocalized,
   deliveredQty: z.number().int().nonnegative(),
-  spend: z.string(),
+  spend: z.number(),
   sharePercent: z.number().min(0).max(100),
 });
 export type SummaryBucket = z.infer<typeof zSummaryBucket>;
@@ -41,7 +49,7 @@ export type SummaryBucket = z.infer<typeof zSummaryBucket>;
 export const zFinancialSummary = z.object({
   dimension: z.enum(["serviceline", "category", "provider"]),
   buckets: z.array(zSummaryBucket),
-  totalSpend: z.string(),
+  totalSpend: z.number(),
 });
 export type FinancialSummary = z.infer<typeof zFinancialSummary>;
 
@@ -52,8 +60,8 @@ export const zSettlementLine = z.object({
   serviceCode: z.string(),
   serviceLine: zLocalized,
   deliveredQty: z.number().int().nonnegative(),
-  agreedUnitPrice: z.string(),
-  lineTotal: z.string(),
+  agreedUnitPrice: z.number(),   // 18.D2 (U7): raw; formatted at render
+  lineTotal: z.number(),
 });
 export type SettlementLine = z.infer<typeof zSettlementLine>;
 
@@ -65,7 +73,7 @@ export const zSettlement = z.object({
   periodStart: z.string(),
   periodEnd: z.string(),
   currency: z.string(),
-  total: z.string(),
+  total: z.number(),
   status: zStatus,
   state: zSettlementStatus,
   lines: z.array(zSettlementLine),

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useFormat } from "../i18n/useFormat";
 import { Button, Card, DataTable, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type {
@@ -103,6 +104,7 @@ export function MyCases() {
 }
 
 function Beneficiary360Panel({ caseId, t }: { caseId: string; t: (l: Localized) => string }) {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const view = useAsync<Beneficiary360>(() => api.beneficiary360(caseId), [caseId]);
   return (
@@ -118,7 +120,7 @@ function Beneficiary360Panel({ caseId, t }: { caseId: string; t: (l: Localized) 
               <div><dt>{t(S.coverage)}</dt><dd><StatusChip kind={v.coverage.status.kind} label={t(v.coverage.status.label)} /></dd></div>
               <div><dt>{t(S.plan)}</dt><dd>{t(v.coverage.planName)}</dd></div>
               <div><dt>{t(S.category2)}</dt><dd>{t(v.coverage.coverageCategory)}</dd></div>
-              {v.coverage.remaining && <div><dt>{t(S.remaining)}</dt><dd className="tnum">{v.coverage.remaining}</dd></div>}
+              {v.coverage.remaining && <div><dt>{t(S.remaining)}</dt><dd className="tnum">{fmt.money(v.coverage.remaining)}</dd></div>}
             </div>
           </Card>
 
@@ -134,7 +136,7 @@ function Beneficiary360Panel({ caseId, t }: { caseId: string; t: (l: Localized) 
             <h2 className="section-h" style={{ margin: 0 }}>{t(S.appts)}</h2>
             <ul className="doc-list">
               {v.appointments.map((a) => (
-                <li key={a.id}><span className="tnum">{new Date(a.when).toLocaleString()}</span> · {t(a.clinic)} · <StatusChip kind={a.status.kind} label={t(a.status.label)} /></li>
+                <li key={a.id}><span className="tnum">{fmt.dateTime(a.when)}</span> · {t(a.clinic)} · <StatusChip kind={a.status.kind} label={t(a.status.label)} /></li>
               ))}
             </ul>
             <h2 className="section-h" style={{ margin: 0 }}>{t(S.approvals)}</h2>
@@ -200,6 +202,7 @@ function CaseTasks({ caseId, t }: { caseId: string; t: (l: Localized) => string 
 
 /** Escalations raised from the caller's case load — trackable, status-badged. */
 export function Escalations() {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
   const state = useAsync<Escalation[]>(() => api.escalations(), []);
@@ -208,7 +211,7 @@ export function Escalations() {
     { key: "raisedTo", header: t(S.raisedTo), cell: (r) => t(r.raisedToRole) },
     { key: "reason", header: t(S.reason), cell: (r) => r.reason },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "raisedAt", header: t(S.raisedAt), cell: (r) => <span className="tnum">{new Date(r.raisedAt).toLocaleString()}</span> },
+    { key: "raisedAt", header: t(S.raisedAt), cell: (r) => <span className="tnum">{fmt.dateTime(r.raisedAt)}</span> },
   ];
   return (
     <>

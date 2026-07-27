@@ -1,4 +1,5 @@
 import { KpiCard, Card, DataTable, SegmentedControl, StatusChip } from "@mersal/design-system";
+import { useFormat } from "../i18n/useFormat";
 import type { Column } from "@mersal/design-system";
 import type { ClaimRow, ClaimsKpis, Localized, ReconciliationRow } from "@mersal/contracts";
 import { useState } from "react";
@@ -49,12 +50,13 @@ const S = {
   count: { en: "Count", ar: "العدد" },
 } satisfies Record<string, Localized>;
 
-const money = (n?: number | null) => (n == null ? "—" : `EGP ${Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 })}`);
+// 18.D2 (U7): money is formatted at render by useFormat — EGP in the ACTIVE locale, not en-US.
 const pct = (n: number) => `${Math.round(n * 100)}%`;
-const dt = (s?: string | null) => (s ? new Date(s).toLocaleDateString() : "—");
+// 18.D2 (U7): see useFormat — Africa/Cairo + the app locale, never the browser's.
 
 /** Claims worklist (36 §4) — the officer's queue of claims, filterable by lifecycle status. Codes + amounts only. */
 export function ClaimsWorklist() {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
   const [status, setStatus] = useState<string>("");
@@ -63,10 +65,10 @@ export function ClaimsWorklist() {
     { key: "claimNo", header: t(S.claimNo), cell: (r) => <span className="tnum">{r.claimNo}</span> },
     { key: "origin", header: t(S.origin), cell: (r) => r.origin },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "claimed", header: t(S.claimed), cell: (r) => <span className="tnum">{money(r.claimedAmount)}</span> },
-    { key: "net", header: t(S.net), cell: (r) => <span className="tnum">{money(r.netPayable)}</span> },
-    { key: "serviceFrom", header: t(S.serviceFrom), cell: (r) => <span className="tnum">{dt(r.serviceDateFrom)}</span> },
-    { key: "submitted", header: t(S.submitted), cell: (r) => <span className="tnum">{dt(r.submittedAt)}</span> },
+    { key: "claimed", header: t(S.claimed), cell: (r) => <span className="tnum">{fmt.money(r.claimedAmount)}</span> },
+    { key: "net", header: t(S.net), cell: (r) => <span className="tnum">{fmt.money(r.netPayable)}</span> },
+    { key: "serviceFrom", header: t(S.serviceFrom), cell: (r) => <span className="tnum">{fmt.date(r.serviceDateFrom)}</span> },
+    { key: "submitted", header: t(S.submitted), cell: (r) => <span className="tnum">{fmt.date(r.submittedAt)}</span> },
   ];
   return (
     <>
@@ -95,6 +97,7 @@ export function ClaimsWorklist() {
 
 /** Reconciliation worklist (36 §7) — delivered/billed/coded signals bucketed by the classifier. */
 export function ClaimsReconciliation() {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
   const [bucket, setBucket] = useState<string>("");
@@ -103,9 +106,9 @@ export function ClaimsReconciliation() {
     { key: "claimNo", header: t(S.claimNo), cell: (r) => <span className="tnum">{r.claimNo}</span> },
     { key: "origin", header: t(S.origin), cell: (r) => r.origin },
     { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.code}</span> },
-    { key: "serviceDate", header: t(S.serviceDate), cell: (r) => <span className="tnum">{dt(r.serviceDate)}</span> },
-    { key: "billed", header: t(S.billed), cell: (r) => <span className="tnum">{money(r.billedAmount)}</span> },
-    { key: "allowed", header: t(S.allowed), cell: (r) => <span className="tnum">{money(r.allowedAmount)}</span> },
+    { key: "serviceDate", header: t(S.serviceDate), cell: (r) => <span className="tnum">{fmt.date(r.serviceDate)}</span> },
+    { key: "billed", header: t(S.billed), cell: (r) => <span className="tnum">{fmt.money(r.billedAmount)}</span> },
+    { key: "allowed", header: t(S.allowed), cell: (r) => <span className="tnum">{fmt.money(r.allowedAmount)}</span> },
     { key: "bucket", header: t(S.bucket), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
   ];
   return (
@@ -135,6 +138,7 @@ export function ClaimsReconciliation() {
 
 /** Claims insights (36 §11) — PHI-free operational KPIs + the top denial reasons. */
 export function ClaimsInsights() {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
   const state = useAsync<ClaimsKpis>(() => api.claimsKpis(), []);
@@ -154,8 +158,8 @@ export function ClaimsInsights() {
               <KpiCard label={t(S.denial)} value={pct(k.denialRate)} />
               <KpiCard label={t(S.ocr)} value={pct(k.ocrAutoMatchRate)} />
               <KpiCard label={t(S.agedCount)} value={String(k.agedUnbilledCount)} />
-              <KpiCard label={t(S.agedValue)} value={money(k.agedUnbilledValue)} />
-              <KpiCard label={t(S.recovery)} value={money(k.recoveryOutstanding)} />
+              <KpiCard label={t(S.agedValue)} value={fmt.money(k.agedUnbilledValue)} />
+              <KpiCard label={t(S.recovery)} value={fmt.money(k.recoveryOutstanding)} />
             </div>
             <Card as="section" style={{ padding: "var(--sp3)" }}>
               <h2 style={{ fontSize: "var(--fs-title-3)", marginTop: 0 }}>{t(S.denialsTitle)}</h2>

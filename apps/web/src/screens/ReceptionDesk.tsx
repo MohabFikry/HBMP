@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useFormat, type Formatters } from "../i18n/useFormat";
 import { Button, Card, DataTable, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { AppointmentRow, Localized } from "@mersal/contracts";
@@ -27,15 +28,21 @@ const S = {
   },
 } satisfies Record<string, Localized>;
 
-const timeOf = (iso: string) =>
-  new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-
-/** Shared columns for a read-only appointment board (masked beneficiary token + type/time/status). */
-function boardColumns(t: (l: Localized) => string): Column<AppointmentRow>[] {
+/**
+ * Shared columns for a read-only appointment board (masked beneficiary token + type/time/status).
+ *
+ * 18.D2 (audit R2 U7) — the appointment TIME is the headline case. This used to be
+ * `toLocaleTimeString(undefined, …)`, which formats in the MACHINE's time zone: a clinic PC set to UTC —
+ * the default on a fresh Linux image and in every container — rendered a 09:00 Cairo appointment as 07:00.
+ * Nothing errored. The receptionist read 07:00, told the patient 07:00, and the patient missed their slot
+ * or arrived two hours early. DST made the error change size mid-year. The formatter is now passed in,
+ * pinned to Africa/Cairo and the app's own locale.
+ */
+function boardColumns(t: (l: Localized) => string, fmt: Formatters): Column<AppointmentRow>[] {
   return [
     { key: "beneficiary", header: t(S.beneficiary), cell: (r) => <span className="tnum">{r.beneficiary.token}</span> },
     { key: "type", header: t(S.type), cell: (r) => r.appointmentType },
-    { key: "time", header: t(S.time), cell: (r) => <span className="tnum">{timeOf(r.scheduledStart)}</span> },
+    { key: "time", header: t(S.time), cell: (r) => <span className="tnum">{fmt.time(r.scheduledStart)}</span> },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
   ];
 }
@@ -44,8 +51,9 @@ function boardColumns(t: (l: Localized) => string): Column<AppointmentRow>[] {
 export function ReceptionVisits() {
   const api = useApi();
   const t = useLoc();
+  const fmt = useFormat();   // 18.D2 (U7) — Cairo appointment times, app locale
   const state = useAsync<AppointmentRow[]>(() => api.appointments("checked-in"), []);
-  const cols = boardColumns(t);
+  const cols = boardColumns(t, fmt);
   return (
     <>
       <PageHeader title={t(S.visitsTitle)} />
@@ -62,8 +70,9 @@ export function ReceptionVisits() {
 export function ReceptionAppointments() {
   const api = useApi();
   const t = useLoc();
+  const fmt = useFormat();   // 18.D2 (U7) — Cairo appointment times, app locale
   const state = useAsync<AppointmentRow[]>(() => api.appointments("all"), []);
-  const cols = boardColumns(t);
+  const cols = boardColumns(t, fmt);
   return (
     <>
       <PageHeader title={t(S.apptTitle)} />
@@ -80,6 +89,7 @@ export function ReceptionAppointments() {
 export function ReceptionCheckIn() {
   const api = useApi();
   const t = useLoc();
+  const fmt = useFormat();   // 18.D2 (U7) — Cairo appointment times, app locale
   const state = useAsync<AppointmentRow[]>(() => api.appointments("booked"), []);
   const [busy, setBusy] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
@@ -116,7 +126,7 @@ export function ReceptionCheckIn() {
   }
 
   const cols: Column<AppointmentRow>[] = [
-    ...boardColumns(t),
+    ...boardColumns(t, fmt),
     {
       key: "action",
       header: t(S.action),

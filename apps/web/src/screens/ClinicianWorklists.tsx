@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useFormat, type Formatters } from "../i18n/useFormat";
 import { Button, Card, DataTable, Modal, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { Localized, OrderRow, PatientListItem, ResultDetail, RxRow } from "@mersal/contracts";
@@ -34,17 +35,19 @@ const S = {
   close: { en: "Close", ar: "إغلاق" },
 } satisfies Record<string, Localized>;
 
-const dt = (s?: string | null) => (s ? new Date(s).toLocaleDateString() : "—");
+// 18.D2 (U7): dates come from useFormat — pinned to Africa/Cairo and the APP locale. A bare
+// toLocaleDateString uses the MACHINE zone, so a UTC-set clinic PC renders the wrong day near midnight.
 
 /** My patients — the caller's own encounters (treating-relationship gated server-side). */
 export function DoctorPatients() {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
   const state = useAsync<PatientListItem[]>(() => api.listPatients(), []);
   const cols: Column<PatientListItem>[] = [
     { key: "patient", header: t(S.patient), cell: (r) => t(r.name) },
     { key: "mrn", header: t(S.mrn), cell: (r) => <span className="tnum">{r.mrn}</span> },
-    { key: "lastVisit", header: t(S.lastVisit), cell: (r) => <span className="tnum">{dt(r.lastVisit)}</span> },
+    { key: "lastVisit", header: t(S.lastVisit), cell: (r) => <span className="tnum">{fmt.date(r.lastVisit)}</span> },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
   ];
   return (
@@ -59,14 +62,16 @@ export function DoctorPatients() {
   );
 }
 
-function orderColumns(t: (l: Localized) => string): Column<OrderRow>[] {
+// 18.D2 (U7): the formatter is PASSED IN rather than hooked here — this is a plain helper, not a component,
+// so calling a hook inside it violates the rules of hooks (and would break if it were ever called twice).
+function orderColumns(t: (l: Localized) => string, fmt: Formatters): Column<OrderRow>[] {
   return [
     { key: "orderNo", header: t(S.orderNo), cell: (r) => <span className="tnum">{r.orderNo}</span> },
     { key: "patient", header: t(S.patient), cell: (r) => <span className="tnum">{r.beneficiary.token}</span> },
     { key: "type", header: t(S.type), cell: (r) => r.orderType },
     { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.primaryCode}</span> },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "placed", header: t(S.placed), cell: (r) => <span className="tnum">{dt(r.requestedAt)}</span> },
+    { key: "placed", header: t(S.placed), cell: (r) => <span className="tnum">{fmt.date(r.requestedAt)}</span> },
   ];
 }
 
@@ -74,8 +79,9 @@ function orderColumns(t: (l: Localized) => string): Column<OrderRow>[] {
 export function DoctorOrders() {
   const api = useApi();
   const t = useLoc();
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const state = useAsync<OrderRow[]>(() => api.ordersMine(), []);
-  const cols = orderColumns(t);
+  const cols = orderColumns(t, fmt);
   return (
     <>
       <PageHeader title={t(S.ordersTitle)} />
@@ -98,6 +104,7 @@ export function DoctorOrders() {
 export function DoctorResults() {
   const api = useApi();
   const t = useLoc();
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const state = useAsync<OrderRow[]>(() => api.ordersMine("Completed"), []);
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState<ResultDetail | null>(null);
@@ -127,7 +134,7 @@ export function DoctorResults() {
   }
 
   const cols: Column<OrderRow>[] = [
-    ...orderColumns(t),
+    ...orderColumns(t, fmt),
     {
       key: "result",
       header: t(S.result),
@@ -187,6 +194,7 @@ export function DoctorResults() {
 
 /** Prescriptions — e-prescriptions I authored. */
 export function DoctorPrescriptions() {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
   const state = useAsync<RxRow[]>(() => api.prescriptionsMine(), []);
@@ -194,7 +202,7 @@ export function DoctorPrescriptions() {
     { key: "patient", header: t(S.patient), cell: (r) => <span className="tnum">{r.beneficiary.token}</span> },
     { key: "lines", header: t(S.lines), cell: (r) => <span className="tnum">{r.lineCount}</span> },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "submitted", header: t(S.submitted), cell: (r) => <span className="tnum">{dt(r.submittedAt)}</span> },
+    { key: "submitted", header: t(S.submitted), cell: (r) => <span className="tnum">{fmt.date(r.submittedAt)}</span> },
   ];
   return (
     <>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useFormat } from "../i18n/useFormat";
 import { Button, Card, InputField, StatusChip, useTheme } from "@mersal/design-system";
 import type { EligibilityResult, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -115,6 +116,7 @@ export function ReceptionEligibility() {
 }
 
 function ResultCard({ result, t, S }: { result: EligibilityResult; t: (l: Localized) => string; S: Record<string, Localized> }) {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const b = result.beneficiary;
   const c = result.coverage;
   return (
@@ -136,7 +138,7 @@ function ResultCard({ result, t, S }: { result: EligibilityResult; t: (l: Locali
           <div><dt>{t(S.band)}</dt><dd>{t(c.band)}</dd></div>
           {c.copayPercent != null && <div><dt>{t(S.copay)}</dt><dd className="tnum">{c.copayPercent}%</dd></div>}
           {c.validUntil && <div><dt>{t(S.validUntil)}</dt><dd className="tnum">{c.validUntil}</dd></div>}
-          {c.annualCapRemaining && <div><dt>{t(S.capRemaining)}</dt><dd className="tnum">{c.annualCapRemaining}</dd></div>}
+          {c.annualCapRemaining && <div><dt>{t(S.capRemaining)}</dt><dd className="tnum">{fmt.money(c.annualCapRemaining)}</dd></div>}
         </div>
       )}
 

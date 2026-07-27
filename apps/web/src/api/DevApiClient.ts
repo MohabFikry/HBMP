@@ -136,7 +136,7 @@ export class DevApiClient implements ApiClient {
           band: loc("Band B — Outpatient + Pharmacy", "الفئة ب — عيادات + صيدلية"),
           validUntil: "2026-12-31",
           copayPercent: 10,
-          annualCapRemaining: "EGP 8,400",
+          annualCapRemaining: 8400,
         },
         visitGate: { allowed: true },
       }),
@@ -772,8 +772,8 @@ export class DevApiClient implements ApiClient {
           status: { kind: "ok", label: loc("Eligible", "مؤهل") },
           planName: loc("Mersal Essential", "مرسال الأساسية"),
           coverageCategory: loc("Band B — Outpatient + Pharmacy", "الفئة ب — عيادات + صيدلية"),
-          annualCap: "EGP 20,000",
-          remaining: "EGP 8,400",
+          annualCap: 20000,
+          remaining: 8400,
         },
         carePlan: {
           status: loc("Active", "نشطة"),
@@ -838,13 +838,13 @@ export class DevApiClient implements ApiClient {
         from: "2026-06-22",
         to: "2026-07-22",
         rows: [
-          { serviceCode: "70553", serviceLine: loc("Imaging", "أشعة"), coverageCategory: loc("Outpatient", "عيادات خارجية"), providerRef: "PRV-•••301", authorizedQty: 12, deliveredQty: 9, spend: "EGP 58,500" },
-          { serviceCode: "J01CA04", serviceLine: loc("Pharmacy", "صيدلية"), coverageCategory: loc("Pharmacy", "صيدلية"), providerRef: "PRV-•••118", authorizedQty: 240, deliveredQty: 231, spend: "EGP 12,400" },
-          { serviceCode: "80053", serviceLine: loc("Lab", "مختبر"), coverageCategory: loc("Outpatient", "عيادات خارجية"), providerRef: "PRV-•••204", authorizedQty: 88, deliveredQty: 86, spend: "EGP 9,120" },
+          { serviceCode: "70553", serviceLine: loc("Imaging", "أشعة"), coverageCategory: loc("Outpatient", "عيادات خارجية"), providerRef: "PRV-•••301", authorizedQty: 12, deliveredQty: 9, spend: 58500 },
+          { serviceCode: "J01CA04", serviceLine: loc("Pharmacy", "صيدلية"), coverageCategory: loc("Pharmacy", "صيدلية"), providerRef: "PRV-•••118", authorizedQty: 240, deliveredQty: 231, spend: 12400 },
+          { serviceCode: "80053", serviceLine: loc("Lab", "مختبر"), coverageCategory: loc("Outpatient", "عيادات خارجية"), providerRef: "PRV-•••204", authorizedQty: 88, deliveredQty: 86, spend: 9120 },
         ],
         totalAuthorized: 340,
         totalDelivered: 326,
-        totalSpend: "EGP 80,020",
+        totalSpend: 80020,
       }),
     );
   }
@@ -860,11 +860,11 @@ export class DevApiClient implements ApiClient {
             periodStart: "2026-06-01",
             periodEnd: "2026-06-30",
             currency: "EGP",
-            total: "EGP 58,500",
+            total: 58500,
             status: { kind: "info", label: loc("Submitted", "مُقدّمة") },
             state: "submitted",
             lines: [
-              { serviceCode: "70553", serviceLine: loc("Imaging", "أشعة"), deliveredQty: 9, agreedUnitPrice: "EGP 6,500", lineTotal: "EGP 58,500" },
+              { serviceCode: "70553", serviceLine: loc("Imaging", "أشعة"), deliveredQty: 9, agreedUnitPrice: 6500, lineTotal: 58500 },
             ],
           },
           {
@@ -875,11 +875,11 @@ export class DevApiClient implements ApiClient {
             periodStart: "2026-06-01",
             periodEnd: "2026-06-30",
             currency: "EGP",
-            total: "EGP 12,400",
+            total: 12400,
             status: { kind: "ok", label: loc("Approved", "معتمدة") },
             state: "approved",
             lines: [
-              { serviceCode: "J01CA04", serviceLine: loc("Pharmacy", "صيدلية"), deliveredQty: 231, agreedUnitPrice: "EGP 53.68", lineTotal: "EGP 12,400" },
+              { serviceCode: "J01CA04", serviceLine: loc("Pharmacy", "صيدلية"), deliveredQty: 231, agreedUnitPrice: 53.68, lineTotal: 12400 },
             ],
           },
         ]),
@@ -891,11 +891,11 @@ export class DevApiClient implements ApiClient {
       ok(zFinancialSummary, {
         dimension,
         buckets: [
-          { key: loc("Imaging", "أشعة"), deliveredQty: 9, spend: "EGP 58,500", sharePercent: 73 },
-          { key: loc("Pharmacy", "صيدلية"), deliveredQty: 231, spend: "EGP 12,400", sharePercent: 15 },
-          { key: loc("Lab", "مختبر"), deliveredQty: 86, spend: "EGP 9,120", sharePercent: 12 },
+          { key: loc("Imaging", "أشعة"), deliveredQty: 9, spend: 58500, sharePercent: 73 },
+          { key: loc("Pharmacy", "صيدلية"), deliveredQty: 231, spend: 12400, sharePercent: 15 },
+          { key: loc("Lab", "مختبر"), deliveredQty: 86, spend: 9120, sharePercent: 12 },
         ],
-        totalSpend: "EGP 80,020",
+        totalSpend: 80020,
       }),
     );
   }

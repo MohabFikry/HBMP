@@ -27,6 +27,31 @@ export default tseslint.config(
     },
   },
   {
+    /**
+     * 18.D2 (audit R2 U7) — ban the formatting calls that silently use the wrong zone and locale.
+     *
+     * `toLocaleDateString()` / `toLocaleTimeString()` / `toLocaleString()` format in the MACHINE's time zone
+     * and the BROWSER's locale. Neither is right here: display is Africa/Cairo (CLAUDE.md) and the locale
+     * follows the APP's language, which is unrelated to the browser's. The failure is silent — a UTC-set
+     * clinic PC renders a 09:00 appointment as 07:00 and nothing errors — so a lint rule is the only thing
+     * that catches the next one at authoring time. `useFormat()` is the sanctioned path.
+     */
+    files: ["apps/web/src/**/*.{ts,tsx}"],
+    ignores: ["apps/web/src/i18n/useFormat.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression > MemberExpression[property.name=/^toLocale(Date|Time)?String$/]",
+          message:
+            "Use useFormat() — toLocale*String formats in the machine's time zone and the browser's locale; " +
+            "display must be Africa/Cairo in the app's language (18.D2 / U7).",
+        },
+      ],
+    },
+  },
+  {
     // Test + config files: allow the pragmatic patterns fixtures/mocks use.
     files: ["**/test/**/*.{ts,tsx}", "**/*.config.{ts,mts}", "**/vite-env.d.ts"],
     rules: {

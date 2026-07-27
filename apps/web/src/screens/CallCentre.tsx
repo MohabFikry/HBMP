@@ -1,3 +1,5 @@
+import { memberStatus, callOutcomeLabel, identifierTypeLabel, appointmentTypeLabel } from "./statusLabels";
+import { useFormat } from "../i18n/useFormat";
 import { useCallback, useEffect, useState } from "react";
 import { Button, Card, Icon, InputField, StatusChip, useTheme } from "@mersal/design-system";
 import { L } from "../i18n/strings";
@@ -131,6 +133,7 @@ export function createHttpCcApi(): CcApi {
  * exists anywhere in this graph.
  */
 export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }) {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const { lang } = useTheme();
   const t = (l: { en: string; ar: string }) => l[lang];
 
@@ -298,7 +301,14 @@ export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }
             <Card>
               <div className="cc-360" data-testid="cc-360">
                 <h2>{summary.identity.displayName} {summary.identity.memberNo && <span className="cc-muted">· {summary.identity.memberNo}</span>}</h2>
-                <StatusChip kind="ok" label={summary.identity.status} />
+                {/* 18.D2 (U3) — the chip's KIND and LABEL now come from the SAME value. This was
+                    kind="ok" with a server-supplied label, so a Suspended or Expired member displayed as
+                    green with the real word beside it in small text — and an agent under call pressure
+                    reads the colour. */}
+                <StatusChip
+                  kind={memberStatus(summary.identity.status).kind}
+                  label={t(memberStatus(summary.identity.status).label)}
+                />
 
                 <section aria-label={t(L.ccCoverage)}>
                   <h3>{t(L.ccCoverage)}</h3>
@@ -307,7 +317,7 @@ export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }
 
                 <section aria-label={t(L.ccContacts)}>
                   <h3>{t(L.ccContacts)}</h3>
-                  <ul>{summary.contacts.map((c) => <li key={c.contactId}>{c.kind}: {c.value}{c.isPrimary ? " ★" : ""}</li>)}</ul>
+                  <ul>{summary.contacts.map((c) => <li key={c.contactId}>{t(identifierTypeLabel(c.kind))}: {c.value}{c.isPrimary ? " ★" : ""}</li>)}</ul>
                 </section>
 
                 <section aria-label={t(L.ccAppointments)}>
@@ -315,7 +325,7 @@ export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }
                   <ul className="cc-appts">
                     {summary.appointments.map((a) => (
                       <li key={a.appointmentId}>
-                        <span>{a.appointmentType} · {new Date(a.scheduledStart).toLocaleDateString()} · {a.branchName ?? "—"} · {a.doctorName ?? "—"}{a.specialty ? ` (${a.specialty})` : ""}</span>
+                        <span>{t(appointmentTypeLabel(a.appointmentType))} · {fmt.date(a.scheduledStart)} · {a.branchName ?? "—"} · {a.doctorName ?? "—"}{a.specialty ? ` (${a.specialty})` : ""}</span>
                         {a.canReschedule && (
                           <Button variant="ghost" onClick={() => reschedule(a.appointmentId)}>{t(L.ccReschedule)}</Button>
                         )}
@@ -371,6 +381,7 @@ export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }
 
 /** Phase 15.5 — the agent's own call history (supervisors see the team, server-side). */
 export function CallHistory({ api = createHttpCcApi() }: { api?: CcApi }) {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const { lang } = useTheme();
   const t = (l: { en: string; ar: string }) => l[lang];
   const [rows, setRows] = useState<CcCallRow[] | null>(null);
@@ -400,7 +411,7 @@ export function CallHistory({ api = createHttpCcApi() }: { api?: CcApi }) {
       {!failed && rows && rows.length > 0 && (
         <ul className="cc-history">
           {rows.map((r) => (
-            <li key={r.callRef}>{r.callRef} · {new Date(r.startedAt).toLocaleString()} · {r.status}{r.outcome ? ` · ${r.outcome}` : ""}</li>
+            <li key={r.callRef}>{r.callRef} · {fmt.dateTime(r.startedAt)} · {r.status}{r.outcome ? ` · ${t(callOutcomeLabel(r.outcome))}` : ""}</li>
           ))}
         </ul>
       )}

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useFormat } from "../i18n/useFormat";
 import { Button, Card, DataTable, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { Localized, Notification } from "@mersal/contracts";
@@ -26,6 +27,7 @@ const S = {
  * only a subject/body + a min-necessary business key). Marking an item read also stops its escalation timer.
  */
 export function Notifications() {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -55,7 +57,7 @@ export function Notifications() {
     },
     { key: "ref", header: t(S.ref), cell: (r) => (r.entityRef ? <span className="tnum">{r.entityRef}</span> : <span className="muted">—</span>) },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "received", header: t(S.received), cell: (r) => <span className="tnum">{new Date(r.createdAt).toLocaleString()}</span> },
+    { key: "received", header: t(S.received), cell: (r) => <span className="tnum">{fmt.dateTime(r.createdAt)}</span> },
     {
       key: "action",
       header: t(S.action),

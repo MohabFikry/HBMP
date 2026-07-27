@@ -46,7 +46,7 @@
   inline-size: 100%;
   padding: var(--sp3);
   border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
-  border-radius: var(--radius-2, 8px);
+  border-radius: var(--r-sm);
   background: var(--surface-1, transparent);
   color: inherit;
   text-align: start;
@@ -60,7 +60,7 @@
   background: var(--surface-2, rgba(0, 0, 0, 0.05));
 }
 .picker-row:focus-visible {
-  outline: 3px solid var(--focus, #1d9ba6);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 .app-bell {
@@ -72,7 +72,7 @@
   block-size: 44px;
   padding: 0;
   border: none;
-  border-radius: var(--radius-2, 8px);
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--text-2);
   cursor: pointer;
@@ -82,7 +82,7 @@
   color: var(--text-1);
 }
 .app-bell:focus-visible {
-  outline: 3px solid var(--focus, #1d9ba6);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 .app-bell svg {
@@ -385,15 +385,75 @@ nav.mrs-rail {
   }
 }
 
+/*
+ * 18.D2 (audit R2 U4) — navigation below 760px.
+ *
+ * This block used to be `nav.mrs-rail { display: none }` with nothing in its place, so on a phone the app
+ * had no navigation at all: whatever screen you landed on was the only screen you could reach. The NavRail
+ * component's own docstring says it "collapses to a bottom tab bar on mobile via CSS" — the behaviour was
+ * documented and never implemented, which is why nobody noticed it was missing.
+ *
+ * A bottom tab bar rather than a drawer: it needs no new markup, no focus trap and no open/close state, so
+ * it cannot be got wrong in a way that traps a keyboard user. Items scroll horizontally when a portal has
+ * more than fits — a reception portal has five sections, an admin portal has more — and the whole bar stays
+ * keyboard-reachable in DOM order because it is the same <nav> and the same buttons.
+ */
 @media (max-width: 760px) {
   .app-grid {
     grid-template-columns: 1fr;
   }
-  nav.mrs-rail {
-    display: none;
-  }
   .app-bar {
     grid-column: 1;
+  }
+
+  nav.mrs-rail {
+    position: fixed;
+    inset-inline: 0;              /* logical, so RTL mirrors without a second rule */
+    bottom: 0;
+    z-index: 40;
+    display: flex;
+    flex-direction: row;
+    gap: 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    padding: 0;
+    /* Clear the iOS home indicator / Android gesture bar. */
+    padding-bottom: env(safe-area-inset-bottom, 0);
+    border-block-start: 1px solid var(--border);
+    background: var(--surface-2);
+  }
+
+  /* Group headings are a rail affordance; in a tab bar they are noise between tabs. Hidden visually but
+     left in the accessibility tree would be worse (a heading between two tabs reads as a broken list), so
+     they are removed for this layout only. */
+  nav.mrs-rail .mrs-grp {
+    display: none;
+  }
+
+  nav.mrs-rail .mrs-navi {
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    /* The project's own ≥44px target bar (21-accessibility). */
+    min-width: 4.5rem;
+    min-height: 56px;
+    padding: 6px 10px;
+    font-size: 0.72rem;
+    line-height: 1.1;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  /* The accent bar marks the current tab along the TOP edge here, not the inline edge. */
+  nav.mrs-rail .mrs-navi[aria-current="page"] {
+    box-shadow: inset 0 3px 0 0 var(--accent);
+  }
+
+  /* Reserve room so the bar never covers the last row of a worklist or a submit button. */
+  .app-main {
+    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
   }
 }
 
@@ -415,7 +475,7 @@ nav.mrs-rail {
   flex-direction: column;
   min-block-size: 0;
   border: 1px solid var(--border);
-  border-radius: var(--radius-3, 14px);
+  border-radius: var(--r-lg);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
   overflow: hidden;
   animation: npane-in 0.16s ease;
@@ -455,7 +515,7 @@ nav.mrs-rail {
   inline-size: 44px;
   block-size: 44px;
   border: none;
-  border-radius: var(--radius-2, 8px);
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--text-2);
   cursor: pointer;
@@ -465,7 +525,7 @@ nav.mrs-rail {
   color: var(--text-1);
 }
 .npane-close:focus-visible {
-  outline: 3px solid var(--focus, #1d9ba6);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 .npane-body {
@@ -509,7 +569,7 @@ nav.mrs-rail {
   background: var(--surface-2, rgba(0, 0, 0, 0.05));
 }
 .npane-item-open:focus-visible {
-  outline: 3px solid var(--focus, #1d9ba6);
+  outline: 3px solid var(--focus);
   outline-offset: -3px;
 }
 .npane-dot {
@@ -521,7 +581,7 @@ nav.mrs-rail {
   flex: 0 0 auto;
 }
 .npane-dot[data-on="true"] {
-  background: var(--accent, #1d9ba6);
+  background: var(--accent);
 }
 .npane-item-main {
   display: grid;
@@ -559,7 +619,7 @@ nav.mrs-rail {
 }
 .npane-origin {
   font-weight: 600;
-  color: var(--accent, #1d9ba6);
+  color: var(--accent);
 }
 .npane-ref {
   color: var(--text-2);
@@ -569,16 +629,16 @@ nav.mrs-rail {
   align-self: center;
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--accent, #1d9ba6);
+  color: var(--accent);
   padding: var(--sp2);
-  border-radius: var(--radius-1, 6px);
+  border-radius: var(--r-sm);
   cursor: pointer;
 }
 .npane-markread:hover {
   text-decoration: underline;
 }
 .npane-markread:focus-visible {
-  outline: 3px solid var(--focus, #1d9ba6);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 .npane-foot {
@@ -589,7 +649,7 @@ nav.mrs-rail {
   inline-size: 100%;
   min-block-size: 44px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-2, 8px);
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--text-1);
   font-weight: 600;
@@ -599,7 +659,7 @@ nav.mrs-rail {
   background: var(--surface-2, rgba(0, 0, 0, 0.05));
 }
 .npane-viewall:focus-visible {
-  outline: 3px solid var(--focus, #1d9ba6);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -620,7 +680,7 @@ nav.mrs-rail {
   background: var(--surface-2, rgba(0, 0, 0, 0.05));
 }
 .app-userbtn:focus-visible {
-  outline: 3px solid var(--focus, #1d9ba6);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 .app-avatar {
@@ -631,7 +691,10 @@ nav.mrs-rail {
   block-size: 36px;
   flex: 0 0 auto;
   border-radius: 999px;
-  background: var(--brand, #16808d);
+  /* 18.D2 (U9): was var(--brand) — tokens.css marks --brand "decorative only" (#00acac), which under white
+     text is ~2.2:1 and fails WCAG AA for the initials it carries. --accent is the action colour and is
+     specified at 5.2:1 in light and re-derived for dark. */
+  background: var(--accent);
   color: #fff;
   font-weight: 700;
   font-size: 13px;
@@ -677,7 +740,8 @@ nav.mrs-rail {
   block-size: 56px;
   flex: 0 0 auto;
   border-radius: 999px;
-  background: var(--brand, #16808d);
+  /* 18.D2 (U9): see above — --brand is decorative and fails contrast under white text. */
+  background: var(--accent);
   color: #fff;
   font-weight: 700;
   font-size: 20px;
@@ -717,14 +781,14 @@ nav.mrs-rail {
 .cc-callbar { display: flex; align-items: center; gap: var(--sp4); flex-wrap: wrap; min-block-size: 44px; }
 .cc-callbar select, .cc-search select, .cc-wrapup select, .cc-cancel select {
   min-block-size: 44px; padding: 0 var(--sp3); border: 1px solid var(--border);
-  border-radius: var(--radius-2); background: var(--surface-1); color: var(--text-1);
+  border-radius: var(--r-sm); background: var(--surface-1); color: var(--text-1);
 }
 .cc-search { display: flex; align-items: flex-end; gap: var(--sp3); flex-wrap: wrap; }
 .cc-results { list-style: none; margin: var(--sp3) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp2); }
 .cc-result { display: flex; justify-content: space-between; gap: var(--sp4); inline-size: 100%;
-  min-block-size: 44px; padding: 0 var(--sp4); border: 1px solid var(--border); border-radius: var(--radius-2);
+  min-block-size: 44px; padding: 0 var(--sp4); border: 1px solid var(--border); border-radius: var(--r-sm);
   background: var(--surface-1); color: var(--text-1); cursor: pointer; }
-.cc-result[aria-pressed="true"] { border-color: var(--brand-teal); box-shadow: 0 0 0 2px var(--brand-teal); }
+.cc-result[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 .cc-muted { color: var(--text-2); }
 .cc-locked { display: flex; flex-direction: column; gap: var(--sp3); }
 .cc-lockchip { display: inline-flex; align-items: center; gap: var(--sp2); align-self: flex-start;
@@ -732,7 +796,7 @@ nav.mrs-rail {
   background: var(--surface-2); color: var(--text-2); font-weight: 600; }
 .cc-check { display: inline-flex; align-items: center; gap: var(--sp2); margin-inline-end: var(--sp4); min-block-size: 44px; }
 .cc-verify-actions, .cc-cancel { display: flex; align-items: center; gap: var(--sp3); flex-wrap: wrap; }
-.cc-error { color: var(--status-bad-fg, #b42318); font-weight: 600; }
+.cc-error { color: var(--st-bad-fg); font-weight: 600; }
 .cc-360 { display: flex; flex-direction: column; gap: var(--sp4); }
 .cc-360 section { border-top: 1px solid var(--border); padding-top: var(--sp3); }
 .cc-appts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp2); }

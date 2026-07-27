@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useFormat } from "../i18n/useFormat";
 import { Button, Card, DataTable, StatusChip, type Column } from "@mersal/design-system";
 import type { Localized, ReportAccessRequestRow } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -45,6 +46,7 @@ const S = {
 type Decision = "approve" | "deny" | "requestinfo";
 
 export function ReportAccessInbox() {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
   const [reloadKey, setReloadKey] = useState(0);
@@ -81,7 +83,7 @@ export function ReportAccessInbox() {
     { key: "justification", header: t(S.justification), cell: (r) => <span>{r.justification}</span> },
     { key: "ttl", header: t(S.ttl), cell: (r) => <span className="tnum">{r.requestedTtlHours ? `${r.requestedTtlHours} ${t(S.hours)}` : "—"}</span> },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "raised", header: t(S.raised), cell: (r) => <span className="tnum">{new Date(r.createdAt).toLocaleString()}</span> },
+    { key: "raised", header: t(S.raised), cell: (r) => <span className="tnum">{fmt.dateTime(r.createdAt)}</span> },
     {
       key: "actions",
       header: t(S.actions),

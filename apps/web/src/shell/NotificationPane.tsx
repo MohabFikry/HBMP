@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useFormat } from "../i18n/useFormat";
 import { Icon, StatusChip, useTheme } from "@mersal/design-system";
 import type { Notification } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -29,6 +30,7 @@ export function NotificationPane({
   onNavigate: (fullPath: string) => void;
   onChanged: () => void;
 }) {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const { lang } = useTheme();
   const t = (l: { en: string; ar: string }) => l[lang];
@@ -164,7 +166,7 @@ export function NotificationPane({
                           )}
                           {origin && <span className="npane-origin">▸ {t(origin.label)}</span>}
                           {n.entityRef && <span className="tnum npane-ref">{n.entityRef}</span>}
-                          <span className="npane-time tnum">{new Date(n.createdAt).toLocaleString()}</span>
+                          <span className="npane-time tnum">{fmt.dateTime(n.createdAt)}</span>
                         </span>
                       </span>
                     </button>

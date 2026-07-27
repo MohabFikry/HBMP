@@ -50,8 +50,9 @@ export const zCoverageSummary = z.object({
   status: zStatus,
   planName: zLocalized,
   coverageCategory: zLocalized,
-  annualCap: z.string().optional(), // pre-formatted, masked-min
-  remaining: z.string().optional(),
+  // 18.D2 (U7): raw numbers; formatted at render in the active locale (see useFormat).
+  annualCap: z.number().optional(),
+  remaining: z.number().optional(),
 });
 
 export const zCarePlanSummary = z.object({

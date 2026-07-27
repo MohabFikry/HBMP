@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useFormat } from "../i18n/useFormat";
 import { Button, Card, DataTable, InlineAlert, InputField, KpiCard, StatusChip, useTheme } from "@mersal/design-system";
 import { useWrite, writeErrorText } from "../api/useWrite";
 import type { Column } from "@mersal/design-system";
@@ -43,7 +44,7 @@ const S = {
   needFields: { en: "Code, legal name, and a valid type are required.", ar: "الرمز والاسم والنوع الصحيح مطلوبة." },
 } satisfies Record<string, Localized>;
 
-const dt = (s?: string) => (s ? new Date(s).toLocaleDateString() : "—");
+// 18.D2 (U7): see useFormat — Africa/Cairo + the app locale, never the browser's.
 const VALID_TYPES = ["Hospital", "Clinic", "Lab", "Pharmacy", "Imaging"] as const;
 
 function directoryColumns(t: (l: Localized) => string): Column<ProviderSummary>[] {
@@ -148,12 +149,13 @@ export function NetworkContracts() {
   return <ProviderScoped title={S.contractsTitle} render={(p) => <ContractsPanel providerId={p.id} t={t} api={api} />} />;
 }
 function ContractsPanel({ providerId, t, api }: { providerId: string; t: (l: Localized) => string; api: ReturnType<typeof useApi> }) {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const state = useAsync<ProviderContract[]>(() => api.providerContracts(providerId), [providerId]);
   const cols: Column<ProviderContract>[] = [
     { key: "no", header: t(S.contractNo), cell: (r) => <span className="tnum">{r.contractNo}</span> },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "from", header: t(S.from), cell: (r) => <span className="tnum">{dt(r.effectiveFrom)}</span> },
-    { key: "to", header: t(S.to), cell: (r) => <span className="tnum">{r.effectiveTo ? dt(r.effectiveTo) : "—"}</span> },
+    { key: "from", header: t(S.from), cell: (r) => <span className="tnum">{fmt.date(r.effectiveFrom)}</span> },
+    { key: "to", header: t(S.to), cell: (r) => <span className="tnum">{r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}</span> },
     { key: "lines", header: t(S.lines), cell: (r) => <span className="tnum">{r.serviceLines}</span> },
   ];
   return (

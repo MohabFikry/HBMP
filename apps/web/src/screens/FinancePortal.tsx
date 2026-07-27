@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useFormat } from "../i18n/useFormat";
 import { Button, Card, DataTable, SegmentedControl, StatusChip, useToast } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type {
@@ -65,6 +66,7 @@ const S = {
 
 /** Utilization — authorized-vs-delivered + spend by billing code. A table (no chart needed); totals footer. */
 export function FinanceUtilization() {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
   const state = useAsync<UtilizationView>(() => api.utilization(), []);
@@ -75,7 +77,7 @@ export function FinanceUtilization() {
     { key: "provider", header: t(S.provider), cell: (r) => <span className="tnum">{r.providerRef ?? "—"}</span> },
     { key: "authorized", header: t(S.authorized), cell: (r) => <span className="tnum">{r.authorizedQty}</span> },
     { key: "delivered", header: t(S.delivered), cell: (r) => <span className="tnum">{r.deliveredQty}</span> },
-    { key: "spend", header: t(S.spend), cell: (r) => <span className="tnum">{r.spend}</span> },
+    { key: "spend", header: t(S.spend), cell: (r) => <span className="tnum">{fmt.money(r.spend)}</span> },
   ];
   return (
     <>
@@ -88,7 +90,7 @@ export function FinanceUtilization() {
               <div className="result-head" style={{ paddingInline: "var(--sp2)" }}>
                 <strong>{t(S.totals)}</strong>
                 <span className="tnum">
-                  {t(S.authorized)} {d.totalAuthorized} · {t(S.delivered)} {d.totalDelivered} · {t(S.spend)} {d.totalSpend}
+                  {t(S.authorized)} {d.totalAuthorized} · {t(S.delivered)} {d.totalDelivered} · {t(S.spend)} {fmt.money(d.totalSpend)}
                 </span>
               </div>
             </div>
@@ -101,6 +103,7 @@ export function FinanceUtilization() {
 
 /** Provider settlements — list → priced line detail. Prices are the agreed contract prices (read from provider). */
 export function FinanceSettlements() {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
   const state = useAsync<Settlement[]>(() => api.settlements(), []);
@@ -110,7 +113,7 @@ export function FinanceSettlements() {
     { key: "settlement", header: t(S.settlement), cell: (r) => <span className="tnum">{r.settlementNo}</span> },
     { key: "provider", header: t(S.provider), cell: (r) => t(r.providerName) },
     { key: "period", header: t(S.period), cell: (r) => <span className="tnum">{r.periodStart} → {r.periodEnd}</span> },
-    { key: "total", header: t(S.total), cell: (r) => <span className="tnum">{r.total}</span> },
+    { key: "total", header: t(S.total), cell: (r) => <span className="tnum">{fmt.money(r.total)}</span> },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
     {
       key: "view",
@@ -148,12 +151,13 @@ export function FinanceSettlements() {
 }
 
 function SettlementLines({ lines, t }: { lines: SettlementLine[]; t: (l: Localized) => string }) {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const cols: Column<SettlementLine>[] = [
     { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.serviceCode}</span> },
     { key: "line", header: t(S.line), cell: (r) => t(r.serviceLine) },
     { key: "delivered", header: t(S.delivered), cell: (r) => <span className="tnum">{r.deliveredQty}</span> },
-    { key: "agreed", header: t(S.agreedPrice), cell: (r) => <span className="tnum">{r.agreedUnitPrice}</span> },
-    { key: "total", header: t(S.lineTotal), cell: (r) => <span className="tnum">{r.lineTotal}</span> },
+    { key: "agreed", header: t(S.agreedPrice), cell: (r) => <span className="tnum">{fmt.money(r.agreedUnitPrice)}</span> },
+    { key: "total", header: t(S.lineTotal), cell: (r) => <span className="tnum">{fmt.money(r.lineTotal)}</span> },
   ];
   return (
     <Card as="section" style={{ padding: "var(--sp3)" }}>
@@ -164,6 +168,7 @@ function SettlementLines({ lines, t }: { lines: SettlementLine[]; t: (l: Localiz
 
 /** Financial summaries — a roll-up with a chart + accessible data-table toggle (US-073). Billing dimensions only. */
 export function FinanceSummaries() {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
   const [dimension, setDimension] = useState<FinancialSummary["dimension"]>("serviceline");
@@ -175,7 +180,7 @@ export function FinanceSummaries() {
     <>
       <PageHeader
         title={t(S.sumTitle)}
-        actions={<span className="muted tnum">{t(S.total)}: {state.data?.totalSpend}</span>}
+        actions={<span className="muted tnum">{t(S.total)}: {fmt.money(state.data?.totalSpend)}</span>}
       />
       <Card as="section" style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp4)" }}>
         <div className="result-head">
@@ -211,7 +216,7 @@ export function FinanceSummaries() {
                     <tr key={i}>
                       <td>{t(b.key)}</td>
                       <td className="tnum">{b.deliveredQty}</td>
-                      <td className="tnum">{b.spend}</td>
+                      <td className="tnum">{fmt.money(b.spend)}</td>
                       <td className="tnum">{b.sharePercent}%</td>
                     </tr>
                   ))}
@@ -224,7 +229,7 @@ export function FinanceSummaries() {
                   <li key={i}>
                     <span className="bar-label">{t(b.key)}</span>
                     <span className="bar-track"><span className="bar-fill" style={{ inlineSize: `${(b.sharePercent / max) * 100}%` }} /></span>
-                    <span className="bar-val tnum">{b.spend}</span>
+                    <span className="bar-val tnum">{fmt.money(b.spend)}</span>
                   </li>
                 ))}
               </ul>

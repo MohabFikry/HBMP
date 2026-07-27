@@ -6,7 +6,6 @@ import {
   Logo,
   Modal,
   NavRail,
-  SearchField,
   useTheme,
   type NavItem,
 } from "@mersal/design-system";
@@ -70,7 +69,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
   const tr = useLocalized();
-  const searchRef = useRef<HTMLInputElement | null>(null);
 
   const portal = session?.role ? portalForRole(session.role) : null;
   const accessible: Section[] = useMemo(
@@ -90,18 +88,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const homePath = portal && accessible[0] ? `/${portal.base}/${accessible[0].path}` : "/";
   const primaryQueuePath = homePath;
 
-  // Global keyboard map (14 §4): "/" focus search, "g h" home, "g q" primary queue.
+  // Global keyboard map (14 §4): "g h" home, "g q" primary queue. The "/" binding went with the dead
+  // search field in 18.D2 (U5) — a shortcut that focuses a control which does nothing is worse than none.
   useEffect(() => {
     let gPending = false;
     let gTimer: ReturnType<typeof setTimeout> | null = null;
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement;
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable;
-      if (e.key === "/" && !typing) {
-        e.preventDefault();
-        searchRef.current?.focus();
-        return;
-      }
       if (typing) return;
       if (e.key === "g") {
         gPending = true;
@@ -137,9 +131,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="app-grid">
       <header className="mrs-glass app-bar" role="banner">
         <Logo variant="lockup" height={48} />
-        <div className="app-search">
-          <SearchField aria-label={L.search[lang]} placeholder={L.search[lang]} ref={searchRef} />
-        </div>
+        {/*
+          18.D2 (audit R2 U5) — the app-bar search field is REMOVED, along with its "/" shortcut.
+          It was bound to nothing: typing in it did nothing, submitting it did nothing, and the global "/"
+          binding focused it — actively teaching every user a gesture that never works. A dead control is
+          worse than a missing one, because people keep trying it and conclude the app is broken rather
+          than that the feature does not exist. A permission-scoped command palette lands in 18.F2; until
+          then the nav rail is the way to move around, and it works.
+        */}
         <div className="app-actions">
           {!branchCtx.memberScoped && branchCtx.branches.length > 0 && (
             <BranchSwitcher

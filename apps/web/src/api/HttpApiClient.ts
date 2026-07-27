@@ -81,7 +81,14 @@ import { GATEWAY_BASE } from "../config";
 /** Wrap a plain service string as the bilingual shape the portal contracts use (same text both langs). */
 const loc = (s: unknown) => ({ en: String(s ?? ""), ar: String(s ?? "") });
 /** Pre-format a numeric amount as the contract's display string, e.g. 12400 -> "EGP 12,400". */
-const money = (n: unknown) => `EGP ${Number(n ?? 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+/**
+ * 18.D2 (audit R2 U7) — the API layer now returns a NUMBER; formatting happens at render.
+ *
+ * This used to build "EGP 12,400" with a hardcoded en-US locale, so the Arabic UI showed Western digits and
+ * an English currency prefix. A pre-formatted string also cannot be summed, sorted numerically, or
+ * re-localised when the user switches language mid-session.
+ */
+const money = (n: unknown) => { const v = Number(n ?? 0); return Number.isFinite(v) ? v : 0; };
 /** Map a service case status (Open/Active/OnHold/Resolved/Closed) to the contract's snake_case enum. */
 const caseStatus = (s: unknown) =>
   ({ open: "open", active: "active", onhold: "on_hold", resolved: "resolved", closed: "closed" })[

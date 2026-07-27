@@ -1,4 +1,5 @@
 import { Card, DataTable, StatusChip } from "@mersal/design-system";
+import { useFormat } from "../i18n/useFormat";
 import type { Column } from "@mersal/design-system";
 import type {
   AccessReviewCampaign,
@@ -85,7 +86,7 @@ const S = {
   scopeCount: { en: "Count", ar: "العدد" },
 } satisfies Record<string, Localized>;
 
-const dt = (s?: string) => (s ? new Date(s).toLocaleDateString() : "—");
+// 18.D2 (U7): see useFormat — Africa/Cairo + the app locale, never the browser's.
 
 /**
  * Users & roles.
@@ -103,6 +104,7 @@ const dt = (s?: string) => (s ? new Date(s).toLocaleDateString() : "—");
  * shown below the account list rather than in place of it.
  */
 export function AdminUsers() {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
   const users = useAsync<IdentityUser[]>(() => api.identityUsers(), []);
@@ -132,7 +134,7 @@ export function AdminUsers() {
     { key: "scope", header: t(S.scope), cell: (r) => r.scope },
     { key: "tier", header: t(S.tier), cell: (r) => <StatusChip kind="neu" label={r.tier} /> },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "reviewDue", header: t(S.reviewDue), cell: (r) => <span className="tnum">{dt(r.reviewDueAt)}</span> },
+    { key: "reviewDue", header: t(S.reviewDue), cell: (r) => <span className="tnum">{fmt.date(r.reviewDueAt)}</span> },
   ];
 
   return (
@@ -201,6 +203,7 @@ export function AdminPolicies() {
 
 /** Tenants / providers — the tenant registry (super-admin scope). */
 export function AdminTenants() {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
   const state = useAsync<TenantSummary[]>(() => api.adminTenants(), []);
@@ -208,7 +211,7 @@ export function AdminTenants() {
     { key: "name", header: t(S.tenant), cell: (r) => r.name },
     { key: "id", header: "ID", cell: (r) => <span className="tnum muted">{r.id}</span> },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "created", header: t(S.created), cell: (r) => <span className="tnum">{dt(r.createdAt)}</span> },
+    { key: "created", header: t(S.created), cell: (r) => <span className="tnum">{fmt.date(r.createdAt)}</span> },
   ];
   return (
     <>
@@ -224,6 +227,7 @@ export function AdminTenants() {
 
 /** Audit & access reviews — recertification campaigns + the break-glass governance dashboard. */
 export function AdminGovernance() {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
   const campaigns = useAsync<AccessReviewCampaign[]>(() => api.accessReviewCampaigns(), []);
@@ -233,14 +237,14 @@ export function AdminGovernance() {
     { key: "name", header: t(S.campaign), cell: (r) => r.name },
     { key: "minTier", header: t(S.minTier), cell: (r) => <StatusChip kind="neu" label={r.minTier ?? "—"} /> },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "due", header: t(S.due), cell: (r) => <span className="tnum">{dt(r.dueAt)}</span> },
+    { key: "due", header: t(S.due), cell: (r) => <span className="tnum">{fmt.date(r.dueAt)}</span> },
   ];
   const bgCols: Column<BreakGlassGrant>[] = [
     { key: "requester", header: t(S.requester), cell: (r) => <span className="tnum">{r.requesterToken}</span> },
     { key: "reasonCode", header: t(S.reasonCode), cell: (r) => r.reasonCode },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "requested", header: t(S.requested), cell: (r) => <span className="tnum">{dt(r.requestedAt)}</span> },
-    { key: "expires", header: t(S.expires), cell: (r) => <span className="tnum">{dt(r.expiresAt)}</span> },
+    { key: "requested", header: t(S.requested), cell: (r) => <span className="tnum">{fmt.date(r.requestedAt)}</span> },
+    { key: "expires", header: t(S.expires), cell: (r) => <span className="tnum">{fmt.date(r.expiresAt)}</span> },
   ];
   return (
     <>
@@ -265,6 +269,7 @@ export function AdminGovernance() {
 
 /** Master data — the effective-dated code-system versions currently in force (governance read, FR-MDM-007). */
 export function AdminMasterData() {
+  const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
   const state = useAsync<MasterDataVersion[]>(() => api.adminMasterData(), []);
@@ -273,7 +278,7 @@ export function AdminMasterData() {
     { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.code}</span> },
     { key: "version", header: t(S.version), cell: (r) => <span className="tnum">v{r.versionNo}</span> },
     { key: "retired", header: t(S.retired), cell: (r) => <StatusChip kind={r.retired ? "warn" : "ok"} label={r.retired ? t(S.retired) : "—"} /> },
-    { key: "effective", header: t(S.effective), cell: (r) => <span className="tnum">{dt(r.effectiveFrom)}</span> },
+    { key: "effective", header: t(S.effective), cell: (r) => <span className="tnum">{fmt.date(r.effectiveFrom)}</span> },
   ];
   return (
     <>
