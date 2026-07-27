@@ -17,6 +17,14 @@ public sealed class Policy
     public DateOnly EffectiveFrom { get; set; }
     public DateOnly? EffectiveTo { get; set; }
     public PolicyStatus Status { get; set; } = PolicyStatus.Active;
+
+    /// <summary>19.2 — the payer this contract is with. Replaces the free-text <see cref="Sponsor"/>, which is
+    /// kept only so existing rows stay readable until the 19.7 backfill retires it.</summary>
+    public Guid? PayerId { get; set; }
+    /// <summary>The policy this one renewed, forming the renewal chain a member's history is read along.</summary>
+    public Guid? PreviousPolicyId { get; set; }
+    public int? MaxMembers { get; set; }
+
     public bool IsDeleted { get; set; }
     public int RowVersion { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
@@ -41,6 +49,13 @@ public sealed class Coverage
     public DateOnly EffectiveFrom { get; set; }
     public DateOnly? EffectiveTo { get; set; }
     public CoverageStatus Status { get; set; } = CoverageStatus.Active;
+
+    /// <summary>19.2 — the plan version this entitlement was GENERATED from, and the enrolment that produced
+    /// it. Provenance is what makes "why am I covered for this, and for how much" answerable: both point back
+    /// to a dated, immutable configuration rather than to whoever typed the row.</summary>
+    public Guid? SourcePlanVersionId { get; set; }
+    public Guid? EnrollmentId { get; set; }
+
     public bool IsDeleted { get; set; }
     public List<CoverageLimit> Limits { get; set; } = [];
 }

@@ -34,6 +34,14 @@ builder.Services.AddSingleton(TimeProvider.System);
 // creates them, so this is deliberately a read-only window and not a local copy of the network model.
 builder.Services.AddHttpClient<INetworkTierCatalog, HttpNetworkTierCatalog>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Provider:BaseUrl"] ?? "http://provider-service:8080"));
+// 19.2 — enrolment validates the beneficiary against patient-service (never fail-soft: not knowing whether
+// someone is Active is not a reason to enrol them) and issues the member number.
+builder.Services.AddHttpClient<IBeneficiaryStatusProbe, HttpBeneficiaryStatusProbe>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Patient:BaseUrl"] ?? "http://patient-service:8080"));
+builder.Services.AddScoped<IMemberNoIssuer, SequentialMemberNoIssuer>();
+// 19.2b — the plan-change consumption rule is a SETTING, not a constant: ADR-0020 is unsigned, and reversing
+// it later must not require migrating every member's accumulator.
+builder.Services.Configure<MembershipOptions>(builder.Configuration.GetSection(MembershipOptions.SectionName));
 // 18.A1 (X1) — consume the fulfillment streams and move coverage_limit.consumed_value. Without this the
 // accumulator never advances and every member is eligible forever.
 builder.Services.Configure<ConsumptionConsumerOptions>(builder.Configuration.GetSection(ConsumptionConsumerOptions.SectionName));
@@ -58,23 +66,10 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "po
 
 var v1 = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("policy:write"));
 
-// Create a policy → PolicyChanged.
-v1.MapPost("/policies", async (CreatePolicy req, PolicyDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
-{
-    var now = clock.GetUtcNow();
-    var p = new PolicyEntity
-    {
-        PolicyId = Guid.NewGuid(), PolicyNo = req.PolicyNo, Sponsor = req.Sponsor,
-        EffectiveFrom = req.EffectiveFrom, EffectiveTo = req.EffectiveTo,
-        Status = PolicyStatus.Active, CreatedAt = now, UpdatedAt = now,
-    };
-    db.Policies.Add(p);
-    await db.SaveChangesAsync(ct);
-    await audit.EmitAsync(new AuditEventDraft { EntityType = "policy", EntityId = p.PolicyId.ToString(), Action = AuditAction.Create, ActorUserId = me.Principal?.Subject }, ct);
-    await outbox.EnqueueAsync("PolicyChanged", "policy.events", // 18.B2 — tenant on the envelope: eligibility binds its RLS GUC from here.
-        new { tenantId = p.TenantId, policyId = p.PolicyId, p.PolicyNo, status = p.Status.ToString() }, ct);
-    return Results.Created($"/api/v1/policies/{p.PolicyId}", new { p.PolicyId, p.PolicyNo });
-});
+// 19.2 SUPERSEDES the phase-1.2 `POST /policies` that used to live here. A policy now carries a payer_id
+// rather than a free-text sponsor, and issuing one is part of the membership layer — see
+// EnrollmentEndpoints.MapMembership. Keeping both would have meant two handlers on one route, and the older
+// one could not satisfy the payer requirement every 19.x query and report scopes by.
 
 // Create a coverage (+ its limits) for a beneficiary → CoverageChanged + CoverageLimitChanged.
 v1.MapPost("/policies/{policyId:guid}/coverages", async (Guid policyId, CreateCoverage req, PolicyDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, CancellationToken ct) =>
@@ -151,7 +146,8 @@ v1.MapPost("/coverage-limits/reset-run", async (PolicyDbContext db, IAuditClient
     return Results.Ok(new { evaluated = limits.Count, reset });
 });
 
-app.MapPlanAdministration();   // 19.1 — payers, plans, effective-dated immutable plan versions
+app.MapPlanAdministration();
+app.MapMembership();   // 19.2 + 19.2b — policies, plans, groups, enrolment lifecycle   // 19.1 — payers, plans, effective-dated immutable plan versions
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

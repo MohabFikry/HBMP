@@ -103,6 +103,10 @@ services:
           - /api/v1/payers
           - /api/v1/plans
           - /api/v1/plan-versions
+          # 19.2 + 19.2b — the membership layer.
+          - /api/v1/policy-plans
+          - /api/v1/member-groups
+          - /api/v1/enrollments
         strip_path: false
 
   # --- provider-service: provider network + contracts + branches + practitioners + specialties ---

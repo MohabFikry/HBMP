@@ -21,6 +21,11 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
     public DbSet<PlanVersion> PlanVersions => Set<PlanVersion>();
     public DbSet<BenefitRule> BenefitRules => Set<BenefitRule>();
     public DbSet<BenefitRuleTier> BenefitRuleTiers => Set<BenefitRuleTier>();   // 19.1b
+    // 19.2 + 19.2b — the membership layer (design 38 §3–§4.2).
+    public DbSet<PolicyPlan> PolicyPlans => Set<PolicyPlan>();
+    public DbSet<MemberGroup> MemberGroups => Set<MemberGroup>();
+    public DbSet<Enrollment> Enrollments => Set<Enrollment>();
+    public DbSet<EnrollmentEvent> EnrollmentEvents => Set<EnrollmentEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -36,6 +41,9 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.EffectiveFrom).HasColumnName("effective_from");
             e.Property(x => x.EffectiveTo).HasColumnName("effective_to");
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.PayerId).HasColumnName("payer_id");                       // 19.2
+            e.Property(x => x.PreviousPolicyId).HasColumnName("previous_policy_id");     // 19.2
+            e.Property(x => x.MaxMembers).HasColumnName("max_members");                  // 19.2
             e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
             e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
@@ -63,6 +71,9 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.EffectiveTo).HasColumnName("effective_to");
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
             e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
+            // 19.2 — provenance: which plan version and which enrolment produced this entitlement.
+            e.Property(x => x.SourcePlanVersionId).HasColumnName("source_plan_version_id");
+            e.Property(x => x.EnrollmentId).HasColumnName("enrollment_id");
             e.HasMany(x => x.Limits).WithOne().HasForeignKey(l => l.CoverageId);
             e.HasIndex(x => x.BeneficiaryId);
         });
@@ -211,6 +222,101 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
             e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
             e.HasIndex(x => new { x.BenefitRuleId, x.NetworkTierId }).IsUnique();
+        });
+
+        // ---- 19.2 + 19.2b membership layer ------------------------------------------------------------
+        b.Entity<PolicyPlan>(e =>
+        {
+            e.ToTable("policy_plan");
+            e.HasKey(x => x.PolicyPlanId);
+            e.Property(x => x.PolicyPlanId).HasColumnName("policy_plan_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.PolicyId).HasColumnName("policy_id");
+            e.Property(x => x.PlanVersionId).HasColumnName("plan_version_id");
+            e.Property(x => x.PlanLabel).HasColumnName("plan_label").IsRequired();
+            e.Property(x => x.EffectiveFrom).HasColumnName("effective_from");
+            e.Property(x => x.EffectiveTo).HasColumnName("effective_to");
+            e.Property(x => x.IsDefault).HasColumnName("is_default");
+            e.Property(x => x.EligibilityRule).HasColumnName("eligibility_rule").HasColumnType("jsonb");
+            e.Property(x => x.MaxMembers).HasColumnName("max_members");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
+            e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.CreatedBy).HasColumnName("created_by");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
+            e.HasIndex(x => x.PolicyId);
+        });
+
+        b.Entity<MemberGroup>(e =>
+        {
+            e.ToTable("member_group");
+            e.HasKey(x => x.GroupId);
+            e.Property(x => x.GroupId).HasColumnName("group_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.PolicyId).HasColumnName("policy_id");
+            e.Property(x => x.GroupCode).HasColumnName("group_code").IsRequired();
+            e.Property(x => x.NameEn).HasColumnName("name_en").IsRequired();
+            e.Property(x => x.NameAr).HasColumnName("name_ar").IsRequired();
+            e.Property(x => x.GroupType).HasConversion<string>().HasColumnName("group_type");
+            e.Property(x => x.EffectiveFrom).HasColumnName("effective_from");
+            e.Property(x => x.EffectiveTo).HasColumnName("effective_to");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
+            e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.CreatedBy).HasColumnName("created_by");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
+            e.HasIndex(x => x.PolicyId);
+        });
+
+        b.Entity<Enrollment>(e =>
+        {
+            e.ToTable("enrollment");
+            e.HasKey(x => x.EnrollmentId);
+            e.Property(x => x.EnrollmentId).HasColumnName("enrollment_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.BeneficiaryId).HasColumnName("beneficiary_id");
+            e.Property(x => x.PolicyId).HasColumnName("policy_id");
+            e.Property(x => x.PolicyPlanId).HasColumnName("policy_plan_id");
+            e.Property(x => x.GroupId).HasColumnName("group_id");
+            e.Property(x => x.MemberNo).HasColumnName("member_no").IsRequired();
+            e.Property(x => x.Relationship).HasConversion<string>().HasColumnName("relationship");
+            e.Property(x => x.PrincipalEnrollmentId).HasColumnName("principal_enrollment_id");
+            e.Property(x => x.EffectiveFrom).HasColumnName("effective_from");
+            e.Property(x => x.EffectiveTo).HasColumnName("effective_to");
+            e.Property(x => x.WaitingPeriodEndsOn).HasColumnName("waiting_period_ends_on");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.TerminationReason).HasColumnName("termination_reason");
+            e.Property(x => x.SourcePlanVersionId).HasColumnName("source_plan_version_id");
+            e.Property(x => x.IdempotencyKey).HasColumnName("idempotency_key");
+            e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
+            e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.CreatedBy).HasColumnName("created_by");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
+            e.HasIndex(x => x.BeneficiaryId);
+            e.HasIndex(x => new { x.PolicyId, x.Status });
+        });
+
+        b.Entity<EnrollmentEvent>(e =>
+        {
+            e.ToTable("enrollment_event");
+            e.HasKey(x => x.EventId);
+            e.Property(x => x.EventId).HasColumnName("event_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.EnrollmentId).HasColumnName("enrollment_id");
+            e.Property(x => x.EventType).HasConversion<string>().HasColumnName("event_type");
+            e.Property(x => x.EffectiveDate).HasColumnName("effective_date");
+            e.Property(x => x.Reason).HasColumnName("reason");
+            e.Property(x => x.Payload).HasColumnName("payload").HasColumnType("jsonb");
+            e.Property(x => x.ActorUserId).HasColumnName("actor_user_id");
+            e.Property(x => x.OccurredAt).HasColumnName("occurred_at");
+            e.Ignore(x => x.IsRetroEffective);
+            e.HasIndex(x => new { x.EnrollmentId, x.OccurredAt });
         });
 
         b.Entity<ProcessedEvent>(e =>

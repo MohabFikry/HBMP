@@ -11,6 +11,8 @@
     <ProjectReference Include="../Infrastructure/Mersal.Policy.Infrastructure.csproj" />
     <ProjectReference Include="../Api/Mersal.Policy.Api.csproj" />
     <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
+    <!-- 19.2 guardrail: generated coverage is fed to the REAL EligibilityEngine, not a stand-in. -->
+    <ProjectReference Include="../../eligibility/Domain/Mersal.Eligibility.Domain.csproj" />
   </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
 </Project>

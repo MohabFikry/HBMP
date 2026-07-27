@@ -20,13 +20,18 @@ public sealed record LimitState(LimitType LimitType, decimal LimitValue, decimal
 }
 
 /// <summary>A coverage row (projected from policy-service) applicable to a benefit category.</summary>
+/// <param name="WaitingPeriodEndsOn">19.2 — the LAST day still inside the member's waiting period, or null
+/// when none applies. A newly enrolled member holds valid coverage with remaining limits and is still not
+/// payable until this date passes; without it here, the engine would return Eligible for exactly the window
+/// the waiting period exists to exclude. Defaulted so existing callers are unaffected.</param>
 public sealed record CoverageView(
     Guid CoverageId,
     string BenefitCategory,
     bool CoverageActive,
     DateOnly EffectiveFrom,
     DateOnly? EffectiveTo,
-    IReadOnlyList<LimitState> Limits);
+    IReadOnlyList<LimitState> Limits,
+    DateOnly? WaitingPeriodEndsOn = null);
 
 /// <summary>The three inputs to a decision: member status, coverage validity, remaining limits.</summary>
 public sealed record EligibilityRequest(
@@ -71,6 +76,15 @@ public static class EligibilityEngine
         if (coverage is null)
             return new EligibilityResult(EligibilityDecision.Ineligible, null,
                 [$"no active coverage for {req.BenefitCategory}"], null);
+
+        // (2b) Waiting period (19.2). The member IS covered — the policy is valid, the category matches and
+        // the limits are intact — but the benefit is not yet payable. That is a hard Ineligible rather than a
+        // NeedsAuthorization: no approval can shorten a waiting period, so routing it to the approvals team
+        // would queue work nobody can action and tell the beneficiary to wait twice.
+        if (coverage.WaitingPeriodEndsOn is { } waitingEnds && req.OnDate <= waitingEnds)
+            return new EligibilityResult(EligibilityDecision.Ineligible, coverage.CoverageId,
+                [$"WAITING_PERIOD: cover for {req.BenefitCategory} begins on {waitingEnds.AddDays(1):yyyy-MM-dd}"],
+                null);
 
         // (3) Remaining limits — the binding limit is the one with the least remaining.
         var binding = coverage.Limits.Count == 0
