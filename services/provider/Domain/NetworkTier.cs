@@ -11,10 +11,21 @@ public enum NetworkAssignmentScope { Provider, Location, ContractServiceLine }
 /// tier that may no longer be offered, and that history must still render.</summary>
 public enum NetworkTierStatus { Active, Retired }
 
-/// <summary><c>Revoked</c> means "this assignment was a mistake and never governed anything". ENDING an
-/// assignment is not a revocation — it is closing <c>EffectiveTo</c>, which keeps the row resolvable for
-/// service dates inside its window. Conflating the two would let a tier move rewrite adjudicated history.</summary>
-public enum NetworkAssignmentStatus { Active, Revoked }
+/// <summary>
+/// Withdrawing an assignment is THREE different acts, and collapsing them loses information that matters.
+///
+/// <list type="bullet">
+/// <item><c>Active</c> with a closed <c>EffectiveTo</c> — the assignment ENDED. It still governs service dates
+/// inside its own window, which is what a tier move must do: February's care stays priced at February's tier.</item>
+/// <item><c>Revoked</c> — it had not taken effect yet, so it never governed anything and erasing it changes
+/// nothing that already happened.</item>
+/// <item><c>Corrected</c> — it WAS in force and should never have been. A mis-assignment (wrong provider,
+/// wrong tier) left standing means a week of wrong resolution with no legitimate way to fix it, so this
+/// retroactively voids it. It is refused once any claim has adjudicated against that assignment: at that point
+/// the money has moved and the fix is a claims adjustment, not a tier edit.</item>
+/// </list>
+/// </summary>
+public enum NetworkAssignmentStatus { Active, Revoked, Corrected }
 
 /// <summary>A network tier: T1 preferred, T2 standard, OON out-of-network (or Gold/Silver/Bronze).
 /// <see cref="Rank"/> orders them, 1 being most preferred.</summary>
@@ -61,6 +72,8 @@ public sealed class ProviderNetworkAssignment
     /// <summary>EXCLUSIVE end of the window; null = open-ended.</summary>
     public DateOnly? EffectiveTo { get; set; }
     public NetworkAssignmentStatus Status { get; set; } = NetworkAssignmentStatus.Active;
+    /// <summary>Mandatory whenever the row leaves <c>Active</c>, and for a correction it is the audit trail's
+    /// only account of what the tier map used to say.</summary>
     public string? RevokedReason { get; set; }
     public bool IsDeleted { get; set; }
     public int RowVersion { get; set; }
@@ -72,6 +85,8 @@ public sealed class ProviderNetworkAssignment
     /// <summary>Half-open containment: the start day is governed by this assignment, the end day by its
     /// successor.</summary>
     public bool InForce(DateOnly serviceDate) =>
+        // Revoked never governed; Corrected is retroactively treated as never having governed. Only Active
+        // rows resolve, whether their window is still open or already closed.
         Status == NetworkAssignmentStatus.Active && !IsDeleted
         && EffectiveFrom <= serviceDate
         && (EffectiveTo is null || serviceDate < EffectiveTo.Value);

@@ -50,7 +50,11 @@ public static class DependencyInjection
         // immutability on the claims side is the append-only settlement_advice row + content hash.
         services.AddScoped<ISettlementDocumentStore, NullWormStore>();
         // Permissive fact source by default; the HTTP-backed eligibility/policy/approvals/provider wiring lands later.
-        services.AddScoped<IExternalAdjudicationFacts, PermissiveAdjudicationFacts>();
+        // 19.1b — real adjudication facts: the network tier IN FORCE ON THE SERVICE DATE drives step 6 and
+        // the member/payer split, through the same libs/benefit-pricing path eligibility previews with.
+        services.AddScoped<IExternalAdjudicationFacts, TierAwareAdjudicationFacts>();
+        services.AddScoped<IBenefitCategoryResolver, CodeSystemBenefitCategoryResolver>();
+        services.AddScoped<IPlanVersionForClaim, UnresolvedPlanVersionForClaim>();
         // No fulfillment resolver by default → provider-submitted lines land in manual assessment until the
         // orders/pharmacy fulfillment-query wiring is live (same deferral as the auto-derive event consumers).
         services.AddScoped<IFulfillmentResolver, NoFulfillmentResolver>();

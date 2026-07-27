@@ -267,7 +267,7 @@ public static class PlanEndpoints
                     IsCovered = r.IsCovered,
                     LimitType = r.LimitType is null ? null : Enum.Parse<LimitType>(r.LimitType),
                     LimitValue = r.LimitValue, ResetPeriod = reset,
-                    Deductible = r.Deductible,
+                    Deductible = r.Deductible, DeductibleWaived = r.DeductibleWaived,
                     WaitingPeriodDays = r.WaitingPeriodDays, RequiresPreauth = r.RequiresPreauth,
                     PreauthCostThreshold = r.PreauthCostThreshold,
                     Exclusions = r.Exclusions ?? "[]", Notes = r.Notes,
@@ -285,6 +285,7 @@ public static class PlanEndpoints
                         NetworkTierId = t.NetworkTierId, TierCode = tierCode, IsCovered = t.IsCovered,
                         CopayFixed = t.CopayFixed, CopayPercent = t.CopayPercent,
                         CoinsurancePercent = t.CoinsurancePercent,
+                        CopayCountsTowardDeductible = t.CopayCountsTowardDeductible,
                         RequiresPreauthOverride = t.RequiresPreauthOverride, LimitMultiplier = t.LimitMultiplier,
                         CreatedAt = now, UpdatedAt = now, CreatedBy = gate.SubjectId, UpdatedBy = gate.SubjectId,
                     });
@@ -313,6 +314,42 @@ public static class PlanEndpoints
             var saved = await db.PlanVersions.AsNoTracking().Include(v => v.Rules).ThenInclude(r => r.Tiers)
                 .FirstAsync(v => v.PlanVersionId == id, ct);
             return Results.Ok(PlanVersionView.From(saved));
+        });
+
+        // 19.1b — THE cost-share lookup approvals, eligibility and claims all resolve against, via the shared
+        // libs/benefit-pricing path. It answers "what did this version agree for this category at this tier",
+        // and nothing more: no arithmetic happens here, because the split has to be computed in exactly one
+        // place (libs/money) or the eligibility card and the claim stop agreeing.
+        v1.MapGet("/plan-versions/{id:guid}/cost-share", async (Guid id, string benefitCategoryCode,
+            Guid networkTierId, PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(PolicyPolicies.Read, ct);
+            if (denied is not null) return denied;
+
+            var category = await db.BenefitCategories.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Code == benefitCategoryCode, ct);
+            if (category is null)
+                return ProblemResults.Invalid("UNKNOWN_BENEFIT_CATEGORY", $"'{benefitCategoryCode}' is not a benefit category.");
+
+            var rule = await db.BenefitRules.AsNoTracking().Include(r => r.Tiers)
+                .FirstOrDefaultAsync(r => r.PlanVersionId == id && r.BenefitCategoryId == category.BenefitCategoryId, ct);
+            if (rule is null) return NotFound();
+
+            var tier = rule.Tiers.FirstOrDefault(t => t.NetworkTierId == networkTierId);
+            // 404, not a default. Activation refuses to leave an Active tier unpriced, so a miss here means the
+            // caller is asking about a tier that did not exist when this version was authored — and inventing a
+            // price for it is exactly the guess this layer exists to prevent.
+            if (tier is null) return NotFound();
+
+            return Results.Ok(new CostShareView(
+                tier.NetworkTierId, tier.TierCode, tier.IsCovered,
+                tier.CopayFixed, tier.CopayPercent, tier.CoinsurancePercent,
+                // The deductible AND the waiver both travel. Flattening a waiver into a null deductible here
+                // would lose the distinction the field exists for — "this category is exempt from the plan's
+                // 200 EGP" is not "this plan has no deductible", and only one of them survives an amendment.
+                rule.Deductible, rule.DeductibleWaived,
+                tier.CopayCountsTowardDeductible,
+                tier.ResolvesPreauth(rule), tier.ResolvesLimit(rule)));
         });
 
         // Dry run: exactly the checks activation applies, without the state change. Lets an author fix a plan
@@ -420,7 +457,7 @@ public static class PlanEndpoints
             RuleId = Guid.NewGuid(),
             BenefitCategoryId = source.BenefitCategoryId, IsCovered = source.IsCovered,
             LimitType = source.LimitType, LimitValue = source.LimitValue, ResetPeriod = source.ResetPeriod,
-            Deductible = source.Deductible,
+            Deductible = source.Deductible, DeductibleWaived = source.DeductibleWaived,
             WaitingPeriodDays = source.WaitingPeriodDays, RequiresPreauth = source.RequiresPreauth,
             PreauthCostThreshold = source.PreauthCostThreshold,
             Exclusions = source.Exclusions, Notes = source.Notes,
@@ -431,7 +468,7 @@ public static class PlanEndpoints
             RuleTierId = Guid.NewGuid(), BenefitRuleId = clone.RuleId,
             NetworkTierId = t.NetworkTierId, TierCode = t.TierCode, IsCovered = t.IsCovered,
             CopayFixed = t.CopayFixed, CopayPercent = t.CopayPercent, CoinsurancePercent = t.CoinsurancePercent,
-            RequiresPreauthOverride = t.RequiresPreauthOverride, LimitMultiplier = t.LimitMultiplier,
+            CopayCountsTowardDeductible = t.CopayCountsTowardDeductible, RequiresPreauthOverride = t.RequiresPreauthOverride, LimitMultiplier = t.LimitMultiplier,
             CreatedAt = now, UpdatedAt = now, CreatedBy = actor, UpdatedBy = actor,
         }));
         return clone;

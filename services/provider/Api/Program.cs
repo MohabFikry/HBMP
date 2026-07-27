@@ -31,6 +31,9 @@ builder.Services.AddProviderInfrastructure(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ProviderAccessGuard>();
 builder.Services.AddScoped<NetworkTierGate>();   // 19.1b — Network-Team-only tier administration
+// 19.1b — the guard on CORRECTING a tier assignment. Default reports zero (see UnwiredAdjudicatedClaimProbe):
+// a known open gap awaiting the claims read-model query, not a safe default.
+builder.Services.AddScoped<IAdjudicatedClaimProbe, UnwiredAdjudicatedClaimProbe>();
 builder.Services.AddSingleton(TimeProvider.System);
 
 // masterdata-backed code validation for CPT/LOINC service-line codes.

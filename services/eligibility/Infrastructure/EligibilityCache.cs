@@ -9,9 +9,16 @@ namespace Mersal.Eligibility.Infrastructure;
 /// code and whether the service is pre-auth GATED. A cached non-gated <c>Eligible</c> was therefore
 /// served for a gated service for the full 15-minute TTL — a silent pre-authorization bypass. The key
 /// now carries the whole decision input, so two different questions can never share an answer.
+///
+/// <para>19.1b adds the three tier dimensions. The SAME beneficiary asking about the SAME service now gets a
+/// different cost share depending on where they are standing (provider, location) and when the care happens
+/// (service date, because a provider's tier is effective-dated). Leaving any of them out of the key would
+/// serve one hospital's co-pay for another's — the identical failure X9 was, one layer down, and this time
+/// the wrong number is quoted directly to a beneficiary at a counter.</para>
 /// </summary>
 public readonly record struct EligibilityCacheKey(
-    Guid BeneficiaryId, string BenefitCategory, string? ServiceCode, bool RequiresPreAuth);
+    Guid BeneficiaryId, string BenefitCategory, string? ServiceCode, bool RequiresPreAuth,
+    Guid? ProviderId = null, Guid? LocationId = null, DateOnly? ServiceDate = null);
 
 /// <summary>
 /// Cache-first eligibility snapshot store. A check serves the cached snapshot within TTL; upstream
@@ -31,7 +38,12 @@ public static class CacheKey
     public static string For(EligibilityCacheKey k) =>
         $"elig:{k.BeneficiaryId:N}:{k.BenefitCategory.ToUpperInvariant()}" +
         $":{(string.IsNullOrWhiteSpace(k.ServiceCode) ? "-" : k.ServiceCode.ToUpperInvariant())}" +
-        $":{(k.RequiresPreAuth ? "gated" : "open")}";
+        $":{(k.RequiresPreAuth ? "gated" : "open")}" +
+        // 19.1b — the tier dimensions. Rendered even when absent ("-") so a check WITHOUT a provider can never
+        // collide with one that named a provider: those are different questions with different answers.
+        $":{(k.ProviderId is { } p ? p.ToString("N") : "-")}" +
+        $":{(k.LocationId is { } l ? l.ToString("N") : "-")}" +
+        $":{(k.ServiceDate is { } d ? d.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture) : "-")}";
 
     public static string Set(Guid beneficiaryId) => $"elig:set:{beneficiaryId:N}";
 }

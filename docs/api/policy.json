@@ -350,6 +350,46 @@
         }
       }
     },
+    "/api/v1/plan-versions/{id}/cost-share": {
+      "get": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "benefitCategoryCode",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "networkTierId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/plan-versions/{id}/validate": {
       "post": {
         "tags": [
@@ -427,6 +467,9 @@
             "format": "double",
             "nullable": true
           },
+          "deductibleWaived": {
+            "type": "boolean"
+          },
           "waitingPeriodDays": {
             "type": "integer",
             "format": "int32"
@@ -481,6 +524,9 @@
             "type": "number",
             "format": "double",
             "nullable": true
+          },
+          "copayCountsTowardDeductible": {
+            "type": "boolean"
           },
           "requiresPreauthOverride": {
             "type": "boolean",

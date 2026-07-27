@@ -1,3 +1,4 @@
+using Mersal.BenefitPricing;
 using System.Text.Json.Serialization;
 using Mersal.Audit.Client;
 using Mersal.Auth;
@@ -14,6 +15,8 @@ using OpenTelemetry.Trace;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
+// 19.1b — the shared tier-pricing path (same composition and same libs/money split as eligibility).
+builder.Services.AddHbmpTierPricing(builder.Configuration);
 builder.Services.AddHbmpBusinessCalendar();   // 18.A3 — Africa/Cairo business dates + injected clock
 builder.Services.AddHbmpAuditClient("claims-service");
 // claims-service authorizes with the claims overlay: the claims roles hold ONLY the claims actions, so a

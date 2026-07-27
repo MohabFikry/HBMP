@@ -184,6 +184,42 @@ public class NetworkTierResolutionTests
     }
 
     [Fact]
+    public void A_corrected_assignment_never_governed_anything()
+    {
+        // The third withdrawal verb. Correcting retroactively voids an assignment that WAS in force and should
+        // never have been — so unlike a CLOSED assignment (which keeps governing its own past window), a
+        // corrected one resolves as if it had never existed. Closing it instead would only stop it going
+        // forward and leave the wrong tier standing over the days it was wrongly in force.
+        var assignments = new[]
+        {
+            Assign(T1, NetworkAssignmentScope.Provider, ProviderId, new(2026, 1, 1),
+                status: NetworkAssignmentStatus.Corrected),
+        };
+
+        var resolved = NetworkTierResolution.Resolve(assignments, Catalog(T1, Oon), new(2026, 2, 15));
+
+        resolved!.Basis.Should().Be(TierResolutionBasis.DefaultOutOfNetwork);
+    }
+
+    [Fact]
+    public void A_closed_assignment_still_governs_the_window_it_was_in_force_for()
+    {
+        // The contrast that makes the third verb necessary. Closing ENDS an assignment; it does not deny that
+        // it ever applied. February still resolves to T1 after the assignment is closed in March.
+        var assignments = new[]
+        {
+            Assign(T1, NetworkAssignmentScope.Provider, ProviderId, new(2026, 1, 1), to: new(2026, 3, 1)),
+        };
+
+        var february = NetworkTierResolution.Resolve(assignments, Catalog(T1, Oon), new(2026, 2, 15));
+        var april = NetworkTierResolution.Resolve(assignments, Catalog(T1, Oon), new(2026, 4, 15));
+
+        february!.Tier.TierCode.Should().Be("T1");
+        february.Basis.Should().Be(TierResolutionBasis.Provider);
+        april!.Basis.Should().Be(TierResolutionBasis.DefaultOutOfNetwork);
+    }
+
+    [Fact]
     public void A_retired_out_of_network_tier_is_not_used_as_the_fallback()
     {
         var retiredOon = Tier("OON", rank: 98, oon: true, status: NetworkTierStatus.Retired);

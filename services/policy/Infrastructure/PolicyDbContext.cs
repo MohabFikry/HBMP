@@ -175,6 +175,7 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.LimitValue).HasColumnName("limit_value").HasColumnType("numeric(14,2)");
             e.Property(x => x.ResetPeriod).HasConversion<string>().HasColumnName("reset_period");
             e.Property(x => x.Deductible).HasColumnName("deductible").HasColumnType("numeric(14,2)");
+            e.Property(x => x.DeductibleWaived).HasColumnName("deductible_waived");
             e.Property(x => x.WaitingPeriodDays).HasColumnName("waiting_period_days");
             e.Property(x => x.RequiresPreauth).HasColumnName("requires_preauth");
             e.Property(x => x.PreauthCostThreshold).HasColumnName("preauth_cost_threshold").HasColumnType("numeric(14,2)");
@@ -202,6 +203,7 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.CopayFixed).HasColumnName("copay_fixed").HasColumnType("numeric(14,2)");
             e.Property(x => x.CopayPercent).HasColumnName("copay_percent").HasColumnType("numeric(5,2)");
             e.Property(x => x.CoinsurancePercent).HasColumnName("coinsurance_percent").HasColumnType("numeric(5,2)");
+            e.Property(x => x.CopayCountsTowardDeductible).HasColumnName("copay_counts_toward_deductible");
             e.Property(x => x.RequiresPreauthOverride).HasColumnName("requires_preauth_override");
             e.Property(x => x.LimitMultiplier).HasColumnName("limit_multiplier").HasColumnType("numeric(5,2)");
             e.Property(x => x.CreatedAt).HasColumnName("created_at");

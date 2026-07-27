@@ -4,6 +4,7 @@
     <ProjectReference Include="../Domain/Mersal.Approvals.Domain.csproj" />
     <ProjectReference Include="../Infrastructure/Mersal.Approvals.Infrastructure.csproj" />
     <ProjectReference Include="../../../libs/auth/Mersal.Auth.csproj" />
+    <ProjectReference Include="../../../libs/benefit-pricing/Mersal.BenefitPricing.csproj" />
     <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" />
     <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
     <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />

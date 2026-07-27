@@ -20,6 +20,8 @@ public sealed record BenefitRuleInput(
     decimal? LimitValue,
     string? ResetPeriod,
     decimal? Deductible,
+    /// <summary>The plan's deductible does not apply to this category (primary care commonly waives it).</summary>
+    bool DeductibleWaived,
     int WaitingPeriodDays,
     bool RequiresPreauth,
     decimal? PreauthCostThreshold,
@@ -37,6 +39,8 @@ public sealed record BenefitRuleTierInput(
     decimal? CopayFixed,
     decimal? CopayPercent,
     decimal? CoinsurancePercent,
+    /// <summary>The co-pay paid here accrues toward the member's deductible for LATER services.</summary>
+    bool CopayCountsTowardDeductible,
     bool? RequiresPreauthOverride,
     decimal? LimitMultiplier);
 
@@ -67,7 +71,7 @@ public sealed record PlanVersionView(
 
 public sealed record BenefitRuleView(
     Guid RuleId, Guid BenefitCategoryId, bool IsCovered, string? LimitType, decimal? LimitValue,
-    string ResetPeriod, decimal? Deductible, int WaitingPeriodDays, bool RequiresPreauth,
+    string ResetPeriod, decimal? Deductible, bool DeductibleWaived, int WaitingPeriodDays, bool RequiresPreauth,
     decimal? PreauthCostThreshold, string Exclusions, string? Notes,
     IReadOnlyList<BenefitRuleTierView> Tiers)
 {
@@ -75,7 +79,7 @@ public sealed record BenefitRuleView(
     {
         ArgumentNullException.ThrowIfNull(r);
         return new(r.RuleId, r.BenefitCategoryId, r.IsCovered, r.LimitType?.ToString(), r.LimitValue,
-            r.ResetPeriod.ToString(), r.Deductible, r.WaitingPeriodDays, r.RequiresPreauth,
+            r.ResetPeriod.ToString(), r.Deductible, r.DeductibleWaived, r.WaitingPeriodDays, r.RequiresPreauth,
             r.PreauthCostThreshold, r.Exclusions, r.Notes,
             [.. r.Tiers.OrderBy(t => t.TierCode, StringComparer.Ordinal).Select(t => BenefitRuleTierView.From(t, r))]);
     }
@@ -87,7 +91,7 @@ public sealed record BenefitRuleView(
 public sealed record BenefitRuleTierView(
     Guid RuleTierId, Guid NetworkTierId, string TierCode, bool IsCovered,
     decimal? CopayFixed, decimal? CopayPercent, decimal? CoinsurancePercent,
-    bool? RequiresPreauthOverride, decimal? LimitMultiplier,
+    bool CopayCountsTowardDeductible, bool? RequiresPreauthOverride, decimal? LimitMultiplier,
     bool EffectiveRequiresPreauth, decimal? EffectiveLimitValue)
 {
     public static BenefitRuleTierView From(BenefitRuleTier t, BenefitRule rule)
@@ -95,7 +99,16 @@ public sealed record BenefitRuleTierView(
         ArgumentNullException.ThrowIfNull(t);
         return new(t.RuleTierId, t.NetworkTierId, t.TierCode, t.IsCovered,
             t.CopayFixed, t.CopayPercent, t.CoinsurancePercent,
-            t.RequiresPreauthOverride, t.LimitMultiplier,
+            t.CopayCountsTowardDeductible, t.RequiresPreauthOverride, t.LimitMultiplier,
             t.ResolvesPreauth(rule), t.ResolvesLimit(rule));
     }
 }
+
+/// <summary>19.1b — the authored cost share for one (plan version, benefit category, network tier). The shape
+/// <c>libs/benefit-pricing</c> reads, and the ONLY thing policy-service publishes about pricing: it states what
+/// was AGREED and performs no arithmetic, so the split can happen in exactly one place.</summary>
+public sealed record CostShareView(
+    Guid NetworkTierId, string TierCode, bool IsCovered,
+    decimal? CopayFixed, decimal? CopayPercent, decimal? CoinsurancePercent,
+    decimal? Deductible, bool DeductibleWaived, bool CopayCountsTowardDeductible,
+    bool RequiresPreauth, decimal? LimitValue);

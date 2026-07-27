@@ -207,15 +207,21 @@ public static class NetworkTierEndpoints
             return Results.Ok(rows.Select(a => TierAssignmentView.From(a, null)));
         });
 
-        // Withdrawing an assignment. The two cases are NOT the same act and are not treated as one:
-        //   • It has not taken effect yet → Revoked. It never governed a service, so erasing it changes nothing.
-        //   • It is already in force → CLOSED at today (effective_to = today) and left Active. Revoking it
-        //     outright would retroactively make every past service at that provider out-of-network, silently
-        //     changing what already-adjudicated claims should have paid.
-        // The response says which happened rather than leaving the caller to infer it.
-        write.MapDelete("/assignments/{assignmentId:guid}", async (Guid assignmentId, string? reason,
+        // Withdrawing an assignment is THREE acts, not two, and the response says which one happened.
+        //
+        //   Revoked    it had not taken effect yet — it never governed a service, so erasing it changes nothing.
+        //   Closed     it is in force and is ENDING (effective_to = today). It keeps governing its own window,
+        //              which is what a tier move must do: February's care stays priced at February's tier.
+        //   Corrected  it WAS in force and should never have been (wrong provider, wrong tier). Retroactively
+        //              voided. Without this verb a week-old mis-assignment leaves a week of wrong resolution
+        //              standing with no legitimate way to fix it — closing it would only stop it going forward.
+        //
+        // A correction is REFUSED once any claim has adjudicated against the assignment. At that point money has
+        // moved on the strength of that tier, and quietly rewriting it would leave settled claims referencing a
+        // tier the record no longer admits to. The fix from there is a claims adjustment, not a tier edit.
+        write.MapDelete("/assignments/{assignmentId:guid}", async (Guid assignmentId, string? reason, bool? correct,
             ProviderDbContext db, NetworkTierGate gate, IAuditClient audit, IOutbox outbox,
-            IBusinessCalendar calendar, TimeProvider clock, CancellationToken ct) =>
+            IAdjudicatedClaimProbe claims, IBusinessCalendar calendar, TimeProvider clock, CancellationToken ct) =>
         {
             if (await gate.CheckAsync(ct) is { } denied) return denied;
             if (string.IsNullOrWhiteSpace(reason))
@@ -223,26 +229,39 @@ public static class NetworkTierEndpoints
 
             var a = await db.NetworkAssignments.FirstOrDefaultAsync(x => x.AssignmentId == assignmentId && !x.IsDeleted, ct);
             if (a is null) return NotFound();
-            if (a.Status == NetworkAssignmentStatus.Revoked)
-                return Results.Ok(new { a.AssignmentId, outcome = "AlreadyRevoked" });
+            if (a.Status != NetworkAssignmentStatus.Active)
+                return Results.Ok(new { a.AssignmentId, outcome = $"Already{a.Status}" });
 
             var today = calendar.Today();
             var now = clock.GetUtcNow();
             string outcome;
-            if (a.EffectiveFrom > today)
+
+            if (correct == true)
+            {
+                var adjudicated = await claims.CountAdjudicatedAgainstAsync(a, ct);
+                if (adjudicated > 0)
+                    return ProblemResults.Conflict("ASSIGNMENT_HAS_ADJUDICATED_CLAIMS",
+                        $"{adjudicated} claim(s) have already been adjudicated against this tier assignment. " +
+                        "Correcting it would leave settled claims referencing a tier the record no longer admits to — " +
+                        "raise a claims adjustment instead.");
+                a.Status = NetworkAssignmentStatus.Corrected;
+                outcome = "Corrected";
+            }
+            else if (a.EffectiveFrom > today)
             {
                 a.Status = NetworkAssignmentStatus.Revoked;
-                a.RevokedReason = reason;
                 outcome = "Revoked";
             }
             else
             {
                 if (a.EffectiveTo is not null && a.EffectiveTo <= today)
-                    return ProblemResults.Conflict("ALREADY_CLOSED", "This assignment has already ended.");
+                    return ProblemResults.Conflict("ALREADY_CLOSED",
+                        "This assignment has already ended. To void it retroactively, correct it instead.");
                 a.EffectiveTo = today;
-                a.RevokedReason = reason;
                 outcome = "Closed";
             }
+
+            a.RevokedReason = reason;
             a.UpdatedAt = now;
             a.UpdatedBy = gate.Subject;
             if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
@@ -252,12 +271,16 @@ public static class NetworkTierEndpoints
                 EntityType = "provider_network_assignment", EntityId = a.AssignmentId.ToString(),
                 Action = AuditAction.StateChange, ActorUserId = gate.Subject, TenantId = gate.TenantId,
                 DecisionOutcome = outcome, DecisionReasonCode = reason,
+                // A correction rewrites what the tier map says about the PAST, so it is audited as its own
+                // high-signal act rather than blending into the ordinary churn of tier moves.
+                FieldClasses = outcome == "Corrected" ? ["network-tier-correction"] : [],
             }, ct);
-            await outbox.EnqueueAsync("ProviderTierRevoked", "provider.events", new
-            {
-                tenantId = a.TenantId, assignmentId = a.AssignmentId, networkTierId = a.NetworkTierId,
-                providerId = a.ProviderId, outcome, effectiveTo = a.EffectiveTo,
-            }, ct);
+            await outbox.EnqueueAsync(
+                outcome == "Corrected" ? "ProviderTierCorrected" : "ProviderTierRevoked", "provider.events", new
+                {
+                    tenantId = a.TenantId, assignmentId = a.AssignmentId, networkTierId = a.NetworkTierId,
+                    providerId = a.ProviderId, outcome, effectiveTo = a.EffectiveTo, reason,
+                }, ct);
             return Results.Ok(new { a.AssignmentId, outcome, effectiveTo = a.EffectiveTo });
         });
     }

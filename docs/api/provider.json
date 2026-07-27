@@ -1024,6 +1024,13 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "correct",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {

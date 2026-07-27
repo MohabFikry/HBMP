@@ -162,6 +162,69 @@ public class CostShareTests
         Reconciles(split);
     }
 
+    // ---- The two explicit fields that used to be silent defaults ------------------------------------------
+
+    [Fact]
+    public void A_waived_deductible_exempts_the_category_without_zeroing_the_plans_deductible()
+    {
+        // Primary care commonly waives it. Modelling this as "set the deductible to zero" would lose the
+        // distinction between "this category is exempt" and "this plan has no deductible" — which survive a
+        // plan amendment differently, and only one of them should follow the category.
+        var terms = new TierCostShareTerms(true, CopayPercent: 10m, Deductible: 200m, DeductibleWaived: true);
+
+        var split = CostShareCalculator.Split(Egp(1000m), terms);
+
+        split.DeductibleApplied.Should().Be(Egp(0m));
+        split.Copay.Should().Be(Egp(100m), "the co-pay percentage now applies to the whole amount");
+        split.MemberShare.Should().Be(Egp(100m));
+        Reconciles(split);
+
+        // The same terms without the waiver charge the deductible AND a smaller co-pay — a different number,
+        // which is why the field cannot be left implicit.
+        CostShareCalculator.Split(Egp(1000m), terms with { DeductibleWaived = false })
+            .MemberShare.Should().Be(Egp(280m));
+    }
+
+    [Fact]
+    public void Copay_accrues_to_the_deductible_only_when_the_plan_says_it_does()
+    {
+        var terms = new TierCostShareTerms(true, CopayPercent: 10m, Deductible: 200m);
+
+        var doesNotCount = CostShareCalculator.Split(Egp(1000m), terms);
+        var counts = CostShareCalculator.Split(Egp(1000m), terms with { CopayCountsTowardDeductible = true });
+
+        // Same money out of the member's pocket either way…
+        doesNotCount.MemberShare.Should().Be(counts.MemberShare);
+        // …but a different amount of progress toward the year's deductible, which changes what they pay NEXT.
+        doesNotCount.AccruesToDeductible.Should().Be(Egp(200m), "the deductible applied, and nothing else");
+        counts.AccruesToDeductible.Should().Be(Egp(280m), "plus the 80 co-pay");
+    }
+
+    [Fact]
+    public void What_accrues_is_never_more_than_what_the_member_actually_paid()
+    {
+        // The accrual is a COMPONENT of the member share, not an addition to it. If it could exceed the share,
+        // a member would be credited with deductible progress they never funded.
+        var terms = new TierCostShareTerms(true, CopayPercent: 25m, CoinsurancePercent: 20m,
+            Deductible: 150m, CopayCountsTowardDeductible: true);
+
+        var split = CostShareCalculator.Split(Egp(2000m), terms);
+
+        split.AccruesToDeductible.Amount.Should().BeLessThanOrEqualTo(split.MemberShare.Amount);
+        split.Coinsurance.Amount.Should().BeGreaterThan(0m, "so the case is not vacuous");
+    }
+
+    [Fact]
+    public void Nothing_accrues_at_a_tier_that_covers_nothing()
+    {
+        // This money bought no benefit, so it must not buy progress toward one.
+        var split = CostShareCalculator.Split(Egp(1000m),
+            new TierCostShareTerms(IsCovered: false, Deductible: 200m, CopayCountsTowardDeductible: true));
+
+        split.MemberShare.Should().Be(Egp(1000m));
+        split.AccruesToDeductible.Should().Be(Egp(0m));
+    }
+
     [Fact]
     public void Member_share_is_the_same_number_the_full_split_reports()
     {

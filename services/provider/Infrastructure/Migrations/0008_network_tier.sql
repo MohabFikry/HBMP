@@ -117,3 +117,23 @@ CREATE POLICY rls_provider_network_assignment ON provider.provider_network_assig
         OR provider_id::text = current_setting('app.provider_id', true)
     )
 );
+
+-- ---- 19.1b refinement: correction as a distinct third act ---------------------------------------------------
+-- Withdrawing an assignment was two verbs and needed three. ENDING one closes effective_to and leaves it Active,
+-- so it still governs its own window. REVOKING one that never took effect erases a statement that governed
+-- nothing. Neither can fix the third case: an assignment that WAS in force and should never have been (wrong
+-- provider, wrong tier). Without a correction verb, a week-old mis-assignment leaves a week of wrong tier
+-- resolution standing with no legitimate way to repair it.
+--
+-- A correction retroactively voids the row. It is refused once any claim has adjudicated against that
+-- assignment — at that point money has moved, and the fix is a claims adjustment, not a tier edit.
+ALTER TABLE provider.provider_network_assignment DROP CONSTRAINT IF EXISTS provider_network_assignment_status_check;  -- migrate-compat: contract-ok (replaced immediately below by a WIDER check adding 'Corrected'; no existing value becomes invalid)
+ALTER TABLE provider.provider_network_assignment
+    ADD CONSTRAINT provider_network_assignment_status_check
+    CHECK (status IN ('Active','Revoked','Corrected'));
+
+-- Leaving Active is never silent: every one of the three acts records why.
+ALTER TABLE provider.provider_network_assignment DROP CONSTRAINT IF EXISTS ck_pna_withdrawal_has_reason;  -- migrate-compat: contract-ok (idempotent drop-then-readd of a constraint this migration itself introduces)
+ALTER TABLE provider.provider_network_assignment
+    ADD CONSTRAINT ck_pna_withdrawal_has_reason
+    CHECK (status = 'Active' OR revoked_reason IS NOT NULL);

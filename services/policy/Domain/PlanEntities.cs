@@ -100,6 +100,12 @@ public sealed class BenefitRule
     public decimal? LimitValue { get; set; }
     public ResetPeriod ResetPeriod { get; set; } = ResetPeriod.None;
     public decimal? Deductible { get; set; }
+
+    /// <summary>The plan's deductible does not apply to this category (primary care commonly waives it).
+    /// Deliberately NOT modelled as a zero deductible: "this category is exempt" and "this plan has no
+    /// deductible" survive a plan amendment differently, and only the exemption should follow the category.</summary>
+    public bool DeductibleWaived { get; set; }
+
     public int WaitingPeriodDays { get; set; }
     /// <summary>The plan-level default. A tier may override it via
     /// <see cref="BenefitRuleTier.RequiresPreauthOverride"/> — out-of-network care commonly needs
@@ -147,6 +153,11 @@ public sealed class BenefitRuleTier
     public decimal? CopayFixed { get; set; }
     public decimal? CopayPercent { get; set; }
     public decimal? CoinsurancePercent { get; set; }
+
+    /// <summary>The co-pay paid here accrues toward the member's deductible for LATER services. It does not
+    /// change what they pay today; it changes what they pay next, which is why it is explicit rather than
+    /// assumed. The accumulator that consumes it arrives with member-level accumulators (19.2).</summary>
+    public bool CopayCountsTowardDeductible { get; set; }
 
     /// <summary>Overrides <see cref="BenefitRule.RequiresPreauth"/> for this tier; null = inherit.</summary>
     public bool? RequiresPreauthOverride { get; set; }

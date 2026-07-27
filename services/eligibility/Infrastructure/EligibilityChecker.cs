@@ -13,6 +13,10 @@ public sealed record LimitStateDto(string LimitType, decimal LimitValue, decimal
 /// <summary>The cache-first check result plus whether it was served from cache (for latency/audit).</summary>
 public sealed record CheckOutcome(EligibilityResult Result, DateTimeOffset ExpiresAt, bool FromCache);
 
+/// <summary>Where and when the care happens — the dimensions a network tier is resolved on (19.1b). Absent
+/// when the caller asks a provider-independent question, which is a DIFFERENT question and is cached as one.</summary>
+public readonly record struct EligibilityTierContext(Guid ProviderId, DateOnly ServiceDate, Guid? LocationId);
+
 /// <summary>
 /// Read-through eligibility resolver: cache → projection → engine → snapshot + cache. Reads the
 /// member + coverage projections owned by this service, computes via the pure engine, persists the
@@ -24,13 +28,18 @@ public sealed class EligibilityChecker(EligibilityDbContext db, IEligibilityCach
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     public static readonly TimeSpan Ttl = TimeSpan.FromMinutes(15);
 
+    /// <param name="tier">19.1b — where and when the care happens. It reaches the cache key because the tier
+    /// can make a service GATED that is open-access elsewhere (<c>requires_preauth_override</c>), so two
+    /// providers are two different questions with two different right answers.</param>
     public async Task<CheckOutcome> CheckAsync(
         Guid beneficiaryId, string benefitCategory, string? serviceCode, bool serviceRequiresPreAuth,
-        CancellationToken ct = default)
+        EligibilityTierContext? tier = null, CancellationToken ct = default)
     {
         // 18.A3 (X9): the key carries every input the engine branches on — a non-gated answer can no
-        // longer be served for a gated service.
-        var cacheKey = new EligibilityCacheKey(beneficiaryId, benefitCategory, serviceCode, serviceRequiresPreAuth);
+        // longer be served for a gated service. 19.1b extends the same rule to provider/location/service date.
+        var cacheKey = new EligibilityCacheKey(
+            beneficiaryId, benefitCategory, serviceCode, serviceRequiresPreAuth,
+            tier?.ProviderId, tier?.LocationId, tier?.ServiceDate);
         var cached = await cache.GetAsync(cacheKey, ct);
         if (cached is not null)
         {
