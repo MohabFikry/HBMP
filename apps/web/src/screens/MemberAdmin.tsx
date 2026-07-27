@@ -19,6 +19,7 @@ import type {
   MemberQueryRow,
   MemberUtilizationView,
   PlanChangeView,
+  PlanChangePreviewView,
   PolicyApi,
   PolicyPlanView,
 } from "../api/policyApi";
@@ -109,6 +110,23 @@ const S = {
     en: "Consumption carries with the member. A member who has used 300 of 1,000 moving to a 500 plan has 200 left, not 500.",
     ar: "ينتقل الاستهلاك مع العضو. من استهلك ٣٠٠ من ١٠٠٠ وانتقل إلى خطة ٥٠٠ يتبقى له ٢٠٠ لا ٥٠٠.",
   },
+  // The two readings of ADR-0020. Which one is in force is a SERVER setting, so the hint is chosen from the
+  // preview's answer rather than hard-coded here — a screen that always claims consumption carries would be
+  // stating the wrong rule outright on any deployment configured the other way.
+  resetHint: {
+    en: "Each plan carries its own ceiling here: the member starts the new plan at zero consumed.",
+    ar: "لكل خطة سقفها الخاص هنا: يبدأ العضو الخطة الجديدة باستهلاك صفر.",
+  },
+  selectPlanFirst: { en: "Choose a plan to see what would change.", ar: "اختر خطة لعرض ما سيتغيّر." },
+  currentLimit: { en: "Limit now", ar: "الحد الحالي" },
+  newLimit: { en: "Limit after", ar: "الحد بعد التغيير" },
+  notHeldToday: { en: "New benefit", ar: "منفعة جديدة" },
+  dropped: { en: "Benefits that would be withdrawn", ar: "منافع ستُسحب" },
+  droppedHint: {
+    en: "The new plan does not cover these at all. The member holds them today.",
+    ar: "الخطة الجديدة لا تغطي هذه إطلاقًا. العضو يملكها اليوم.",
+  },
+  previewing: { en: "Calculating…", ar: "جارٍ الحساب…" },
   carryResult: { en: "Applied — new balances", ar: "تم التطبيق — الأرصدة الجديدة" },
   exhausted: { en: "Exhausted", ar: "مستنفد" },
   backdated: {
@@ -329,7 +347,6 @@ export function MemberDetail({
           api={api}
           kind={dialog}
           row={row}
-          coverage={coverage}
           onClose={() => setDialog(null)}
           onDone={async (msg) => {
             setAnnounce(msg);
@@ -534,14 +551,12 @@ function MembershipDialog({
   api,
   kind,
   row,
-  coverage,
   onClose,
   onDone,
 }: {
   api: PolicyApi;
   kind: Exclude<Dialog, null>;
   row: MemberQueryRow;
-  coverage: MemberCoverageDetail | null;
   onClose: () => void;
   onDone: (announcement: string) => Promise<void>;
 }) {
@@ -556,6 +571,9 @@ function MembershipDialog({
   const [error, setError] = useState<Localized | null>(null);
   const [busy, setBusy] = useState(false);
   const [applied, setApplied] = useState<PlanChangeView | null>(null);
+  const [preview, setPreview] = useState<PlanChangePreviewView | null>(null);
+  const [previewError, setPreviewError] = useState<Localized | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   const [key, rotateKey] = useIdempotencyKey();
 
   const reasonMandatory = kind === "terminate" || kind === "changePlan";
@@ -565,6 +583,39 @@ function MembershipDialog({
     if (kind === "changeGroup") api.policyGroups(row.policyId).then(setGroups).catch(() => setGroups([]));
     if (kind === "changePlan") api.policyPlans(row.policyId).then(setPlans).catch(() => setPlans([]));
   }, [api, kind, row.policyId]);
+
+  // The dry run. Re-asked whenever the target plan or the effective date changes, because both are inputs to
+  // the answer — a plan not yet in force on the chosen date fails HERE, in a preview, rather than after the
+  // officer has written a justification for a change that was never going to be accepted.
+  useEffect(() => {
+    if (kind !== "changePlan" || !policyPlanId) {
+      setPreview(null);
+      setPreviewError(null);
+      return;
+    }
+    let live = true;
+    setPreviewing(true);
+    setPreviewError(null);
+    api
+      .previewPlanChange(row.enrollmentId, policyPlanId, effectiveDate)
+      .then((p) => {
+        if (!live) return;
+        setPreview(p);
+      })
+      .catch((e: unknown) => {
+        if (!live) return;
+        // A failed preview clears the previous one. Leaving the last successful answer on screen beside a newly
+        // chosen plan is how somebody confirms a change against arithmetic for a different plan.
+        setPreview(null);
+        setPreviewError(writeErrorMessage(e).message);
+      })
+      .finally(() => {
+        if (live) setPreviewing(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [api, kind, policyPlanId, effectiveDate, row.enrollmentId]);
 
   const title = { terminate: S.terminate, reinstate: S.reinstate, changeGroup: S.changeGroup, changePlan: S.changePlan }[kind];
 
@@ -644,30 +695,74 @@ function MembershipDialog({
             ))}
           </select>
 
-          {/* The carry-forward preview. There is no server dry-run for a plan change, so this shows what the
-              member has ALREADY consumed — the quantity that travels with them — and states the rule. The
-              resulting ceilings are rendered from the server's own answer once applied. */}
-          {coverage && (
+          {/* The carry-forward preview — the server's own dry run, not an estimate assembled here. Same
+              resolution and same arithmetic as the change itself, so what this shows is what will happen. */}
+          {!policyPlanId && <p className="pol-muted">{t(S.selectPlanFirst)}</p>}
+          {previewing && <p className="pol-muted" aria-live="polite">{t(S.previewing)}</p>}
+          {previewError && <InlineAlert tone="bad" data-testid="preview-error">{t(previewError)}</InlineAlert>}
+
+          {preview && (
             <div data-testid="carry-preview">
               <h4>{t(S.carryPreview)}</h4>
-              <InlineAlert tone="info">{t(S.carryHint)}</InlineAlert>
+              <InlineAlert tone="info">
+                {t(preview.consumptionPolicy === "CarryForward" ? S.carryHint : S.resetHint)}
+              </InlineAlert>
               <table className="pol-costshare">
                 <caption className="sr-only">{t(S.carryPreview)}</caption>
                 <thead>
                   <tr>
                     <th scope="col">{t(S.category)}</th>
+                    <th scope="col">{t(S.currentLimit)}</th>
                     <th scope="col">{t(S.consumed)}</th>
+                    <th scope="col">{t(S.newLimit)}</th>
+                    <th scope="col">{t(S.remaining)}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {coverage.categories.map((c) => (
-                    <tr key={c.benefitCategoryCode}>
-                      <th scope="row">{c.benefitCategoryCode}</th>
-                      <td>{fmt.money(c.consumed)}</td>
+                  {preview.rows.map((r) => (
+                    <tr key={r.benefitCategoryId}>
+                      <th scope="row">{r.benefitCategoryCode ?? r.benefitCategoryId.slice(0, 8)}</th>
+                      {/* "Not covered today" and "unbounded today" are different facts and a dash cannot say
+                          both — `held` is what separates them. */}
+                      <td>{!r.held ? t(S.notHeldToday) : r.currentLimitValue != null ? fmt.money(r.currentLimitValue) : "∞"}</td>
+                      <td>{fmt.money(r.consumedValue)}</td>
+                      <td>{r.newLimitValue != null ? fmt.money(r.newLimitValue) : "∞"}</td>
+                      <td>
+                        {r.remaining != null ? fmt.money(r.remaining) : "∞"}
+                        {r.exhausted && <StatusChip kind="bad" label={t(S.exhausted)} />}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+
+              {/* The half no client-side estimate could have recovered: a benefit the new plan does not cover
+                  produces no row in the outcome at all, so without this it simply disappears. */}
+              {preview.droppedCategories.length > 0 && (
+                <div data-testid="carry-dropped">
+                  <h4>{t(S.dropped)}</h4>
+                  <InlineAlert tone="warn">{t(S.droppedHint)}</InlineAlert>
+                  <table className="pol-costshare">
+                    <caption className="sr-only">{t(S.dropped)}</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">{t(S.category)}</th>
+                        <th scope="col">{t(S.currentLimit)}</th>
+                        <th scope="col">{t(S.consumed)}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.droppedCategories.map((d) => (
+                        <tr key={d.benefitCategoryId}>
+                          <th scope="row">{d.benefitCategoryCode ?? d.benefitCategoryId.slice(0, 8)}</th>
+                          <td>{d.currentLimitValue != null ? fmt.money(d.currentLimitValue) : "∞"}</td>
+                          <td>{fmt.money(d.consumedValue)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </>
@@ -699,7 +794,7 @@ function MembershipDialog({
             <tbody>
               {applied.carriedLimits.map((c) => (
                 <tr key={c.benefitCategoryId}>
-                  <th scope="row">{c.benefitCategoryId.slice(0, 8)}</th>
+                  <th scope="row">{c.benefitCategoryCode ?? c.benefitCategoryId.slice(0, 8)}</th>
                   <td>{c.limitValue != null ? fmt.money(c.limitValue) : "∞"}</td>
                   <td>{fmt.money(c.consumedValue)}</td>
                   <td>
@@ -715,7 +810,11 @@ function MembershipDialog({
 
       <div className="pol-dialog-actions">
         {!applied && (
-          <Button variant="primary" onClick={submit} disabled={busy}>
+          // A plan change cannot be confirmed until the dry run has answered. Not defensiveness about the
+          // network: the preview runs the same resolution the change does, so a preview that failed is a change
+          // that would have failed — and the point of the dialog is that nobody moves a member's entitlement
+          // without having been shown what it does to them.
+          <Button variant="primary" onClick={submit} disabled={busy || (kind === "changePlan" && !preview)}>
             {t(S.confirm)}
           </Button>
         )}

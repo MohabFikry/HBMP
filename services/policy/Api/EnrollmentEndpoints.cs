@@ -311,18 +311,54 @@ public static class EnrollmentEndpoints
             return result.Ok ? Results.Ok(EnrollmentView.From(result.Value!.Enrollment)) : Problem(result.Error!);
         });
 
+        // 19.6 — the DRY RUN behind the change-plan dialog's carry-forward preview.
+        //
+        // Gated at Write, not Read, and deliberately: a preview is the first half of a change, and the authority
+        // to model what moving a member would do to their entitlement is the authority to move them. Read is the
+        // broad benefit-configuration permission; it should not double as a way to interrogate one member's
+        // consumption against every plan on the policy.
+        //
+        // POST because it carries a body, not because it writes — nothing here is saved.
+        v1.MapPost("/enrollments/{id:guid}/change-plan/preview", async (Guid id, PreviewPlanChange req,
+            MembershipCommands membership, PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
+        {
+            if (await gate.CheckAsync(PolicyPolicies.Write, ct) is { } denied) return denied;
+            ArgumentNullException.ThrowIfNull(req);
+            var result = await membership.PreviewPlanChangeAsync(id, req.PolicyPlanId, req.EffectiveDate, ct);
+            if (!result.Ok) return Problem(result.Error!);
+
+            var p = result.Value!;
+            var codes = await PlanEndpoints.CategoryCodesAsync(db, ct);
+            return Results.Ok(new PlanChangePreviewView(
+                p.EnrollmentId, p.FromPolicyPlanId, p.ToPlan.PolicyPlanId, p.ToPlan.PlanLabel, p.PlanVersionId,
+                p.EffectiveDate, p.ConsumptionPolicy,
+                [.. p.Carried.Select(c => new CarryPreviewRow(
+                    c.BenefitCategoryId, CarriedLimitView.Code(codes, c.BenefitCategoryId),
+                    p.CurrentLimits.ContainsKey(c.BenefitCategoryId),
+                    p.CurrentLimits.GetValueOrDefault(c.BenefitCategoryId),
+                    c.ConsumedValue, c.LimitValue, c.Remaining, c.Exhausted))],
+                [.. p.DroppedCategories.Select(gid => new DroppedCategoryView(
+                    gid, CarriedLimitView.Code(codes, gid),
+                    p.CurrentLimits.GetValueOrDefault(gid), p.Consumed.GetValueOrDefault(gid)))]));
+        });
+
         // 19.2b — the plan change. Coverage REGENERATES from the new plan version, and consumption is carried
         // across per ADR-0020 (a setting, not a hard-coded rule, because the decision is not yet signed off).
         v1.MapPost("/enrollments/{id:guid}/change-plan", async (Guid id, ChangePlan req,
-            MembershipCommands membership, PolicyGate gate, CancellationToken ct) =>
+            MembershipCommands membership, PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
         {
             if (await gate.CheckAsync(PolicyPolicies.Write, ct) is { } denied) return denied;
             var result = await membership.ChangePlanAsync(id, req.PolicyPlanId, req.EffectiveDate, req.Reason, Actor(gate), ct);
             if (!result.Ok) return Problem(result.Error!);
 
             var outcome = result.Value!;
+            var codes = await PlanEndpoints.CategoryCodesAsync(db, ct);
             return Results.Ok(new PlanChangeView(id, outcome.Plan.PolicyPlanId, outcome.PlanVersionId,
-                outcome.ConsumptionPolicy, [.. outcome.Carried.Select(CarriedLimitView.From)]));
+                outcome.ConsumptionPolicy, [.. outcome.Carried.Select(c => CarriedLimitView.From(c, codes))],
+                // Limits are gone by now — the old coverages were closed in the same transaction — so a dropped
+                // category is reported by name and consumption only. The preview is where the before-figures live.
+                [.. outcome.DroppedCategories.Select(gid => new DroppedCategoryView(
+                    gid, CarriedLimitView.Code(codes, gid), null, 0m))]));
         });
     }
 

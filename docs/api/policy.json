@@ -756,6 +756,39 @@
         }
       }
     },
+    "/api/v1/enrollments/{id}/change-plan/preview": {
+      "post": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewPlanChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/enrollments/{id}/change-plan": {
       "post": {
         "tags": [
@@ -3021,6 +3054,20 @@
             "type": "string",
             "format": "date",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PreviewPlanChange": {
+        "type": "object",
+        "properties": {
+          "policyPlanId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "effectiveDate": {
+            "type": "string",
+            "format": "date"
           }
         },
         "additionalProperties": false

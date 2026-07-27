@@ -58,6 +58,7 @@ function fakeApi(overrides: Partial<PolicyApi> = {}): PolicyApi {
     reinstate: reject,
     changeGroup: reject,
     changePlan: reject,
+    previewPlanChange: reject,
     coverageDetails: reject,
     notes: () => Promise.resolve([]),
     addNote: reject,
@@ -430,6 +431,103 @@ describe("Member query table", () => {
     const row = await screen.findByText("MRS-M-2026-000002");
     expect(row).toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+});
+
+// ── The plan-change dry run ─────────────────────────────────────────────────────────────────────────────
+
+const memberRow = {
+  enrollmentId: "e1", beneficiaryId: "b1", memberNo: "MRS-M-2026-000001",
+  givenName: "Nour", familyName: "Ali", beneficiaryStatus: "Active",
+  policyId: "p1", policyPlanId: "pp1", planLabel: "Rich", groupId: null, payerId: null,
+  relationship: "Principal", status: "Active",
+  effectiveFrom: "2026-01-01", effectiveTo: null,
+  waitingPeriodEndsOn: null, waitingPeriodState: "Served", branchId: null, terminationReason: null,
+  totalLimit: 1000, totalConsumed: 300, totalRemaining: 700, percentUsed: 30, utilizationBand: "Low",
+} as const;
+
+const leanPlan = {
+  policyPlanId: "pp2", policyId: "p1", planVersionId: "v2", planLabel: "Lean",
+  effectiveFrom: "2026-01-01", effectiveTo: null, isDefault: false, eligibilityRule: null,
+  maxMembers: null, status: "Active", memberCount: 4,
+} as const;
+
+const previewFor = (dropped: unknown[] = []) => ({
+  enrollmentId: "e1", fromPolicyPlanId: "pp1", toPolicyPlanId: "pp2", toPlanLabel: "Lean",
+  planVersionId: "v2", effectiveDate: "2026-06-01", consumptionPolicy: "CarryForward",
+  rows: [
+    {
+      benefitCategoryId: "c1", benefitCategoryCode: "LAB", held: true,
+      currentLimitValue: 1000, consumedValue: 300, newLimitValue: 500, remaining: 200, exhausted: false,
+    },
+  ],
+  droppedCategories: dropped,
+});
+
+async function openChangePlan(api: PolicyApi) {
+  const { MemberDetail } = await import("../src/screens/MemberAdmin");
+  renderNode(<MemberDetail api={api} row={memberRow} onChanged={() => {}} />);
+  await userEvent.click(await screen.findByRole("button", { name: "Change plan" }));
+  return screen.findByTestId("dialog-changePlan");
+}
+
+describe("Change plan — the officer sees the consequence before confirming", () => {
+  it("shows the server's arithmetic, both ceilings, and not an estimate assembled here", async () => {
+    const previewPlanChange = vi.fn().mockResolvedValue(previewFor());
+    const api = fakeApi({ policyPlans: () => Promise.resolve([leanPlan]), previewPlanChange });
+    const dialog = await openChangePlan(api);
+
+    // Nothing to preview until a target plan is named, and nothing to confirm either.
+    expect(within(dialog).getByRole("button", { name: "Confirm" })).toBeDisabled();
+    expect(previewPlanChange).not.toHaveBeenCalled();
+
+    await userEvent.selectOptions(within(dialog).getByLabelText("Move to plan"), "pp2");
+
+    const preview = await within(dialog).findByTestId("carry-preview");
+    // 300 consumed against a new ceiling of 500 leaves 200 — the number the whole dialog exists to show.
+    expect(within(preview).getByText(/1,000\.00/)).toBeInTheDocument();
+    expect(within(preview).getByText(/\b500\.00/)).toBeInTheDocument();
+    expect(within(preview).getByText(/\b200\.00/)).toBeInTheDocument();
+    expect(within(preview).getByText("LAB")).toBeInTheDocument();
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Confirm" })).toBeEnabled());
+  });
+
+  it("names the benefits the new plan would withdraw", async () => {
+    const api = fakeApi({
+      policyPlans: () => Promise.resolve([leanPlan]),
+      previewPlanChange: () =>
+        Promise.resolve(
+          previewFor([
+            { benefitCategoryId: "c2", benefitCategoryCode: "PHARMACY", currentLimitValue: 400, consumedValue: 120 },
+          ]) as never,
+        ),
+    });
+    const dialog = await openChangePlan(api);
+    await userEvent.selectOptions(within(dialog).getByLabelText("Move to plan"), "pp2");
+
+    // The one consequence no client-side estimate could recover: the new plan grants no row for this at all,
+    // so without the server saying so the benefit would simply disappear between screens.
+    const dropped = await within(dialog).findByTestId("carry-dropped");
+    expect(within(dropped).getByText("PHARMACY")).toBeInTheDocument();
+    expect(within(dropped).getByText(/400\.00/)).toBeInTheDocument();
+    expect(within(dropped).getByText(/120\.00/)).toBeInTheDocument();
+  });
+
+  it("refuses to let the change be confirmed when the dry run failed", async () => {
+    const changePlan = vi.fn();
+    const api = fakeApi({
+      policyPlans: () => Promise.resolve([leanPlan]),
+      previewPlanChange: () => Promise.reject(new ApiError("http", "PLAN_NOT_IN_FORCE", 409)),
+      changePlan,
+    });
+    const dialog = await openChangePlan(api);
+    await userEvent.selectOptions(within(dialog).getByLabelText("Move to plan"), "pp2");
+
+    expect(await within(dialog).findByTestId("preview-error")).toBeInTheDocument();
+    expect(within(dialog).queryByTestId("carry-preview")).not.toBeInTheDocument();
+    // The preview runs the same resolution the change does, so a failed preview is a change that would fail.
+    expect(within(dialog).getByRole("button", { name: "Confirm" })).toBeDisabled();
+    expect(changePlan).not.toHaveBeenCalled();
   });
 });
 

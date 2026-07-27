@@ -242,20 +242,62 @@ export interface EnrollmentView {
 
 export interface CarriedLimitView {
   benefitCategoryId: string;
+  benefitCategoryCode?: string | null;
   limitValue?: number | null;
   consumedValue: number;
   remaining?: number | null;
   exhausted: boolean;
 }
 
-/** What a plan change would do to each category's balance. Shown BEFORE confirmation — a member who has
- *  used 300 of 1,000 moving to a 500 plan has 200 left, not 500. */
+/** A benefit the member holds today and would not hold after the change. */
+export interface DroppedCategoryView {
+  benefitCategoryId: string;
+  benefitCategoryCode?: string | null;
+  currentLimitValue?: number | null;
+  consumedValue: number;
+}
+
 export interface PlanChangeView {
   enrollmentId: string;
   policyPlanId: string;
   planVersionId: string;
   consumptionPolicy: string;
   carriedLimits: CarriedLimitView[];
+  droppedCategories: DroppedCategoryView[];
+}
+
+/**
+ * The plan-change DRY RUN. One row per category the new plan covers, carrying BOTH ceilings so the officer can
+ * see what is being moved away from, plus the categories that disappear entirely.
+ *
+ * The client does not compute any of this. Which consumption travels is a server setting (ADR-0020, unsigned),
+ * the new plan's limits are the other half of the sum, and a dropped category produces no row at all — so an
+ * estimate assembled here would disagree with the outcome exactly when somebody is deciding whether to move a
+ * patient mid-treatment.
+ */
+export interface PlanChangePreviewView {
+  enrollmentId: string;
+  fromPolicyPlanId: string;
+  toPolicyPlanId: string;
+  toPlanLabel: string;
+  planVersionId: string;
+  effectiveDate: string;
+  consumptionPolicy: string;
+  rows: CarryPreviewRow[];
+  droppedCategories: DroppedCategoryView[];
+}
+
+export interface CarryPreviewRow {
+  benefitCategoryId: string;
+  benefitCategoryCode?: string | null;
+  /** False when the new plan ADDS this benefit — distinguishes "unbounded today" from "not covered today",
+   *  which a null current limit alone cannot. */
+  held: boolean;
+  currentLimitValue?: number | null;
+  consumedValue: number;
+  newLimitValue?: number | null;
+  remaining?: number | null;
+  exhausted: boolean;
 }
 
 export interface TierCostShare {
@@ -650,6 +692,8 @@ export interface PolicyApi {
   reinstate(enrollmentId: string, effectiveDate: string, reason: string | null, idempotencyKey: string): Promise<EnrollmentView>;
   changeGroup(enrollmentId: string, groupId: string | null, effectiveDate: string, reason: string | null, idempotencyKey: string): Promise<EnrollmentView>;
   changePlan(enrollmentId: string, policyPlanId: string, effectiveDate: string, reason: string, idempotencyKey: string): Promise<PlanChangeView>;
+  /** Dry run. Carries no Idempotency-Key: nothing is written, so there is nothing to double-apply. */
+  previewPlanChange(enrollmentId: string, policyPlanId: string, effectiveDate: string): Promise<PlanChangePreviewView>;
   coverageDetails(enrollmentId: string, asOf?: string): Promise<MemberCoverageDetail>;
 
   // Notes (19.3) — shared by policy and member
@@ -730,6 +774,8 @@ export function createHttpPolicyApi(): PolicyApi {
       postRaw(`/enrollments/${id}/change-group`, { groupId, effectiveDate, reason }, key) as Promise<EnrollmentView>,
     changePlan: (id, policyPlanId, effectiveDate, reason, key) =>
       postRaw(`/enrollments/${id}/change-plan`, { policyPlanId, effectiveDate, reason }, key) as Promise<PlanChangeView>,
+    previewPlanChange: (id, policyPlanId, effectiveDate) =>
+      postRaw(`/enrollments/${id}/change-plan/preview`, { policyPlanId, effectiveDate }) as Promise<PlanChangePreviewView>,
     coverageDetails: (id, asOf) =>
       getRaw(`/enrollments/${id}/coverage-details${q({ asOf })}`) as Promise<MemberCoverageDetail>,
 

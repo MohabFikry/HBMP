@@ -40,6 +40,9 @@ public sealed record ReinstateEnrollment(DateOnly EffectiveDate, string? Reason)
 public sealed record ChangeGroup(Guid? GroupId, DateOnly EffectiveDate, string? Reason);
 public sealed record ChangePlan(Guid PolicyPlanId, DateOnly EffectiveDate, string Reason);
 
+/// <summary>The dry-run's request. No reason — see <c>MembershipCommands.PreviewPlanChangeAsync</c>.</summary>
+public sealed record PreviewPlanChange(Guid PolicyPlanId, DateOnly EffectiveDate);
+
 public sealed record PolicyPlanView(
     Guid PolicyPlanId, Guid PolicyId, Guid PlanVersionId, string PlanLabel,
     DateOnly EffectiveFrom, DateOnly? EffectiveTo, bool IsDefault, string? EligibilityRule,
@@ -101,14 +104,51 @@ public sealed record EnrollmentEventView(
 /// visible rather than discovered at the next visit.</summary>
 public sealed record PlanChangeView(
     Guid EnrollmentId, Guid PolicyPlanId, Guid PlanVersionId, string ConsumptionPolicy,
-    IReadOnlyList<CarriedLimitView> CarriedLimits);
+    IReadOnlyList<CarriedLimitView> CarriedLimits,
+    /// <summary>Categories the member held that the new plan does not cover — reported here as well as on the
+    /// dry-run, so the confirmation and the preview answer the same question.</summary>
+    IReadOnlyList<DroppedCategoryView> DroppedCategories);
 
 public sealed record CarriedLimitView(
-    Guid BenefitCategoryId, decimal? LimitValue, decimal ConsumedValue, decimal? Remaining, bool Exhausted)
+    Guid BenefitCategoryId, string? BenefitCategoryCode,
+    decimal? LimitValue, decimal ConsumedValue, decimal? Remaining, bool Exhausted)
 {
-    public static CarriedLimitView From(CarriedLimit c) =>
-        new(c.BenefitCategoryId, c.LimitValue, c.ConsumedValue, c.Remaining, c.Exhausted);
+    public static CarriedLimitView From(CarriedLimit c, IReadOnlyDictionary<Guid, string>? categoryCodes = null) =>
+        new(c.BenefitCategoryId, Code(categoryCodes, c.BenefitCategoryId),
+            c.LimitValue, c.ConsumedValue, c.Remaining, c.Exhausted);
+
+    /// <summary>Null rather than a guessed label. A benefit category the caller cannot name is a data problem
+    /// they should see, not one an invented string should hide.</summary>
+    internal static string? Code(IReadOnlyDictionary<Guid, string>? codes, Guid id) =>
+        codes is not null && codes.TryGetValue(id, out var code) ? code : null;
 }
+
+/// <summary>A benefit the member holds today and would not hold after the change.</summary>
+public sealed record DroppedCategoryView(
+    Guid BenefitCategoryId, string? BenefitCategoryCode, decimal? CurrentLimitValue, decimal ConsumedValue);
+
+/// <summary>
+/// The plan-change DRY RUN (19.6). Same resolution and same arithmetic as the change itself — this is not a
+/// second implementation that happens to agree.
+///
+/// <para>Each row carries the ceiling in force today beside the one that would replace it, because "how do
+/// remaining limits carry forward" is a comparison and a client holding only one side of it cannot make one.
+/// <see cref="DroppedCategories"/> is the half that no amount of client-side arithmetic could have recovered:
+/// a benefit the new plan does not cover produces no row at all in the outcome.</para>
+/// </summary>
+public sealed record PlanChangePreviewView(
+    Guid EnrollmentId, Guid FromPolicyPlanId, Guid ToPolicyPlanId, string ToPlanLabel, Guid PlanVersionId,
+    DateOnly EffectiveDate, string ConsumptionPolicy,
+    IReadOnlyList<CarryPreviewRow> Rows, IReadOnlyList<DroppedCategoryView> DroppedCategories);
+
+/// <param name="CurrentLimitValue">The ceiling in force today; null = unbounded, and null also when the member
+/// holds no coverage in this category yet (a benefit the new plan ADDS).</param>
+/// <param name="Held">False when the category is new to this member — distinguishes "unbounded today" from
+/// "not covered today", which a null limit alone cannot.</param>
+public sealed record CarryPreviewRow(
+    Guid BenefitCategoryId, string? BenefitCategoryCode, bool Held,
+    decimal? CurrentLimitValue, decimal ConsumedValue,
+    decimal? NewLimitValue, decimal? Remaining, bool Exhausted);
 
 public sealed record RenewalView(
     Guid PolicyId, string PolicyNo, Guid? PreviousPolicyId, int MembersCarried, IReadOnlyList<string> Unmapped);

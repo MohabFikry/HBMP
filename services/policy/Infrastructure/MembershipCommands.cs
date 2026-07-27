@@ -56,7 +56,32 @@ public sealed record EnrollOutcome(Enrollment Enrollment, int CoverageCount, boo
 public sealed record GroupChangeOutcome(Enrollment Enrollment, Guid? PreviousGroupId);
 public sealed record PlanChangeOutcome(
     Enrollment Enrollment, PolicyPlan Plan, Guid PreviousPolicyPlanId, Guid PlanVersionId,
-    string ConsumptionPolicy, IReadOnlyList<CarriedLimit> Carried);
+    string ConsumptionPolicy, IReadOnlyList<CarriedLimit> Carried,
+    /// <summary>Categories the member held that the new plan does not cover. Reported on the outcome as well as
+    /// the preview so the confirmation and the dry-run answer the same question.</summary>
+    IReadOnlyList<Guid> DroppedCategories);
+
+/// <summary>A plan change resolved and validated but not applied — the shared middle step between the dry-run
+/// and the change (19.6). Internal to the membership layer; the HTTP layer sees an outcome or a preview.</summary>
+/// <param name="Existing">The member's current coverages, tracked when the caller intends to close them.</param>
+/// <param name="CurrentLimits">Category → the ceiling in force TODAY, null where unbounded. Carried on the
+/// preview only: an officer comparing plans needs the number being moved away from, and the change response
+/// has never carried it because after the change there is no "before" left to report.</param>
+/// <param name="Consumed">Category → what the member has already used. Read from the phase-18 accumulator and
+/// carried onto the preview so a category the new plan DROPS can still report the usage that is about to stop
+/// being covered — the arithmetic the carried rows do not contain because they only describe the new plan.</param>
+public sealed record PlanChangePlan(
+    Enrollment Enrollment, PolicyPlan Plan, PlanVersion Version, IReadOnlyList<Coverage> Existing,
+    PlanChangeConsumptionPolicy ConsumptionPolicy, IReadOnlyList<CarriedLimit> Carried,
+    IReadOnlyDictionary<Guid, decimal?> CurrentLimits, IReadOnlyDictionary<Guid, decimal> Consumed,
+    IReadOnlyList<Guid> DroppedCategories);
+
+/// <summary>What a plan change WOULD do. Nothing here has been written.</summary>
+public sealed record PlanChangePreview(
+    Guid EnrollmentId, Guid FromPolicyPlanId, PolicyPlan ToPlan, Guid PlanVersionId, DateOnly EffectiveDate,
+    string ConsumptionPolicy, IReadOnlyList<CarriedLimit> Carried,
+    IReadOnlyDictionary<Guid, decimal?> CurrentLimits, IReadOnlyDictionary<Guid, decimal> Consumed,
+    IReadOnlyList<Guid> DroppedCategories);
 
 public sealed class MembershipCommands(
     PolicyDbContext db,
@@ -320,6 +345,111 @@ public sealed class MembershipCommands(
 
     // ---- Change plan -------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// Resolve and validate a plan change WITHOUT applying it, and compute the arithmetic it would produce.
+    ///
+    /// <para>19.6 closed a gap the portal had papered over. The change dialog is required to show the officer
+    /// how remaining limits carry forward BEFORE they confirm, and with no server dry-run the only honest thing
+    /// the client could render was what the member had already consumed plus a sentence describing the rule.
+    /// That is not a preview: the rule is a SETTING (ADR-0020, still unsigned), the new plan's limits are the
+    /// other half of the sum, and a category the new plan does not cover at all disappears silently. Any of the
+    /// three would have made a client-side estimate disagree with the outcome — and it would disagree exactly
+    /// when it matters, at the moment somebody is deciding whether to move a patient mid-treatment.</para>
+    ///
+    /// <para>So the preview and the change run the SAME resolution. Not a second implementation that happens to
+    /// agree today.</para>
+    /// </summary>
+    /// <param name="forUpdate">Track the entities the caller is about to mutate. A dry-run reads no-tracking so
+    /// it cannot leave a half-modified enrolment in the change tracker for some later SaveChanges to pick up.</param>
+    private async Task<MembershipResult<PlanChangePlan>> ResolvePlanChangeAsync(
+        Guid enrollmentId, Guid policyPlanId, DateOnly effectiveDate, bool forUpdate, CancellationToken ct)
+    {
+        var enrollments = forUpdate ? db.Enrollments : db.Enrollments.AsNoTracking();
+        var e = await enrollments.FirstOrDefaultAsync(x => x.EnrollmentId == enrollmentId && !x.IsDeleted, ct);
+        if (e is null) return MembershipResults.Fail<PlanChangePlan>(MembershipFailureKind.NotFound, "NOT_FOUND", "No such membership.");
+        if (e.PolicyPlanId == policyPlanId)
+            return MembershipResults.Fail<PlanChangePlan>(MembershipFailureKind.Conflict,
+                "ALREADY_ON_PLAN", "The member is already on that plan.");
+
+        var plan = await db.PolicyPlans.AsNoTracking()
+            .FirstOrDefaultAsync(pp => pp.PolicyPlanId == policyPlanId && !pp.IsDeleted, ct);
+        if (plan is null)
+            return MembershipResults.Fail<PlanChangePlan>(MembershipFailureKind.Invalid, "UNKNOWN_PLAN", "That plan does not exist.");
+        if (plan.PolicyId != e.PolicyId)
+            return MembershipResults.Fail<PlanChangePlan>(MembershipFailureKind.Invalid,
+                "PLAN_NOT_OF_POLICY", "That plan belongs to a different policy.");
+        if (!plan.Covers(effectiveDate))
+            return MembershipResults.Fail<PlanChangePlan>(MembershipFailureKind.Unprocessable,
+                "PLAN_NOT_IN_FORCE", $"Plan '{plan.PlanLabel}' is not in force on {effectiveDate:yyyy-MM-dd}.");
+
+        var version = await db.PlanVersions.AsNoTracking().Include(v => v.Rules)
+            .FirstOrDefaultAsync(v => v.PlanVersionId == plan.PlanVersionId, ct);
+        if (version is null)
+            return MembershipResults.Fail<PlanChangePlan>(MembershipFailureKind.Conflict,
+                "PLAN_VERSION_MISSING", "The plan's version could not be loaded.");
+
+        // READ ONLY — phase 18 owns consumed_value and remains its only writer; carrying forward changes the
+        // LIMIT, never the accumulator.
+        var coverages = forUpdate ? db.Coverages : db.Coverages.AsNoTracking();
+        var existing = await coverages.Include(c => c.Limits)
+            .Where(c => c.EnrollmentId == enrollmentId && !c.IsDeleted).ToListAsync(ct);
+        // Summed across a category's limits, which is the aggregation the change itself has always applied; the
+        // preview reports the same number rather than a per-limit breakdown the outcome would not match.
+        var consumedByCategory = existing.ToDictionary(
+            c => c.BenefitCategoryId, c => c.Limits.Sum(l => l.ConsumedValue));
+        // The ceiling in force today, computed the way CoverageDetail computes the one the member's coverage
+        // screen displays — accumulating limits only, and null (unbounded) when there are none. The preview is
+        // read beside that screen, so the two must not report different "current" limits for the same category.
+        //
+        // Consumption above deliberately does NOT apply that filter: it mirrors what the change itself carries.
+        // A preview whose limits match the coverage screen but whose consumption does not match the outcome
+        // would be the wrong trade — the number being previewed is the one the change is about to write.
+        var currentLimits = existing.ToDictionary(
+            c => c.BenefitCategoryId,
+            c =>
+            {
+                var accumulating = c.Limits.Where(l => BenefitAccumulation.Accumulates(l.LimitType)).ToList();
+                return accumulating.Count == 0 ? (decimal?)null : accumulating.Sum(l => l.LimitValue);
+            });
+
+        var covered = version.Rules.Where(r => r.IsCovered).ToList();
+        var policyChoice = options.Value.PlanChangeConsumption;
+        var carried = ConsumptionCarryForward.Apply(
+            covered.Select(r => new CategoryCarryForward(
+                r.BenefitCategoryId,
+                consumedByCategory.GetValueOrDefault(r.BenefitCategoryId),
+                r.LimitValue)),
+            policyChoice);
+
+        // The categories the member holds today that the new plan does not cover. These are the rows that would
+        // otherwise vanish without a line in the outcome — the change response only ever listed what the NEW
+        // plan grants, so a benefit being withdrawn was the one consequence the officer could not see.
+        var droppedCategories = existing
+            .Select(c => c.BenefitCategoryId)
+            .Where(id => !covered.Exists(r => r.BenefitCategoryId == id))
+            .Distinct()
+            .ToList();
+
+        return MembershipResults.Success(new PlanChangePlan(
+            e, plan, version, existing, policyChoice, carried, currentLimits, consumedByCategory, droppedCategories));
+    }
+
+    /// <summary>The dry-run. Same resolution, same arithmetic, nothing written.</summary>
+    /// <remarks>Takes no reason: a preview is not a change, and demanding the justification before showing the
+    /// consequence would force an officer to defend a decision they have not been given the means to evaluate.
+    /// The reason stays mandatory on the change itself.</remarks>
+    public async Task<MembershipResult<PlanChangePreview>> PreviewPlanChangeAsync(
+        Guid enrollmentId, Guid policyPlanId, DateOnly effectiveDate, CancellationToken ct = default)
+    {
+        var resolved = await ResolvePlanChangeAsync(enrollmentId, policyPlanId, effectiveDate, forUpdate: false, ct);
+        if (!resolved.Ok) return new MembershipResult<PlanChangePreview>(default, resolved.Error);
+
+        var p = resolved.Value!;
+        return MembershipResults.Success(new PlanChangePreview(
+            p.Enrollment.EnrollmentId, p.Enrollment.PolicyPlanId, p.Plan, p.Version.PlanVersionId, effectiveDate,
+            p.ConsumptionPolicy.ToString(), p.Carried, p.CurrentLimits, p.Consumed, p.DroppedCategories));
+    }
+
     public async Task<MembershipResult<PlanChangeOutcome>> ChangePlanAsync(
         Guid enrollmentId, Guid policyPlanId, DateOnly effectiveDate, string? reason, ActorRef actor,
         CancellationToken ct = default)
@@ -329,43 +459,10 @@ public sealed class MembershipCommands(
             return MembershipResults.Fail<PlanChangeOutcome>(MembershipFailureKind.Invalid,
                 "REASON_REQUIRED", "A reason is required to change a member's plan.");
 
-        var e = await db.Enrollments.FirstOrDefaultAsync(x => x.EnrollmentId == enrollmentId && !x.IsDeleted, ct);
-        if (e is null) return MembershipResults.Fail<PlanChangeOutcome>(MembershipFailureKind.NotFound, "NOT_FOUND", "No such membership.");
-        if (e.PolicyPlanId == policyPlanId)
-            return MembershipResults.Fail<PlanChangeOutcome>(MembershipFailureKind.Conflict,
-                "ALREADY_ON_PLAN", "The member is already on that plan.");
+        var resolved = await ResolvePlanChangeAsync(enrollmentId, policyPlanId, effectiveDate, forUpdate: true, ct);
+        if (!resolved.Ok) return new MembershipResult<PlanChangeOutcome>(default, resolved.Error);
 
-        var plan = await db.PolicyPlans.AsNoTracking()
-            .FirstOrDefaultAsync(pp => pp.PolicyPlanId == policyPlanId && !pp.IsDeleted, ct);
-        if (plan is null)
-            return MembershipResults.Fail<PlanChangeOutcome>(MembershipFailureKind.Invalid, "UNKNOWN_PLAN", "That plan does not exist.");
-        if (plan.PolicyId != e.PolicyId)
-            return MembershipResults.Fail<PlanChangeOutcome>(MembershipFailureKind.Invalid,
-                "PLAN_NOT_OF_POLICY", "That plan belongs to a different policy.");
-        if (!plan.Covers(effectiveDate))
-            return MembershipResults.Fail<PlanChangeOutcome>(MembershipFailureKind.Unprocessable,
-                "PLAN_NOT_IN_FORCE", $"Plan '{plan.PlanLabel}' is not in force on {effectiveDate:yyyy-MM-dd}.");
-
-        var version = await db.PlanVersions.AsNoTracking().Include(v => v.Rules)
-            .FirstOrDefaultAsync(v => v.PlanVersionId == plan.PlanVersionId, ct);
-        if (version is null)
-            return MembershipResults.Fail<PlanChangeOutcome>(MembershipFailureKind.Conflict,
-                "PLAN_VERSION_MISSING", "The plan's version could not be loaded.");
-
-        // READ ONLY — phase 18 owns consumed_value and remains its only writer; carrying forward changes the
-        // LIMIT, never the accumulator.
-        var existing = await db.Coverages.Include(c => c.Limits)
-            .Where(c => c.EnrollmentId == enrollmentId && !c.IsDeleted).ToListAsync(ct);
-        var consumedByCategory = existing.ToDictionary(
-            c => c.BenefitCategoryId, c => c.Limits.Sum(l => l.ConsumedValue));
-
-        var policyChoice = options.Value.PlanChangeConsumption;
-        var carried = ConsumptionCarryForward.Apply(
-            version.Rules.Where(r => r.IsCovered).Select(r => new CategoryCarryForward(
-                r.BenefitCategoryId,
-                consumedByCategory.GetValueOrDefault(r.BenefitCategoryId),
-                r.LimitValue)),
-            policyChoice);
+        var (e, plan, version, existing, policyChoice, carried, _, _, droppedCategories) = resolved.Value!;
 
         var now = clock.GetUtcNow();
         var previousPlanId = e.PolicyPlanId;
@@ -394,6 +491,9 @@ public sealed class MembershipCommands(
             {
                 toPlan = plan.PlanLabel, policyPlanId = plan.PolicyPlanId, fromPolicyPlanId = previousPlanId,
                 planVersionId = version.PlanVersionId, consumptionPolicy = policyChoice.ToString(),
+                // Recorded on the event, not merely returned: a benefit the member stopped holding is the part
+                // of a plan change somebody asks about months later, and the timeline is where they will look.
+                droppedCategories,
             }));
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<PlanChangeOutcome>(default, conflict);
 
@@ -406,7 +506,7 @@ public sealed class MembershipCommands(
         }, ct);
 
         return MembershipResults.Success(new PlanChangeOutcome(
-            e, plan, previousPlanId, version.PlanVersionId, policyChoice.ToString(), carried));
+            e, plan, previousPlanId, version.PlanVersionId, policyChoice.ToString(), carried, droppedCategories));
     }
 
     // ---- Cancel (the rollback verb for a bulk-created enrolment) -----------------------------------------

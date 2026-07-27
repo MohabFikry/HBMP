@@ -199,8 +199,10 @@ public static class PlanEndpoints
         });
     }
 
-    /// <summary>benefit-category id → code, for projecting a rule set the caller can write back (19.6).</summary>
-    private static async Task<IReadOnlyDictionary<Guid, string>> CategoryCodesAsync(
+    /// <summary>benefit-category id → code, for projecting a rule set the caller can write back (19.6).
+    /// Internal because the membership endpoints project the same catalogue onto a plan-change preview — a
+    /// second copy of this query is a second place for the two to start naming categories differently.</summary>
+    internal static async Task<IReadOnlyDictionary<Guid, string>> CategoryCodesAsync(
         PolicyDbContext db, CancellationToken ct) =>
         await db.BenefitCategories.AsNoTracking().ToDictionaryAsync(c => c.BenefitCategoryId, c => c.Code, ct);
 
