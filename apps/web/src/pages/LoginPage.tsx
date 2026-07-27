@@ -10,8 +10,12 @@ import { LIVE } from "../config";
 
 /**
  * Login (US-070): OIDC + MFA. The dev build shows a role picker (standing in for the IdP's account) plus
- * an MFA code step; on success the user lands on THEIR portal's home only. The real build redirects to
- * Keycloak and this screen becomes the post-redirect callback — the surrounding flow is unchanged.
+ * an MFA code step; on success the user lands on THEIR portal's home only. The live build redirects to
+ * identity-service and this screen becomes the post-redirect callback — the surrounding flow is unchanged.
+ *
+ * The issuer is the platform's OWN (ASP.NET Identity + OpenIddict, Phase 17 / ADR-0015). Keycloak was
+ * retired then; this screen still named it in the user-facing copy long afterwards, which told every
+ * operator that their credentials went somewhere they no longer do.
  */
 export function LoginPage() {
   const { login } = useAuth();
@@ -41,12 +45,12 @@ export function LoginPage() {
     }
   }
 
-  // Live mode: identity + MFA are owned by Keycloak. A single button starts the auth-code + PKCE redirect;
-  // on return the role (and thus portal) is derived from the token, not chosen here.
-  async function onKeycloakSignIn() {
+  // Live mode: identity + MFA are owned by the issuer. A single button starts the auth-code + PKCE
+  // redirect; on return the role (and thus portal) is derived from the token, not chosen here.
+  async function onIssuerSignIn() {
     setBusy(true);
     try {
-      await login(role, "000000"); // args ignored by the OIDC client — it redirects to Keycloak
+      await login(role, "000000"); // args ignored by the OIDC client — it redirects to the issuer
     } catch {
       setBusy(false);
       setError(L.mfaError[lang]);
@@ -65,11 +69,11 @@ export function LoginPage() {
         </p>
         {LIVE ? (
           <div style={{ display: "grid", gap: "var(--sp4)", marginTop: "var(--sp5)" }}>
-            <Button type="button" variant="primary" loading={busy} onClick={onKeycloakSignIn}>
+            <Button type="button" variant="primary" loading={busy} onClick={onIssuerSignIn}>
               {L.signIn[lang]}
             </Button>
             <p className="muted" style={{ textAlign: "center", fontSize: "var(--fs-footnote)" }}>
-              {lang === "ar" ? "تسجيل الدخول عبر Keycloak" : "Secure sign-in via Keycloak"}
+              {L.signInVia[lang]}
             </p>
           </div>
         ) : (

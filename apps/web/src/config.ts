@@ -3,10 +3,13 @@ import type { Role } from "./authz/permissions";
 /**
  * Runtime configuration for the SPA. In **fixture mode** (default, and in tests) the app runs on
  * `DevAuthClient` + `DevApiClient` with no backend. In **live mode** (`VITE_LIVE=1`) it authenticates
- * against Keycloak (auth-code + PKCE) and calls the real services through Kong.
+ * against identity-service (auth-code + PKCE, ADR-0015) and calls the real services through Kong.
  *
- * `import.meta.env` is statically replaced by Vite; in vitest it is undefined, so LIVE is false and the
- * unit tests keep using the injected dev clients unchanged.
+ * `import.meta.env` is statically replaced by Vite — including under vitest, which loads .env files through
+ * the same config. It is NOT undefined in tests, as this comment used to claim: a developer with
+ * `VITE_LIVE=1` in their .env.local put the whole unit suite into live mode and the login test failed on a
+ * machine where nothing was wrong. `vite.config.ts` now pins the test env, so the suite keeps the injected
+ * dev clients regardless of how the developer runs the SPA.
  */
 const env = (import.meta as { env?: Record<string, string | undefined> }).env ?? {};
 
@@ -29,20 +32,30 @@ export const OIDC = {
   clientId: env.VITE_OIDC_CLIENT_ID ?? "hbmp-web",
   redirectUri: env.VITE_OIDC_REDIRECT ?? "http://localhost:5173/",
   /**
-   * The full space-delimited scope set the SPA requests. The services enforce a scope PER endpoint
-   * (e.g. `finance:read`); requesting the union lets any role reach its own endpoints while the service
-   * still denies by role. Keycloak only issues the scopes the user's client is permitted.
+   * The full space-delimited scope set the SPA requests: exactly `IdentityContract.InteractiveScopes` plus
+   * `openid` and `offline_access`. The services enforce a scope PER endpoint (e.g. `finance:read`);
+   * requesting the union lets any role reach its own endpoints while the service still denies by role.
+   *
+   * **This list must equal the issuer's interactive set, and `tools/ci/check-spa-scopes.py` fails the build
+   * when it does not.** It is asked for as one union up front, so a drift in EITHER direction breaks
+   * everything rather than one screen: a scope the SPA requests but the client does not hold refuses the
+   * whole login with `ID2051`, and a scope the SPA omits produces a token that authenticates fine and then
+   * 403s on every endpoint guarding it. Both happened — the machine-only ingest/projection scopes were still
+   * being requested after 18.B1 narrowed the public client, and the claims, notes and policy-administration
+   * scopes added since were never added here.
    */
   scope:
-    "openid offline_access admin:read admin:write admin:break-glass " +
-    "callcentre:read callcentre:act callcentre:interaction callcentre:verify claims:read claims:reconcile claims:export " +
-    "appointment:read appointment:write audit:read auth:decide auth:emergency auth:ingest " +
-    "auth:manual auth:override auth:read auth:review case:manage case:read case:write document:write " +
-    "eligibility:check emr:read emr:write encounter:write finance:approve finance:export finance:project " +
-    "finance:read finance:write notification:ingest notification:read orders:consume " +
-    "orders:read orders:write patient:read patient:write pharmacy:dispense pharmacy:read policy:write provider:finance " +
-    "provider:read provider:write reception:search referral:write reporting:export reporting:project " +
-    "reporting:read rx:write",
+    "openid offline_access admin:break-glass admin:read admin:write appointment:read appointment:write " +
+    "audit:read auth:decide auth:emergency auth:manual auth:override auth:read auth:review callcentre:act " +
+    "callcentre:interaction callcentre:read callcentre:verify case:manage case:read case:write " +
+    "claims:adjudicate claims:adjust claims:appeal claims:batch claims:decide claims:export claims:ingest " +
+    "claims:read claims:reconcile claims:reimburse:submit claims:review claims:settle claims:submit " +
+    "document:write eligibility:check emr:read emr:write encounter:write finance:approve finance:export " +
+    "finance:read finance:write note:read note:write notification:read orders:consume orders:read " +
+    "orders:write patient:read patient:write pharmacy:dispense pharmacy:read policy:admin policy:read " +
+    "policy:supervise policy:write provider:admin provider:finance provider:read provider:write " +
+    "reception:read reception:search referral:write reporting:export reporting:read reporting:read-financial " +
+    "rx:read rx:write",
 };
 
 /**

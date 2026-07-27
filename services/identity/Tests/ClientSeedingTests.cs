@@ -65,6 +65,42 @@ public class ClientSeedingTests
         }
     }
 
+    [Fact]
+    public void Both_clients_are_reconciled_on_every_start_not_created_once()
+    {
+        // Phase 19: the WEB client was created and then skipped forever, so every scope a later phase added
+        // to the frozen contract never reached the registered client — by phase 19 it was twenty behind,
+        // and the symptom was a REFUSED LOGIN (ID2051), not a missing feature, because the SPA asks for the
+        // union up front. 18.B1 had already fixed exactly this for the service client and left it here.
+        //
+        // Asserted on the source because the alternative is an OpenIddict store fake that proves only that
+        // the fake was called: what must not come back is the `if (… is null)` guard around the web client.
+        var source = File.ReadAllText(
+            Path.Combine(RepoRoot(), "services", "identity", "Api", "Auth", "ClientSeeder.cs"));
+
+        Matches(source, @"FindByClientIdAsync\(\s*IdentityContract\.WebClientId").Should().Be(1,
+            "the web client is looked up once, to decide between create and update");
+        Matches(source, @"if\s*\(\s*await\s+apps\.FindByClientIdAsync\(\s*IdentityContract\.WebClientId[^)]*\)[^)]*\)\s*is\s+null\s*\)")
+            .Should().Be(0, "a create-only guard is what made the client permanently stale");
+
+        foreach (var client in new[] { "WebClientId", "ServiceClientId" })
+            Matches(source, @"UpdateAsync\(").Should().BeGreaterThanOrEqualTo(1,
+                "{0} must be reconciled, not just created", client);
+    }
+
+    [Fact]
+    public void Every_interactive_scope_reaches_the_SPA_client()
+    {
+        // The seeder grants InteractiveScopes verbatim, so this pins the other half of the contract: the
+        // scopes phase 19 depends on are in the interactive set and therefore in the registration.
+        IdentityContract.InteractiveScopes.Should().Contain(
+            ["policy:read", "policy:admin", "policy:supervise", "provider:admin", "patient:read"],
+            "the policy-administration portal authenticates with the same union every other portal does");
+    }
+
+    private static int Matches(string source, string pattern) =>
+        System.Text.RegularExpressions.Regex.Matches(source, pattern, System.Text.RegularExpressions.RegexOptions.Singleline).Count;
+
     private static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

@@ -98,6 +98,9 @@ export const L = {
   mfaHelp: { en: "Enter the 6-digit code from your authenticator app.", ar: "أدخل الرمز المكوّن من 6 أرقام من تطبيق المصادقة." },
   mfaError: { en: "A valid 6-digit code is required.", ar: "يلزم رمز صحيح من 6 أرقام." },
   signIn: { en: "Sign in", ar: "دخول" },
+  // Names the platform's own issuer. It said "via Keycloak" until phase 19 — long after ADR-0015 retired
+  // Keycloak — so the screen told every operator their credentials were going somewhere they were not.
+  signInVia: { en: "Secure sign-in via Mersal ID", ar: "تسجيل دخول آمن عبر هوية مرسال" },
   // 403 / 404
   forbiddenTitle: { en: "You don't have access to this page", ar: "ليس لديك صلاحية الوصول لهذه الصفحة" },
   forbiddenBody: {

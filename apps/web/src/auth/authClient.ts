@@ -1,7 +1,7 @@
 import { permissionsForRole, type Permission, type Role } from "../authz/permissions";
 
 /**
- * Authenticated session. In production `permissions` are derived from the Keycloak token + admin-service
+ * Authenticated session. In production `permissions` are derived from the issuer's token + admin-service
  * effective roles; here the dev client seeds them from the role. `mfaSatisfied` reflects the step-up.
  */
 export interface Session {
@@ -19,12 +19,12 @@ export interface Session {
 }
 
 /**
- * AuthClient abstraction. The real implementation wraps an OIDC (Keycloak) client — authorization-code +
+ * AuthClient abstraction. The real implementation wraps an OIDC (identity-service) client — authorization-code +
  * PKCE, MFA via the IdP, silent renew. The dev client below simulates the same shape so the portal shell,
  * routing, and session-timeout logic are identical regardless of backend availability.
  */
 export interface AuthClient {
-  /** Begin login. Dev: resolves after the caller supplies role + MFA. Prod: redirects to Keycloak. */
+  /** Begin login. Dev: resolves after the caller supplies role + MFA. Prod: redirects to the issuer. */
   login(role: Role, mfaCode: string): Promise<Session>;
   logout(): Promise<void>;
   /** Restore a persisted session on reload (returns null if none/expired). */
@@ -61,7 +61,7 @@ const DISPLAY_NAMES: Record<Role, string> = {
 };
 
 /**
- * Dev auth client — no live Keycloak required. Accepts any 6-digit MFA code (the *presence* of a code
+ * Dev auth client — no live issuer required. Accepts any 6-digit MFA code (the *presence* of a code
  * models the step-up), persists the session to localStorage, and enforces the same expiry the real token
  * would carry. Swap for the OIDC client without touching AuthProvider or the router.
  */

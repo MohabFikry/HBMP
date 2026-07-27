@@ -98,6 +98,12 @@ jobs:
       - name: Kong route-coverage gate (every served public prefix has a route)
         run: python3 tools/ci/check-kong-route-coverage.py
 
+      # Phase 19: the SPA's scope literal is a hand-copy of IdentityContract.InteractiveScopes and had
+      # drifted nineteen scopes behind it. Because the SPA asks for the union in one request, that is not a
+      # degraded screen — it is a refused login (ID2051) or a token that 403s everywhere.
+      - name: SPA scope gate (requested scopes match the issuer's interactive set)
+        run: python3 tools/ci/check-spa-scopes.py
+
       - name: Integration DPIA / data-sharing gate (13.3)
         run: |
           python3 tools/ci/check-integration-dpia.py --selftest

@@ -28,35 +28,54 @@ public sealed class ClientSeeder(IServiceProvider services, IConfiguration confi
             }, ct);
         }
 
+        await SeedWebClientAsync(apps, ct);
+        await SeedServiceClientAsync(apps, ct);
+    }
+
+    /// <summary>
+    /// The SPA's public PKCE client.
+    ///
+    /// <para><b>RECONCILED on every start, not created once.</b> It used to be skipped whenever the client
+    /// already existed, which meant every scope a later phase added to the frozen contract never reached the
+    /// registered client: the row kept whatever the contract said on the day the database was first seeded.
+    /// By phase 19 it was twenty scopes behind — <c>patient:read</c>, all ten claims scopes, both note
+    /// scopes, and the whole policy-administration set. The symptom is not a missing feature but a REFUSED
+    /// LOGIN (<c>ID2051</c>, "not allowed to use the specified scope"), because the SPA asks for the union up
+    /// front; and any scope that slipped past that would have become a 403 on a screen that had rendered.</para>
+    ///
+    /// <para>This is the same defect 18.B1 closed for the service client (see
+    /// <see cref="SeedServiceClientAsync"/>, note 3) — fixed there, left in place here.</para>
+    /// </summary>
+    private async Task SeedWebClientAsync(IOpenIddictApplicationManager apps, CancellationToken ct)
+    {
         var webRedirect = config["Issuer:WebRedirectUri"] ?? "http://localhost:5173/";
         var postLogout = config["Issuer:WebPostLogoutUri"] ?? "http://localhost:5173/";
-        if (await apps.FindByClientIdAsync(IdentityContract.WebClientId, ct) is null)
+        var web = new OpenIddictApplicationDescriptor
         {
-            var web = new OpenIddictApplicationDescriptor
+            ClientId = IdentityContract.WebClientId,
+            ClientType = ClientTypes.Public,
+            ConsentType = ConsentTypes.Implicit,
+            DisplayName = "Mersal Web (SPA)",
+            RedirectUris = { new Uri(webRedirect) },
+            PostLogoutRedirectUris = { new Uri(postLogout) },
+            Permissions =
             {
-                ClientId = IdentityContract.WebClientId,
-                ClientType = ClientTypes.Public,
-                ConsentType = ConsentTypes.Implicit,
-                DisplayName = "Mersal Web (SPA)",
-                RedirectUris = { new Uri(webRedirect) },
-                PostLogoutRedirectUris = { new Uri(postLogout) },
-                Permissions =
-                {
-                    Permissions.Endpoints.Authorization, Permissions.Endpoints.Token,
-                    Permissions.Endpoints.Logout,
-                    Permissions.GrantTypes.AuthorizationCode, Permissions.GrantTypes.RefreshToken,
-                    Permissions.ResponseTypes.Code,
-                    Permissions.Scopes.Profile, Permissions.Scopes.Email,
-                },
-                Requirements = { Requirements.Features.ProofKeyForCodeExchange },
-            };
-            // 18.B1: the SPA is a PUBLIC client (no secret, anyone can impersonate it), so it may only ever
-            // request the INTERACTIVE scope set — never the machine ingest/projection scopes.
-            foreach (var s in IdentityContract.InteractiveScopes) web.Permissions.Add(Permissions.Prefixes.Scope + s);
-            await apps.CreateAsync(web, ct);
-        }
+                Permissions.Endpoints.Authorization, Permissions.Endpoints.Token,
+                Permissions.Endpoints.Logout,
+                Permissions.GrantTypes.AuthorizationCode, Permissions.GrantTypes.RefreshToken,
+                Permissions.ResponseTypes.Code,
+                Permissions.Scopes.Profile, Permissions.Scopes.Email,
+            },
+            Requirements = { Requirements.Features.ProofKeyForCodeExchange },
+        };
+        // 18.B1: the SPA is a PUBLIC client (no secret, anyone can impersonate it), so it may only ever
+        // request the INTERACTIVE scope set — never the machine ingest/projection scopes. Reconciling widens
+        // AND narrows: a scope removed from the contract is removed from the client on the next restart.
+        foreach (var s in IdentityContract.InteractiveScopes) web.Permissions.Add(Permissions.Prefixes.Scope + s);
 
-        await SeedServiceClientAsync(apps, ct);
+        var existing = await apps.FindByClientIdAsync(IdentityContract.WebClientId, ct);
+        if (existing is null) await apps.CreateAsync(web, ct);
+        else await apps.UpdateAsync(existing, web, ct);
     }
 
     /// <summary>

@@ -5,7 +5,7 @@ import { DevAuthClient, SESSION_TTL, type AuthClient, type Session } from "./aut
 import { OidcAuthClient } from "./oidcClient";
 import { LIVE } from "../config";
 
-/** The default auth client: real OIDC (Keycloak) in live mode, else the no-backend dev stub. */
+/** The default auth client: real OIDC (identity-service) in live mode, else the no-backend dev stub. */
 const defaultAuthClient: AuthClient = LIVE ? new OidcAuthClient() : new DevAuthClient();
 
 /** Idle warning fires this long before the session expires. */
