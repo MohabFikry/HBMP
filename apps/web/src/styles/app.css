@@ -864,3 +864,43 @@ nav.mrs-rail {
   color: var(--text-2);
   font-size: 0.78rem;
 }
+
+/* ---- app-bar search affordance (opens the command palette) --------------------------------------
+   Styled as a field rather than a button because that is what people look for, but it IS a button:
+   clicking hands you to the palette instead of swallowing keystrokes with nowhere to send them. */
+.app-searchbtn {
+  inline-size: 100%;
+  min-block-size: 44px;                 /* the project's own target bar (21-accessibility) */
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+  padding: 0 var(--sp3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: inherit;
+  text-align: start;                    /* logical — mirrors in RTL without a second rule */
+  cursor: pointer;
+}
+.app-searchbtn:hover { color: var(--text-1); }
+.app-searchbtn:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.app-searchbtn-text { flex: 1; }
+.app-searchbtn-kbd {
+  font-size: 0.72rem;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-2);
+}
+/* Below 760px the app bar is tight and the label + shortcut do not fit; the icon alone still opens the
+   palette, and the button keeps its accessible name from the visually-hidden text. */
+@media (max-width: 760px) {
+  .app-search { max-width: 3rem; }
+  .app-searchbtn-text {
+    position: absolute;
+    inline-size: 1px; block-size: 1px;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+  .app-searchbtn-kbd { display: none; }
+}
