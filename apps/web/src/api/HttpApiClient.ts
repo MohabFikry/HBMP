@@ -66,9 +66,13 @@ import {
   type PlaceOrderRequest,
   type PrescribeRequest,
   type VitalInput,
+  zIdentityUser,
+  zRoleScopeGrant,
+  zReportAccessRequestRow,
 } from "@mersal/contracts";
 import type { ApiClient } from "./client";
-import { getRaw, postRaw, postForm, parseOr } from "./http";
+import { getRaw, postRaw, postForm, parseOr, getAbsolute } from "./http";
+import { GATEWAY_BASE } from "../config";
 
 /* This client is a deliberate adapter between loosely-typed service JSON and the strict portal contracts;
    it maps `any` service payloads then zod-validates the mapping, so `any` is intentional file-wide. */
@@ -528,6 +532,40 @@ export class HttpApiClient implements ApiClient {
     })) as any;
     return parseOr(zReportAccessRequestResult, { requestId: r?.requestId ?? r?.id ?? "unknown", status: r?.status ?? "Pending" });
   }
+  /**
+   * 18.C2 (audit R2 W4) — the approver inbox. Clinical-free by construction: the row carries who asked, for
+   * which line and why, and a MASKED beneficiary token. An approver decides whether the requester may see the
+   * result; showing them the result to make that decision would disclose the thing being gated.
+   */
+  async reportAccessInbox() {
+    const r = (await getRaw(`/report-access-requests`)) as any[];
+    return (Array.isArray(r) ? r : []).map((q: any) =>
+      parseOr(zReportAccessRequestRow, {
+        requestId: q.requestId,
+        orderId: q.orderId,
+        orderLineId: q.orderLineId,
+        beneficiaryToken: `•••${String(q.beneficiaryId ?? "").replace(/-/g, "").slice(-4)}`,
+        requestedBy: String(q.requestedBy ?? ""),
+        requestedForRole: q.requestedForRole ?? undefined,
+        purposeCode: String(q.purposeCode ?? ""),
+        justification: String(q.justification ?? ""),
+        requestedTtlHours: typeof q.requestedTtlHours === "number" ? q.requestedTtlHours : undefined,
+        status: q.status === "UnderReview"
+          ? { kind: "info" as const, label: loc("Under review") }
+          : { kind: "warn" as const, label: loc("Awaiting decision") },
+        createdAt: q.createdAt ?? new Date().toISOString(),
+      }),
+    );
+  }
+
+  async decideReportAccess(requestId: string, decision: "approve" | "deny" | "requestinfo", reason: string, ttlHours?: number) {
+    await postRaw(`/report-access-requests/${encodeURIComponent(requestId)}/decision`, { decision, reason, ttlHours });
+  }
+
+  async revokeReportAccessGrant(grantId: string) {
+    await postRaw(`/report-access-grants/${encodeURIComponent(grantId)}/revoke`, {});
+  }
+
   async prescriptionsMine(status?: string) {
     const r = (await getRaw(`/prescriptions/mine${status ? `?status=${encodeURIComponent(status)}` : ""}`)) as any[];
     return (r ?? []).map((p: any) =>
@@ -1173,6 +1211,43 @@ export class HttpApiClient implements ApiClient {
       }),
     );
   }
+  /**
+   * 18.C2 (audit R2 W5) — users from the IDENTITY STORE. The console read admin-service's access-matrix
+   * PROJECTION, which knows role bindings and nothing about the account, so it could not show whether an
+   * account was active or carried a second factor — the control gating every admin scope on the platform.
+   * `/identity` sits outside `/api/v1` (it is the issuer's own surface), hence the absolute gateway path.
+   */
+  async identityUsers(query?: string) {
+    const url = `${GATEWAY_BASE}/identity/admin/users${query ? `?query=${encodeURIComponent(query)}` : ""}`;
+    const r = (await getAbsolute(url)) as any[];
+    return (Array.isArray(r) ? r : []).map((u: any) =>
+      parseOr(zIdentityUser, {
+        id: String(u.id),
+        username: String(u.username ?? ""),
+        displayName: String(u.displayName ?? u.username ?? ""),
+        tenantId: u.tenantId ? `•••${String(u.tenantId).replace(/-/g, "").slice(-4)}` : undefined,
+        isActive: u.isActive !== false,
+        twoFactorEnabled: u.twoFactorEnabled === true,
+        roles: Array.isArray(u.roles) ? u.roles.map(String) : [],
+      }),
+    );
+  }
+
+  /** 18.C2 (W5) — the live role→scope matrix, read from the issuer's own catalog rather than inferred. */
+  async identityRoleScopes() {
+    const roles = (await getAbsolute(`${GATEWAY_BASE}/identity/roles`)) as any[];
+    const names = (Array.isArray(roles) ? roles : []).map((r: any) => String(r.name));
+    // One call per role: /effective-scopes is the exact seam the issuer uses to build the `scope` claim, so
+    // what the screen shows is what a token would actually carry — not a second copy of the mapping.
+    const rows = await Promise.all(
+      names.map(async (role) => {
+        const scopes = (await getAbsolute(`${GATEWAY_BASE}/identity/effective-scopes?role=${encodeURIComponent(role)}`)) as string[];
+        return parseOr(zRoleScopeGrant, { role, scopes: Array.isArray(scopes) ? scopes.map(String) : [] });
+      }),
+    );
+    return rows;
+  }
+
   async adminTenants() {
     const r = (await getRaw(`/admin/tenants`)) as any[];
     return (Array.isArray(r) ? r : []).map((tn: any) =>

@@ -18,6 +18,8 @@ const BeneficiaryRegister = lazy(() => import("./BeneficiaryPortal").then((m) =>
 const BeneficiaryManage = lazy(() => import("./BeneficiaryPortal").then((m) => ({ default: m.BeneficiaryManage })));
 const BeneficiaryStatus = lazy(() => import("./BeneficiaryPortal").then((m) => ({ default: m.BeneficiaryStatus })));
 const DoctorEncounter = lazy(() => import("./DoctorEncounter").then((m) => ({ default: m.DoctorEncounter })));
+// 18.C2 (W4) — the sensitive-result approver inbox, shared by the Doctor and Medical Director portals.
+const ReportAccessInbox = lazy(() => import("./ReportAccessInbox").then((m) => ({ default: m.ReportAccessInbox })));
 // Clinician worklists (Phase 4) — my patients / orders / prescriptions / results inbox share one chunk.
 const DoctorPatients = lazy(() => import("./ClinicianWorklists").then((m) => ({ default: m.DoctorPatients })));
 const DoctorOrders = lazy(() => import("./ClinicianWorklists").then((m) => ({ default: m.DoctorOrders })));
@@ -108,6 +110,11 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/approvals/manual": () => <ApprovalsManual />,
   "/approvals/emergency": () => <ApprovalsEmergency />,
   "/approvals/sla": () => <ApprovalsSla />,
+  // 18.C2 (W4) — result-access approvals. Reachable from BOTH portals because 37 §6 routes a request to the
+  // authoring doctor AND allows a Medical Director to decide when that doctor is unavailable — which is the
+  // case the escalation path exists for, so it cannot live only under /clinician.
+  "/clinician/result-access": () => <ReportAccessInbox />,
+  "/director/result-access": () => <ReportAccessInbox />,
   // 6. Executive dashboard (US-073) — director scope.
   "/director/dashboards": () => <ExecutiveDashboard scope="director" />,
   "/director/oversight": () => <DirectorReport section="oversight" />,

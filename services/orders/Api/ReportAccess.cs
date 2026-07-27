@@ -17,6 +17,47 @@ public static class ReportAccessEndpoints
     {
         var v1 = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("orders:read"));
 
+        // 18.C2 (audit R2 W4) — THE APPROVER INBOX. Requests could be raised and decided by id, and there was
+        // no way to LIST them: an approver had no way to discover a request existed. The sensitive-result gate
+        // was therefore permanent-deny in practice — a clinician asks for a colleague's restricted result and
+        // the request sits in a table nobody queries until it expires. Design 37 §6 depends on this list.
+        v1.MapGet("/report-access-requests", async (string? status, OrdersDbContext db, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        {
+            var p = me.Principal;
+            if (p is null) return Results.Unauthorized();
+
+            var q = db.ReportAccessRequests.AsNoTracking().Where(r => r.TenantId == p.TenantId);
+            // Default view: what needs a decision. An approver opening the inbox wants the work, not history.
+            if (string.IsNullOrWhiteSpace(status))
+                q = q.Where(r => r.Status == ReportAccessStatus.Requested || r.Status == ReportAccessStatus.UnderReview);
+            else if (Enum.TryParse<ReportAccessStatus>(status, ignoreCase: true, out var s))
+                q = q.Where(r => r.Status == s);
+            else
+                return Results.Problem(statusCode: 400, title: "unknown-status", detail: $"unknown status '{status}'");
+
+            // A Medical Director sees every pending request (37 §6: the escalation path when the authoring
+            // doctor is unavailable); anyone else sees only what is routed to them as the ordering provider.
+            // Deliberately CLINICAL-FREE: the inbox shows who asked, for which line, why — never the result.
+            var isDirector = p.IsInRole("medical_director");
+            var rows = await q.OrderBy(r => r.CreatedAt).Take(200).ToListAsync(ct);
+            if (!isDirector)
+            {
+                var mine = await db.Orders.AsNoTracking()
+                    .Where(o => o.OrderingProviderId.ToString() == p.Subject)
+                    .Select(o => o.OrderId).ToListAsync(ct);
+                var mineSet = mine.ToHashSet();
+                rows = [.. rows.Where(r => mineSet.Contains(r.OrderId))];
+            }
+
+            return Results.Ok(rows.Select(r => new
+            {
+                r.RequestId, r.OrderId, r.OrderLineId, r.BeneficiaryId,
+                requestedBy = r.RequestedBy, requestedForRole = r.RequestedForRole,
+                purposeCode = r.PurposeCode.ToString(), r.Justification, r.RequestedTtlHours,
+                status = r.Status.ToString(), r.CreatedAt,
+            }));
+        });
+
         // Raise a request (purpose + justification REQUIRED → else 422). Routes to the authoring doctor.
         v1.MapPost("/report-access-requests", async (RaiseAccessRequest req, OrdersDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
@@ -196,7 +237,10 @@ public static class ReportAccessEndpoints
 
     /// <summary>18.A4 — carry an Approved request to the terminal state its grant just reached. Silent
     /// no-op if the request already moved (a revoke racing the expiry sweep must not throw).</summary>
-    private static async Task MoveRequestWithGrantAsync(OrdersDbContext db, Guid requestId, ReportAccessStatus to, CancellationToken ct)
+    /// <summary>Carry the REQUEST to the same terminal state as its grant, so the two tables cannot disagree
+    /// about whether access is live (18.A4). Internal rather than private: the expiry sweeper (18.C2) applies
+    /// the identical transition on its timer and must not reimplement it.</summary>
+    internal static async Task MoveRequestWithGrantAsync(OrdersDbContext db, Guid requestId, ReportAccessStatus to, CancellationToken ct)
     {
         var r = await db.ReportAccessRequests.FirstOrDefaultAsync(x => x.RequestId == requestId, ct);
         if (r is not null && ReportAccessWorkflow.CanTransition(r.Status, to)) r.Status = to;

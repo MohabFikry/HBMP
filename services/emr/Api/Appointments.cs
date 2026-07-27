@@ -33,10 +33,23 @@ public static class AppointmentsModule
 
         // POST /appointment-slots — materialize bookable slots from a recurring availability rule.
         write.MapPost("/appointment-slots", async (
-            CreateSlotsRequest req, EmrDbContext db, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+            CreateSlotsRequest req, EmrDbContext db, IPractitionerBranchDirectory practitioners,
+            IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
             if (req.SlotMinutes <= 0 || req.EndTime <= req.StartTime || req.ToDate < req.FromDate)
                 return Results.Problem(statusCode: 400, title: "Invalid availability window", type: "urn:hbmp:invalid-availability");
+
+            // 18.C2 (W7 / FR-BRN-026) — the FIRST of the two gates, and the one that matters more: refusing
+            // here means the bad slots are never materialized, so no patient can be booked into them. Catching
+            // it only at booking time would leave a doctor's calendar full of appointments at a branch they
+            // do not work at, each needing to be cancelled and the patient rung back.
+            if (req.DoctorId is { } doctorId && req.BranchId is { } branchId)
+            {
+                var serves = await practitioners.ServesBranchAsync(doctorId, branchId, ct);
+                if (PractitionerBranchRules.Refuse(serves, doctorId, branchId) is { } reason)
+                    return Results.Problem(statusCode: 422, title: "practitioner-not-at-branch",
+                        type: PractitionerBranchRules.ProblemType, detail: reason);
+            }
 
             var availability = new ProviderAvailability
             {
@@ -90,8 +103,8 @@ public static class AppointmentsModule
         // POST /appointments — concurrency-safe booking (US-020).
         write.MapPost("/appointments", async (
             BookAppointmentRequest req, HttpRequest http, EmrDbContext db, AppointmentBookingService booking,
-            ReminderDispatcher reminders, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me,
-            TimeProvider clock, CancellationToken ct) =>
+            ReminderDispatcher reminders, IPractitionerBranchDirectory practitioners, IAuditClient audit,
+            IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
             var idem = http.Headers["Idempotency-Key"].ToString();
             if (string.IsNullOrWhiteSpace(idem))
@@ -102,6 +115,17 @@ public static class AppointmentsModule
                 return Results.Problem(statusCode: 400, type: "urn:hbmp:missing-linkage",
                     title: type == AppointmentType.Referral ? "Referral bookings require a referralRef (REF-*)"
                                                             : "Follow-up bookings require an originEncounterId");
+
+            // 18.C2 (W7 / FR-BRN-027) — the second gate. Availability is not the only route to an appointment:
+            // a walk-in is slotless, and a booking may name a doctor directly. Both bypass the slot table
+            // entirely, so the check has to be repeated here rather than assumed from 026.
+            if (req.DoctorId is { } bookDoctorId && req.BranchId is { } bookBranchId)
+            {
+                var serves = await practitioners.ServesBranchAsync(bookDoctorId, bookBranchId, ct);
+                if (PractitionerBranchRules.Refuse(serves, bookDoctorId, bookBranchId) is { } reason)
+                    return Results.Problem(statusCode: 422, title: "practitioner-not-at-branch",
+                        type: PractitionerBranchRules.ProblemType, detail: reason);
+            }
 
             var actor = me.Principal?.Subject;
             var now = clock.GetUtcNow();

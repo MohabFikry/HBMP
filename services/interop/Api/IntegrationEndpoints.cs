@@ -16,7 +16,12 @@ public static class IntegrationEndpoints
 {
     public static void MapIntegration(this WebApplication app)
     {
-        var g = app.MapGroup("/interop/integration");
+        // 18.B3/18.C2 (audit R2 S3) — the partner registry decides which external organisations may exchange
+        // data with the platform and records the DPIA sign-off that unlocks them. It had no framework
+        // authorization at all; InteropGate in each handler was the only control. admin:read reaches the
+        // group, and the gate still decides PartnerRead vs PartnerManage per action.
+        var g = app.MapGroup("/interop/integration")
+            .RequireAuthorization(Mersal.Auth.Authorization.HbmpPolicies.Scope("admin:read"));
 
         // List partners + their DPIA/enablement state (admin read).
         g.MapGet("/partners", async (InteropGate gate, IExternalPartnerRegistry registry, CancellationToken ct) =>

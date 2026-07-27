@@ -66,7 +66,7 @@ export function parseOr<T>(schema: z.ZodType<T>, data: unknown): T {
   return r.data;
 }
 
-async function request(path: string, init: RequestInit): Promise<unknown> {
+async function request(path: string, init: RequestInit, absolute = false): Promise<unknown> {
   let res: Response;
   const token = getToken();
   const auth: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
@@ -79,7 +79,7 @@ async function request(path: string, init: RequestInit): Promise<unknown> {
     ? { Accept: "application/json", ...auth, ...branch }
     : { "Content-Type": "application/json", Accept: "application/json", ...auth, ...branch };
   try {
-    res = await fetch(`${API_BASE}${path}`, {
+    res = await fetch(absolute ? path : `${API_BASE}${path}`, {
       ...init,
       headers: { ...baseHeaders, ...(init.headers ?? {}) },
     });
@@ -96,6 +96,20 @@ async function request(path: string, init: RequestInit): Promise<unknown> {
 
 export function getJson<T>(path: string, schema: z.ZodType<T>): Promise<T> {
   return request(path, { method: "GET" }).then((d) => parseOr(schema, d));
+}
+
+/**
+ * 18.C2 (W5) — a GET against an ABSOLUTE gateway path, i.e. one outside the `/api/v1` prefix baked into
+ * API_BASE. Only `/identity/*` needs this today: the issuer's own admin surface is not a versioned domain
+ * API. Identical auth, branch-header and RFC-7807 handling — it differs only in how the URL is built, so a
+ * caller cannot accidentally bypass the error contract by reaching for `fetch`.
+ */
+export function getAbsolute(url: string): Promise<unknown> {
+  return request(url, { method: "GET" }, /* absolute */ true);
+}
+
+export function postAbsolute(url: string, body: unknown): Promise<unknown> {
+  return request(url, { method: "POST", body: JSON.stringify(body) }, true);
 }
 
 /**

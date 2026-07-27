@@ -22,9 +22,15 @@ public static class FhirEndpoints
 {
     public static void MapFhir(this WebApplication app)
     {
-        var g = app.MapGroup("/fhir/r4");
+        // 18.B3/18.C2 (audit R2 S3) — the same un-gated group pattern the audit found in admin was replicated
+        // here. Authentication is required at the framework for every FHIR interaction; the SMART scope and
+        // the per-resource rule are decided by InteropGate, and the OWNING service re-authorizes under the
+        // caller's own token (the façade is never an authorization bypass, ADR-0016).
+        var g = app.MapGroup("/fhir/r4").RequireAuthorization();
 
-        // Capability statement — public metadata (advertises exactly the implemented interactions + SMART scopes).
+        // Capability statement — public metadata by FHIR convention: a client fetches it BEFORE it holds a
+        // token, to discover the supported interactions and where to authenticate. It advertises capabilities
+        // and nothing else — no patient data, no partner configuration.
         g.MapGet("/metadata", (HttpContext http, IBusinessCalendar calendar) =>
             FhirResults.Ok(FhirCapability.Statement(BaseUrl(http), calendar))).AllowAnonymous();
 

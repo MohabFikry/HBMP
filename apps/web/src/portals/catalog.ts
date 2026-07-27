@@ -76,6 +76,9 @@ export const PORTALS: PortalDef[] = [
       { key: "orders", path: "orders", label: { en: "Orders", ar: "الطلبات" }, group: G.clinical, icon: "flask", permission: "orders.place" },
       { key: "prescriptions", path: "prescriptions", label: { en: "Prescriptions", ar: "الوصفات" }, group: G.clinical, icon: "pill", permission: "prescriptions.write" },
       { key: "results", path: "results", label: { en: "Results inbox", ar: "صندوق النتائج" }, group: G.clinical, icon: "chart", permission: "results.inbox" },
+      // 18.C2 (W4): requests to release a sensitive result the doctor authored. Same permission as the
+      // results inbox — deciding who may see your result is part of owning it (37 §6).
+      { key: "result-access", path: "result-access", label: { en: "Result access requests", ar: "طلبات الوصول للنتائج" }, group: G.clinical, icon: "clock", permission: "results.inbox" },
     ],
   },
   {
@@ -244,6 +247,9 @@ export const PORTALS: PortalDef[] = [
       { key: "oversight", path: "oversight", label: { en: "Approval oversight / TAT", ar: "الإشراف على الموافقات" }, group: G.oversight, icon: "check2", permission: "director.oversight" },
       { key: "quality", path: "quality", label: { en: "Quality & outcomes", ar: "الجودة والنتائج" }, group: G.oversight, icon: "doc", permission: "director.quality" },
       { key: "escalations", path: "escalations", label: { en: "Escalations", ar: "التصعيدات" }, group: G.oversight, icon: "triangle", permission: "director.escalations" },
+      // 18.C2 (W4): the ESCALATION path for sensitive-result release — 37 §6 lets the Medical Director decide
+      // when the authoring doctor is unavailable, which is the case the whole mechanism exists to cover.
+      { key: "result-access", path: "result-access", label: { en: "Result access requests", ar: "طلبات الوصول للنتائج" }, group: G.oversight, icon: "clock", permission: "director.escalations" },
     ],
   },
 ];

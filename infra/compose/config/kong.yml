@@ -195,10 +195,37 @@ services:
         paths: ["/api/v1/call-interactions", "/api/v1/call-centre"]
         strip_path: false
 
+  # --- interop-service: the FHIR R4 façade (13.1) + partner integration registry (13.2). ---
+  # 18.C2 (audit R2 W3): phase 13 had no route at all. It serves /fhir rather than /api/v1, which is also why
+  # the API coverage guard never flagged it — the guard only inspects /api/v1 paths.
+  - name: interop-service
+    url: http://interop-service:8080
+    routes:
+      # The CapabilityStatement is public by FHIR convention: a client fetches it BEFORE it has a token, to
+      # discover which interactions and SMART scopes this server supports and where to authenticate. Gating it
+      # behind the edge jwt plugin would make the façade undiscoverable, so this one path is exempt — and only
+      # this one. It advertises capabilities and contains no patient data.
+      - name: interop-metadata-route
+        paths: ["~/fhir/r4/metadata$"]
+        regex_priority: 300
+        strip_path: false
+        plugins:
+          - name: jwt
+            enabled: false
+      - name: interop-routes
+        paths: ["/fhir", "/interop"]
+        strip_path: false
+
   # --- identity-service: the in-app OIDC issuer (Phase 17). OAuth/OIDC endpoints + discovery/JWKS. ---
   - name: identity-service
     url: http://identity-service:8080
     routes:
+      # 18.C2 (audit R2 W5): /identity was unroutable, so the in-app user/role/scope admin that closes C3
+      # could not be reached from the SPA at all and the admin console went on editing the legacy
+      # admin-service projection instead of the real identity store.
+      - name: identity-admin-routes
+        paths: ["/identity"]
+        strip_path: false
       - name: identity-oidc-routes
         paths: ["/connect", "/.well-known"]
         strip_path: false

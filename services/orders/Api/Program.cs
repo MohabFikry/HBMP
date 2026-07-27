@@ -53,6 +53,11 @@ builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("orders-
 // Accept enum names (e.g. "Lab", "LOINC") in request bodies — matching the string enums we already emit on
 // responses. JsonStringEnumConverter still accepts numeric values too, so this is backward compatible.
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+// 18.C2 (audit R2 W4) — the report-access expiry sweep on a timer. The endpoint existed and nothing called
+// it, so grants stayed Active for ever: the read path filtered them out, but the grant list shown to a
+// patient or the DPO said people still held access they had lost, and the expiry was never audited.
+builder.Services.AddHostedService<ReportAccessExpirySweeper>();
+
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

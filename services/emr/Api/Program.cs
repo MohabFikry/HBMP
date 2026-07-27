@@ -53,6 +53,13 @@ builder.Services.AddScoped<BranchScopeState>();
 builder.Services.AddHttpClient<IBranchDirectory, HttpBranchDirectory>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Admin:BaseUrl"] ?? "http://admin-service:8080"));
 
+// 18.C2 (audit R2 W7 / FR-BRN-026-027) — doctor↔branch validation. provider-service has exposed the
+// serves-branch probe since 14.5 and emr never called it, so a doctor could hold availability at a branch
+// they are not assigned to and a patient could be booked into it. Registered as a typed client so the
+// booking rules stay testable against the seam without a live sibling.
+builder.Services.AddHttpClient<IPractitionerBranchDirectory, HttpPractitionerBranchDirectory>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Provider:BaseUrl"] ?? "http://provider-service:8080"));
+
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("emr-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
     .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());

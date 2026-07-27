@@ -47,12 +47,12 @@ Mark `✅ YYYY-MM-DD` per id here **and** on the finding row in `AUDIT-R2-E2E.md
 |---|---|---|---|
 | 18.C1 | W1 | Live sessions expire every 5 minutes (no refresh exchange) | ✅ 2026-07-27 (refresh + rotation + single-flight + silent renew) |
 | 18.C1 | W2 | Branch scoping inert end-to-end (no `X-Active-Branch`, Kong CORS) | ✅ 2026-07-27 (header on every request, Kong CORS both lists, server echo) |
-| 18.C2 | W3 | interop/FHIR has no compose entry and no Kong route | ☐ |
-| 18.C2 | W4 | Report-access grant/decision has no UI → sensitive gate is permanent-deny | ☐ |
-| 18.C2 | W5 | identity admin has no Kong route; console edits the legacy projection | ☐ |
-| 18.C2 | W6 | SPA commented out of compose | ☐ |
-| 18.C2 | W7 | FR-BRN-026/027 unbuilt — doctor bookable at an unassigned branch | ☐ |
-| 18.C2 | W8 | 10b.6 OCR reimbursement ticked but structurally inert | ☐ |
+| 18.C2 | W3 | interop/FHIR has no compose entry and no Kong route | ✅ 2026-07-27 (compose + Kong /fhir,/interop; metadata stays public) |
+| 18.C2 | W4 | Report-access grant/decision has no UI → sensitive gate is permanent-deny | ✅ 2026-07-27 (inbox endpoint + approver screen on both portals + hourly expiry sweeper) |
+| 18.C2 | W5 | identity admin has no Kong route; console edits the legacy projection | ✅ 2026-07-27 (/identity routed; console reads the real store incl. 2FA state) |
+| 18.C2 | W6 | SPA commented out of compose | ✅ 2026-07-27 |
+| 18.C2 | W7 | FR-BRN-026/027 unbuilt — doctor bookable at an unassigned branch | ✅ 2026-07-27 (IPractitionerBranchDirectory; 422 at BOTH availability + booking) |
+| 18.C2 | W8 | 10b.6 OCR reimbursement ticked but structurally inert | ✅ 2026-07-27 (10b.6 downgraded to ◐ — the honest option; seams named) |
 
 ## Gate D — UX safety
 

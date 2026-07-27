@@ -66,6 +66,9 @@ import {
   type Localized,
   type PlaceOrderRequest,
   type PrescribeRequest,
+  type IdentityUser,
+  type RoleScopeGrant,
+  type ReportAccessRequestRow,
 } from "@mersal/contracts";
 import type { ApiClient, ApiScenario } from "./client";
 import { ApiError } from "./http";
@@ -265,6 +268,52 @@ export class DevApiClient implements ApiClient {
         code: "80053", value: "Within reference range", status: "Completed", resultedAt: "2026-07-20T11:00:00Z",
       });
     });
+  }
+
+  /**
+   * 18.C2 (W4) — fixture approver inbox. Two rows, deliberately: one Requested and one UnderReview, so the
+   * screen's status handling and the "already picked up by someone" case are both exercised without a backend.
+   */
+  async reportAccessInbox(): Promise<ReportAccessRequestRow[]> {
+    return [
+      {
+        requestId: "rar-1", orderId: "ord-77", orderLineId: "ol-77a", beneficiaryToken: "•••4821",
+        requestedBy: "dr.hala", requestedForRole: "doctor", purposeCode: "TRT",
+        justification: "Patient referred to me for follow-up; need the histology to plan treatment.",
+        requestedTtlHours: 24,
+        status: { kind: "warn", label: { en: "Awaiting decision", ar: "بانتظار القرار" } },
+        createdAt: new Date(Date.now() - 3_600_000).toISOString(),
+      },
+      {
+        requestId: "rar-2", orderId: "ord-91", orderLineId: "ol-91c", beneficiaryToken: "•••1903",
+        requestedBy: "dr.omar", requestedForRole: "medical_approval", purposeCode: "PUR",
+        justification: "Authorization review — medical necessity for the requested procedure.",
+        requestedTtlHours: 8,
+        status: { kind: "info", label: { en: "Under review", ar: "قيد المراجعة" } },
+        createdAt: new Date(Date.now() - 7_200_000).toISOString(),
+      },
+    ];
+  }
+
+  async decideReportAccess(): Promise<void> {}
+  async revokeReportAccessGrant(): Promise<void> {}
+
+  /** 18.C2 (W5) — fixture identity users. One account WITHOUT a second factor, because that is the row the
+   * screen exists to make visible. */
+  async identityUsers(): Promise<IdentityUser[]> {
+    return [
+      { id: "u-1", username: "org.admin", displayName: "Org Admin", tenantId: "•••1111", isActive: true, twoFactorEnabled: true, roles: ["org_admin"] },
+      { id: "u-2", username: "dr.hala", displayName: "Dr. Hala", tenantId: "•••1111", isActive: true, twoFactorEnabled: false, roles: ["doctor"] },
+      { id: "u-3", username: "left.staff", displayName: "Former Staff", tenantId: "•••1111", isActive: false, twoFactorEnabled: true, roles: ["reception"] },
+    ];
+  }
+
+  async identityRoleScopes(): Promise<RoleScopeGrant[]> {
+    return [
+      { role: "reception", scopes: ["reception:search", "reception:read", "patient:read", "eligibility:check"] },
+      { role: "doctor", scopes: ["emr:read", "emr:write", "orders:write", "rx:write", "rx:read", "patient:read"] },
+      { role: "claims_officer", scopes: ["claims:read", "claims:review", "claims:decide", "claims:batch"] },
+    ];
   }
 
   /** 14.8 — a report-access request; the server would enqueue it for the author/MD to grant. */

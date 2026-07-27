@@ -23,10 +23,12 @@ public sealed record QueueItemResponse(
 // ---- Phase 3.1 appointments (17-api-specifications §6, US-020) ----
 
 /// <summary>Materialize bookable slots from a recurring availability rule over an inclusive date range.</summary>
+/// <summary>18.C2 (W7): <c>BranchId</c> is optional and, when present alongside <c>DoctorId</c>, is validated
+/// against the practitioner's active branch assignments (FR-BRN-026) before any slot is materialized.</summary>
 public sealed record CreateSlotsRequest(
     Guid ProviderId, Guid LocationId, Guid? DoctorId,
     DayOfWeek DayOfWeek, TimeOnly StartTime, TimeOnly EndTime, int SlotMinutes,
-    DateOnly FromDate, DateOnly ToDate);
+    DateOnly FromDate, DateOnly ToDate, Guid? BranchId = null);
 
 /// <summary>Book an appointment. Provide <see cref="SlotId"/> to hold a specific slot; omit it (non-walk-in)
 /// to auto-take the earliest open slot. Walk-ins may be slotless (uses <see cref="ScheduledStart"/>).</summary>
@@ -34,7 +36,10 @@ public sealed record BookAppointmentRequest(
     Guid BeneficiaryId, Guid ProviderId, Guid LocationId, string AppointmentType,
     Guid? SlotId, DateTimeOffset? ScheduledStart, DateTimeOffset? ScheduledEnd,
     string? ReferralRef, Guid? OriginEncounterId, bool JoinWaitlistIfFull,
-    string? PreferredChannel = null);
+    string? PreferredChannel = null,
+    // 18.C2 (W7 / FR-BRN-027): validated against the practitioner's branch assignments. Optional because a
+    // walk-in at the desk names neither — the check applies when the caller states both.
+    Guid? DoctorId = null, Guid? BranchId = null);
 
 /// <summary>Minimum-necessary appointment view — scheduling + identity only, never EMR/clinical data.
 /// <see cref="RowVersion"/> is the row's <c>xmin</c> optimistic-concurrency token: it lets a client echo the

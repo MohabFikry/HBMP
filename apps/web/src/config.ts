@@ -15,6 +15,13 @@ export const LIVE = env.VITE_LIVE === "1";
 /** Base URL for the API gateway (Kong). All service calls are `${API_BASE}/<path>`. */
 export const API_BASE = env.VITE_API_BASE ?? "http://localhost:8000/api/v1";
 
+/**
+ * The gateway ORIGIN, without the `/api/v1` prefix. 18.C2 (audit R2 W5): identity-service serves the in-app
+ * user/role/scope admin at `/identity/*` — deliberately outside `/api/v1`, because it is the issuer's own
+ * surface rather than a domain API. Reaching it needs the origin, not the versioned prefix.
+ */
+export const GATEWAY_BASE = API_BASE.replace(/\/api\/v1\/?$/, "");
+
 export const OIDC = {
   /** The in-app issuer (identity-service, OpenIddict), as the *browser* reaches it (must match token `iss`).
    * Phase 17.5: this replaced Keycloak — endpoints are `/connect/*` and JWKS is at `/.well-known/jwks`. */

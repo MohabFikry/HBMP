@@ -64,6 +64,9 @@ import type {
   Prescription,
   Settlement,
   UtilizationView,
+  IdentityUser,
+  RoleScopeGrant,
+  ReportAccessRequestRow,
 } from "@mersal/contracts";
 
 /**
@@ -102,6 +105,15 @@ export interface ApiClient {
   resultDetail(orderId: string, lineId: string): Promise<ResultDetail>;
   /** Request time-boxed access to a restricted result (14.8) — purpose + justification are mandatory. */
   requestReportAccess(input: ReportAccessInput): Promise<ReportAccessRequestResult>;
+  /**
+   * 18.C2 (W4) — the approver inbox. Without a list endpoint AND a screen, a request could be raised and
+   * decided by id but never DISCOVERED, so the sensitive-result gate was permanent-deny in practice.
+   */
+  reportAccessInbox(): Promise<ReportAccessRequestRow[]>;
+  /** Approve / deny / ask for more information. `ttlHours` is capped server-side by the result's sensitivity. */
+  decideReportAccess(requestId: string, decision: "approve" | "deny" | "requestinfo", reason: string, ttlHours?: number): Promise<void>;
+  /** Revoke a live grant early (the request follows it to Revoked). */
+  revokeReportAccessGrant(grantId: string): Promise<void>;
   /** Record vitals on an encounter (nurse triage, US-030) — treating-gated server-side. */
   recordVitals(encounterId: string, readings: VitalInput[]): Promise<VitalsResult>;
 
@@ -156,6 +168,10 @@ export interface ApiClient {
   markNotificationRead(id: string): Promise<MarkReadResult>;
 
   // Admin / platform governance (Phase 8b) — WHO can access, not content. Admin-role gated on the server.
+  /** 18.C2 (W5) — users from the IDENTITY STORE (active + 2FA state), not the admin-service projection. */
+  identityUsers(query?: string): Promise<IdentityUser[]>;
+  /** 18.C2 (W5) — the live role→scope matrix the token issuer actually reads. */
+  identityRoleScopes(): Promise<RoleScopeGrant[]>;
   accessMatrix(): Promise<RoleBinding[]>;
   adminTenants(): Promise<TenantSummary[]>;
   sodMatrix(): Promise<SodConflict[]>;

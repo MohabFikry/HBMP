@@ -2,6 +2,8 @@ import { Card, DataTable, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type {
   AccessReviewCampaign,
+  IdentityUser,
+  RoleScopeGrant,
   BreakGlassGrant,
   Localized,
   MasterDataVersion,
@@ -63,16 +65,68 @@ const S = {
   type: { en: "Type", ar: "النوع" },
   value: { en: "Value", ar: "القيمة" },
   platform: { en: "Platform", ar: "المنصة" },
+  // 18.C2 (W5) — identity-store columns.
+  username: { en: "Username", ar: "اسم المستخدم" },
+  displayName: { en: "Name", ar: "الاسم" },
+  twoFactor: { en: "Second factor", ar: "التحقق بخطوتين" },
+  mfaOn: { en: "Enrolled", ar: "مُفعّل" },
+  mfaOff: { en: "Not enrolled", ar: "غير مُفعّل" },
+  active: { en: "Active", ar: "نشط" },
+  deprovisioned: { en: "De-provisioned", ar: "مُعطّل" },
+  accountsHeading: { en: "Accounts (identity store)", ar: "الحسابات (مخزن الهوية)" },
+  bindingsHeading: { en: "Role bindings & recertification", ar: "ارتباطات الأدوار وإعادة الاعتماد" },
+  sodHeading: { en: "Segregation-of-duties conflicts", ar: "تعارضات فصل المهام" },
+  scopeHeading: { en: "Role → scope matrix (live)", ar: "مصفوفة الأدوار والصلاحيات (مباشرة)" },
+  scopeNote: {
+    en: "What a token issued to this role would actually carry — read from the issuer, not inferred.",
+    ar: "ما يحمله فعليًا الرمز الصادر لهذا الدور — يُقرأ من جهة الإصدار.",
+  },
+  scopes: { en: "Scopes", ar: "الصلاحيات" },
+  scopeCount: { en: "Count", ar: "العدد" },
 } satisfies Record<string, Localized>;
 
 const dt = (s?: string) => (s ? new Date(s).toLocaleDateString() : "—");
 
-/** Users & roles — the access matrix (who holds which role, at what tier, and when it needs recertifying). */
+/**
+ * Users & roles.
+ *
+ * 18.C2 (audit R2 W5) — repointed at the IDENTITY STORE. This screen read admin-service's access-matrix
+ * projection, which knows role bindings and nothing about the account behind them, so an administrator could
+ * not see the two things they open this page to check: is the account still active, and does it carry a
+ * second factor? Phase 17 moved users into identity-service and the console was never repointed, so it went
+ * on rendering a view of a system that had stopped being the source of truth.
+ *
+ * The 2FA column is the one that matters. MFA gates every admin scope and every break-glass request on the
+ * platform, and until now no screen anywhere showed whether a given account actually had one.
+ *
+ * Role BINDINGS (tier, recertification due) remain admin-service's — that is genuinely its data — and are
+ * shown below the account list rather than in place of it.
+ */
 export function AdminUsers() {
   const api = useApi();
   const t = useLoc();
-  const state = useAsync<RoleBinding[]>(() => api.accessMatrix(), []);
-  const cols: Column<RoleBinding>[] = [
+  const users = useAsync<IdentityUser[]>(() => api.identityUsers(), []);
+  const bindings = useAsync<RoleBinding[]>(() => api.accessMatrix(), []);
+
+  const userCols: Column<IdentityUser>[] = [
+    { key: "username", header: t(S.username), cell: (r) => <span>{r.username}</span> },
+    { key: "displayName", header: t(S.displayName), cell: (r) => r.displayName },
+    { key: "roles", header: t(S.role), cell: (r) => (r.roles.length ? r.roles.join(", ") : "—") },
+    {
+      key: "active",
+      header: t(S.status),
+      cell: (r) => <StatusChip kind={r.isActive ? "ok" : "neu"} label={t(r.isActive ? S.active : S.deprovisioned)} />,
+    },
+    {
+      // Text label as well as chip kind: an administrator scans this column looking for the accounts that
+      // CANNOT satisfy MFA, and colour alone would not carry that (21-accessibility).
+      key: "twoFactor",
+      header: t(S.twoFactor),
+      cell: (r) => <StatusChip kind={r.twoFactorEnabled ? "ok" : "warn"} label={t(r.twoFactorEnabled ? S.mfaOn : S.mfaOff)} />,
+    },
+  ];
+
+  const bindingCols: Column<RoleBinding>[] = [
     { key: "subject", header: t(S.subject), cell: (r) => <span className="tnum">{r.subjectToken}</span> },
     { key: "role", header: t(S.role), cell: (r) => r.role },
     { key: "scope", header: t(S.scope), cell: (r) => r.scope },
@@ -80,23 +134,46 @@ export function AdminUsers() {
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
     { key: "reviewDue", header: t(S.reviewDue), cell: (r) => <span className="tnum">{dt(r.reviewDueAt)}</span> },
   ];
+
   return (
     <>
       <PageHeader title={t(S.usersTitle)} />
       <Card as="section" style={{ padding: "var(--sp3)" }}>
-        <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.usersEmpty}>
-          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.usersTitle)} />}
+        <h3 style={{ marginTop: 0 }}>{t(S.accountsHeading)}</h3>
+        <AsyncSection<IdentityUser[]> state={users} isEmpty={(d) => d.length === 0} emptyLabel={S.usersEmpty}>
+          {(rows) => <DataTable columns={userCols} rows={rows} rowKey={(r) => r.id} caption={t(S.accountsHeading)} />}
+        </AsyncSection>
+      </Card>
+      <Card as="section" style={{ padding: "var(--sp3)", marginTop: "var(--sp3)" }}>
+        <h3 style={{ marginTop: 0 }}>{t(S.bindingsHeading)}</h3>
+        <AsyncSection<RoleBinding[]> state={bindings} isEmpty={(d) => d.length === 0} emptyLabel={S.usersEmpty}>
+          {(rows) => <DataTable columns={bindingCols} rows={rows} rowKey={(r) => r.id} caption={t(S.bindingsHeading)} />}
         </AsyncSection>
       </Card>
     </>
   );
 }
 
-/** Permissions / policies — the Segregation-of-Duties conflict matrix (10-role-matrix §7). */
+/**
+ * Permissions / policies — the Segregation-of-Duties conflict matrix (10-role-matrix §7) and, since 18.C2
+ * (W5), the live role→scope matrix from the identity store.
+ *
+ * The SoD matrix says which roles must not be held together. It does not say what a role can DO — and that is
+ * what the issuer reads to build a token's `scope` claim. 18.B3 found 141 rule/role pairs where a policy rule
+ * named a role that could not hold the scope the rule required: silent denials nobody could see, because a
+ * missing grant produces a 403 and not an error. This table is where that becomes visible — it renders
+ * `/identity/effective-scopes`, the exact seam the issuer uses, so what is on screen is what a token carries.
+ */
 export function AdminPolicies() {
   const api = useApi();
   const t = useLoc();
   const state = useAsync<SodConflict[]>(() => api.sodMatrix(), []);
+  const scopes = useAsync<RoleScopeGrant[]>(() => api.identityRoleScopes(), []);
+  const scopeCols: Column<RoleScopeGrant>[] = [
+    { key: "role", header: t(S.role), cell: (r) => <StatusChip kind="neu" label={r.role} /> },
+    { key: "count", header: t(S.scopeCount), cell: (r) => <span className="tnum">{r.scopes.length}</span> },
+    { key: "scopes", header: t(S.scopes), cell: (r) => <span>{r.scopes.length ? r.scopes.join(" · ") : "—"}</span> },
+  ];
   const cols: Column<SodConflict>[] = [
     { key: "roleA", header: t(S.roleA), cell: (r) => <StatusChip kind="info" label={r.roleA} /> },
     { key: "roleB", header: t(S.roleB), cell: (r) => <StatusChip kind="warn" label={r.roleB} /> },
@@ -106,8 +183,16 @@ export function AdminPolicies() {
     <>
       <PageHeader title={t(S.policiesTitle)} />
       <Card as="section" style={{ padding: "var(--sp3)" }}>
-        <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.policiesEmpty}>
-          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => `${r.roleA}:${r.roleB}`} caption={t(S.policiesTitle)} />}
+        <h3 style={{ marginTop: 0 }}>{t(S.sodHeading)}</h3>
+        <AsyncSection<SodConflict[]> state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.policiesEmpty}>
+          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => `${r.roleA}:${r.roleB}`} caption={t(S.sodHeading)} />}
+        </AsyncSection>
+      </Card>
+      <Card as="section" style={{ padding: "var(--sp3)", marginTop: "var(--sp3)" }}>
+        <h3 style={{ marginTop: 0 }}>{t(S.scopeHeading)}</h3>
+        <p className="muted" style={{ marginTop: 0 }}>{t(S.scopeNote)}</p>
+        <AsyncSection<RoleScopeGrant[]> state={scopes} isEmpty={(d) => d.length === 0} emptyLabel={S.policiesEmpty}>
+          {(rows) => <DataTable columns={scopeCols} rows={rows} rowKey={(r) => r.role} caption={t(S.scopeHeading)} />}
         </AsyncSection>
       </Card>
     </>
