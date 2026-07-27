@@ -414,6 +414,18 @@
         }
       }
     },
+    "/api/v1/benefit-categories": {
+      "get": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/policies": {
       "post": {
         "tags": [

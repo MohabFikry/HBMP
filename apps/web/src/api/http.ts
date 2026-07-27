@@ -135,6 +135,49 @@ export function postRaw(
 }
 
 /**
+ * PUT / DELETE with the same auth, branch-header and RFC-7807 handling as the rest of this module (19.6 —
+ * the policy administration surface replaces a draft's rule set wholesale and revokes tier assignments, and
+ * neither verb existed here). An idempotency key is accepted on PUT because a replaced rule set is a write
+ * whose retry must not be a second review.
+ */
+export function putRaw(path: string, body: unknown, idempotencyKey?: string): Promise<unknown> {
+  const headers: Record<string, string> = {};
+  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+  return request(path, { method: "PUT", body: JSON.stringify(body), headers });
+}
+export function deleteRaw(path: string): Promise<unknown> {
+  return request(path, { method: "DELETE" });
+}
+
+/**
+ * GET a non-JSON body (a CSV export). Kept separate from {@link getRaw} rather than sniffing the content
+ * type, because a JSON endpoint that starts answering with text is a defect the caller should see, not
+ * something to absorb. Errors take the same RFC-7807 path — an export that fails must be as legible as a
+ * write that fails.
+ */
+export async function getText(path: string): Promise<string> {
+  const token = getToken();
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: "GET",
+      headers: {
+        Accept: "text/csv, text/plain",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...activeBranchHeader(),
+      },
+    });
+  } catch (e) {
+    throw new ApiError("network", e instanceof Error ? e.message : "Network request failed");
+  }
+  if (!res.ok) {
+    const problem = await readProblem(res);
+    throw new ApiError("http", problem?.detail ?? problem?.title ?? `Request to ${path} failed`, res.status, problem);
+  }
+  return await res.text();
+}
+
+/**
  * POST a multipart/form-data body (e.g. a lab/imaging result with an optional file). We deliberately pass no
  * `Content-Type` so the browser sets the multipart boundary itself; the JSON default is overridden to undefined.
  */

@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Mersal.Policy.Api;
 using Mersal.Policy.Domain;
 
 namespace Mersal.Policy.Tests;
@@ -284,5 +285,63 @@ public class PlanVersionValidationTests
         v.Covers(new DateOnly(2026, 1, 1)).Should().BeTrue();
         v.Covers(new DateOnly(2099, 1, 1)).Should().BeTrue();
         v.Covers(new DateOnly(2025, 12, 31)).Should().BeFalse();
+    }
+}
+
+/// <summary>
+/// Phase 19.6 — the read/write round trip of a benefit rule set.
+///
+/// <para>The editor reads a draft, lets an administrator change it, and writes the whole set back. That only
+/// works if the two directions agree on how a benefit category is identified. They did not: the response
+/// carried <c>benefitCategoryId</c> while <see cref="BenefitRuleInput"/> is keyed by CODE, so a client could
+/// read a draft and had no way to re-submit it without a catalogue it was never given. The projection now
+/// carries the code, and this pins it.</para>
+/// </summary>
+public sealed class BenefitRuleProjectionTests
+{
+    private static readonly Guid Lab = Guid.NewGuid();
+    private static readonly Guid Pharmacy = Guid.NewGuid();
+
+    private static BenefitRule Rule(Guid categoryId) => new()
+    {
+        RuleId = Guid.NewGuid(), BenefitCategoryId = categoryId, IsCovered = true,
+        LimitType = LimitType.Annual, LimitValue = 1000m, ResetPeriod = ResetPeriod.Yearly,
+    };
+
+    [Fact]
+    public void A_projected_rule_names_the_category_the_write_path_expects()
+    {
+        var codes = new Dictionary<Guid, string> { [Lab] = "LAB", [Pharmacy] = "PHARMACY" };
+
+        var view = BenefitRuleView.From(Rule(Lab), codes);
+
+        view.BenefitCategoryCode.Should().Be("LAB");
+        view.BenefitCategoryId.Should().Be(Lab);
+    }
+
+    [Fact]
+    public void A_category_the_catalogue_does_not_know_projects_a_null_code_rather_than_a_guess()
+    {
+        var view = BenefitRuleView.From(Rule(Guid.NewGuid()), new Dictionary<Guid, string> { [Lab] = "LAB" });
+
+        // Null is the honest answer. Falling back to the id as a "code" would produce a rule set that
+        // round-trips cleanly right up to the moment the service rejects UNKNOWN_BENEFIT_CATEGORY.
+        view.BenefitCategoryCode.Should().BeNull();
+    }
+
+    [Fact]
+    public void A_version_projected_without_a_catalogue_still_returns_its_rules()
+    {
+        var version = new PlanVersion
+        {
+            PlanVersionId = Guid.NewGuid(), PlanId = Guid.NewGuid(), VersionNo = 1,
+            EffectiveFrom = new DateOnly(2026, 1, 1), Status = PlanVersionStatus.Draft,
+            Rules = [Rule(Lab)],
+        };
+
+        var view = PlanVersionView.From(version);
+
+        view.Rules.Should().HaveCount(1);
+        view.Rules[0].BenefitCategoryCode.Should().BeNull();
     }
 }

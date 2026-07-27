@@ -612,3 +612,10 @@ nav.mrs-rail {
   background: var(--st-ok-bg);
   color: var(--st-ok-fg);
 }
+/* 19.6 — warn. Outlined rather than filled, matching the `warn` StatusChip shape, so the two read as the
+   same severity in the same page. */
+.mrs-alert.mrs-alert-warn {
+  background: transparent;
+  color: var(--st-warn-fg);
+  border-color: var(--st-warn-fg);
+}

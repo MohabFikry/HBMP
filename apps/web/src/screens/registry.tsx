@@ -73,6 +73,17 @@ const AdminTenants = lazy(() => import("./AdminConsole").then((m) => ({ default:
 const AdminGovernance = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminGovernance })));
 const AdminMasterData = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminMasterData })));
 const AdminConfig = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminConfig })));
+// Policy administration (Phase 19.6) — four chunks rather than one, because the portal's sections are used by
+// two different roles: a beneficiary-management officer opens Members and Bulk and never touches the plan
+// version editor, which is the heaviest screen here.
+const PolicyPayers = lazy(() => import("./PolicyProductAdmin").then((m) => ({ default: m.PolicyPayers })));
+const PolicyPlans = lazy(() => import("./PolicyProductAdmin").then((m) => ({ default: m.PolicyPlans })));
+const PolicyList = lazy(() => import("./PolicyBook").then((m) => ({ default: m.PolicyList })));
+const GroupsScreen = lazy(() => import("./PolicyBook").then((m) => ({ default: m.GroupsScreen })));
+const UtilizationScreen = lazy(() => import("./PolicyBook").then((m) => ({ default: m.UtilizationScreen })));
+const MemberSearch = lazy(() => import("./MemberAdmin").then((m) => ({ default: m.MemberSearch })));
+const BulkJobs = lazy(() => import("./PolicyBulk").then((m) => ({ default: m.BulkJobs })));
+const NetworkTiers = lazy(() => import("./NetworkTierAdmin").then((m) => ({ default: m.NetworkTiers })));
 
 export const SCREENS: Record<string, () => ReactNode> = {
   // 1. Reception — eligibility (also surfaced in the beneficiary-management portal).
@@ -142,6 +153,24 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/claims/worklist": () => <ClaimsWorklist />,
   "/claims/reconciliation": () => <ClaimsReconciliation />,
   "/claims/insights": () => <ClaimsInsights />,
+  // 12. Policy administration (Phase 19.6) — the benefit product and the policy book. No clinical route.
+  "/policy/payers": () => <PolicyPayers />,
+  "/policy/plans": () => <PolicyPlans />,
+  "/policy/policies": () => <PolicyList />,
+  "/policy/members": () => <MemberSearch />,
+  "/policy/groups": () => <GroupsScreen />,
+  "/policy/utilization": () => <UtilizationScreen />,
+  "/policy/bulk": () => <BulkJobs />,
+  "/policy/tiers": () => <NetworkTiers />,
+  // 13. The membership sections the beneficiary-management portal shares with policy administration. Same
+  // screens, same server-side projection — a second implementation would be a second answer to "may this
+  // officer see the money".
+  "/beneficiaries/members": () => <MemberSearch />,
+  "/beneficiaries/groups": () => <GroupsScreen />,
+  "/beneficiaries/utilization": () => <UtilizationScreen />,
+  "/beneficiaries/bulk": () => <BulkJobs />,
+  // 14. Network tiers under the Network Team's own portal (write) — the same screen policy admins read.
+  "/network/tiers": () => <NetworkTiers />,
 };
 
 // Admin sections are shared by the org-admin (/admin/*) and super-admin (/platform/*) portals; map by the

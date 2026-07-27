@@ -109,6 +109,8 @@ services:
           - /api/v1/payers
           - /api/v1/plans
           - /api/v1/plan-versions
+          # 19.6 — reference data the plan-version editor needs to render its row set (codes + names, no PHI).
+          - /api/v1/benefit-categories
           # 19.2 + 19.2b — the membership layer.
           - /api/v1/policy-plans
           - /api/v1/member-groups

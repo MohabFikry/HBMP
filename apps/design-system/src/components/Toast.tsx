@@ -70,22 +70,44 @@ export function useToast(): ToastContextValue {
   return ctx;
 }
 
-/** Inline alert — role=status/alert, icon + text (never color-only). For persistent, in-flow messages. */
+/**
+ * Inline alert — role=status/alert, icon + text (never color-only). For persistent, in-flow messages.
+ *
+ * `warn` (19.6) is the tone for "this is not a failure, and you must not proceed as though it were fine":
+ * a result page that is a subset of the matches, a back-dated change that needs rights the caller may not
+ * have, counts that do not add up. It was missing, so every such message had to be either shouted as an
+ * error (role=alert, which trains people to dismiss alerts) or whispered as information. StatusChip has
+ * carried a `warn` kind since 0B; the two vocabularies now agree.
+ */
 export function InlineAlert({
   tone = "info",
   children,
   className,
+  "data-testid": testId,
 }: {
-  tone?: "ok" | "bad" | "info";
+  tone?: "ok" | "bad" | "warn" | "info";
   children: ReactNode;
   className?: string;
+  /** Test hook. An alert is often the ONLY rendered evidence of a rule (immutability, a withheld column),
+   *  and matching it by its prose makes the test fail when the wording is improved rather than when the
+   *  behaviour breaks. */
+  "data-testid"?: string;
 }) {
   return (
     <div
-      className={cx("mrs-alert", tone === "bad" && "mrs-alert-bad", tone === "ok" && "mrs-alert-ok", className)}
+      data-testid={testId}
+      className={cx(
+        "mrs-alert",
+        tone === "bad" && "mrs-alert-bad",
+        tone === "ok" && "mrs-alert-ok",
+        tone === "warn" && "mrs-alert-warn",
+        className,
+      )}
+      // Only a failure interrupts. A warning is announced politely, in turn — it describes the state of what
+      // is on screen rather than the outcome of something the user just did.
       role={tone === "bad" ? "alert" : "status"}
     >
-      <Icon name={tone === "bad" ? "cross" : tone === "ok" ? "ok" : "info"} />
+      <Icon name={tone === "bad" ? "cross" : tone === "ok" ? "ok" : tone === "warn" ? "triangle" : "info"} />
       <span>{children}</span>
     </div>
   );

@@ -54,6 +54,7 @@ const DISPLAY_NAMES: Record<Role, string> = {
   claims_officer: "Claims Officer Tarek",
   finance: "Finance Officer",
   provider_admin: "Network Admin",
+  policy_admin: "Policy Administrator",
   org_admin: "Org Admin",
   super_admin: "Super Admin",
   medical_director: "Medical Director",

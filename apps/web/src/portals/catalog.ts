@@ -44,6 +44,8 @@ const G = {
   admin: { en: "Administration", ar: "الإدارة" },
   oversight: { en: "Oversight", ar: "الإشراف" },
   insights: { en: "Insights", ar: "المؤشرات" },
+  product: { en: "Benefit product", ar: "منتج المنافع" },
+  membership: { en: "Membership", ar: "العضوية" },
 } satisfies Record<string, Localized>;
 
 /**
@@ -147,6 +149,12 @@ export const PORTALS: PortalDef[] = [
       { key: "manage", path: "manage", label: { en: "Search / manage", ar: "بحث / إدارة" }, group: G.registration, icon: "user", permission: "beneficiary.manage" },
       { key: "status", path: "status", label: { en: "Status & reactivation", ar: "الحالة وإعادة التفعيل" }, group: G.registration, icon: "clock", permission: "beneficiary.status" },
       { key: "eligibility", path: "eligibility", label: { en: "Eligibility check", ar: "التحقق من الأهلية" }, group: G.access, icon: "check2", permission: "eligibility.check" },
+      // Phase 19.6 — the membership book. Registration answers "who is this person"; these answer "what are
+      // they entitled to, under whose policy, and what have they used".
+      { key: "members", path: "members", label: { en: "Members", ar: "الأعضاء" }, group: G.membership, icon: "user", permission: "policy.members" },
+      { key: "groups", path: "groups", label: { en: "Groups", ar: "المجموعات" }, group: G.membership, icon: "refer", permission: "policy.groups" },
+      { key: "utilization", path: "utilization", label: { en: "Utilization", ar: "الاستخدام" }, group: G.insights, icon: "chart", permission: "policy.utilization" },
+      { key: "bulk", path: "bulk", label: { en: "Bulk & imports", ar: "الرفع الجماعي" }, group: G.membership, icon: "doc", permission: "policy.bulk" },
     ],
   },
   {
@@ -207,6 +215,27 @@ export const PORTALS: PortalDef[] = [
       { key: "contracts", path: "contracts", label: { en: "Contracts & coverage", ar: "العقود والتغطية" }, group: G.network, icon: "doc", permission: "provider.contracts" },
       { key: "locations", path: "locations", label: { en: "Locations & users", ar: "المواقع والمستخدمون" }, group: G.network, icon: "check2", permission: "provider.locations" },
       { key: "performance", path: "performance", label: { en: "Performance", ar: "الأداء" }, group: G.insights, icon: "chart", permission: "provider.performance" },
+      // Phase 19.6 (19.1b) — the Network Team owns the tier structure and who sits in it.
+      { key: "tiers", path: "tiers", label: { en: "Network tiers", ar: "شرائح الشبكة" }, group: G.network, icon: "half", permission: "network.tiers" },
+    ],
+  },
+  {
+    role: "policy_admin",
+    base: "policy",
+    title: { en: "Policy administration", ar: "إدارة الوثائق التأمينية" },
+    eyebrow: { en: "Policy admin", ar: "مدير الوثائق" },
+    // No clinical route exists here — policy administration reads entitlement and money, never a diagnosis.
+    sections: [
+      { key: "payers", path: "payers", label: { en: "Payers", ar: "الجهات الممولة" }, group: G.product, icon: "user", permission: "policy.payers" },
+      { key: "plans", path: "plans", label: { en: "Plans & versions", ar: "الخطط والإصدارات" }, group: G.product, icon: "doc", permission: "policy.plans" },
+      { key: "policies", path: "policies", label: { en: "Policies", ar: "الوثائق" }, group: G.product, icon: "check2", permission: "policy.policies" },
+      { key: "members", path: "members", label: { en: "Members", ar: "الأعضاء" }, group: G.membership, icon: "user", permission: "policy.members" },
+      { key: "groups", path: "groups", label: { en: "Groups", ar: "المجموعات" }, group: G.membership, icon: "refer", permission: "policy.groups" },
+      { key: "utilization", path: "utilization", label: { en: "Utilization", ar: "الاستخدام" }, group: G.insights, icon: "chart", permission: "policy.utilization" },
+      { key: "bulk", path: "bulk", label: { en: "Bulk & imports", ar: "الرفع الجماعي" }, group: G.membership, icon: "plus", permission: "policy.bulk" },
+      // Read-only here: policy administration prices benefits AT a tier; the Network Team decides which tier
+      // a provider sits in. Same section, different capability (see `mayAdministerTiers`).
+      { key: "tiers", path: "tiers", label: { en: "Network tiers", ar: "شرائح الشبكة" }, group: G.network, icon: "half", permission: "network.tiers" },
     ],
   },
   {

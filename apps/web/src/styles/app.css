@@ -932,3 +932,98 @@ nav.mrs-rail {
   color: var(--text-2);
   font-size: 0.78rem;
 }
+
+/* ── Phase 19.6 — policy administration & membership portals ───────────────────────────────────────────
+   Tokens only: no literal colours, sizes or spacings. Every interactive target is at least 44px and every
+   status is carried by text as well as by hue (0B / 21). */
+.pol-screen { display: grid; gap: var(--sp4); }
+.pol-detail { display: grid; gap: var(--sp4); margin-block-start: var(--sp4); }
+.pol-panel { display: grid; gap: var(--sp3); }
+.pol-panel h3 { margin: 0; }
+.pol-muted { color: var(--text-2); }
+
+.pol-searchbar { display: flex; gap: var(--sp3); align-items: end; flex-wrap: wrap; }
+.pol-searchbar > *:first-child { flex: 1 1 22rem; }
+
+.pol-kpis { display: flex; flex-wrap: wrap; gap: var(--sp5); margin: 0; }
+.pol-kpis > div { display: grid; gap: var(--sp1); }
+.pol-kpis dt { color: var(--text-2); font-size: 0.82rem; }
+.pol-kpis dd { margin: 0; font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+
+.pol-identity { display: grid; gap: var(--sp2); }
+.pol-identity dl { display: flex; flex-wrap: wrap; gap: var(--sp5); margin: 0; }
+.pol-identity dt { color: var(--text-2); font-size: 0.82rem; }
+.pol-identity dd { margin: 0; }
+.pol-actions { display: flex; flex-wrap: wrap; gap: var(--sp2); margin-block-start: var(--sp3); }
+
+/* The two-level grid. Wide by nature (one column per tier once expanded), so it scrolls INSIDE its own
+   container — the page body must never scroll sideways. */
+.pol-grid, .pol-costshare { width: 100%; border-collapse: collapse; display: block; overflow-x: auto; }
+.pol-grid th, .pol-grid td, .pol-costshare th, .pol-costshare td {
+  padding: var(--sp2) var(--sp3);
+  border-block-end: 1px solid var(--border);
+  text-align: start;
+  vertical-align: middle;
+}
+.pol-grid thead th, .pol-costshare thead th {
+  font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-2);
+}
+.pol-grid input[type="text"], .pol-grid input:not([type]), .pol-grid select,
+.pol-costshare input, .pol-costshare select { min-block-size: 44px; inline-size: 100%; }
+.pol-grid input[type="checkbox"], .pol-costshare input[type="checkbox"] { inline-size: 24px; block-size: 24px; }
+.pol-grid-sub > td { background: var(--surface-2); }
+.pol-grid-sub fieldset { border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp3); }
+.pol-grid-sub legend { padding-inline: var(--sp2); font-weight: 600; }
+
+.pol-editor-head { display: flex; gap: var(--sp3); align-items: center; flex-wrap: wrap; }
+.pol-editor-actions { display: flex; gap: var(--sp2); flex-wrap: wrap; margin-block-start: var(--sp3); }
+.pol-problems, .pol-diff, .pol-versions { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--sp2); }
+.pol-versions li { display: flex; gap: var(--sp3); align-items: center; flex-wrap: wrap; }
+
+/* Notes. A cancelled note is dimmed and struck through — and STILL RENDERED, with its canceller, reason and
+   timestamp. Opacity never carries the status on its own: the chip says the word "Cancelled". */
+.pol-notes { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--sp3); }
+.pol-note { border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp3); display: grid; gap: var(--sp2); }
+.pol-note.cancelled { opacity: 0.72; }
+.pol-note.cancelled .pol-note-body { text-decoration: line-through; }
+.pol-note-meta { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; font-size: 0.85rem; }
+.pol-note-author { font-weight: 600; }
+.pol-note-time { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.pol-note-body { margin: 0; white-space: pre-wrap; }
+.pol-note-cancel { margin: 0; color: var(--text-2); font-size: 0.85rem; }
+.pol-note-form { display: grid; gap: var(--sp2); }
+.pol-check { display: flex; gap: var(--sp2); align-items: center; min-block-size: 44px; }
+.pol-check input { inline-size: 24px; block-size: 24px; }
+
+/* A withheld body is a LOCKED state, never an empty one. */
+.pol-locked {
+  display: flex; gap: var(--sp2); align-items: start;
+  border: 1px dashed var(--border); border-radius: var(--r-md); padding: var(--sp3);
+  background: var(--surface-2);
+}
+.pol-locked p { margin: var(--sp1) 0 0; color: var(--text-2); font-size: 0.88rem; }
+.pol-locked-inline { display: inline-flex; gap: var(--sp1); align-items: center; color: var(--text-2); }
+
+.pol-docs { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--sp2); }
+.pol-doc { display: flex; gap: var(--sp3); align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.pol-doc-meta { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; }
+
+.pol-timeline { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--sp3); }
+.pol-timeline li { border-inline-start: 3px solid var(--border); padding-inline-start: var(--sp3); }
+.pol-timeline p { margin: var(--sp1) 0 0; }
+.pol-timeline-head { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; font-size: 0.85rem; color: var(--text-2); }
+
+/* Meters. Decorative by design — the numbers live in the always-present sr-only table beside them. */
+.pol-meters { display: grid; gap: var(--sp3); }
+.pol-meter { display: grid; gap: var(--sp1); }
+.pol-meter-head { display: flex; justify-content: space-between; gap: var(--sp3); font-size: 0.85rem; }
+.pol-meter-val { font-variant-numeric: tabular-nums; color: var(--text-2); }
+.pol-meter-track { block-size: 10px; border-radius: var(--r-sm); background: var(--surface-2); overflow: hidden; }
+.pol-meter-fill { block-size: 100%; }
+.pol-meter-fill.ok { background: var(--st-ok-fg); }
+.pol-meter-fill.warn { background: var(--st-warn-fg); }
+.pol-meter-fill.bad { background: var(--st-bad-fg); }
+.pol-meter-fill.neu { background: var(--st-neu-fg); }
+
+.pol-dialog { display: grid; gap: var(--sp3); border: 2px solid var(--accent); }
+.pol-dialog-actions { display: flex; gap: var(--sp2); flex-wrap: wrap; }

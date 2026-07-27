@@ -62,12 +62,25 @@ export type Permission =
   | "finance.settlements"
   | "finance.summaries"
   | "finance.export"
+  // Policy administration (Phase 19) — the benefit PRODUCT and the membership book. No clinical permission
+  // exists here by construction: policy administration reads entitlement and money, never a diagnosis.
+  | "policy.payers"
+  | "policy.plans"
+  | "policy.policies"
+  | "policy.members"
+  | "policy.groups"
+  | "policy.utilization"
+  | "policy.bulk"
   // Network / provider admin
   | "provider.directory"
   | "provider.onboarding"
   | "provider.contracts"
   | "provider.locations"
   | "provider.performance"
+  // Network tiers (19.1b). Held by BOTH the Network Team and policy administration — but only the Network
+  // Team may write, which is a capability (see `mayAdministerTiers`), not a second permission. Two
+  // permissions would have let the two lists drift until a tier had two owners.
+  | "network.tiers"
   // Org / super admin
   | "admin.users"
   | "admin.policies"
@@ -97,6 +110,7 @@ export type Role =
   | "claims_officer"
   | "finance"
   | "provider_admin"
+  | "policy_admin"
   | "org_admin"
   | "super_admin"
   | "medical_director";
@@ -122,14 +136,46 @@ export const rolePermissions: Record<Role, Permission[]> = {
   imaging: ["imaging.queue", "imaging.consume", "imaging.result.upload"],
   pharmacy: ["pharmacy.queue", "pharmacy.dispense", "pharmacy.substitution"],
   medical_approval: ["approvals.worklist", "approvals.decide", "approvals.manual", "approvals.emergency", "approvals.sla"],
-  beneficiary_mgmt: ["beneficiary.register", "beneficiary.manage", "beneficiary.status", "eligibility.check"],
+  // Beneficiary management owns the MEMBERSHIP book: who is enrolled, in which group, on which plan, and
+  // what they have used. It does NOT own the benefit product — no payers, no plan versions — because the
+  // person enrolling a member must not also be the person who decides what that plan pays for.
+  beneficiary_mgmt: [
+    "beneficiary.register",
+    "beneficiary.manage",
+    "beneficiary.status",
+    "eligibility.check",
+    "policy.members",
+    "policy.groups",
+    "policy.utilization",
+    "policy.bulk",
+  ],
   case_manager: ["case.read", "case.beneficiary360", "case.escalations"],
   // Call Centre — a call workspace + call history. No clinical permission exists here (min-necessary).
   call_center: ["callcentre.workspace", "callcentre.history", "appointments.read"],
   // Claims officer — worklist + reconciliation + PHI-free KPIs. No clinical/diagnosis permission (finance-parity).
   claims_officer: ["claims.worklist", "claims.reconciliation", "claims.insights"],
   finance: ["finance.utilization", "finance.settlements", "finance.summaries", "finance.export"],
-  provider_admin: ["provider.directory", "provider.onboarding", "provider.contracts", "provider.locations", "provider.performance"],
+  provider_admin: [
+    "provider.directory",
+    "provider.onboarding",
+    "provider.contracts",
+    "provider.locations",
+    "provider.performance",
+    "network.tiers",
+  ],
+  // Policy administration — the benefit product (payers, plans, plan versions) and the policies written
+  // against it. Sees network tiers READ-ONLY: it prices what a member pays AT a tier, while the Network
+  // Team decides WHICH tier a provider sits in (mirrors provider-service's NetworkTierGate).
+  policy_admin: [
+    "policy.payers",
+    "policy.plans",
+    "policy.policies",
+    "policy.members",
+    "policy.groups",
+    "policy.utilization",
+    "policy.bulk",
+    "network.tiers",
+  ],
   org_admin: ["admin.users", "admin.policies", "admin.masterdata", "admin.tenants", "admin.audit", "admin.config"],
   // Super admin can administer globally; sensitive PHI reads remain break-glass on the server, not routine UI.
   super_admin: ["admin.users", "admin.policies", "admin.masterdata", "admin.tenants", "admin.audit", "admin.config"],
@@ -144,4 +190,26 @@ export function permissionsForRole(role: Role): ReadonlySet<Permission> {
 
 export function hasPermission(perms: ReadonlySet<Permission>, required: Permission): boolean {
   return perms.has(required);
+}
+
+/**
+ * May this role CREATE or CHANGE a network tier, as opposed to reading one?
+ *
+ * The Network Team owns the tier structure; policy administration prices benefits at a tier and must be able
+ * to see the tiers it is pricing against, but not to invent one. Expressed as a capability over the role
+ * rather than as a second permission so the read list and the write list cannot drift apart — the server's
+ * `NetworkTierGate` draws exactly this line and returns 403 either way.
+ */
+export function mayAdministerTiers(role: Role | null | undefined): boolean {
+  return role === "provider_admin" || role === "org_admin" || role === "super_admin";
+}
+
+/**
+ * May this role cancel somebody else's note, or make a back-dated membership change?
+ *
+ * The server calls it `policy:supervise` and enforces it; this mirror only decides whether the affordance is
+ * offered. An operator who is shown a button they will be refused learns nothing about why.
+ */
+export function maySupervisePolicy(role: Role | null | undefined): boolean {
+  return role === "policy_admin" || role === "org_admin" || role === "super_admin";
 }

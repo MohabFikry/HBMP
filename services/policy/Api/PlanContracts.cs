@@ -44,6 +44,9 @@ public sealed record BenefitRuleTierInput(
     bool? RequiresPreauthOverride,
     decimal? LimitMultiplier);
 
+/// <summary>19.6 — reference data for the plan-version editor's row set. Codes and names only.</summary>
+public sealed record BenefitCategoryView(Guid BenefitCategoryId, string Code, string Name);
+
 public sealed record PayerView(Guid PayerId, string PayerCode, string NameEn, string NameAr, string PayerType, string Status)
 {
     public static PayerView From(Payer p) =>
@@ -63,22 +66,32 @@ public sealed record PlanVersionView(
     string Status, bool Editable, DateTimeOffset? ActivatedAt, Guid? SupersededByVersionId,
     IReadOnlyList<BenefitRuleView> Rules)
 {
-    public static PlanVersionView From(PlanVersion v) =>
-        new(v.PlanVersionId, v.PlanId, v.VersionNo, v.EffectiveFrom, v.EffectiveTo,
+    /// <param name="categoryCodes">benefit-category id → code. 19.6: without it the response identifies each
+    /// rule's category by an id while <see cref="BenefitRuleInput"/> writes it back by CODE, so a client could
+    /// read a draft and could not re-submit it. Optional so a caller with no catalogue to hand still gets the
+    /// version; the code is then null rather than guessed.</param>
+    public static PlanVersionView From(PlanVersion v, IReadOnlyDictionary<Guid, string>? categoryCodes = null)
+    {
+        ArgumentNullException.ThrowIfNull(v);
+        return new(v.PlanVersionId, v.PlanId, v.VersionNo, v.EffectiveFrom, v.EffectiveTo,
             v.Status.ToString(), v.IsEditable, v.ActivatedAt, v.SupersededByVersionId,
-            [.. v.Rules.Select(BenefitRuleView.From)]);
+            [.. v.Rules.Select(r => BenefitRuleView.From(r, categoryCodes))]);
+    }
 }
 
 public sealed record BenefitRuleView(
-    Guid RuleId, Guid BenefitCategoryId, bool IsCovered, string? LimitType, decimal? LimitValue,
+    Guid RuleId, Guid BenefitCategoryId, string? BenefitCategoryCode, bool IsCovered, string? LimitType,
+    decimal? LimitValue,
     string ResetPeriod, decimal? Deductible, bool DeductibleWaived, int WaitingPeriodDays, bool RequiresPreauth,
     decimal? PreauthCostThreshold, string Exclusions, string? Notes,
     IReadOnlyList<BenefitRuleTierView> Tiers)
 {
-    public static BenefitRuleView From(BenefitRule r)
+    public static BenefitRuleView From(BenefitRule r, IReadOnlyDictionary<Guid, string>? categoryCodes = null)
     {
         ArgumentNullException.ThrowIfNull(r);
-        return new(r.RuleId, r.BenefitCategoryId, r.IsCovered, r.LimitType?.ToString(), r.LimitValue,
+        return new(r.RuleId, r.BenefitCategoryId,
+            categoryCodes is not null && categoryCodes.TryGetValue(r.BenefitCategoryId, out var code) ? code : null,
+            r.IsCovered, r.LimitType?.ToString(), r.LimitValue,
             r.ResetPeriod.ToString(), r.Deductible, r.DeductibleWaived, r.WaitingPeriodDays, r.RequiresPreauth,
             r.PreauthCostThreshold, r.Exclusions, r.Notes,
             [.. r.Tiers.OrderBy(t => t.TierCode, StringComparer.Ordinal).Select(t => BenefitRuleTierView.From(t, r))]);
