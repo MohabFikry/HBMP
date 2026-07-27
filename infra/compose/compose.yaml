@@ -5,7 +5,7 @@
 #
 # ⚠️ STARTER, NOT PRODUCTION-HARDENED. Before real data:
 #   - move every secret out of .env into OpenBao; enable TLS at the edge (Traefik + Let's Encrypt + ModSecurity/OWASP CRS)
-#   - turn OpenSearch security ON; run Keycloak in production mode; run OpenBao as a real server (not -dev)
+#   - turn OpenSearch security ON; run identity-service in production mode; run OpenBao as a real server (not -dev)
 #   - enable LUKS full-disk encryption on the host; wire pgBackRest + restic offsite backups
 # See README.md and phase-11-hardening-and-nfr.md.
 
@@ -294,7 +294,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Messaging__Uri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       Messaging__Queue: "audit.events"
       Worm__Endpoint: "http://minio:9000"
@@ -323,7 +323,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8091:8080"]
     depends_on:
@@ -343,7 +343,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8092:8080"]
@@ -362,7 +362,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8093:8080"]
@@ -381,7 +381,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       ClamAV__Host: "clamav"
       Blob__Endpoint: "http://minio:9000"
       Blob__AccessKey: "${MINIO_ROOT_USER}"
@@ -405,7 +405,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Cache__Valkey: "valkey:6379,password=${VALKEY_PASSWORD}"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
@@ -427,7 +427,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Eligibility__BaseUrl: "http://eligibility-service:8080"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
@@ -448,7 +448,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Masterdata__BaseUrl: "http://masterdata-service:8080"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
@@ -469,7 +469,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8098:8080"]
@@ -489,7 +489,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8099:8080"]
@@ -509,7 +509,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8100:8080"]
@@ -529,7 +529,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8101:8080"]
@@ -549,7 +549,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8102:8080"]
@@ -569,7 +569,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8103:8080"]
@@ -589,7 +589,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8104:8080"]
@@ -609,7 +609,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8105:8080"]
@@ -629,7 +629,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Siblings__Provider: "http://provider-service:8080"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
@@ -650,7 +650,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Siblings__Eligibility: "http://eligibility-service:8080"
       Siblings__Emr: "http://emr-service:8080"
       Siblings__Patient: "http://patient-service:8080"
@@ -677,7 +677,7 @@ services:
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       # The façade owns NO data: every read and every safe create is proxied to the OWNING service under the
       # caller's own bearer token, so each one re-authorizes independently (ADR-0016).
       Siblings__Patient: "http://patient-service:8080"

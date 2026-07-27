@@ -32,7 +32,7 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(options);
         if (string.IsNullOrWhiteSpace(options.Authority))
-            throw new InvalidOperationException("Auth:Authority (Keycloak realm URL) must be configured.");
+            throw new InvalidOperationException("Auth:Authority (the identity-service issuer URL) must be configured.");
 
         services.AddSingleton(Microsoft.Extensions.Options.Options.Create(options));
         services.AddHttpContextAccessor();
@@ -47,13 +47,30 @@ public static class ServiceCollectionExtensions
                 jwt.Authority = options.Authority;
                 jwt.Audience = options.Audience;
                 jwt.RequireHttpsMetadata = options.RequireHttpsMetadata;
-                jwt.MapInboundClaims = false; // keep raw Keycloak claim names (sub, scope, realm_access…)
+                jwt.MapInboundClaims = false; // keep the issuer's raw claim names (sub, scope, roles)
 
                 // Accept the Authority issuer plus any explicitly-allowed issuers (split-horizon dev:
-                // browser tokens carry iss=localhost:8080 while services fetch JWKS via keycloak:8080).
+                // browser tokens carry iss=localhost:8090 while services fetch JWKS via identity-service:8080).
                 // The JwtBearer handler additionally concatenates the discovered Authority issuer.
-                var validIssuers = new List<string> { options.Authority };
-                validIssuers.AddRange(options.ValidIssuers);
+                //
+                // Each is accepted BOTH with and without its trailing slash. An issuer identifier that differs
+                // only by that slash is the same issuer to everyone except a string comparison, and OpenIddict
+                // publishes `http://host/` while every configured value here was written `http://host` — so
+                // every browser-issued token was rejected by every service, platform-wide, with
+                // "The issuer 'http://localhost:8090/' is invalid": an error that names the issuer it just
+                // refused and therefore reads as though the ISSUER is wrong rather than this list.
+                //
+                // This is not a loosening of issuer validation. `https://a.example/` and `https://a.example`
+                // are the same origin and path; nothing else about the check changes, and an issuer that is
+                // not in the list is still refused.
+                var validIssuers = new List<string>();
+                foreach (var issuer in new[] { options.Authority }.Concat(options.ValidIssuers))
+                {
+                    if (string.IsNullOrWhiteSpace(issuer)) continue;
+                    var trimmed = issuer.TrimEnd('/');
+                    validIssuers.Add(trimmed);
+                    validIssuers.Add(trimmed + "/");
+                }
 
                 jwt.TokenValidationParameters = new TokenValidationParameters
                 {
