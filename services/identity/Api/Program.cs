@@ -31,6 +31,35 @@ builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// The SPA is served from another origin (:5173) and reaches the issuer directly, because the token's `iss`
+// has to be the issuer as the BROWSER sees it (apps/web/src/config.ts). Two legs of the auth-code+PKCE flow
+// are therefore cross-origin XHR — the discovery document and the /connect/token code exchange — and both
+// were being blocked, so login failed before a password was ever typed. /connect/authorize is a top-level
+// navigation and never needed CORS, which is why the flow looked half-alive.
+//
+// Origins are derived from the SAME config as the registered redirect URIs rather than listed separately:
+// an origin allowed here but not registered there (or vice versa) is exactly the drift that produces a
+// login which fails at a different step depending on which of the two is wrong.
+const string SpaCorsPolicy = "hbmp-spa";
+var spaOrigins = new[]
+    {
+        builder.Configuration["Issuer:WebRedirectUri"] ?? "http://localhost:5173/",
+        builder.Configuration["Issuer:WebPostLogoutUri"] ?? "http://localhost:5173/",
+    }
+    .Select(uri => Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
+        ? parsed.GetLeftPart(UriPartial.Authority)
+        : null)
+    .Where(origin => !string.IsNullOrEmpty(origin))
+    .Distinct()
+    .ToArray()!;
+
+builder.Services.AddCors(options => options.AddPolicy(SpaCorsPolicy, policy => policy
+    .WithOrigins(spaOrigins!)
+    .WithMethods("GET", "POST", "OPTIONS")
+    // No credentials: the SPA carries the token in the Authorization header, not cookies — matching the
+    // gateway's own CORS stance in infra/compose/config/kong.yml.
+    .WithHeaders("Authorization", "Content-Type")));
+
 var app = builder.Build();
 // 18.B3 (audit R2 S7) — FIRST middleware. identity-service was the only service without it, which is the
 // worst possible one to omit: it is where passwords, TOTP codes and bearer tokens are transmitted. Without
@@ -39,6 +68,10 @@ var app = builder.Build();
 app.UseHbmpTransportSecurity();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
+// Before the rate limiter and auth: a preflight carries no Authorization header and must not be counted,
+// throttled or challenged. A 429 or 401 without CORS headers on the preflight reaches the page as an opaque
+// network error, which is indistinguishable from the server being down.
+app.UseCors(SpaCorsPolicy);
 app.UseRateLimiter();      // 18.B3 (S9) — before auth: a rejected flood must not cost a token validation
 app.UseAuthentication();
 app.UseAuthorization();
