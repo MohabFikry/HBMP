@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Antiforgery;
 using Mersal.Identity.Domain;
 using Mersal.Identity.Infrastructure;
 using Microsoft.AspNetCore; // OpenIddictServerAspNetCoreHelpers.GetOpenIddictServerRequest(HttpContext)
@@ -47,6 +49,10 @@ public static class ConnectEndpoints
             // was completed); carry them onto the token so MfaEvaluator can gate protected scopes.
             var amr = auth.Principal!.FindAll(AccountPages.AmrClaim).Select(c => c.Value).ToArray();
             var principal = factory.ForUser(facts, request.GetScopes(), amr.Length > 0 ? amr : ["pwd"]);
+            // 18.B3 (S5): refuse at AUTHORIZE too, so the user is told now rather than being redirected back
+            // with a code that cannot be exchanged.
+            if (principal is null)
+                return Forbid(Errors.InvalidScope, "None of the requested scopes are granted to this account.");
             return Results.SignIn(principal, properties: null, Scheme);
         });
 
@@ -86,11 +92,15 @@ public static class ConnectEndpoints
                 var amr = stored.Principal.GetClaims(TokenPrincipalFactory.AmrClaim);
                 var principal = factory.ForUser(facts, stored.Principal.GetScopes(),
                     amr.Length > 0 ? amr : ["pwd"]);
+                // 18.B3 (S5): no grantable scope ⇒ invalid_scope. This used to fall back to the user's ENTIRE
+                // entitlement, so the narrowest request produced the broadest token.
+                if (principal is null)
+                    return Forbid(Errors.InvalidScope, "None of the requested scopes are granted to this account.");
                 return Results.SignIn(principal, properties: null, Scheme);
             }
 
             return Forbid(Errors.UnsupportedGrantType, "The specified grant type is not supported.");
-        });
+        }).RequireRateLimiting(IssuerRateLimits.Token);   // 18.B3 (S9)
 
         // ---- UserInfo -------------------------------------------------------------------------------------
         app.MapMethods("/connect/userinfo", ["GET", "POST"], async (HttpContext http, UserManager<ApplicationUser> users) =>
@@ -110,17 +120,19 @@ public static class ConnectEndpoints
         }).RequireAuthorization();
 
         // ---- Password sign-in (17.3 login UI); routes to TOTP when the account has 2FA enabled -------------
-        app.MapGet("/connect/login", (HttpContext http, string? returnUrl) =>
-            Results.Content(AccountPages.LoginPage(LangOf(http), returnUrl), "text/html"));
+        app.MapGet("/connect/login", (HttpContext http, IAntiforgery antiforgery, string? returnUrl) =>
+            Results.Content(AccountPages.LoginPage(LangOf(http), returnUrl,
+                AccountPages.AntiforgeryField(antiforgery, http)), "text/html"));
 
         app.MapPost("/connect/login", async (
             HttpContext http, [FromForm] string username, [FromForm] string password, [FromForm] string? returnUrl,
-            SignInManager<ApplicationUser> signIn, UserManager<ApplicationUser> users) =>
+            IAntiforgery antiforgery, SignInManager<ApplicationUser> signIn, UserManager<ApplicationUser> users) =>
         {
             var lang = LangOf(http);
             var user = await users.FindByNameAsync(username);
             if (user is null || !user.IsActive)
-                return Results.Content(AccountPages.LoginPage(lang, returnUrl, error: true), "text/html");
+                return Results.Content(AccountPages.LoginPage(lang, returnUrl,
+                    AccountPages.AntiforgeryField(antiforgery, http), error: true), "text/html");
 
             var result = await signIn.PasswordSignInAsync(user, password, isPersistent: false, lockoutOnFailure: true);
             if (result.RequiresTwoFactor)
@@ -129,13 +141,14 @@ public static class ConnectEndpoints
                 return Results.Redirect($"/connect/2fa{q}");
             }
             if (!result.Succeeded)
-                return Results.Content(AccountPages.LoginPage(lang, returnUrl, error: true), "text/html");
+                return Results.Content(AccountPages.LoginPage(lang, returnUrl,
+                    AccountPages.AntiforgeryField(antiforgery, http), error: true), "text/html");
 
             // Single-factor success: stamp amr=pwd. Protected scopes will still be denied downstream until the
             // user enrols a second factor (/connect/enroll-2fa) — that is the MFA gate (C3) on the new issuer.
             await AccountPages.StampSignIn(http, signIn, user, ["pwd"]);
             return Results.Redirect(AccountPages.SafeReturn(returnUrl));
-        }).DisableAntiforgery();
+        }).RequireRateLimiting(IssuerRateLimits.Credential);
 
         app.MapPost("/connect/logout", async (HttpContext http, SignInManager<ApplicationUser> signIn) =>
         {

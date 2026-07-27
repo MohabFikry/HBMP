@@ -24,7 +24,9 @@ public static class AdminEndpoints
 
     public static void MapAdmin(this WebApplication app)
     {
-        var g = app.MapGroup("/identity/admin");
+        // 18.B3 (S3) — the framework enforces authn + an admin scope + MFA before routing reaches a handler.
+        // Guard remains as layer two for the per-action read/write distinction and its problem bodies.
+        var g = app.MapGroup("/identity/admin").RequireAuthorization(IdentityAdminPolicies.Admin);
 
         // ---- Users -----------------------------------------------------------------------------------------
         g.MapGet("/users", async (HttpContext http, string? query, UserManager<ApplicationUser> users, IdentityStoreDbContext db) =>

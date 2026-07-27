@@ -1,3 +1,4 @@
+using Mersal.Auth.Authorization;
 using Mersal.Auth;
 using Mersal.Authz;
 
@@ -11,10 +12,16 @@ public static class BranchAssignmentEndpoints
 {
     public static void MapBranchAssignments(this WebApplication app)
     {
-        var admin = app.MapGroup("/api/v1/admin").WithTags("admin-branches");
+        // 18.B3 (audit R2 S3) — the framework gate. Until now these groups carried NO .RequireAuthorization,
+        // so an UNAUTHENTICATED request reached the handler and was rejected only by AdminGate's in-handler
+        // check. That worked, but it made the whole surface depend on every handler remembering to call the
+        // gate first, and it never enforced MFA at the pipeline. Group scope = admin:read (authn + admin-ness +
+        // MFA); mutations add admin:write on top; AdminGate stays as layer two for the per-action rule + audit.
+        var admin = app.MapGroup("/api/v1/admin").WithTags("admin-branches").RequireAuthorization(HbmpPolicies.Scope("admin:read"));
+        var adminWrite = admin.MapGroup("").RequireAuthorization(HbmpPolicies.Scope("admin:write"));
 
         // Assign a branch (Home or Additional). A second active Home → 409 home-exists.
-        admin.MapPost("/users/{subject}/branches", async (string subject, AssignBranchRequest req, AdminGate gate, BranchAssignmentService svc, CancellationToken ct) =>
+        adminWrite.MapPost("/users/{subject}/branches", async (string subject, AssignBranchRequest req, AdminGate gate, BranchAssignmentService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.GrantRole, ct);
             if (denied is not null) return denied;
@@ -32,7 +39,7 @@ public static class BranchAssignmentEndpoints
         });
 
         // Revoke a branch assignment (soft — effective on the user's next request).
-        admin.MapPost("/users/{subject}/branches/revoke", async (string subject, RevokeBranchRequest req, AdminGate gate, BranchAssignmentService svc, CancellationToken ct) =>
+        adminWrite.MapPost("/users/{subject}/branches/revoke", async (string subject, RevokeBranchRequest req, AdminGate gate, BranchAssignmentService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.RevokeRole, ct);
             if (denied is not null) return denied;

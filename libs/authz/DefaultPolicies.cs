@@ -18,7 +18,12 @@ public static class DefaultPolicies
         public const string Result = "result";            // lab/imaging results
         public const string Financials = "financials";
         public const string Coverage = "coverage";
-        public const string Identity = "identity";
+        public const string Identity = "identity";        // name, member no, status — every reader needs these
+        // 18.B3 (audit R2 S6) — the two classes R1 deferred. "identity" as a single bucket could not separate
+        // "which person is this" from "here is their national ID", so the beneficiary record had no way to
+        // give reception a phone number without also giving it a UNHCR registration number.
+        public const string Pii = "pii";                  // identifier VALUES: national ID, UNHCR no, passport
+        public const string Contact = "contact";          // phone, address
     }
 
     public static PolicyBundle Bundle() => new(Version,

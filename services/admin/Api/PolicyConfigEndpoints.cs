@@ -1,3 +1,4 @@
+using Mersal.Auth.Authorization;
 using Mersal.Authz;
 
 namespace Mersal.Admin.Api;
@@ -8,9 +9,15 @@ public static class PolicyConfigEndpoints
 {
     public static void MapPolicyConfig(this WebApplication app)
     {
-        var g = app.MapGroup("/api/v1/admin").WithTags("admin-policy-config");
+        // 18.B3 (audit R2 S3) — the framework gate. Until now these groups carried NO .RequireAuthorization,
+        // so an UNAUTHENTICATED request reached the handler and was rejected only by AdminGate's in-handler
+        // check. That worked, but it made the whole surface depend on every handler remembering to call the
+        // gate first, and it never enforced MFA at the pipeline. Group scope = admin:read (authn + admin-ness +
+        // MFA); mutations add admin:write on top; AdminGate stays as layer two for the per-action rule + audit.
+        var g = app.MapGroup("/api/v1/admin").WithTags("admin-policy-config").RequireAuthorization(HbmpPolicies.Scope("admin:read"));
+        var w = g.MapGroup("").RequireAuthorization(HbmpPolicies.Scope("admin:write"));
 
-        g.MapPut("/session-policy", async (SessionPolicyRequest req, AdminGate gate, PolicyConfigService svc, CancellationToken ct) =>
+        w.MapPut("/session-policy", async (SessionPolicyRequest req, AdminGate gate, PolicyConfigService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.Configure, ct);
             if (denied is not null) return denied;
@@ -25,7 +32,7 @@ public static class PolicyConfigEndpoints
             return Results.Ok(new { policy.PolicyId, tier = policy.RoleTier.ToString(), policy.EffectiveFrom });
         });
 
-        g.MapPut("/device-policy", async (DevicePolicyRequest req, AdminGate gate, PolicyConfigService svc, CancellationToken ct) =>
+        w.MapPut("/device-policy", async (DevicePolicyRequest req, AdminGate gate, PolicyConfigService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.Configure, ct);
             if (denied is not null) return denied;
@@ -40,7 +47,7 @@ public static class PolicyConfigEndpoints
         });
 
         // Stage a policy-bundle change — Super Admin only; proposes/diffs, never deploys.
-        g.MapPost("/policy-proposals", async (PolicyProposalRequest req, AdminGate gate, PolicyConfigService svc, CancellationToken ct) =>
+        w.MapPost("/policy-proposals", async (PolicyProposalRequest req, AdminGate gate, PolicyConfigService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.ProposePolicy, ct);
             if (denied is not null) return denied;

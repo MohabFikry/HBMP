@@ -17,7 +17,10 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpAuditClient("patient-service");
-builder.Services.AddHbmpAuthorization();
+// 18.B3 (S6) — the beneficiary-directory overlay: patient:read as a first-class scope, a Sensitive read rule
+// (so the engine audits the allow), and the pii/contact field-class matrix the R1 audit deferred.
+builder.Services.AddHbmpAuthorization(PatientPolicies.Bundle(), PatientPolicies.FieldMatrix());
+builder.Services.AddScoped<BeneficiaryReadGuard>();
 builder.Services.AddHbmpBreakGlass(builder.Configuration); // live break-glass elevation (16.6, H5)
 builder.Services.AddHbmpEvents(builder.Configuration);
 builder.Services.AddHbmpDurableOutbox<PatientDbContext>();
@@ -50,7 +53,14 @@ if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "patient-service" })).AllowAnonymous();
 
+// 18.B3 (audit R2 S6) — reads and writes are no longer the same permission.
+//
+// Everything under /beneficiaries required patient:write, which only beneficiary_mgmt holds. So the desk
+// could not look up the person standing in front of it, and whoever COULD look someone up was, by the same
+// token, allowed to rewrite their identity record. Reads now take patient:read and go through
+// BeneficiaryReadGuard (engine + tenant + PHI-read audit + field projection); writes keep patient:write.
 var v1 = app.MapGroup("/api/v1/beneficiaries").RequireAuthorization(HbmpPolicies.Scope("patient:write"));
+var read = app.MapGroup("/api/v1/beneficiaries").RequireAuthorization(HbmpPolicies.Scope("patient:read"));
 
 // POST /beneficiaries — register (Idempotency-Key required); 201 + ETag, or 409 duplicate, or 400.
 v1.MapPost("", async (
@@ -107,8 +117,8 @@ v1.MapPost("", async (
 });
 
 // GET /beneficiaries — search by identifier / name / status (cursor-ish paging).
-v1.MapGet("", async (string? identifierType, string? identifierValue, string? name, string? status,
-    int? page, int? pageSize, PatientDbContext db, CancellationToken ct) =>
+read.MapGet("", async (string? identifierType, string? identifierValue, string? name, string? status,
+    int? page, int? pageSize, PatientDbContext db, BeneficiaryReadGuard guard, CancellationToken ct) =>
 {
     var (p, ps) = (Math.Max(page ?? 1, 1), Math.Clamp(pageSize ?? 25, 1, 100));
     var q = db.Beneficiaries.AsNoTracking().Where(x => !x.IsDeleted);
@@ -125,17 +135,31 @@ v1.MapGet("", async (string? identifierType, string? identifierValue, string? na
     if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<BeneficiaryStatus>(status, out var st))
         q = q.Where(x => x.Status == st);
 
-    var items = await q.OrderBy(x => x.FamilyName).Skip((p - 1) * ps).Take(ps).ToListAsync(ct);
-    return Results.Ok(new { page = p, pageSize = ps, items = items.Select(BeneficiaryDto.From) });
+    var items = await q.Include(x => x.Identifiers).Include(x => x.Contacts)
+        .OrderBy(x => x.FamilyName).Skip((p - 1) * ps).Take(ps).ToListAsync(ct);
+
+    // Every hit is authorized and audited individually. A search is the higher-volume disclosure of the two,
+    // and "forty records were returned" is not an audit trail — the row ids are what makes a later review
+    // possible. Rows the caller may not read are dropped rather than 403-ing the page, so a name query does
+    // not become an oracle for which beneficiaries exist outside the caller's tenant.
+    var disclosed = new List<IReadOnlyDictionary<string, object?>>();
+    foreach (var b in items)
+    {
+        if (await guard.AuthorizeAsync(b, ct) is not null) continue;
+        disclosed.Add(await guard.DiscloseAsync(b, "search", ct));
+    }
+    return Results.Ok(new { page = p, pageSize = ps, items = disclosed });
 });
 
-// GET /beneficiaries/{id} — with ETag (row_version).
-v1.MapGet("/{id:guid}", async (Guid id, PatientDbContext db, CancellationToken ct) =>
+// GET /beneficiaries/{id} — engine-authorized, tenant-scoped, audited, field-projected (18.B3 / S6).
+read.MapGet("/{id:guid}", async (Guid id, PatientDbContext db, BeneficiaryReadGuard guard, CancellationToken ct) =>
 {
     var b = await db.Beneficiaries.AsNoTracking().Include(x => x.Identifiers).Include(x => x.Contacts)
         .FirstOrDefaultAsync(x => x.BeneficiaryId == id && !x.IsDeleted, ct);
-    return b is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(BeneficiaryDto.From(b));
-}).RequireAuthorization();
+    if (b is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+    if (await guard.AuthorizeAsync(b, ct) is { } denied) return denied;
+    return Results.Ok(await guard.DiscloseAsync(b, "by-id", ct));
+});
 
 // ================================================================ REGISTRATION WORKFLOW (1.4, US-003/004)
 var reg = app.MapGroup("/api/v1/registrations").RequireAuthorization(HbmpPolicies.Scope("patient:write"));

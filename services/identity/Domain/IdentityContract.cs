@@ -25,7 +25,7 @@ public static class IdentityContract
         "auth:read", "auth:review", "auth:decide", "auth:emergency", "auth:override", "auth:manual", "auth:ingest",
         "reception:search",
         "emr:read", "emr:write", "encounter:write",
-        "rx:write", "patient:write", "eligibility:check",
+        "rx:write", "patient:read", "patient:write", "eligibility:check",
         "appointment:read", "appointment:write",
         "document:write",
         "case:read", "case:write", "case:manage",

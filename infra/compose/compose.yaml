@@ -80,6 +80,10 @@ services:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
       KONG_PROXY_LISTEN: 0.0.0.0:8000
+      # 18.B3 (S8) — edge JWT validation. Must match the issuer exactly: `iss` is the lookup key for the
+      # registered signing key, so a trailing slash here rejects every token at the gateway.
+      IDENTITY_ISSUER: ${IDENTITY_ISSUER:-http://localhost:8090/}
+      IDENTITY_JWKS_PUBLIC_KEY: ${IDENTITY_JWKS_PUBLIC_KEY}
       KONG_ADMIN_LISTEN: 127.0.0.1:8001
       KONG_LOG_LEVEL: notice
     ports:

@@ -1,5 +1,6 @@
 using Mersal.Identity.Domain;
 using Mersal.Identity.Infrastructure;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 
 namespace Mersal.Identity.Api.Auth;
@@ -24,6 +25,25 @@ public static class IssuerSetup
 
         // The four Identity cookies SignInManager expects (application is the primary; the two-factor +
         // external cookies are used by the 17.3 login flow).
+        // 18.B3 (audit R2 S4) — cookie hardening. These four cookies ARE the issuer session: the application
+        // cookie carries the amr claims that satisfy MFA, and TwoFactorUserId identifies the half-authenticated
+        // user between the password step and the TOTP step. They shipped on framework defaults —
+        // SecurePolicy=SameAsRequest and SameSite=Lax — so a single plaintext request leaked the session cookie
+        // on the wire, and Lax still rides along on a top-level cross-site GET.
+        //
+        // Development is the one exception, and only for Secure: Tier 1 runs over http on localhost, and
+        // Always there would make it impossible to log in at all. SameSite=Strict applies everywhere — nothing
+        // in this flow is a legitimate cross-site navigation, because the SPA uses the authorization-code
+        // redirect rather than a cross-site form post.
+        void Harden(Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions o)
+        {
+            o.Cookie.SecurePolicy = env.IsDevelopment()
+                ? CookieSecurePolicy.SameAsRequest
+                : CookieSecurePolicy.Always;
+            o.Cookie.SameSite = SameSiteMode.Strict;
+            o.Cookie.HttpOnly = true;   // explicit: no script on any origin reads the session
+        }
+
         services.AddAuthentication(IdentityConstants.ApplicationScheme)
             .AddCookie(IdentityConstants.ApplicationScheme, o =>
             {
@@ -31,10 +51,20 @@ public static class IssuerSetup
                 o.Cookie.Name = "mersal.idp";
                 o.ExpireTimeSpan = TimeSpan.FromMinutes(30); // aligns with the SSO idle window
                 o.SlidingExpiration = true;
+                Harden(o);
             })
-            .AddCookie(IdentityConstants.ExternalScheme)
-            .AddCookie(IdentityConstants.TwoFactorUserIdScheme)
-            .AddCookie(IdentityConstants.TwoFactorRememberMeScheme);
+            .AddCookie(IdentityConstants.ExternalScheme, Harden)
+            .AddCookie(IdentityConstants.TwoFactorUserIdScheme, Harden)
+            .AddCookie(IdentityConstants.TwoFactorRememberMeScheme, Harden);
+
+        // 18.B3 (S4) — the antiforgery cookie travels with the same rules as the session it protects.
+        services.AddAntiforgery(o =>
+        {
+            o.Cookie.Name = "mersal.idp.csrf";
+            o.Cookie.SecurePolicy = env.IsDevelopment() ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
+            o.Cookie.SameSite = SameSiteMode.Strict;
+            o.FormFieldName = "__hbmp_csrf";
+        });
 
         services.AddScoped<TokenPrincipalFactory>();
 

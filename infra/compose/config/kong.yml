@@ -9,7 +9,9 @@ _format_version: "3.0"
 # (/connect/*, /.well-known/*) are routed to it below so the SPA reaches one origin. JWKS-based signature
 # validation is enforced at every service (defense in depth, libs/auth); for true EDGE enforcement in Tier
 # 2/3 add Kong's openid-connect plugin pointed at that JWKS (community-edition `jwt` cannot do JWKS
-# discovery with rotating RS256 keys, so services stay the enforcement point in Tier 1). Keycloak retired.
+# discovery with rotating RS256 keys). Phase 18.B3 (S8) closed this: the edge now enforces a signed,
+# unexpired token globally via the OSS `jwt` plugin against the issuer's registered RS256 public key (see
+# the consumers block below), and the services remain the enforcement point for scope/role/ABAC.
 #
 # Routing is by the service's REAL path prefix (see each service's MapGroup). Sub-paths under
 # /api/v1/beneficiaries are owned by MULTIPLE services (patient, emr, eligibility, document); the
@@ -200,8 +202,45 @@ services:
       - name: identity-oidc-routes
         paths: ["/connect", "/.well-known"]
         strip_path: false
+        # 18.B3 (S8) — the ONLY exemption from the global edge jwt plugin. These routes are how a caller
+        # OBTAINS a token (/connect/authorize, /connect/token, the login + 2FA pages) and how a verifier
+        # fetches the signing keys (/.well-known/jwks, the discovery document). Requiring a token to reach
+        # them would be a bootstrap deadlock. Route scope beats global scope in Kong, so `enabled: false`
+        # here overrides the global plugin for exactly these paths and nothing else.
+        plugins:
+          - name: jwt
+            enabled: false
+
+# 18.B3 (audit R2 S8) — EDGE authentication. Until now Kong did routing, CORS and correlation ids only:
+# an unauthenticated request was proxied all the way to a service and rejected there. Every service does
+# validate the JWT (libs/auth, defense in depth), so this was not an open door — but it meant the gateway
+# forwarded anonymous traffic to twenty internal services, and any service that ever shipped a route without
+# .RequireAuthorization inherited a public endpoint. The edge now rejects an unsigned or expired token before
+# it reaches the mesh, and the services keep validating independently.
+#
+# Kong OSS has no openid-connect plugin (Enterprise) and its `jwt` plugin cannot discover JWKS, so the
+# issuer's RS256 PUBLIC key is registered here as a consumer credential, keyed on the `iss` claim. That is
+# workable only because Phase 12.3 made the issuer keys PERSISTENT in OpenBao — with the old ephemeral
+# per-restart keys this would have broken on every deploy. The key is public by definition; it is injected
+# rather than committed so that a rotation is a config change, not a code change.
+consumers:
+  - username: hbmp-issuer
+    jwt_secrets:
+      # Kong 3.x env-vault references: read at boot from IDENTITY_ISSUER / IDENTITY_JWKS_PUBLIC_KEY on the
+      # Kong container. The public key is not a secret, but it is deployment-specific and must track whatever
+      # OpenBao holds — a mismatch here rejects every token at the edge, so it is injected, never committed.
+      - key: "{vault://env/identity-issuer}"
+        algorithm: RS256
+        rsa_public_key: "{vault://env/identity-jwks-public-key}"
 
 plugins:
+  # Global edge authentication (S8). Health and metrics are not routed through Kong at all (Prometheus
+  # scrapes services in-cluster), so they need no exemption; the OIDC routes carry an explicit disable above.
+  - name: jwt
+    config:
+      key_claim_name: iss
+      claims_to_verify: ["exp"]
+      run_on_preflight: false   # a CORS preflight carries no Authorization header by design
   # Dev CORS: allow the Vite SPA origin to call the API with a bearer token.
   # credentials:false — the SPA sends the token in the Authorization header, not cookies, so we do not
   # need (and must not advertise) credentialed CORS. If-Match/ETag support optimistic concurrency.

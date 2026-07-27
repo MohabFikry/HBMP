@@ -1,3 +1,4 @@
+using Mersal.Auth.Authorization;
 using Mersal.Authz;
 
 namespace Mersal.Admin.Api;
@@ -8,9 +9,15 @@ public static class AccessReviewEndpoints
 {
     public static void MapAccessReview(this WebApplication app)
     {
-        var g = app.MapGroup("/api/v1/admin/access-reviews").WithTags("admin-access-review");
+        // 18.B3 (audit R2 S3) — the framework gate. Until now these groups carried NO .RequireAuthorization,
+        // so an UNAUTHENTICATED request reached the handler and was rejected only by AdminGate's in-handler
+        // check. That worked, but it made the whole surface depend on every handler remembering to call the
+        // gate first, and it never enforced MFA at the pipeline. Group scope = admin:read (authn + admin-ness +
+        // MFA); mutations add admin:write on top; AdminGate stays as layer two for the per-action rule + audit.
+        var g = app.MapGroup("/api/v1/admin/access-reviews").WithTags("admin-access-review").RequireAuthorization(HbmpPolicies.Scope("admin:read"));
+        var w = g.MapGroup("").RequireAuthorization(HbmpPolicies.Scope("admin:write"));
 
-        g.MapPost("/", async (CreateCampaignRequest req, AdminGate gate, AccessReviewService svc, CancellationToken ct) =>
+        w.MapPost("/", async (CreateCampaignRequest req, AdminGate gate, AccessReviewService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.Review, ct);
             if (denied is not null) return denied;
@@ -24,7 +31,7 @@ public static class AccessReviewEndpoints
                 new { c.CampaignId, c.Name, minTier = c.MinTier.ToString(), items = c.Items.Count, c.DueAt });
         });
 
-        g.MapPost("/items/{itemId:guid}/recertify", async (Guid itemId, ReviewDecisionRequest req, AdminGate gate, AccessReviewService svc, CancellationToken ct) =>
+        w.MapPost("/items/{itemId:guid}/recertify", async (Guid itemId, ReviewDecisionRequest req, AdminGate gate, AccessReviewService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.Review, ct);
             if (denied is not null) return denied;
@@ -37,7 +44,7 @@ public static class AccessReviewEndpoints
             return ok ? Results.NoContent() : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
         });
 
-        g.MapPost("/items/{itemId:guid}/revoke", async (Guid itemId, ReviewDecisionRequest req, AdminGate gate, AccessReviewService svc, CancellationToken ct) =>
+        w.MapPost("/items/{itemId:guid}/revoke", async (Guid itemId, ReviewDecisionRequest req, AdminGate gate, AccessReviewService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.Review, ct);
             if (denied is not null) return denied;
@@ -51,7 +58,7 @@ public static class AccessReviewEndpoints
         });
 
         // Sweep the campaign: any grant still unconfirmed past the deadline auto-expires (revoked).
-        g.MapPost("/{campaignId:guid}/sweep", async (Guid campaignId, string? tenant, AdminGate gate, AccessReviewService svc, CancellationToken ct) =>
+        w.MapPost("/{campaignId:guid}/sweep", async (Guid campaignId, string? tenant, AdminGate gate, AccessReviewService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.Review, ct);
             if (denied is not null) return denied;

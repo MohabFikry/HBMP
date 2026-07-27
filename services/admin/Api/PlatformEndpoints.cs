@@ -1,3 +1,4 @@
+using Mersal.Auth.Authorization;
 using Mersal.Authz;
 
 namespace Mersal.Admin.Api;
@@ -16,8 +17,14 @@ public static class PlatformEndpoints
     public static void MapPlatform(this WebApplication app)
     {
         // -------------------------------------------------- Tenant administration (Super Admin)
-        var tenants = app.MapGroup("/api/v1/admin/tenants").WithTags("admin-tenants");
-        tenants.MapPut("/", async (TenantUpsertRequest req, AdminGate gate, TenantAdminService svc, CancellationToken ct) =>
+        // 18.B3 (audit R2 S3) — the framework gate. Until now these groups carried NO .RequireAuthorization,
+        // so an UNAUTHENTICATED request reached the handler and was rejected only by AdminGate's in-handler
+        // check. That worked, but it made the whole surface depend on every handler remembering to call the
+        // gate first, and it never enforced MFA at the pipeline. Group scope = admin:read (authn + admin-ness +
+        // MFA); mutations add admin:write on top; AdminGate stays as layer two for the per-action rule + audit.
+        var tenants = app.MapGroup("/api/v1/admin/tenants").WithTags("admin-tenants").RequireAuthorization(HbmpPolicies.Scope("admin:read"));
+        var tenantWrite = tenants.MapGroup("").RequireAuthorization(HbmpPolicies.Scope("admin:write"));
+        tenantWrite.MapPut("/", async (TenantUpsertRequest req, AdminGate gate, TenantAdminService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.ManageTenant, ct);
             if (denied is not null) return denied;
@@ -32,7 +39,12 @@ public static class PlatformEndpoints
         });
 
         // -------------------------------------------------- Break-glass lifecycle
-        var bg = app.MapGroup("/api/v1/admin/break-glass").WithTags("admin-break-glass");
+        // 18.B3 (S3) — the group requires authentication; the LIFECYCLE actions additionally require the
+        // admin:break-glass scope. They are split because GET /active is deliberately self-scoped: every
+        // service's break-glass provider calls it with the CALLER's own token to discover that caller's own
+        // grants, so demanding the scope there would break elevation for the very roles it exists to serve.
+        var bg = app.MapGroup("/api/v1/admin/break-glass").WithTags("admin-break-glass").RequireAuthorization();
+        var bgAction = bg.MapGroup("").RequireAuthorization(HbmpPolicies.Scope("admin:break-glass"));
 
         // 16.6 (H5): the runtime seam — every service's break-glass provider reads the CALLER's own active grants
         // here (caller's token forwarded) to widen access at decision time. Self-scoped (subject from the token),
@@ -43,9 +55,9 @@ public static class PlatformEndpoints
             if (p is null) return Results.Unauthorized();
             if (string.IsNullOrEmpty(p.TenantId)) return Results.Ok(Array.Empty<ActiveGrantView>());
             return Results.Ok(await svc.ActiveForSubjectAsync(p.Subject, p.TenantId, ct));
-        }).RequireAuthorization();
+        });
 
-        bg.MapPost("/", async (BreakGlassRequestBody req, AdminGate gate, BreakGlassAdminService svc, CancellationToken ct) =>
+        bgAction.MapPost("/", async (BreakGlassRequestBody req, AdminGate gate, BreakGlassAdminService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.BreakGlassRequest, ct);
             if (denied is not null) return denied;
@@ -61,7 +73,7 @@ public static class PlatformEndpoints
             return Results.Created($"/api/v1/admin/break-glass/{g.GrantId}", new { g.GrantId, status = g.Status.ToString() });
         });
 
-        bg.MapPost("/{grantId:guid}/approve", async (Guid grantId, BreakGlassRejectBody? body, AdminGate gate, BreakGlassAdminService svc, CancellationToken ct) =>
+        bgAction.MapPost("/{grantId:guid}/approve", async (Guid grantId, BreakGlassRejectBody? body, AdminGate gate, BreakGlassAdminService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.BreakGlassApprove, ct);
             if (denied is not null) return denied;
@@ -78,7 +90,7 @@ public static class PlatformEndpoints
                 : ProblemResults.Invalid(r.ReasonCode ?? "error");
         });
 
-        bg.MapPost("/{grantId:guid}/reject", async (Guid grantId, BreakGlassRejectBody req, AdminGate gate, BreakGlassAdminService svc, CancellationToken ct) =>
+        bgAction.MapPost("/{grantId:guid}/reject", async (Guid grantId, BreakGlassRejectBody req, AdminGate gate, BreakGlassAdminService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.BreakGlassApprove, ct);
             if (denied is not null) return denied;
@@ -90,7 +102,7 @@ public static class PlatformEndpoints
             return r.Ok ? Results.NoContent() : ProblemResults.Invalid(r.ReasonCode ?? "error");
         });
 
-        bg.MapPost("/{grantId:guid}/activate", async (Guid grantId, BreakGlassActivateBody req, AdminGate gate, BreakGlassAdminService svc, CancellationToken ct) =>
+        bgAction.MapPost("/{grantId:guid}/activate", async (Guid grantId, BreakGlassActivateBody req, AdminGate gate, BreakGlassAdminService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.BreakGlassRequest, ct);
             if (denied is not null) return denied;
@@ -105,7 +117,7 @@ public static class PlatformEndpoints
         });
 
         // Record + evaluate an access under a grant. 200 within scope, 403 out of scope (no field-deny bypass).
-        bg.MapPost("/{grantId:guid}/access", async (Guid grantId, BreakGlassAccessBody req, AdminGate gate, BreakGlassAdminService svc, CancellationToken ct) =>
+        bgAction.MapPost("/{grantId:guid}/access", async (Guid grantId, BreakGlassAccessBody req, AdminGate gate, BreakGlassAdminService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.BreakGlassRequest, ct);
             if (denied is not null) return denied;
@@ -121,7 +133,7 @@ public static class PlatformEndpoints
         });
 
         // -------------------------------------------------- Governance dashboards (tenant-scoped, audited view)
-        var dash = app.MapGroup("/api/v1/admin/dashboards").WithTags("admin-dashboards");
+        var dash = app.MapGroup("/api/v1/admin/dashboards").WithTags("admin-dashboards").RequireAuthorization(HbmpPolicies.Scope("admin:read"));
         dash.MapGet("/break-glass", async (string? tenant, AdminGate gate, DashboardService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.ReadDashboard, ct);

@@ -1,3 +1,4 @@
+using Mersal.Auth.Authorization;
 using Mersal.Authz;
 using Microsoft.EntityFrameworkCore;
 using Mersal.Admin.Infrastructure;
@@ -12,10 +13,16 @@ public static class UsersEndpoints
 {
     public static void MapUsers(this WebApplication app)
     {
-        var g = app.MapGroup("/api/v1/admin").WithTags("admin-users");
+        // 18.B3 (audit R2 S3) — the framework gate. Until now these groups carried NO .RequireAuthorization,
+        // so an UNAUTHENTICATED request reached the handler and was rejected only by AdminGate's in-handler
+        // check. That worked, but it made the whole surface depend on every handler remembering to call the
+        // gate first, and it never enforced MFA at the pipeline. Group scope = admin:read (authn + admin-ness +
+        // MFA); mutations add admin:write on top; AdminGate stays as layer two for the per-action rule + audit.
+        var g = app.MapGroup("/api/v1/admin").WithTags("admin-users").RequireAuthorization(HbmpPolicies.Scope("admin:read"));
+        var w = g.MapGroup("").RequireAuthorization(HbmpPolicies.Scope("admin:write"));
 
         // Assign a role — rejected (409) with the SoD reason if the grant breaches Segregation of Duties.
-        g.MapPost("/role-bindings", async (GrantRoleRequest req, AdminGate gate, RoleAdminService svc, CancellationToken ct) =>
+        w.MapPost("/role-bindings", async (GrantRoleRequest req, AdminGate gate, RoleAdminService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.GrantRole, ct);
             if (denied is not null) return denied;
@@ -37,7 +44,7 @@ public static class UsersEndpoints
         });
 
         // Revoke a single binding.
-        g.MapPost("/role-bindings/revoke", async (RevokeRoleRequest req, AdminGate gate, RoleAdminService svc, CancellationToken ct) =>
+        w.MapPost("/role-bindings/revoke", async (RevokeRoleRequest req, AdminGate gate, RoleAdminService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.RevokeRole, ct);
             if (denied is not null) return denied;
@@ -51,7 +58,7 @@ public static class UsersEndpoints
         });
 
         // De-provision a user everywhere (FR-IAM-010).
-        g.MapPost("/users/deprovision", async (DeprovisionRequest req, AdminGate gate, RoleAdminService svc, CancellationToken ct) =>
+        w.MapPost("/users/deprovision", async (DeprovisionRequest req, AdminGate gate, RoleAdminService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.RevokeRole, ct);
             if (denied is not null) return denied;

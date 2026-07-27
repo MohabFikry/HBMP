@@ -31,13 +31,15 @@ Mark `✅ YYYY-MM-DD` per id here **and** on the finding row in `AUDIT-R2-E2E.md
 | 18.B2 | S2 | interop RLS policy is fail-**open**; GUC never bound | ✅ 2026-07-27 (+ admin's 4 migrations, same shape, not in the audit) |
 | 18.B2 | — | *(found)* eligibility stamped a hardcoded `SoleTenantId` on the projection write path | ✅ 2026-07-27 (tenant from envelope; 28 publishers enriched) |
 | 18.B2 | — | *(found)* admin write paths silently substituted the caller's tenant for a mismatched body tenant | ✅ 2026-07-27 (403, not a redirected write) |
-| 18.B3 | S3 | Admin privileged groups un-gated at the framework (no MFA on role grants) | ☐ |
-| 18.B3 | S4 | CSRF on issuer cookie POSTs incl. `POST /connect/enroll-2fa` | ☐ |
-| 18.B3 | S5 | Token scope grant fails open to the user's full entitlement | ☐ |
-| 18.B3 | S6 | patient by-id/search returns national ID + contacts, unscoped, unaudited | ☐ |
-| 18.B3 | S7 | identity-service missing `UseHbmpTransportSecurity()` | ☐ |
-| 18.B3 | S8 | Kong performs no authentication | ☐ |
-| 18.B3 | S9 | No rate limiting on `/connect/*` | ☐ |
+| 18.B3 | S3 | Admin privileged groups un-gated at the framework (no MFA on role grants) | ✅ 2026-07-27 (route-table gate, not a handler convention) |
+| 18.B3 | S4 | CSRF on issuer cookie POSTs incl. `POST /connect/enroll-2fa` | ✅ 2026-07-27 (antiforgery on all 3 forms + Secure/SameSite=Strict cookies) |
+| 18.B3 | S5 | Token scope grant fails open to the user's full entitlement | ✅ 2026-07-27 (+ found: the intersection dropped offline_access → no refresh token ever) |
+| 18.B3 | S6 | patient by-id/search returns national ID + contacts, unscoped, unaudited | ✅ 2026-07-27 (patient:read split, engine+tenant+PHI-read audit+pii/contact projection) |
+| 18.B3 | S7 | identity-service missing `UseHbmpTransportSecurity()` | ✅ 2026-07-27 |
+| 18.B3 | S8 | Kong performs no authentication | ✅ 2026-07-27 (Kong OSS jwt plugin + registered issuer key; 🟡 needs a live stack to verify) |
+| 18.B3 | S9 | No rate limiting on `/connect/*` | ✅ 2026-07-27 (10/min credential, 60/min token, per-IP) |
+| 18.B3 | — | *(found)* 141 rule/role pairs no token could satisfy — policy bundles vs the identity seed | ✅ 2026-07-27 (135 closed by 0004+0005; 6 declared) |
+| 18.B3 | — | **OPEN — needs a product decision**: 6 roles named by policy rules but absent from the frozen role vocabulary | ☐ claims_reviewer, manager, network_manager, approvals_team, finance_approver, call_center_supervisor |
 
 ## Gate C — Last-mile wiring
 

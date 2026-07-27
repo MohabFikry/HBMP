@@ -33,7 +33,7 @@ export const OIDC = {
     "auth:manual auth:override auth:read auth:review case:manage case:read case:write document:write " +
     "eligibility:check emr:read emr:write encounter:write finance:approve finance:export finance:project " +
     "finance:read finance:write notification:ingest notification:read orders:consume " +
-    "orders:read orders:write patient:write pharmacy:dispense pharmacy:read policy:write provider:finance " +
+    "orders:read orders:write patient:read patient:write pharmacy:dispense pharmacy:read policy:write provider:finance " +
     "provider:read provider:write reception:search referral:write reporting:export reporting:project " +
     "reporting:read rx:write",
 };

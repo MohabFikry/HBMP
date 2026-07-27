@@ -2,9 +2,11 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
 using Mersal.Identity.Domain;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Mersal.Identity.Api.Auth;
 
@@ -19,15 +21,36 @@ public static class AccountPages
 {
     public const string AmrClaim = "amr";
 
+    /// <summary>
+    /// 18.B3 (audit R2 S4) — the hidden antiforgery field for a rendered form.
+    ///
+    /// All three POSTs carried <c>.DisableAntiforgery()</c>. The consequence on <c>/connect/enroll-2fa</c> is
+    /// the sharpest: it is authenticated by the <c>mersal.idp</c> COOKIE, so a victim who is signed in and
+    /// visits an attacker's page has their browser submit that form with the ATTACKER's TOTP secret. The
+    /// enrolment succeeds, the attacker's authenticator becomes the victim's second factor, and the flow then
+    /// stamps <c>amr=otp</c> onto the session. The victim sees nothing — they already had a session. From that
+    /// point the attacker can satisfy MFA for that account, which is precisely the control that gates every
+    /// admin scope and every break-glass request on the platform.
+    ///
+    /// <c>/connect/login</c> and <c>/connect/2fa</c> are login-CSRF rather than takeover: an attacker forces
+    /// the victim into a session the attacker controls, and anything the victim then files lands in the
+    /// attacker's account. Same fix.
+    /// </summary>
+    public static string AntiforgeryField(IAntiforgery antiforgery, HttpContext http)
+    {
+        var tokens = antiforgery.GetAndStoreTokens(http);
+        return $"""<input type="hidden" name="{Enc.Encode(tokens.FormFieldName)}" value="{Enc.Encode(tokens.RequestToken ?? "")}" />""";
+    }
+
     public static void MapAccount(this WebApplication app)
     {
         // ---- TOTP challenge (after a password sign-in that RequiresTwoFactor) ------------------------------
-        app.MapGet("/connect/2fa", (HttpContext http, string? returnUrl) =>
-            Results.Content(TwoFactorPage(Lang(http), returnUrl), "text/html"));
+        app.MapGet("/connect/2fa", (HttpContext http, IAntiforgery antiforgery, string? returnUrl) =>
+            Results.Content(TwoFactorPage(Lang(http), returnUrl, AntiforgeryField(antiforgery, http)), "text/html"));
 
         app.MapPost("/connect/2fa", async (
             HttpContext http, [FromForm] string code, [FromForm] bool? recovery, [FromForm] string? returnUrl,
-            SignInManager<ApplicationUser> signIn, UserManager<ApplicationUser> users) =>
+            IAntiforgery antiforgery, SignInManager<ApplicationUser> signIn, UserManager<ApplicationUser> users) =>
         {
             var user = await signIn.GetTwoFactorAuthenticationUserAsync();
             if (user is null) return Results.Redirect("/connect/login");
@@ -37,23 +60,24 @@ public static class AccountPages
                 ? (await signIn.TwoFactorRecoveryCodeSignInAsync(stripped)).Succeeded
                 : (await signIn.TwoFactorAuthenticatorSignInAsync(stripped, isPersistent: false, rememberClient: false)).Succeeded;
             if (!ok)
-                return Results.Content(TwoFactorPage(Lang(http), returnUrl, error: true), "text/html");
+                return Results.Content(TwoFactorPage(Lang(http), returnUrl, AntiforgeryField(antiforgery, http), error: true), "text/html");
 
             await StampSignIn(http, signIn, user, ["pwd", "otp"]);
             return Results.Redirect(SafeReturn(returnUrl));
-        }).DisableAntiforgery();
+        }).RequireRateLimiting(IssuerRateLimits.Credential);
 
         // ---- Authenticator enrolment (signed-in user) ------------------------------------------------------
-        app.MapGet("/connect/enroll-2fa", async (HttpContext http, UserManager<ApplicationUser> users) =>
+        app.MapGet("/connect/enroll-2fa", async (HttpContext http, IAntiforgery antiforgery, UserManager<ApplicationUser> users) =>
         {
             var user = await users.GetUserAsync(http.User);
             if (user is null) return Results.Redirect("/connect/login");
             var key = await EnsureAuthenticatorKey(users, user);
-            return Results.Content(EnrollPage(Lang(http), user.UserName ?? "", key), "text/html");
+            return Results.Content(EnrollPage(Lang(http), user.UserName ?? "", key, AntiforgeryField(antiforgery, http)), "text/html");
         }).RequireAuthorization();
 
         app.MapPost("/connect/enroll-2fa", async (
-            HttpContext http, [FromForm] string code, SignInManager<ApplicationUser> signIn, UserManager<ApplicationUser> users) =>
+            HttpContext http, [FromForm] string code, IAntiforgery antiforgery,
+            SignInManager<ApplicationUser> signIn, UserManager<ApplicationUser> users) =>
         {
             var user = await users.GetUserAsync(http.User);
             if (user is null) return Results.Redirect("/connect/login");
@@ -64,7 +88,7 @@ public static class AccountPages
             if (!valid)
             {
                 var key = await EnsureAuthenticatorKey(users, user);
-                return Results.Content(EnrollPage(Lang(http), user.UserName ?? "", key, error: true), "text/html");
+                return Results.Content(EnrollPage(Lang(http), user.UserName ?? "", key, AntiforgeryField(antiforgery, http), error: true), "text/html");
             }
 
             await users.SetTwoFactorEnabledAsync(user, true);
@@ -72,7 +96,7 @@ public static class AccountPages
             // The enrolling session has now proven a second factor.
             await StampSignIn(http, signIn, user, ["pwd", "otp"]);
             return Results.Content(RecoveryCodesPage(Lang(http), codes?.ToArray() ?? []), "text/html");
-        }).RequireAuthorization().DisableAntiforgery();
+        }).RequireAuthorization().RequireRateLimiting(IssuerRateLimits.Credential);
     }
 
     /// <summary>Re-issue the application cookie with explicit <c>amr</c> claims recording the factors performed
@@ -125,7 +149,7 @@ public static class AccountPages
         """;
     }
 
-    public static string LoginPage(string lang, string? returnUrl, bool error = false)
+    public static string LoginPage(string lang, string? returnUrl, string antiforgeryField, bool error = false)
     {
         var s = Strings(lang);
         var ret = Enc.Encode(SafeReturn(returnUrl));
@@ -133,6 +157,7 @@ public static class AccountPages
         var body = $"""
         <h1>{s["signIn"]}</h1>{err}
         <form method="post" action="/connect/login">
+          {antiforgeryField}
           <input type="hidden" name="returnUrl" value="{ret}" />
           <label for="u">{s["username"]}</label>
           <input id="u" name="username" autocomplete="username" required autofocus>
@@ -144,7 +169,7 @@ public static class AccountPages
         return Layout(lang, s["signIn"], body);
     }
 
-    private static string TwoFactorPage(string lang, string? returnUrl, bool error = false)
+    private static string TwoFactorPage(string lang, string? returnUrl, string antiforgeryField, bool error = false)
     {
         var s = Strings(lang);
         var ret = Enc.Encode(SafeReturn(returnUrl));
@@ -152,6 +177,7 @@ public static class AccountPages
         var body = $"""
         <h1>{s["twoFactor"]}</h1><p class="muted">{s["twoFactorHint"]}</p>{err}
         <form method="post" action="/connect/2fa">
+          {antiforgeryField}
           <input type="hidden" name="returnUrl" value="{ret}" />
           <label for="c">{s["code"]}</label>
           <input id="c" name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus>
@@ -162,7 +188,7 @@ public static class AccountPages
         return Layout(lang, s["twoFactor"], body);
     }
 
-    private static string EnrollPage(string lang, string username, string key, bool error = false)
+    private static string EnrollPage(string lang, string username, string key, string antiforgeryField, bool error = false)
     {
         var s = Strings(lang);
         var err = error ? $"<p class=\"err\" role=\"alert\">{s["codeError"]}</p>" : "";
@@ -175,6 +201,7 @@ public static class AccountPages
         <p>{s["key"]}: <code>{Enc.Encode(FormatKey(key))}</code></p>
         <p class="muted"><code>{Enc.Encode(otpauth)}</code></p>
         <form method="post" action="/connect/enroll-2fa">
+          {antiforgeryField}
           <label for="c">{s["code"]}</label>
           <input id="c" name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus>
           <button type="submit">{s["verifyEnable"]}</button>

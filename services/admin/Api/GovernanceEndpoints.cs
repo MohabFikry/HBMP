@@ -1,3 +1,4 @@
+using Mersal.Auth.Authorization;
 using Mersal.Admin.Domain;
 using Mersal.Admin.Infrastructure;
 using Mersal.Authz;
@@ -27,10 +28,16 @@ public static class GovernanceEndpoints
 {
     public static void MapGovernance(this WebApplication app)
     {
-        var g = app.MapGroup("/api/v1/admin").WithTags("admin-governance");
+        // 18.B3 (audit R2 S3) — the framework gate. Until now these groups carried NO .RequireAuthorization,
+        // so an UNAUTHENTICATED request reached the handler and was rejected only by AdminGate's in-handler
+        // check. That worked, but it made the whole surface depend on every handler remembering to call the
+        // gate first, and it never enforced MFA at the pipeline. Group scope = admin:read (authn + admin-ness +
+        // MFA); mutations add admin:write on top; AdminGate stays as layer two for the per-action rule + audit.
+        var g = app.MapGroup("/api/v1/admin").WithTags("admin-governance").RequireAuthorization(HbmpPolicies.Scope("admin:read"));
+        var w = g.MapGroup("").RequireAuthorization(HbmpPolicies.Scope("admin:write"));
 
         // Master-data edit — appends a new effective-dated version (clinical governance / Super Admin only).
-        g.MapPost("/master-data", async (MasterDataEditRequest req, AdminGate gate, GovernanceService svc, CancellationToken ct) =>
+        w.MapPost("/master-data", async (MasterDataEditRequest req, AdminGate gate, GovernanceService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.EditMasterData, ct);
             if (denied is not null) return denied;
@@ -82,7 +89,7 @@ public static class GovernanceEndpoints
         });
 
         // Notification template — linted (PHI-safe + AR/EN parity) before save.
-        g.MapPost("/templates", async (TemplateEditRequest req, AdminGate gate, GovernanceService svc, CancellationToken ct) =>
+        w.MapPost("/templates", async (TemplateEditRequest req, AdminGate gate, GovernanceService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.EditTemplate, ct);
             if (denied is not null) return denied;
@@ -100,7 +107,7 @@ public static class GovernanceEndpoints
         });
 
         // System configuration — typed + validated + effective-dated.
-        g.MapPut("/system-config", async (ConfigEditRequest req, AdminGate gate, GovernanceService svc, CancellationToken ct) =>
+        w.MapPut("/system-config", async (ConfigEditRequest req, AdminGate gate, GovernanceService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.EditConfig, ct);
             if (denied is not null) return denied;
