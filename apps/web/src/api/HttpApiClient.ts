@@ -356,6 +356,7 @@ export class HttpApiClient implements ApiClient {
         status: apptStatusChip(a.status),
         scheduledStart: a.scheduledStart ?? new Date().toISOString(),
         checkInEligible: String(a.status ?? "") === "Booked",
+        checkedIn: String(a.status ?? "") === "CheckedIn",
         rowVersion: typeof a.rowVersion === "number" ? a.rowVersion : undefined,
       }),
     );
@@ -635,8 +636,8 @@ export class HttpApiClient implements ApiClient {
         }),
       );
   }
-  async uploadResult(orderId: string, lineId: string, resultValue: string) {
-    await postForm(`/investigation-orders/${encodeURIComponent(orderId)}/lines/${encodeURIComponent(lineId)}/result`, { resultValue });
+  async uploadResult(orderId: string, lineId: string, resultValue: string, idempotencyKey?: string) {
+    await postForm(`/investigation-orders/${encodeURIComponent(orderId)}/lines/${encodeURIComponent(lineId)}/result`, { resultValue }, idempotencyKey);
     return parseOr(zResultUpload, { orderId, lineId, uploaded: true });
   }
   async consume(req: ConsumeRequest) {
@@ -814,8 +815,10 @@ export class HttpApiClient implements ApiClient {
       })),
     });
   }
-  async createManualAuth(input: ManualAuthInput) {
-    const idem = `manual:${input.beneficiaryId}:${input.serviceCodes.join(",")}`;
+  async createManualAuth(input: ManualAuthInput, idempotencyKey?: string) {
+    // 18.D1: prefer the FORM's key. The content-derived fallback treats two genuinely separate manual
+    // authorizations for the same beneficiary + codes as one — which is wrong when a second is deliberate.
+    const idem = idempotencyKey ?? `manual:${input.beneficiaryId}:${input.serviceCodes.join(",")}`;
     const body = {
       beneficiaryId: input.beneficiaryId,
       serviceCodes: input.serviceCodes,
@@ -1335,8 +1338,8 @@ export class HttpApiClient implements ApiClient {
       }),
     );
   }
-  async createProvider(input: CreateProviderInput) {
-    const r = (await postRaw(`/providers`, { providerCode: input.code, legalName: input.legalName, providerType: input.providerType })) as any;
+  async createProvider(input: CreateProviderInput, idempotencyKey?: string) {
+    const r = (await postRaw(`/providers`, { providerCode: input.code, legalName: input.legalName, providerType: input.providerType }, idempotencyKey)) as any;
     return parseOr(zProviderSummary, {
       id: r?.providerId ?? "",
       code: String(r?.providerCode ?? input.code),
@@ -1367,8 +1370,10 @@ export class HttpApiClient implements ApiClient {
       }),
     );
   }
-  async registerBeneficiary(input: RegisterBeneficiaryInput) {
-    const idem = `reg:${input.identifierType}:${input.identifierValue}`;
+  async registerBeneficiary(input: RegisterBeneficiaryInput, idempotencyKey?: string) {
+    // 18.D1: the form's per-instance key wins. The content-derived fallback stays for callers that do not
+    // supply one — registering the same identifier twice IS a duplicate and should replay.
+    const idem = idempotencyKey ?? `reg:${input.identifierType}:${input.identifierValue}`;
     const body = {
       givenName: input.givenName,
       familyName: input.familyName,

@@ -123,7 +123,7 @@ export interface ApiClient {
   /** Consumed lines this provider still owes a result on (US-042). */
   awaitingResult(kind: "lab" | "imaging"): Promise<ResultTask[]>;
   /** Attach a result value to a consumed line (US-042). */
-  uploadResult(orderId: string, lineId: string, resultValue: string): Promise<ResultUpload>;
+  uploadResult(orderId: string, lineId: string, resultValue: string, idempotencyKey?: string): Promise<ResultUpload>;
 
   // Pharmacy — dispense (Phase 6)
   pharmacyQueue(): Promise<Prescription[]>;
@@ -138,7 +138,7 @@ export interface ApiClient {
   decide(req: DecisionRequest): Promise<DecisionResult>;
   // Approvals — break-glass + SLA (Phase 7.3)
   slaSummary(): Promise<TatSummary>;
-  createManualAuth(input: ManualAuthInput): Promise<ManualAuthResult>;
+  createManualAuth(input: ManualAuthInput, idempotencyKey?: string): Promise<ManualAuthResult>;
   emergencyApprove(authId: string, justification: string): Promise<EmergencyResult>;
 
   // Executive dashboard (Phase 8)
@@ -184,11 +184,11 @@ export interface ApiClient {
   providerList(): Promise<ProviderSummary[]>;
   providerLocations(providerId: string): Promise<ProviderLocation[]>;
   providerContracts(providerId: string): Promise<ProviderContract[]>;
-  createProvider(input: CreateProviderInput): Promise<ProviderSummary>;
+  createProvider(input: CreateProviderInput, idempotencyKey?: string): Promise<ProviderSummary>;
 
   // Beneficiary management — the beneficiary registry (Phase 1). Min-necessary identity, no clinical data.
   beneficiarySearch(query: { name?: string; status?: string }): Promise<BeneficiaryRow[]>;
-  registerBeneficiary(input: RegisterBeneficiaryInput): Promise<RegisterResult>;
+  registerBeneficiary(input: RegisterBeneficiaryInput, idempotencyKey?: string): Promise<RegisterResult>;
   changeBeneficiaryStatus(id: string, toStatus: string, reason: string): Promise<StatusChangeResult>;
 }
 

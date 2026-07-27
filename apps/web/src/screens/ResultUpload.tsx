@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Button, Card, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
+import { Button, Card, InlineAlert, InputField, StatusChip, useTheme } from "@mersal/design-system";
+import { useWrite, writeErrorText } from "../api/useWrite";
 import type { Localized, ResultTask } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
@@ -44,16 +45,21 @@ function ResultCard({ task, onDone }: { task: ResultTask; onDone: () => void }) 
   const t = useLoc();
   const [value, setValue] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "done" | "empty">("idle");
+  // 18.D1 (U1) — a result upload is a clinical write that previously failed SILENTLY and carried no
+  // idempotency key: the spinner stopped, nothing appeared, and pressing the button again filed the result
+  // a second time against the same order line.
+  const write = useWrite();
+  const { lang } = useTheme();
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (value.trim() === "") { setStatus("empty"); return; }
     setStatus("saving");
-    try {
-      await api.uploadResult(task.orderId, task.lineId, value.trim());
+    const ok = await write.run((key) => api.uploadResult(task.orderId, task.lineId, value.trim(), key));
+    if (ok) {
       setStatus("done");
       setTimeout(onDone, 800);
-    } catch {
+    } else {
       setStatus("idle");
     }
   }
@@ -75,7 +81,12 @@ function ResultCard({ task, onDone }: { task: ResultTask; onDone: () => void }) 
             value={value}
             onChange={(e) => setValue(e.currentTarget.value)}
           />
-          <div aria-live="polite">{status === "empty" && <InlineAlert tone="bad">{t(S.needValue)}</InlineAlert>}</div>
+          <div aria-live="polite">
+            {status === "empty" && <InlineAlert tone="bad">{t(S.needValue)}</InlineAlert>}
+            {/* 18.D1 (U1/U2): the typed, translated failure. InlineAlert tone="bad" carries role="alert",
+                so a screen-reader user hears it without moving focus. */}
+            {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
+          </div>
           <div>
             <Button type="submit" variant="primary" loading={status === "saving"}>{t(S.submit)}</Button>
           </div>

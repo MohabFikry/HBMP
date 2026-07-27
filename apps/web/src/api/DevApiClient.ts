@@ -160,6 +160,7 @@ export class DevApiClient implements ApiClient {
           status: r.chip,
           scheduledStart: r.at,
           checkInEligible: r.eligible,
+          checkedIn: r.st === "CheckedIn",
           rowVersion: 1,
         }))),
       [],

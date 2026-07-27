@@ -16,7 +16,19 @@ function booked(rowVersion?: number): AppointmentRow {
     status: { kind: "info", label: { en: "Booked", ar: "محجوز" } },
     scheduledStart: "2026-07-26T09:00:00Z",
     checkInEligible: true,
+    checkedIn: false,
     rowVersion,
+  };
+}
+
+/** 18.D1 (E3): the row as the SERVER returns it AFTER a successful check-in. The desk must derive its chip
+ * from this, not from a local "we sent the request" flag. */
+function checkedIn(rowVersion?: number): AppointmentRow {
+  return {
+    ...booked(rowVersion),
+    status: { kind: "ok", label: { en: "Checked in", ar: "تم الوصول" } },
+    checkInEligible: false,
+    checkedIn: true,
   };
 }
 
@@ -45,6 +57,28 @@ describe("17.0 — reception check-in optimistic concurrency (If-Match opt-in)",
     await user.click(await screen.findByRole("button", { name: /check in/i }));
 
     await waitFor(() => expect(api.checkIn).toHaveBeenCalledWith("appt-1", 42));
+  });
+
+  it("renders the checked-in chip only from SERVER state, after a reload (18.D1 / E3)", async () => {
+    // The rule: a read may be optimistic, a server-invariant operation may not. This screen used to paint the
+    // green chip from a local `done` set the moment the request was SENT — so the board showed "checked in"
+    // for a patient the server had not admitted, and a reload silently disagreed with what the desk had just
+    // seen. The first load returns Booked, the reload after a successful check-in returns CheckedIn.
+    const user = userEvent.setup();
+    const appointments = vi.fn()
+      .mockResolvedValueOnce([booked(42)])
+      .mockResolvedValue([checkedIn(43)]);
+    const api = fakeApi({ appointments });
+    renderCheckIn(api);
+
+    await user.click(await screen.findByRole("button", { name: /check in/i }));
+
+    // The board was RE-READ, and the action cell now shows the confirmed chip instead of the button. Both
+    // the status column and the action cell render "Checked in", which is the point — they agree because
+    // both derive from the same server row.
+    await waitFor(() => expect(appointments).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /check in/i })).not.toBeInTheDocument());
+    expect(screen.getAllByText(/checked in/i).length).toBeGreaterThan(0);
   });
 
   it("on a 412 stale write, shows the changed notice and reloads the board instead of double-acting", async () => {

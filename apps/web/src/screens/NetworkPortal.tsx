@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Button, Card, DataTable, InlineAlert, InputField, KpiCard, StatusChip } from "@mersal/design-system";
+import { Button, Card, DataTable, InlineAlert, InputField, KpiCard, StatusChip, useTheme } from "@mersal/design-system";
+import { useWrite, writeErrorText } from "../api/useWrite";
 import type { Column } from "@mersal/design-system";
 import type { CreateProviderInput, Localized, ProviderContract, ProviderLocation, ProviderSummary } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -194,6 +195,8 @@ export function NetworkOnboarding() {
   const [legalName, setLegalName] = useState("");
   const [type, setType] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "done" | "invalid">("idle");
+  const write = useWrite();          // 18.D1 — per-form idempotency key + typed failures
+  const { lang } = useTheme();
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -202,11 +205,14 @@ export function NetworkOnboarding() {
       return;
     }
     setStatus("saving");
-    try {
-      await api.createProvider({ code: code.trim(), legalName: legalName.trim(), providerType: type as CreateProviderInput["providerType"] });
+    // 18.D1 (U1): this had neither an error surface nor an idempotency key — a retry created a duplicate
+    // provider, and a duplicate provider means contracts and claims attached to the wrong one.
+    const ok = await write.run((key) =>
+      api.createProvider({ code: code.trim(), legalName: legalName.trim(), providerType: type as CreateProviderInput["providerType"] }, key));
+    if (ok) {
       setStatus("done");
       setCode(""); setLegalName(""); setType("");
-    } catch {
+    } else {
       setStatus("idle");
     }
   }
@@ -220,6 +226,9 @@ export function NetworkOnboarding() {
           <InputField label={t(S.type)} value={type} onChange={(e) => setType(e.currentTarget.value)} autoComplete="off" />
           <div aria-live="polite" className="stack" style={{ gap: "var(--sp2)" }}>
             {status === "invalid" && <InlineAlert tone="bad">{t(S.needFields)}</InlineAlert>}
+            {/* 18.D1 (U2): the server's own reason, translated and typed — a 409 reads
+                differently from a dropped connection, because they demand opposite actions. */}
+            {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
             {status === "done" && <StatusChip kind="ok" label={t(S.created)} />}
             <div><Button type="submit" variant="primary" loading={status === "saving"}>{t(S.create)}</Button></div>
           </div>

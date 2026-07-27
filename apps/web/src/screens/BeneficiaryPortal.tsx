@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Button, Card, DataTable, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
+import { Button, Card, DataTable, InlineAlert, InputField, StatusChip, useTheme } from "@mersal/design-system";
+import { useWrite, writeErrorText } from "../api/useWrite";
 import type { Column } from "@mersal/design-system";
 import type { BeneficiaryRow, Localized, RegisterBeneficiaryInput } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -155,6 +156,8 @@ export function BeneficiaryRegister() {
   const t = useLoc();
   const [f, setF] = useState({ givenName: "", familyName: "", birthDate: "", idType: "", idValue: "", phone: "" });
   const [status, setStatus] = useState<"idle" | "saving" | "done" | "invalid">("idle");
+  const write = useWrite();          // 18.D1 — per-form idempotency key + typed failures
+  const { lang } = useTheme();
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF((s) => ({ ...s, [k]: e.currentTarget.value }));
 
   async function submit(e: React.FormEvent) {
@@ -164,19 +167,22 @@ export function BeneficiaryRegister() {
       return;
     }
     setStatus("saving");
-    try {
-      const input: RegisterBeneficiaryInput = {
-        givenName: f.givenName.trim(),
-        familyName: f.familyName.trim(),
-        birthDate: f.birthDate.trim() || undefined,
-        identifierType: f.idType as RegisterBeneficiaryInput["identifierType"],
-        identifierValue: f.idValue.trim(),
-        phone: f.phone.trim() || undefined,
-      };
-      await api.registerBeneficiary(input);
+    const input: RegisterBeneficiaryInput = {
+      givenName: f.givenName.trim(),
+      familyName: f.familyName.trim(),
+      birthDate: f.birthDate.trim() || undefined,
+      identifierType: f.idType as RegisterBeneficiaryInput["identifierType"],
+      identifierValue: f.idValue.trim(),
+      phone: f.phone.trim() || undefined,
+    };
+    // 18.D1 (U1): registering a beneficiary failed silently. The operator saw the spinner stop with the form
+    // still full, retried, and created a second record for the same person — which then has to be merged.
+    const ok = await write.run((key) => api.registerBeneficiary(input, key));
+    if (ok) {
       setStatus("done");
+      // Clear ONLY on confirmed success: wiping a form after a failure destroys the operator's typing.
       setF({ givenName: "", familyName: "", birthDate: "", idType: "", idValue: "", phone: "" });
-    } catch {
+    } else {
       setStatus("idle");
     }
   }
@@ -195,6 +201,9 @@ export function BeneficiaryRegister() {
           </div>
           <div aria-live="polite" className="stack" style={{ gap: "var(--sp2)" }}>
             {status === "invalid" && <InlineAlert tone="bad">{t(S.needFields)}</InlineAlert>}
+            {/* 18.D1 (U2): the server's own reason, translated and typed — a 409 reads
+                differently from a dropped connection, because they demand opposite actions. */}
+            {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
             {status === "done" && <StatusChip kind="ok" label={t(S.registered)} />}
             <div><Button type="submit" variant="primary" loading={status === "saving"}>{t(S.register)}</Button></div>
           </div>

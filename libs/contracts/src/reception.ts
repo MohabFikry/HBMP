@@ -16,6 +16,13 @@ export const zAppointmentRow = z.object({
   scheduledStart: zInstant,
   /** True when the appointment is Booked (the only state reception can check in). */
   checkInEligible: z.boolean(),
+  /**
+   * 18.D1 (audit R2 E3) — the SERVER's answer to "has this patient arrived?", so the desk renders confirmed
+   * state instead of a local "we sent the request" flag. Distinct from `!checkInEligible`, which is also
+   * false for a cancelled or no-show appointment — three different situations the receptionist must be able
+   * to tell apart.
+   */
+  checkedIn: z.boolean(),
   /** The emr row's `xmin` optimistic-concurrency token (opt-in): echoed as `If-Match` on check-in so a
    * stale board loses to a concurrent transition with 412 instead of silently double-acting. Optional —
    * absent for a fixture/older service, in which case check-in proceeds without the guard. */

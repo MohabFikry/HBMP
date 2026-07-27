@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Button, Card, DataTable, InlineAlert, InputField, KpiCard, StatusChip, TextareaField } from "@mersal/design-system";
+import { Button, Card, DataTable, InlineAlert, InputField, KpiCard, StatusChip, TextareaField, useTheme } from "@mersal/design-system";
+import { useWrite, writeErrorText } from "../api/useWrite";
 import type { Column } from "@mersal/design-system";
 import type { ApprovalItem, Localized, TatSummary } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -79,6 +80,8 @@ export function ApprovalsManual() {
   const [codes, setCodes] = useState("");
   const [justification, setJustification] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "done" | "invalid">("idle");
+  const write = useWrite();          // 18.D1 — per-form idempotency key + typed failures
+  const { lang } = useTheme();
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -88,11 +91,15 @@ export function ApprovalsManual() {
       return;
     }
     setStatus("saving");
-    try {
-      await api.createManualAuth({ beneficiaryId: beneficiaryId.trim(), serviceCodes, justification: justification.trim() });
+    // 18.D1 (U1): a MANUAL AUTHORIZATION is a break-glass-adjacent write — it grants coverage outside the
+    // automated path. Failing it silently, with no key, meant a retry could issue two authorizations for the
+    // same service and both would be billable.
+    const ok = await write.run((key) =>
+      api.createManualAuth({ beneficiaryId: beneficiaryId.trim(), serviceCodes, justification: justification.trim() }, key));
+    if (ok) {
       setStatus("done");
       setBeneficiaryId(""); setCodes(""); setJustification("");
-    } catch {
+    } else {
       setStatus("idle");
     }
   }
@@ -106,6 +113,9 @@ export function ApprovalsManual() {
           <TextareaField label={t(S.justification)} value={justification} onChange={(e) => setJustification(e.currentTarget.value)} rows={3} />
           <div aria-live="polite" className="stack" style={{ gap: "var(--sp2)" }}>
             {status === "invalid" && <InlineAlert tone="bad">{t(S.needFields)}</InlineAlert>}
+            {/* 18.D1 (U2): the server's own reason, translated and typed — a 409 reads
+                differently from a dropped connection, because they demand opposite actions. */}
+            {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
             {status === "done" && <StatusChip kind="ok" label={t(S.created)} />}
             <div><Button type="submit" variant="primary" loading={status === "saving"}>{t(S.create)}</Button></div>
           </div>

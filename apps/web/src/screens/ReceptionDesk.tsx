@@ -82,16 +82,25 @@ export function ReceptionCheckIn() {
   const t = useLoc();
   const state = useAsync<AppointmentRow[]>(() => api.appointments("booked"), []);
   const [busy, setBusy] = useState<string | null>(null);
-  const [done, setDone] = useState<Set<string>>(new Set());
   const [stale, setStale] = useState(false);
 
+  /**
+   * 18.D1 (audit R2 E3) — check-in renders SERVER-CONFIRMED state only.
+   *
+   * The rule: a read may be optimistic; a server-invariant operation (book, consume, dispense, decide,
+   * check-in, cancel) may not. This screen kept a local `done` set and painted a green "Checked in" chip from
+   * it. The chip was therefore a record of the request having been SENT, not of the patient having been
+   * checked in — and after a partial failure, a reload, or a concurrent transition elsewhere, the board and
+   * the truth disagreed with no way for the receptionist to tell. Now the call is followed by a reload and
+   * the chip is derived from the row's own status.
+   */
   async function doCheckIn(row: AppointmentRow) {
     setBusy(row.id);
     setStale(false);
     try {
       // Echo the version we read (opt-in If-Match): a concurrent transition invalidates our board → 412.
       await api.checkIn(row.id, row.rowVersion);
-      setDone((prev) => new Set(prev).add(row.id));
+      state.reload();
     } catch (e) {
       // 412 = the row moved under us (already checked in / rescheduled elsewhere). Re-load the board rather
       // than double-acting; any other failure re-throws for the generic handler.
@@ -112,7 +121,8 @@ export function ReceptionCheckIn() {
       key: "action",
       header: t(S.action),
       cell: (r) =>
-        done.has(r.id) ? (
+        // Derived from the row the SERVER returned, never from a local "we sent it" flag.
+        r.checkedIn ? (
           <StatusChip kind="ok" label={t(S.checkedIn)} />
         ) : (
           <Button variant="primary" size="sm" loading={busy === r.id} disabled={!r.checkInEligible} onClick={() => void doCheckIn(r)}>

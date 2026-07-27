@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { Button, Card, DataTable, InputField, StatusChip, useToast } from "@mersal/design-system";
+import { Button, Card, DataTable, InputField, StatusChip, useTheme, useToast } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { DispenseLine, Localized, Prescription, PrescriptionLine } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
-import { newIdempotencyKey } from "../api/http";
+import { useWrite, writeErrorText } from "../api/useWrite";
+import { writeErrorMessage } from "../api/writeError";
+import { ConfirmAction } from "./ConfirmAction";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
@@ -28,6 +30,7 @@ const S = {
   partial: { en: "Partially dispensed — lines remain.", ar: "صرف جزئي — بقيت بنود." },
   replay: { en: "Already recorded (idempotent replay) — no double-apply.", ar: "مُسجّل مسبقاً (إعادة متكافئة) — دون ازدواج." },
   fail: { en: "Dispense failed.", ar: "فشل الصرف." },
+  confirmTitle: { en: "Confirm dispense", ar: "تأكيد الصرف" },
   nothing: { en: "Enter a quantity on at least one in-stock line.", ar: "أدخل كمية لبند واحد متوفر على الأقل." },
 } satisfies Record<string, Localized>;
 
@@ -81,29 +84,61 @@ export function PharmacyDispense() {
 function DispensePanel({ rx, t, onDone }: { rx: Prescription; t: (l: Localized) => string; onDone: () => void }) {
   const api = useApi();
   const { toast } = useToast();
+  const { lang } = useTheme();
+  /**
+   * 18.D1 — quantities default to ZERO, not to the full remaining amount.
+   *
+   * Pre-filling the maximum makes "dispense everything" the path of least resistance: the pharmacist confirms
+   * a form they did not fill in, and a partial dispense — the common case when stock is short — requires them
+   * to notice and correct a number that already looked right. Zero forces the quantity to be an act. It also
+   * means an accidental submit dispenses nothing rather than a full course of medication that then has to be
+   * reversed against a controlled-drug register.
+   */
   const [qty, setQty] = useState<Record<string, number>>(() =>
-    Object.fromEntries(rx.lines.map((l) => [l.id, l.outOfStock ? 0 : Math.max(0, l.quantity - l.dispensed)])),
+    Object.fromEntries(rx.lines.map((l) => [l.id, 0])),
   );
   const [busy, setBusy] = useState(false);
+  // 18.D1 (E4) — dispensing medication is irreversible in the sense that matters: the drugs leave the
+  // counter. A confirmation step goes in front of it, and it asks for the drug NAME rather than a yes/no,
+  // because a yes/no in a repetitive queue becomes muscle memory inside a shift.
+  const [confirming, setConfirming] = useState(false);
+  const write = useWrite();
 
   const remaining = (l: PrescriptionLine) => Math.max(0, l.quantity - l.dispensed);
 
-  async function dispense() {
-    const lines: DispenseLine[] = rx.lines
+  const pending = (): DispenseLine[] =>
+    rx.lines
       .filter((l) => !l.outOfStock && (qty[l.id] ?? 0) > 0)
       .map((l) => ({ lineId: l.id, quantity: Math.min(qty[l.id] ?? 0, remaining(l)) }));
-    if (lines.length === 0) {
+
+  /** The drug the operator must name to confirm — the first line actually being dispensed. */
+  const firstDrug = (): string => {
+    const first = pending()[0];
+    const line = rx.lines.find((l) => l.id === first?.lineId);
+    return line ? (t(line.drug.label) || line.id) : "";
+  };
+
+  function askToDispense() {
+    if (pending().length === 0) {
       toast(t(S.nothing), "bad");
       return;
     }
+    setConfirming(true);
+  }
+
+  async function dispense() {
+    const lines = pending();
+    if (lines.length === 0) return;
     setBusy(true);
     try {
-      const res = await api.dispense({ prescriptionId: rx.id, idempotencyKey: newIdempotencyKey(), lines });
+      // 18.D1: the key comes from useWrite — minted once per panel and rotated only after a CONFIRMED
+      // success, so a retry after a timeout replays rather than dispensing a second time.
+      const res = await api.dispense({ prescriptionId: rx.id, idempotencyKey: write.idempotencyKey, lines });
       if (res.replayed) toast(t(S.replay), "info");
       else toast(t(res.linesOutstanding === 0 ? S.done : S.partial), "ok");
       onDone();
-    } catch {
-      toast(t(S.fail), "bad");
+    } catch (e) {
+      toast(writeErrorText(writeErrorMessage(e), lang) ?? t(S.fail), "bad");
     } finally {
       setBusy(false);
     }
@@ -138,8 +173,20 @@ function DispensePanel({ rx, t, onDone }: { rx: Prescription; t: (l: Localized) 
         ))}
       </ul>
       <div>
-        <Button variant="primary" loading={busy} onClick={() => void dispense()}>{t(S.dispenseBtn)}</Button>
+        <Button variant="primary" loading={busy} onClick={askToDispense}>{t(S.dispenseBtn)}</Button>
       </div>
+      <ConfirmAction
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={S.confirmTitle}
+        body={{
+          en: `Dispensing ${pending().length} line(s) for prescription ${rx.id}. Stock will be decremented and the prescription updated.`,
+          ar: `صرف ${pending().length} بند/بنود للوصفة ${rx.id}. سيتم خصم المخزون وتحديث الوصفة.`,
+        }}
+        requireText={firstDrug()}
+        confirmLabel={S.dispenseBtn}
+        onConfirm={dispense}
+      />
     </Card>
   );
 }

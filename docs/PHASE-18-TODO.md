@@ -58,8 +58,8 @@ Mark `✅ YYYY-MM-DD` per id here **and** on the finding row in `AUDIT-R2-E2E.md
 
 | Sub | Id | Finding | Status |
 |---|---|---|---|
-| 18.D1 | U1 | Four write flows fail silently and lack idempotency keys | ☐ |
-| 18.D1 | U2 | All 4xx collapse into one message on decide/dispense/consume | ☐ |
+| 18.D1 | U1 | Four write flows fail silently and lack idempotency keys | ✅ 2026-07-27 (useWrite: per-form key + typed alert on all four) |
+| 18.D1 | U2 | All 4xx collapse into one message on decide/dispense/consume | ✅ 2026-07-27 (one writeErrorMessage: 401/403/404/409/412/422/429/5xx + network/schema) |
 | 18.D2 | U3 | Call Centre renders every member status as a green "eligible" chip | ☐ |
 | 18.D2 | U4 | Navigation vanishes below 760px | ☐ |
 | 18.D2 | U5 | App-bar global search is a dead field bound to `/` | ☐ |

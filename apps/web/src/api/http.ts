@@ -138,10 +138,18 @@ export function postRaw(
  * POST a multipart/form-data body (e.g. a lab/imaging result with an optional file). We deliberately pass no
  * `Content-Type` so the browser sets the multipart boundary itself; the JSON default is overridden to undefined.
  */
-export function postForm(path: string, fields: Record<string, string | Blob>): Promise<unknown> {
+export function postForm(
+  path: string,
+  fields: Record<string, string | Blob>,
+  // 18.D1 (U1): a result upload is a clinical write. It had no idempotency key at all, so an operator
+  // retrying after a timeout uploaded the result twice.
+  idempotencyKey?: string,
+): Promise<unknown> {
   const form = new FormData();
   for (const [k, v] of Object.entries(fields)) form.append(k, v);
-  return request(path, { method: "POST", body: form });
+  const headers: Record<string, string> = {};
+  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+  return request(path, { method: "POST", body: form, headers });
 }
 
 /**
