@@ -31,6 +31,19 @@ until [ "$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q 
 done
 echo " ok"
 
+# Schema DDL runs here, under the owning superuser, BEFORE any service starts — not from inside a service.
+# 18.B2 put every service on a least-privilege login role, and a role that cannot own a schema cannot create
+# one: audit-service used to apply its own migrations at startup and began crash-looping on
+# `42501: permission denied for database hbmp`, because `CREATE SCHEMA IF NOT EXISTS` still performs the
+# CREATE-on-database ACL check when the schema already exists. This is the same script CI runs
+# (.github/workflows/backend-ci.yml) and the path the other services already depended on.
+echo "==> Applying SQL migrations for every service (idempotent)…"
+# shellcheck disable=SC1091
+set -a; . ./.env; set +a
+PGHOST=localhost PGPORT=55432 PGUSER="$POSTGRES_USER" PGPASSWORD="$POSTGRES_PASSWORD" PGDATABASE=hbmp \
+  HBMP_APP_PASSWORD="$HBMP_APP_PASSWORD" HBMP_AUDIT_PASSWORD="$HBMP_AUDIT_PASSWORD" \
+  bash ../../tools/ci/apply-migrations.sh
+
 echo "==> Building + starting identity-service (the in-app OIDC issuer)…"
 docker compose up -d --build identity-service
 
@@ -48,12 +61,19 @@ echo " ok"
 # startup, so any rebuild of identity-service silently invalidates the copy Kong booted with; a stale value
 # is worse than a missing one, because Kong comes up healthy and rejects every real token. (Phase 12.3 made
 # the keys persistent in OpenBao for the deployed tiers; this dev path has no such store.)
+#
+# The grep/awk pair this replaced wrote the PEM across multiple lines (GNU awk turns "%s\\n" into a real
+# newline), which dotenv accepts — so the FIRST run looked fine. The second run's `grep -v '^KEY='` then
+# dropped only the opening line and orphaned the rest of the PEM, after which every `docker compose`
+# command in this script failed with `unexpected character "/" in variable name` and was never checked,
+# leaving Kong up with a key the issuer had already replaced. set-env-key.py writes one escaped line.
 echo "==> Deriving IDENTITY_JWKS_PUBLIC_KEY from the issuer's live JWKS…"
-pem=$(python3 ./jwks-to-pem.py http://localhost:8090/.well-known/jwks)
-tmp_env=$(mktemp)
-grep -v '^IDENTITY_JWKS_PUBLIC_KEY=' .env > "$tmp_env"
-printf 'IDENTITY_JWKS_PUBLIC_KEY="%s"\n' "$(printf '%s' "$pem" | awk '{printf "%s\\n", $0}')" >> "$tmp_env"
-mv "$tmp_env" .env
+python3 ./jwks-to-pem.py http://localhost:8090/.well-known/jwks \
+  | python3 ./set-env-key.py IDENTITY_JWKS_PUBLIC_KEY .env
+
+# .env is read by every compose command below; a malformed one fails them all, so stop here rather than
+# carrying on and reporting a stack that is "up".
+docker compose config --quiet || { echo "  .env is not parseable after the key write — aborting." >&2; exit 1; }
 
 # --force-recreate because the key is passed as an environment variable: without it compose sees an unchanged
 # service definition and leaves the old container — still holding the previous key — running.
@@ -67,7 +87,7 @@ cat <<'EOF'
 
 ==> Stack is up. Endpoints (host):
   identity-service (issuer)  http://localhost:8090   (users seeded per role; password = .env IDENTITY_DEMO_PASSWORD)
-  Kong API gateway           http://localhost:8000   (e.g. /health/live, /api/v1/masterdata)
+  Kong API gateway           http://localhost:8000   (e.g. /api/v1/icd-codes — 401 without a token)
   Grafana (traces/logs)      http://localhost:3000   (admin / see .env GRAFANA_ADMIN_PASSWORD)
   MinIO console              http://localhost:9001
   RabbitMQ management        http://localhost:15672

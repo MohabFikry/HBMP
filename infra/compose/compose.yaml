@@ -708,7 +708,9 @@ services:
       VITE_OIDC_CLIENT_ID: "hbmp-web"
       VITE_OIDC_REDIRECT: "http://localhost:5173/"
       VITE_LIVE: "true"
-    ports: ["127.0.0.1:5173:80"]
+    # The image's nginx listens on 8080 (apps/web/nginx.conf + Dockerfile EXPOSE), not 80 — mapping to :80
+    # published a port nothing was bound to, so :5173 reset the connection with the container "Up".
+    ports: ["127.0.0.1:5173:8080"]
     depends_on:
       kong: { condition: service_started }
       identity-service: { condition: service_started }
