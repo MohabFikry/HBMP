@@ -56,9 +56,19 @@ public class CallCentreE2ETests(CallCentreFactory factory) : IClassFixture<CallC
                 new { interactionId, reasonCode = "PatientRequest" }))
                 .StatusCode.Should().Be(HttpStatusCode.OK);
 
-            // 7. close with an outcome
+            // 7. close with an outcome AND a summary.
+            // Consciously updated in phase 20.3b: a summary is now REQUIRED at close for every outcome but
+            // Abandoned (design 39 §5b). This call used to pass with `notes` alone, and it should not — the
+            // notes column stays agent-scoped and is never promoted, so a call that closed "Resolved" with
+            // only notes leaves every other role reading a row that says something happened and refuses to
+            // say what. The 422 path is asserted in CallHistoryProjectionTests.
             (await client.PostAsJsonAsync($"/api/v1/call-interactions/{interactionId}/close",
-                new { outcome = "Resolved", notes = "handled" }))
+                new
+                {
+                    outcome = "Resolved",
+                    notes = "handled",
+                    summary = "Booked a consultation and cancelled the duplicate at the member's request.",
+                }))
                 .StatusCode.Should().Be(HttpStatusCode.OK);
 
             // --- audit/event chain: correlated by call_ref, complete ---

@@ -77,7 +77,8 @@ appointment:read appointment:write  document:write  case:read case:write case:ma
 finance:read finance:write finance:approve finance:export finance:project provider:finance
 provider:read provider:write referral:write
 policy:read policy:write policy:admin policy:supervise
-callcentre:read callcentre:act callcentre:interaction callcentre:verify
+callcentre:read callcentre:act callcentre:interaction callcentre:verify callcentre:history:read
+profile:read profile:export
 claims:read claims:reconcile claims:export  reporting:read reporting:project reporting:export
 notification:read notification:ingest  audit:read
 ```

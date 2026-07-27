@@ -45,6 +45,14 @@ public static class IdentityContract
         // statement. Cancelling another user's note additionally needs policy:supervise.
         "note:read", "note:write",
         "callcentre:read", "callcentre:act", "callcentre:interaction", "callcentre:verify",
+        // 20 — the patient-profile authorities. profile:read is held by EVERY role the design-39 §4 matrix
+        // names, because it is the COARSE gate: what each of them actually receives is decided per section by
+        // ProfilePolicies, so a finance officer and a treating doctor carry the same scope and get profiles
+        // with almost nothing in common. profile:export is narrower — copying a record out of the platform is
+        // a different act from looking at it. callcentre:history:read is separate from callcentre:read because
+        // it is held by roles that are not in the call centre at all and would have no business holding the
+        // agent's workspace scope.
+        "profile:read", "profile:export", "callcentre:history:read",
         // 18.B3/18.E1: the claims AUTHORITIES. Phase 10b's policy rules required these and the vocabulary
         // never listed them, so no token could carry one and the entire claims decision surface denied.
         // Each is a distinct authority by design — the officer who decides a line is not the person who

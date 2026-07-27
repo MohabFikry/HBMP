@@ -47,13 +47,15 @@ export const OIDC = {
   scope:
     "openid offline_access admin:break-glass admin:read admin:write appointment:read appointment:write " +
     "audit:read auth:decide auth:emergency auth:manual auth:override auth:read auth:review callcentre:act " +
-    "callcentre:interaction callcentre:read callcentre:verify case:manage case:read case:write " +
+    "callcentre:history:read callcentre:interaction callcentre:read callcentre:verify case:manage " +
+    "case:read case:write " +
     "claims:adjudicate claims:adjust claims:appeal claims:batch claims:decide claims:export claims:ingest " +
     "claims:read claims:reconcile claims:reimburse:submit claims:review claims:settle claims:submit " +
     "document:write eligibility:check emr:read emr:write encounter:write finance:approve finance:export " +
     "finance:read finance:write note:read note:write notification:read orders:consume orders:read " +
     "orders:write patient:read patient:write pharmacy:dispense pharmacy:read policy:admin policy:read " +
-    "policy:supervise policy:write provider:admin provider:finance provider:read provider:write " +
+    "policy:supervise policy:write profile:export profile:read provider:admin provider:finance " +
+    "provider:read provider:write " +
     "reception:read reception:search referral:write reporting:export reporting:read reporting:read-financial " +
     "rx:read rx:write",
 };
