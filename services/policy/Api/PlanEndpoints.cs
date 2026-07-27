@@ -143,7 +143,7 @@ public static class PlanEndpoints
             var denied = await gate.CheckAsync(PolicyPolicies.Admin, ct);
             if (denied is not null) return denied;
 
-            var active = await db.PlanVersions.AsNoTracking().Include(v => v.Rules)
+            var active = await db.PlanVersions.AsNoTracking().Include(v => v.Rules).ThenInclude(r => r.Tiers)
                 .FirstOrDefaultAsync(v => v.PlanId == id && v.Status == PlanVersionStatus.Active, ct);
             if (active is null)
                 return ProblemResults.Conflict("NO_ACTIVE_VERSION", "This plan has no Active version to amend.");
@@ -214,7 +214,7 @@ public static class PlanEndpoints
         {
             var denied = await gate.CheckAsync(PolicyPolicies.Read, ct);
             if (denied is not null) return denied;
-            var version = await db.PlanVersions.AsNoTracking().Include(v => v.Rules)
+            var version = await db.PlanVersions.AsNoTracking().Include(v => v.Rules).ThenInclude(r => r.Tiers)
                 .FirstOrDefaultAsync(v => v.PlanVersionId == id, ct);
             return version is null ? NotFound() : Results.Ok(PlanVersionView.From(version));
         });
@@ -223,7 +223,7 @@ public static class PlanEndpoints
         {
             var denied = await gate.CheckAsync(PolicyPolicies.Read, ct);
             if (denied is not null) return denied;
-            var rows = await db.PlanVersions.AsNoTracking().Include(v => v.Rules)
+            var rows = await db.PlanVersions.AsNoTracking().Include(v => v.Rules).ThenInclude(r => r.Tiers)
                 .Where(v => v.PlanId == planId).OrderByDescending(v => v.VersionNo).ToListAsync(ct);
             return Results.Ok(rows.Select(PlanVersionView.From));
         });
@@ -231,17 +231,25 @@ public static class PlanEndpoints
         // Replace the draft's benefit configuration wholesale. A rule set is a unit — accepting partial edits
         // would let an author activate a version they only half-reviewed.
         v1.MapPut("/plan-versions/{id:guid}/rules", async (Guid id, SetBenefitRules req, PolicyDbContext db,
-            PolicyGate gate, IAuditClient audit, TimeProvider clock, CancellationToken ct) =>
+            PolicyGate gate, IAuditClient audit, INetworkTierCatalog tiers, HttpContext http,
+            TimeProvider clock, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(PolicyPolicies.Admin, ct);
             if (denied is not null) return denied;
 
-            var version = await db.PlanVersions.Include(v => v.Rules).FirstOrDefaultAsync(v => v.PlanVersionId == id, ct);
+            var version = await db.PlanVersions.Include(v => v.Rules).ThenInclude(r => r.Tiers)
+                .FirstOrDefaultAsync(v => v.PlanVersionId == id, ct);
             if (version is null) return NotFound();
             if (!version.IsEditable)
                 return Immutable(version);
 
             var categories = await db.BenefitCategories.AsNoTracking().ToDictionaryAsync(c => c.Code, c => c.BenefitCategoryId, ct);
+            // 19.1b — the tier catalogue, so a rule can only price tiers that actually exist. Read as the
+            // caller, not as the service, and NOT fail-soft: an unreadable catalogue means we cannot tell a
+            // valid grid from an invalid one, which is a reason to refuse the write.
+            var tierCatalog = (await tiers.ActiveTiersAsync(Bearer(http), ct))
+                .ToDictionary(t => t.NetworkTierId, t => t.TierCode);
+
             var now = clock.GetUtcNow();
             var replacement = new List<BenefitRule>();
             foreach (var r in req.Rules)
@@ -253,22 +261,44 @@ public static class PlanEndpoints
                 if (!Enum.TryParse<ResetPeriod>(r.ResetPeriod ?? "None", out var reset))
                     return ProblemResults.Invalid("UNKNOWN_RESET_PERIOD", $"'{r.ResetPeriod}' is not a reset period.");
 
-                replacement.Add(new BenefitRule
+                var rule = new BenefitRule
                 {
                     RuleId = Guid.NewGuid(), PlanVersionId = version.PlanVersionId, BenefitCategoryId = categoryId,
                     IsCovered = r.IsCovered,
                     LimitType = r.LimitType is null ? null : Enum.Parse<LimitType>(r.LimitType),
                     LimitValue = r.LimitValue, ResetPeriod = reset,
-                    CopayFixed = r.CopayFixed, CopayPercent = r.CopayPercent, Deductible = r.Deductible,
+                    Deductible = r.Deductible,
                     WaitingPeriodDays = r.WaitingPeriodDays, RequiresPreauth = r.RequiresPreauth,
-                    PreauthCostThreshold = r.PreauthCostThreshold, NetworkTier = r.NetworkTier,
+                    PreauthCostThreshold = r.PreauthCostThreshold,
                     Exclusions = r.Exclusions ?? "[]", Notes = r.Notes,
                     CreatedAt = now, UpdatedAt = now, CreatedBy = gate.SubjectId, UpdatedBy = gate.SubjectId,
-                });
+                };
+
+                foreach (var t in r.Tiers ?? [])
+                {
+                    if (!tierCatalog.TryGetValue(t.NetworkTierId, out var tierCode))
+                        return ProblemResults.Invalid("UNKNOWN_NETWORK_TIER",
+                            $"{t.NetworkTierId} is not an Active network tier. Tiers are created by the Network Team.");
+                    rule.Tiers.Add(new BenefitRuleTier
+                    {
+                        RuleTierId = Guid.NewGuid(), BenefitRuleId = rule.RuleId,
+                        NetworkTierId = t.NetworkTierId, TierCode = tierCode, IsCovered = t.IsCovered,
+                        CopayFixed = t.CopayFixed, CopayPercent = t.CopayPercent,
+                        CoinsurancePercent = t.CoinsurancePercent,
+                        RequiresPreauthOverride = t.RequiresPreauthOverride, LimitMultiplier = t.LimitMultiplier,
+                        CreatedAt = now, UpdatedAt = now, CreatedBy = gate.SubjectId, UpdatedBy = gate.SubjectId,
+                    });
+                }
+                if (rule.Tiers.Select(t => t.NetworkTierId).Distinct().Count() != rule.Tiers.Count)
+                    return ProblemResults.Invalid("DUPLICATE_TIER",
+                        $"Category {r.BenefitCategoryCode} prices the same network tier more than once.");
+
+                replacement.Add(rule);
             }
             if (replacement.Select(r => r.BenefitCategoryId).Distinct().Count() != replacement.Count)
                 return ProblemResults.Invalid("DUPLICATE_CATEGORY", "A benefit category may appear at most once in a version.");
 
+            db.BenefitRuleTiers.RemoveRange(version.Rules.SelectMany(r => r.Tiers));
             db.BenefitRules.RemoveRange(version.Rules);
             db.BenefitRules.AddRange(replacement);
             version.UpdatedAt = now;
@@ -280,7 +310,7 @@ public static class PlanEndpoints
                 EntityType = "plan_version", EntityId = version.PlanVersionId.ToString(),
                 Action = AuditAction.Update, ActorUserId = gate.Subject, DecisionOutcome = "rules-set",
             }, ct);
-            var saved = await db.PlanVersions.AsNoTracking().Include(v => v.Rules)
+            var saved = await db.PlanVersions.AsNoTracking().Include(v => v.Rules).ThenInclude(r => r.Tiers)
                 .FirstAsync(v => v.PlanVersionId == id, ct);
             return Results.Ok(PlanVersionView.From(saved));
         });
@@ -288,30 +318,37 @@ public static class PlanEndpoints
         // Dry run: exactly the checks activation applies, without the state change. Lets an author fix a plan
         // before the irreversible step rather than discovering the problems through a 422.
         v1.MapPost("/plan-versions/{id:guid}/validate", async (Guid id, PolicyDbContext db, PolicyGate gate,
-            IBusinessCalendar calendar, CancellationToken ct) =>
+            INetworkTierCatalog tiers, HttpContext http, IBusinessCalendar calendar, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(PolicyPolicies.Read, ct);
             if (denied is not null) return denied;
-            var version = await db.PlanVersions.AsNoTracking().Include(v => v.Rules)
+            var version = await db.PlanVersions.AsNoTracking().Include(v => v.Rules).ThenInclude(r => r.Tiers)
                 .FirstOrDefaultAsync(v => v.PlanVersionId == id, ct);
             if (version is null) return NotFound();
 
-            var problems = PlanVersionValidation.Validate(version, calendar.Today());
+            var problems = PlanVersionValidation.Validate(version, calendar.Today(),
+                await tiers.ActiveTiersAsync(Bearer(http), ct));
             return Results.Ok(new { valid = problems.Count == 0, problems });
         });
 
         v1.MapPost("/plan-versions/{id:guid}/activate", async (Guid id, PolicyDbContext db, PolicyGate gate,
-            IAuditClient audit, IOutbox outbox, IBusinessCalendar calendar, TimeProvider clock, CancellationToken ct) =>
+            IAuditClient audit, IOutbox outbox, INetworkTierCatalog tiers, HttpContext http,
+            IBusinessCalendar calendar, TimeProvider clock, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(PolicyPolicies.Admin, ct);
             if (denied is not null) return denied;
 
-            var version = await db.PlanVersions.Include(v => v.Rules).FirstOrDefaultAsync(v => v.PlanVersionId == id, ct);
+            var version = await db.PlanVersions.Include(v => v.Rules).ThenInclude(r => r.Tiers)
+                .FirstOrDefaultAsync(v => v.PlanVersionId == id, ct);
             if (version is null) return NotFound();
             if (version.Status != PlanVersionStatus.Draft)
                 return Immutable(version);
 
-            var problems = PlanVersionValidation.Validate(version, calendar.Today());
+            // 19.1b — the tier catalogue is read at ACTIVATION, not only at authoring time. A tier added after
+            // the draft was written must still be priced before that draft can go live, or the plan activates
+            // with a hole in its cost-share grid that nobody edited into it.
+            var problems = PlanVersionValidation.Validate(version, calendar.Today(),
+                await tiers.ActiveTiersAsync(Bearer(http), ct));
             if (problems.Count > 0)
                 return ProblemResults.Unprocessable("PLAN_VERSION_INVALID",
                     "This version cannot be activated.", new Dictionary<string, object?> { ["problems"] = problems });
@@ -365,7 +402,7 @@ public static class PlanEndpoints
                 }, ct);
             }
 
-            var saved = await db.PlanVersions.AsNoTracking().Include(v => v.Rules)
+            var saved = await db.PlanVersions.AsNoTracking().Include(v => v.Rules).ThenInclude(r => r.Tiers)
                 .FirstAsync(v => v.PlanVersionId == id, ct);
             return Results.Ok(PlanVersionView.From(saved));
         });
@@ -373,17 +410,36 @@ public static class PlanEndpoints
 
     // ---- helpers -----------------------------------------------------------------------------------------
 
-    private static BenefitRule CloneRule(BenefitRule source, DateTimeOffset now, Guid? actor) => new()
+    /// <summary>Clone a rule AND its cost-share grid into a fresh draft. Cloning the rule alone would produce a
+    /// draft that prices nothing — and since activation now rejects an unpriced tier, an amendment would fail
+    /// validation for a grid the author never touched.</summary>
+    private static BenefitRule CloneRule(BenefitRule source, DateTimeOffset now, Guid? actor)
     {
-        RuleId = Guid.NewGuid(),
-        BenefitCategoryId = source.BenefitCategoryId, IsCovered = source.IsCovered,
-        LimitType = source.LimitType, LimitValue = source.LimitValue, ResetPeriod = source.ResetPeriod,
-        CopayFixed = source.CopayFixed, CopayPercent = source.CopayPercent, Deductible = source.Deductible,
-        WaitingPeriodDays = source.WaitingPeriodDays, RequiresPreauth = source.RequiresPreauth,
-        PreauthCostThreshold = source.PreauthCostThreshold, NetworkTier = source.NetworkTier,
-        Exclusions = source.Exclusions, Notes = source.Notes,
-        CreatedAt = now, UpdatedAt = now, CreatedBy = actor, UpdatedBy = actor,
-    };
+        var clone = new BenefitRule
+        {
+            RuleId = Guid.NewGuid(),
+            BenefitCategoryId = source.BenefitCategoryId, IsCovered = source.IsCovered,
+            LimitType = source.LimitType, LimitValue = source.LimitValue, ResetPeriod = source.ResetPeriod,
+            Deductible = source.Deductible,
+            WaitingPeriodDays = source.WaitingPeriodDays, RequiresPreauth = source.RequiresPreauth,
+            PreauthCostThreshold = source.PreauthCostThreshold,
+            Exclusions = source.Exclusions, Notes = source.Notes,
+            CreatedAt = now, UpdatedAt = now, CreatedBy = actor, UpdatedBy = actor,
+        };
+        clone.Tiers.AddRange(source.Tiers.Select(t => new BenefitRuleTier
+        {
+            RuleTierId = Guid.NewGuid(), BenefitRuleId = clone.RuleId,
+            NetworkTierId = t.NetworkTierId, TierCode = t.TierCode, IsCovered = t.IsCovered,
+            CopayFixed = t.CopayFixed, CopayPercent = t.CopayPercent, CoinsurancePercent = t.CoinsurancePercent,
+            RequiresPreauthOverride = t.RequiresPreauthOverride, LimitMultiplier = t.LimitMultiplier,
+            CreatedAt = now, UpdatedAt = now, CreatedBy = actor, UpdatedBy = actor,
+        }));
+        return clone;
+    }
+
+    /// <summary>The caller's bearer, forwarded to provider-service so the tier catalogue is read as THEM. A
+    /// service-to-service token would let a plan be validated against tiers the author cannot see.</summary>
+    private static string? Bearer(HttpContext http) => http.Request.Headers.Authorization.FirstOrDefault();
 
     private static IResult NotFound() =>
         Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");

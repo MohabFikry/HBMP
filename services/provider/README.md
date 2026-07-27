@@ -98,12 +98,46 @@ Every denied cross-provider attempt emits a high-severity `audit_event`. **Perfo
 (`GET /providers/{id}/metrics`) are provider-scoped (own numbers only); the network roll-up (`GET /metrics`)
 is Network-Team-only. Order throughput / turnaround fields are populated by phase 5/6 fulfillment events.
 
+## Network tiers (19.1b — design 38 §3, §4.1b)
+
+`network_tier` (T1 preferred / T2 standard / OON) and `provider_network_assignment` live here, **not** in
+policy-service. The split is the point: deciding WHICH tier a hospital sits in is network commercial policy
+the Network Team negotiates; deciding what a member PAYS at a tier is benefit design policy administration
+owns (`policy.benefit_rule_tier`). Collapsing them would let one person set the out-of-network penalty *and*
+decide who is out of network. A policy admin gets **403** on every write here — asserted by
+`NetworkTierAuthzTests`, not just documented.
+
+Writes need the Network Team role **and** the new `provider:admin` scope (identity `0007`), split out of
+`provider:write` because a tier reassignment reprices every plan referencing that tier, for every member,
+from its effective date — while adding an address does not.
+
+- `POST|GET|PUT /api/v1/network-tiers`, `POST /{id}/retire` (never delete: last year's claims were priced at
+  it). `tier_code` and `is_out_of_network` are **not** editable — both are referenced by activated plan
+  versions and settled claims, so changing them rewrites what history meant.
+- `POST /{id}/assignments`, `DELETE /assignments/{id}` (a not-yet-effective assignment is **revoked**; one
+  already in force is **closed** at today, because revoking it would retroactively make every past service
+  there out-of-network).
+- **`GET /network-tiers/resolve?providerId=&serviceDate=&locationId=&serviceCode=`** — the endpoint
+  eligibility, approvals and claims call. `serviceDate` is REQUIRED: a resolver defaulting to today answers
+  the wrong question for every retrospective adjudication.
+
+Two properties carry the design, both boundary-tested:
+
+- **Most-specific-wins, at the service date.** Contract service line > location > provider. A provider moving
+  tier on 1 March does not change what February's already-adjudicated claim was priced at.
+- **Resolution FAILS SAFE.** An unassigned provider is out-of-network, never in-network by omission — the
+  failure that pays the best negotiated rate to a provider nobody negotiated with. A partial unique index
+  enforces **at most one** Active out-of-network tier, so that fallback is deterministic rather than
+  whichever row the planner returned first.
+
 ## Data
 
 Migrations under `Infrastructure/Migrations/` (apply in order with `psql`):
 `0001_provider_schema.sql` (needs `btree_gist` for the contract-overlap exclusion), `0002_onboarding.sql`,
 `0003_rls.sql`, `0004_app_role.sql` (provisions `hbmp_app`; ops sets its password out of band and points
-`ConnectionStrings__Provider` at it).
+`ConnectionStrings__Provider` at it), `0005_branch.sql`, `0006_practitioner.sql`,
+`0007_practitioner_rls.sql`, `0008_network_tier.sql` (19.1b — tier windows are **half-open** `[from, to)`,
+unlike `provider_contract`'s inclusive `[]`; the difference is deliberate and noted in the migration header).
 
 ## Tests
 
@@ -115,6 +149,14 @@ Migrations under `Infrastructure/Migrations/` (apply in order with `psql`):
   allowed on own; cross-tenant denied; **PO-reuse** proof (a downstream service importing the bundle gets
   the same deny).
 - `MinNecessaryTests` — reflection over `ProviderBoundaryPatient` (no clinical/PII field can exist).
+- `NetworkTierResolutionTests` (pure) — the most-specific-wins matrix, the tier-move boundary in both
+  directions, an already-adjudicated service unaffected by a later move, and every fail-safe path.
+- `NetworkTierAuthzTests` (real engine) — a **policy admin gets 403** on tier writes with either the role or
+  the scope; `provider:write` does not reach tier administration; a provider admin cannot move their own
+  provider up a tier.
+- `NetworkTierStoreTests` (env-gated `PROVIDER_TEST_DB_OWNER`, live PG) — the overlap exclusion, abutting
+  windows allowed, different scope refs allowed to overlap (that IS an override), one Active OON tier, one
+  Active tier per rank — all attempted **directly through EF with no endpoint in the way**.
 - `RlsIsolationTests` — **RLS** isolation proven at the datastore, independently of ABAC (env-gated:
   `PROVIDER_TEST_DB_OWNER` + `PROVIDER_TEST_DB_APP`; the app conn string must be the `NOBYPASSRLS` role).
 

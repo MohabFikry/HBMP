@@ -30,7 +30,10 @@ public static class IdentityContract
         "document:write",
         "case:read", "case:write", "case:manage",
         "finance:read", "finance:write", "finance:approve", "finance:export", "finance:project",
-        "provider:read", "provider:write", "provider:finance",
+        // 19.1b — provider:admin is network ADMINISTRATION (create/retire a tier, move a provider between
+        // tiers), split out of provider:write because a tier reassignment reprices every plan referencing that
+        // tier while ordinary provider metadata edits do not.
+        "provider:read", "provider:write", "provider:finance", "provider:admin",
         // 19.1 — the PAS split. policy:write already existed for MEMBER administration (enrol/terminate);
         // authoring the benefit product that members are enrolled onto is a separate, far heavier authority
         // (policy:admin), and policy:supervise is the supervisory increment (cancel another user's note,

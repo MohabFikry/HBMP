@@ -28,7 +28,12 @@ builder.Services.AddHbmpEvents(builder.Configuration);
 builder.Services.AddHbmpDurableOutbox<PolicyDbContext>();
 builder.Services.AddHbmpOutboxRelay();   // relay staged events (incl. audit) to RabbitMQ
 builder.Services.AddPolicyInfrastructure(builder.Configuration);
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(TimeProvider.System);
+// 19.1b — the tier catalogue, read from provider-service. policy administration PRICES tiers; the Network Team
+// creates them, so this is deliberately a read-only window and not a local copy of the network model.
+builder.Services.AddHttpClient<INetworkTierCatalog, HttpNetworkTierCatalog>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Provider:BaseUrl"] ?? "http://provider-service:8080"));
 // 18.A1 (X1) — consume the fulfillment streams and move coverage_limit.consumed_value. Without this the
 // accumulator never advances and every member is eligible forever.
 builder.Services.Configure<ConsumptionConsumerOptions>(builder.Configuration.GetSection(ConsumptionConsumerOptions.SectionName));

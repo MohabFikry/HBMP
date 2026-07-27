@@ -59,12 +59,16 @@ public class PlanVersionStoreTests
         // between plan and plan_version — the FK is real in the database but invisible to the change tracker,
         // so EF cannot order the deletes itself.
         await db.Database.ExecuteSqlRawAsync("ALTER TABLE policy.benefit_rule DISABLE TRIGGER trg_benefit_rule_immutable");
+        await db.Database.ExecuteSqlRawAsync("ALTER TABLE policy.benefit_rule_tier DISABLE TRIGGER trg_benefit_rule_tier_immutable");
         await db.Database.ExecuteSqlRawAsync("ALTER TABLE policy.plan_version DISABLE TRIGGER trg_plan_version_immutable");
         try
         {
             // The supersede chain is a self-FK; it has to be broken before any version row can go.
             await db.Database.ExecuteSqlRawAsync(
                 "UPDATE policy.plan_version SET superseded_by_version_id = NULL WHERE plan_id = {0}", planId);
+            await db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM policy.benefit_rule_tier WHERE benefit_rule_id IN (SELECT rule_id FROM policy.benefit_rule " +
+                "WHERE plan_version_id IN (SELECT plan_version_id FROM policy.plan_version WHERE plan_id = {0}))", planId);
             await db.Database.ExecuteSqlRawAsync(
                 "DELETE FROM policy.benefit_rule WHERE plan_version_id IN (SELECT plan_version_id FROM policy.plan_version WHERE plan_id = {0})", planId);
             await db.Database.ExecuteSqlRawAsync("DELETE FROM policy.plan_version WHERE plan_id = {0}", planId);
@@ -73,6 +77,7 @@ public class PlanVersionStoreTests
         finally
         {
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE policy.benefit_rule ENABLE TRIGGER trg_benefit_rule_immutable");
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE policy.benefit_rule_tier ENABLE TRIGGER trg_benefit_rule_tier_immutable");
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE policy.plan_version ENABLE TRIGGER trg_plan_version_immutable");
         }
     }
@@ -138,6 +143,136 @@ public class PlanVersionStoreTests
             var ex = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
             ex.InnerException.Should().BeOfType<PostgresException>()
                 .Which.MessageText.Should().Contain("immutable");
+        }
+        finally { await Cleanup(planId); }
+    }
+
+    [SkippableFact]
+    public async Task The_cost_share_of_an_active_version_cannot_be_rewritten()
+    {
+        // 19.1b. Freezing plan_version and benefit_rule while leaving the per-tier AMOUNTS writable would
+        // freeze the shape of the plan and none of its prices — which is most of what a plan is. Attempted
+        // directly through EF, with no endpoint in the way.
+        Skip.If(Db is null, "POLICY_TEST_DB not set — DB integration test skipped.");
+        Guid planId;
+        Guid ruleId;
+        await using (var db = Ctx())
+        {
+            planId = await SeedPlan(db);
+            var v = Version(planId, 1, new(2026, 1, 1), null, PlanVersionStatus.Draft);
+            var rule = new BenefitRule
+            {
+                RuleId = Guid.NewGuid(), TenantId = Tenant, PlanVersionId = v.PlanVersionId,
+                BenefitCategoryId = await CategoryId(db), IsCovered = true,
+                LimitType = LimitType.Annual, LimitValue = 5000m, ResetPeriod = ResetPeriod.Yearly,
+                CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+            };
+            rule.Tiers.Add(new BenefitRuleTier
+            {
+                RuleTierId = Guid.NewGuid(), TenantId = Tenant, BenefitRuleId = rule.RuleId,
+                NetworkTierId = Guid.NewGuid(), TierCode = "T1", IsCovered = true, CopayPercent = 10m,
+                CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+            });
+            v.Rules.Add(rule);
+            db.PlanVersions.Add(v);
+            await db.SaveChangesAsync();
+            ruleId = rule.RuleId;
+
+            v.Status = PlanVersionStatus.Active;
+            v.ActivatedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        try
+        {
+            await using var db = Ctx();
+            var tier = await db.BenefitRuleTiers.FirstAsync(t => t.BenefitRuleId == ruleId);
+            tier.CopayPercent = 40m;   // quadrupling the member's share of every past claim at this tier
+
+            var ex = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+            ex.InnerException.Should().BeOfType<PostgresException>()
+                .Which.MessageText.Should().Contain("immutable");
+        }
+        finally { await Cleanup(planId); }
+    }
+
+    [SkippableFact]
+    public async Task Cost_share_may_not_be_added_to_an_active_version()
+    {
+        // The other half of the same rule: an activated version must not gain a tier it did not have. Without
+        // the INSERT arm of the trigger, a plan that was validated as complete could grow a new price after
+        // the fact — outside anyone's review.
+        Skip.If(Db is null, "POLICY_TEST_DB not set — DB integration test skipped.");
+        Guid planId;
+        Guid ruleId;
+        await using (var db = Ctx())
+        {
+            planId = await SeedPlan(db);
+            var v = Version(planId, 1, new(2026, 1, 1), null, PlanVersionStatus.Draft);
+            var rule = new BenefitRule
+            {
+                RuleId = Guid.NewGuid(), TenantId = Tenant, PlanVersionId = v.PlanVersionId,
+                BenefitCategoryId = await CategoryId(db), IsCovered = true,
+                LimitType = LimitType.Annual, LimitValue = 5000m, ResetPeriod = ResetPeriod.Yearly,
+                CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+            };
+            v.Rules.Add(rule);
+            db.PlanVersions.Add(v);
+            await db.SaveChangesAsync();
+            ruleId = rule.RuleId;
+
+            v.Status = PlanVersionStatus.Active;
+            v.ActivatedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        try
+        {
+            await using var db = Ctx();
+            db.BenefitRuleTiers.Add(new BenefitRuleTier
+            {
+                RuleTierId = Guid.NewGuid(), TenantId = Tenant, BenefitRuleId = ruleId,
+                NetworkTierId = Guid.NewGuid(), TierCode = "OON", IsCovered = false,
+                CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+            });
+
+            var ex = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+            ex.InnerException.Should().BeOfType<PostgresException>()
+                .Which.MessageText.Should().Contain("immutable");
+        }
+        finally { await Cleanup(planId); }
+    }
+
+    [SkippableFact]
+    public async Task A_not_covered_tier_may_not_carry_cost_share()
+    {
+        // The database's own version of UNCOVERED_WITH_TIER_COST_SHARE: there is no amount to take a share OF,
+        // and a stored co-pay under a not-covered row renders as an entitlement in every UI that reads it.
+        Skip.If(Db is null, "POLICY_TEST_DB not set — DB integration test skipped.");
+        Guid planId;
+        await using var seed = Ctx();
+        planId = await SeedPlan(seed);
+        try
+        {
+            var v = Version(planId, 1, new(2026, 1, 1), null, PlanVersionStatus.Draft);
+            var rule = new BenefitRule
+            {
+                RuleId = Guid.NewGuid(), TenantId = Tenant, PlanVersionId = v.PlanVersionId,
+                BenefitCategoryId = await CategoryId(seed), IsCovered = true,
+                LimitType = LimitType.Annual, LimitValue = 5000m, ResetPeriod = ResetPeriod.Yearly,
+                CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+            };
+            rule.Tiers.Add(new BenefitRuleTier
+            {
+                RuleTierId = Guid.NewGuid(), TenantId = Tenant, BenefitRuleId = rule.RuleId,
+                NetworkTierId = Guid.NewGuid(), TierCode = "OON",
+                IsCovered = false, CopayPercent = 40m,
+                CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+            });
+            v.Rules.Add(rule);
+            seed.PlanVersions.Add(v);
+
+            var ex = await Assert.ThrowsAsync<DbUpdateException>(() => seed.SaveChangesAsync());
+            ex.InnerException.Should().BeOfType<PostgresException>()
+                .Which.ConstraintName.Should().Be("ck_brt_uncovered_has_no_cost_share");
         }
         finally { await Cleanup(planId); }
     }

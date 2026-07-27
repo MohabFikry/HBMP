@@ -422,16 +422,6 @@
             "type": "string",
             "nullable": true
           },
-          "copayFixed": {
-            "type": "number",
-            "format": "double",
-            "nullable": true
-          },
-          "copayPercent": {
-            "type": "number",
-            "format": "double",
-            "nullable": true
-          },
           "deductible": {
             "type": "number",
             "format": "double",
@@ -449,16 +439,56 @@
             "format": "double",
             "nullable": true
           },
-          "networkTier": {
-            "type": "string",
-            "nullable": true
-          },
           "exclusions": {
             "type": "string",
             "nullable": true
           },
           "notes": {
             "type": "string",
+            "nullable": true
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BenefitRuleTierInput"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "BenefitRuleTierInput": {
+        "type": "object",
+        "properties": {
+          "networkTierId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "isCovered": {
+            "type": "boolean"
+          },
+          "copayFixed": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "copayPercent": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "coinsurancePercent": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "requiresPreauthOverride": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "limitMultiplier": {
+            "type": "number",
+            "format": "double",
             "nullable": true
           }
         },

@@ -116,6 +116,8 @@ services:
           - /api/v1/branches
           - /api/v1/practitioners
           - /api/v1/specialties
+          # 19.1b — network tiers + effective-dated tier assignment + the service-date resolver.
+          - /api/v1/network-tiers
         strip_path: false
 
   # --- orders-service: investigation orders + lab/imaging fulfillment + report-access ---

@@ -42,13 +42,17 @@ Mersal's adaptation: the "employer group" is a **programme/cohort** (Oncology, U
 flowchart TD
   PAYER[payer / sponsor] --> POL[policy]
   PLAN[plan  product] --> PV[plan_version  effective-dated]
-  PV --> POL
+  POL --> PP[policy_plan  1..n plans under a policy]
+  PV --> PP
   POL --> GRP[member_group  cohort]
-  POL --> ENR[enrollment  member]
+  PP --> ENR[enrollment  member elected onto ONE plan]
   GRP --> ENR
   ENR --> BEN[beneficiary  patient-service]
-  PV --> BC[benefit_config: categories, limits, copay, waiting, exclusions, pre-auth]
-  ENR --> UTIL[(utilization: individual / group / policy / payer)]
+  PV --> BR[benefit_rule: covered, limits, waiting, exclusions, pre-auth]
+  BR --> BRT[benefit_rule_tier: cost-share PER NETWORK TIER]
+  NT[network_tier  provider-service] --> BRT
+  NT --> PNT[provider / location / contract tier assignment]
+  ENR --> UTIL[(utilization: individual / group / plan / policy / payer)]
   POL -.notes.-> NOTE[note  signed + timestamped + cancellable]
   ENR -.notes.-> NOTE
 ```
@@ -58,23 +62,37 @@ flowchart TD
 - **`payer`** — `payer_code`, name EN/AR, type `{SelfFunded, Donor, Government, PartnerNGO, Insurer}`, contact, status. *Payer scope* = every query/report can be filtered and secured to a payer.
 - **`plan`** — the reusable product: `plan_code`, name EN/AR, description, category (e.g. Primary, Oncology, Emergency), status.
 - **`plan_version`** — **the heart of correctness**: `plan_id`, `version_no`, `effective_from/to`, `status {Draft, Active, Superseded, Retired}`, and the whole benefit configuration. A version is **immutable once Active**; changes create a new version. Everything downstream resolves *the version in force on the service date*.
-- **`benefit_rule`** (child of plan_version) — per benefit category: covered yes/no, `limit_type` + `limit_value` + `reset_period`, co-pay fixed/percent, deductible, **waiting period days**, **pre-auth required** (+ cost threshold), network tier, exclusions (coded), notes.
-- **`policy`** (extended) — `policy_no`, **`payer_id`**, **`plan_version_id`**, effective dates, status, renewal linkage (`previous_policy_id`), max members, notes.
+- **`benefit_rule`** (child of plan_version) — per benefit category: covered yes/no, `limit_type` + `limit_value` + `reset_period`, deductible, **waiting period days**, **pre-auth required** (+ cost threshold), exclusions (coded), notes. Cost-share now lives per tier (below).
+- **`benefit_rule_tier`** — **cost-share per network tier**: `benefit_rule_id` × `network_tier_id` → `is_covered`, `copay_fixed`, `copay_percent`, `coinsurance_percent`, `requires_preauth_override?`, `limit_multiplier?`. This is what makes "in-network 10%, out-of-network 40% or not covered" expressible.
+- **`policy`** (extended) — `policy_no`, **`payer_id`**, effective dates, status, renewal linkage (`previous_policy_id`), max members, notes. **A policy no longer points at a single plan version** — see `policy_plan`.
+- **`policy_plan`** — **the plans under a policy** (1..n): `policy_id`, `plan_version_id`, `plan_label` (e.g. "Standard", "Oncology", "Staff"), `effective_from/to`, `is_default`, `eligibility_rule` (which group / relationship / criteria may be elected onto it), `max_members?`, status. One policy can offer several plans concurrently; each has its own effective window.
 - **`member_group`** — cohort inside a policy: `group_code`, name, type `{Programme, Cohort, BranchCaseload, Campaign}`, effective dates, status.
-- **`enrollment`** — the membership record: `beneficiary_id`, `policy_id`, `group_id?`, `member_no`, `relationship {Principal, Spouse, Child, Dependent}`, `principal_enrollment_id?`, `effective_from/to`, `waiting_period_ends_on`, `status {Pending, Active, Suspended, Terminated, Cancelled}`, `termination_reason`.
+- **`enrollment`** — the membership record: `beneficiary_id`, `policy_id`, **`policy_plan_id`** (the plan the member is elected onto), `group_id?`, `member_no`, `relationship {Principal, Spouse, Child, Dependent}`, `principal_enrollment_id?`, `effective_from/to`, `waiting_period_ends_on`, `status {Pending, Active, Suspended, Terminated, Cancelled}`, `termination_reason`. **Plan changes are events** (`PlanChanged`), never edits.
+
+**Network tiers (owned by provider-service — network administration)**
+
+- **`network_tier`** — `tier_code` (e.g. `T1`, `T2`, `OON`), name EN/AR, `rank` (1 = most preferred), description, `is_out_of_network`, status. Managed by the **Network Team** in the network-administration portal, not by policy admins.
+- **`provider_network_assignment`** — assigns a **provider**, a **provider_location**, or a **contract service line** to a tier, with `effective_from/to`. A provider may sit in different tiers over time, or a specific branch/location may be tiered differently from its parent.
+- **Resolution at point of service:** given (performing provider/location, service date) → the tier in force. Combined with the member's plan version → `benefit_rule_tier` → covered? cost share? pre-auth? This is consumed by **eligibility** (`NeedsAuthorization` / cost-share preview), **approvals** (tier-aware rules), and **claims** (`PROVIDER_OUT_OF_NETWORK`, correct co-pay/coinsurance split).
 - **`enrollment_event`** (append-only) — every enrol/change/terminate/reinstate with effective date, reason, actor — this is what makes **retro-effective** changes auditable and reversible.
 - **`note`** — see §5.
 - **Coverage/coverage_limit** stay as the *derived, per-member instance* of the plan's benefit rules (so the existing eligibility engine and the phase-18 accumulator keep working) — but they are now **generated from `plan_version.benefit_rule` at enrollment**, not hand-entered.
 
 ## 4. Capabilities
 
-**4.1 Policy setup & configuration.** Create payer → create plan → author a **draft plan version** with its benefit rules (categories, limits, reset periods, co-pay, waiting periods, pre-auth triggers, exclusions) → validate → **activate** (immutable) → attach to a policy with effective dates. Amend = new version + endorsement record; renew = new policy linked to the previous one, carrying members forward.
+**4.1 Policy setup & configuration.** Create payer → create plan → author a **draft plan version** with its benefit rules (categories, limits, reset periods, waiting periods, pre-auth triggers, exclusions) **and the per-tier cost-share grid** (category × network tier → covered / co-pay / co-insurance) → validate → **activate** (immutable) → **attach one or more plans to a policy** via `policy_plan`, each with its own effective window, default flag and eligibility rule. Amend = new version + endorsement record; renew = new policy linked to the previous one, carrying members forward on their equivalent plan.
+
+**4.1b Network tiers.** The **Network Team** defines tiers (`T1` preferred, `T2` standard, `OON` out-of-network — or Gold/Silver/Bronze) in the network-administration portal and assigns providers, locations and contract service lines to them with effective dates. Policy admins then *consume* tiers when configuring cost-share, but cannot create or reassign them — the separation keeps network commercial policy with the Network Team and benefit design with policy administration. Tier assignment is effective-dated and audited; a provider moving tier does **not** retroactively change already-adjudicated services.
 
 **4.2 Member management.** Enrol a beneficiary (individual or bulk/CSV), attach dependents to a principal, assign to a group, set effective dates and waiting period, terminate with reason and effective date, reinstate, transfer between groups/policies. Enrollment **generates** the member's coverage + limits from the plan version.
 
 **4.3 Utilization — individual and group.** A read-model answering: for a member / group / policy / payer over a period — services consumed by category, limit consumed vs remaining vs %, top categories, encounter counts, authorizations raised/approved/denied, claims value (from [36](36-claims-management.md)), and outliers (members > X% of limit). Individual view = the member's consumption ledger; group view = aggregate + per-member table + distribution.
 
 **4.4 Policy query & member query.** Structured, multi-criteria search (not single-identifier lookup): **policy query** by payer, plan, status, effective window, group, member count, utilization band; **member query** by identifier, name, member no, policy, group, relationship, status, branch, enrollment window, waiting-period state, utilization band. Both paginated, sortable, exportable (audited), and **field-projected by role** — Finance sees no clinical anything; Reception sees eligibility-relevant fields only.
+
+**4.4b Bulk upload & data extract.** One engine both ways. **In:** templated CSV/XLSX jobs for member enrolment, termination, plan change, group assignment, contact update, provider tier assignment and draft benefit-rule import — malware-scanned, staged, row-validated with bilingual errors, previewed as a dry run, committed idempotently per row (partial failure continues rather than half-committing), reconciled, and reversible by batch. **Out:** extracts over the same filter vocabulary as §4.4 — payer, policy, plan, **effective/as-of date**, group, network tier, branch, status, relationship, benefit category, utilization band — with a per-role column allow-list, saved and scheduled definitions, async large runs to signed short-TTL downloads, and an audit of every run's filter snapshot. **As-of extraction** (the membership as it stood on a past date, reconstructed from effective dating + `enrollment_event`) is a first-class requirement, not a report variant.
+
+**4.4c Analytical dashboard.** Six views over pre-aggregated read models — Enrolment (growth, churn, dependants, waiting-period population), Utilization (consumed vs limit, threshold crossings, **in-network vs OON split**), Financial (claimed/approved/adjusted/net, cost per member per month, top drivers — no diagnoses), Network (tier mix, OON leakage and its cost, provider volume/value, tier gaps by branch), Plan comparison (side-by-side enrolment, utilization %, cost/member, OON rate), and Outliers & data quality (limit outliers, zero-utilization members, missing plan/group, expiring policies and plan versions, failed bulk rows). One shared, URL-encoded filter bar; drill-down from chart → filtered table → audited member detail; period-over-period compare; exports that reuse the extract column allow-list so the dashboard cannot become a PHI side-channel. Payer and branch scope are enforced **server-side per view**.
 
 **4.5 Full coverage details.** For a member: the plan + version in force, every benefit category with covered/limit/consumed/remaining/reset date, co-pay, waiting-period status, pre-auth requirements, exclusions, and the effective-dated history of changes.
 
@@ -118,6 +136,20 @@ note
 7. **Audited.** Create, cancel, and **read** of any note whose class is Clinical/Restricted write immutable audit events.
 8. Notes are surfaced on the policy screen, the member screen, and (read-only, filtered) in the Call Centre 360 — where only `Administrative` notes are visible.
 
+## 5b. Documents (policy + member, incl. past medical history)
+
+Attachments live on both a **policy** (contract, benefit schedule, payer agreement, endorsement, financial guarantee, correspondence) and a **member** (identity, proof of eligibility, enrolment/consent forms, **past medical history**, medical reports, lab results, prescriptions, discharge summaries, referrals, invoices/receipts, correspondence). Bytes stay in **document-service/MinIO** — this module adds linkage, classification and lifecycle, never a second store or scanner.
+
+Every document carries: **`document_class`**, a **`visibility_class`** the class defaults (Clinical for medical material; **Restricted** for mental-health, HIV/STI, genetic, substance-use, reproductive or GBV material per [37 §5](37-branch-scoping-and-clinical-sensitivity.md)) which an uploader may **raise but never lower**; a **`document_date`** — the date *on* the document, distinct from `uploaded_at`, so past medical history sorts clinically rather than by upload order; the **uploader's username + display captured as a snapshot** and the UTC upload timestamp; optional issuing provider, expiry and verification; and a status of `Active | Superseded | Withdrawn`.
+
+Rules mirror notes: re-upload creates a **new version** (the prior is Superseded, never deleted); withdrawal needs a **mandatory reason** and keeps the record visible; **listing is metadata-only and role-projected** while **downloading is a separate, always-audited action** served by a short-TTL signed URL; and **Restricted** documents are existence-only until released through the existing [37 §6](37-branch-scoping-and-clinical-sensitivity.md) request/grant flow. Malware scanning is fail-closed.
+
+## 5c. Change timeline (policy + member)
+
+A single chronological history answering *what happened to this policy / this member, when, and who did it* — built as a **replayable projection over the existing hash-chained audit stream and domain events**, never a second hand-maintained log (a parallel log drifts and becomes a lie).
+
+It carries lifecycle, coverage, plan, enrolment, note, document, utilization-threshold, authorization, claim, **access** and bulk-operation events; each entry has a UTC timestamp rendered in Africa/Cairo, the **actor's username as a snapshot**, a bilingual one-line summary, a **minimized, class-projected diff** (a clinical value is withheld from operational roles — they see that a clinical record changed, not what it says), a correlation id and a deep link. Entries are **append-only**; a correction is a new entry. Notably, **who viewed a restricted document or invoked break-glass belongs on the member's timeline** ([19](19-audit-strategy.md)) — often the most important line on it. The projection is idempotent (`UNIQUE source_event_id`) and rebuildable to byte-identical history.
+
 ## 6. Roles & scope
 
 | Role | Capability |
@@ -133,7 +165,9 @@ Payer scope and branch scope both apply: a payer-scoped user sees only their pay
 
 ## 7. Correctness invariants
 
-1. **Adjudicate against the plan version in force on the service date** — never "current". Eligibility, authorization and claims all resolve `plan_version` by `service_date ∈ [effective_from, effective_to)`.
+1. **Adjudicate against the plan version in force on the service date** — never "current". Eligibility, authorization and claims all resolve the member's `policy_plan → plan_version` by `service_date ∈ [effective_from, effective_to)`.
+1b. **Resolve the network tier in force on the service date too.** Cost-share = `benefit_rule_tier` for (plan version, benefit category, resolved tier). A later tier reassignment never changes an already-adjudicated service.
+1c. **A member is on exactly one plan at a time** within a policy; plan changes are `enrollment_event`s with an effective date, never edits.
 2. **An Active plan version is immutable.** Changes create a new version; the old one is `Superseded`, never mutated.
 3. **Enrollment generates coverage** — a member's `coverage`/`coverage_limit` rows are derived from the plan version at enrolment, with the source `plan_version_id` recorded, so entitlement is explainable.
 4. **No overlapping active enrollment** for the same beneficiary + policy (exclusion constraint on the date range).
@@ -144,13 +178,19 @@ Payer scope and branch scope both apply: a payer-scoped user sees only their pay
 
 ## 8. Acceptance criteria
 
-- [ ] Payer, plan, effective-dated plan version with benefit rules can be created, validated, activated (immutable), amended and renewed.
-- [ ] Policies attach a payer + plan version; a service date resolves the correct version, proven by a test spanning a version boundary.
+- [ ] Payer, plan, effective-dated plan version with benefit rules **and a per-tier cost-share grid** can be created, validated, activated (immutable), amended and renewed.
+- [ ] **Network tiers** are managed by the Network Team, assigned to providers/locations/contract lines with effective dates, and resolve correctly at a service date; policy admins can consume but not create them.
+- [ ] **A policy carries multiple plans** (`policy_plan`) with their own windows, default flag and eligibility rules; a member is elected onto exactly one, and plan changes are events.
+- [ ] Policies attach a payer; a service date resolves the correct plan version **and network tier**, proven by tests spanning both a version boundary and a tier-reassignment boundary.
 - [ ] Members enrol (with dependents, groups, waiting periods), terminate, reinstate; coverage + limits are **generated** from the plan version; no overlapping active enrollment.
 - [ ] Utilization is queryable for **individual, group, policy and payer**, reconciling exactly to the consumption accumulator.
 - [ ] Policy query and member query support the §4.4 criteria with pagination, sort, audited export, and role-based field projection.
+- [ ] **Bulk upload** validates per row with a dry-run preview, commits idempotently without half-committing, reconciles, and rolls back by batch; **extracts** run on the same filter vocabulary with per-role column allow-lists and **as-of date** reconstruction.
+- [ ] **Analytical dashboard** delivers the six §4.4c views with one shared filter bar, drill-down, compare mode and audited exports — payer/branch scoped server-side, every chart with an always-rendered data table.
 - [ ] Full coverage details and the administrative beneficiary 360 render with min-necessary projection and audited PHI reads.
 - [ ] **Notes** exist on policy and member, are timestamped, **signed with the username**, cancellable with a mandatory reason, never edited or deleted, class-projected by role, and audited.
+- [ ] **Documents** attach to policy and member with classification (incl. past medical history), `document_date` separate from upload time, uploader signature, class-driven visibility that cannot be lowered, versioning, withdrawal-with-reason, fail-closed scanning, and **audited short-TTL downloads**; Restricted material stays existence-only until granted.
+- [ ] **Change timeline** on policy and member is a replayable projection over the audit stream, append-only, bilingual, actor-snapshotted, class-projected, includes access events, and is filterable + audited on export.
 - [ ] Authorization tests prove: Finance/Call Centre never receive clinical note bodies; a payer-scoped user cannot read another payer's policies.
 
 ---

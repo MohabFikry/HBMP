@@ -30,6 +30,7 @@ builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddProviderInfrastructure(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ProviderAccessGuard>();
+builder.Services.AddScoped<NetworkTierGate>();   // 19.1b — Network-Team-only tier administration
 builder.Services.AddSingleton(TimeProvider.System);
 
 // masterdata-backed code validation for CPT/LOINC service-line codes.
@@ -283,6 +284,8 @@ app.MapMetrics();
 app.MapBranches();
 // 14.5 — practitioners, specialty & doctor↔branch assignment + the doctor picker + serves-branch probe.
 app.MapPractitioners();
+// 19.1b — network tiers + effective-dated provider tier assignment + the service-date resolver.
+app.MapNetworkTiers();
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

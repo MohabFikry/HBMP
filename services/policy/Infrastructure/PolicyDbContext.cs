@@ -20,6 +20,7 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
     public DbSet<Plan> Plans => Set<Plan>();
     public DbSet<PlanVersion> PlanVersions => Set<PlanVersion>();
     public DbSet<BenefitRule> BenefitRules => Set<BenefitRule>();
+    public DbSet<BenefitRuleTier> BenefitRuleTiers => Set<BenefitRuleTier>();   // 19.1b
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -173,13 +174,10 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.LimitType).HasConversion<string>().HasColumnName("limit_type");
             e.Property(x => x.LimitValue).HasColumnName("limit_value").HasColumnType("numeric(14,2)");
             e.Property(x => x.ResetPeriod).HasConversion<string>().HasColumnName("reset_period");
-            e.Property(x => x.CopayFixed).HasColumnName("copay_fixed").HasColumnType("numeric(14,2)");
-            e.Property(x => x.CopayPercent).HasColumnName("copay_percent").HasColumnType("numeric(5,2)");
             e.Property(x => x.Deductible).HasColumnName("deductible").HasColumnType("numeric(14,2)");
             e.Property(x => x.WaitingPeriodDays).HasColumnName("waiting_period_days");
             e.Property(x => x.RequiresPreauth).HasColumnName("requires_preauth");
             e.Property(x => x.PreauthCostThreshold).HasColumnName("preauth_cost_threshold").HasColumnType("numeric(14,2)");
-            e.Property(x => x.NetworkTier).HasColumnName("network_tier");
             e.Property(x => x.Exclusions).HasColumnName("exclusions").HasColumnType("jsonb");
             e.Property(x => x.Notes).HasColumnName("notes");
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
@@ -187,6 +185,30 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
             e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
             e.HasIndex(x => new { x.PlanVersionId, x.BenefitCategoryId }).IsUnique();
+            e.HasMany(x => x.Tiers).WithOne().HasForeignKey(t => t.BenefitRuleId);
+        });
+
+        // 19.1b — the per-tier cost-share grid (design 38 §3). network_tier_id is a cross-service VALUE.
+        b.Entity<BenefitRuleTier>(e =>
+        {
+            e.ToTable("benefit_rule_tier");
+            e.HasKey(x => x.RuleTierId);
+            e.Property(x => x.RuleTierId).HasColumnName("rule_tier_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.BenefitRuleId).HasColumnName("benefit_rule_id");
+            e.Property(x => x.NetworkTierId).HasColumnName("network_tier_id");
+            e.Property(x => x.TierCode).HasColumnName("tier_code").IsRequired();
+            e.Property(x => x.IsCovered).HasColumnName("is_covered");
+            e.Property(x => x.CopayFixed).HasColumnName("copay_fixed").HasColumnType("numeric(14,2)");
+            e.Property(x => x.CopayPercent).HasColumnName("copay_percent").HasColumnType("numeric(5,2)");
+            e.Property(x => x.CoinsurancePercent).HasColumnName("coinsurance_percent").HasColumnType("numeric(5,2)");
+            e.Property(x => x.RequiresPreauthOverride).HasColumnName("requires_preauth_override");
+            e.Property(x => x.LimitMultiplier).HasColumnName("limit_multiplier").HasColumnType("numeric(5,2)");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.CreatedBy).HasColumnName("created_by");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
+            e.HasIndex(x => new { x.BenefitRuleId, x.NetworkTierId }).IsUnique();
         });
 
         b.Entity<ProcessedEvent>(e =>

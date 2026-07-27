@@ -17,6 +17,11 @@ public class PlanVersionValidationTests
     private static readonly DateOnly Today = new(2026, 7, 1);
     private static readonly Guid Lab = Guid.NewGuid();
 
+    // 19.1b — the Active tier catalogue every covered category must price completely.
+    private static readonly NetworkTierRef T1 = new(Guid.NewGuid(), "T1");
+    private static readonly NetworkTierRef Oon = new(Guid.NewGuid(), "OON");
+    private static readonly NetworkTierRef[] ActiveTiers = [T1, Oon];
+
     private static PlanVersion Draft(params BenefitRule[] rules) => new()
     {
         PlanVersionId = Guid.NewGuid(), PlanId = Guid.NewGuid(), VersionNo = 1,
@@ -24,17 +29,31 @@ public class PlanVersionValidationTests
         Rules = [.. rules],
     };
 
+    /// <summary>A rule that prices every Active tier by default, so the pre-19.1b cases below still exercise
+    /// exactly what they were written to exercise rather than tripping on the new completeness check.</summary>
     private static BenefitRule Rule(bool covered = true, LimitType? limitType = Domain.LimitType.Annual,
         decimal? limitValue = 5000m, ResetPeriod reset = ResetPeriod.Yearly,
-        bool preauth = false, decimal? threshold = null, decimal? copayFixed = null, decimal? copayPercent = null) => new()
+        bool preauth = false, decimal? threshold = null, BenefitRuleTier[]? tiers = null)
     {
-        RuleId = Guid.NewGuid(), BenefitCategoryId = Lab, IsCovered = covered,
-        LimitType = limitType, LimitValue = limitValue, ResetPeriod = reset,
-        RequiresPreauth = preauth, PreauthCostThreshold = threshold,
-        CopayFixed = copayFixed, CopayPercent = copayPercent,
+        var rule = new BenefitRule
+        {
+            RuleId = Guid.NewGuid(), BenefitCategoryId = Lab, IsCovered = covered,
+            LimitType = limitType, LimitValue = limitValue, ResetPeriod = reset,
+            RequiresPreauth = preauth, PreauthCostThreshold = threshold,
+        };
+        rule.Tiers.AddRange(tiers ?? (covered ? [Tier(T1, copayPercent: 10m), Tier(Oon, copayPercent: 40m)] : []));
+        return rule;
+    }
+
+    private static BenefitRuleTier Tier(NetworkTierRef tier, bool covered = true, decimal? copayFixed = null,
+        decimal? copayPercent = null, decimal? multiplier = null) => new()
+    {
+        RuleTierId = Guid.NewGuid(), NetworkTierId = tier.NetworkTierId, TierCode = tier.TierCode,
+        IsCovered = covered, CopayFixed = copayFixed, CopayPercent = copayPercent, LimitMultiplier = multiplier,
     };
 
-    private static string[] Codes(PlanVersion v) => [.. PlanVersionValidation.Validate(v, Today).Select(p => p.Code)];
+    private static string[] Codes(PlanVersion v) =>
+        [.. PlanVersionValidation.Validate(v, Today, ActiveTiers).Select(p => p.Code)];
 
     [Fact]
     public void A_well_formed_draft_validates()
@@ -124,6 +143,123 @@ public class PlanVersionValidationTests
         // five-minute correction into five round trips through an irreversible action.
         var v = Draft(Rule(limitValue: 0m, limitType: LimitType.Lifetime, reset: ResetPeriod.Yearly));
         Codes(v).Should().Contain(["ZERO_LIMIT", "LIFETIME_RESET"]);
+    }
+
+    // ---- 19.1b: the cost-share grid must be COMPLETE ------------------------------------------------------
+
+    [Fact]
+    public void A_covered_category_that_leaves_an_active_tier_unpriced_cannot_be_activated()
+    {
+        // THE 19.1b acceptance case, and the most dangerous shape in this file because nothing about it looks
+        // wrong: the plan reads as covered, the tier exists, and adjudication reaches a service delivered
+        // there with no agreed member share. Whatever it charges then is a number nobody authored.
+        var priced = Rule(tiers: [Tier(T1, copayPercent: 10m)]);
+
+        var codes = Codes(Draft(priced));
+
+        codes.Should().Contain("TIER_NOT_CONFIGURED");
+        // The message must name the tier — "some tier is missing" sends the author hunting through a grid.
+        PlanVersionValidation.Validate(Draft(priced), Today, ActiveTiers)
+            .Single(p => p.Code == "TIER_NOT_CONFIGURED").Detail.Should().Contain("OON");
+    }
+
+    [Fact]
+    public void Not_covered_at_this_tier_is_a_valid_statement_and_not_a_gap()
+    {
+        // An HMO that pays nothing out-of-network is ordinary benefit design. The distinction the validator
+        // draws is between SAYING nothing is covered there and saying nothing at all.
+        var rule = Rule(tiers: [Tier(T1, copayPercent: 10m), Tier(Oon, covered: false)]);
+
+        Codes(Draft(rule)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void An_uncovered_category_may_not_carry_a_per_tier_cost_share()
+    {
+        var rule = Rule(covered: false, limitType: null, limitValue: null, reset: ResetPeriod.None,
+            tiers: [Tier(T1, copayPercent: 10m)]);
+        rule.BenefitCategoryId = Guid.NewGuid();
+
+        Codes(Draft(Rule(), rule)).Should().Contain("UNCOVERED_WITH_TIER_COST_SHARE");
+    }
+
+    [Fact]
+    public void A_tier_that_is_no_longer_active_cannot_be_priced()
+    {
+        // A draft written before a tier was retired must not activate against it: the resolver will never
+        // return that tier again, so the row is cost share for a situation that can no longer arise.
+        var retired = new NetworkTierRef(Guid.NewGuid(), "T3");
+        var rule = Rule(tiers: [Tier(T1, copayPercent: 10m), Tier(Oon, copayPercent: 40m), Tier(retired)]);
+
+        Codes(Draft(rule)).Should().Contain("UNKNOWN_TIER");
+    }
+
+    [Fact]
+    public void A_tier_may_not_be_priced_twice_in_one_category()
+    {
+        var rule = Rule(tiers:
+            [Tier(T1, copayPercent: 10m), Tier(T1, copayPercent: 25m), Tier(Oon, copayPercent: 40m)]);
+
+        Codes(Draft(rule)).Should().Contain("DUPLICATE_TIER");
+    }
+
+    [Fact]
+    public void A_tier_may_not_set_both_a_fixed_and_a_percentage_copay()
+    {
+        var rule = Rule(tiers:
+            [Tier(T1, copayFixed: 50m, copayPercent: 10m), Tier(Oon, copayPercent: 40m)]);
+
+        Codes(Draft(rule)).Should().Contain("BOTH_COPAY_FORMS");
+    }
+
+    [Fact]
+    public void A_covered_tier_with_a_zero_limit_multiplier_is_rejected()
+    {
+        // Same failure as ZERO_LIMIT one level down: it renders as covered and entitles nothing.
+        var rule = Rule(tiers:
+            [Tier(T1, copayPercent: 10m), Tier(Oon, copayPercent: 40m, multiplier: 0m)]);
+
+        Codes(Draft(rule)).Should().Contain("ZERO_TIER_MULTIPLIER");
+    }
+
+    [Fact]
+    public void With_no_tiers_configured_at_all_every_active_tier_is_reported()
+    {
+        // The empty-grid case: an author who never opened the cost-share tab gets one problem per tier, not a
+        // single vague complaint.
+        var rule = Rule(tiers: []);
+
+        var problems = PlanVersionValidation.Validate(Draft(rule), Today, ActiveTiers);
+
+        problems.Count(p => p.Code == "TIER_NOT_CONFIGURED").Should().Be(2);
+    }
+
+    // ---- 19.1b: what applies AT a tier, resolving overrides against the rule ------------------------------
+
+    [Fact]
+    public void A_tier_override_decides_pre_authorization_and_falls_back_to_the_rule()
+    {
+        var rule = Rule(preauth: false);
+        var inNetwork = Tier(T1);
+        var outOfNetwork = Tier(Oon);
+        outOfNetwork.RequiresPreauthOverride = true;
+
+        // The common real configuration: open access in-network, authorization required outside it.
+        inNetwork.ResolvesPreauth(rule).Should().BeFalse("no override — inherit the rule's default");
+        outOfNetwork.ResolvesPreauth(rule).Should().BeTrue();
+    }
+
+    [Fact]
+    public void A_tier_multiplier_scales_the_rules_limit_but_never_invents_one()
+    {
+        var rule = Rule(limitValue: 5000m);
+
+        Tier(T1).ResolvesLimit(rule).Should().Be(5000m, "no multiplier — the rule's own limit applies");
+        Tier(Oon, multiplier: 0.5m).ResolvesLimit(rule).Should().Be(2500m);
+
+        // An unlimited benefit stays unlimited: multiplying "no ceiling" by a half is not half a ceiling.
+        var unlimited = Rule(limitType: null, limitValue: null, reset: ResetPeriod.None);
+        Tier(Oon, multiplier: 0.5m).ResolvesLimit(unlimited).Should().BeNull();
     }
 
     // ---- The half-open window, which is where off-by-one errors become wrong adjudications ----------------

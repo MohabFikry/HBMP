@@ -19,6 +19,12 @@ public static class ProviderPolicies
         public const string Write = "provider:write";
         public const string ReadOwn = "provider:read-own";     // Provider Admin, own org only
         public const string QueueRead = "provider-queue:read";  // Lab/Imaging/Pharmacy worklist (phase 5/6)
+
+        /// <summary>19.1b — create/retire a network tier and move providers between tiers. Deliberately
+        /// separate from <see cref="Write"/>: ordinary provider metadata (a new address, another credential)
+        /// is routine Network Team work, whereas a tier reassignment reprices every plan that references that
+        /// tier, for every member, from its effective date.</summary>
+        public const string NetworkAdmin = "network-tier:admin";
     }
 
     /// <summary>The PO rules on their own, so other services can splice them into their bundle.</summary>
@@ -43,6 +49,20 @@ public static class ProviderPolicies
             Action = Actions.ReadOwn, ResourceType = "provider",
             Roles = Set("provider_admin"), Scopes = Set("provider:read"),
             RequiredConditions = [AbacConditions.TenantMatch, AbacConditions.ProviderOwnership],
+            Sensitive = true,
+        },
+        // 19.1b — network administration. THE SEPARATION 19.1b EXISTS TO CREATE: a policy administrator
+        // consumes tiers when configuring cost-share (policy.benefit_rule_tier) but must not be able to move a
+        // provider between them, because moving one provider from OON to T1 silently reprices every plan that
+        // references those tiers, for every member, from the assignment's effective date. Network commercial
+        // policy belongs to the Network Team; benefit design belongs to policy administration.
+        // Sensitive: an allow is as interesting as a deny when the act repricings a whole network.
+        new PolicyRule
+        {
+            Action = Actions.NetworkAdmin, ResourceType = "network_tier",
+            Roles = Set("network_team", "org_admin", "super_admin"),
+            Scopes = Set("provider:admin"),
+            RequiredConditions = [AbacConditions.TenantMatch],
             Sensitive = true,
         },
         // Provider techs: read their own provider's work queue only (imported by orders/pharmacy later).

@@ -83,7 +83,12 @@ public sealed class PlanVersion
 
 /// <summary>Per-benefit-category configuration inside a plan version. This is the row that a member's
 /// coverage + coverage_limit are GENERATED from at enrolment (19.2), which is what makes an entitlement
-/// explainable back to a specific version.</summary>
+/// explainable back to a specific version.
+///
+/// <para>19.1b moved COST SHARE off this type onto <see cref="BenefitRuleTier"/>. What is left here are the
+/// properties of the benefit itself — whether it is covered, how much of it, how long the member waits, what
+/// is excluded. What the member PAYS depends on where the care was delivered, so it belongs per tier.</para>
+/// </summary>
 public sealed class BenefitRule
 {
     public Guid RuleId { get; set; }
@@ -94,13 +99,13 @@ public sealed class BenefitRule
     public LimitType? LimitType { get; set; }
     public decimal? LimitValue { get; set; }
     public ResetPeriod ResetPeriod { get; set; } = ResetPeriod.None;
-    public decimal? CopayFixed { get; set; }
-    public decimal? CopayPercent { get; set; }
     public decimal? Deductible { get; set; }
     public int WaitingPeriodDays { get; set; }
+    /// <summary>The plan-level default. A tier may override it via
+    /// <see cref="BenefitRuleTier.RequiresPreauthOverride"/> — out-of-network care commonly needs
+    /// authorization for a service that is open-access in-network.</summary>
     public bool RequiresPreauth { get; set; }
     public decimal? PreauthCostThreshold { get; set; }
-    public string? NetworkTier { get; set; }
     /// <summary>Coded exclusions (jsonb array of codes).</summary>
     public string Exclusions { get; set; } = "[]";
     public string? Notes { get; set; }
@@ -108,4 +113,66 @@ public sealed class BenefitRule
     public Guid? CreatedBy { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public Guid? UpdatedBy { get; set; }
+
+    /// <summary>The cost-share grid: one row per network tier. Activation requires every Active tier to be
+    /// present (19.1b) — an unconfigured tier is a validation error, never a silent default.</summary>
+    public List<BenefitRuleTier> Tiers { get; set; } = [];
 }
+
+/// <summary>
+/// What a member pays for one benefit category AT ONE NETWORK TIER (design 38 §3, phase 19.1b).
+///
+/// This is what makes "in-network 10%, out-of-network 40% or not covered" expressible. The tier itself is
+/// owned by provider-service (network administration); policy administration only decides the price at it —
+/// which is why <see cref="NetworkTierId"/> is a plain value rather than a foreign key.
+/// </summary>
+public sealed class BenefitRuleTier
+{
+    public Guid RuleTierId { get; set; }
+    public string TenantId { get; set; } = "";
+    public Guid BenefitRuleId { get; set; }
+
+    /// <summary>provider.network_tier — a cross-service VALUE, validated at write time (no cross-schema FK).</summary>
+    public Guid NetworkTierId { get; set; }
+
+    /// <summary>The tier's code, snapshotted at authoring time. A plan version is immutable and stays
+    /// resolvable for as long as a claim can reference it, so reading a years-old version must not depend on a
+    /// live call into another service.</summary>
+    public string TierCode { get; set; } = default!;
+
+    /// <summary>An explicit "not covered at this tier" — a real statement (an HMO paying nothing
+    /// out-of-network), and deliberately NOT the same as the tier being absent, which activation rejects.</summary>
+    public bool IsCovered { get; set; } = true;
+
+    public decimal? CopayFixed { get; set; }
+    public decimal? CopayPercent { get; set; }
+    public decimal? CoinsurancePercent { get; set; }
+
+    /// <summary>Overrides <see cref="BenefitRule.RequiresPreauth"/> for this tier; null = inherit.</summary>
+    public bool? RequiresPreauthOverride { get; set; }
+
+    /// <summary>Scales the rule's limit at this tier (0.5 = half the ceiling out-of-network); null = inherit.</summary>
+    public decimal? LimitMultiplier { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public Guid? UpdatedBy { get; set; }
+
+    /// <summary>Whether pre-authorization is required here, resolving the override against the rule default.</summary>
+    public bool ResolvesPreauth(BenefitRule rule) =>
+        RequiresPreauthOverride ?? (rule ?? throw new ArgumentNullException(nameof(rule))).RequiresPreauth;
+
+    /// <summary>The limit that applies at this tier, resolving the multiplier against the rule's own limit.
+    /// Null stays null — an unlimited benefit is not made finite by a tier multiplier.</summary>
+    public decimal? ResolvesLimit(BenefitRule rule)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+        if (rule.LimitValue is not { } limit) return null;
+        return LimitMultiplier is { } m ? decimal.Round(limit * m, 2, MidpointRounding.AwayFromZero) : limit;
+    }
+}
+
+/// <summary>A tier as policy administration needs to know it: an id and a code. Deliberately NOT a copy of
+/// provider-service's entity — policy-service consumes the catalogue, it does not model the network.</summary>
+public sealed record NetworkTierRef(Guid NetworkTierId, string TierCode);

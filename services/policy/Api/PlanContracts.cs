@@ -19,15 +19,26 @@ public sealed record BenefitRuleInput(
     string? LimitType,
     decimal? LimitValue,
     string? ResetPeriod,
-    decimal? CopayFixed,
-    decimal? CopayPercent,
     decimal? Deductible,
     int WaitingPeriodDays,
     bool RequiresPreauth,
     decimal? PreauthCostThreshold,
-    string? NetworkTier,
     string? Exclusions,
-    string? Notes);
+    string? Notes,
+    /// <summary>19.1b — the cost-share grid, one entry per Active network tier. Activation rejects a covered
+    /// category that leaves any Active tier unpriced, so this is not optional in practice.</summary>
+    BenefitRuleTierInput[]? Tiers);
+
+/// <summary>What the member pays for this category at one tier. <c>networkTierId</c> refers to a tier owned by
+/// provider-service; policy administration prices tiers but does not create them (19.1b).</summary>
+public sealed record BenefitRuleTierInput(
+    Guid NetworkTierId,
+    bool IsCovered,
+    decimal? CopayFixed,
+    decimal? CopayPercent,
+    decimal? CoinsurancePercent,
+    bool? RequiresPreauthOverride,
+    decimal? LimitMultiplier);
 
 public sealed record PayerView(Guid PayerId, string PayerCode, string NameEn, string NameAr, string PayerType, string Status)
 {
@@ -56,13 +67,35 @@ public sealed record PlanVersionView(
 
 public sealed record BenefitRuleView(
     Guid RuleId, Guid BenefitCategoryId, bool IsCovered, string? LimitType, decimal? LimitValue,
-    string ResetPeriod, decimal? CopayFixed, decimal? CopayPercent, decimal? Deductible,
-    int WaitingPeriodDays, bool RequiresPreauth, decimal? PreauthCostThreshold, string? NetworkTier,
-    string Exclusions, string? Notes)
+    string ResetPeriod, decimal? Deductible, int WaitingPeriodDays, bool RequiresPreauth,
+    decimal? PreauthCostThreshold, string Exclusions, string? Notes,
+    IReadOnlyList<BenefitRuleTierView> Tiers)
 {
-    public static BenefitRuleView From(BenefitRule r) =>
-        new(r.RuleId, r.BenefitCategoryId, r.IsCovered, r.LimitType?.ToString(), r.LimitValue,
-            r.ResetPeriod.ToString(), r.CopayFixed, r.CopayPercent, r.Deductible,
-            r.WaitingPeriodDays, r.RequiresPreauth, r.PreauthCostThreshold, r.NetworkTier,
-            r.Exclusions, r.Notes);
+    public static BenefitRuleView From(BenefitRule r)
+    {
+        ArgumentNullException.ThrowIfNull(r);
+        return new(r.RuleId, r.BenefitCategoryId, r.IsCovered, r.LimitType?.ToString(), r.LimitValue,
+            r.ResetPeriod.ToString(), r.Deductible, r.WaitingPeriodDays, r.RequiresPreauth,
+            r.PreauthCostThreshold, r.Exclusions, r.Notes,
+            [.. r.Tiers.OrderBy(t => t.TierCode, StringComparer.Ordinal).Select(t => BenefitRuleTierView.From(t, r))]);
+    }
+}
+
+/// <summary><c>effectiveRequiresPreauth</c> and <c>effectiveLimitValue</c> are projected rather than left for
+/// the client to compute from the override and the multiplier: eligibility, approvals, claims and the UI must
+/// all agree on what applies at this tier, and resolving it four times is how they come to disagree.</summary>
+public sealed record BenefitRuleTierView(
+    Guid RuleTierId, Guid NetworkTierId, string TierCode, bool IsCovered,
+    decimal? CopayFixed, decimal? CopayPercent, decimal? CoinsurancePercent,
+    bool? RequiresPreauthOverride, decimal? LimitMultiplier,
+    bool EffectiveRequiresPreauth, decimal? EffectiveLimitValue)
+{
+    public static BenefitRuleTierView From(BenefitRuleTier t, BenefitRule rule)
+    {
+        ArgumentNullException.ThrowIfNull(t);
+        return new(t.RuleTierId, t.NetworkTierId, t.TierCode, t.IsCovered,
+            t.CopayFixed, t.CopayPercent, t.CoinsurancePercent,
+            t.RequiresPreauthOverride, t.LimitMultiplier,
+            t.ResolvesPreauth(rule), t.ResolvesLimit(rule));
+    }
 }

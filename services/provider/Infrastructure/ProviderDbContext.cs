@@ -20,6 +20,8 @@ public sealed class ProviderDbContext(DbContextOptions<ProviderDbContext> option
     public DbSet<Practitioner> Practitioners => Set<Practitioner>();               // 14.5
     public DbSet<PractitionerSpecialty> PractitionerSpecialties => Set<PractitionerSpecialty>();          // 14.5
     public DbSet<PractitionerBranchAssignment> PractitionerBranchAssignments => Set<PractitionerBranchAssignment>();   // 14.5
+    public DbSet<NetworkTier> NetworkTiers => Set<NetworkTier>();                                   // 19.1b
+    public DbSet<ProviderNetworkAssignment> NetworkAssignments => Set<ProviderNetworkAssignment>(); // 19.1b
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -196,6 +198,53 @@ public sealed class ProviderDbContext(DbContextOptions<ProviderDbContext> option
             e.Property(x => x.Status).HasColumnName("status");
             e.HasIndex(x => new { x.PractitionerId, x.Status });
             e.HasIndex(x => x.BranchId);
+        });
+
+        // 19.1b — network tiers + effective-dated tier assignment (design 38 §3, §4.1b).
+        b.Entity<NetworkTier>(e =>
+        {
+            e.ToTable("network_tier");
+            e.HasKey(x => x.NetworkTierId);
+            e.Property(x => x.NetworkTierId).HasColumnName("network_tier_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id").IsRequired();
+            e.Property(x => x.TierCode).HasColumnName("tier_code").IsRequired();
+            e.Property(x => x.NameEn).HasColumnName("name_en").IsRequired();
+            e.Property(x => x.NameAr).HasColumnName("name_ar").IsRequired();
+            e.Property(x => x.Rank).HasColumnName("rank");
+            e.Property(x => x.Description).HasColumnName("description");
+            e.Property(x => x.IsOutOfNetwork).HasColumnName("is_out_of_network");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
+            e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.CreatedBy).HasColumnName("created_by");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
+            e.HasIndex(x => new { x.TenantId, x.TierCode }).IsUnique().HasFilter("NOT is_deleted");
+        });
+
+        b.Entity<ProviderNetworkAssignment>(e =>
+        {
+            e.ToTable("provider_network_assignment");
+            e.HasKey(x => x.AssignmentId);
+            e.Property(x => x.AssignmentId).HasColumnName("assignment_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id").IsRequired();
+            e.Property(x => x.NetworkTierId).HasColumnName("network_tier_id");
+            e.Property(x => x.ProviderId).HasColumnName("provider_id");
+            e.Property(x => x.Scope).HasConversion<string>().HasColumnName("scope");
+            e.Property(x => x.ScopeRef).HasColumnName("scope_ref");
+            e.Property(x => x.EffectiveFrom).HasColumnName("effective_from");
+            e.Property(x => x.EffectiveTo).HasColumnName("effective_to");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.RevokedReason).HasColumnName("revoked_reason");
+            e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
+            e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.CreatedBy).HasColumnName("created_by");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
+            e.HasIndex(x => new { x.Scope, x.ScopeRef, x.EffectiveFrom });
+            e.HasIndex(x => x.ProviderId);
         });
     }
 }
