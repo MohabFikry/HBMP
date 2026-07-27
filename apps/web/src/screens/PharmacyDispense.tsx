@@ -161,7 +161,16 @@ function DispensePanel({ rx, t, onDone }: { rx: Prescription; t: (l: Localized) 
               <StatusChip kind="warn" label={t(S.outOfStock)} />
             ) : (
               <InputField
-                label={t(S.dispenseQty)}
+                /*
+                 * 18.D3 (U6) — the drug name is IN the label, not just beside it.
+                 *
+                 * Every quantity input on this panel used the same label ("Quantity to dispense"), so a
+                 * screen-reader user tabbing through a five-line prescription heard "Quantity to dispense,
+                 * edit" five times with nothing distinguishing them. The drug name was visible above each
+                 * field and invisible to the accessibility tree. Typing 30 into the wrong one dispenses the
+                 * wrong medication at the wrong dose — this is a medication-error risk, not a nicety.
+                 */
+                label={`${t(S.dispenseQty)} — ${t(l.drug.label)}`}
                 type="number"
                 min={0}
                 max={remaining(l)}

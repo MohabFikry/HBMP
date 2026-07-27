@@ -1,6 +1,7 @@
 import { useRef, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { cx } from "../lib/cx";
+import { useTheme } from "../theme/ThemeProvider";
 
 export interface Column<Row> {
   key: string;
@@ -28,6 +29,7 @@ export interface DataTableProps<Row> {
   onSort?: (key: string) => void;
   loading?: boolean;
   error?: string;
+  /** Overrides the default localized "No results". */
   emptyLabel?: string;
 }
 
@@ -50,9 +52,17 @@ export function DataTable<Row>({
   onSort,
   loading = false,
   error,
-  emptyLabel = "No results",
+  emptyLabel,
 }: DataTableProps<Row>) {
   const rowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
+  // 18.D3 (U6) — the DS shipped hardcoded English "Loading…" / "No results". An Arabic user saw English
+  // inside an otherwise Arabic table, and the strings were unreachable from the app's own i18n because they
+  // live in the component. They follow the app language now; a caller may still override emptyLabel with
+  // something specific ("No authorizations awaiting your review").
+  const { lang } = useTheme();
+  const ar = lang === "ar";
+  const loadingText = ar ? "جارٍ التحميل…" : "Loading…";
+  const emptyText = emptyLabel ?? (ar ? "لا توجد نتائج" : "No results");
 
   function onRowKeyDown(e: React.KeyboardEvent, index: number, row: Row) {
     if (e.key === "Enter" || e.key === " ") {
@@ -71,7 +81,18 @@ export function DataTable<Row>({
 
   return (
     <div className="mrs-wl-scroll">
-      <table className={cx("mrs-wl", density === "compact" && "mrs-compact")}>
+      {/*
+        18.D3 (U6) — an interactive worklist is a GRID, not a table.
+        `aria-selected` on a <tr> inside an implicit role="table" is invalid ARIA: the attribute is simply
+        ignored, so a screen-reader user navigating a worklist is never told which row is current. role="grid"
+        (with gridcell children) is the role that supports selection and two-dimensional arrow navigation —
+        which this component already implements in onRowKeyDown. A non-interactive table stays a plain table,
+        because a grid role on static data adds navigation semantics that are not there.
+      */}
+      <table
+        className={cx("mrs-wl", density === "compact" && "mrs-compact")}
+        role={interactive ? "grid" : undefined}
+      >
       <caption className="sr-only">{caption}</caption>
       <thead>
         <tr>
@@ -96,7 +117,7 @@ export function DataTable<Row>({
         {loading && (
           <tr>
             <td colSpan={colCount} className="mrs-tablestate" aria-live="polite">
-              Loading…
+              {loadingText}
             </td>
           </tr>
         )}
@@ -110,7 +131,7 @@ export function DataTable<Row>({
         {!loading && !error && rows.length === 0 && (
           <tr>
             <td colSpan={colCount} className="mrs-tablestate">
-              {emptyLabel}
+              {emptyText}
             </td>
           </tr>
         )}
@@ -132,7 +153,7 @@ export function DataTable<Row>({
                 onKeyDown={interactive ? (e) => onRowKeyDown(e, i, row) : undefined}
               >
                 {columns.map((c) => (
-                  <td key={c.key}>{c.cell(row)}</td>
+                  <td key={c.key} role={interactive ? "gridcell" : undefined}>{c.cell(row)}</td>
                 ))}
               </tr>
             );

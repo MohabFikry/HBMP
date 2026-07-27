@@ -85,3 +85,34 @@ jobs:
         run: pnpm --filter @mersal/web test
       - name: Build (portals bundle)
         run: pnpm --filter @mersal/web build
+
+  # 18.D3 (audit R2 U6) — colour contrast, in a browser.
+  #
+  # A separate job because it needs a Chromium binary and a BUILT bundle. It is not duplication of the axe
+  # job above: jsdom has no layout or paint, so `color-contrast` is disabled there and reports nothing
+  # whatever the palette does. Until now that meant contrast — the most common WCAG failure, and the reason
+  # the token layer exists — was unverified everywhere while the a11y gate showed green.
+  a11y-contrast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium
+        run: pnpm --filter @mersal/web exec playwright install --with-deps chromium
+      - name: Build (the bundle under test — real compiled CSS, not dev-server styles)
+        run: pnpm --filter @mersal/web build
+      - name: axe color-contrast (light + dark, en + ar)
+        run: pnpm --filter @mersal/web test:a11y-contrast
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-a11y-trace
+          path: apps/web/test-results/
+          retention-days: 7

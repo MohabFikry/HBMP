@@ -68,7 +68,9 @@ h3 {
 /* Skip link */
 .skip {
   position: absolute;
-  left: 12px;
+  /* 18.D3 (U6): logical, not `left`. In Arabic (dir=rtl) a physical `left` put the skip link on the wrong
+     side of the viewport — the first thing a keyboard user meets, mirrored away from where they look. */
+  inset-inline-start: 12px;
   top: -48px;
   background: var(--accent);
   color: #fff;
@@ -79,6 +81,20 @@ h3 {
 }
 .skip:focus {
   top: 12px;
+}
+
+/*
+ * 18.D3 (U6) — a focused row must not end up under a sticky header.
+ *
+ * Worklist headers are sticky, so arrow-keying up a long table scrolled the focused row to the top of the
+ * scroll container and straight underneath the header: the row had focus, the focus ring was drawn, and the
+ * user could see neither. scroll-margin reserves the header's height when the browser scrolls focus into
+ * view. Applied to the rows AND the cells, because focus can land on either.
+ */
+.mrs-wl tbody tr,
+.mrs-wl tbody td,
+.mrs-row {
+  scroll-margin-block-start: 3.5rem;
 }
 
 /* Base motion contract (v1.1): interactive elements animate; reduced-motion disables */

@@ -100,14 +100,14 @@ function VitalsForm({ patient, onBack }: { patient: PatientListItem; onBack: () 
         <Button variant="ghost" size="sm" onClick={onBack}>{t(S.back)}</Button>
       </div>
       <form onSubmit={submit} className="stack" aria-label={t(S.record)}>
-        <div className="kv-grid">
+        <dl className="kv-grid">
           <InputField label={t(S.hr)} inputMode="decimal" value={fields.HR} onChange={set("HR")} />
           <InputField label={t(S.temp)} inputMode="decimal" value={fields.Temp} onChange={set("Temp")} />
           <InputField label={t(S.spo2)} inputMode="decimal" value={fields.SpO2} onChange={set("SpO2")} />
           <InputField label={t(S.systolic)} inputMode="decimal" value={fields.BP} onChange={set("BP")} />
           <InputField label={t(S.weight)} inputMode="decimal" value={fields.Weight} onChange={set("Weight")} />
           <InputField label={t(S.height)} inputMode="decimal" value={fields.Height} onChange={set("Height")} />
-        </div>
+        </dl>
         <div aria-live="polite" className="stack" style={{ gap: "var(--sp2)" }}>
           {status === "empty" && <InlineAlert tone="bad">{t(S.nothing)}</InlineAlert>}
           {status === "saved" && <StatusChip kind="ok" label={t(S.saved)} />}

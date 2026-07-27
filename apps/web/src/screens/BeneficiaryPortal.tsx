@@ -191,6 +191,8 @@ export function BeneficiaryRegister() {
       <PageHeader title={t(S.registerTitle)} />
       <Card as="section" style={{ padding: "var(--sp5)" }}>
         <form onSubmit={submit} className="stack" aria-label={t(S.registerTitle)}>
+          {/* NOT a <dl>: this reuses the kv-grid LAYOUT for form fields. A definition list here would be
+              invalid (InputField renders no dt/dd) and would announce the form as a term/value list. */}
           <div className="kv-grid">
             <InputField label={t(S.givenName)} value={f.givenName} onChange={set("givenName")} autoComplete="off" />
             <InputField label={t(S.familyName)} value={f.familyName} onChange={set("familyName")} autoComplete="off" />

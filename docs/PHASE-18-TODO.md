@@ -65,7 +65,7 @@ Mark `✅ YYYY-MM-DD` per id here **and** on the finding row in `AUDIT-R2-E2E.md
 | 18.D2 | U5 | App-bar global search is a dead field bound to `/` | ✅ 2026-07-27 (dead field + `/` binding removed; palette lands in 18.F2) |
 | 18.D2 | U7 | Dates/times use browser locale **and** time zone (not Africa/Cairo) | ✅ 2026-07-27 (useFormat: Africa/Cairo + app locale; money → raw numbers; ESLint ban) |
 | 18.D2 | U8/U9 | Undefined CSS tokens; brand-teal avatar contrast ~2.2:1 | ✅ 2026-07-27 (tokens renamed + legacy hex dropped + test asserts every var() resolves; avatar --brand → --accent) |
-| 18.D3 | U6/U10 | axe covers 3 of ~45 routes, no AR/RTL, contrast disabled; a11y defect set | ☐ |
+| 18.D3 | U6/U10 | axe covers 3 of ~45 routes, no AR/RTL, contrast disabled; a11y defect set | ✅ 2026-07-27 (route-wide axe in both locales + themes, Playwright contrast job, 8 structural fixes) |
 
 ## Gate E — CI truth & quality
 

@@ -66,11 +66,11 @@ function ResultCard({ task, onDone }: { task: ResultTask; onDone: () => void }) 
 
   return (
     <Card as="section" style={{ padding: "var(--sp4)", display: "grid", gap: "var(--sp3)" }}>
-      <div className="kv-grid" aria-label={t(S.order)}>
+      <dl className="kv-grid" aria-label={t(S.order)}>
         <div><dt>{t(S.order)}</dt><dd className="tnum">{task.orderNo}</dd></div>
         <div><dt>{t(S.patient)}</dt><dd className="tnum">{task.beneficiary.token}</dd></div>
         <div><dt>{t(S.code)}</dt><dd className="tnum">{task.code}</dd></div>
-      </div>
+      </dl>
       {status === "done" ? (
         <StatusChip kind="ok" label={t(S.uploaded)} />
       ) : (

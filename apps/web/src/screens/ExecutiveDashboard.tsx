@@ -71,20 +71,28 @@ function ChartCard({ chart, t }: { chart: ChartWidget; t: (l: Localized) => stri
         </Button>
       </div>
 
-      {showTable ? (
-        <table className="mini-table">
-          <caption className="sr-only">{t(chart.title)}</caption>
-          <thead>
-            <tr>{chart.dataTable.columns.map((col, i) => <th key={i} scope="col">{t(col)}</th>)}</tr>
-          </thead>
-          <tbody>
-            {chart.dataTable.rows.map((row, ri) => (
-              <tr key={ri}>{row.map((cell, ci) => <td key={ci} className={ci > 0 ? "tnum" : undefined}>{cell}</td>)}</tr>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        // The visual is decorative — the data-table above is the accessible source of truth (US-073).
+      {/*
+        18.D3 (audit R2 U6) — the data table is ALWAYS in the accessibility tree.
+        It used to render only when `showTable` was on, and the default was OFF, while the bar chart carried
+        aria-hidden="true". So the default state of every dashboard chart was: sighted users see bars, screen
+        reader users encounter NOTHING — the region was empty. "There is an accessible alternative behind a
+        toggle" is not an accessible alternative if the toggle starts closed and a screen-reader user has no
+        way to know it exists. The table now renders unconditionally; the toggle only controls whether it is
+        also VISIBLE, and the chart stays aria-hidden because it is genuinely decorative.
+      */}
+      <table className={showTable ? "mini-table" : "mini-table sr-only"}>
+        <caption className="sr-only">{t(chart.title)}</caption>
+        <thead>
+          <tr>{chart.dataTable.columns.map((col, i) => <th key={i} scope="col">{t(col)}</th>)}</tr>
+        </thead>
+        <tbody>
+          {chart.dataTable.rows.map((row, ri) => (
+            <tr key={ri}>{row.map((cell, ci) => <td key={ci} className={ci > 0 ? "tnum" : undefined}>{cell}</td>)}</tr>
+          ))}
+        </tbody>
+      </table>
+      {!showTable && (
+        // Decorative: the table above carries the same numbers for assistive tech (US-073).
         <ul className="bars" aria-hidden="true">
           {chart.series.map((p, i) => (
             <li key={i}>

@@ -86,7 +86,19 @@ export function MyCases() {
       <div className="split split-wide">
         <Card as="section" style={{ padding: "var(--sp3)" }}>
           <AsyncSection state={cases} isEmpty={(d) => d.length === 0} emptyLabel={S.casesEmpty}>
-            {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.casesTitle)} interactive />}
+            {(rows) => (
+              // 18.D3 (U6): interactive rows with no onSelect — a keyboard user could focus a case and
+              // press Enter to no effect. Enter/Space now opens the 360 panel, same as the mouse.
+              <DataTable
+                columns={cols}
+                rows={rows}
+                rowKey={(r) => r.id}
+                caption={t(S.casesTitle)}
+                interactive
+                selectedKey={selected ?? undefined}
+                onSelect={(r) => setSelected(r.id)}
+              />
+            )}
           </AsyncSection>
         </Card>
         <div>
@@ -116,12 +128,12 @@ function Beneficiary360Panel({ caseId, t }: { caseId: string; t: (l: Localized) 
               <h2 className="section-h" style={{ margin: 0 }}>{v.caseNo}</h2>
               <span className="tnum muted">{v.beneficiary.token}</span>
             </div>
-            <div className="kv-grid">
+            <dl className="kv-grid">
               <div><dt>{t(S.coverage)}</dt><dd><StatusChip kind={v.coverage.status.kind} label={t(v.coverage.status.label)} /></dd></div>
               <div><dt>{t(S.plan)}</dt><dd>{t(v.coverage.planName)}</dd></div>
               <div><dt>{t(S.category2)}</dt><dd>{t(v.coverage.coverageCategory)}</dd></div>
               {v.coverage.remaining && <div><dt>{t(S.remaining)}</dt><dd className="tnum">{fmt.money(v.coverage.remaining)}</dd></div>}
-            </div>
+            </dl>
           </Card>
 
           <Card as="section" style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp3)" }}>
@@ -157,11 +169,11 @@ function Beneficiary360Panel({ caseId, t }: { caseId: string; t: (l: Localized) 
                 {v.clinical.activeDiagnoses.map((d) => <li key={d.code}><StatusChip kind="info" label={`${d.code} · ${t(d.label)}`} /></li>)}
               </ul>
             </div>
-            <div className="kv-grid">
+            <dl className="kv-grid">
               <MaskedRow label={t(S.notes)} section={v.clinical.notes} t={t} />
               <MaskedRow label={t(S.prescriptions)} section={v.clinical.prescriptions} t={t} />
               <MaskedRow label={t(S.results)} section={v.clinical.results} t={t} />
-            </div>
+            </dl>
           </Card>
 
           <CaseTasks caseId={caseId} t={t} />

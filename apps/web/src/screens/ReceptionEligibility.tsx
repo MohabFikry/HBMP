@@ -133,13 +133,13 @@ function ResultCard({ result, t, S }: { result: EligibilityResult; t: (l: Locali
       </div>
 
       {c && (
-        <div className="kv-grid" aria-label={t(S.coverage)}>
+        <dl className="kv-grid" aria-label={t(S.coverage)}>
           <div><dt>{t(S.plan)}</dt><dd>{t(c.planName)}</dd></div>
           <div><dt>{t(S.band)}</dt><dd>{t(c.band)}</dd></div>
           {c.copayPercent != null && <div><dt>{t(S.copay)}</dt><dd className="tnum">{c.copayPercent}%</dd></div>}
           {c.validUntil && <div><dt>{t(S.validUntil)}</dt><dd className="tnum">{c.validUntil}</dd></div>}
           {c.annualCapRemaining && <div><dt>{t(S.capRemaining)}</dt><dd className="tnum">{fmt.money(c.annualCapRemaining)}</dd></div>}
-        </div>
+        </dl>
       )}
 
       <div>

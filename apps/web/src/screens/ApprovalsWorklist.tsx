@@ -102,7 +102,20 @@ export function ApprovalsWorklist() {
       <div className="split split-wide">
         <Card as="section" style={{ padding: "var(--sp3)" }}>
           <AsyncSection state={worklist} isEmpty={(d) => d.length === 0} emptyLabel={S.empty}>
-            {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.title)} interactive />}
+            {(rows) => (
+              // 18.D3 (U6): rows were focusable (interactive) with NO onSelect, so a keyboard user could
+              // tab to a row, press Enter, and nothing happened — the worklist was reachable but not
+              // operable. Enter/Space now opens the same review the mouse opens.
+              <DataTable
+                columns={cols}
+                rows={rows}
+                rowKey={(r) => r.id}
+                caption={t(S.title)}
+                interactive
+                selectedKey={selected ?? undefined}
+                onSelect={(r) => setSelected(r.id)}
+              />
+            )}
           </AsyncSection>
         </Card>
         <div>
@@ -185,7 +198,7 @@ function DecisionForm({ review, t, onDone }: { review: ApprovalReview; t: (l: Lo
         <h2 style={{ margin: 0 }}>{review.service.code} · {t(review.service.label)}</h2>
         <p className="muted" style={{ margin: "4px 0 0" }}>{review.patient.token} · {t(S.requested)}: <span className="tnum">{review.requestedAmount}</span></p>
       </div>
-      <div className="kv-grid">
+      <dl className="kv-grid">
         <div><dt>{t(S.justification)}</dt><dd>{review.clinicalJustification}</dd></div>
         <div>
           <dt>{t(S.codes)}</dt>
@@ -195,7 +208,7 @@ function DecisionForm({ review, t, onDone }: { review: ApprovalReview; t: (l: Lo
           <dt>{t(S.documents)}</dt>
           <dd><ul className="doc-list">{review.documents.map((d) => <li key={d.id}>{d.name}</li>)}</ul></dd>
         </div>
-      </div>
+      </dl>
 
       <form
         className="stack"

@@ -46,7 +46,11 @@
   box-shadow: none;
 }
 .mrs-btn.mrs-sm {
-  min-height: 32px;
+  /* 18.D3 (U10): 32px failed the project's OWN ≥44px target bar (21-accessibility) — and `size="sm"` is used
+     exactly where it matters most, in dense worklist rows an operator taps all shift. The visual weight of a
+     small button comes from its font size and padding, not its hit area, so the height rises to 44 without
+     the row growing much. */
+  min-height: 44px;
   padding: 0 12px;
   font-size: var(--fs-caption);
 }
@@ -263,7 +267,8 @@ html[dir="rtl"] .mrs-search input {
   font: inherit;
   font-weight: 600;
   font-size: var(--fs-caption);
-  min-height: 38px;
+  /* 18.D3 (U10): 38px → 44px, the project's own bar. */
+  min-height: 44px;
   padding: 0 14px;
   border-radius: var(--r-pill);
   cursor: pointer;
