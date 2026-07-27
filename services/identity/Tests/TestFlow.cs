@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Net;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -20,6 +21,11 @@ namespace Mersal.Identity.Tests;
 /// <summary>The identity-service under test (Development env, pointed at IDENTITY_TEST_DB).</summary>
 public sealed class IdentityAppFactory : WebApplicationFactory<Program>
 {
+    /// <summary>The m2m secret this test host seeds and the tests authenticate with. A test-only value, and
+    /// deliberately not a plausible one — the gitleaks rules added in 18.B1 scan for credential-shaped
+    /// literals, and a realistic-looking secret here would be indistinguishable from a real leak.</summary>
+    public const string ServiceSecret = "test-harness-m2m-secret";
+
     protected override IHost CreateHost(IHostBuilder builder)
     {
         builder.UseEnvironment("Development");
@@ -27,6 +33,14 @@ public sealed class IdentityAppFactory : WebApplicationFactory<Program>
         {
             ["ConnectionStrings:Identity"] = IdentityTestDb.Conn,
             ["Issuer:SeedDemoUsers"] = "false", // don't seed demo staff into the shared test DB
+            // 18.E1 — the harness supplies the m2m secret EXPLICITLY.
+            //
+            // Before 18.B1 the seeder fell back to a literal (`dev-service-secret-change-me`) and these
+            // tests hardcoded the same string. B1 removed that fallback — outside Development it is now a
+            // startup failure, and in Development it is a RANDOM per-run value, so a known secret can never
+            // be minted. The tests kept the literal and started failing with invalid_client, and nobody saw
+            // it because IDENTITY_TEST_DB was never exported in CI (Q2): they skipped on every run.
+            ["Issuer:ServiceClientSecret"] = ServiceSecret,
         }));
         return base.CreateHost(builder);
     }
@@ -91,7 +105,8 @@ public static class TestFlow
             + $"&client_id={IdentityContract.WebClientId}&redirect_uri={Uri.EscapeDataString(redirect)}"
             + $"&scope={Uri.EscapeDataString(scope)}&code_challenge={challenge}&code_challenge_method=S256&state=xyz";
 
-        var login = await client.PostAsync("/connect/login", new FormUrlEncodedContent(new Dictionary<string, string>
+        var loginForm = await AntiforgeryFields(client, "/connect/login");
+        var login = await client.PostAsync("/connect/login", new FormUrlEncodedContent(new Dictionary<string, string>(loginForm)
         {
             ["username"] = username, ["password"] = password, ["returnUrl"] = authorizeUrl,
         }));
@@ -99,7 +114,8 @@ public static class TestFlow
         if (login.Headers.Location?.ToString().StartsWith("/connect/2fa", StringComparison.Ordinal) == true)
         {
             totpKey.Should().NotBeNull("the account has 2FA enabled but no TOTP key was supplied");
-            var twofa = await client.PostAsync("/connect/2fa", new FormUrlEncodedContent(new Dictionary<string, string>
+            var twofaForm = await AntiforgeryFields(client, "/connect/2fa");
+            var twofa = await client.PostAsync("/connect/2fa", new FormUrlEncodedContent(new Dictionary<string, string>(twofaForm)
             {
                 ["code"] = Totp(totpKey!), ["returnUrl"] = authorizeUrl,
             }));
@@ -179,5 +195,25 @@ public static class TestFlow
             if (bits >= 8) { output.Add((byte)((value >> (bits - 8)) & 0xff)); bits -= 8; }
         }
         return output.ToArray();
+    }
+
+    /// <summary>
+    /// 18.E1 — fetch a rendered form and return its antiforgery field, exactly as a browser does.
+    ///
+    /// 18.B3 (S4) removed `.DisableAntiforgery()` from the three credential POSTs, because a cross-site post
+    /// to /connect/enroll-2fa registered the ATTACKER's authenticator as the victim's second factor. These
+    /// tests posted credentials without ever loading the form — which no browser does — so they began
+    /// failing the moment the protection landed. Nobody saw it: IDENTITY_TEST_DB was never exported in CI
+    /// (Q2), so this whole suite skipped on every run.
+    ///
+    /// The GET also sets the antiforgery COOKIE on the shared HttpClient handler, which is the other half of
+    /// the double-submit pair — so this must run against the same client that will post.
+    /// </summary>
+    private static async Task<Dictionary<string, string>> AntiforgeryFields(HttpClient client, string path)
+    {
+        var html = await client.GetStringAsync(path);
+        var m = Regex.Match(html, @"<input type=""hidden"" name=""([^""]+)"" value=""([^""]*)"" />");
+        m.Success.Should().BeTrue("the rendered form at {0} must carry an antiforgery field (18.B3 / S4)", path);
+        return new Dictionary<string, string> { [m.Groups[1].Value] = m.Groups[2].Value };
     }
 }

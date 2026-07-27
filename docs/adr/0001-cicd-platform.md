@@ -19,6 +19,30 @@ Rationale:
 
 The canonical pipeline lives in `.gitlab-ci.yml` (+ includes under `.gitlab/ci/`). Conventional Commits are enforced by a `commit-lint` job.
 
+## Amendment — 2026-07-27 (Phase 18.E1, audit R2 Q1): the executing pipeline is GitHub Actions; the GATES are shared scripts
+
+**What happened.** Every gate that actually protects this repo was built in `.github/workflows/*.yml`:
+migration expand/contract, the two-role RLS isolation suites, the DPIA gate, coverage, OpenAPI generation.
+`.gitlab-ci.yml` was written in Phase 0 against an empty scaffold and never caught up — by Phase 18 its test
+job printed `Coverage threshold: 80%` and enforced nothing.
+
+**Why that mattered more than the duplication.** Two pipelines both claiming to gate the same repository,
+one of them describing a check it does not perform, is worse than either alone. Someone asking "is coverage
+gated, and at what number?" got a different answer depending on which file they opened — and the reassuring
+answer was the false one.
+
+**Decision.** The choice of GitLab CE stands: it remains the on-prem, $0, self-hosted target ADR-0001 chose
+for a charity operations team, and nothing here reverses that. What changes is where a gate LIVES:
+
+- Every structural gate is implemented once, in `tools/ci/*` (plain Python/bash, no runner-specific syntax).
+- **Both** pipelines invoke those scripts. Neither reimplements a check.
+- GitHub Actions is the pipeline that runs today, on the current hosting. `.gitlab-ci.yml` is the on-prem
+  port and is kept executable so the migration is a runner change, not a rewrite.
+
+The consequence worth stating plainly: a gate can no longer be strengthened in one pipeline and left weak in
+the other, because there is only one implementation of it. That property — not which YAML dialect runs — is
+what the split-brain was costing.
+
 ## Consequences
 - One platform to operate/back up; Harbor must be provisioned alongside (Tier 2/3) — for Tier 1 dev, images build locally and scanning runs in-pipeline.
 - CI runners execute the user-local .NET 8 SDK image; see `dotnet.sh` / `global.json`.

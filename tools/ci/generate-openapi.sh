@@ -17,11 +17,16 @@ mkdir -p "$OUT"
 # dummy value suffices; a few (e.g. audit) migrate at startup and need a REAL connection — so any
 # ConnectionStrings__<Key> already exported by the caller (CI, which has the migrated Postgres) is kept.
 dummy="Host=localhost;Port=5432;Database=placeholder;Username=placeholder;Password=placeholder"
+# 18.E1 (audit R2 Q2): Identity and Interop added. Both were missing, so neither had an OpenAPI gate —
+# identity-service being the one that mints every token on the platform.
 for k in Admin Approvals Audit CallCentre Case Claims Document Eligibility Emr Finance \
-         MasterData Notification Orders Patient Pharmacy Policy Provider Reporting; do
+         Identity Interop MasterData Notification Orders Patient Pharmacy Policy Provider Reporting; do
   var="ConnectionStrings__${k}"
   [ -n "${!var:-}" ] || export "${var}=${dummy}"
 done
+# identity-service fails fast without these (18.B1) — dummies satisfy DI without minting anything.
+export Issuer__ServiceClientSecret="${Issuer__ServiceClientSecret:-openapi-generation-only}"
+export Issuer__SeedDemoUsers="false"
 export Auth__Authority="http://localhost:8080/realms/mersal"
 export Auth__Audience="hbmp-api"
 export Auth__RequireHttpsMetadata="false"

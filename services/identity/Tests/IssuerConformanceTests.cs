@@ -19,11 +19,18 @@ public class IssuerConformanceTests
         var client = factory.CreateClient();
 
         var token = await TestFlow.ClientCredentialsToken(
-            client, IdentityContractRef.ServiceClientId, "dev-service-secret-change-me", "finance:read notification:ingest");
+            client, IdentityContractRef.ServiceClientId, IdentityAppFactory.ServiceSecret,
+            // 18.B1 narrowed the service client to ServiceScopes only: a background worker ingests events
+            // and rebuilds projections, it is never a clinician or an admin. finance:read is NOT one of
+            // them, so requesting it here would (correctly) be refused by the client's permissions.
+            "notification:ingest reporting:project");
 
         var principal = await TestFlow.Validate(client, token);
         principal.Subject.Should().Be(IdentityContractRef.ServiceClientId);
-        principal.Scopes.Should().Contain("finance:read");
+        principal.Scopes.Should().BeEquivalentTo(["notification:ingest", "reporting:project"]);
+        // The blast-radius assertion 18.B1 exists for: this token reaches ingest and projection surfaces and
+        // NOTHING clinical or administrative, so a leaked service secret is not a platform-wide PHI token.
+        principal.Scopes.Should().NotContain("finance:read").And.NotContain("emr:read").And.NotContain("admin:write");
     }
 
     [SkippableFact]

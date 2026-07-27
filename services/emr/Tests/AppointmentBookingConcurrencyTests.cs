@@ -16,10 +16,13 @@ public class AppointmentBookingConcurrencyTests
     private static DbContextOptions<EmrDbContext> Options() =>
         new DbContextOptionsBuilder<EmrDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options;
 
-    [Fact]
+    [SkippableFact]
     public async Task Parallel_bookings_at_one_slot_yield_exactly_one_success()
     {
-        if (Db is null) return; // skip when no DB configured
+        // 18.E1 (audit R2 Q2): was `if (Db is null) return;`. A [Fact] that returns early reports PASSED —
+        // so on any machine without EMR_TEST_DB this concurrency proof was a green tick over nothing run,
+        // which is worse than no test because it reads as coverage. SkippableFact reports SKIPPED.
+        Skip.If(Db is null, "test DB not configured — set EMR_TEST_DB to run this DB integration test.");
 
         var providerId = Guid.NewGuid();
         var locationId = Guid.NewGuid();

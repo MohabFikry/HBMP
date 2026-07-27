@@ -1,9 +1,19 @@
-# Mersal HBMP — CI/CD pipeline (ADR-0001: GitLab CE + Harbor + Trivy)
-# Every stage below is a REQUIRED gate. See CLAUDE.md § Definition of Done and
-# HBMP-Design/claude-code-prompts/phase-0-foundations.md (0.1).
+# Mersal HBMP — CI/CD pipeline (ADR-0001: GitLab CE + Harbor + Trivy; amended 18.E1)
 #
-# On an empty scaffold this runs green: build/test/coverage are no-ops until the
-# first project exists, SAST/scan/IaC-validate execute, a11y is a wired no-op until phase 9.
+# 18.E1 (audit R2 Q1) — CI SPLIT-BRAIN, resolved.
+#
+# ADR-0001 named this file canonical. In practice every gate that matters was built in
+# .github/workflows/*.yml — migrations, the two-role RLS suites, the DPIA gate, expand/contract, coverage,
+# OpenAPI — and this file drifted into a scaffold-era shell whose test job printed "Coverage threshold: 80%"
+# without enforcing anything. Two pipelines claiming to gate the same repo, one of them lying, is worse than
+# one: a reader checking "is coverage gated?" could find either answer depending on which file they opened.
+#
+# The resolution is NOT to delete this. ADR-0001 chose GitLab CE deliberately (self-hosted, $0, charity ops)
+# and that on-prem path still matters. Instead: every gate here now DELEGATES to the same tools/ci/* script
+# GitHub Actions runs. One implementation per gate, two runners. If a gate changes, it changes in one place
+# and both pipelines pick it up — which is the only arrangement where they cannot disagree.
+#
+# See CLAUDE.md § Definition of Done and docs/adr/0001-cicd-platform.md (amended).
 
 stages:
   - lint
@@ -49,19 +59,41 @@ build:
     paths: [ "**/bin/Release/" ]
     expire_in: 1 day
 
-# ---------------------------------------------------------------- Unit + contract tests (≥80% domain coverage)
+# ---------------------------------------------------------------- Structural gates (shared scripts)
+# 18.E1: these are the SAME scripts .github/workflows/backend-ci.yml runs. Not a copy — the same file.
+structural-gates:
+  stage: lint
+  image: python:3.12-slim
+  script:
+    - python3 tools/ci/check-migration-compat.py --selftest
+    - python3 tools/ci/check-migration-compat.py --all
+    - python3 tools/ci/check-integration-dpia.py --selftest
+    - python3 tools/ci/check-integration-dpia.py
+    - python3 tools/ci/check-kong-route-coverage.py
+
+# ---------------------------------------------------------------- Unit + contract tests + coverage gate
 test:
   stage: test
   image: mcr.microsoft.com/dotnet/sdk:8.0
+  services:
+    - name: postgres:16
+      alias: postgres
+  variables:
+    POSTGRES_USER: hbmp
+    POSTGRES_PASSWORD: ci_hbmp_pw
+    POSTGRES_DB: hbmp
+    PGHOST: postgres
+    OWNER_PASSWORD: ci_hbmp_pw
+    APP_PASSWORD: ci_hbmp_app_pw
+    HBMP_APP_PASSWORD: ci_hbmp_app_pw
   script:
-    - |
-      if ls **/*.sln >/dev/null 2>&1 || ls *.sln >/dev/null 2>&1; then
-        dotnet test -c Release --collect:"XPlat Code Coverage" --results-directory ./TestResults
-        # Coverage gate on /libs and /services domain projects — enforced once projects exist.
-        echo "Coverage threshold: ${COVERAGE_MIN}% on domain projects (enforced via coverlet thresholds per-project)."
-      else
-        echo "No tests yet (empty scaffold) — test/coverage gate is a wired no-op."
-      fi
+    # 18.E1: the coverage FLOOR is enforced by tools/ci/coverage-gate.sh — the same script and the same
+    # numbers GitHub Actions uses. Previously this job echoed a threshold it never checked.
+    - apt-get update && apt-get install -y --no-install-recommends postgresql-client python3
+    - bash tools/ci/apply-migrations.sh
+    - set -a && . <(bash tools/ci/print-test-db-env.sh) && set +a
+    - dotnet test HbmpPlatform.sln -c Release --collect:"XPlat Code Coverage" --results-directory ./TestResults
+    - bash tools/ci/coverage-gate.sh ./TestResults
   coverage: '/Total\s*\|\s*(\d+(?:\.\d+)?)%/'
   artifacts:
     reports:

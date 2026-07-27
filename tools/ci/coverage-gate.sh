@@ -6,14 +6,20 @@
 # not gated (Api/Infrastructure lines are exercised by the DB-gated integration suites).
 #
 #   $1                      — results directory holding **/coverage.cobertura.xml (default ./coverage)
-#   COVERAGE_MIN_DOMAIN     — minimum domain line-rate percent (default 55)
+#   COVERAGE_MIN_DOMAIN     — minimum domain line-rate percent (default 58)
+#   COVERAGE_MIN_OVERALL    — minimum OVERALL line-rate percent (default 45)
+#
+# 18.E1 (audit R2 Q4): overall coverage was printed and NOT gated. That is the number that falls when the
+# DB-gated integration suites stop running — a *_TEST_DB variable quietly missing from CI drops hundreds of
+# Api/Infrastructure lines and every remaining test still passes. Gating it means that failure is loud.
 set -euo pipefail
 RESULTS="${1:-./coverage}"
-MIN="${COVERAGE_MIN_DOMAIN:-55}"
+MIN="${COVERAGE_MIN_DOMAIN:-58}"
+MIN_OVERALL="${COVERAGE_MIN_OVERALL:-45}"
 
-python3 - "$RESULTS" "$MIN" <<'PY'
+python3 - "$RESULTS" "$MIN" "$MIN_OVERALL" <<'PY'
 import glob, sys, xml.etree.ElementTree as ET
-results, minpct = sys.argv[1], float(sys.argv[2])
+results, minpct, minoverall = sys.argv[1], float(sys.argv[2]), float(sys.argv[3])
 cov=val=dcov=dval=0
 files = glob.glob(f"{results}/**/coverage.cobertura.xml", recursive=True)
 if not files:
@@ -30,10 +36,17 @@ for f in files:
                 dval += 1; dcov += hit
 overall = cov/val*100 if val else 0
 domain  = dcov/dval*100 if dval else 0
-print(f"coverage — overall {cov}/{val} = {overall:.1f}%  |  domain {dcov}/{dval} = {domain:.1f}%  (gate: domain ≥ {minpct:.0f}%)")
+print(f"coverage — overall {cov}/{val} = {overall:.1f}% (gate ≥ {minoverall:.0f}%)  |  "
+      f"domain {dcov}/{dval} = {domain:.1f}% (gate ≥ {minpct:.0f}%)")
 if dval == 0:
     print("::error::no domain lines measured"); sys.exit(2)
+failed = False
 if domain + 1e-9 < minpct:
-    print(f"::error::domain coverage {domain:.1f}% is below the {minpct:.0f}% floor"); sys.exit(1)
+    print(f"::error::domain coverage {domain:.1f}% is below the {minpct:.0f}% floor"); failed = True
+if overall + 1e-9 < minoverall:
+    print(f"::error::overall coverage {overall:.1f}% is below the {minoverall:.0f}% floor — "
+          "this usually means the DB-gated integration suites did not run"); failed = True
+if failed:
+    sys.exit(1)
 print("coverage gate: PASS")
 PY

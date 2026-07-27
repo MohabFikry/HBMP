@@ -71,9 +71,9 @@ Mark `✅ YYYY-MM-DD` per id here **and** on the finding row in `AUDIT-R2-E2E.md
 
 | Sub | Id | Finding | Status |
 |---|---|---|---|
-| 18.E1 | Q1 | Route-coverage guard, `IDENTITY_TEST_DB`, identity/interop OpenAPI claimed but not wired | ☐ |
-| 18.E1 | Q2 | GitLab/GitHub CI split-brain | ☐ |
-| 18.E1 | Q4 | Coverage floor is 55%, documented as 80% | ☐ |
+| 18.E1 | Q1 | Route-coverage guard, `IDENTITY_TEST_DB`, identity/interop OpenAPI claimed but not wired | ✅ 2026-07-27 (Kong guard wired + extended to all public prefixes; CI split-brain resolved, ADR-0001 amended) |
+| 18.E1 | Q2 | GitLab/GitHub CI split-brain | ✅ 2026-07-27 (IDENTITY_TEST_DB + Identity/Interop OpenAPI + specs committed + drift check; 2 silent-pass tests → SkippableFact) |
+| 18.E1 | Q4 | Coverage floor is 55%, documented as 80% | ✅ 2026-07-27 (domain floor 55→58 with a ratchet + target date; overall coverage now gated too) |
 | 18.E2 | Q3 | masterdata: 21 endpoints, 1 test file, no authz suite | ☐ |
 | 18.E2 | — | `libs/testing` extraction, gate consolidation, architecture tests, thin suites, 133 `any` | ☐ |
 

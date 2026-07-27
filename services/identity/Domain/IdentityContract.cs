@@ -33,7 +33,16 @@ public static class IdentityContract
         "provider:read", "provider:write", "provider:finance",
         "policy:write", "referral:write",
         "callcentre:read", "callcentre:act", "callcentre:interaction", "callcentre:verify",
+        // 18.B3/18.E1: the claims AUTHORITIES. Phase 10b's policy rules required these and the vocabulary
+        // never listed them, so no token could carry one and the entire claims decision surface denied.
+        // Each is a distinct authority by design — the officer who decides a line is not the person who
+        // releases the settlement, and one scope covering both would erase that SoD split.
         "claims:read", "claims:reconcile", "claims:export",
+        "claims:review", "claims:decide", "claims:adjudicate", "claims:adjust", "claims:batch",
+        "claims:submit", "claims:reimburse:submit", "claims:appeal", "claims:settle", "claims:ingest",
+        // 18.B3/18.E1: the eligibility card at the front desk (distinct from reception:search, which finds
+        // the person), a prescriber reading back their own prescription, and the reporting FINANCIAL zone.
+        "reception:read", "rx:read", "reporting:read-financial",
         "reporting:read", "reporting:project", "reporting:export",
         "notification:read", "notification:ingest",
         "audit:read",

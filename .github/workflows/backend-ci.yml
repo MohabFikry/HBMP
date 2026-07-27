@@ -60,7 +60,15 @@ jobs:
       OWNER_PASSWORD: ci_hbmp_pw
       APP_PASSWORD: ci_hbmp_app_pw
       HBMP_APP_PASSWORD: ci_hbmp_app_pw
-      COVERAGE_MIN_DOMAIN: "55"
+      # 18.E1 (audit R2 Q4) — the RATCHET. 55 was set as a regression guard below the then-current value
+      # and never moved, so it stopped meaning anything: coverage could fall a long way and still pass.
+      # CLAUDE.md's target is 80. Raise this by +3 on each merge to main that improves it; the floor must
+      # never go DOWN without an ADR saying why. Target: 80 by 2026-10-31.
+      COVERAGE_MIN_DOMAIN: "58"
+      # Overall coverage was printed and not gated at all. Now floored too — Api/Infrastructure lines are
+      # exercised by the DB-gated suites, so a drop here means those stopped running, which is exactly the
+      # failure a green build should not hide.
+      COVERAGE_MIN_OVERALL: "45"
 
     steps:
       - uses: actions/checkout@v4
@@ -83,6 +91,12 @@ jobs:
         run: |
           python3 tools/ci/check-migration-compat.py --selftest
           python3 tools/ci/check-migration-compat.py --all
+
+      # 18.E1 (audit R2 Q1) — this guard EXISTED and was never wired into CI, and it only inspected
+      # /api/v1 — so it was blind to exactly the gap that shipped as W3 (the whole FHIR facade with no
+      # route). Now it runs, and it covers every public prefix.
+      - name: Kong route-coverage gate (every served public prefix has a route)
+        run: python3 tools/ci/check-kong-route-coverage.py
 
       - name: Integration DPIA / data-sharing gate (13.3)
         run: |
@@ -111,11 +125,31 @@ jobs:
       - name: Generate + validate OpenAPI specs (all services)
         run: |
           CI_DB="Host=localhost;Port=5432;Database=hbmp;Username=hbmp;Password=ci_hbmp_pw"
+          # 18.E1 (Q2): Identity and Interop were MISSING from this list. identity-service is the newest
+          # and most security-critical service on the platform — it mints every token — and it had no
+          # OpenAPI regression gate at all.
           for k in Admin Approvals Audit CallCentre Case Claims Document Eligibility Emr Finance \
-                   MasterData Notification Orders Patient Pharmacy Policy Provider Reporting; do
+                   Identity Interop MasterData Notification Orders Patient Pharmacy Policy Provider Reporting; do
             export "ConnectionStrings__${k}=${CI_DB}"
           done
           bash tools/ci/generate-openapi.sh artifacts/openapi
+
+      # 18.E1 (Q2) — OpenAPI DRIFT is a red build.
+      #
+      # CLAUDE.md says the spec is the source of truth. It was generated in CI, uploaded as an artefact
+      # nobody opens, and thrown away — so the committed contract and the running services could diverge
+      # indefinitely and nothing said so. The specs now live in docs/api/ and a diff fails the build:
+      # changing an endpoint means committing the regenerated spec, which puts the contract change in the
+      # pull request where a reviewer sees it.
+      - name: OpenAPI drift check (committed specs must match the running services)
+        run: |
+          mkdir -p docs/api
+          cp artifacts/openapi/*.json docs/api/ 2>/dev/null || true
+          if ! git diff --exit-code -- docs/api; then
+            echo "::error::OpenAPI specs in docs/api are stale."
+            echo "Run tools/ci/generate-openapi.sh locally and commit the result — the spec is the contract."
+            exit 1
+          fi
 
       - name: Upload coverage + OpenAPI specs + test results
         if: always()

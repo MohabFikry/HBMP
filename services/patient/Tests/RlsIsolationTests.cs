@@ -20,10 +20,13 @@ public class RlsIsolationTests
     private static readonly Guid BenA = new("aaaaaaaa-1111-0000-0000-000000000001");
     private static readonly Guid BenB = new("bbbbbbbb-2222-0000-0000-000000000002");
 
-    [Fact]
+    [SkippableFact]
     public async Task Raw_query_under_tenant_A_guc_cannot_see_tenant_B_or_unscoped()
     {
-        if (Owner is null || App is null) return; // DB-less CI skips
+        // 18.E1 (audit R2 Q2): an early `return` in a [Fact] reports PASSED. This is the RLS isolation
+        // proof for the beneficiary registry — the last test that should silently report green without
+        // having connected to a database.
+        Skip.If(Owner is null || App is null, "test DB not configured — set the *_TEST_DB env vars to run this.");
 
         await Seed();
         try
