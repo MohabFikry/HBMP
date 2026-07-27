@@ -13,6 +13,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { useApi } from "../api/ApiProvider";
 import { portalForRole, type Localized, type Section } from "../portals/catalog";
 import { L } from "../i18n/strings";
+import { CommandPalette } from "./CommandPalette";
 import { NotificationPane } from "./NotificationPane";
 import { UserPane } from "./UserPane";
 import { BranchSwitcher } from "./BranchSwitcher";
@@ -79,6 +80,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   // 14.8 — branch context for the app-bar switcher (fail-soft: renders only when the caller has branches).
   const branchCtx = useBranchContext(session?.role ?? undefined);
   const [paneOpen, setPaneOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);   // 18.F2 — ⌘K / Ctrl+K
   const [userPaneOpen, setUserPaneOpen] = useState(false);
   const [notifyRefresh, setNotifyRefresh] = useState(0);
   const unread = useUnreadCount(canNotify, notifyRefresh);
@@ -86,16 +88,36 @@ export function AppShell({ children }: { children: ReactNode }) {
   const avatarRef = useRef<HTMLButtonElement | null>(null);
 
   const homePath = portal && accessible[0] ? `/${portal.base}/${accessible[0].path}` : "/";
-  const primaryQueuePath = homePath;
+  const primaryQueuePath = useMemo(() => {
+    if (!portal) return homePath;
+    const queue = accessible.find((sec) => /queue|worklist|workspace|inbox/i.test(sec.key)
+                                        || /queue|worklist|inbox/i.test(sec.label.en));
+    return queue ? `/${portal.base}/${queue.path}` : homePath;
+  }, [portal, accessible, homePath]);
 
-  // Global keyboard map (14 §4): "g h" home, "g q" primary queue. The "/" binding went with the dead
-  // search field in 18.D2 (U5) — a shortcut that focuses a control which does nothing is worse than none.
+  // Global keyboard map (14 §4): ⌘K/Ctrl+K palette, "g h" home, "g q" primary queue.
+  //
+  // 18.F2 — the palette REPLACES the "/" binding removed in 18.D2, which focused a search field that did
+  // nothing. ⌘K is the convention users already have from every other tool, so it needs no discovery.
+  //
+  // Also fixed here: "g h" and "g q" both navigated to homePath, because primaryQueuePath was assigned from
+  // it. Two shortcuts with one effect is not a shortcut — a user who learns "g q" and lands on Home each
+  // time concludes the whole scheme is broken. "g q" now goes to the first section in the QUEUE/WORKLIST
+  // group, falling back to home only when the portal genuinely has no queue.
   useEffect(() => {
     let gPending = false;
     let gTimer: ReturnType<typeof setTimeout> | null = null;
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement;
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable;
+
+      // ⌘K / Ctrl+K works even while typing — that is the point of a palette: reach it from anywhere,
+      // including from inside the form you are halfway through.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+        return;
+      }
       if (typing) return;
       if (e.key === "g") {
         gPending = true;
@@ -189,6 +211,14 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
         </div>
       </header>
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        sections={accessible}
+        portalBase={portal.base}
+        onNavigate={navigate}
+      />
 
       <NavRail
         aria-label={tr(portal.title)}

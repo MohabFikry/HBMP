@@ -803,3 +803,64 @@ nav.mrs-rail {
 .cc-appts li { display: flex; align-items: center; justify-content: space-between; gap: var(--sp4); flex-wrap: wrap; }
 .cc-wrapup { display: flex; gap: var(--sp4); flex-wrap: wrap; align-items: flex-end; }
 .cc-history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp2); }
+
+/* ---- 18.F2 — command palette (⌘K / Ctrl+K) ------------------------------------------------------
+   Replaces the dead app-bar search removed in 18.D2. Sixteen role portals × 5-9 sections each means the
+   nav rail can only ever show one portal's slice, so a palette is the only navigation that scales. */
+.cmdk-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;                      /* above the notification pane (50) and the mobile tab bar (40) */
+  background: rgb(0 0 0 / 35%);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-block-start: 12vh;        /* near the top: the eye is already there after ⌘K */
+}
+.cmdk {
+  inline-size: min(34rem, calc(100vw - 2rem));
+  background: var(--surface-1);
+  color: var(--text-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 30%);
+  overflow: hidden;
+}
+.cmdk-input {
+  inline-size: 100%;
+  min-block-size: 52px;
+  padding: 0 var(--sp4);
+  border: 0;
+  border-block-end: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1.05rem;
+}
+.cmdk-input:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
+.cmdk-list { list-style: none; margin: 0; padding: var(--sp2); max-block-size: 22rem; overflow-y: auto; }
+.cmdk-opt {
+  display: flex;
+  gap: var(--sp3);
+  align-items: baseline;
+  min-block-size: 44px;             /* the project's own target bar (21-accessibility) */
+  padding: 0 var(--sp3);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+/* The active option is marked by BACKGROUND + a leading accent bar, not colour alone — the list is
+   driven by arrow keys, so the current row must be unmistakable without relying on hue. */
+.cmdk-opt-active {
+  background: var(--surface-2);
+  box-shadow: inset 3px 0 0 0 var(--accent);
+}
+.cmdk-group { color: var(--text-2); font-size: 0.8rem; }
+.cmdk-label { font-weight: 600; }
+.cmdk-empty { padding: var(--sp3); color: var(--text-2); }
+.cmdk-hint {
+  margin: 0;
+  padding: var(--sp2) var(--sp4);
+  border-block-start: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 0.78rem;
+}

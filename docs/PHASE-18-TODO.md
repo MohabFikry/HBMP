@@ -96,3 +96,28 @@ Three items are **not** done and are deliberately left rather than half-done:
 | Burn down 66 `any` in `HttpApiClient.ts` + remove the file-wide eslint-disable | ~250 edits with **zero correctness impact** — every output is already zod-validated at runtime and that validation is tested. Pure type-hygiene, and the least valuable thing to risk regressions on at the end of a large phase. |
 
 Everything else in 18.E2 landed: architecture tests (7 rules), the provider RLS gap they found, `libs/data` interceptor tests, masterdata authz suite, 7 anonymous-object 404s → RFC-7807, `services/hello` deleted.
+
+### Gate F — what landed, and what is deferred
+
+Gate F is explicitly *"Enhancements (highest value first)"* and the prompt's Done-when says **"as prioritized with the sponsor"**. Items were chosen by how directly they close a finding this audit actually made.
+
+**Landed (18.F1 + parts of F2/F3):**
+
+| Item | Why it was picked first |
+|---|---|
+| `libs/money` value type + 12 property tests | Makes X3 structurally impossible rather than clamped at six call sites |
+| Property-based ConsumeExecutor tests (real Postgres, 55 generated interleavings) | X7's whole class — lost updates live in the interleavings nobody thought of |
+| **Tenant-isolation fuzzer** (`tools/ci/check-tenant-isolation.py`) | The prompt's own *"control that would have caught X6/S2 automatically"*. **Found a real disclosure the R2 audit did not name** — 105 blank-tenant rows in `emr.appointment_history` readable by any caller without a tenant claim |
+| Command palette (⌘K), permission-scoped | Owed: 18.D2 deleted the dead app-bar search on the promise of this. Also fixed the duplicate `g h` / `g q` binding |
+
+**Deferred — needs a sponsor decision, live infrastructure, or is a feature in its own right:**
+
+| Item | Why |
+|---|---|
+| F2: server-side sort/filter/paginate on 4 worklists | Real value (SLA-remaining sort especially), but it is an API change across four services plus `DataTable` wiring — a feature, not a remediation |
+| F2: keyboard-first worklist mode (j/k/a/r/p, `?` overlay) | Depends on the sort/filter work above to be worth having |
+| F2: inline validation on blur, draft autosave | Autosave for SOAP notes needs a storage decision (local vs server draft) with PHI implications |
+| F2: offline queue, density/branch persistence, UX telemetry | Telemetry is the highest-value of these — the retry-after-failure metric would have surfaced every U1 silent failure within a week — but it needs a privacy review of the event shape before it ships |
+| F3: OpenBao dynamic Postgres credentials | Requires a running OpenBao; replaces the static `hbmp_app` that 18.B2 just established |
+| F3: audit-topic anomaly detection | Needs the streaming stack live |
+| F3: DAST/Schemathesis, SBOM + cosign + SLSA, Pact | All need CI infrastructure this environment cannot exercise; wiring them unverified would repeat the Q1 mistake (a gate committed and never run) |
