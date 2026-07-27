@@ -160,6 +160,9 @@ public static class DispensingEndpoints
                             beneficiaryId = rx.BeneficiaryId,
                             benefitCategory = "PHARMACY",
                             serviceDate = calendar.Today(),   // 18.A3 — Cairo service date
+                            // 19.4 — the dispensing pharmacy, for the utilization tier split. Absent rather
+                            // than guessed when the principal has no provider.
+                            providerId = pharmacy == Guid.Empty ? (Guid?)null : pharmacy,
                             evt.Quantity,
                             evt.BatchNo,
                             idempotencyKey = idem,

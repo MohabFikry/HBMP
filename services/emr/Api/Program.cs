@@ -198,6 +198,7 @@ v1.MapGet("/queue", async (EmrDbContext db, CancellationToken ct) =>
 app.MapAppointments();
 app.MapQueue();
 app.MapClinical();
+app.MapUtilizationFacts();   // 19.4 — encounter COUNTS for utilization; no clinical payload crosses the wire
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

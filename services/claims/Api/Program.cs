@@ -63,6 +63,7 @@ app.MapReimbursements(); // phase 10b.6 — beneficiary reimbursement + OCR (ass
 app.MapReconciliation(); // phase 10b.7 — reconciliation worklist + append-only adjustments
 app.MapSettlement(); // phase 10b.8 — settlement advice + exports (NO payment execution)
 app.MapAppeals(); // phase 10b.9 — appeals (preserve decision thread) + claims KPI feed
+app.MapUtilizationFacts(); // 19.4 — claimed/approved/member-share TOTALS for utilization (no claim lines)
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

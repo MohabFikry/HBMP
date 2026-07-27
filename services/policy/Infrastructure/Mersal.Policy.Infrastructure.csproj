@@ -2,7 +2,10 @@
   <PropertyGroup><RootNamespace>Mersal.Policy.Infrastructure</RootNamespace></PropertyGroup>
   <ItemGroup><ProjectReference Include="../Domain/Mersal.Policy.Domain.csproj" />
     <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
-    <ProjectReference Include="../../../libs/data/Mersal.Data.csproj" /></ItemGroup>
+    <ProjectReference Include="../../../libs/data/Mersal.Data.csproj" />
+    <!-- 19.4: utilization resolves the SAME network tier that priced the claim, through the SAME resolver
+         eligibility/approvals/claims use. A second resolver here would let a report disagree with the money. -->
+    <ProjectReference Include="../../../libs/benefit-pricing/Mersal.BenefitPricing.csproj" /></ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />

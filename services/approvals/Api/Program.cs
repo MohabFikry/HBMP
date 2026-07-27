@@ -58,6 +58,7 @@ app.MapWorklist();   // phase 7.1 ingestion + reviewer inbox + assign
 app.MapReview();     // phase 7.1 clinical review view (field-scoped, PHI-read audited)
 app.MapDecisions();  // phase 7.2 decisions (mandatory rationale) + downstream events + TAT/SLA
 app.MapBreakGlass(); // phase 7.3 emergency / override / manual + retrospective queue + TAT summary
+app.MapUtilizationFacts(); // 19.4 — raised/approved/denied COUNTS for utilization; no clinical payload
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

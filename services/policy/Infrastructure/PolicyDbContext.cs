@@ -112,6 +112,9 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.Outcome).HasConversion<string>().HasColumnName("outcome");
             e.Property(x => x.MovedLimits).HasColumnName("moved_limits");
             e.Property(x => x.AppliedAt).HasColumnName("applied_at");
+            e.Property(x => x.ProviderId).HasColumnName("provider_id");                       // 19.4
+            e.Property(x => x.ProviderLocationId).HasColumnName("provider_location_id");      // 19.4
+            e.Property(x => x.ServiceDate).HasColumnName("service_date");                     // 19.4
             e.HasIndex(x => x.SourceRef).IsUnique();
         });
 

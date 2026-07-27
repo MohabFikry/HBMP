@@ -113,6 +113,8 @@ services:
           - /api/v1/documents
           # 19.3c — the change timeline (a projection over the audit stream).
           - /api/v1/timeline
+          # 19.4 — utilization for member · group · plan · policy · payer (read-only; no clinical fields).
+          - /api/v1/utilization
         strip_path: false
 
   # --- provider-service: provider network + contracts + branches + practitioners + specialties ---

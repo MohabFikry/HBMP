@@ -147,6 +147,11 @@ public sealed class BenefitConsumptionConsumer(
         var category = Str(root, "benefitCategory");
         var key = Str(root, "idempotencyKey") ?? eventId.ToString();
         var onDate = Date(root, "serviceDate") ?? today;
+        // 19.4 — optional attribution. Absent on events emitted before the producers carried it, and absent
+        // whenever the consuming principal had no provider; both cases report as unattributed rather than
+        // being guessed into a tier.
+        var providerId = GuidOf(root, "providerId");
+        var locationId = GuidOf(root, "providerLocationId");
 
         var direction = eventType is "OrderFulfillmentVoided" or "RxDispenseVoided"
             ? ConsumptionDirection.Reversed
@@ -159,7 +164,7 @@ public sealed class BenefitConsumptionConsumer(
                 Lines(root).Select(l => new ConsumptionInstruction(
                     eventId, eventType, tenantId, beneficiaryId.Value, category,
                     BenefitAccumulation.SourceRef(eventType, l.LineId, key, direction),
-                    l.Quantity, direction, onDate)).ToList(),
+                    l.Quantity, direction, onDate, providerId, locationId)).ToList(),
 
             // pharmacy-service: one line per dispense event.
             "RxLinesDispensed" or "RxDispenseVoided" =>
@@ -167,7 +172,7 @@ public sealed class BenefitConsumptionConsumer(
                     ? [new ConsumptionInstruction(
                         eventId, eventType, tenantId, beneficiaryId.Value, category ?? "PHARMACY",
                         BenefitAccumulation.SourceRef(eventType, lineId, key, direction),
-                        qty, direction, onDate)]
+                        qty, direction, onDate, providerId, locationId)]
                     : [],
 
             _ => [],

@@ -57,6 +57,10 @@ public static class ConsumeEndpoints
                             beneficiaryId = order.BeneficiaryId,
                             benefitCategory = BenefitCategoryMap.ForOrderType(order.OrderType),
                             serviceDate = calendar.Today(),   // 18.A3 — Cairo service date
+                            // 19.4 — WHO delivered it, so policy-service can attribute the movement to a
+                            // network tier resolved at the service date. Empty when the principal carries no
+                            // provider; policy reports that as unattributed rather than assuming in-network.
+                            providerId = provider == Guid.Empty ? (Guid?)null : provider,
                             lines = fulfillments.Select(f => new { f.OrderLineId, f.Quantity }),
                             idempotencyKey = idem,
                         }, c);

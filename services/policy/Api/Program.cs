@@ -2,6 +2,7 @@ using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Auth.Authorization;
 using Mersal.Authz;
+using Mersal.BenefitPricing;
 using Mersal.Data;
 using Mersal.Events;
 using Mersal.Policy.Api;
@@ -48,6 +49,21 @@ builder.Services.AddScoped<IPolicyDocumentOcr, DisabledPolicyDocumentOcr>();
 // 19.3c — the timeline projector. Nothing in the domain calls it as part of doing its work; it consumes
 // events that already exist, which is what keeps the timeline from drifting into a second log.
 builder.Services.AddScoped<TimelineProjector>();
+// 19.4 — utilization. A DIRECT QUERY over the accumulator, not a projection (ADR-0023): reconciliation to
+// coverage_limit has to be a property that cannot become false, not one somebody keeps true.
+builder.Services.AddScoped<UtilizationQuery>();
+builder.Services.AddScoped<UtilizationFactComposer>();
+// The SAME tier resolver eligibility/approvals/claims price with, so a report cannot disagree with the money.
+builder.Services.AddHttpClient<INetworkTierResolver, HttpNetworkTierResolver>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Provider:BaseUrl"] ?? "http://provider-service:8080"));
+// The three facts a utilization report needs and policy-service does not own. Each fails SEPARATELY: an
+// approvals outage must not blank the claim value too.
+builder.Services.AddHttpClient<IEncounterFactSource, HttpEncounterFactSource>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Emr:BaseUrl"] ?? "http://emr-service:8080"));
+builder.Services.AddHttpClient<IAuthorizationFactSource, HttpAuthorizationFactSource>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Approvals:BaseUrl"] ?? "http://approvals-service:8080"));
+builder.Services.AddHttpClient<IClaimFactSource, HttpClaimFactSource>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Claims:BaseUrl"] ?? "http://claims-service:8080"));
 // 19.2b — the plan-change consumption rule is a SETTING, not a constant: ADR-0020 is unsigned, and reversing
 // it later must not require migrating every member's accumulator.
 builder.Services.Configure<MembershipOptions>(builder.Configuration.GetSection(MembershipOptions.SectionName));
@@ -159,6 +175,7 @@ app.MapPlanAdministration();
 app.MapMembership();
 app.MapNotes();
 app.MapPolicyDocuments();
+app.MapUtilization();   // 19.4 — utilization for member · group · plan · policy · payer (read-only)
 app.MapTimeline();   // 19.3c — the change timeline (a projection over the audit stream)   // 19.3b — classified documents on policy + member   // 19.3 — signed, timestamped, append-only notes on policy + member   // 19.2 + 19.2b — policies, plans, groups, enrolment lifecycle   // 19.1 — payers, plans, effective-dated immutable plan versions
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)

@@ -44,7 +44,12 @@ public sealed record ConsumptionInstruction(
     string SourceRef,
     decimal Quantity,
     ConsumptionDirection Direction,
-    DateOnly OnDate);
+    DateOnly OnDate,
+    /// <summary>19.4 — WHERE the care was delivered, so utilization can resolve the network tier in force on
+    /// <paramref name="OnDate"/> at report time. Optional: an event that does not carry it still accumulates
+    /// (the benefit was used either way) and reports in the explicit unattributed bucket.</summary>
+    Guid? ProviderId = null,
+    Guid? ProviderLocationId = null);
 
 /// <summary>The result of applying one instruction, including which limits actually moved.</summary>
 public sealed record ConsumptionResult(ConsumptionOutcome Outcome, Guid? CoverageId, IReadOnlyList<Guid> MovedLimits)
@@ -70,6 +75,14 @@ public sealed class BenefitConsumptionRecord
     public ConsumptionOutcome Outcome { get; set; }
     public int MovedLimits { get; set; }
     public DateTimeOffset AppliedAt { get; set; }
+
+    /// <summary>19.4 — the provider whose tier this movement is attributed to, and the date the tier is
+    /// resolved AT. <see cref="AppliedAt"/> is when the accumulator moved, which lags the care by however
+    /// long the broker and any retry took; resolving a tier at that instant would price February's care
+    /// against March's network.</summary>
+    public Guid? ProviderId { get; set; }
+    public Guid? ProviderLocationId { get; set; }
+    public DateOnly? ServiceDate { get; set; }
 }
 
 /// <summary>The background consumer's dedupe ledger (at-least-once delivery). Transport-level, no

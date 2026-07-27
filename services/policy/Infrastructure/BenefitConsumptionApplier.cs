@@ -52,6 +52,11 @@ public sealed class BenefitConsumptionApplier(PolicyDbContext db, IOutbox outbox
             Outcome = outcome,
             MovedLimits = 0,
             AppliedAt = clock.GetUtcNow(),
+            // 19.4 — attribution for the tier split. Recorded even on a no-move outcome: a NoCoverage movement
+            // at an out-of-network provider is precisely the pattern the Network Team wants to see.
+            ProviderId = instruction.ProviderId,
+            ProviderLocationId = instruction.ProviderLocationId,
+            ServiceDate = instruction.OnDate,
         };
         db.BenefitConsumptions.Add(record);
 
