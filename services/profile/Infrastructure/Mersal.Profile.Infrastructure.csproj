@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>Mersal.Profile.Infrastructure</RootNamespace></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Domain/Mersal.Profile.Domain.csproj" />
+    <ProjectReference Include="../../../libs/auth/Mersal.Auth.csproj" />
+    <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
+    <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+</Project>

@@ -68,6 +68,7 @@ public class HousePatternTests
         ["masterdata"] = "reference catalogue (ICD/CPT/LOINC/ATC) — tenant-FREE by design: a diagnosis code means the same thing for every tenant (18.B2)",
         ["audit"] = "RLS keys on ROLE MEMBERSHIP (pg_has_role), not a tenant GUC — it runs as hbmp_audit, not hbmp_app (18.B2)",
         ["identity"] = "the issuer looks a user up BY USERNAME to discover their tenant, before any request-scoped tenant exists — tenant RLS here would break login (identity 0002)",
+        ["profile"] = "pure COMPOSITION — owns no data, has no DbContext and no migrations (design 39 §7.4), so there is no connection to bind a tenant GUC on. Its isolation is the owning services' own RLS, reached under the caller's own token (phase 20)",
     };
 
     [Fact]

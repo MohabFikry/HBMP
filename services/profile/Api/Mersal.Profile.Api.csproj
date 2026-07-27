@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup><RootNamespace>Mersal.Profile.Api</RootNamespace></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Domain/Mersal.Profile.Domain.csproj" />
+    <ProjectReference Include="../Infrastructure/Mersal.Profile.Infrastructure.csproj" />
+    <ProjectReference Include="../../../libs/auth/Mersal.Auth.csproj" />
+    <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" />
+    <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Swashbuckle.AspNetCore" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" />
+  </ItemGroup>
+</Project>
