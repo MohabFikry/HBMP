@@ -164,40 +164,25 @@ describe("command palette — keyboard and assistive tech", () => {
   });
 });
 
-describe("app-bar entry point — the visible affordance", () => {
-  it("is a BUTTON that opens the palette, not an input that swallows keystrokes", async () => {
-    // The original app-bar search was an <input> bound to nothing: it accepted typing and discarded it,
-    // which reads as "the app is broken" rather than "this feature does not exist yet" (audit U5). The
-    // visible control is back, because removing it cost discoverability for mouse-first users — but it is a
-    // button, so the first click reaches something that works. When record search lands server-side (it
-    // needs min-necessary rules + a PHI-read audit) it slots into the palette behind this same control.
-    const user = userEvent.setup();
+describe("app-bar search field", () => {
+  it("is the original text input, restored at the product owner's direction", async () => {
+    // Reopens audit U5 KNOWINGLY: the field accepts typing and has nowhere to send it until record search
+    // exists server-side (which needs min-necessary field rules + a PHI-read audit). Requested so the
+    // affordance stays visible while that is designed; recorded here and in docs/PHASE-18-TODO.md so it is
+    // a tracked decision rather than a regression.
     renderApp("/", "medical_approval");
 
-    const trigger = await screen.findByRole("button", { name: /search/i });
-    expect(trigger.tagName).toBe("BUTTON");
-    expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
-
-    await user.click(trigger);
-    expect(await screen.findByRole("dialog", { name: /go to/i })).toBeInTheDocument();
-  });
-
-  it("opens on \"/\" as well, the binding 18.D2 removed when it pointed at a dead field", async () => {
-    const user = userEvent.setup();
-    renderApp("/", "medical_approval");
-    await screen.findByRole("button", { name: /search/i });
-
-    await user.keyboard("/");
-
-    expect(await screen.findByRole("dialog", { name: /go to/i })).toBeInTheDocument();
+    const field = await screen.findByRole("searchbox", { name: /search/i })
+      .catch(() => screen.findByRole("textbox", { name: /search/i }));
+    expect(field).toBeInTheDocument();
   });
 
   it("does not steal \"/\" from someone typing into a field", async () => {
-    // A bare "/" must never be intercepted mid-entry — a dose, a date and a code all contain one. ⌘K is
-    // deliberately NOT guarded this way (reaching the palette from inside a form is the point); "/" is.
+    // The one part of the old behaviour worth keeping guarded: a bare "/" must never be intercepted
+    // mid-entry — a dose, a date and a code all contain one.
     const user = userEvent.setup();
     renderApp("/", "medical_approval");
-    await screen.findByRole("button", { name: /search/i });
+    await screen.findByRole("banner");
 
     const anyInput = document.createElement("input");
     document.body.appendChild(anyInput);
@@ -205,6 +190,6 @@ describe("app-bar entry point — the visible affordance", () => {
     await user.keyboard("2/3");
 
     expect(anyInput).toHaveValue("2/3");
-    expect(screen.queryByRole("dialog", { name: /go to/i })).not.toBeInTheDocument();
+    anyInput.remove();
   });
 });

@@ -6,6 +6,7 @@ import {
   Logo,
   Modal,
   NavRail,
+  SearchField,
   useTheme,
   type NavItem,
 } from "@mersal/design-system";
@@ -70,6 +71,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
   const tr = useLocalized();
+  const searchRef = useRef<HTMLInputElement | null>(null);
 
   const portal = session?.role ? portalForRole(session.role) : null;
   const accessible: Section[] = useMemo(
@@ -119,12 +121,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         return;
       }
 
-      // "/" opens the palette too. 18.D2 removed this binding because it focused a dead field; it is back
-      // now that it reaches something real. Guarded by `typing` — unlike ⌘K, a bare "/" must never be stolen
-      // from someone entering a date, a dose or a code.
+      // "/" focuses the app-bar search field, as it did before 18.D2. Guarded by `typing` — a bare "/"
+      // must never be stolen from someone entering a date, a dose or a code.
       if (e.key === "/" && !typing) {
         e.preventDefault();
-        setPaletteOpen(true);
+        searchRef.current?.focus();
         return;
       }
       if (typing) return;
@@ -162,32 +163,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="app-grid">
       <header className="mrs-glass app-bar" role="banner">
         <Logo variant="lockup" height={48} />
-        {/*
-          The app-bar search affordance. 18.D2 removed the original because it was a text input bound to
-          NOTHING — typing did nothing, and the global "/" shortcut focused it, teaching a gesture that never
-          worked. This is the visible entry point restored, but as a BUTTON that opens the command palette
-          (18.F2) rather than an input that swallows keystrokes: it looks like search, and it does something
-          the moment you click it.
-
-          Why a button and not an input: an input invites you to type INTO it, and until record search exists
-          server-side (which needs min-necessary field rules and a PHI-read audit — see CommandPalette) there
-          is nowhere for those keystrokes to go. The button hands you straight to the thing that works, and
-          when record search lands it slots into the palette behind the same control.
-        */}
         <div className="app-search">
-          <button
-            type="button"
-            className="app-searchbtn"
-            onClick={() => setPaletteOpen(true)}
-            aria-haspopup="dialog"
-            aria-expanded={paletteOpen}
-          >
-            <Icon name="search" />
-            <span className="app-searchbtn-text">{L.search[lang]}</span>
-            {/* The shortcut is shown, not hidden in a tooltip — a keyboard affordance nobody can see is one
-                nobody uses. aria-hidden because a screen-reader user gets the same dialog from the button. */}
-            <kbd className="app-searchbtn-kbd" aria-hidden="true">⌘K</kbd>
-          </button>
+          <SearchField aria-label={L.search[lang]} placeholder={L.search[lang]} ref={searchRef} />
         </div>
         <div className="app-actions">
           {!branchCtx.memberScoped && branchCtx.branches.length > 0 && (
