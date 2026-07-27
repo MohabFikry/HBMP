@@ -86,11 +86,11 @@ public static class PrescriptionEndpoints
             await db.SaveChangesAsync(ct);
 
             await outbox.EnqueueAsync("RxCreated", "pharmacy.events",
-                new { prescriptionId = rx.PrescriptionId, rx.RxNo, beneficiaryId = rx.BeneficiaryId }, ct);
+                new { tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, rx.RxNo, beneficiaryId = rx.BeneficiaryId }, ct);
             await outbox.EnqueueAsync("RxSubmitted", "pharmacy.events",
-                new { prescriptionId = rx.PrescriptionId, rx.RxNo, requiresApproval = route.RequiresApproval }, ct);
+                new { tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, rx.RxNo, requiresApproval = route.RequiresApproval }, ct);
             if (rx.Status == RxStatus.Approved)
-                await outbox.EnqueueAsync("RxApproved", "pharmacy.events", new { prescriptionId = rx.PrescriptionId, rx.RxNo, auto = true }, ct);
+                await outbox.EnqueueAsync("RxApproved", "pharmacy.events", new { tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, rx.RxNo, auto = true }, ct);
             await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
@@ -142,7 +142,7 @@ public static class PrescriptionEndpoints
             rx.Status = RxStatus.Cancelled;
             foreach (var l in rx.Lines.Where(l => l.Status == RxLineStatus.Active)) l.Status = RxLineStatus.Cancelled;
             await db.SaveChangesAsync(ct);
-            await outbox.EnqueueAsync("RxCancelled", "pharmacy.events", new { prescriptionId = rx.PrescriptionId, reason = req.Reason }, ct);
+            await outbox.EnqueueAsync("RxCancelled", "pharmacy.events", new { tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, reason = req.Reason }, ct);
             await audit.EmitAsync(new AuditEventDraft
             {
                 EntityType = "prescription", EntityId = rx.PrescriptionId.ToString(), Action = AuditAction.StateChange,

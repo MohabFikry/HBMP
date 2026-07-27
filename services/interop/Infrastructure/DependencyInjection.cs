@@ -1,3 +1,4 @@
+using Mersal.Data;
 using Mersal.Interop.Domain.Integration;
 using Mersal.Interop.Infrastructure.Integration;
 using Microsoft.EntityFrameworkCore;
@@ -10,11 +11,16 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInteropInfrastructure(this IServiceCollection services, IConfiguration config)
     {
-        services.AddDbContext<InteropDbContext>(o =>
+        // 18.B2 (audit R2 S2) — interop's policy was the only fail-OPEN one in the repo AND its GUC was never
+        // bound, so the escape hatch was the only reason writes worked. 0003 closes the policy; this binds the
+        // GUC. Both halves are required: closing the policy without the binder denies every row.
+        services.AddHbmpRls();
+        services.AddDbContext<InteropDbContext>((sp, o) =>
             o.UseNpgsql(config.GetConnectionString("Interop")
                         ?? throw new System.InvalidOperationException(
                             "Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential."))
-             .UseSnakeCaseNamingConvention());
+             .UseSnakeCaseNamingConvention()
+             .AddHbmpRlsInterceptors(sp));
         services.AddScoped<IFhirDataSource, HttpFhirDataSource>();
 
         // 13.2 — integration-readiness layer: registry (DPIA-gated), ingestion (anti-corruption boundary),

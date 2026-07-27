@@ -1,6 +1,7 @@
 using System.Text;
 using Mersal.Data;
 using Mersal.Eligibility.Infrastructure;
+using Mersal.Events;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -28,10 +29,6 @@ public sealed class EventConsumer(
 {
     private IConnection? _connection;
     private IModel? _channel;
-
-    /// <summary>The sole tenant (ADR-0011); the platform is single-tenant, so background projections are
-    /// stamped with it. Matches the DB column DEFAULT and the RLS GUC the read path derives from the principal.</summary>
-    private const string SoleTenantId = "11111111-1111-1111-1111-111111111111";
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -71,12 +68,22 @@ public sealed class EventConsumer(
             var eventType = ea.BasicProperties.Type ?? "";
             var payload = Encoding.UTF8.GetString(ea.Body.Span);
 
+            // 18.B2 — a background consumer has no HTTP principal, so it binds the RLS tenant GUC itself.
+            // It takes the tenant from the EVENT ENVELOPE; it used to stamp a hardcoded SoleTenantId, which
+            // would have routed a second tenant's patient/policy events into the first tenant's eligibility
+            // projections — wrong answers, not errors. An unattributable message is dead-lettered instead.
+            var tenant = EventTenant.Of(payload);
+            if (tenant is null)
+            {
+                logger.LogError(
+                    "eligibility projection refused: {EventType} (delivery {Tag}, event {EventId}) carries no tenantId; " +
+                    "dead-lettering rather than guessing a tenant", eventType, ea.DeliveryTag, eventId);
+                _channel!.BasicNack(ea.DeliveryTag, multiple: false, requeue: false);
+                return;
+            }
+
             using var scope = scopeFactory.CreateScope();
-            // This is a background consumer — no HTTP principal — so bind the RLS tenant GUC ourselves, else
-            // the FORCE-RLS projection writes are denied (no app.tenant_id set). The platform is single-tenant
-            // (ADR-0011): stamp the sole Mersal tenant. When a second tenant is onboarded, source this from the
-            // event's tenant claim instead.
-            scope.ServiceProvider.GetRequiredService<RlsContext>().TenantId = SoleTenantId;
+            scope.ServiceProvider.GetRequiredService<RlsContext>().TenantId = tenant;
             var updater = scope.ServiceProvider.GetRequiredService<ProjectionUpdater>();
             await updater.ApplyAsync(eventId, eventType, payload, ct);
 

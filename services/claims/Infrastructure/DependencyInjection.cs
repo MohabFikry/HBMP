@@ -1,5 +1,6 @@
 using System.Globalization;
 using Mersal.Claims.Domain;
+using Mersal.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,10 +21,15 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddClaimsInfrastructure(this IServiceCollection services, IConfiguration config)
     {
-        services.AddDbContext<ClaimsDbContext>(o =>
+        // 18.B2 — claims has had ENABLE+FORCE RLS and fail-closed policies since 10b.1, but no binder: the
+        // GUC was never set, so the day the connection string moved off the superuser every query would have
+        // returned zero rows. Binder first, connection string second (that order is the whole point).
+        services.AddHbmpRls();
+        services.AddDbContext<ClaimsDbContext>((sp, o) =>
             o.UseNpgsql(config.GetConnectionString("Claims")
                         ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential."))
-             .UseSnakeCaseNamingConvention());
+             .UseSnakeCaseNamingConvention()
+             .AddHbmpRlsInterceptors(sp));
 
         services.AddScoped<ClaimNoIssuer>();
         services.AddScoped<ClaimIntakeExecutor>();

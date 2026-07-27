@@ -75,7 +75,7 @@ public static class ResultEndpoints
             // Route to the ordering doctor (+ approvals if the order was approval-gated).
             await outbox.EnqueueAsync("OrderResultUploaded", "orders.events", new
             {
-                orderId, lineId, fulfillmentId = target.FulfillmentId, order.OrderNo,
+                tenantId = order.TenantId, orderId, lineId, fulfillmentId = target.FulfillmentId, order.OrderNo,
                 orderingProviderId = order.OrderingProviderId, beneficiaryId = order.BeneficiaryId,
                 approvalGated = order.AuthorizationId is not null, resultDocumentId = target.ResultDocumentId,
                 sensitivityLevel = line.SensitivityLevel.ToString(),
@@ -86,7 +86,7 @@ public static class ResultEndpoints
             if (line.SensitivityLevel != SensitivityLevel.Standard)
                 await outbox.EnqueueAsync("SensitiveResultRestricted", "orders.events", new
                 {
-                    orderId, lineId, order.OrderNo, beneficiaryId = order.BeneficiaryId,
+                    tenantId = order.TenantId, orderId, lineId, order.OrderNo, beneficiaryId = order.BeneficiaryId,
                     orderingProviderId = order.OrderingProviderId, sensitivityLevel = line.SensitivityLevel.ToString(),
                 }, ct);
 

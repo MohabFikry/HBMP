@@ -15,8 +15,9 @@ public static class PolicyConfigEndpoints
             var denied = await gate.CheckAsync(AdminPolicies.Configure, ct);
             if (denied is not null) return denied;
             var p = gate.Principal!;
-            var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return ProblemResults.Invalid("no-tenant");
+            var scope = gate.BindTenant(req.Tenant);
+            if (!scope.IsAllowed) return scope.ToProblem();
+            var tenant = scope.Tenant!;
 
             var policy = await svc.SetSessionPolicyAsync(AdminContracts.Actor(p), tenant, req.Tier,
                 req.AccessTokenTtlSeconds, req.IdleTimeoutSeconds, req.AbsoluteCapSeconds,
@@ -29,8 +30,9 @@ public static class PolicyConfigEndpoints
             var denied = await gate.CheckAsync(AdminPolicies.Configure, ct);
             if (denied is not null) return denied;
             var p = gate.Principal!;
-            var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return ProblemResults.Invalid("no-tenant");
+            var scope = gate.BindTenant(req.Tenant);
+            if (!scope.IsAllowed) return scope.ToProblem();
+            var tenant = scope.Tenant!;
 
             var policy = await svc.SetDevicePolicyAsync(AdminContracts.Actor(p), tenant, req.Role,
                 req.RequireManagedDevice, req.IpAllowList, ct);

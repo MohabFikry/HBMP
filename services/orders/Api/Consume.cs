@@ -61,7 +61,7 @@ public static class ConsumeEndpoints
                             idempotencyKey = idem,
                         }, c);
                     if (order.Status == OrderStatus.Completed)
-                        await outbox.EnqueueAsync("OrderCompleted", "orders.events", new { orderId, order.OrderNo }, c);
+                        await outbox.EnqueueAsync("OrderCompleted", "orders.events", new { tenantId = order.TenantId, orderId, order.OrderNo }, c);
                 }, ct);
 
             switch (result.Outcome)

@@ -1,5 +1,6 @@
 using System.Globalization;
 using Mersal.CallCentre.Domain;
+using Mersal.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -62,10 +63,14 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddCallCentreInfrastructure(this IServiceCollection services, IConfiguration config)
     {
-        services.AddDbContext<CallCentreDbContext>(o =>
+        // 18.B2 — callcentre had tenant_id on every table and ZERO RLS DDL: isolation rested entirely on the
+        // application predicate. 0003_tenant_rls.sql adds the datastore layer; this binds the GUC it reads.
+        services.AddHbmpRls();
+        services.AddDbContext<CallCentreDbContext>((sp, o) =>
             o.UseNpgsql(config.GetConnectionString("CallCentre")
                         ?? throw new System.InvalidOperationException("Database connection string is not configured — inject it via ConnectionStrings env/OpenBao; never a baked credential."))
-             .UseSnakeCaseNamingConvention());
+             .UseSnakeCaseNamingConvention()
+             .AddHbmpRlsInterceptors(sp));
         services.AddScoped<VerificationService>();
         services.AddScoped<CallRefIssuer>();
         services.AddScoped<KpiService>();

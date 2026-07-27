@@ -50,8 +50,9 @@ public static class PlatformEndpoints
             var denied = await gate.CheckAsync(AdminPolicies.BreakGlassRequest, ct);
             if (denied is not null) return denied;
             var p = gate.Principal!;
-            var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return ProblemResults.Invalid("no-tenant");
+            var scope = gate.BindTenant(req.Tenant);
+            if (!scope.IsAllowed) return scope.ToProblem();
+            var tenant = scope.Tenant!;
             if (string.IsNullOrWhiteSpace(req.Justification) || req.ScopedResourceTypes.Count == 0)
                 return ProblemResults.Invalid("justification-and-scope-required");
 
@@ -65,8 +66,9 @@ public static class PlatformEndpoints
             var denied = await gate.CheckAsync(AdminPolicies.BreakGlassApprove, ct);
             if (denied is not null) return denied;
             var p = gate.Principal!;
-            var tenant = AdminContracts.ResolveTenant(p, body?.Tenant);
-            if (tenant is null) return ProblemResults.Invalid("no-tenant");
+            var scope = gate.BindTenant(body?.Tenant);
+            if (!scope.IsAllowed) return scope.ToProblem();
+            var tenant = scope.Tenant!;
 
             var r = await svc.ApproveAsync(AdminContracts.Actor(p), tenant, grantId, ct);
             if (r.Ok) return Results.Ok(new { grantId, status = r.Grant!.Status.ToString() });
@@ -81,8 +83,9 @@ public static class PlatformEndpoints
             var denied = await gate.CheckAsync(AdminPolicies.BreakGlassApprove, ct);
             if (denied is not null) return denied;
             var p = gate.Principal!;
-            var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return ProblemResults.Invalid("no-tenant");
+            var scope = gate.BindTenant(req.Tenant);
+            if (!scope.IsAllowed) return scope.ToProblem();
+            var tenant = scope.Tenant!;
             var r = await svc.RejectAsync(AdminContracts.Actor(p), tenant, grantId, req.Reason, ct);
             return r.Ok ? Results.NoContent() : ProblemResults.Invalid(r.ReasonCode ?? "error");
         });
@@ -92,8 +95,9 @@ public static class PlatformEndpoints
             var denied = await gate.CheckAsync(AdminPolicies.BreakGlassRequest, ct);
             if (denied is not null) return denied;
             var p = gate.Principal!;
-            var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return ProblemResults.Invalid("no-tenant");
+            var scope = gate.BindTenant(req.Tenant);
+            if (!scope.IsAllowed) return scope.ToProblem();
+            var tenant = scope.Tenant!;
             var r = await svc.ActivateAsync(AdminContracts.Actor(p), tenant, grantId, req.StepUpSatisfied, ct);
             return r.Ok
                 ? Results.Ok(new { grantId, status = r.Grant!.Status.ToString(), r.Grant.ExpiresAt })
@@ -106,8 +110,9 @@ public static class PlatformEndpoints
             var denied = await gate.CheckAsync(AdminPolicies.BreakGlassRequest, ct);
             if (denied is not null) return denied;
             var p = gate.Principal!;
-            var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return ProblemResults.Invalid("no-tenant");
+            var scope = gate.BindTenant(req.Tenant);
+            if (!scope.IsAllowed) return scope.ToProblem();
+            var tenant = scope.Tenant!;
 
             var granted = await svc.RecordAccessAsync(AdminContracts.Actor(p), tenant, grantId, req.ResourceType, req.ResourceId, req.Action, ct);
             return granted
@@ -121,24 +126,27 @@ public static class PlatformEndpoints
         {
             var denied = await gate.CheckAsync(AdminPolicies.ReadDashboard, ct);
             if (denied is not null) return denied;
-            var t = AdminContracts.ResolveTenant(gate.Principal!, tenant);
-            if (t is null) return ProblemResults.Invalid("no-tenant");
+            var scope = gate.BindTenant(tenant);
+            if (!scope.IsAllowed) return scope.ToProblem();
+            var t = scope.Tenant!;
             return Results.Ok(await svc.BreakGlassAsync(AdminContracts.Actor(gate.Principal!), t, ct));
         });
         dash.MapGet("/access-review", async (string? tenant, AdminGate gate, DashboardService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.ReadDashboard, ct);
             if (denied is not null) return denied;
-            var t = AdminContracts.ResolveTenant(gate.Principal!, tenant);
-            if (t is null) return ProblemResults.Invalid("no-tenant");
+            var scope = gate.BindTenant(tenant);
+            if (!scope.IsAllowed) return scope.ToProblem();
+            var t = scope.Tenant!;
             return Results.Ok(await svc.AccessReviewAsync(AdminContracts.Actor(gate.Principal!), t, ct));
         });
         dash.MapGet("/sod-violations", async (string? tenant, AdminGate gate, DashboardService svc, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(AdminPolicies.ReadDashboard, ct);
             if (denied is not null) return denied;
-            var t = AdminContracts.ResolveTenant(gate.Principal!, tenant);
-            if (t is null) return ProblemResults.Invalid("no-tenant");
+            var scope = gate.BindTenant(tenant);
+            if (!scope.IsAllowed) return scope.ToProblem();
+            var t = scope.Tenant!;
             return Results.Ok(await svc.SodViolationsAsync(AdminContracts.Actor(gate.Principal!), t, ct));
         });
     }

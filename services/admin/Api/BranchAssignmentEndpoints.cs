@@ -19,8 +19,9 @@ public static class BranchAssignmentEndpoints
             var denied = await gate.CheckAsync(AdminPolicies.GrantRole, ct);
             if (denied is not null) return denied;
             var p = gate.Principal!;
-            var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return ProblemResults.Invalid("no-tenant");
+            var scope = gate.BindTenant(req.Tenant);
+            if (!scope.IsAllowed) return scope.ToProblem();
+            var tenant = scope.Tenant!;
             if (!Enum.TryParse<BranchAssignmentType>(req.AssignmentType, out var type))
                 return ProblemResults.Invalid("unknown-assignment-type");
 
@@ -36,8 +37,9 @@ public static class BranchAssignmentEndpoints
             var denied = await gate.CheckAsync(AdminPolicies.RevokeRole, ct);
             if (denied is not null) return denied;
             var p = gate.Principal!;
-            var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return ProblemResults.Invalid("no-tenant");
+            var scope = gate.BindTenant(req.Tenant);
+            if (!scope.IsAllowed) return scope.ToProblem();
+            var tenant = scope.Tenant!;
 
             var ok = await svc.RevokeAsync(AdminContracts.Actor(p), tenant, req.AssignmentId, ct);
             return ok ? Results.NoContent() : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
@@ -48,8 +50,9 @@ public static class BranchAssignmentEndpoints
         {
             var denied = await gate.CheckAsync(AdminPolicies.ReadAccess, ct);
             if (denied is not null) return denied;
-            var t = AdminContracts.ResolveTenant(gate.Principal!, tenant);
-            if (t is null) return ProblemResults.Invalid("no-tenant");
+            var scope = gate.BindTenant(tenant);
+            if (!scope.IsAllowed) return scope.ToProblem();
+            var t = scope.Tenant!;
             var rows = await svc.ListAsync(t, subject, ct);
             return Results.Ok(rows.Select(BranchAssignmentView.Of));
         });

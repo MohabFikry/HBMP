@@ -11,12 +11,14 @@
 # Connection comes from standard libpq env vars (PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE); the user
 # must own/superuse the target so CREATE ROLE / CREATE EXTENSION succeed.
 #
-#   HBMP_APP_PASSWORD — password to set on the hbmp_app role (default: a dev value).
+#   HBMP_APP_PASSWORD   — password to set on the hbmp_app role (default: a dev value).
+#   HBMP_AUDIT_PASSWORD — password for hbmp_audit, audit-service's own login role (18.B2).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 : "${PGDATABASE:=hbmp}"
 : "${HBMP_APP_PASSWORD:=app_dev_ci_password}"
+: "${HBMP_AUDIT_PASSWORD:=audit_dev_ci_password}"
 export PGDATABASE
 
 run() { psql -v ON_ERROR_STOP=1 -q "$@"; }
@@ -28,6 +30,16 @@ run -c "DO \$\$ BEGIN
   END IF;
 END \$\$;"
 run -c "ALTER ROLE hbmp_app PASSWORD '${HBMP_APP_PASSWORD}';"
+
+# 18.B2 — audit-service gets its own login role rather than hbmp_app, so the twenty services that share
+# hbmp_app cannot read the audit trail. audit 0002 grants it membership in hbmp_audit_writer.
+echo "==> Provisioning hbmp_audit runtime role (idempotent, NOBYPASSRLS)…"
+run -c "DO \$\$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='hbmp_audit') THEN
+    CREATE ROLE hbmp_audit LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+  END IF;
+END \$\$;"
+run -c "ALTER ROLE hbmp_audit PASSWORD '${HBMP_AUDIT_PASSWORD}';"
 
 total=0
 for mig_dir in services/*/Infrastructure/Migrations; do

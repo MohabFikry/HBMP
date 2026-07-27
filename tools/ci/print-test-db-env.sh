@@ -20,7 +20,9 @@ for s in ADMIN APPROVALS CALLCENTRE CASE CLAIMS ELIGIBILITY EMR FINANCE INTEROP 
   echo "${s}_TEST_DB=${owner}"
 done
 # Two-role RLS isolation suites (owner seeds/cleans; hbmp_app is the role under test).
-for s in APPROVALS CASE DOCUMENT ELIGIBILITY EMR FINANCE NOTIFICATION ORDERS PATIENT PHARMACY POLICY PROVIDER REPORTING; do
+# 18.B2 added ADMIN, CALLCENTRE, CLAIMS and INTEROP — the four services that gained a binder + a
+# fail-closed policy set in the same commit their connection string left the superuser.
+for s in ADMIN APPROVALS CALLCENTRE CASE CLAIMS DOCUMENT ELIGIBILITY EMR FINANCE INTEROP NOTIFICATION ORDERS PATIENT PHARMACY POLICY PROVIDER REPORTING; do
   echo "${s}_TEST_DB_OWNER=${owner}"
   echo "${s}_TEST_DB_APP=${app}"
 done

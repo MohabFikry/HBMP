@@ -63,7 +63,8 @@ v1.MapPost("/policies", async (CreatePolicy req, PolicyDbContext db, IAuditClien
     db.Policies.Add(p);
     await db.SaveChangesAsync(ct);
     await audit.EmitAsync(new AuditEventDraft { EntityType = "policy", EntityId = p.PolicyId.ToString(), Action = AuditAction.Create, ActorUserId = me.Principal?.Subject }, ct);
-    await outbox.EnqueueAsync("PolicyChanged", "policy.events", new { policyId = p.PolicyId, p.PolicyNo, status = p.Status.ToString() }, ct);
+    await outbox.EnqueueAsync("PolicyChanged", "policy.events", // 18.B2 — tenant on the envelope: eligibility binds its RLS GUC from here.
+        new { tenantId = p.TenantId, policyId = p.PolicyId, p.PolicyNo, status = p.Status.ToString() }, ct);
     return Results.Created($"/api/v1/policies/{p.PolicyId}", new { p.PolicyId, p.PolicyNo });
 });
 
@@ -99,13 +100,14 @@ v1.MapPost("/policies/{policyId:guid}/coverages", async (Guid policyId, CreateCo
     await audit.EmitAsync(new AuditEventDraft { EntityType = "coverage", EntityId = cov.CoverageId.ToString(), Action = AuditAction.Create, ActorUserId = me.Principal?.Subject, FieldClasses = ["coverage"] }, ct);
     await outbox.EnqueueAsync("CoverageChanged", "policy.events", new
     {
+        tenantId = cov.TenantId,
         coverageId = cov.CoverageId, beneficiaryId = cov.BeneficiaryId, category = cat.Code,
         status = cov.Status.ToString(), policyNo = policy.PolicyNo,
         effectiveFrom = cov.EffectiveFrom, effectiveTo = cov.EffectiveTo,
         limits = cov.Limits.Select(l => new { limitType = l.LimitType.ToString(), l.LimitValue, l.ConsumedValue }),
     }, ct);
     foreach (var l in cov.Limits)
-        await outbox.EnqueueAsync("CoverageLimitChanged", "policy.events", new { coverageLimitId = l.CoverageLimitId, cov.CoverageId, l.LimitType, l.LimitValue, remaining = l.Remaining }, ct);
+        await outbox.EnqueueAsync("CoverageLimitChanged", "policy.events", new { tenantId = cov.TenantId, coverageLimitId = l.CoverageLimitId, cov.CoverageId, l.LimitType, l.LimitValue, remaining = l.Remaining }, ct);
 
     return Results.Created($"/api/v1/coverages/{cov.CoverageId}", new { cov.CoverageId, remaining = cov.Limits.Select(l => new { l.LimitType, l.Remaining }) });
 });
@@ -134,7 +136,7 @@ v1.MapPost("/coverage-limits/reset-run", async (PolicyDbContext db, IAuditClient
         {
             reset++;
             await audit.EmitAsync(new AuditEventDraft { EntityType = "coverage_limit", EntityId = l.CoverageLimitId.ToString(), Action = AuditAction.StateChange, DecisionOutcome = "reset", FieldClasses = ["coverage"] }, ct);
-            await outbox.EnqueueAsync("CoverageLimitChanged", "policy.events", new { coverageLimitId = l.CoverageLimitId, reset = true, remaining = l.Remaining }, ct);
+            await outbox.EnqueueAsync("CoverageLimitChanged", "policy.events", new { tenantId = l.TenantId, coverageLimitId = l.CoverageLimitId, reset = true, remaining = l.Remaining }, ct);
         }
     }
     await db.SaveChangesAsync(ct);

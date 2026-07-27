@@ -26,9 +26,11 @@ Mark `✅ YYYY-MM-DD` per id here **and** on the finding row in `AUDIT-R2-E2E.md
 |---|---|---|---|
 | 18.B1 | X4 | MinIO PHI-bucket credential committed in `document/Api/appsettings.json` | ✅ 2026-07-27 (+ WORM bucket, found by the new rule) |
 | 18.B1 | X5 | identity m2m secret defaults to a public literal, all scopes, unrotatable | ✅ 2026-07-27 |
-| 18.B2 | X6 | RLS deny-all trap armed in claims, callcentre, admin | ☐ |
-| 18.B2 | S1 | provider-service still connects as superuser | ☐ |
-| 18.B2 | S2 | interop RLS policy is fail-**open**; GUC never bound | ☐ |
+| 18.B2 | X6 | RLS deny-all trap armed in claims, callcentre, admin | ✅ 2026-07-27 |
+| 18.B2 | S1 | provider-service still connects as superuser | ✅ 2026-07-27 (all 7 superuser connections flipped) |
+| 18.B2 | S2 | interop RLS policy is fail-**open**; GUC never bound | ✅ 2026-07-27 (+ admin's 4 migrations, same shape, not in the audit) |
+| 18.B2 | — | *(found)* eligibility stamped a hardcoded `SoleTenantId` on the projection write path | ✅ 2026-07-27 (tenant from envelope; 28 publishers enriched) |
+| 18.B2 | — | *(found)* admin write paths silently substituted the caller's tenant for a mismatched body tenant | ✅ 2026-07-27 (403, not a redirected write) |
 | 18.B3 | S3 | Admin privileged groups un-gated at the framework (no MFA on role grants) | ☐ |
 | 18.B3 | S4 | CSRF on issuer cookie POSTs incl. `POST /connect/enroll-2fa` | ☐ |
 | 18.B3 | S5 | Token scope grant fails open to the user's full entitlement | ☐ |

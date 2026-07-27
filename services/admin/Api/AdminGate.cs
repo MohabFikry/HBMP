@@ -1,5 +1,6 @@
 using Mersal.Auth;
 using Mersal.Authz;
+using Mersal.Data;
 
 namespace Mersal.Admin.Api;
 
@@ -10,9 +11,27 @@ namespace Mersal.Admin.Api;
 /// so the engine audits the allow (grants, revocations, config changes, review decisions, and access-matrix reads).
 /// Returns a ready 401/403 when denied, else null.
 /// </summary>
-public sealed class AdminGate(IHbmpPrincipalAccessor me, IAuthorizationEngine engine)
+public sealed class AdminGate(IHbmpPrincipalAccessor me, IAuthorizationEngine engine, RlsContext rls)
 {
     public HbmpPrincipal? Principal => me.Principal;
+
+    /// <summary>
+    /// 18.B2 — resolve the target tenant for this action AND bind it to the RLS session, in that order.
+    ///
+    /// Binding matters now that admin-service connects as the NOBYPASSRLS <c>hbmp_app</c> role. The
+    /// <c>UseHbmpRls</c> middleware binds the GUC from the principal, which is right for every ordinary
+    /// caller; a Super Admin acting ON ANOTHER TENANT would then write rows that its own session cannot see
+    /// and that the target tenant's policy rejects. So a legitimate cross-tenant action re-binds the GUC to
+    /// the tenant it was authorised for, and an illegitimate one never reaches the database at all.
+    /// </summary>
+    public TenantResolution BindTenant(string? requested)
+    {
+        var p = me.Principal;
+        if (p is null) return TenantResolution.Denied("no-tenant");
+        var resolution = AdminContracts.ResolveTenantOrDeny(p, requested);
+        if (resolution.IsAllowed) rls.TenantId = resolution.Tenant!;
+        return resolution;
+    }
 
     public async Task<IResult?> CheckAsync(string action, CancellationToken ct)
     {

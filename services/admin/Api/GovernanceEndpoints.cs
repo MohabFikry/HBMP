@@ -87,8 +87,9 @@ public static class GovernanceEndpoints
             var denied = await gate.CheckAsync(AdminPolicies.EditTemplate, ct);
             if (denied is not null) return denied;
             var p = gate.Principal!;
-            var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return ProblemResults.Invalid("no-tenant");
+            var scope = gate.BindTenant(req.Tenant);
+            if (!scope.IsAllowed) return scope.ToProblem();
+            var tenant = scope.Tenant!;
 
             var result = await svc.SaveTemplateAsync(AdminContracts.Actor(p), tenant, req.TemplateKey, req.Channel,
                 req.SubjectEn, req.SubjectAr, req.BodyEn, req.BodyAr, ct);
@@ -104,8 +105,9 @@ public static class GovernanceEndpoints
             var denied = await gate.CheckAsync(AdminPolicies.EditConfig, ct);
             if (denied is not null) return denied;
             var p = gate.Principal!;
-            var tenant = AdminContracts.ResolveTenant(p, req.Tenant);
-            if (tenant is null) return ProblemResults.Invalid("no-tenant");
+            var scope = gate.BindTenant(req.Tenant);
+            if (!scope.IsAllowed) return scope.ToProblem();
+            var tenant = scope.Tenant!;
             if (!req.TypeValid) return ProblemResults.Invalid("unknown-value-type");
 
             var (ok, error, config) = await svc.SetConfigAsync(AdminContracts.Actor(p), tenant, req.Key, req.TypeEnum, req.Value, ct);

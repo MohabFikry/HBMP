@@ -59,7 +59,7 @@ services:
     <<: *restart
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Identity: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__Identity: "Host=postgres;Database=hbmp;Username=hbmp_app;Password=${HBMP_APP_PASSWORD}"
       Issuer__WebRedirectUri: "http://localhost:5173/"
       Issuer__WebPostLogoutUri: "http://localhost:5173/"
       Issuer__ServiceClientSecret: "${IDENTITY_SERVICE_SECRET}"
@@ -268,7 +268,7 @@ services:
     <<: *restart
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Audit: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__Audit: "Host=postgres;Database=hbmp;Username=hbmp_audit;Password=${HBMP_AUDIT_PASSWORD}"
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
@@ -297,7 +297,7 @@ services:
     <<: *restart
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__MasterData: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__MasterData: "Host=postgres;Database=hbmp;Username=hbmp_app;Password=${HBMP_APP_PASSWORD}"
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
@@ -422,7 +422,7 @@ services:
     <<: *restart
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Provider: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__Provider: "Host=postgres;Database=hbmp;Username=hbmp_app;Password=${HBMP_APP_PASSWORD}"
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
@@ -543,7 +543,7 @@ services:
     <<: *restart
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Admin: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__Admin: "Host=postgres;Database=hbmp;Username=hbmp_app;Password=${HBMP_APP_PASSWORD}"
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
@@ -603,7 +603,7 @@ services:
     <<: *restart
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Claims: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__Claims: "Host=postgres;Database=hbmp;Username=hbmp_app;Password=${HBMP_APP_PASSWORD}"
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
@@ -624,7 +624,7 @@ services:
     <<: *restart
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__CallCentre: "Host=postgres;Database=hbmp;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__CallCentre: "Host=postgres;Database=hbmp;Username=hbmp_app;Password=${HBMP_APP_PASSWORD}"
       Auth__Authority: "http://identity-service:8080"
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"

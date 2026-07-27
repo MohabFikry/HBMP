@@ -97,13 +97,13 @@ public static class OrdersEndpoints
 
             // Outbox events in the same transaction as the state change (consumers dedupe on event id).
             await outbox.EnqueueAsync("OrderCreated", "orders.events",
-                new { orderId = order.OrderId, order.OrderNo, beneficiaryId = order.BeneficiaryId, orderType = order.OrderType.ToString() }, ct);
+                new { tenantId = order.TenantId, orderId = order.OrderId, order.OrderNo, beneficiaryId = order.BeneficiaryId, orderType = order.OrderType.ToString() }, ct);
             if (route.RouteToApproval)
                 await outbox.EnqueueAsync("OrderPendingApproval", "orders.events",
-                    new { orderId = order.OrderId, order.OrderNo, reason = route.Reason }, ct);
+                    new { tenantId = order.TenantId, orderId = order.OrderId, order.OrderNo, reason = route.Reason }, ct);
             else
                 await outbox.EnqueueAsync("OrderActivated", "orders.events",
-                    new { orderId = order.OrderId, order.OrderNo }, ct);
+                    new { tenantId = order.TenantId, orderId = order.OrderId, order.OrderNo }, ct);
             await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
@@ -160,7 +160,7 @@ public static class OrdersEndpoints
             order.Status = OrderStatus.Cancelled;
             foreach (var l in order.Lines.Where(l => l.Status == OrderLineStatus.Active)) l.Status = OrderLineStatus.Cancelled;
             await db.SaveChangesAsync(ct);
-            await outbox.EnqueueAsync("OrderCancelled", "orders.events", new { orderId = order.OrderId, reason = req.Reason }, ct);
+            await outbox.EnqueueAsync("OrderCancelled", "orders.events", new { tenantId = order.TenantId, orderId = order.OrderId, reason = req.Reason }, ct);
             await audit.EmitAsync(new AuditEventDraft
             {
                 EntityType = "investigation_order", EntityId = order.OrderId.ToString(), Action = AuditAction.StateChange,

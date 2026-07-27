@@ -118,7 +118,7 @@ public static class DispensingEndpoints
 
             var lineHead = await db.PrescriptionLines.AsNoTracking()
                 .Where(l => l.PrescriptionLineId == lineId && l.PrescriptionId == rxId)
-                .Select(l => new { l.DrugId }).FirstOrDefaultAsync(ct);
+                .Select(l => new { l.DrugId, l.TenantId }).FirstOrDefaultAsync(ct);
             if (lineHead is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var bearer = http.Headers.Authorization.ToString();
@@ -130,7 +130,7 @@ public static class DispensingEndpoints
                 if (!SubstitutionPolicy.IsApproved(lineHead.DrugId, sub, approved))
                 {
                     await outbox.EnqueueAsync("RxSubstitutionRoutedToApproval", "pharmacy.events",
-                        new { prescriptionId = rxId, prescriptionLineId = lineId, prescribedDrugId = lineHead.DrugId, requestedDrugId = sub }, ct);
+                        new { tenantId = lineHead.TenantId, prescriptionId = rxId, prescriptionLineId = lineId, prescribedDrugId = lineHead.DrugId, requestedDrugId = sub }, ct);
                     await audit.EmitAsync(new AuditEventDraft
                     {
                         EntityType = "prescription_line", EntityId = lineId.ToString(), Action = AuditAction.Decision,
@@ -165,7 +165,7 @@ public static class DispensingEndpoints
                             idempotencyKey = idem,
                         }, c);
                     if (rx.Status == RxStatus.Dispensed)
-                        await outbox.EnqueueAsync("RxDispensed", "pharmacy.events", new { prescriptionId = rxId, rx.RxNo }, c);
+                        await outbox.EnqueueAsync("RxDispensed", "pharmacy.events", new { tenantId = rx.TenantId, prescriptionId = rxId, rx.RxNo }, c);
                 }, ct);
 
             switch (result.Outcome)
@@ -233,7 +233,7 @@ public static class DispensingEndpoints
             // No accumulator change — the line stays available for backorder / a later visit. Notify + audit only.
             await outbox.EnqueueAsync("RxLineOutOfStock", "pharmacy.events", new
             {
-                prescriptionId = rxId, prescriptionLineId = lineId, beneficiaryId = rx.BeneficiaryId,
+                tenantId = rx.TenantId, prescriptionId = rxId, prescriptionLineId = lineId, beneficiaryId = rx.BeneficiaryId,
                 prescriberId = rx.PrescriberId, drugId = line.DrugId, quantity = req.Quantity ?? line.QuantityRemaining,
                 note = req.Note,
             }, ct);

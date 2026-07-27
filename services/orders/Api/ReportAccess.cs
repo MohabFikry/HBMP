@@ -40,7 +40,7 @@ public static class ReportAccessEndpoints
             await db.SaveChangesAsync(ct);
             await audit.EmitAsync(Draft(r.RequestId, AuditAction.Create, me, order.BeneficiaryId, "ReportAccessRequested", purpose.ToString(), AuditSeverity.Notice), ct);
             await outbox.EnqueueAsync("ReportAccessRequested", "orders.events",
-                new { r.RequestId, r.OrderLineId, orderingProviderId = order.OrderingProviderId, purposeCode = purpose.ToString() }, ct);
+                new { tenantId = r.TenantId, r.RequestId, r.OrderLineId, orderingProviderId = order.OrderingProviderId, purposeCode = purpose.ToString() }, ct);
             return Results.Created($"/api/v1/report-access-requests/{r.RequestId}", new { r.RequestId, status = r.Status.ToString() });
         });
 
@@ -87,7 +87,7 @@ public static class ReportAccessEndpoints
                     db.ReportAccessGrants.Add(grant);
                     await db.SaveChangesAsync(ct);
                     await audit.EmitAsync(Draft(r.RequestId, AuditAction.Decision, me, r.BeneficiaryId, "ReportAccessApproved", r.DecidedByRole, severity), ct);
-                    await outbox.EnqueueAsync("ReportAccessApproved", "orders.events", new { r.RequestId, grant.GrantId, grant.GranteeUserId, grant.OrderLineId, grant.ExpiresAt, decidedByRole = r.DecidedByRole }, ct);
+                    await outbox.EnqueueAsync("ReportAccessApproved", "orders.events", new { tenantId = r.TenantId, r.RequestId, grant.GrantId, grant.GranteeUserId, grant.OrderLineId, grant.ExpiresAt, decidedByRole = r.DecidedByRole }, ct);
                     return Results.Ok(new { r.RequestId, status = r.Status.ToString(), grant.GrantId, grant.ExpiresAt });
 
                 case "deny":
@@ -95,13 +95,13 @@ public static class ReportAccessEndpoints
                     r.Status = ReportAccessStatus.Denied; r.DecisionReason = dec.Reason;
                     await db.SaveChangesAsync(ct);
                     await audit.EmitAsync(Draft(r.RequestId, AuditAction.Decision, me, r.BeneficiaryId, "ReportAccessDenied", r.DecidedByRole, severity), ct);
-                    await outbox.EnqueueAsync("ReportAccessDenied", "orders.events", new { r.RequestId, reason = dec.Reason, decidedByRole = r.DecidedByRole }, ct);
+                    await outbox.EnqueueAsync("ReportAccessDenied", "orders.events", new { tenantId = r.TenantId, r.RequestId, reason = dec.Reason, decidedByRole = r.DecidedByRole }, ct);
                     return Results.Ok(new { r.RequestId, status = r.Status.ToString() });
 
                 case "requestinfo":
                     r.Status = ReportAccessStatus.InfoRequested; r.DecisionReason = dec.Reason;
                     await db.SaveChangesAsync(ct);
-                    await outbox.EnqueueAsync("ReportAccessInfoRequested", "orders.events", new { r.RequestId, note = dec.Reason }, ct);
+                    await outbox.EnqueueAsync("ReportAccessInfoRequested", "orders.events", new { tenantId = r.TenantId, r.RequestId, note = dec.Reason }, ct);
                     return Results.Ok(new { r.RequestId, status = r.Status.ToString() });
 
                 default:
@@ -159,7 +159,7 @@ public static class ReportAccessEndpoints
             r.Status = ReportAccessStatus.UnderReview;
             await db.SaveChangesAsync(ct);
             await audit.EmitAsync(Draft(r.RequestId, AuditAction.Update, me, r.BeneficiaryId, "ReportAccessInfoSupplied", null, AuditSeverity.Notice), ct);
-            await outbox.EnqueueAsync("ReportAccessInfoSupplied", "orders.events", new { r.RequestId }, ct);
+            await outbox.EnqueueAsync("ReportAccessInfoSupplied", "orders.events", new { tenantId = r.TenantId, r.RequestId }, ct);
             return Results.Ok(new { r.RequestId, status = r.Status.ToString() });
         });
 
@@ -174,7 +174,7 @@ public static class ReportAccessEndpoints
             await MoveRequestWithGrantAsync(db, g.RequestId, ReportAccessStatus.Revoked, ct);
             await db.SaveChangesAsync(ct);
             await audit.EmitAsync(Draft(g.GrantId, AuditAction.StateChange, me, Guid.Empty, "ReportAccessGrantRevoked", null, AuditSeverity.High), ct);
-            await outbox.EnqueueAsync("ReportAccessGrantRevoked", "orders.events", new { g.GrantId, g.OrderLineId, revokedBy = g.RevokedBy }, ct);
+            await outbox.EnqueueAsync("ReportAccessGrantRevoked", "orders.events", new { tenantId = g.TenantId, g.GrantId, g.OrderLineId, revokedBy = g.RevokedBy }, ct);
             return Results.NoContent();
         });
 
@@ -187,7 +187,7 @@ public static class ReportAccessEndpoints
             {
                 g.RevokedAt = now; g.RevokedBy = "system:expiry";
                 await MoveRequestWithGrantAsync(db, g.RequestId, ReportAccessStatus.Expired, ct);   // 18.A4
-                await outbox.EnqueueAsync("ReportAccessGrantExpired", "orders.events", new { g.GrantId, g.OrderLineId }, ct);
+                await outbox.EnqueueAsync("ReportAccessGrantExpired", "orders.events", new { tenantId = g.TenantId, g.GrantId, g.OrderLineId }, ct);
             }
             await db.SaveChangesAsync(ct);
             return Results.Ok(new { expired = due.Count });

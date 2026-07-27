@@ -4,6 +4,7 @@ using Mersal.Auth;
 using Mersal.Authz;
 using Mersal.Claims.Api;
 using Mersal.Claims.Infrastructure;
+using Mersal.Data;
 using Mersal.Events;
 using Mersal.Time;
 using OpenTelemetry.Resources;
@@ -46,6 +47,7 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseHbmpRls(); // 18.B2 — bind app.tenant_id / app.provider_id from the principal (RLS, ADR-0011)
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "claims-service" })).AllowAnonymous();

@@ -86,6 +86,9 @@ v1.MapPost("", async (
             await outbox.EnqueueAsync("BeneficiaryRegistered", "patient.events",
                 new
                 {
+                    // 18.B2 — the envelope carries its tenant so downstream projections bind RLS from the
+                    // event instead of assuming the sole tenant.
+                    tenantId = created.Beneficiary.TenantId,
                     beneficiaryId = created.Beneficiary.BeneficiaryId,
                     status = "Pending",
                     givenName = created.Beneficiary.GivenName,
@@ -201,7 +204,7 @@ reg.MapPost("/{id:guid}/decision", async (Guid id, DecisionRequest req, PatientD
         });
         await db.SaveChangesAsync(ct);
         await audit.EmitAsync(new AuditEventDraft { EntityType = "beneficiary", EntityId = beneficiary.BeneficiaryId.ToString(), Action = AuditAction.StateChange, ActorUserId = actor, DecisionOutcome = "Activated", AfterState = $"{{\"memberNo\":\"{memberNo}\"}}" }, ct);
-        await outbox.EnqueueAsync("BeneficiaryActivated", "patient.events", new { beneficiaryId = beneficiary.BeneficiaryId, memberNo, givenName = beneficiary.GivenName, familyName = beneficiary.FamilyName }, ct);
+        await outbox.EnqueueAsync("BeneficiaryActivated", "patient.events", new { tenantId = beneficiary.TenantId, beneficiaryId = beneficiary.BeneficiaryId, memberNo, givenName = beneficiary.GivenName, familyName = beneficiary.FamilyName }, ct);
         return Results.Ok(new { r.RegistrationId, status = r.Status.ToString(), beneficiary.BeneficiaryId, memberNo });
     }
 
@@ -228,7 +231,7 @@ v1.MapPost("/{id:guid}/status", async (Guid id, StatusChange req, PatientDbConte
     b.Status = to; b.UpdatedBy = me.Principal?.Subject; b.UpdatedAt = clock.GetUtcNow();
     await db.SaveChangesAsync(ct);
     await audit.EmitAsync(new AuditEventDraft { EntityType = "beneficiary", EntityId = id.ToString(), Action = AuditAction.StateChange, ActorUserId = me.Principal?.Subject, BeforeState = $"{{\"status\":\"{from}\"}}", AfterState = $"{{\"status\":\"{to}\"}}", DecisionReasonCode = req.Reason }, ct);
-    await outbox.EnqueueAsync("BeneficiaryStatusChanged", "patient.events", new { beneficiaryId = id, from = from.ToString(), to = to.ToString(), reason = req.Reason }, ct);
+    await outbox.EnqueueAsync("BeneficiaryStatusChanged", "patient.events", new { tenantId = b.TenantId, beneficiaryId = id, from = from.ToString(), to = to.ToString(), reason = req.Reason }, ct);
     return Results.Ok(new { beneficiaryId = id, from = from.ToString(), to = to.ToString() });
 }).RequireAuthorization(HbmpPolicies.Scope("patient:write"));
 

@@ -3,6 +3,7 @@ using Mersal.Auth;
 using Mersal.Authz;
 using Mersal.Interop.Api;
 using Mersal.Interop.Infrastructure;
+using Mersal.Data;
 using Mersal.Events;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -60,6 +61,7 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseHbmpRls(); // 18.B2 — bind app.tenant_id / app.provider_id from the principal (RLS, ADR-0011)
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "interop-service" })).AllowAnonymous();

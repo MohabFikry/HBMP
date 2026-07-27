@@ -54,7 +54,7 @@ public static class ReferralEndpoints
             db.Referrals.Add(referral);
             await db.SaveChangesAsync(ct);
             await outbox.EnqueueAsync("ReferralRequested", "pharmacy.events",
-                new { referralId = referral.ReferralId, referral.ReferralNo, referral.TargetSpecialty, beneficiaryId = referral.BeneficiaryId }, ct);
+                new { tenantId = referral.TenantId, referralId = referral.ReferralId, referral.ReferralNo, referral.TargetSpecialty, beneficiaryId = referral.BeneficiaryId }, ct);
             await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft

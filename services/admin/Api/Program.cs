@@ -2,6 +2,7 @@ using Mersal.Admin.Api;
 using Mersal.Admin.Infrastructure;
 using Mersal.Audit.Client;
 using Mersal.Auth;
+using Mersal.Data;
 using Mersal.Authz;
 using Mersal.Events;
 using Mersal.Time;
@@ -46,6 +47,7 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseHbmpRls(); // 18.B2 — bind app.tenant_id / app.provider_id from the principal (RLS, ADR-0011)
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "admin-service" })).AllowAnonymous();
