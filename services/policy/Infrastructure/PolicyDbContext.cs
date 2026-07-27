@@ -15,6 +15,11 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
     public DbSet<CoverageLimit> CoverageLimits => Set<CoverageLimit>();
     public DbSet<BenefitConsumptionRecord> BenefitConsumptions => Set<BenefitConsumptionRecord>();
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
+    // 19.1 — the PAS product layer (design 38 §3).
+    public DbSet<Payer> Payers => Set<Payer>();
+    public DbSet<Plan> Plans => Set<Plan>();
+    public DbSet<PlanVersion> PlanVersions => Set<PlanVersion>();
+    public DbSet<BenefitRule> BenefitRules => Set<BenefitRule>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -93,6 +98,95 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.MovedLimits).HasColumnName("moved_limits");
             e.Property(x => x.AppliedAt).HasColumnName("applied_at");
             e.HasIndex(x => x.SourceRef).IsUnique();
+        });
+
+        // ---- 19.1 PAS product layer -------------------------------------------------------------------
+        b.Entity<Payer>(e =>
+        {
+            e.ToTable("payer");
+            e.HasKey(x => x.PayerId);
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.PayerCode).HasColumnName("payer_code").IsRequired();
+            e.Property(x => x.NameEn).HasColumnName("name_en").IsRequired();
+            e.Property(x => x.NameAr).HasColumnName("name_ar").IsRequired();
+            e.Property(x => x.PayerType).HasConversion<string>().HasColumnName("payer_type");
+            e.Property(x => x.Contact).HasColumnName("contact").HasColumnType("jsonb");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
+            e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.CreatedBy).HasColumnName("created_by");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        b.Entity<Plan>(e =>
+        {
+            e.ToTable("plan");
+            e.HasKey(x => x.PlanId);
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.PlanCode).HasColumnName("plan_code").IsRequired();
+            e.Property(x => x.NameEn).HasColumnName("name_en").IsRequired();
+            e.Property(x => x.NameAr).HasColumnName("name_ar").IsRequired();
+            e.Property(x => x.Description).HasColumnName("description");
+            e.Property(x => x.Category).HasColumnName("category").IsRequired();
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
+            e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.CreatedBy).HasColumnName("created_by");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        b.Entity<PlanVersion>(e =>
+        {
+            e.ToTable("plan_version");
+            e.HasKey(x => x.PlanVersionId);
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.PlanId).HasColumnName("plan_id");
+            e.Property(x => x.VersionNo).HasColumnName("version_no");
+            e.Property(x => x.EffectiveFrom).HasColumnName("effective_from");
+            e.Property(x => x.EffectiveTo).HasColumnName("effective_to");
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.ActivatedBy).HasColumnName("activated_by");
+            e.Property(x => x.ActivatedAt).HasColumnName("activated_at");
+            e.Property(x => x.SupersededByVersionId).HasColumnName("superseded_by_version_id");
+            e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.CreatedBy).HasColumnName("created_by");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
+            e.HasMany(x => x.Rules).WithOne().HasForeignKey(r => r.PlanVersionId);
+            e.HasIndex(x => new { x.PlanId, x.VersionNo }).IsUnique();
+            e.Ignore(x => x.IsEditable);
+        });
+
+        b.Entity<BenefitRule>(e =>
+        {
+            e.ToTable("benefit_rule");
+            e.HasKey(x => x.RuleId);
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.PlanVersionId).HasColumnName("plan_version_id");
+            e.Property(x => x.BenefitCategoryId).HasColumnName("benefit_category_id");
+            e.Property(x => x.IsCovered).HasColumnName("is_covered");
+            e.Property(x => x.LimitType).HasConversion<string>().HasColumnName("limit_type");
+            e.Property(x => x.LimitValue).HasColumnName("limit_value").HasColumnType("numeric(14,2)");
+            e.Property(x => x.ResetPeriod).HasConversion<string>().HasColumnName("reset_period");
+            e.Property(x => x.CopayFixed).HasColumnName("copay_fixed").HasColumnType("numeric(14,2)");
+            e.Property(x => x.CopayPercent).HasColumnName("copay_percent").HasColumnType("numeric(5,2)");
+            e.Property(x => x.Deductible).HasColumnName("deductible").HasColumnType("numeric(14,2)");
+            e.Property(x => x.WaitingPeriodDays).HasColumnName("waiting_period_days");
+            e.Property(x => x.RequiresPreauth).HasColumnName("requires_preauth");
+            e.Property(x => x.PreauthCostThreshold).HasColumnName("preauth_cost_threshold").HasColumnType("numeric(14,2)");
+            e.Property(x => x.NetworkTier).HasColumnName("network_tier");
+            e.Property(x => x.Exclusions).HasColumnName("exclusions").HasColumnType("jsonb");
+            e.Property(x => x.Notes).HasColumnName("notes");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.CreatedBy).HasColumnName("created_by");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
+            e.HasIndex(x => new { x.PlanVersionId, x.BenefitCategoryId }).IsUnique();
         });
 
         b.Entity<ProcessedEvent>(e =>

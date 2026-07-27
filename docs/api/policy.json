@@ -106,10 +106,364 @@
           }
         }
       }
+    },
+    "/api/v1/payers": {
+      "post": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePayer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/payers/{id}": {
+      "get": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/plans": {
+      "post": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePlan"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/plans/{id}/version-at": {
+      "get": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/plans/{id}/amend": {
+      "post": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/plan-versions": {
+      "post": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePlanVersion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/plan-versions/{id}": {
+      "get": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/plans/{planId}/versions": {
+      "get": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/plan-versions/{id}/rules": {
+      "put": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetBenefitRules"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/plan-versions/{id}/validate": {
+      "post": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/plan-versions/{id}/activate": {
+      "post": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "BenefitRuleInput": {
+        "type": "object",
+        "properties": {
+          "benefitCategoryCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "isCovered": {
+            "type": "boolean"
+          },
+          "limitType": {
+            "type": "string",
+            "nullable": true
+          },
+          "limitValue": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "resetPeriod": {
+            "type": "string",
+            "nullable": true
+          },
+          "copayFixed": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "copayPercent": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "deductible": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "waitingPeriodDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "requiresPreauth": {
+            "type": "boolean"
+          },
+          "preauthCostThreshold": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "networkTier": {
+            "type": "string",
+            "nullable": true
+          },
+          "exclusions": {
+            "type": "string",
+            "nullable": true
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateCoverage": {
         "type": "object",
         "properties": {
@@ -162,6 +516,77 @@
         },
         "additionalProperties": false
       },
+      "CreatePayer": {
+        "type": "object",
+        "properties": {
+          "payerCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "payerType": {
+            "type": "string",
+            "nullable": true
+          },
+          "contact": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreatePlan": {
+        "type": "object",
+        "properties": {
+          "planCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "category": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreatePlanVersion": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date"
+          },
+          "effectiveTo": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "CreatePolicy": {
         "type": "object",
         "properties": {
@@ -180,6 +605,19 @@
           "effectiveTo": {
             "type": "string",
             "format": "date",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SetBenefitRules": {
+        "type": "object",
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BenefitRuleInput"
+            },
             "nullable": true
           }
         },

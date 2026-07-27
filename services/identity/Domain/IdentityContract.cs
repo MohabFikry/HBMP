@@ -31,7 +31,12 @@ public static class IdentityContract
         "case:read", "case:write", "case:manage",
         "finance:read", "finance:write", "finance:approve", "finance:export", "finance:project",
         "provider:read", "provider:write", "provider:finance",
-        "policy:write", "referral:write",
+        // 19.1 — the PAS split. policy:write already existed for MEMBER administration (enrol/terminate);
+        // authoring the benefit product that members are enrolled onto is a separate, far heavier authority
+        // (policy:admin), and policy:supervise is the supervisory increment (cancel another user's note,
+        // approve a retro-effective change). policy:read is broad because the benefit configuration is the
+        // vocabulary the whole platform adjudicates against — and it carries no PHI.
+        "policy:read", "policy:write", "policy:admin", "policy:supervise", "referral:write",
         "callcentre:read", "callcentre:act", "callcentre:interaction", "callcentre:verify",
         // 18.B3/18.E1: the claims AUTHORITIES. Phase 10b's policy rules required these and the vocabulary
         // never listed them, so no token could carry one and the entire claims decision surface denied.

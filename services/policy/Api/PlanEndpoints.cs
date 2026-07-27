@@ -1,0 +1,422 @@
+using Mersal.Audit.Client;
+using Mersal.Auth;
+using Mersal.Auth.Authorization;
+using Mersal.Authz;
+using Mersal.Events;
+using Mersal.Policy.Domain;
+using Mersal.Policy.Infrastructure;
+using Mersal.Time;
+using Microsoft.EntityFrameworkCore;
+
+namespace Mersal.Policy.Api;
+
+/// <summary>
+/// Phase 19.1 — payer / plan / effective-dated plan version + benefit configuration (design 38 §3, §4.1).
+///
+/// The lifecycle these endpoints implement is the whole point of the module: a version is authored as a
+/// <c>Draft</c> (freely editable), <b>validated</b>, then <b>activated</b> — at which moment it becomes the
+/// benefit configuration in force and can never be edited again. Changing a live plan is therefore not an
+/// update but an <b>amendment</b>: clone the active version into a new draft, edit that, activate it, and the
+/// predecessor closes at the successor's start date and becomes <c>Superseded</c>. Superseded versions are kept
+/// forever and stay resolvable, because a claim for care given last March must be judged by March's rules.
+/// </summary>
+public static class PlanEndpoints
+{
+    public static void MapPlanAdministration(this IEndpointRouteBuilder app)
+    {
+        // policy:read on the group; each write additionally requires policy:admin at the gate, so a reader can
+        // browse the configuration they are adjudicated against without being able to author it.
+        var v1 = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("policy:read"));
+
+        MapPayers(v1);
+        MapPlans(v1);
+        MapPlanVersions(v1);
+    }
+
+    // ---- Payers ------------------------------------------------------------------------------------------
+    private static void MapPayers(RouteGroupBuilder v1)
+    {
+        v1.MapPost("/payers", async (CreatePayer req, PolicyDbContext db, PolicyGate gate, IAuditClient audit,
+            IOutbox outbox, TimeProvider clock, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(PolicyPolicies.Admin, ct);
+            if (denied is not null) return denied;
+            if (!Enum.TryParse<PayerType>(req.PayerType, out var type))
+                return ProblemResults.Invalid("UNKNOWN_PAYER_TYPE", $"'{req.PayerType}' is not a payer type.");
+            if (string.IsNullOrWhiteSpace(req.PayerCode))
+                return ProblemResults.Invalid("PAYER_CODE_REQUIRED", "A payer code is required.");
+
+            var now = clock.GetUtcNow();
+            var payer = new Payer
+            {
+                PayerId = Guid.NewGuid(), PayerCode = req.PayerCode.Trim(),
+                NameEn = req.NameEn, NameAr = req.NameAr, PayerType = type,
+                Contact = req.Contact ?? "{}",
+                CreatedAt = now, UpdatedAt = now, CreatedBy = gate.SubjectId, UpdatedBy = gate.SubjectId,
+            };
+            db.Payers.Add(payer);
+            if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
+
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "payer", EntityId = payer.PayerId.ToString(),
+                Action = AuditAction.Create, ActorUserId = gate.Subject,
+            }, ct);
+            await outbox.EnqueueAsync("PayerCreated", "policy.events",
+                new { tenantId = payer.TenantId, payerId = payer.PayerId, payer.PayerCode, payerType = type.ToString() }, ct);
+            return Results.Created($"/api/v1/payers/{payer.PayerId}", PayerView.From(payer));
+        });
+
+        v1.MapGet("/payers", async (PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(PolicyPolicies.Read, ct);
+            if (denied is not null) return denied;
+            var rows = await db.Payers.AsNoTracking().Where(p => !p.IsDeleted)
+                .OrderBy(p => p.PayerCode).ToListAsync(ct);
+            return Results.Ok(rows.Select(PayerView.From));
+        });
+
+        v1.MapGet("/payers/{id:guid}", async (Guid id, PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(PolicyPolicies.Read, ct);
+            if (denied is not null) return denied;
+            var payer = await db.Payers.AsNoTracking().FirstOrDefaultAsync(p => p.PayerId == id && !p.IsDeleted, ct);
+            return payer is null ? NotFound() : Results.Ok(PayerView.From(payer));
+        });
+    }
+
+    // ---- Plans -------------------------------------------------------------------------------------------
+    private static void MapPlans(RouteGroupBuilder v1)
+    {
+        v1.MapPost("/plans", async (CreatePlan req, PolicyDbContext db, PolicyGate gate, IAuditClient audit,
+            TimeProvider clock, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(PolicyPolicies.Admin, ct);
+            if (denied is not null) return denied;
+            if (string.IsNullOrWhiteSpace(req.PlanCode))
+                return ProblemResults.Invalid("PLAN_CODE_REQUIRED", "A plan code is required.");
+
+            var now = clock.GetUtcNow();
+            var plan = new Plan
+            {
+                PlanId = Guid.NewGuid(), PlanCode = req.PlanCode.Trim(),
+                NameEn = req.NameEn, NameAr = req.NameAr, Description = req.Description,
+                Category = req.Category,
+                CreatedAt = now, UpdatedAt = now, CreatedBy = gate.SubjectId, UpdatedBy = gate.SubjectId,
+            };
+            db.Plans.Add(plan);
+            if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
+
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "plan", EntityId = plan.PlanId.ToString(),
+                Action = AuditAction.Create, ActorUserId = gate.Subject,
+            }, ct);
+            return Results.Created($"/api/v1/plans/{plan.PlanId}", PlanView.From(plan));
+        });
+
+        v1.MapGet("/plans", async (PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(PolicyPolicies.Read, ct);
+            if (denied is not null) return denied;
+            var rows = await db.Plans.AsNoTracking().Where(p => !p.IsDeleted).OrderBy(p => p.PlanCode).ToListAsync(ct);
+            return Results.Ok(rows.Select(PlanView.From));
+        });
+
+        // The resolver, exposed for eligibility / authorization / claims: the configuration in force on a
+        // SERVICE DATE. Consumers must call this rather than reading "the active version" (invariant 1).
+        v1.MapGet("/plans/{id:guid}/version-at", async (Guid id, DateOnly date, IPlanVersionResolver resolver,
+            PolicyGate gate, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(PolicyPolicies.Read, ct);
+            if (denied is not null) return denied;
+            var version = await resolver.ResolveAsync(id, date, ct);
+            return version is null
+                ? ProblemResults.Conflict("NO_VERSION_IN_FORCE", $"Plan {id} had no benefit configuration in force on {date:yyyy-MM-dd}.")
+                : Results.Ok(PlanVersionView.From(version));
+        });
+
+        // Amend = clone the version in force into a new Draft. This is the ONLY way to change a live plan.
+        v1.MapPost("/plans/{id:guid}/amend", async (Guid id, PolicyDbContext db, PolicyGate gate,
+            IAuditClient audit, TimeProvider clock, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(PolicyPolicies.Admin, ct);
+            if (denied is not null) return denied;
+
+            var active = await db.PlanVersions.AsNoTracking().Include(v => v.Rules)
+                .FirstOrDefaultAsync(v => v.PlanId == id && v.Status == PlanVersionStatus.Active, ct);
+            if (active is null)
+                return ProblemResults.Conflict("NO_ACTIVE_VERSION", "This plan has no Active version to amend.");
+
+            var existingDraft = await db.PlanVersions.AsNoTracking()
+                .AnyAsync(v => v.PlanId == id && v.Status == PlanVersionStatus.Draft, ct);
+            if (existingDraft)
+                return ProblemResults.Conflict("DRAFT_EXISTS", "This plan already has an open draft; edit or discard it first.");
+
+            var now = clock.GetUtcNow();
+            var nextNo = await db.PlanVersions.Where(v => v.PlanId == id).MaxAsync(v => (int?)v.VersionNo, ct) ?? 0;
+            var draft = new PlanVersion
+            {
+                PlanVersionId = Guid.NewGuid(), PlanId = id, VersionNo = nextNo + 1,
+                // The successor's window is open-ended and starts where the author later decides; seeding it at
+                // the predecessor's start would collide the moment it activates, so we seed "today" and let the
+                // author move it while it is still a draft.
+                EffectiveFrom = DateOnly.FromDateTime(now.UtcDateTime),
+                Status = PlanVersionStatus.Draft,
+                CreatedAt = now, UpdatedAt = now, CreatedBy = gate.SubjectId, UpdatedBy = gate.SubjectId,
+                Rules = [.. active.Rules.Select(r => CloneRule(r, now, gate.SubjectId))],
+            };
+            foreach (var rule in draft.Rules) rule.PlanVersionId = draft.PlanVersionId;
+            db.PlanVersions.Add(draft);
+            if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
+
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "plan_version", EntityId = draft.PlanVersionId.ToString(),
+                Action = AuditAction.Create, ActorUserId = gate.Subject, DecisionOutcome = "amend",
+            }, ct);
+            return Results.Created($"/api/v1/plan-versions/{draft.PlanVersionId}", PlanVersionView.From(draft));
+        });
+    }
+
+    // ---- Plan versions -----------------------------------------------------------------------------------
+    private static void MapPlanVersions(RouteGroupBuilder v1)
+    {
+        v1.MapPost("/plan-versions", async (CreatePlanVersion req, PolicyDbContext db, PolicyGate gate,
+            IAuditClient audit, TimeProvider clock, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(PolicyPolicies.Admin, ct);
+            if (denied is not null) return denied;
+            if (!await db.Plans.AnyAsync(p => p.PlanId == req.PlanId && !p.IsDeleted, ct))
+                return ProblemResults.Invalid("UNKNOWN_PLAN", $"Plan {req.PlanId} does not exist.");
+
+            var now = clock.GetUtcNow();
+            var nextNo = await db.PlanVersions.Where(v => v.PlanId == req.PlanId).MaxAsync(v => (int?)v.VersionNo, ct) ?? 0;
+            var version = new PlanVersion
+            {
+                PlanVersionId = Guid.NewGuid(), PlanId = req.PlanId, VersionNo = nextNo + 1,
+                EffectiveFrom = req.EffectiveFrom, EffectiveTo = req.EffectiveTo,
+                Status = PlanVersionStatus.Draft,
+                CreatedAt = now, UpdatedAt = now, CreatedBy = gate.SubjectId, UpdatedBy = gate.SubjectId,
+            };
+            db.PlanVersions.Add(version);
+            if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
+
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "plan_version", EntityId = version.PlanVersionId.ToString(),
+                Action = AuditAction.Create, ActorUserId = gate.Subject,
+            }, ct);
+            return Results.Created($"/api/v1/plan-versions/{version.PlanVersionId}", PlanVersionView.From(version));
+        });
+
+        v1.MapGet("/plan-versions/{id:guid}", async (Guid id, PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(PolicyPolicies.Read, ct);
+            if (denied is not null) return denied;
+            var version = await db.PlanVersions.AsNoTracking().Include(v => v.Rules)
+                .FirstOrDefaultAsync(v => v.PlanVersionId == id, ct);
+            return version is null ? NotFound() : Results.Ok(PlanVersionView.From(version));
+        });
+
+        v1.MapGet("/plans/{planId:guid}/versions", async (Guid planId, PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(PolicyPolicies.Read, ct);
+            if (denied is not null) return denied;
+            var rows = await db.PlanVersions.AsNoTracking().Include(v => v.Rules)
+                .Where(v => v.PlanId == planId).OrderByDescending(v => v.VersionNo).ToListAsync(ct);
+            return Results.Ok(rows.Select(PlanVersionView.From));
+        });
+
+        // Replace the draft's benefit configuration wholesale. A rule set is a unit — accepting partial edits
+        // would let an author activate a version they only half-reviewed.
+        v1.MapPut("/plan-versions/{id:guid}/rules", async (Guid id, SetBenefitRules req, PolicyDbContext db,
+            PolicyGate gate, IAuditClient audit, TimeProvider clock, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(PolicyPolicies.Admin, ct);
+            if (denied is not null) return denied;
+
+            var version = await db.PlanVersions.Include(v => v.Rules).FirstOrDefaultAsync(v => v.PlanVersionId == id, ct);
+            if (version is null) return NotFound();
+            if (!version.IsEditable)
+                return Immutable(version);
+
+            var categories = await db.BenefitCategories.AsNoTracking().ToDictionaryAsync(c => c.Code, c => c.BenefitCategoryId, ct);
+            var now = clock.GetUtcNow();
+            var replacement = new List<BenefitRule>();
+            foreach (var r in req.Rules)
+            {
+                if (!categories.TryGetValue(r.BenefitCategoryCode, out var categoryId))
+                    return ProblemResults.Invalid("UNKNOWN_BENEFIT_CATEGORY", $"'{r.BenefitCategoryCode}' is not a benefit category.");
+                if (r.LimitType is not null && !Enum.TryParse<LimitType>(r.LimitType, out _))
+                    return ProblemResults.Invalid("UNKNOWN_LIMIT_TYPE", $"'{r.LimitType}' is not a limit type.");
+                if (!Enum.TryParse<ResetPeriod>(r.ResetPeriod ?? "None", out var reset))
+                    return ProblemResults.Invalid("UNKNOWN_RESET_PERIOD", $"'{r.ResetPeriod}' is not a reset period.");
+
+                replacement.Add(new BenefitRule
+                {
+                    RuleId = Guid.NewGuid(), PlanVersionId = version.PlanVersionId, BenefitCategoryId = categoryId,
+                    IsCovered = r.IsCovered,
+                    LimitType = r.LimitType is null ? null : Enum.Parse<LimitType>(r.LimitType),
+                    LimitValue = r.LimitValue, ResetPeriod = reset,
+                    CopayFixed = r.CopayFixed, CopayPercent = r.CopayPercent, Deductible = r.Deductible,
+                    WaitingPeriodDays = r.WaitingPeriodDays, RequiresPreauth = r.RequiresPreauth,
+                    PreauthCostThreshold = r.PreauthCostThreshold, NetworkTier = r.NetworkTier,
+                    Exclusions = r.Exclusions ?? "[]", Notes = r.Notes,
+                    CreatedAt = now, UpdatedAt = now, CreatedBy = gate.SubjectId, UpdatedBy = gate.SubjectId,
+                });
+            }
+            if (replacement.Select(r => r.BenefitCategoryId).Distinct().Count() != replacement.Count)
+                return ProblemResults.Invalid("DUPLICATE_CATEGORY", "A benefit category may appear at most once in a version.");
+
+            db.BenefitRules.RemoveRange(version.Rules);
+            db.BenefitRules.AddRange(replacement);
+            version.UpdatedAt = now;
+            version.UpdatedBy = gate.SubjectId;
+            if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
+
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "plan_version", EntityId = version.PlanVersionId.ToString(),
+                Action = AuditAction.Update, ActorUserId = gate.Subject, DecisionOutcome = "rules-set",
+            }, ct);
+            var saved = await db.PlanVersions.AsNoTracking().Include(v => v.Rules)
+                .FirstAsync(v => v.PlanVersionId == id, ct);
+            return Results.Ok(PlanVersionView.From(saved));
+        });
+
+        // Dry run: exactly the checks activation applies, without the state change. Lets an author fix a plan
+        // before the irreversible step rather than discovering the problems through a 422.
+        v1.MapPost("/plan-versions/{id:guid}/validate", async (Guid id, PolicyDbContext db, PolicyGate gate,
+            IBusinessCalendar calendar, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(PolicyPolicies.Read, ct);
+            if (denied is not null) return denied;
+            var version = await db.PlanVersions.AsNoTracking().Include(v => v.Rules)
+                .FirstOrDefaultAsync(v => v.PlanVersionId == id, ct);
+            if (version is null) return NotFound();
+
+            var problems = PlanVersionValidation.Validate(version, calendar.Today());
+            return Results.Ok(new { valid = problems.Count == 0, problems });
+        });
+
+        v1.MapPost("/plan-versions/{id:guid}/activate", async (Guid id, PolicyDbContext db, PolicyGate gate,
+            IAuditClient audit, IOutbox outbox, IBusinessCalendar calendar, TimeProvider clock, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(PolicyPolicies.Admin, ct);
+            if (denied is not null) return denied;
+
+            var version = await db.PlanVersions.Include(v => v.Rules).FirstOrDefaultAsync(v => v.PlanVersionId == id, ct);
+            if (version is null) return NotFound();
+            if (version.Status != PlanVersionStatus.Draft)
+                return Immutable(version);
+
+            var problems = PlanVersionValidation.Validate(version, calendar.Today());
+            if (problems.Count > 0)
+                return ProblemResults.Unprocessable("PLAN_VERSION_INVALID",
+                    "This version cannot be activated.", new Dictionary<string, object?> { ["problems"] = problems });
+
+            var now = clock.GetUtcNow();
+            // Close the outgoing version at the incoming one's start date. Because the window is half-open the
+            // two abut exactly: [.., from) then [from, ..) — no gap for a service date to fall through, and no
+            // day covered twice (which the 0005 exclusion constraint would reject anyway).
+            var outgoing = await db.PlanVersions
+                .FirstOrDefaultAsync(v => v.PlanId == version.PlanId && v.Status == PlanVersionStatus.Active, ct);
+            if (outgoing is not null)
+            {
+                if (version.EffectiveFrom <= outgoing.EffectiveFrom)
+                    return ProblemResults.Unprocessable("STARTS_BEFORE_PREDECESSOR",
+                        $"This version starts on {version.EffectiveFrom:yyyy-MM-dd}, on or before the version it would supersede ({outgoing.EffectiveFrom:yyyy-MM-dd}).");
+                outgoing.EffectiveTo = version.EffectiveFrom;
+                outgoing.Status = PlanVersionStatus.Superseded;
+                outgoing.SupersededByVersionId = version.PlanVersionId;
+                outgoing.UpdatedAt = now;
+                outgoing.UpdatedBy = gate.SubjectId;
+            }
+
+            version.Status = PlanVersionStatus.Active;
+            version.ActivatedAt = now;
+            version.ActivatedBy = gate.SubjectId;
+            version.UpdatedAt = now;
+            version.UpdatedBy = gate.SubjectId;
+            if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
+
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "plan_version", EntityId = version.PlanVersionId.ToString(),
+                Action = AuditAction.StateChange, ActorUserId = gate.Subject, DecisionOutcome = "activated",
+            }, ct);
+            await outbox.EnqueueAsync("PlanVersionActivated", "policy.events", new
+            {
+                tenantId = version.TenantId, planId = version.PlanId, planVersionId = version.PlanVersionId,
+                version.VersionNo, effectiveFrom = version.EffectiveFrom, effectiveTo = version.EffectiveTo,
+            }, ct);
+            if (outgoing is not null)
+            {
+                await audit.EmitAsync(new AuditEventDraft
+                {
+                    EntityType = "plan_version", EntityId = outgoing.PlanVersionId.ToString(),
+                    Action = AuditAction.StateChange, ActorUserId = gate.Subject, DecisionOutcome = "superseded",
+                }, ct);
+                await outbox.EnqueueAsync("PlanVersionSuperseded", "policy.events", new
+                {
+                    tenantId = outgoing.TenantId, planId = outgoing.PlanId, planVersionId = outgoing.PlanVersionId,
+                    supersededBy = version.PlanVersionId, effectiveTo = outgoing.EffectiveTo,
+                }, ct);
+            }
+
+            var saved = await db.PlanVersions.AsNoTracking().Include(v => v.Rules)
+                .FirstAsync(v => v.PlanVersionId == id, ct);
+            return Results.Ok(PlanVersionView.From(saved));
+        });
+    }
+
+    // ---- helpers -----------------------------------------------------------------------------------------
+
+    private static BenefitRule CloneRule(BenefitRule source, DateTimeOffset now, Guid? actor) => new()
+    {
+        RuleId = Guid.NewGuid(),
+        BenefitCategoryId = source.BenefitCategoryId, IsCovered = source.IsCovered,
+        LimitType = source.LimitType, LimitValue = source.LimitValue, ResetPeriod = source.ResetPeriod,
+        CopayFixed = source.CopayFixed, CopayPercent = source.CopayPercent, Deductible = source.Deductible,
+        WaitingPeriodDays = source.WaitingPeriodDays, RequiresPreauth = source.RequiresPreauth,
+        PreauthCostThreshold = source.PreauthCostThreshold, NetworkTier = source.NetworkTier,
+        Exclusions = source.Exclusions, Notes = source.Notes,
+        CreatedAt = now, UpdatedAt = now, CreatedBy = actor, UpdatedBy = actor,
+    };
+
+    private static IResult NotFound() =>
+        Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+    /// <summary>The 409 an activated version answers every write with. The database refuses it too (0005
+    /// triggers) — this is the polite half of the same rule.</summary>
+    private static IResult Immutable(PlanVersion version) =>
+        ProblemResults.Conflict("PLAN_VERSION_IMMUTABLE",
+            $"Version {version.VersionNo} is {version.Status} and immutable. Amend the plan to create a new version.");
+
+    /// <summary>Translate the database's own invariants into the API's vocabulary. A unique-key clash and an
+    /// overlapping effective range are both legitimate client errors, not 500s — and the immutability triggers
+    /// raise here too, for any path that reached the DB without going through <see cref="Immutable"/>.</summary>
+    private static async Task<IResult?> SaveOrConflict(PolicyDbContext db, CancellationToken ct)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return null;
+        }
+        // Only the states we can explain are translated; anything else keeps its stack and becomes a 500, because
+        // a database error we have not reasoned about is not something to report to a client as their mistake.
+        catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException pg
+                                           && pg.SqlState is "23505" or "23P01" or "P0001")
+        {
+            var pgEx = (Npgsql.PostgresException)ex.InnerException!;
+            return pgEx.SqlState switch
+            {
+                "23505" => ProblemResults.Conflict("DUPLICATE_KEY", "A record with this code or version already exists."),
+                "23P01" => ProblemResults.Conflict("OVERLAPPING_VERSION",
+                    "Another version of this plan already covers part of that effective range."),
+                _ => ProblemResults.Conflict("PLAN_VERSION_IMMUTABLE", pgEx.MessageText),
+            };
+        }
+    }
+}

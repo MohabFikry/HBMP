@@ -75,7 +75,8 @@ auth:read auth:review auth:decide auth:emergency auth:override auth:manual auth:
 reception:search  emr:read emr:write encounter:write rx:write patient:write  eligibility:check
 appointment:read appointment:write  document:write  case:read case:write case:manage
 finance:read finance:write finance:approve finance:export finance:project provider:finance
-provider:read provider:write policy:write referral:write
+provider:read provider:write referral:write
+policy:read policy:write policy:admin policy:supervise
 callcentre:read callcentre:act callcentre:interaction callcentre:verify
 claims:read claims:reconcile claims:export  reporting:read reporting:project reporting:export
 notification:read notification:ingest  audit:read

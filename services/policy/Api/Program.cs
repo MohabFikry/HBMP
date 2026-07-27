@@ -19,7 +19,10 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHbmpAuthentication(builder.Configuration);
 builder.Services.AddHbmpBusinessCalendar();   // 18.A3 — Africa/Cairo business dates + injected clock
 builder.Services.AddHbmpAuditClient("policy-service");
-builder.Services.AddHbmpAuthorization();
+// 19.1 — policy-service now authorizes with its own bundle: authoring benefit configuration (policy:admin)
+// is a different capability from administering a member against it (policy:write).
+builder.Services.AddHbmpAuthorization(bundle: PolicyPolicies.Bundle());
+builder.Services.AddScoped<PolicyGate>();
 builder.Services.AddHbmpBreakGlass(builder.Configuration); // live break-glass elevation (16.6, H5)
 builder.Services.AddHbmpEvents(builder.Configuration);
 builder.Services.AddHbmpDurableOutbox<PolicyDbContext>();
@@ -142,6 +145,8 @@ v1.MapPost("/coverage-limits/reset-run", async (PolicyDbContext db, IAuditClient
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { evaluated = limits.Count, reset });
 });
+
+app.MapPlanAdministration();   // 19.1 — payers, plans, effective-dated immutable plan versions
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

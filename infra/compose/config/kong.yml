@@ -90,12 +90,19 @@ services:
         paths: ["/api/v1/beneficiaries", "/api/v1/registrations"]
         strip_path: false
 
-  # --- policy-service: coverage + limits ---
+  # --- policy-service: the PAS — payers, plans, effective-dated benefit configuration, coverage + limits ---
   - name: policy-service
     url: http://policy-service:8080
     routes:
       - name: policy-routes
-        paths: ["/api/v1/policies", "/api/v1/coverages", "/api/v1/coverage-limits"]
+        paths:
+          - /api/v1/policies
+          - /api/v1/coverages
+          - /api/v1/coverage-limits
+          # 19.1 — the benefit product layer.
+          - /api/v1/payers
+          - /api/v1/plans
+          - /api/v1/plan-versions
         strip_path: false
 
   # --- provider-service: provider network + contracts + branches + practitioners + specialties ---
