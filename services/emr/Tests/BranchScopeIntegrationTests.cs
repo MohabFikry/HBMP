@@ -49,7 +49,8 @@ public class BranchScopeIntegrationTests
         var now = DateTimeOffset.UtcNow;
         db.Appointments.Add(new Appointment
         {
-            AppointmentId = Guid.NewGuid(), BeneficiaryId = Guid.NewGuid(), ProviderId = provider,
+            // 18.F3: a blank tenant is now rejected at the database (ck_appointment_tenant_not_blank).
+            AppointmentId = Guid.NewGuid(), TenantId = "11111111-1111-1111-1111-111111111111", BeneficiaryId = Guid.NewGuid(), ProviderId = provider,
             LocationId = Guid.NewGuid(), BranchId = branch, AppointmentType = AppointmentType.Scheduled,
             Status = AppointmentStatus.Booked, ScheduledStart = now.AddHours(1), ScheduledEnd = now.AddHours(2),
             CreatedAt = now, UpdatedAt = now,

@@ -32,11 +32,36 @@ public sealed class RlsConnectionInterceptor(RlsContext context) : DbConnectionI
         base.ConnectionOpened(connection, eventData);
     }
 
+    /// <summary>
+    /// Phase 18.F3 — a sentinel that no row can carry, bound whenever the request has no tenant.
+    ///
+    /// FOUND BY THE TENANT-ISOLATION FUZZER, not by the R2 audit.
+    ///
+    /// An unbound request used to bind the EMPTY STRING, and the policies say
+    /// <c>tenant_id = current_setting('app.tenant_id', true)</c>. That is fail-closed against a NULL — but
+    /// not against <c>''</c>: a row whose tenant_id is itself an empty string MATCHES. emr.appointment_history
+    /// held 105 such rows (written by the history trigger from appointments that predate tenant stamping),
+    /// so any request without a tenant claim — an unauthenticated call, a background job, a token missing
+    /// the claim — could read them. An append-only clinical history table, visible to a caller with no
+    /// tenant at all.
+    ///
+    /// Fixing the 105 rows fixes today. Binding a sentinel fixes the CLASS: an empty or blank tenant now
+    /// resolves to a value no row can equal, so an unbound session reads nothing from ANY table, including
+    /// tables that acquire an empty-tenant row in future. This is one line in one place rather than a CHECK
+    /// constraint on ninety-two tables, and it cannot be forgotten on the ninety-third.
+    /// </summary>
+    /// <remarks>Parentheses cannot appear in a UUID and the platform's tenant ids are UUIDs, so no row can
+    /// ever carry this value — including a row whose tenant_id is blank, which is the case that leaked. A NUL
+    /// byte would be a stronger guarantee but Postgres text cannot hold one.</remarks>
+    public const string NoTenantSentinel = "(no-tenant)";
+
     private async Task ApplyAsync(DbConnection connection, CancellationToken ct)
     {
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT set_config('app.tenant_id', $1, false), set_config('app.provider_id', $2, false)";
-        var t = cmd.CreateParameter(); t.Value = context.TenantId; cmd.Parameters.Add(t);
+        var t = cmd.CreateParameter();
+        t.Value = string.IsNullOrWhiteSpace(context.TenantId) ? NoTenantSentinel : context.TenantId;
+        cmd.Parameters.Add(t);
         var p = cmd.CreateParameter(); p.Value = context.ProviderId; cmd.Parameters.Add(p);
         await cmd.ExecuteNonQueryAsync(ct);
     }

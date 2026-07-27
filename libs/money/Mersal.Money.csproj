@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Mersal.Money</RootNamespace>
+    <AssemblyName>Mersal.Money</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Tests/**/*.cs" />
+    <None Remove="Tests/**/*" />
+  </ItemGroup>
+</Project>

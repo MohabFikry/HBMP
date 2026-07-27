@@ -106,6 +106,15 @@ jobs:
       - name: Apply migrations + provision hbmp_app role
         run: bash tools/ci/apply-migrations.sh
 
+      # 18.F3 — the control that would have caught X6 and S2 automatically. Every other check asks a
+      # question someone thought to ask; this one asks the DATABASE what tables exist and proves isolation
+      # on each, so a table added in a service nobody is thinking about is covered the day it lands.
+      # --selftest first: a checker that cannot fail is not a check.
+      - name: Tenant-isolation fuzzer (every tenant_id table, driven off information_schema)
+        run: |
+          python3 tools/ci/check-tenant-isolation.py --selftest
+          python3 tools/ci/check-tenant-isolation.py
+
       - name: Wire *_TEST_DB env so integration + RLS suites run
         run: bash tools/ci/print-test-db-env.sh >> "$GITHUB_ENV"
 

@@ -41,7 +41,10 @@ public class AppointmentBookingConcurrencyTests
                 var booking = new AppointmentBookingService(ctx);
                 var appt = new Appointment
                 {
-                    AppointmentId = Guid.NewGuid(), BeneficiaryId = Guid.NewGuid(),
+                    // 18.F3: a tenant is now REQUIRED (ck_appointment_tenant_not_blank). These fixtures
+                    // seeded blank-tenant appointments — the same defect that produced 105 unreachable
+                    // history rows readable by any caller with no tenant claim.
+                    AppointmentId = Guid.NewGuid(), TenantId = "11111111-1111-1111-1111-111111111111", BeneficiaryId = Guid.NewGuid(),
                     ProviderId = providerId, LocationId = locationId, SlotId = slotId,
                     AppointmentType = AppointmentType.Scheduled, Status = AppointmentStatus.Booked,
                     ScheduledStart = start, ScheduledEnd = start.AddMinutes(15),

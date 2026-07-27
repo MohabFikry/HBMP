@@ -197,6 +197,24 @@ public class HousePatternTests
             allTables.Should().Contain(table, "'{0}' is declared RLS-free ({1}) but no such table exists", table, reason);
     }
 
+
+    [Fact]
+    public void The_two_rls_free_registers_agree()
+    {
+        // 18.F3 — the same exemptions are declared in TWO places: here (a source scan over migrations) and
+        // in tools/ci/check-tenant-isolation.py (a live database sweep). Two lists that can drift apart is
+        // how an exception outlives its reason: a table dropped from one register stays excused by the
+        // other, and nobody notices because both checks still pass.
+        var fuzzer = File.ReadAllText(Path.Combine(RepoRoot(), "tools", "ci", "check-tenant-isolation.py"));
+        var declared = Regex.Matches(
+                fuzzer[fuzzer.IndexOf("RLS_FREE = {", StringComparison.Ordinal)..],
+                @"^\s*""(\w+)"":", RegexOptions.Multiline)
+            .Select(m => m.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
+
+        declared.Should().BeEquivalentTo(RlsFreeTables.Keys,
+            "the C# and Python RLS-free registers must name the same tables");
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private sealed record ProgramFile(string Service, string Source);

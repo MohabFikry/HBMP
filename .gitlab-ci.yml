@@ -71,6 +71,31 @@ structural-gates:
     - python3 tools/ci/check-integration-dpia.py
     - python3 tools/ci/check-kong-route-coverage.py
 
+# 18.F3 — tenant-isolation fuzzer. Needs a migrated database, so it runs in the test stage alongside the
+# suites rather than with the static gates.
+tenant-isolation:
+  stage: test
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  services:
+    - name: postgres:16
+      alias: postgres
+  variables:
+    POSTGRES_USER: hbmp
+    POSTGRES_PASSWORD: ci_hbmp_pw
+    POSTGRES_DB: hbmp
+    PGHOST: postgres
+    PGDATABASE: hbmp
+    OWNER_USER: hbmp
+    OWNER_PASSWORD: ci_hbmp_pw
+    APP_USER: hbmp_app
+    APP_PASSWORD: ci_hbmp_app_pw
+    HBMP_APP_PASSWORD: ci_hbmp_app_pw
+  script:
+    - apt-get update && apt-get install -y --no-install-recommends postgresql-client python3
+    - bash tools/ci/apply-migrations.sh
+    - python3 tools/ci/check-tenant-isolation.py --selftest
+    - python3 tools/ci/check-tenant-isolation.py
+
 # ---------------------------------------------------------------- Unit + contract tests + coverage gate
 test:
   stage: test
