@@ -16,7 +16,9 @@ coverage/
 *.cobertura.xml
 
 # Node / frontend
-node_modules/
+# Matches a node_modules DIRECTORY and a node_modules SYMLINK. The trailing slash used to be here, and
+# git treats a symlink as a file, so a linked dependency tree was staged by `git add -A`.
+node_modules
 dist/
 .vite/
 *.local

@@ -68,6 +68,9 @@ import type {
   IdentityUser,
   RoleScopeGrant,
   ReportAccessRequestRow,
+  PatientProfile,
+  ProfileSectionKey,
+  CopySummariesResult,
 } from "@mersal/contracts";
 
 /**
@@ -188,6 +191,21 @@ export interface ApiClient {
   providerLocations(providerId: string): Promise<ProviderLocation[]>;
   providerContracts(providerId: string): Promise<ProviderContract[]>;
   createProvider(input: CreateProviderInput, idempotencyKey?: string): Promise<ProviderSummary>;
+
+  // Patient profile (Phase 20, design 39) — ONE endpoint, projected server-side to the caller's role.
+  /**
+   * Open a patient profile. `sections` narrows the request (the context bar asks for header+alerts only); it
+   * can never widen it — the server's matrix decides regardless of what was asked for.
+   *
+   * The response carries only what this role may see: a withheld section arrives with no `data` property at
+   * all. Screens render whatever came back and contain NO role logic of their own.
+   */
+  patientProfile(beneficiaryId: string, sections?: ProfileSectionKey[]): Promise<PatientProfile>;
+  /**
+   * "Copy all visible" call summaries. Returns the SERVER-GENERATED block and writes one `CallSummaryCopied`
+   * audit event — copying is when PHI leaves the platform's control, so it is logged like an export.
+   */
+  copyCallSummaries(beneficiaryId: string, callRefs: string[]): Promise<CopySummariesResult>;
 
   // Beneficiary management — the beneficiary registry (Phase 1). Min-necessary identity, no clinical data.
   beneficiarySearch(query: { name?: string; status?: string }): Promise<BeneficiaryRow[]>;

@@ -84,6 +84,10 @@ const UtilizationScreen = lazy(() => import("./PolicyBook").then((m) => ({ defau
 const MemberSearch = lazy(() => import("./MemberAdmin").then((m) => ({ default: m.MemberSearch })));
 const BulkJobs = lazy(() => import("./PolicyBulk").then((m) => ({ default: m.BulkJobs })));
 const NetworkTiers = lazy(() => import("./NetworkTierAdmin").then((m) => ({ default: m.NetworkTiers })));
+// Unified patient profile (Phase 20) — ONE screen for every role. It code-splits into its own chunk because
+// almost every portal links into it, and duplicating it per portal would duplicate the one component whose
+// whole design is that there is exactly one of it.
+const PatientProfile = lazy(() => import("./PatientProfile").then((m) => ({ default: m.PatientProfile })));
 
 export const SCREENS: Record<string, () => ReactNode> = {
   // 1. Reception — eligibility (also surfaced in the beneficiary-management portal).
@@ -171,6 +175,15 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/beneficiaries/bulk": () => <BulkJobs />,
   // 14. Network tiers under the Network Team's own portal (write) — the same screen policy admins read.
   "/network/tiers": () => <NetworkTiers />,
+  // 15. The unified patient profile (Phase 20, design 39). Reachable from every portal that can open a
+  // patient; the SERVER decides what each of them sees, so one route serves all of them.
+  "/reception/patient": () => <PatientProfile />,
+  "/clinician/patient": () => <PatientProfile />,
+  "/nurse/patient": () => <PatientProfile />,
+  "/approvals/patient": () => <PatientProfile />,
+  "/cases/patient": () => <PatientProfile />,
+  "/call-centre/patient": () => <PatientProfile />,
+  "/beneficiaries/patient": () => <PatientProfile />,
 };
 
 // Admin sections are shared by the org-admin (/admin/*) and super-admin (/platform/*) portals; map by the
@@ -185,6 +198,12 @@ const ADMIN_SECTIONS: Record<string, () => ReactNode> = {
 };
 
 export function screenFor(fullPath: string): (() => ReactNode) | undefined {
+  // The deep link design 39 §6 names: /patients/{beneficiaryId} resolves to the caller's own projection.
+  // Unauthorized deep links are refused by the SERVICE with 403 + audit, never by hiding the route — a route
+  // the SPA hides is a route the SPA can be persuaded to unhide.
+  const patient = fullPath.match(/^\/patients\/([^/]+)$/);
+  if (patient) return () => <PatientProfile beneficiaryId={decodeURIComponent(patient[1])} />;
+
   // The notifications inbox is the same screen under every portal base (/reception/notifications,
   // /clinician/notifications, …) — map them all to one component rather than enumerating each.
   if (fullPath.endsWith("/notifications")) return () => <Notifications />;

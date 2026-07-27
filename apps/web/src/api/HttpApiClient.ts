@@ -11,6 +11,9 @@ import {
   zProviderContract,
   type CreateProviderInput,
   zBeneficiaryRow,
+  zPatientProfile,
+  zCopySummariesResult,
+  type ProfileSectionKey,
   zRegisterResult,
   zStatusChangeResult,
   type RegisterBeneficiaryInput,
@@ -1364,6 +1367,25 @@ export class HttpApiClient implements ApiClient {
 
   // Beneficiary management (Phase 1, US-001..005) — the registry: register, search/manage, status/reactivation.
   // Min-necessary identity projection (name + member no + identifiers + status), never clinical data.
+  // Patient profile (Phase 20, design 39). NOTE what this method does NOT do: it applies no filtering, maps no
+  // fields and drops nothing. The payload arrives already projected to the caller's role, and re-shaping it
+  // here would be the client-side filtering the whole feature exists to avoid — so the response is parsed and
+  // handed on exactly as received.
+  async patientProfile(beneficiaryId: string, sections?: ProfileSectionKey[]) {
+    const qs = sections?.length ? `?sections=${encodeURIComponent(sections.join(","))}` : "";
+    const r = await getRaw(`/patients/${encodeURIComponent(beneficiaryId)}/profile${qs}`);
+    return parseOr(zPatientProfile, r);
+  }
+
+  // The clipboard block is generated SERVER-SIDE from the served projection and this call is what writes the
+  // CallSummaryCopied audit event. Assembling the text in the browser would both bypass the audit and risk
+  // including a field the projection dropped.
+  async copyCallSummaries(beneficiaryId: string, callRefs: string[]) {
+    const r = await postRaw(
+      `/beneficiaries/${encodeURIComponent(beneficiaryId)}/call-interactions/copy`, { callRefs });
+    return parseOr(zCopySummariesResult, r);
+  }
+
   async beneficiarySearch(query: { name?: string; status?: string }) {
     const qs = new URLSearchParams();
     if (query.name) qs.set("name", query.name);

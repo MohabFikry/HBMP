@@ -15,6 +15,9 @@ import {
   zPrescribeResult,
   zPrescription,
   zBeneficiary360,
+  zPatientProfile,
+  zCopySummariesResult,
+  type ProfileSectionKey,
   zCaseListItem,
   zCoordinationTask,
   zEscalation,
@@ -1081,6 +1084,101 @@ export class DevApiClient implements ApiClient {
   }
   createProvider(input: CreateProviderInput) {
     return this.gate(() => ok(zProviderSummary, { id: "PRV-NEW", code: input.code, legalName: input.legalName, providerType: input.providerType, status: { kind: "warn", label: loc("Suspended", "موقوف") }, onboardingState: "Draft" }));
+  }
+
+  // ---- Patient profile (Phase 20, design 39) --------------------------------------------------------------
+  // The fixture deliberately carries ALL FOUR states at once — Visible, Restricted, Unavailable and
+  // NotApplicable — because the three non-visible ones are the part of this screen most likely to be got
+  // wrong, and a fixture that only shows happy-path sections is a fixture in which "restricted" and "broken"
+  // and "empty" never get looked at side by side.
+  patientProfile(beneficiaryId: string, sections?: ProfileSectionKey[]) {
+    const all = [
+      {
+        key: "header", state: "Visible" as const,
+        data: {
+          beneficiaryId, memberNo: "MRS-M-014882", displayName: "Amal Hassan", displayNameAr: "أمل حسن",
+          ageBand: "30-39", sex: "F", status: "Active",
+          statusCue: { label: "Active", icon: "check-circle", shape: "circle", tone: "positive" },
+          branchName: "Nasr City", preferredLanguage: "ar",
+          contact: { phone: "+20 100 000 0000", preferredChannel: "WhatsApp" },
+          photoUrl: `/api/v1/patients/${beneficiaryId}/photo`,
+        },
+      },
+      {
+        key: "alerts", state: "Visible" as const,
+        data: {
+          allergies: [{ allergen: "Penicillin", reaction: "Rash", severity: "High" }],
+          criticalFlags: [{ kind: "Critical", label: "Anticoagulated", tone: "critical" }],
+        },
+      },
+      {
+        key: "coverage", state: "Visible" as const,
+        data: {
+          payerName: "Mersal Foundation", policyNo: "POL-2026-0001", planLabel: "Gold", planVersion: 3,
+          effectiveFrom: "2026-01-01", effectiveTo: "2026-12-31", waitingPeriodState: "Served",
+          categories: [
+            { category: "Pharmacy", annualLimit: 5000, consumed: 1200, remaining: 3800, costSharePercent: 10, costShareTier: "Tier1" },
+            { category: "Dental", annualLimit: 2000, consumed: 0, remaining: 2000, costSharePercent: 20, costShareTier: "Tier2" },
+          ],
+        },
+      },
+      // Restricted: the locked state, with the reason AND the way out.
+      {
+        key: "investigations", state: "Restricted" as const, reasonCode: "sensitive-requires-grant",
+        requestAccessAction: { kind: "report-access-request", href: `/api/v1/report-access-requests?beneficiaryId=${beneficiaryId}`, label: "Request access" },
+      },
+      // Unavailable: the owning service did not answer. NOT the same as empty — the user gets Retry.
+      { key: "encounters", state: "Unavailable" as const, reasonCode: "timeout" },
+      // NotApplicable: nothing exists. A plain, calm "no records".
+      { key: "referrals", state: "NotApplicable" as const },
+      {
+        key: "callHistory", state: "Visible" as const,
+        data: {
+          level: "Full",
+          items: [
+            {
+              callRef: "CALL-2026-004137", direction: "Outbound", startedAt: "2026-07-24T12:32:00Z",
+              endedAt: "2026-07-24T12:38:12Z", durationSeconds: 372, branchCode: "Nasr City",
+              agentDisplayName: "R. Adel", reasonCode: "RescheduleAppointment", outcome: "Resolved",
+              summary: "Appointment APT-2026-8841 moved from 25 Jul to 30 Jul at the member's request; member confirmed the new slot on the call.",
+              summaryEdited: false,
+              linkedArtifacts: [{ type: "Appointment", ref: "APT-2026-8841", action: "Reschedule" }],
+              copyText: "[Outbound] 2026-07-24 15:32 (6m 12s) · Nasr City · Agent: R. Adel\nMember: MRS-M-014882 · Ref: CALL-2026-004137\nReason: RescheduleAppointment · Outcome: Resolved\nAppointment APT-2026-8841 moved from 25 Jul to 30 Jul at the member's request; member confirmed the new slot on the call.",
+            },
+            {
+              callRef: "CALL-2026-004102", direction: "Inbound", startedAt: "2026-07-11T08:05:00Z",
+              endedAt: "2026-07-11T08:07:40Z", durationSeconds: 160, branchCode: "Nasr City",
+              agentDisplayName: "M. Farid", reasonCode: "EligibilityEnquiry", outcome: "Resolved",
+              summary: "Member asked whether dental is covered this year; confirmed remaining dental limit and how to book.",
+              summaryEdited: true, linkedArtifacts: [],
+              copyText: "[Inbound] 2026-07-11 11:05 (2m 40s) · Nasr City · Agent: M. Farid\nMember: MRS-M-014882 · Ref: CALL-2026-004102\nReason: EligibilityEnquiry · Outcome: Resolved\nMember asked whether dental is covered this year; confirmed remaining dental limit and how to book.",
+            },
+          ],
+        },
+      },
+    ];
+
+    const wanted = sections?.length ? new Set<string>(sections) : null;
+    return this.gate(() =>
+      ok(zPatientProfile, {
+        beneficiaryId,
+        servedAt: new Date().toISOString(),
+        sections: all.filter((s) => !wanted || wanted.has(s.key)),
+      }),
+    );
+  }
+
+  copyCallSummaries(beneficiaryId: string, callRefs: string[]) {
+    void beneficiaryId;
+    return this.gate(() =>
+      ok(zCopySummariesResult, {
+        level: "Full",
+        callRefs,
+        copyText: callRefs
+          .map((r) => `[Outbound] 2026-07-24 15:32 · Ref: ${r}`)
+          .join("\n\n"),
+      }),
+    );
   }
 
   beneficiarySearch(query: { name?: string; status?: string }) {
