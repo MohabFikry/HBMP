@@ -713,7 +713,7 @@ nav.mrs-rail {
   outline-offset: 2px;
 }
 .npane-foot {
-  padding: var(--sp3) var(--sp5);
+  padding: var(--sp4) var(--sp5);
   border-top: 1px solid var(--border);
 }
 .npane-viewall {
@@ -814,7 +814,7 @@ nav.mrs-rail {
   border-radius: 999px;
   /* 18.D2 (U9): see above — --brand is decorative and fails contrast under white text. */
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
   font-weight: 700;
   font-size: 20px;
 }
@@ -835,13 +835,21 @@ nav.mrs-rail {
 }
 .upane-section {
   padding: var(--sp5);
+  display: grid;
+  gap: var(--sp1);
 }
 .upane-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp3);
-  min-block-size: 44px;
+  min-block-size: 48px;
+}
+/* Equal-width controls on the settings rail: two adjacent rows with differently-sized buttons read as
+   ragged rather than as a column of settings (QA follow-up). */
+.upane-row .mrs-btn {
+  min-inline-size: 132px;
+  justify-content: center;
 }
 .upane-row + .upane-row {
   border-top: 1px solid var(--border);

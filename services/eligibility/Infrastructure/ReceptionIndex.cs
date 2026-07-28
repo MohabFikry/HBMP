@@ -51,12 +51,31 @@ public sealed class PostgresReceptionIndex(EligibilityDbContext db) : IReception
     public async Task<IReadOnlyList<ReceptionDocument>> SearchAsync(string q, int limit, CancellationToken ct = default)
     {
         var term = q.Trim();
-        var like = $"%{term}%";
-        var members = await db.Members.AsNoTracking().Where(m =>
+        var terms = term.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        IQueryable<MemberProjection> query;
+        if (terms.Length <= 1)
+        {
+            var like = $"%{term}%";
+            query = db.Members.AsNoTracking().Where(m =>
                 m.MemberNo == term || m.NationalId == term || m.Passport == term
                 || m.RefugeeId == term || m.UnhcrNo == term || m.PrimaryPhone == term
-                || EF.Functions.ILike(m.GivenName, like) || EF.Functions.ILike(m.FamilyName, like))
-            .Take(limit).ToListAsync(ct);
+                || EF.Functions.ILike(m.GivenName, like) || EF.Functions.ILike(m.FamilyName, like));
+        }
+        else
+        {
+            // A multi-word query is a NAME — no identifier or member number contains a space — and the
+            // natural way to type one is in full. Matching the whole string against each column separately
+            // meant "Omar Khalil" (given "Omar", family "Khalil") returned nothing at the reception desk.
+            // Every term must land in one of the name columns.
+            query = db.Members.AsNoTracking();
+            foreach (var t in terms)
+            {
+                var like = $"%{t}%";
+                query = query.Where(m => EF.Functions.ILike(m.GivenName, like) || EF.Functions.ILike(m.FamilyName, like));
+            }
+        }
+        var members = await query.Take(limit).ToListAsync(ct);
 
         var results = new List<ReceptionDocument>(members.Count);
         foreach (var m in members)

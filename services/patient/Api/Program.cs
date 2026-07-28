@@ -142,11 +142,17 @@ read.MapGet("", async (string? identifierType, string? identifierValue, string? 
     }
     if (!string.IsNullOrWhiteSpace(name))
     {
-        // Escape LIKE metacharacters: the value is already parameterized (no injection), but an unescaped
-        // "%" here makes a search for "100%" match every row — a full-directory disclosure, each row of
-        // which is then individually PHI-read-audited as if it were deliberate.
-        var pattern = $"%{name.Replace(@"\", @"\\").Replace("%", @"\%").Replace("_", @"\_")}%";
-        q = q.Where(x => EF.Functions.ILike(x.GivenName, pattern, @"\") || EF.Functions.ILike(x.FamilyName, pattern, @"\"));
+        // TOKENIZED: every whitespace-separated term must match a name column. The natural query is the
+        // full name — "Omar Khalil" — and matching the whole string against each column separately meant
+        // exactly that query returned nothing (given "Omar" does not contain "Omar Khalil", family
+        // "Khalil" does not either), which read as "search is broken" rather than "type less".
+        // LIKE metacharacters stay escaped: the value is parameterized (no injection), but an unescaped
+        // "%" makes a search for "100%" a full-directory disclosure, each row PHI-read-audited.
+        foreach (var term in name.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var pattern = $"%{term.Replace(@"\", @"\\").Replace("%", @"\%").Replace("_", @"\_")}%";
+            q = q.Where(x => EF.Functions.ILike(x.GivenName, pattern, @"\") || EF.Functions.ILike(x.FamilyName, pattern, @"\"));
+        }
     }
     if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<BeneficiaryStatus>(status, out var st))
         q = q.Where(x => x.Status == st);

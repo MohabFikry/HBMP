@@ -279,7 +279,12 @@ public static class ConnectEndpoints
             return Results.Redirect(AccountPages.SafeReturn(returnUrl));
         });
 
-        app.MapPost("/connect/logout", async (HttpContext http, SignInManager<ApplicationUser> signIn) =>
+        // GET and POST both: RP-initiated logout is a BROWSER NAVIGATION (the OIDC end-session endpoint
+        // is a front-channel GET), and this was mapped POST-only — so the SPA's sign-out redirect 404ed,
+        // the SSO cookie survived, and the next sign-in silently re-authenticated as the same user until
+        // the person cleared cookies by hand (QA follow-up). OpenIddict already validates the logout
+        // request on either verb; only the passthrough mapping was missing the GET.
+        app.MapMethods("/connect/logout", ["GET", "POST"], async (HttpContext http, SignInManager<ApplicationUser> signIn) =>
         {
             await signIn.SignOutAsync();
             return Results.SignOut(new AuthenticationProperties { RedirectUri = "/" }, [Scheme]);
