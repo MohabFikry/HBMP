@@ -71,9 +71,10 @@ cat.MapGet("/scopes", async (IdentityStoreDbContext db, CancellationToken ct) =>
         .Select(s => new { name = s.Name, domain = s.Domain, serviceOnly = s.ServiceOnly }).ToListAsync(ct)));
 
 // The scope union a user with these roles would receive — the exact seam the 17.2 issuer uses for the
-// `scope` claim. Query: /identity/effective-scopes?role=finance&role=reception
-cat.MapGet("/effective-scopes", async (string[] role, RoleScopeResolver resolver, CancellationToken ct) =>
-    Results.Ok((await resolver.ResolveScopesAsync(role, ct)).OrderBy(s => s, StringComparer.Ordinal)));
+// `scope` claim. Query: /identity/effective-scopes?role=finance&role=reception[&tenant=<id>]
+// 21.1b: grants are tenant-local, so the answer depends on the tenant; omitting it asks the platform default.
+cat.MapGet("/effective-scopes", async (string[] role, string? tenant, RoleScopeResolver resolver, CancellationToken ct) =>
+    Results.Ok((await resolver.ResolveScopesAsync(role, tenant, ct)).OrderBy(s => s, StringComparer.Ordinal)));
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

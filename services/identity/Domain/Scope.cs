@@ -26,6 +26,21 @@ public sealed class Scope
 /// </summary>
 public sealed class RoleScope
 {
+    /// <summary>
+    /// 21.1b — the tenant that OWNS this grant (design 40 §2). <see cref="PlatformDefault"/> ("") is the
+    /// platform default set: the untenanted rows seeded by 0001, used for any tenant that has not been
+    /// provisioned its own copy.
+    ///
+    /// Note what is and is not tenant-local: the ROLE CATALOG stays global (the token's <c>roles</c>
+    /// vocabulary is frozen, and ASP.NET Identity's RoleStore requires globally unique role names), so
+    /// tenant-locality lives here — two tenants may grant different scopes to the same role name.
+    /// </summary>
+    public string TenantId { get; set; } = PlatformDefault;
+
     public required string RoleName { get; set; }
     public required string ScopeName { get; set; }
+
+    /// <summary>The platform default grant bucket — the rows every tenant falls back to until it is
+    /// provisioned its own copy. Not a real tenant id.</summary>
+    public const string PlatformDefault = "";
 }

@@ -70,7 +70,10 @@ public sealed class IdentityStoreDbContext(DbContextOptions<IdentityStoreDbConte
         builder.Entity<RoleScope>(e =>
         {
             e.ToTable("role_scope");
-            e.HasKey(rs => new { rs.RoleName, rs.ScopeName });
+            // 21.1b — grants are tenant-local (0011). TenantId leads the key so a tenant's whole grant set
+            // is one index range; "" is the platform default bucket, not a real tenant.
+            e.HasKey(rs => new { rs.TenantId, rs.RoleName, rs.ScopeName });
+            e.Property(rs => rs.TenantId).HasDefaultValue(RoleScope.PlatformDefault);
             e.Property(rs => rs.RoleName).HasMaxLength(64);
             e.Property(rs => rs.ScopeName).HasMaxLength(64);
         });

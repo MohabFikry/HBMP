@@ -22,7 +22,9 @@ public sealed class UserClaimsService(UserManager<ApplicationUser> users, RoleSc
     {
         var roles = (await users.GetRolesAsync(user))
             .Select(r => r.ToLowerInvariant()).Distinct().ToList();
-        var scopes = await resolver.ResolveScopesAsync(roles, ct);
+        // 21.1b — grants are tenant-local, so the user's tenant decides which grant set applies. A tenant
+        // that has not been provisioned its own copy falls back to the platform default (design 40 §2).
+        var scopes = await resolver.ResolveScopesAsync(roles, user.TenantId, ct);
         return new UserTokenFacts(user.Id.ToString(), roles, scopes, user.TenantId, user.ProviderId, user.DisplayName);
     }
 }

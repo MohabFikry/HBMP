@@ -144,15 +144,23 @@ public static class AdminEndpoints
             var catalog = (await db.Scopes.Select(s => s.Name).ToListAsync(http.RequestAborted)).ToHashSet(StringComparer.Ordinal);
             if (!req.Scopes.All(catalog.Contains)) return Results.Problem(statusCode: 422, title: "unknown-scope");
 
-            var existing = await db.RoleScopes.Where(rs => rs.RoleName == role).ToListAsync(http.RequestAborted);
+            // 21.1b — grants are TENANT-LOCAL (design 40 §2). Edit only the caller's own tenant: before this,
+            // one administrator's edit silently rewrote the grant set every tenant resolved through.
+            // Provisioning another tenant's grants is a platform-administration action and gets its own
+            // surface in 21.6; it is deliberately not reachable by passing a tenant here.
+            var tenant = me!.GetClaim(HbmpClaimTypes.TenantId) ?? RoleScope.PlatformDefault;
+
+            var existing = await db.RoleScopes
+                .Where(rs => rs.RoleName == role && rs.TenantId == tenant)
+                .ToListAsync(http.RequestAborted);
             db.RoleScopes.RemoveRange(existing);
             foreach (var s in req.Scopes.Distinct(StringComparer.Ordinal))
-                db.RoleScopes.Add(new RoleScope { RoleName = role, ScopeName = s });
+                db.RoleScopes.Add(new RoleScope { TenantId = tenant, RoleName = role, ScopeName = s });
             await db.SaveChangesAsync(http.RequestAborted);
 
-            await Audit(audit, me, "identity.role_scope", role, AuditAction.Update, "RoleScopesSet",
-                $"{{\"scopes\":[{string.Join(",", req.Scopes.Select(s => $"\"{s}\""))}]}}");
-            return Results.Ok(new { role, scopes = req.Scopes });
+            await Audit(audit, me, "identity.role_scope", $"{tenant}/{role}", AuditAction.Update, "RoleScopesSet",
+                $"{{\"tenant\":\"{tenant}\",\"scopes\":[{string.Join(",", req.Scopes.Select(s => $"\"{s}\""))}]}}");
+            return Results.Ok(new { tenant, role, scopes = req.Scopes });
         });
     }
 
