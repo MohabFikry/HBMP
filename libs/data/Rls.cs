@@ -11,6 +11,18 @@ public sealed class RlsContext
 {
     public string TenantId { get; set; } = "";
     public string ProviderId { get; set; } = "";
+
+    /// <summary>
+    /// 21.5 — the ACTIVE MEMBERSHIP the request is acting under (design 40 §6, ADR-0021).
+    ///
+    /// Attribution has to name the membership, not the raw identity: one person may act in two
+    /// organisations, and "u-1234 changed this" cannot say which hat they were wearing. Auto-stamped onto
+    /// created_by/updated_by by <c>TenantStampingInterceptor</c>, so a handler cannot forget it and an
+    /// attribution gap cannot be introduced by writing a new endpoint.
+    ///
+    /// Empty for machine principals (client-credentials), which legitimately have no membership.
+    /// </summary>
+    public string MembershipId { get; set; } = "";
 }
 
 /// <summary>Platform-wide RLS binder (audit H1 / ADR-0011): sets the PostgreSQL session GUCs

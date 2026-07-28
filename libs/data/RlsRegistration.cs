@@ -41,6 +41,10 @@ public static class RlsRegistration
                 var rls = ctx.RequestServices.GetRequiredService<RlsContext>();
                 rls.TenantId = principal.TenantId ?? "";
                 rls.ProviderId = principal.ProviderId ?? "";
+                // 21.5 — the active membership, for ambient attribution. Bound in the SAME place as the
+                // tenant so a service cannot end up with one and not the other, and empty for machine
+                // principals, which genuinely have no membership.
+                rls.MembershipId = principal.MembershipId ?? "";
             }
             await next();
         });

@@ -26,17 +26,52 @@ public sealed class TenantStampingInterceptor(RlsContext context) : SaveChangesI
         return base.SavingChangesAsync(eventData, result, ct);
     }
 
+    /// <summary>21.5 — attribution columns stamped from the ACTIVE MEMBERSHIP (design 40 §6).</summary>
+    public const string CreatedByProperty = "CreatedBy";
+    public const string UpdatedByProperty = "UpdatedBy";
+
     private void Stamp(DbContext? db)
     {
-        if (db is null || string.IsNullOrEmpty(context.TenantId)) return;
+        if (db is null) return;
         foreach (var entry in db.ChangeTracker.Entries())
         {
-            if (entry.State != EntityState.Added) continue;
-            var prop = entry.Metadata.FindProperty(ColumnProperty);
-            if (prop is null || prop.ClrType != typeof(string)) continue;
-            var member = entry.Property(ColumnProperty);
-            if (string.IsNullOrEmpty(member.CurrentValue as string))
-                member.CurrentValue = context.TenantId;
+            if (entry.State is not (EntityState.Added or EntityState.Modified)) continue;
+
+            if (entry.State == EntityState.Added && !string.IsNullOrEmpty(context.TenantId))
+                StampIfEmpty(entry, ColumnProperty, context.TenantId);
+
+            // 21.5 — AMBIENT ATTRIBUTION. Stamped here rather than in each handler because an attribution
+            // gap is created by OMISSION: the endpoint that forgets is the one nobody wrote a test for, and
+            // the missing name only becomes visible during the incident review that needed it. The
+            // membership, not the raw user id — the same person may act in two organisations, and
+            // "u-1234 changed this" cannot say which hat they were wearing.
+            if (string.IsNullOrEmpty(context.MembershipId)) continue;
+
+            if (entry.State == EntityState.Added)
+                StampIfEmpty(entry, CreatedByProperty, context.MembershipId);
+
+            // updated_by is overwritten, not filled-if-empty: it names whoever made THIS change, so
+            // carrying the previous editor forward would misattribute every subsequent edit.
+            StampAlways(entry, UpdatedByProperty, context.MembershipId);
         }
+    }
+
+    private static void StampIfEmpty(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry, string name, string value)
+    {
+        if (!IsWritableString(entry, name)) return;
+        var member = entry.Property(name);
+        if (string.IsNullOrEmpty(member.CurrentValue as string)) member.CurrentValue = value;
+    }
+
+    private static void StampAlways(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry, string name, string value)
+    {
+        if (!IsWritableString(entry, name)) return;
+        entry.Property(name).CurrentValue = value;
+    }
+
+    private static bool IsWritableString(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry, string name)
+    {
+        var prop = entry.Metadata.FindProperty(name);
+        return prop is not null && prop.ClrType == typeof(string);
     }
 }
