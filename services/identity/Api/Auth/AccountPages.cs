@@ -102,12 +102,19 @@ public static class AccountPages
     /// <summary>Re-issue the application cookie with explicit <c>amr</c> claims recording the factors performed
     /// (the SignInManager helpers don't carry amr). The authorize endpoint reads these onto the token.</summary>
     public static async Task StampSignIn(
-        HttpContext http, SignInManager<ApplicationUser> signIn, ApplicationUser user, string[] amr)
+        HttpContext http, SignInManager<ApplicationUser> signIn, ApplicationUser user, string[] amr,
+        Guid? membershipId = null)
     {
         var principal = await signIn.CreateUserPrincipalAsync(user);
         if (principal.Identity is ClaimsIdentity identity)
+        {
             foreach (var a in amr.Distinct(StringComparer.OrdinalIgnoreCase))
                 identity.AddClaim(new Claim(AmrClaim, a));
+            // 21.1c — record WHICH membership the chooser picked. This is a record of the choice, not a grant:
+            // the authorize endpoint re-validates it against the store on every use.
+            if (membershipId is { } mid)
+                identity.AddClaim(new Claim(TokenPrincipalFactory.MembershipClaim, mid.ToString()));
+        }
         await http.SignInAsync(IdentityConstants.ApplicationScheme, principal,
             new AuthenticationProperties { IsPersistent = false });
     }
@@ -145,6 +152,9 @@ public static class AccountPages
           button{min-height:44px;padding:0 1.25rem;font-weight:600;margin-top:1rem;cursor:pointer}
           .err{color:#b91c1c} .muted{opacity:.75} code{word-break:break-all;background:#8882;padding:.15rem .35rem}
           a{color:inherit} :focus-visible{outline:3px solid #2563eb;outline-offset:2px}
+          fieldset{border:1px solid #8884;border-radius:.5rem;padding:.5rem 1rem 1rem} legend{font-weight:600;padding:0 .35rem}
+          .opt{display:flex;align-items:center;gap:.75rem;min-height:44px;padding:.5rem 0}
+          .opt input{width:auto;min-width:1.25rem;min-height:1.25rem;margin:0} .opt label{margin:0;font-weight:400}
         </style></head><body>{{body}}</body></html>
         """;
     }
@@ -230,6 +240,52 @@ public static class AccountPages
         return sb.ToString().Trim().ToLowerInvariant();
     }
 
+    /// <summary>
+    /// 21.1c — the membership chooser (design 40 §1). Shown only when an identity holds more than one
+    /// selectable membership; one auto-selects and never reaches this page.
+    ///
+    /// Min-necessary by construction: an organization name and the roles the person would hold there, nothing
+    /// else. A11y: a radio GROUP with a legend (not a bare list of links), ≥44px targets via the shared
+    /// stylesheet, the first option focused, and the choice submitted with the antiforgery token. Bilingual
+    /// with the document direction mirrored by <see cref="Layout"/>.
+    /// </summary>
+    public static string MembershipChooserPage(
+        string lang, IReadOnlyList<(Guid Id, string Tenant, IReadOnlyList<string> Roles)> options,
+        string? returnUrl, string antiforgeryField, bool error = false)
+    {
+        var s = Strings(lang);
+        var ret = Enc.Encode(SafeReturn(returnUrl));
+        var err = error ? $"<p class=\"err\" role=\"alert\">{s["membershipError"]}</p>" : "";
+
+        var items = string.Join("\n", options.Select((o, i) =>
+        {
+            var roles = o.Roles.Count > 0 ? Enc.Encode(string.Join(", ", o.Roles)) : Enc.Encode(s["noRoles"]);
+            var autofocus = i == 0 ? " autofocus" : "";
+            var check = i == 0 ? " checked" : "";
+            return $"""
+              <div class="opt">
+                <input type="radio" id="m{i}" name="membershipId" value="{o.Id}" required{check}{autofocus}>
+                <label for="m{i}"><strong>{Enc.Encode(o.Tenant)}</strong><br><span class="muted">{roles}</span></label>
+              </div>
+              """;
+        }));
+
+        var body = $"""
+        <h1>{s["chooseMembership"]}</h1>{err}
+        <p class="muted">{s["chooseMembershipHint"]}</p>
+        <form method="post" action="/connect/select-membership">
+          {antiforgeryField}
+          <input type="hidden" name="returnUrl" value="{ret}" />
+          <fieldset>
+            <legend>{s["chooseMembership"]}</legend>
+            {items}
+          </fieldset>
+          <button type="submit">{s["continue"]}</button>
+        </form>
+        """;
+        return Layout(lang, s["chooseMembership"], body);
+    }
+
     public static string SafeReturn(string? returnUrl) =>
         !string.IsNullOrEmpty(returnUrl) && returnUrl.StartsWith('/') && !returnUrl.StartsWith("//", StringComparison.Ordinal)
             ? returnUrl : "/";
@@ -244,6 +300,10 @@ public static class AccountPages
             ["enroll"] = "تفعيل التحقق بخطوتين", ["enrollHint"] = "أضف المفتاح إلى تطبيق المصادقة ثم أدخل الرمز.",
             ["key"] = "المفتاح", ["verifyEnable"] = "تحقّق وفعّل", ["recovery"] = "رموز الاسترداد",
             ["recoveryIntro"] = "احفظ هذه الرموز في مكان آمن — تظهر مرة واحدة.", ["done"] = "تم",
+            ["chooseMembership"] = "اختر الجهة", ["continue"] = "متابعة",
+            ["chooseMembershipHint"] = "لديك حساب في أكثر من جهة. اختر الجهة التي ستعمل من خلالها في هذه الجلسة.",
+            ["membershipError"] = "هذا الاختيار لم يعد متاحًا. اختر جهة أخرى.",
+            ["noRoles"] = "بدون أدوار",
         }
         : new()
         {
@@ -254,5 +314,9 @@ public static class AccountPages
             ["enroll"] = "Enable two-factor", ["enrollHint"] = "Add the key to your authenticator app, then enter the code.",
             ["key"] = "Key", ["verifyEnable"] = "Verify & enable", ["recovery"] = "Recovery codes",
             ["recoveryIntro"] = "Save these codes somewhere safe — they are shown once.", ["done"] = "Done",
+            ["chooseMembership"] = "Choose organization", ["continue"] = "Continue",
+            ["chooseMembershipHint"] = "You belong to more than one organization. Choose the one you are working as for this session.",
+            ["membershipError"] = "That choice is no longer available. Pick another organization.",
+            ["noRoles"] = "No roles",
         };
 }

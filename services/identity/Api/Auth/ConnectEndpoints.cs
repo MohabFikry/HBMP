@@ -26,7 +26,8 @@ public static class ConnectEndpoints
     {
         // ---- Authorization endpoint (auth-code + PKCE) ------------------------------------------------------
         app.MapMethods("/connect/authorize", ["GET", "POST"], async (
-            HttpContext http, UserManager<ApplicationUser> users, UserClaimsService claims, TokenPrincipalFactory factory) =>
+            HttpContext http, UserManager<ApplicationUser> users, UserClaimsService claims,
+            TokenPrincipalFactory factory, MembershipService memberships) =>
         {
             var request = http.GetOpenIddictServerRequest()
                 ?? throw new InvalidOperationException("The OpenIddict request cannot be retrieved.");
@@ -44,7 +45,24 @@ public static class ConnectEndpoints
             if (user is null || !user.IsActive)
                 return Results.Forbid(properties: null, [IdentityConstants.ApplicationScheme]);
 
-            var facts = await claims.ForAsync(user, http.RequestAborted);
+            // 21.1c — authority comes from the ACTIVE MEMBERSHIP (invariant 1). The selection stamped on the
+            // sign-in cookie is re-validated here rather than trusted: a cookie outlives the membership it
+            // names, so one suspended mid-session stops resolving at the next authorize.
+            var selected = MembershipIdFrom(auth.Principal);
+            var membership = await memberships.ResolveAsync(user.Id, selected, http.RequestAborted);
+            if (membership is null)
+            {
+                var options = await memberships.SelectableAsync(user.Id, http.RequestAborted);
+                // None selectable ⇒ the identity exists but may act nowhere. Refuse; do not fall back to the
+                // identity-level roles, which is exactly the blended principal this phase removes.
+                if (options.Count == 0)
+                    return Forbid(Errors.AccessDenied, "This account has no active membership in any organization.");
+
+                var back = http.Request.PathBase + http.Request.Path + http.Request.QueryString;
+                return Results.Redirect($"/connect/select-membership?returnUrl={Uri.EscapeDataString(back)}");
+            }
+
+            var facts = await claims.ForAsync(user, membership, http.RequestAborted);
             // The factors performed were stamped on the application cookie at sign-in (pwd, and otp when 2FA
             // was completed); carry them onto the token so MfaEvaluator can gate protected scopes.
             var amr = auth.Principal!.FindAll(AccountPages.AmrClaim).Select(c => c.Value).ToArray();
@@ -58,7 +76,8 @@ public static class ConnectEndpoints
 
         // ---- Token endpoint (authorization_code / refresh_token / client_credentials) -----------------------
         app.MapPost("/connect/token", async (
-            HttpContext http, UserManager<ApplicationUser> users, UserClaimsService claims, TokenPrincipalFactory factory) =>
+            HttpContext http, UserManager<ApplicationUser> users, UserClaimsService claims,
+            TokenPrincipalFactory factory, MembershipService memberships) =>
         {
             var request = http.GetOpenIddictServerRequest()
                 ?? throw new InvalidOperationException("The OpenIddict request cannot be retrieved.");
@@ -88,7 +107,28 @@ public static class ConnectEndpoints
 
                 // Re-mint fresh roles/scopes (they may have changed since the code was issued), constrained to
                 // the scopes originally granted; carry the amr recorded at authorize time.
-                var facts = await claims.ForAsync(user, http.RequestAborted);
+                //
+                // 21.1c — re-resolve the MEMBERSHIP too, from the id carried on the stored grant. This is the
+                // re-resolution seam ADR-0021 §3 relies on: a membership suspended or ended after the code was
+                // issued stops minting tokens at the next exchange, within the access-token TTL. A refresh
+                // must never widen authority, so a grant whose membership no longer resolves is refused
+                // outright rather than falling back to the identity-level roles.
+                var storedMembership = MembershipIdFrom(stored.Principal);
+                UserTokenFacts facts;
+                if (storedMembership is { } sm)
+                {
+                    var membership = await memberships.ResolveAsync(user.Id, sm, http.RequestAborted);
+                    if (membership is null)
+                        return Forbid(Errors.InvalidGrant, "The membership this authorization was issued for is no longer active.");
+                    facts = await claims.ForAsync(user, membership, http.RequestAborted);
+                }
+                else
+                {
+                    // Legacy grant issued before 21.1c (no membership_id). Keeps existing sessions alive
+                    // across the deploy; disappears with the contract migration that drops user_role.
+                    facts = await claims.ForAsync(user, http.RequestAborted);
+                }
+
                 var amr = stored.Principal.GetClaims(TokenPrincipalFactory.AmrClaim);
                 var principal = factory.ForUser(facts, stored.Principal.GetScopes(),
                     amr.Length > 0 ? amr : ["pwd"]);
@@ -150,6 +190,70 @@ public static class ConnectEndpoints
             return Results.Redirect(AccountPages.SafeReturn(returnUrl));
         }).RequireRateLimiting(IssuerRateLimits.Credential);
 
+        // ---- Membership chooser (21.1c) --------------------------------------------------------------------
+        //
+        // Reached only when an identity holds MORE THAN ONE selectable membership; one auto-selects in
+        // ResolveAsync and never lands here. The choice is stamped onto the sign-in cookie and re-validated on
+        // every authorize — the cookie records what was picked, it does not grant it.
+        app.MapGet("/connect/select-membership", async (
+            HttpContext http, IAntiforgery antiforgery, string? returnUrl,
+            UserManager<ApplicationUser> users, MembershipService memberships) =>
+        {
+            var auth = await http.AuthenticateAsync(IdentityConstants.ApplicationScheme);
+            if (!auth.Succeeded) return Results.Challenge(
+                new AuthenticationProperties { RedirectUri = "/connect/select-membership" }, [IdentityConstants.ApplicationScheme]);
+
+            var user = await users.GetUserAsync(auth.Principal!);
+            if (user is null || !user.IsActive) return Results.Forbid(properties: null, [IdentityConstants.ApplicationScheme]);
+
+            var options = await memberships.SelectableAsync(user.Id, http.RequestAborted);
+            if (options.Count == 0)
+                return Forbid(Errors.AccessDenied, "This account has no active membership in any organization.");
+
+            // Deliberately NO "exactly one ⇒ redirect straight back" shortcut. Authorize only sends people here
+            // when resolution failed, and one way that happens is a cookie naming a membership that has since
+            // been suspended while ONE other remains selectable. Redirecting back would hand authorize the same
+            // stale cookie, which fails to resolve again, which redirects here again — an infinite loop. The
+            // single option is rendered instead, so the POST restamps the cookie and the session moves forward.
+            // It also means nobody is moved to a different organization without seeing that it happened.
+            return Results.Content(AccountPages.MembershipChooserPage(
+                LangOf(http), [.. options.Select(o => (o.MembershipId, o.TenantId, o.Roles))],
+                returnUrl, AccountPages.AntiforgeryField(antiforgery, http)), "text/html");
+        });
+
+        app.MapPost("/connect/select-membership", async (
+            HttpContext http, [FromForm] Guid membershipId, [FromForm] string? returnUrl,
+            IAntiforgery antiforgery, SignInManager<ApplicationUser> signIn,
+            UserManager<ApplicationUser> users, MembershipService memberships) =>
+        {
+            var auth = await http.AuthenticateAsync(IdentityConstants.ApplicationScheme);
+            if (!auth.Succeeded) return Results.Challenge(properties: null, [IdentityConstants.ApplicationScheme]);
+
+            var user = await users.GetUserAsync(auth.Principal!);
+            if (user is null || !user.IsActive) return Results.Forbid(properties: null, [IdentityConstants.ApplicationScheme]);
+
+            // Validate the POSTed id against what this identity may actually select. A membership id is not a
+            // secret and the form is user-controlled, so an unvalidated value here would be a direct path into
+            // another organization's tenant — re-resolve rather than trust.
+            var chosen = await memberships.ResolveAsync(user.Id, membershipId, http.RequestAborted);
+            if (chosen is null)
+            {
+                var options = await memberships.SelectableAsync(user.Id, http.RequestAborted);
+                if (options.Count == 0)
+                    return Forbid(Errors.AccessDenied, "This account has no active membership in any organization.");
+                return Results.Content(AccountPages.MembershipChooserPage(
+                    LangOf(http), [.. options.Select(o => (o.MembershipId, o.TenantId, o.Roles))],
+                    returnUrl, AccountPages.AntiforgeryField(antiforgery, http), error: true), "text/html");
+            }
+
+            // Re-issue the cookie carrying the selection alongside the amr already recorded, so the factors
+            // performed are not lost by re-signing in.
+            var amr = auth.Principal!.FindAll(AccountPages.AmrClaim).Select(c => c.Value).ToArray();
+            await AccountPages.StampSignIn(http, signIn, user, amr.Length > 0 ? amr : ["pwd"], chosen.MembershipId);
+
+            return Results.Redirect(AccountPages.SafeReturn(returnUrl));
+        });
+
         app.MapPost("/connect/logout", async (HttpContext http, SignInManager<ApplicationUser> signIn) =>
         {
             await signIn.SignOutAsync();
@@ -166,4 +270,9 @@ public static class ConnectEndpoints
         [Scheme]);
 
     private static string LangOf(HttpContext http) => http.Request.Query["lang"] == "ar" ? "ar" : "en";
+
+    /// <summary>The membership selection carried on a sign-in cookie or a stored grant, if any and if it
+    /// parses. A malformed value reads as "no selection" and re-runs resolution — never as a wildcard.</summary>
+    private static Guid? MembershipIdFrom(System.Security.Claims.ClaimsPrincipal? principal) =>
+        Guid.TryParse(principal?.FindFirst(TokenPrincipalFactory.MembershipClaim)?.Value, out var id) ? id : null;
 }

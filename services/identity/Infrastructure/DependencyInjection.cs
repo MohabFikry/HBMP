@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Mersal.Identity.Infrastructure;
 
@@ -39,6 +40,10 @@ public static class DependencyInjection
         // the ASP.NET Core framework assembly, wired at the Api/host layer alongside the login endpoints.
 
         services.AddScoped<RoleScopeResolver>();
+        // TryAdd so a host that already registered its own clock (Api/Program.cs does) keeps it — this only
+        // makes the Infrastructure package self-contained, following the libs/* precedent.
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<MembershipService>();   // 21.1c — resolves the active membership (the principal)
         services.AddScoped<UserClaimsService>();
         return services;
     }

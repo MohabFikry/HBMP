@@ -53,7 +53,7 @@ public static class AdminEndpoints
         });
 
         g.MapPost("/users", async (HttpContext http, CreateUserRequest req,
-            UserManager<ApplicationUser> users, IAuditClient audit, TimeProvider clock) =>
+            UserManager<ApplicationUser> users, IAuditClient audit, TimeProvider clock, MembershipService memberships) =>
         {
             var (me, err) = await Guard(http, "admin:write");
             if (err is not null) return err;
@@ -72,13 +72,18 @@ public static class AdminEndpoints
                 return Results.Problem(statusCode: 422, title: "create-failed", detail: string.Join("; ", created.Errors.Select(e => e.Description)));
             if (req.Roles.Count > 0) await users.AddToRolesAsync(user, req.Roles.Select(r => r.ToLowerInvariant()));
 
+            // 21.1c — give the new account the membership that IS its principal. Without this it could sign in
+            // and then be refused at authorize, because 0010's backfill only covered users that already existed.
+            await memberships.EnsureMirroredAsync(user, req.Roles.Select(r => r.ToLowerInvariant()),
+                me!.GetClaim(Claims.Subject) ?? "admin", http.RequestAborted);
+
             await Audit(audit, me, "identity.user", user.Id.ToString(), AuditAction.Create, "UserCreated",
                 $"{{\"username\":\"{user.UserName}\",\"roles\":[{string.Join(",", req.Roles.Select(r => $"\"{r}\""))}]}}");
             return Results.Created($"/identity/admin/users/{user.Id}", new { id = user.Id, username = user.UserName });
         });
 
         g.MapPost("/users/{id:guid}/roles", async (HttpContext http, Guid id, SetRolesRequest req,
-            UserManager<ApplicationUser> users, IAuditClient audit) =>
+            UserManager<ApplicationUser> users, IAuditClient audit, MembershipService memberships) =>
         {
             var (me, err) = await Guard(http, "admin:write");
             if (err is not null) return err;
@@ -93,13 +98,17 @@ public static class AdminEndpoints
             await users.AddToRolesAsync(user, desired.Except(current));
             await users.RemoveFromRolesAsync(user, current.Except(desired));
 
+            // 21.1c — the membership is what the token is minted from, so a role REMOVED here has to be removed
+            // there too. Mirroring only additions would make revocation cosmetic.
+            await memberships.EnsureMirroredAsync(user, desired, me!.GetClaim(Claims.Subject) ?? "admin", http.RequestAborted);
+
             await Audit(audit, me, "identity.user", id.ToString(), AuditAction.Update, "UserRolesSet",
                 $"{{\"roles\":[{string.Join(",", desired.Select(r => $"\"{r}\""))}]}}");
             return Results.Ok(new { id, roles = desired });
         });
 
         g.MapPost("/users/{id:guid}/deactivate", async (HttpContext http, Guid id,
-            UserManager<ApplicationUser> users, IAuditClient audit) =>
+            UserManager<ApplicationUser> users, IAuditClient audit, MembershipService memberships) =>
         {
             var (me, err) = await Guard(http, "admin:write");
             if (err is not null) return err;
@@ -109,6 +118,11 @@ public static class AdminEndpoints
             user.IsActive = false;                       // soft deprovision — never a hard delete (audit trail)
             await users.UpdateSecurityStampAsync(user);  // invalidate existing sessions/refresh
             await users.UpdateAsync(user);
+
+            // 21.1c — deprovision has to reach the principal, not just the identity. An Active membership left
+            // behind would still resolve and still mint tokens, so the account would remain usable.
+            await memberships.EnsureMirroredAsync(user, await users.GetRolesAsync(user),
+                me!.GetClaim(Claims.Subject) ?? "admin", http.RequestAborted);
 
             await Audit(audit, me, "identity.user", id.ToString(), AuditAction.Update, "UserDeactivated", null);
             return Results.Ok(new { id, isActive = false });

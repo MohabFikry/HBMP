@@ -10,6 +10,7 @@ using Mersal.Identity.Domain;
 using Mersal.Identity.Infrastructure;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -67,7 +68,14 @@ public static class TestFlow
             CreatedAt = DateTimeOffset.UtcNow, EmailConfirmed = true,
         };
         (await users.CreateAsync(user, password)).Succeeded.Should().BeTrue();
-        foreach (var r in roles) (await users.AddToRoleAsync(user, r)).Succeeded.Should().BeTrue();
+        var roleList = roles.ToList();
+        foreach (var r in roleList) (await users.AddToRoleAsync(user, r)).Succeeded.Should().BeTrue();
+
+        // 21.1c — a seeded user needs the MEMBERSHIP it is minted from. 0010 backfills only what existed when
+        // it ran, so a user created here would otherwise sign in and then be refused at authorize.
+        await scope.ServiceProvider.GetRequiredService<MembershipService>()
+            .EnsureMirroredAsync(user, roleList, "test:seed");
+
         string? key = null;
         if (twoFactor)
         {
@@ -76,6 +84,66 @@ public static class TestFlow
             await users.SetTwoFactorEnabledAsync(user, true);
         }
         return (user.Id, key);
+    }
+
+    /// <summary>Give an existing identity a membership in ANOTHER tenant — the multi-membership shape the
+    /// admin surface will create in 21.5, and the one 21.1c's chooser exists for. Written directly through the
+    /// store because <c>EnsureMirroredAsync</c> deliberately only ever touches the identity's own tenant.</summary>
+    public static async Task<Guid> SeedMembership(
+        IdentityAppFactory factory, Guid userId, string tenant, IEnumerable<string> roles,
+        MembershipStatus status = MembershipStatus.Active, Guid? providerId = null)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityStoreDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var m = new TenantMembership
+        {
+            MembershipId = Guid.NewGuid(), UserId = userId, TenantId = tenant, ProviderId = providerId,
+            Status = status, ActivatedAt = now, CreatedBy = "test:seed", CreatedAt = now,
+            UpdatedBy = "test:seed", UpdatedAt = now,
+        };
+        db.Memberships.Add(m);
+        foreach (var r in roles)
+        {
+            var normalized = r.ToUpperInvariant();
+            var role = await db.Roles.FirstAsync(x => x.NormalizedName == normalized);
+            db.MembershipRoles.Add(new MembershipRole
+            {
+                MembershipId = m.MembershipId, RoleId = role.Id, GrantedBy = "test:seed", GrantedAt = now,
+            });
+        }
+        await db.SaveChangesAsync();
+        return m.MembershipId;
+    }
+
+    /// <summary>Re-run the expand-phase mirror for an identity, as the admin role-setting endpoint does.</summary>
+    public static async Task MirrorRoles(IdentityAppFactory factory, Guid userId, IEnumerable<string> roles)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityStoreDbContext>();
+        var user = await db.Users.FirstAsync(u => u.Id == userId);
+        await scope.ServiceProvider.GetRequiredService<MembershipService>()
+            .EnsureMirroredAsync(user, roles, "test:mirror");
+    }
+
+    /// <summary>The membership id an identity holds in a given tenant (the one SeedUser mirrored).</summary>
+    public static async Task<Guid> MembershipIdOf(IdentityAppFactory factory, Guid userId, string tenant)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityStoreDbContext>();
+        return (await db.Memberships.AsNoTracking()
+            .FirstAsync(m => m.UserId == userId && m.TenantId == tenant && !m.IsDeleted)).MembershipId;
+    }
+
+    /// <summary>Move a membership's lifecycle state — used to prove that revocation bites mid-session.</summary>
+    public static async Task SetMembershipStatus(IdentityAppFactory factory, Guid membershipId, MembershipStatus status)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityStoreDbContext>();
+        var m = await db.Memberships.FirstAsync(x => x.MembershipId == membershipId);
+        m.Status = status;
+        m.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
     }
 
     public static async Task DeleteUser(IdentityAppFactory factory, Guid id)
@@ -93,9 +161,18 @@ public static class TestFlow
             ["client_secret"] = secret, ["scope"] = scope,
         });
 
-    /// <summary>Full auth-code + PKCE, optionally completing TOTP when <paramref name="totpKey"/> is supplied.</summary>
+    /// <summary>Full auth-code + PKCE, optionally completing TOTP when <paramref name="totpKey"/> is supplied.
+    /// <paramref name="membership"/> answers the 21.1c chooser; it is only needed when the identity holds more
+    /// than one selectable membership, since a single one auto-selects.</summary>
     public static async Task<string> AuthCodeToken(
-        IdentityAppFactory factory, string username, string password, string? totpKey, string scope)
+        IdentityAppFactory factory, string username, string password, string? totpKey, string scope,
+        Guid? membership = null) =>
+        (await AuthCodeTokens(factory, username, password, totpKey, scope, membership)).Access;
+
+    /// <inheritdoc cref="AuthCodeToken"/>
+    public static async Task<(string Access, string? Refresh)> AuthCodeTokens(
+        IdentityAppFactory factory, string username, string password, string? totpKey, string scope,
+        Guid? membership = null)
     {
         var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         var verifier = Base64Url(RandomNumberGenerator.GetBytes(32));
@@ -127,24 +204,93 @@ public static class TestFlow
         }
 
         var authorize = await client.GetAsync(authorizeUrl);
+
+        // 21.1c — several selectable memberships ⇒ authorize cannot decide which organization this session
+        // acts for and sends the browser to the chooser. Drive it exactly as a person would: load the form,
+        // post the selection, then come back to authorize, which now resolves.
+        if (authorize.Headers.Location?.ToString().StartsWith("/connect/select-membership", StringComparison.Ordinal) == true)
+        {
+            membership.Should().NotBeNull("this identity holds several memberships, so the test must say which one to act under");
+            var chooser = await AntiforgeryFields(client, authorize.Headers.Location!.ToString());
+            var chosen = await client.PostAsync("/connect/select-membership", new FormUrlEncodedContent(
+                new Dictionary<string, string>(chooser)
+                {
+                    ["membershipId"] = membership!.Value.ToString(), ["returnUrl"] = authorizeUrl,
+                }));
+            chosen.StatusCode.Should().Be(HttpStatusCode.Redirect, "a valid selection returns to the authorize request");
+            authorize = await client.GetAsync(authorizeUrl);
+        }
+
         authorize.StatusCode.Should().Be(HttpStatusCode.Redirect);
         var code = Uri.UnescapeDataString(new Uri(authorize.Headers.Location!.ToString()).Query
             .TrimStart('?').Split('&').Select(p => p.Split('=', 2)).First(p => p[0] == "code")[1]);
 
-        return await PostToken(client, new()
+        return await PostTokens(client, new()
         {
             ["grant_type"] = "authorization_code", ["client_id"] = IdentityContract.WebClientId,
             ["redirect_uri"] = redirect, ["code"] = code, ["code_verifier"] = verifier,
         });
     }
 
-    public static async Task<string> PostToken(HttpClient client, Dictionary<string, string> form)
+    /// <summary>
+    /// Sign in, then GET /connect/authorize once, handing back the RAW response.
+    ///
+    /// 21.1c's interesting outcomes are not tokens: a refusal when no membership is selectable, and a redirect
+    /// to the chooser when several are. Both are invisible to <see cref="AuthCodeTokens"/>, which asserts its
+    /// way to a code. The client is returned still holding its cookies so the chooser can then be driven.
+    /// </summary>
+    public static async Task<(HttpClient Client, HttpResponseMessage Authorize, string AuthorizeUrl)> LoginThenAuthorize(
+        IdentityAppFactory factory, string username, string password, string scope)
+    {
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var challenge = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(Base64Url(RandomNumberGenerator.GetBytes(32)))));
+        var authorizeUrl = "/connect/authorize?response_type=code"
+            + $"&client_id={IdentityContract.WebClientId}&redirect_uri={Uri.EscapeDataString("http://localhost:5173/")}"
+            + $"&scope={Uri.EscapeDataString(scope)}&code_challenge={challenge}&code_challenge_method=S256&state=xyz";
+
+        var loginForm = await AntiforgeryFields(client, "/connect/login");
+        var login = await client.PostAsync("/connect/login", new FormUrlEncodedContent(new Dictionary<string, string>(loginForm)
+        {
+            ["username"] = username, ["password"] = password, ["returnUrl"] = authorizeUrl,
+        }));
+        login.StatusCode.Should().Be(HttpStatusCode.Redirect, "password sign-in should succeed");
+
+        return (client, await client.GetAsync(authorizeUrl), authorizeUrl);
+    }
+
+    /// <summary>POST a membership selection to the chooser, as the rendered form does.</summary>
+    public static async Task<HttpResponseMessage> ChooseMembership(
+        HttpClient client, string chooserUrl, Guid membershipId, string returnUrl)
+    {
+        var form = await AntiforgeryFields(client, chooserUrl);
+        return await client.PostAsync("/connect/select-membership", new FormUrlEncodedContent(
+            new Dictionary<string, string>(form)
+            {
+                ["membershipId"] = membershipId.ToString(), ["returnUrl"] = returnUrl,
+            }));
+    }
+
+    public static async Task<string> PostToken(HttpClient client, Dictionary<string, string> form) =>
+        (await PostTokens(client, form)).Access;
+
+    /// <summary>The access token AND the refresh token, when <c>offline_access</c> was granted. 21.1c needs the
+    /// refresh token to prove that ending a membership stops the session at the next exchange.</summary>
+    public static async Task<(string Access, string? Refresh)> PostTokens(HttpClient client, Dictionary<string, string> form)
     {
         var resp = await client.PostAsync("/connect/token", new FormUrlEncodedContent(form));
         var body = await resp.Content.ReadAsStringAsync();
         resp.IsSuccessStatusCode.Should().BeTrue($"token request should succeed, got {(int)resp.StatusCode}: {body}");
         using var doc = JsonDocument.Parse(body);
-        return doc.RootElement.GetProperty("access_token").GetString()!;
+        return (doc.RootElement.GetProperty("access_token").GetString()!,
+                doc.RootElement.TryGetProperty("refresh_token", out var r) ? r.GetString() : null);
+    }
+
+    /// <summary>A token request whose REFUSAL is the point — returns the status and body instead of asserting.</summary>
+    public static async Task<(HttpStatusCode Status, string Body)> PostTokenRaw(
+        HttpClient client, Dictionary<string, string> form)
+    {
+        var resp = await client.PostAsync("/connect/token", new FormUrlEncodedContent(form));
+        return (resp.StatusCode, await resp.Content.ReadAsStringAsync());
     }
 
     /// <summary>Validate exactly as a service would: OIDC discovery → JWKS → RS256 + aud → HbmpPrincipal.</summary>

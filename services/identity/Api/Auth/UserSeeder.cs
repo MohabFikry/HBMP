@@ -34,6 +34,7 @@ public sealed class UserSeeder(IServiceProvider services, IConfiguration config,
         using var scope = services.CreateScope();
         var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher<ApplicationUser>>();
+        var memberships = scope.ServiceProvider.GetRequiredService<Infrastructure.MembershipService>();
 
         foreach (var role in IdentityContract.Roles)
         {
@@ -53,6 +54,9 @@ public sealed class UserSeeder(IServiceProvider services, IConfiguration config,
                 continue;
             }
             await users.AddToRoleAsync(user, role);
+            // 21.1c — the demo accounts need the membership they are minted from; 0010's backfill ran before
+            // they existed. Without it every demo login would authenticate and then be refused at authorize.
+            await memberships.EnsureMirroredAsync(user, [role], "seeder:demo", ct);
         }
         log.LogInformation("Demo staff accounts ensured (username = role, shared dev password).");
     }

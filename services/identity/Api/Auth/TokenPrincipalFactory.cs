@@ -19,6 +19,10 @@ public sealed class TokenPrincipalFactory
     public const string ProviderClaim = "provider_id";
     public const string AmrClaim = "amr";
 
+    /// <summary>21.1c — the active membership (ADR-0021, token-contract §2b). Optional by contract: absent on
+    /// client-credentials tokens and on the legacy membership-less path.</summary>
+    public const string MembershipClaim = "membership_id";
+
     /// <summary>The OIDC/OAuth2 scopes that are not part of the platform vocabulary and are not role-derived.
     /// They govern the SHAPE of the response (an id token, a refresh token), not access to any resource, so
     /// they are granted on request rather than by entitlement.</summary>
@@ -74,6 +78,7 @@ public sealed class TokenPrincipalFactory
         identity.SetClaim(Claims.Name, facts.DisplayName);
         identity.SetClaim(TenantClaim, facts.TenantId);
         if (facts.ProviderId is { } pid) identity.SetClaim(ProviderClaim, pid.ToString());
+        if (facts.MembershipId is { } mid) identity.SetClaim(MembershipClaim, mid.ToString());
         foreach (var role in facts.Roles) identity.AddClaim(new Claim(RolesClaim, role));
         foreach (var a in amr.Distinct(StringComparer.OrdinalIgnoreCase)) identity.AddClaim(new Claim(AmrClaim, a));
 
