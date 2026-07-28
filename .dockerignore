@@ -1,0 +1,39 @@
+# Build-context excludes for every image in the repo.
+#
+# This has to live at the REPO ROOT: Docker reads `.dockerignore` from the build context root and nowhere
+# else, and every Dockerfile here builds with `context: ../..` (the services need libs/, the web bundle needs
+# the pnpm workspace packages). apps/web/.dockerignore was therefore never consulted — it sat next to the
+# Dockerfile rather than at the context root, so node_modules went into the context regardless.
+#
+# Nothing below is needed to BUILD: the service images run `dotnet restore` + `dotnet publish` themselves and
+# the web image runs its own `pnpm install --frozen-lockfile`. Host artefacts are at best 50-60 MB of context
+# transferred per service, and at worst actively wrong — a stale host bin/obj is exactly the "restored source
+# but kept old binaries" failure mode.
+#
+# It also makes the build work from a git worktree at all: pnpm lays node_modules out as symlinks pointing
+# back into the main checkout, and BuildKit fails outright on them
+# ("cannot replace to directory .../node_modules/.bin with file").
+
+# Node / pnpm
+**/node_modules
+**/dist
+**/.vite
+**/coverage
+**/playwright-report
+**/test-results
+
+# .NET build output
+**/bin
+**/obj
+**/TestResults
+
+# VCS + local noise
+.git
+.gitignore
+**/*.log
+**/.DS_Store
+
+# Never let a local secrets file reach a build context.
+**/.env
+**/.env.*
+!**/.env.example
