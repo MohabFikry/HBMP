@@ -7,7 +7,14 @@ import { zCoded, zDate, zId, zInstant, zLocalized, zStatus } from "./common";
  * diagnosis + clinical narrative — the others (reception/lab/pharmacy/finance) structurally cannot.
  */
 export const zPatientListItem = z.object({
+  /** The ENCOUNTER id — this list is a worklist of encounters, not of people. */
   id: zId,
+  /**
+   * The beneficiary this encounter belongs to. Carried because the unified patient profile (design 39) is
+   * keyed on the BENEFICIARY, and a worklist row that cannot name one is a row you cannot open a file from
+   * — which is why the profile was unreachable from every clinical worklist.
+   */
+  beneficiaryId: zId,
   name: zLocalized,
   mrn: z.string(),
   /** True only when a treating relationship is active (server-asserted). */

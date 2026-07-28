@@ -29,7 +29,10 @@ builder.Services.AddHbmpBreakGlass(builder.Configuration); // break-glass works,
 // no state change. Staging audit rows in a database would mean giving a service that owns no data a database
 // purely to hold them. The sink fails the request rather than completing a PHI read unaudited.
 builder.Services.AddHbmpEvents(builder.Configuration);
-builder.Services.AddHbmpOutboxRelay();
+// The PUBLISHER, not the relay. The relay drains a durable outbox and needs the IOutboxReader only a
+// DbContext-backed outbox registers — this service deliberately has neither, so the relay threw
+// "No service for type IOutboxReader" on every pass, forever, drowning real errors in the log.
+builder.Services.AddHbmpEventPublisher();
 builder.Services.AddHbmpDirectAuditSink();
 builder.Services.AddProfileComposition(builder.Configuration);
 builder.Services.AddHttpContextAccessor();

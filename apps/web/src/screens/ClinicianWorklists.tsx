@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useFormat, type Formatters } from "../i18n/useFormat";
 import { Button, Card, DataTable, Modal, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
@@ -17,6 +18,7 @@ const S = {
   rxEmpty: { en: "You haven't written any prescriptions.", ar: "لم تكتب أي وصفات." },
   resultsTitle: { en: "Results inbox", ar: "صندوق النتائج" },
   resultsEmpty: { en: "No completed results yet.", ar: "لا توجد نتائج مكتملة بعد." },
+  openFile: { en: "Patient file", ar: "ملف المريض" },
   patient: { en: "Patient", ar: "المريض" },
   mrn: { en: "MRN", ar: "الرقم الطبي" },
   lastVisit: { en: "Last visit", ar: "آخر زيارة" },
@@ -43,12 +45,24 @@ export function DoctorPatients() {
   const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
+  const navigate = useNavigate();
   const state = useAsync<PatientListItem[]>(() => api.listPatients(), []);
   const cols: Column<PatientListItem>[] = [
     { key: "patient", header: t(S.patient), cell: (r) => t(r.name) },
     { key: "mrn", header: t(S.mrn), cell: (r) => <span className="tnum">{r.mrn}</span> },
     { key: "lastVisit", header: t(S.lastVisit), cell: (r) => <span className="tnum">{fmt.date(r.lastVisit)}</span> },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    {
+      // design 39 §6's "search → profile" entry, from the list a clinician actually starts their day in.
+      // The whole unified profile was unreachable from every clinical worklist without this.
+      key: "file",
+      header: "",
+      cell: (r) => (
+        <Button variant="secondary" size="sm" onClick={() => navigate(`/patients/${encodeURIComponent(r.beneficiaryId)}`)}>
+          {t(S.openFile)}
+        </Button>
+      ),
+    },
   ];
   return (
     <>

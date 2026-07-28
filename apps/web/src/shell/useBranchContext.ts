@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
+// API_BASE ALREADY ENDS IN /api/v1 (see config.ts). Every URL here appended a second /api/v1, so the
+// branch calls hit /api/v1/api/v1/me/branches → 404 → the hook's fail-soft path → no switcher, ever.
+// The whole branch-scoping feature (14.2/21.3) was invisible in the app for this one reason.
 import { API_BASE } from "../config";
 import { getToken } from "../auth/tokenStore";
 import { ACTIVE_BRANCH_HEADER, setActiveBranch } from "../api/activeBranch";
@@ -43,8 +46,8 @@ export function useBranchContext(role: string | undefined): BranchContextValue {
     (async () => {
       try {
         const [meRes, allRes] = await Promise.all([
-          fetch(`${API_BASE}/api/v1/me/branches`, { headers: authHeaders() }),
-          fetch(`${API_BASE}/api/v1/branches`, { headers: authHeaders() }),
+          fetch(`${API_BASE}/me/branches`, { headers: authHeaders() }),
+          fetch(`${API_BASE}/branches`, { headers: authHeaders() }),
         ]);
         if (!meRes.ok || !allRes.ok) return;
         const me = await meRes.json();
@@ -76,7 +79,7 @@ export function useBranchContext(role: string | undefined): BranchContextValue {
     setActiveBranch(id);               // subsequent requests carry the new branch immediately
     void (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/v1/me/active-branch`, {
+        const res = await fetch(`${API_BASE}/me/active-branch`, {
           method: "POST",
           headers: authHeaders(true),
           body: JSON.stringify({ branchId: id }),

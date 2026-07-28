@@ -218,6 +218,7 @@ export class DevApiClient implements ApiClient {
         ok(z.array(zPatientListItem), [
           {
             id: "MRS-M-10231",
+            beneficiaryId: "aaaaaaaa-0000-0000-0000-000000000231",
             name: loc("Amal Hassan", "أمل حسن"),
             mrn: "MRN-10231",
             treating: true,
@@ -226,6 +227,7 @@ export class DevApiClient implements ApiClient {
           },
           {
             id: "MRS-M-10555",
+            beneficiaryId: "aaaaaaaa-0000-0000-0000-000000000555",
             name: loc("Yusuf Haddad", "يوسف حداد"),
             mrn: "MRN-10555",
             treating: true,

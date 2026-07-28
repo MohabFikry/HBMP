@@ -33,6 +33,10 @@ import { useFormat } from "../i18n/useFormat";
  */
 
 const STR = {
+  noPatient: {
+    en: "Open a patient from a worklist or from Search / manage to see their file.",
+    ar: "افتح مريضًا من قائمة عمل أو من «بحث / إدارة» لعرض ملفّه.",
+  },
   title: { en: "Patient profile", ar: "ملف المريض" },
   jumpTo: { en: "Jump to section", ar: "الانتقال إلى قسم" },
   restricted: { en: "Restricted", ar: "مقيّد" },
@@ -151,14 +155,31 @@ const REASONS: Record<string, Localized> = {
 export function PatientProfile({ beneficiaryId }: { beneficiaryId?: string }) {
   const api = useApi();
   const t = useLoc();
-  const id = beneficiaryId ?? "BEN-2";
-  const state = useAsync(useCallback(() => api.patientProfile(id), [api, id]), [id]);
+  // No fixture fallback. This used to default to "BEN-2" — a DevApiClient id — so the seven
+  // /{portal}/patient routes loaded a person who does not exist outside the dev fixtures, and against a
+  // real database the profile simply errored. A file is opened FOR someone (design 39 §6: search → profile,
+  // or a worklist row); with nobody chosen the honest answer is to say where to choose one.
+  const state = useAsync(
+    useCallback(() => (beneficiaryId ? api.patientProfile(beneficiaryId) : Promise.resolve(null)), [api, beneficiaryId]),
+    [beneficiaryId],
+  );
+
+  if (!beneficiaryId) {
+    return (
+      <>
+        <PageHeader title={t(STR.title)} />
+        <Card as="section" style={{ padding: "var(--sp5)" }}>
+          <InlineAlert tone="info">{t(STR.noPatient)}</InlineAlert>
+        </Card>
+      </>
+    );
+  }
 
   return (
     <>
-      <PageHeader title={t(STR.title)} actions={<PrintSummaryButton beneficiaryId={id} />} />
-      <AsyncSection state={state} emptyLabel={STR.empty} isEmpty={(p) => p.sections.length === 0}>
-        {(profile) => <ProfileBody profile={profile} onRetry={state.reload} />}
+      <PageHeader title={t(STR.title)} actions={<PrintSummaryButton beneficiaryId={beneficiaryId} />} />
+      <AsyncSection state={state} emptyLabel={STR.empty} isEmpty={(p) => !p || p.sections.length === 0}>
+        {(profile) => <ProfileBody profile={profile!} onRetry={state.reload} />}
       </AsyncSection>
     </>
   );

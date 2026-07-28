@@ -1,4 +1,4 @@
-import { Suspense } from "react";
+import { Suspense, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { AppShell } from "../shell/AppShell";
@@ -40,12 +40,33 @@ function ResolveRoute() {
   if (path === `/${portal.base}`) return <Navigate to={home} replace />;
 
   const entry = ALL_ROUTES.find((r) => r.fullPath === path);
-  if (!entry) return <NotFound />;
+
+  // CROSS-PORTAL DEEP LINKS have no catalog section, ON PURPOSE: the unified patient profile is opened FOR
+  // someone — from a worklist row, a search result, a notification — never navigated to from a menu
+  // (design 39 §6). But this router resolved routes ONLY through the catalog, so `/patients/{id}` and all
+  // seven `/{portal}/patient` routes answered NotFound. The whole feature was unreachable in the app:
+  // built, tested, projected server-side per role, and behind a door with no handle.
+  //
+  // Gated on the COARSE permission only. What each role actually receives of the file is decided by the
+  // server's per-section projection — that is the authoritative layer, and duplicating it here would be a
+  // second opinion about who may see a diagnosis.
+  if (!entry) {
+    const deepLink = screenFor(path);
+    if (!deepLink) return <NotFound />;
+    if (!can("profile.read")) return <Forbidden path={path} />;
+    return <ScreenBoundary>{deepLink()}</ScreenBoundary>;
+  }
+
   if (!can(entry.section.permission)) return <Forbidden path={path} />;
   // A wired flagship screen (9.3) takes over its route; every other section keeps the 9.2 stub.
   // Screens are code-split (React.lazy), so a Suspense boundary covers the per-portal chunk load.
   const screen = screenFor(path);
   if (!screen) return <SectionPage section={entry.section} />;
+  return <ScreenBoundary>{screen()}</ScreenBoundary>;
+}
+
+/** Suspense boundary for the per-portal lazy chunk, shared by catalog routes and deep links. */
+function ScreenBoundary({ children }: { children: ReactNode }) {
   return (
     <Suspense
       fallback={
@@ -54,7 +75,7 @@ function ResolveRoute() {
         </div>
       }
     >
-      {screen()}
+      {children}
     </Suspense>
   );
 }

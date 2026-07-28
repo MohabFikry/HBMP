@@ -403,6 +403,7 @@ export class HttpApiClient implements ApiClient {
     return (r ?? []).map((e: any) =>
       parseOr(zPatientListItem, {
         id: e.encounterId,
+        beneficiaryId: String(e.beneficiaryId ?? ""),
         name: loc(`Beneficiary •••${String(e.beneficiaryId ?? "").slice(-4)}`),
         mrn: e.encounterNo ?? "",
         treating: true,

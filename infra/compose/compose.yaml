@@ -704,7 +704,14 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      # Trailing slash is SIGNIFICANT — ValidIssuers is a string comparison and OpenIddict publishes
+      # "http://localhost:8090/". profile-service landed in phase 20, after the platform-wide fix that added
+      # the slash to the other 19, so it kept the broken form and rejected every browser token with 401.
+      Auth__ValidIssuers__0: "http://localhost:8090/"
+      # profile-service PUBLISHES its PHI-read audit straight to the broker (no outbox — it owns no data),
+      # and fails the request rather than serving a record it could not audit. Without these credentials
+      # that fail-closed path turned every profile read into a 500: correct behaviour, missing config.
+      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       Siblings__Policy: "http://policy-service:8080"
       Siblings__Emr: "http://emr-service:8080"
       Siblings__Orders: "http://orders-service:8080"

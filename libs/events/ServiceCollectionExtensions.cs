@@ -56,9 +56,25 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>Adds the RabbitMQ publisher + relay background service (needs a broker; Tier 2/3 or Docker).</summary>
-    public static IServiceCollection AddHbmpOutboxRelay(this IServiceCollection services)
+    /// <summary>
+    /// The broker publisher on its own, WITHOUT the relay background service.
+    ///
+    /// For services that publish directly and own no outbox to drain — profile-service composes other
+    /// services' data and holds none of its own, so its PHI-read audit goes straight to the broker
+    /// (<see cref="DirectAuditSink"/>). Registering the relay there instead was the only way to get a
+    /// publisher, and it dragged in a hosted service that threw "No service for type IOutboxReader" on
+    /// every pass forever; removing the relay then took the publisher with it and the service would not
+    /// start at all. The two concerns are now separable, which is what they always were.
+    /// </summary>
+    public static IServiceCollection AddHbmpEventPublisher(this IServiceCollection services)
     {
         services.TryAddSingleton<IEventPublisher, RabbitMqEventPublisher>();
+        return services;
+    }
+
+    public static IServiceCollection AddHbmpOutboxRelay(this IServiceCollection services)
+    {
+        services.AddHbmpEventPublisher();
         services.AddHostedService<OutboxRelayService>();
         return services;
     }
