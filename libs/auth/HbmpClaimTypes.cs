@@ -31,6 +31,23 @@ public static class HbmpClaimTypes
 
     /// <summary>Source IP, surfaced for conditional access / audit (Keycloak can map this).</summary>
     public const string SourceIp = "src_ip";
+
+    // ---- Phase 21 (ADR-0021) — ADDITIVE to the frozen contract. Every one of these is OPTIONAL:
+    // a token minted before phase 21 carries none of them and MUST still yield the same principal.
+
+    /// <summary>The active <c>tenant_membership</c> — THE security principal (design 40 §1). Authorization
+    /// evaluates against this, never against <see cref="Subject"/>, because one identity may hold several
+    /// memberships with different authority.</summary>
+    public const string MembershipId = "membership_id";
+
+    /// <summary>Ordinal trust tier of the active membership's role(s); lower = more privileged (design 40 §2).
+    /// Answers TIER-shaped questions only (MFA-required tiers, peer-review-required grants). Capability
+    /// questions use scope keys — never substitute one for the other.</summary>
+    public const string Level = "level";
+
+    /// <summary>Program-enablement feature switches for the membership's tenant (design 40 §4). Enablement is
+    /// a gate, never a grant: a feature present here still requires the matching scope.</summary>
+    public const string Features = "features";
 }
 
 /// <summary>

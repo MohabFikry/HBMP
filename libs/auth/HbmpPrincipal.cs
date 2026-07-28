@@ -38,6 +38,27 @@ public sealed record HbmpPrincipal
     /// <summary>True when the token evidences a second authentication factor (acr/amr).</summary>
     public bool MfaSatisfied { get; init; }
 
+    // ---- Phase 21 (ADR-0021), additive. Null/empty on every pre-phase-21 token — see the byte-compat
+    // fixtures in libs/auth/Tests/TokenContractByteCompatTests.cs.
+
+    /// <summary>21 — the active membership (design 40 §1). THE security principal: one identity may hold
+    /// several memberships with different authority, so authorization evaluates against this, not
+    /// <see cref="Subject"/>. Null on a pre-phase-21 token and on client-credentials (no membership).</summary>
+    public string? MembershipId { get; init; }
+
+    /// <summary>21 — ordinal trust tier of the active membership (lower = more privileged, design 40 §2).
+    /// TIER-shaped checks only; capability checks use <see cref="Scopes"/>. Null when the token omits it.</summary>
+    public int? Level { get; init; }
+
+    /// <summary>21 — the tenant's enabled program features (design 40 §4). A GATE, never a grant: presence
+    /// here never substitutes for the scope the endpoint requires. Empty when the token omits it.</summary>
+    public IReadOnlySet<string> Features { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+
+    /// <summary>Whether the membership's tenant has <paramref name="feature"/> enabled. False when the token
+    /// carries no <c>features</c> claim at all — enablement is checked server-side against the store by the
+    /// 21.4 middleware, and this is only the in-session fast path.</summary>
+    public bool HasFeature(string feature) => Features.Contains(feature);
+
     public bool HasScope(string scope) => Scopes.Contains(scope);
 
     public bool IsInRole(string role) => Roles.Contains(role.ToLowerInvariant());
@@ -73,6 +94,9 @@ public sealed record HbmpPrincipal
             Acr = acr,
             Amr = amr,
             MfaSatisfied = MfaEvaluator.IsSatisfied(acr, amr),
+            MembershipId = user.FindFirstValue(HbmpClaimTypes.MembershipId),
+            Level = int.TryParse(user.FindFirstValue(HbmpClaimTypes.Level), out var lvl) ? lvl : null,
+            Features = KeycloakClaims.ExtractMulti(user, HbmpClaimTypes.Features).ToHashSet(StringComparer.Ordinal),
         };
     }
 }

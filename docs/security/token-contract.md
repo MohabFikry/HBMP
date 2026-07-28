@@ -1,6 +1,8 @@
 # Frozen access-token contract (Phase 17.0)
 
 **Status:** Frozen 2026-07-26 · **Owner:** Phase 17 (In-App Identity) · **Companion:** ADR-0015
+**Extended additively** 2026-07-28 by [ADR-0021](../adr/0021-user-access-model.md) (phase 21) — see §2b. §1–§2
+are unchanged and stay unchanged; extensions are additive, optional, and arrive only by ADR.
 
 This is the **normative** description of the JWT access token the platform consumes. It is frozen at the
 17.0 boundary so the new in-app issuer (ASP.NET Identity + OpenIddict, ADR-0015) can be built as a
@@ -36,6 +38,37 @@ issuer MUST reproduce these shapes and values. Anything not listed here is free 
 | `amr` | array of method refs | MFA evidence | `MfaEvaluator` |
 | `acr` | string | LoA / step-up evidence | `MfaEvaluator` |
 | `name` / `preferred_username` | string (optional) | display name only | SPA `displayName` |
+
+## 2b. Claims added by phase 21 (ADR-0021) — additive, optional
+
+**Frozen means frozen: nothing in §2 changed.** These three claims are *added*. Every one is **optional** —
+a token minted before phase 21 carries none of them, and MUST still yield the same `HbmpPrincipal` it always
+did. That is asserted byte-for-byte over checked-in fixture tokens in
+`libs/auth/Tests/TokenContractByteCompatTests.cs`, which is the guard on this section: extend the contract
+only additively, and only by ADR.
+
+| Claim | Shape | Meaning / use | Read by |
+|---|---|---|---|
+| `membership_id` | string (uuid), optional | The **active `tenant_membership`** — the security principal (design 40 §1). Authorization evaluates against this, never `sub`, because one identity may hold several memberships with different authority. Absent on client-credentials tokens (no membership) and on all pre-21 tokens | `HbmpPrincipal.MembershipId` |
+| `level` | number (int), optional | Ordinal trust tier of the active membership's role(s), **lower = more privileged** (design 40 §2). **Tier-shaped questions only** — MFA-required tiers, peer-review-required grants. Capability questions use `scope`; never substitute one for the other | `HbmpPrincipal.Level` |
+| `features` | array of strings (or repeated claim), optional | Program-enablement switches for the membership's tenant (design 40 §4). A **gate, never a grant**: a feature listed here still requires the endpoint's scope | `HbmpPrincipal.Features`, `HasFeature(...)` |
+
+**Absent must mean absent.** `MembershipId` is null, `Features` is empty, and `Level` is **null — not 0** —
+when the claim is missing or unparseable. Level 0 is the *most privileged* tier, so defaulting a missing
+level to 0 would hand every legacy token platform authority; two of the byte-compat tests exist solely to
+keep that from regressing.
+
+**What is deliberately NOT in the token.** Branch scope grants resolve **per-request** from the store
+(in-process + Valkey), not from claims — ADR-0021 §2 records the size measurement (a uuid grant set exceeds
+the ~8 KB proxy header buffer at ~130 branches) and the two other reasons: grants are time-bounded, so a
+300 s-cached copy blurs the expiry boundary; and the out-of-session evaluator has no token, so claims would
+force a second resolution path. Data-dependent ABAC conditions — treating relationship, provider ownership,
+case assignment, sensitive-result grants, break-glass state — are **never** claims (adaptation A5); they stay
+request-time in `libs/authz`.
+
+**Staleness.** These claims are a cache with the access-token TTL (§4) as its bound. Mutating a role grant,
+override, scope grant, feature or limit — or suspending a membership or tenant — revokes the refresh family,
+so the next exchange recomputes them (ADR-0021 §3).
 
 ### Role claim — important compatibility note
 
