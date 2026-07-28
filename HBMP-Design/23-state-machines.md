@@ -515,3 +515,64 @@ Active-branch context is **per-request**, not a persisted lifecycle, so it has n
 - Claims schema, enums & reason codes: [22-data-dictionary.md](22-data-dictionary.md) §10A / §11.5
 - Branch scoping, practitioner specialty & sensitivity gating (§11 above): [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md); schema & enums: [22-data-dictionary.md](22-data-dictionary.md) §10B / §11.6
 - Foundations & glossary: [0A-DESIGN-FOUNDATIONS.md](0A-DESIGN-FOUNDATIONS.md)
+
+---
+
+## Phase 19 lifecycles
+
+### Plan version lifecycle (ADR-0017)
+
+```
+Draft ──activate──▶ Active ──(a later version activates)──▶ Superseded
+  │                    │
+  └──delete────▶ ✗     └──amend──▶ (a NEW Draft, cloned)
+```
+
+- **Draft** is the only writable state; a trigger refuses rule writes under any other.
+- **activate** runs the validation pass and refuses an incoherent version. It sets `activated_at`, closes the
+  previous version's `effective_to`, and sets its `superseded_by_version_id`.
+- There is **no Active → Draft edge.** Changing a live plan is amend, which creates a new Draft.
+- A Superseded version is never deleted: coverage generated from it still points at it.
+
+### Enrollment lifecycle
+
+```
+            ┌──────────────── reinstate ────────────────┐
+            ▼                                           │
+(none) ──enrol──▶ Active ──suspend──▶ Suspended ──terminate──▶ Terminated
+                    │                                        ▲
+                    ├──terminate (mandatory reason) ──────────┘
+                    └──cancel (created in error) ──▶ Cancelled
+```
+
+- **terminate** requires a reason; a **back-dated** termination additionally requires `policy:supervise`.
+- **cancel** is the rollback verb for a membership that never should have existed (a mis-uploaded bulk row).
+  It is refused **per row** where benefit was already consumed — 497 clean reversals plus 3 needing a human
+  beats refusing all 500. A termination would leave the member covered for the gap; a cancellation does not.
+- Every transition appends to `enrollment_event`; nothing is updated in place.
+
+### Plan change (ADR-0020)
+
+```
+Active on plan A ──change-plan (mandatory reason)──▶ Active on plan B
+        │                                                   │
+        │  coverage from A closed at effective_date − 1 day  │
+        └───────── consumption carried per setting ──────────┘
+```
+
+- A server-side **dry run** (`/change-plan/preview`) runs the SAME resolution and arithmetic as the change,
+  and reports both ceilings, the resulting balances, and **the benefits the new plan does not cover at all**.
+- Whether consumption carries is a **setting**, not a constant: ADR-0020 is unsigned, and reversing it later
+  must not require migrating every member's accumulator.
+- Phase 18 remains the only writer of `consumed_value`. A plan change moves the LIMIT, never the accumulator.
+
+### Note lifecycle (ADR-0018)
+
+```
+(none) ──add──▶ Active ──cancel (mandatory reason, `policy:supervise` for another user's)──▶ Cancelled
+                   │
+                   └──superseded by a NEW note (supersedes_note_id)
+```
+
+**There is no edit and no delete edge, for any role.** A Cancelled note remains fully visible, struck through,
+with its canceller, timestamp and reason.

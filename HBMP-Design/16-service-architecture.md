@@ -381,3 +381,33 @@ This is a **choreographed saga** (no central orchestrator). Compensation on reje
 - Branch model, scope modes, practitioner specialty, sensitivity gating & release workflow (phase 14, §2.2): [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md)
 - Open-source infra realization: [25-deployment-architecture.md](25-deployment-architecture.md)
 - Authoritative stack: [0C-OPEN-SOURCE-STACK.md](0C-OPEN-SOURCE-STACK.md)
+
+---
+
+## Phase 19 — policy-service's remit, and what provider-service gained
+
+**policy-service is the Policy Administration System (PAS).** Before phase 19 it owned coverage and limits;
+it now owns the whole benefit spine that produces them:
+
+- `payer` — who the contract is with. Replaces the free-text `sponsor`.
+- `plan` → `plan_version` → `benefit_rule` (+ `benefit_rule_tier`) — the effective-dated, immutable statement
+  of what is covered and what the member pays, per network tier (ADR-0017, ADR-0019).
+- `policy` → `policy_plan` — the contract, and the plans offered under it (ADR-0020).
+- `member_group`, `enrollment` — the membership book; coverage is GENERATED from a version at enrolment and
+  records its provenance.
+- `note` (append-only, class-projected — ADR-0018), document **linkage** (bytes stay in document-service,
+  ADR-0021), and the entity **timeline** (a replayable projection over the audit stream, ADR-0022).
+- Query surfaces: policy query, member query, utilization, the administrative 360, and the bulk/extract engine.
+
+**policy-service still writes no clinical data and reads none.** It holds no diagnosis column anywhere, and
+the note/document projections withhold `Clinical`/`Restricted` content by class from every caller not
+entitled to it — including its own administrators.
+
+**provider-service gained network tiers** (`network_tier`, `provider_network_assignment`) and the service-date
+resolver they exist for. The tier structure is the Network Team's; policy-service consumes the resolver
+through `libs/benefit-pricing` and never writes to it.
+
+**reporting-service gained the analytical read model** (`fact_enrolment`, `fact_utilization`, `fact_cost`,
+`dim_label`) projected from policy, benefit and claims events. The 19.6b dashboard reads only these facts —
+it never queries the transactional benefit spine, which is the same tables a reception desk is checking
+eligibility against.

@@ -82,6 +82,11 @@ const ROLE_MAP: Array<[string, Role]> = [
   ["org_admin", "org_admin"],
   ["medical_director", "medical_director"],
   ["medical_approval", "medical_approval"],
+  // 19.7 — ABOVE beneficiary_mgmt in the list, which is what makes the priority order load-bearing: a
+  // supervisor carries the officer role too, and matching the officer first would land them on the portal
+  // without the supervisory affordances they were promoted for.
+  ["policy_admin", "policy_admin"],
+  ["beneficiary_mgmt_supervisor", "beneficiary_mgmt"],
   ["case_manager", "case_manager"],
   ["call_center", "call_center"],
   ["claims_officer", "claims_officer"],

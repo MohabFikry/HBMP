@@ -22,6 +22,9 @@ public static class RoleCatalog
             ["pharmacist"] = SensitivityTier.T3,
             ["medical_approval"] = SensitivityTier.T3,
             ["medical_director"] = SensitivityTier.T3,
+            // 19.7 — benefit administration. T2: entitlement and money, never a diagnosis.
+            ["policy_admin"] = SensitivityTier.T2,
+            ["beneficiary_mgmt_supervisor"] = SensitivityTier.T2,
             ["provider_admin"] = SensitivityTier.T4,
             ["org_admin"] = SensitivityTier.T4,
             ["super_admin"] = SensitivityTier.T4,

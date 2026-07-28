@@ -60,6 +60,7 @@ Read [`0A-DESIGN-FOUNDATIONS.md`](0A-DESIGN-FOUNDATIONS.md) **first** — it def
 | 35 | Implementation Plan | [35-implementation-plan.md](35-implementation-plan.md) | F |
 | 36 | Claims Management (Phase 10b) | [36-claims-management.md](36-claims-management.md) | E |
 | 37 | Branch Scoping, Practitioner Specialty & Clinical Sensitivity (Phase 14) | [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md) | D |
+| 38 | Policy & Member Administration (Phase 19) | [38-policy-member-administration.md](38-policy-member-administration.md) | D |
 
 ---
 

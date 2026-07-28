@@ -13,6 +13,10 @@ public static class IdentityContract
         "reception", "call_center", "beneficiary_mgmt", "finance", "network_team", "claims_officer",
         "case_manager", "doctor", "nurse", "lab_tech", "imaging_tech", "pharmacist",
         "medical_approval", "medical_director", "provider_admin", "org_admin", "super_admin",
+        // 19.7 — the benefit-administration roles 19.1 deferred. `policy_admin` authors the product;
+        // `beneficiary_mgmt_supervisor` is the supervisory increment over member administration (cancelling
+        // another user's note, approving a retro-effective change). Both T2: neither reads clinical data.
+        "policy_admin", "beneficiary_mgmt_supervisor",
     ];
 
     /// <summary>The frozen OAuth scope vocabulary (docs/security/token-contract.md §2). Kept here so the

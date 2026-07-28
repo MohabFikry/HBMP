@@ -1015,3 +1015,30 @@ Order types: `Lab`, `Imaging`, `Procedure`. Code systems: `CPT`, `LOINC`, `LOCAL
 - Branch scoping, practitioner specialty & sensitivity gating (§10B / §11.6): [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md)
 - Sensitivity handling, RLS, masking, minimization: [18-security-model.md](18-security-model.md)
 - API field shapes: [17-api-specifications.md](17-api-specifications.md)
+
+---
+
+## Phase 19 — policy administration, network tiers, notes, documents, analytics
+
+All in `policy` unless stated. Every table carries `tenant_id` (RLS) and the standard audit columns; every
+mutable one is soft-deleted with a `_history` twin unless noted as append-only.
+
+| Table | Schema | Purpose | Sensitivity | Notes |
+|---|---|---|---|---|
+| `payer` | policy | Who a policy's contract is with | Internal | Replaces the free-text `policy.sponsor`, kept readable until the 19.7 backfill retires it. `payer_type ∈ {SelfFunded, Donor, Government, Insurer, Employer}` |
+| `plan` | policy | The container. Says nothing on its own | Internal | `plan_code` unique per tenant |
+| `plan_version` | policy | **The effective-dated, immutable statement** | Internal | `status ∈ {Draft, Active, Superseded}`; Draft-only writes enforced by trigger (ADR-0017); `superseded_by_version_id` carries the lineage |
+| `benefit_rule` | policy | One rule per benefit category on a version | Internal | `limit_type ∈ {Annual, PerEncounter, Lifetime, Count}`; `reset_period ∈ {None, Monthly, Quarterly, Yearly}` |
+| `benefit_rule_tier` | policy | Cost-share for a rule **at a network tier** | Internal | co-pay fixed/percent, co-insurance, deductible interaction, pre-auth override, limit multiplier (ADR-0019) |
+| `policy_plan` | policy | A plan version elected onto a policy | Internal | At most one `is_default` per policy (exclusion constraint); `plan_label` is what members see |
+| `member_group` | policy | A cohort within a policy | Internal | `group_type ∈ {Cohort, Employer, Site, Programme}` |
+| `enrollment` | policy | A member on a policy plan | **PII** | `relationship ∈ {Principal, Spouse, Child, Parent, Other}`; `status ∈ {Active, Suspended, Terminated, Cancelled}`; overlap excluded per (beneficiary, policy) |
+| `enrollment_event` | policy | **Append-only** membership history | PII | `event_type ∈ {Enrolled, Terminated, Reinstated, GroupChanged, PlanChanged, Cancelled}`; the as-of extract reconstructs a member's plan from these |
+| `note` | policy | **Append-only** signed note on a policy or member | **PHI when `Clinical`/`Restricted`** | `visibility_class ∈ {Administrative, Financial, Clinical, Restricted}`; no update path on `body`; cancellation records who/when/why (ADR-0018) |
+| `policy_document` | policy | **Linkage** to a document; bytes live in MinIO | **PHI when `Clinical`/`Identity`/`Restricted`** | `classification` raise-only, enforced by CHECK (ADR-0021) |
+| `entity_timeline` | policy | Replayable projection over the audit stream | PII | Not a second log — rebuildable, and rebuilt rather than repaired (ADR-0022) |
+| `bulk_job`, `bulk_row` | policy | Bulk upload; one transaction per ROW | PII | `Idempotency-Key = (job_id, row_number)` and nothing else, so a resume replays into a SKIP |
+| `network_tier` | **provider** | A tier in the contracted network | Internal | `rank` orders specificity; `is_out_of_network` flags the OON bucket |
+| `provider_network_assignment` | **provider** | A provider (or location) in a tier, **effective-dated** | Internal | One tier per (scope, scope_ref) per day (exclusion constraint); most-specific-wins at the service date |
+| `fact_enrolment`, `fact_utilization`, `fact_cost` | **reporting** | The 19.6b analytical read model | Aggregate + a **pointer** | Carry `beneficiary_id` as a drill-down POINTER only — no name, no identifier, and **`fact_cost` has no clinical column at all**, asserted against `information_schema` |
+| `dim_label` | **reporting** | id → bilingual label for a dimension | Public | Denormalised on purpose: renaming a payer must not restate last year's report |

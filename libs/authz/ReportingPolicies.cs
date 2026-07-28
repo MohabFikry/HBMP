@@ -32,7 +32,13 @@ public static class ReportingPolicies
         new PolicyRule
         {
             Action = ReadOperational, ResourceType = Resource,
-            Roles = Set("medical_director", "manager", "medical_approval"), Scopes = Set("reporting:read"),
+            // 19.7 — the benefit-administration roles. 19.6b's dashboard is the analytical layer over the
+            // membership book THESE roles administer, and granting `reporting:read` in the identity seed was
+            // only half the wiring: this bundle checks the ROLE as well as the scope, so the seed alone
+            // produced a token with the right scope and a 403 that said `role-not-permitted`.
+            Roles = Set("medical_director", "manager", "medical_approval",
+                        "policy_admin", "beneficiary_mgmt", "beneficiary_mgmt_supervisor", "finance"),
+            Scopes = Set("reporting:read"),
             RequiredConditions = [AbacConditions.TenantMatch],
         },
         // Clinical-coded aggregates — Medical Director / Manager only. Finance has NO rule here → default-denied.
@@ -46,6 +52,10 @@ public static class ReportingPolicies
         new PolicyRule
         {
             Action = ReadFinancial, ResourceType = Resource,
+            // Deliberately NOT policy_admin or beneficiary_mgmt: 19.6b's financial and network views are cost
+            // per member, net payable and provider value. A benefit author sees enrolment and utilization and
+            // must ask Finance for the money — the same zone split phase 8.2 drew, applied rather than
+            // re-argued. The seed matches: neither role holds `reporting:read-financial`.
             Roles = Set("finance", "manager", "medical_director"), Scopes = Set("reporting:read-financial"),
             RequiredConditions = [AbacConditions.TenantMatch],
         },
@@ -60,7 +70,9 @@ public static class ReportingPolicies
         new PolicyRule
         {
             Action = Export, ResourceType = Resource,
-            Roles = Set("medical_director", "manager", "finance"), Scopes = Set("reporting:export"),
+            // 19.6b's dashboard export reuses this action, so the audited-export guarantee covers it too.
+            Roles = Set("medical_director", "manager", "finance", "policy_admin"),
+            Scopes = Set("reporting:export"),
             RequiredConditions = [AbacConditions.TenantMatch],
             Sensitive = true,
         },

@@ -12,10 +12,10 @@ namespace Mersal.Identity.Tests;
 public class RoleScopeMatrixTests
 {
     [Fact]
-    public void Frozen_role_vocabulary_is_17_distinct_roles()
+    public void Frozen_role_vocabulary_is_19_distinct_roles()
     {
-        IdentityContract.Roles.Should().HaveCount(17);
-        IdentityContract.Roles.Distinct().Should().HaveCount(17);
+        IdentityContract.Roles.Should().HaveCount(19);
+        IdentityContract.Roles.Distinct().Should().HaveCount(19);
         IdentityContract.Roles.Should().OnlyContain(r => !r.Any(char.IsUpper));
     }
 
