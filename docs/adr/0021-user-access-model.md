@@ -132,6 +132,40 @@ does export `IDENTITY_TEST_DB`, against a clean Postgres service): the dev datab
 the phase-19/20 migrations. Re-migrate it rather than changing code. Phase 21 work uses a scratch
 `hbmp_p21` database provisioned by `tools/ci/apply-migrations.sh` for exactly this reason.
 
+### 4. Divergences decided while BUILDING 21.2–21.6
+
+| Prompt says | What was built | Why |
+|---|---|---|
+| Overrides pass through `SegregationOfDuties` unchanged | added `TokensForScope` / `EvaluateScopeGrant` | overrides hand out CATALOG KEYS; SoD is defined over DUTIES, and no scope key is spelled like a duty token. Unmapped, the check would silently never fire — a control that always passes, worse than none. The map covers only the duties 10-role-matrix §7 actually splits; everything else is genuinely SoD-neutral |
+| — | SoD reports only conflicts a grant INTRODUCES | the coarse `finance` role already implies both payment halves, so an override naming one changes nothing. Refusing it blocks a no-op, leaves the real problem (the role definition) untouched, and trains administrators to read SoD refusals as noise |
+| Kong scopes `admin:access:read/write`, `platform:admin` | kept `admin:read` / `admin:write` | those three would extend the FROZEN scope vocabulary to split a permission already enforced correctly, and platform administration is already modelled by `is_platform_admin` + the catalog's `is_platform_admin_key` (A1). A parallel scope is a second mechanism for one rule, and two mechanisms drift |
+| `tenant_membership` gets RLS "like every other tenant-scoped table" | deliberately NOT RLS'd | the issuer resolves a login BY USERNAME to discover which tenants an identity belongs to, BEFORE any request-scoped `app.tenant_id` exists. A tenant predicate makes the membership chooser unable to read the rows it exists to list — i.e. it breaks login. `tenant_id` here is a CLAIM SOURCE, not a row filter |
+| revoke the refresh family on every grant mutation | invalidate the mode-2 cache only | the token endpoint already re-resolves the membership AND recomputes the effective set on every exchange, so the next refresh picks changes up regardless. Revoking the family forces a full re-login, which is strictly more disruptive than the stated goal ("so the next exchange recomputes") |
+| "extend the existing no-hash-in-audit grep test" | wrote it | no such test existed. `NoCredentialMaterialInAuditTests` now scans all production code, with a self-test proving it fires on the realistic mistake |
+| branch grants keyed on `membership_id` | carries `membership_id` AND `subject_user_id` | memberships live in the identity schema; admin-service must not read across a service boundary (the same rule that kept identity out of `admin.tenant`). The copy preserves `subject_user_id`, authoritative today; a later migration contracts to membership-only |
+
+### 5. Known defects found and fixed while building this phase
+
+Recorded because each was live on `main` before phase 21, and each is the kind that stays invisible:
+
+- **`RowScope.WithBranchScope` fell open.** A BranchScoped caller whose active branch failed to resolve got
+  `BranchUnrestricted = true`. An empty branch predicate does not mean "no branches" — it means every branch
+  in the tenant. Fixed with the reserved-uuid sentinel; the fail-closed test asserts zero rows AND the
+  negation (that the same dataset would have returned rows under an empty predicate), so it cannot rot into
+  a tautology.
+- **Accounts created after migration 0010 would have been locked out.** `0010` backfills memberships but is
+  a migration, not a trigger, so any account created afterwards had none — it would authenticate and then be
+  refused at authorize with no way to fix itself. `EnsureMirroredAsync` keeps `user_role` and the membership
+  in lockstep for the expand phase, and mirrors REMOVALS too, without which role revocation is cosmetic.
+- **A membership-chooser redirect loop.** A cookie naming a suspended membership with exactly one other left
+  bounced authorize → chooser → authorize forever, because the chooser redirected straight back when only
+  one option remained.
+- **`UpdateSecurityStampAsync` does not revoke OpenIddict refresh tokens.** The token endpoint checks
+  `IsActive` but never compares security stamps, so the deactivate path (17.4) did not end live sessions the
+  way its comment claimed — an off-boarded account kept every session it already had until each happened to
+  refresh. Deactivate now calls `SessionService.RevokeAllAsync`, which fails CLOSED: an administrator told
+  the account is deprovisioned must not be told that on the strength of a revocation that did not persist.
+
 ## Alternatives considered
 
 - **Branch grants in the token, capped with an overflow flag** — embed when the set is small, fall back to

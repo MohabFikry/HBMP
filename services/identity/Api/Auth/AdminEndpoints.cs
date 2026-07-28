@@ -109,7 +109,8 @@ public static class AdminEndpoints
         });
 
         g.MapPost("/users/{id:guid}/deactivate", async (HttpContext http, Guid id,
-            UserManager<ApplicationUser> users, IAuditClient audit, MembershipService memberships) =>
+            UserManager<ApplicationUser> users, IAuditClient audit, MembershipService memberships,
+            SessionService sessions) =>
         {
             var (me, err) = await Guard(http, "admin:write");
             if (err is not null) return err;
@@ -124,6 +125,14 @@ public static class AdminEndpoints
             // behind would still resolve and still mint tokens, so the account would remain usable.
             await memberships.EnsureMirroredAsync(user, await users.GetRolesAsync(user),
                 me!.GetClaim(Claims.Subject) ?? "admin", http.RequestAborted);
+
+            // 21.5 — and it has to reach the live SESSIONS. UpdateSecurityStampAsync above does not revoke
+            // OpenIddict refresh tokens: the token endpoint checks IsActive but never compares security
+            // stamps, so before this line an off-boarded account kept every session it already had until
+            // each one happened to refresh. Fails CLOSED (A6) — an administrator who is told the account is
+            // deprovisioned must not be told that on the strength of a revocation that did not persist.
+            await sessions.RevokeAllAsync(id, me!.GetClaim(Claims.Subject) ?? "admin",
+                "account deactivated", http.RequestAborted);
 
             await Audit(audit, me, "identity.user", id.ToString(), AuditAction.Update, "UserDeactivated", null);
             return Results.Ok(new { id, isActive = false });

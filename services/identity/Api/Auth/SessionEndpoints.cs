@@ -29,7 +29,13 @@ public static class SessionEndpoints
     public static void MapSessions(this WebApplication app)
     {
         // ---- Self-service ("my sessions") ------------------------------------------------------------------
-        var me = app.MapGroup("/identity/me").RequireAuthorization();
+        //
+        // Pinned to the issuer's BEARER scheme, not to bare RequireAuthorization(). The default scheme here
+        // is the ASP.NET Identity application COOKIE (the login pages use it), so an unqualified
+        // RequireAuthorization() ignores the SPA's bearer token entirely and challenges to the sign-in page
+        // — the endpoint answers 200 with HTML instead of 401, and the ownership check below never runs.
+        // Caught by UiGatingIsCosmeticTests.
+        var me = app.MapGroup("/identity/me").RequireAuthorization(IdentityAdminPolicies.Authenticated);
 
         me.MapGet("/sessions", async (HttpContext http, SessionService sessions) =>
         {

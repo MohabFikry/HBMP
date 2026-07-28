@@ -234,6 +234,35 @@ Sessions bound to device + IP context; anomalies trigger re-auth or block via Ke
 
 ---
 
+### 9b. Session controls & revocation degradation (phase 21.5, design 40 §6, adaptation A6)
+
+- **Session list + revoke.** Per-identity live sessions with device metadata (`identity.user_session`).
+  A person may list and end **their own** sessions with no administrative scope — signing out a device you
+  no longer trust is a safety feature, and gating it behind `admin:write` denies it to the clinician whose
+  phone was stolen. Administrative revoke-all requires `admin:write` + MFA and is audited.
+- **Concurrent cap** (5 per identity): exceeding it revokes the **oldest**, never refuses the newest.
+  Refusing a login because you already have five sessions is indistinguishable, at the desk, from being
+  locked out.
+- **Deactivation ends sessions.** `UpdateSecurityStampAsync` does **not** revoke OpenIddict refresh tokens
+  (the token endpoint checks `IsActive`, never the stamp), so deactivate explicitly calls `RevokeAllAsync`.
+
+**Revocation degradation policy — the platform's ONLY sanctioned fail-open.** The two directions are
+opposite on purpose:
+
+| Situation | Behaviour | Why |
+|---|---|---|
+| Stateless access-token validation | Never consults the revocation store at all | Signature + expiry only, so a store outage cannot break request authorization |
+| **Refresh-time** revocation check, store unavailable | **FAIL OPEN**, increment `hbmp.authz.revocation_store_failures`, alert | Refusing every refresh during a blip signs out every clinician mid-shift. Exposure is bounded by the access-token TTL |
+| **Explicit revoke**, store unavailable | **FAIL CLOSED** — error to the operator | An operator who believes a revocation succeeded closes the incident and stops looking. A false confirmation is worse than an outage |
+
+**Exposure bound:** a revoked session survives at most one access-token TTL past a fail-open. State this
+number in the runbook — "we are not sure" is not an answer anyone can act on during an incident.
+
+**Login history** (`identity.login_attempt`) records successes AND failures — a history containing only the
+successes cannot show anyone their account is under attack. It never stores password material, and the
+failure reason is deliberately COARSE: "no such user" and "wrong password" record the same value, so the
+distinction cannot leak through a support screen as a user-enumeration oracle.
+
 ## 10. Password & credential policy
 
 - Enforced via Keycloak password policy: length ≥ 12, banned-password/blacklist lists, no forced arbitrary rotation (NIST-aligned) but rotation on compromise.

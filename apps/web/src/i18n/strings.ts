@@ -110,6 +110,25 @@ export const L = {
     ar: "هذا المسار خارج صلاحيات دورك. تم تسجيل المحاولة. يمكنك طلب الوصول من المسؤول.",
   },
   requestAccess: { en: "Request access", ar: "طلب الوصول" },
+  // Phase 21.6 — THREE distinct 403 treatments (design 40 §4/§6). One generic page would send every user
+  // to the wrong person: these three are fixed by an administrator, by Mersal, and by the user themselves.
+  notEnabledTitle: { en: "This module isn't enabled for your organization", ar: "هذه الوحدة غير مفعّلة لمؤسستك" },
+  notEnabledBody: {
+    en: "Your permissions are fine — this programme has not been enabled for your organization yet. Mersal programme administration can enable it.",
+    ar: "صلاحياتك سليمة — لكن هذا البرنامج لم يُفعّل لمؤسستك بعد. يمكن لإدارة برامج مرسال تفعيله.",
+  },
+  contactMersal: { en: "Contact Mersal programme administration", ar: "تواصل مع إدارة برامج مرسال" },
+  limitReachedTitle: { en: "Your organization has reached its limit", ar: "وصلت مؤسستك إلى الحد المسموح" },
+  limitReachedBody: {
+    en: "Free a slot, or ask Mersal programme administration to raise the limit.",
+    ar: "حرّر مكانًا، أو اطلب من إدارة برامج مرسال رفع الحد.",
+  },
+  branchOutOfScopeTitle: { en: "That branch isn't in your current access", ar: "هذا الفرع ليس ضمن صلاحيات وصولك" },
+  branchOutOfScopeBody: {
+    en: "You asked for a branch you don't currently have a grant for. Switch to a branch you can reach, or ask your administrator to extend your access.",
+    ar: "طلبت فرعًا ليس لديك تصريح به حاليًا. انتقل إلى فرع يمكنك الوصول إليه، أو اطلب من المسؤول توسيع صلاحياتك.",
+  },
+  switchBranch: { en: "Switch branch", ar: "تبديل الفرع" },
   backToPortal: { en: "Back to my portal", ar: "العودة إلى بوابتي" },
   notFoundTitle: { en: "Page not found", ar: "الصفحة غير موجودة" },
   notFoundBody: { en: "The page you're looking for doesn't exist.", ar: "الصفحة التي تبحث عنها غير موجودة." },

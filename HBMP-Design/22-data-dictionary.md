@@ -1049,6 +1049,32 @@ Order types: `Lab`, `Imaging`, `Procedure`. Code systems: `CPT`, `LOINC`, `LOCAL
 
 ---
 
+## 11.7 User & access model tables (phase 21 — see [40-user-access-model.md](40-user-access-model.md), ADR-0021)
+
+The security principal is the **membership**, not the identity (invariant 1): authorization evaluates against
+`identity.tenant_membership`, and one person may hold several with genuinely different authority.
+
+| Table | Schema | Purpose | Notes |
+|---|---|---|---|
+| `tenant_membership` | identity | **The security principal** — (identity × tenant), owning roles, provider binding and lifecycle | Status `Invited/Active/Suspended/Ended`; only `Active` is selectable. One live row per (user, tenant). Deliberately **not** RLS-protected — the issuer resolves logins before any `app.tenant_id` exists |
+| `membership_role` | identity | Roles held THROUGH a membership | Replaces the identity-level `user_role` binding (expand phase: both exist) |
+| `tenant_membership_history` | identity | Append-only lifecycle history | Memberships are never hard-deleted |
+| `membership_override` | identity | Per-membership Allow/Deny of one catalog key | `reason` is **NOT NULL** — an unexplained exception cannot be reviewed. `valid_until` evaluated at resolution time (no sweeper). One live row per (membership, key) |
+| `membership_override_history` | identity | Append-only override history | |
+| `scope` (extended) | identity | Catalog metadata | Gains `deprecated`, `replaced_by`, `is_platform_admin_key`. **A1:** the platform-admin flag short-circuits ONLY keys marked `is_platform_admin_key`; every other key is hard-excluded |
+| `role` (extended) | identity | Ordinal trust tier | Gains `level int` — **lower = more privileged**, seeded as `4 − sensitivity tier`. Answers tier-shaped questions only; capability questions use KEYS |
+| `user_session` | identity | Live sign-ins + device metadata | Soft, attributed revocation. Concurrent cap revokes the **oldest** |
+| `login_attempt` | identity | Sign-in history, successes and failures | Never any password material. `failure_reason` is COARSE — "no such user" and "wrong password" record the same value, so the distinction cannot leak as an enumeration oracle |
+| `branch_scope_grant` | admin | Time-bounded, attributed branch reach | Replaces `user_branch_assignment` (expand phase: copied, source still authoritative). Keyed on `branch_id uuid`, not a code |
+| `branch_scope_grant_history` | admin | Append-only grant history | |
+| `tenant_feature` / `tenant_feature_history` | admin | Per-tenant programme switches | Absent ⇒ **disabled** (fail closed) |
+| `tenant_limit` / `tenant_limit_history` | admin | Per-tenant caps | Absent ⇒ **unlimited** (fail open — inventing a default would take a working platform offline). Enforced by counting live rows inside the mutating transaction, never a stored counter |
+
+**Effective set = (role grants ∪ membership allows) − membership denies.** Deny always wins. One evaluator
+(`libs/authz/EffectiveSetEvaluator`), two entry points (token issuance and out-of-session), parity-tested.
+
+---
+
 ## 12. Reference / Lookup Tables Summary
 
 | Lookup | Owner schema | Distribution |

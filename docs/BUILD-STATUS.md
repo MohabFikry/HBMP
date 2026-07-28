@@ -194,6 +194,38 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 > canary drill, human sign-offs, OpenBao provisioning) are operational gates 🟡 (target infra), per phase 11.
 > **Next: Phase 13 (Interoperability).**
 
+### Phase 21 — User & Access Model (design 40, ADR-0021)
+
+`tenant_membership` is now **the security principal**: authorization evaluates against the membership, never
+the identity, so one person can hold genuinely different authority in two organisations.
+
+- **21.0** ADR-0021 + three additive token claims (`membership_id`, `level`, `features`) behind the frozen
+  contract, with a byte-compat guard.
+- **21.1a/b/c** membership model + access-neutral backfill; tenant-local role→scope grants (catalog stays
+  global); login membership chooser, with authorize/token re-resolving the membership on every use.
+- **21.2** catalog metadata (`deprecated` / `replaced_by` / `is_platform_admin_key`), role `level`,
+  SoD-vetted per-membership overrides, and ONE effective-set evaluator in two modes. **The A1 denial test and
+  the mode-1/mode-2 parity suite are CI-pinned by name** (`AuthzParityGuardTests`) — deleting either fails
+  the build.
+- **21.3** time-bounded branch grants + the four-step precedence chain with dual failure semantics, and a
+  fail-closed branch **sentinel**. Fixed a live whole-tenant leak: `RowScope.WithBranchScope` used to fall
+  open when a branch-scoped caller's reach did not resolve.
+- **21.4** per-tenant programme features + caps, with two deliberately DISTINCT problem types
+  (`program-not-enabled` vs `program-limit-reached`, both ≠ a permission denial — the remedies differ). Caps
+  counted live inside the transaction under an advisory lock, so two parallel creates at cap−1 yield exactly one.
+- **21.5** ambient membership attribution (stamped by the interceptor, not by handlers); A6 revocation
+  degradation (refresh fails OPEN, explicit revoke fails CLOSED); A2 switch guards; session/device controls
+  with a concurrent cap that revokes the OLDEST; login-attempt history with a COARSE failure reason;
+  access-review snapshot (JSON + CSV) audited as an export, carrying overrides WITH their reasons.
+- **21.6** explicit Kong routes for the new surfaces (route-coverage guard green), docs (40 indexed, 22
+  gains the table catalog, 18 gains the degradation policy), and the admin UI.
+
+Full suite **1592 passing / 0 failing**. Twelve mutations were used to prove the new guards actually bite —
+platform-admin-as-wildcard, allow-beats-deny, ignored expiry, deleting the A1 test, the branch fail-open, the
+missing cap lock, and reversing the A6 pairing were each killed by the test written for them.
+
+Divergences from the build prompt and the defects found along the way are recorded in **ADR-0021 §4–§5**.
+
 ## Environment notes
 - .NET 8 SDK: user-local `~/.dotnet` (use `./dotnet.sh`). Node 20, psql 17 present.
 - **Frontend (Phase 9):** pnpm workspace at repo root (`pnpm-workspace.yaml`); `apps/design-system` (9.1),

@@ -297,6 +297,22 @@ services:
       - name: identity-admin-routes
         paths: ["/identity"]
         strip_path: false
+      # 21.6 — the phase-21 user & access surfaces, listed explicitly rather than left to the /identity
+      # prefix above. They are already reachable through it; naming them here is so the edge config states
+      # WHAT is exposed, and so a future narrowing of the broad prefix cannot silently unroute them.
+      #
+      # They deliberately keep the existing admin:read / admin:write scopes rather than minting
+      # admin:access:read/write and platform:admin. Those would extend the FROZEN scope vocabulary
+      # (docs/security/token-contract.md §2) to split a permission that is already enforced correctly, and
+      # platform administration is already modelled by the is_platform_admin flag plus the catalog's
+      # is_platform_admin_key marker (A1) — a parallel scope would be a second mechanism for one rule, and
+      # the two would drift. See ADR-0021.
+      - name: identity-access-model-routes
+        paths:
+          - "/identity/admin/memberships"      # 21.2 per-membership overrides + effective-access preview
+          - "/identity/admin/access-review"    # 21.5 access-review snapshot (JSON + CSV, audited export)
+          - "/identity/me"                     # 21.5 self-service sessions + login history
+        strip_path: false
       - name: identity-oidc-routes
         paths: ["/connect", "/.well-known"]
         strip_path: false
