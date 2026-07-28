@@ -70,6 +70,7 @@ import type {
   ReportAccessRequestRow,
   PatientProfile,
   ProfileSectionKey,
+  ProfileExportSummary,
   CopySummariesResult,
 } from "@mersal/contracts";
 
@@ -206,6 +207,12 @@ export interface ApiClient {
    * audit event — copying is when PHI leaves the platform's control, so it is logged like an export.
    */
   copyCallSummaries(beneficiaryId: string, callRefs: string[]): Promise<CopySummariesResult>;
+  /**
+   * The role-projected print summary, composed SERVER-SIDE from the same projection and audited as a PHI
+   * export. Never rendered from the DOM — that would make the export's contents a property of what this
+   * browser happened to have loaded, and would skip the export audit entirely.
+   */
+  profileSummary(beneficiaryId: string): Promise<ProfileExportSummary>;
 
   // Beneficiary management — the beneficiary registry (Phase 1). Min-necessary identity, no clinical data.
   beneficiarySearch(query: { name?: string; status?: string }): Promise<BeneficiaryRow[]>;

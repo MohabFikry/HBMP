@@ -7,6 +7,7 @@ import { useAsync } from "../api/useAsync";
 import { useWrite, writeErrorText } from "../api/useWrite";
 import { writeErrorMessage } from "../api/writeError";
 import { ConfirmAction } from "./ConfirmAction";
+import { PatientContextBar } from "./PatientProfile";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
@@ -68,6 +69,9 @@ export function PharmacyDispense() {
           </AsyncSection>
         </Card>
         <div>
+          {/* Phase 20 — the context bar. A pharmacy's projection is min-header + ALLERGIES (design 39 §4):
+              the drug-allergy check is the reason this strip is on the dispensing screen at all. */}
+          {active ? <PatientContextBar beneficiaryId={active.patient.id} /> : null}
           {active ? (
             <DispensePanel key={active.id} rx={active} t={t} onDone={() => { setSelected(null); q.reload(); }} />
           ) : (

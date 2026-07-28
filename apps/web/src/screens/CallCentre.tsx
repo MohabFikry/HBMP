@@ -309,6 +309,15 @@ export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }
                   kind={memberStatus(summary.identity.status).kind}
                   label={t(memberStatus(summary.identity.status).label)}
                 />
+                {/* Phase 20 — into the unified profile, carrying the verified interaction. The link appears
+                    only AFTER a pass, because the phase-15 gate is what makes any disclosure legitimate; the
+                    profile endpoint refuses an unverified call-centre principal independently (ADR-0026). */}
+                <a
+                  className="profile-action-link"
+                  href={`/patients/${encodeURIComponent(selected.beneficiaryId)}?interactionId=${encodeURIComponent(interactionId ?? "")}`}
+                >
+                  {t(L.ccOpenProfile)}
+                </a>
 
                 <section aria-label={t(L.ccCoverage)}>
                   <h3>{t(L.ccCoverage)}</h3>

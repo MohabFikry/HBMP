@@ -235,7 +235,16 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
   verbatim with an `aria-live` confirmation and a textarea fallback.
   **20.5** Kong routes, a compose block with no connection string, three scopes (`profile:read`,
   `profile:export`, `callcentre:history:read`), `docs/api/profile.json`, and docs 11/14/16/19/22 + the index.
-  Tests: authz **109**, profile-service **82**, callcentre **37**, web **145**. Four existing gates caught real
+  **20.4 completed:** permission-gated module deep-links from each section (rendered or absent, never
+  disabled — a greyed-out "Start encounter" on a receptionist's screen advertises a capability they will never
+  have); the print/export summary fetched from the SERVER and printed with its payload watermark rather than
+  rendered from the DOM; the patient context bar mounted in encounter, lab, dispense and approvals screens
+  (for a lab and a pharmacy its projection is min-header + ALLERGIES, which is exactly what matters at the
+  bench and at the counter); search → profile from the member-admin result row and from the call-centre 360
+  after a verification pass. **20.5 completed:** `perf/k6/06-patient-profile.js` encodes both budgets and
+  asserts the context bar returns a SUBSET as well as being fast — a regression that made it fetch the whole
+  profile would still be correct and would silently cost seconds on every clinical screen.
+  Tests: authz **109**, profile-service **82**, callcentre **37**, web **150**. Four existing gates caught real
   slips during the build — scope-integrity (a scope granted to roles with no call-history cell), the bare-clock
   scanner, the OpenAPI-coverage gate, and the display-truth rule (a raw `toLocaleString`).
   **20.2** the four partial 360s are consolidated onto the one contract. The case beneficiary-360 and the

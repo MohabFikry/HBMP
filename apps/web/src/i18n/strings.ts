@@ -53,6 +53,8 @@ export const L = {
   ccFail: { en: "Verify — Fail", ar: "تحقّق — فشل" },
   ccNeedTwo: { en: "Tick at least two identifiers to pass verification.", ar: "حدّد هويّتين على الأقل لإتمام التحقق." },
   ccVerified: { en: "Caller verified — member details unlocked", ar: "تم التحقق من المتصل — تم فتح بيانات المستفيد" },
+  // Phase 20 — into the unified profile, offered only after a verification pass.
+  ccOpenProfile: { en: "Open full profile", ar: "فتح الملف الكامل" },
   ccFailed: { en: "Verification failed — details stay hidden", ar: "فشل التحقق — تبقى البيانات مخفية" },
   ccCoverage: { en: "Coverage & remaining limits", ar: "التغطية والحدود المتبقية" },
   ccContacts: { en: "Contacts", ar: "بيانات التواصل" },

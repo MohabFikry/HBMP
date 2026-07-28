@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
-import { renderNode } from "./helpers";
+import { renderNode, seedSession } from "./helpers";
 import { PatientProfile, PatientContextBar } from "../src/screens/PatientProfile";
 import { DevApiClient } from "../src/api/DevApiClient";
 import type { ApiClient } from "../src/api/client";
@@ -352,6 +352,93 @@ describe("20.4 — the patient context bar", () => {
     );
     const link = await screen.findByRole("link", { name: "Amal Hassan" });
     expect(link).toHaveAttribute("href", `/patients/${BEN}`);
+  });
+});
+
+// ---------------------------------------------------------------- module deep-links & print
+
+describe("20.4 — module deep-links and the print summary", () => {
+  it("offers a section's module link only when the role holds the permission", async () => {
+    // Rendered or absent — never disabled. A greyed-out "Start encounter" on a receptionist's screen
+    // advertises a capability they will never have; a link that 403s is worse.
+    seedSession("doctor");
+    renderProfile(
+      fakeApi({
+        patientProfile: vi.fn().mockResolvedValue(
+          profile([{ key: "encounters", state: "Visible", data: { items: [] } }]),
+        ),
+      }),
+    );
+    const section = await screen.findByRole("region", { name: /encounters/i });
+    expect(within(section).getByRole("link", { name: /start encounter/i })).toHaveAttribute(
+      "href", expect.stringContaining(BEN));
+  });
+
+  it("offers no module link to a role without the permission", async () => {
+    seedSession("reception");
+    renderProfile(
+      fakeApi({
+        patientProfile: vi.fn().mockResolvedValue(
+          profile([{ key: "encounters", state: "Visible", data: { items: [] } }]),
+        ),
+      }),
+    );
+    const section = await screen.findByRole("region", { name: /encounters/i });
+    expect(within(section).queryByRole("link", { name: /start encounter/i })).not.toBeInTheDocument();
+  });
+
+  it("offers no module link beside a RESTRICTED section", async () => {
+    // Inviting a clinician to order against a record they were just told they cannot see.
+    seedSession("doctor");
+    renderProfile(
+      fakeApi({
+        patientProfile: vi.fn().mockResolvedValue(
+          profile([{ key: "investigations", state: "Restricted", reasonCode: "not-treating" }]),
+        ),
+      }),
+    );
+    const section = await screen.findByRole("region", { name: /investigations/i });
+    expect(within(section).queryByRole("link", { name: /raise investigation/i })).not.toBeInTheDocument();
+  });
+
+  it("fetches the print summary from the SERVER rather than printing the DOM", async () => {
+    // Printing what is on screen would make the export's contents a property of what this browser happened
+    // to have loaded, and would skip the separate PHI-export audit event entirely.
+    seedSession("doctor");
+    const profileSummary = vi.fn().mockResolvedValue({
+      profile: profile([{ key: "header", state: "Visible", data: header() }]),
+      watermark: {
+        viewerSubject: "u-1", viewerRoles: "doctor",
+        generatedAt: new Date().toISOString(), purpose: "profile-export",
+      },
+    });
+    const printed: string[] = [];
+    vi.spyOn(window, "open").mockReturnValue({
+      document: { write: (h: string) => printed.push(h), close: () => {} },
+      print: () => {},
+    } as unknown as Window);
+
+    const user = userEvent.setup();
+    renderProfile(fakeApi({
+      patientProfile: vi.fn().mockResolvedValue(profile([{ key: "header", state: "Visible", data: header() }])),
+      profileSummary,
+    }));
+    await screen.findByRole("region", { name: /identity/i });
+
+    await user.click(screen.getByRole("button", { name: /print summary/i }));
+    await waitFor(() => expect(profileSummary).toHaveBeenCalledWith(BEN));
+    // The watermark comes from the PAYLOAD — an export printable without it leaves unattributed.
+    await waitFor(() => expect(printed.join("")).toContain("profile-export"));
+    expect(printed.join("")).toContain("doctor");
+  });
+
+  it("does not offer the print summary to a role without profile.export", async () => {
+    seedSession("reception");
+    renderProfile(fakeApi({
+      patientProfile: vi.fn().mockResolvedValue(profile([{ key: "header", state: "Visible", data: header() }])),
+    }));
+    await screen.findByRole("region", { name: /identity/i });
+    expect(screen.queryByRole("button", { name: /print summary/i })).not.toBeInTheDocument();
   });
 });
 

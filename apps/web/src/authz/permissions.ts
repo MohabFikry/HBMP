@@ -50,6 +50,11 @@ export type Permission =
   | "case.read"
   | "case.beneficiary360"
   | "case.escalations"
+  // Patient profile (Phase 20). `profile.read` is held by every role the design-39 §4 matrix names — the
+  // COARSE gate only; what each of them receives is decided per section on the SERVER. `profile.export` is
+  // narrower: copying a record out of the platform is a different act from looking at it.
+  | "profile.read"
+  | "profile.export"
   // Call centre (Phase 15) — NO clinical reach by construction
   | "callcentre.workspace"
   | "callcentre.history"
@@ -182,10 +187,32 @@ export const rolePermissions: Record<Role, Permission[]> = {
   medical_director: ["director.dashboards", "director.oversight", "director.quality", "director.escalations", "approvals.sla"],
 };
 
+/**
+ * Roles that may generate the role-projected PRINT/EXPORT summary of a patient profile.
+ *
+ * Mirrors the `profile:export` grants in identity `0009_profile_scopes.sql`, and is deliberately narrower than
+ * `profile.read`: copying a patient record out of the platform is a different act from looking at it. Reception
+ * hands over a card, not a clinical summary; finance and claims export through the phase-19.5b extract engine,
+ * which has its own controls.
+ */
+const PROFILE_EXPORTERS: ReadonlySet<Role> = new Set<Role>([
+  "doctor", "nurse", "medical_approval", "medical_director", "case_manager", "beneficiary_mgmt", "super_admin",
+]);
+
+/**
+ * Every role the design-39 §4 matrix names may OPEN a profile — `profile.read` is the coarse gate, and what
+ * each of them actually receives is decided per section on the server. The roles absent here are the ones with
+ * no row in that matrix at all.
+ */
+const NON_PROFILE_ROLES: ReadonlySet<Role> = new Set<Role>(["provider_admin", "policy_admin"]);
+
 /** Effective permissions for a role (deduplicated). Every role additionally carries `notification.read` —
  * the in-app inbox is a self-service surface available in every portal (the server row-filters by recipient). */
 export function permissionsForRole(role: Role): ReadonlySet<Permission> {
-  return new Set<Permission>([...rolePermissions[role], "notification.read"]);
+  const perms = new Set<Permission>([...rolePermissions[role], "notification.read"]);
+  if (!NON_PROFILE_ROLES.has(role)) perms.add("profile.read");
+  if (PROFILE_EXPORTERS.has(role)) perms.add("profile.export");
+  return perms;
 }
 
 export function hasPermission(perms: ReadonlySet<Permission>, required: Permission): boolean {

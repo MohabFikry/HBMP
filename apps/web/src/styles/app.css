@@ -1027,3 +1027,61 @@ nav.mrs-rail {
 
 .pol-dialog { display: grid; gap: var(--sp3); border: 2px solid var(--accent); }
 .pol-dialog-actions { display: flex; gap: var(--sp2); flex-wrap: wrap; }
+
+/* ── Phase 20: the unified patient profile ─────────────────────────────────────────────────────────────
+   The three withheld states must be visually distinct, not three shades of grey — a user has to be able
+   to tell "you may not see this" from "it broke" from "there is nothing" at a glance, in both themes and
+   without relying on hue (0B four-cue rule). */
+.patient-profile { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp4); }
+@media (min-width: 60rem) {
+  .patient-profile { grid-template-columns: 14rem minmax(0, 1fr); align-items: start; }
+  .profile-jump { position: sticky; top: var(--sp4); }
+}
+.profile-jump ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp1); }
+.profile-jump a { display: block; padding: var(--sp2); border-radius: var(--r-md); text-decoration: none; }
+.profile-jump a:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.profile-sections { display: grid; gap: var(--sp4); }
+.profile-section-head { display: flex; flex-wrap: wrap; gap: var(--sp3); align-items: baseline; justify-content: space-between; }
+.profile-section-actions { display: flex; flex-wrap: wrap; gap: var(--sp2); }
+.profile-action-link { font-size: 0.9em; text-decoration: underline; }
+.profile-action-link:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+/* Restricted: a LOCK and the word, on a hatched surface — deliberately unlike the warning treatment. */
+.profile-restricted { display: grid; gap: var(--sp2); padding: var(--sp3); border: 1px dashed currentColor; border-radius: var(--r-md); opacity: 0.95; }
+.profile-empty { margin: 0; opacity: 0.75; font-style: italic; }
+
+.profile-chip { display: inline-flex; align-items: center; gap: var(--sp1); margin: 0; padding: 2px var(--sp2); border-radius: 999px; font-size: 0.85em; border: 1px solid currentColor; }
+.profile-chip--restricted { border-style: dashed; }
+.profile-chip-icon { font-style: normal; }
+.profile-chip[data-shape="square"] { border-radius: var(--r-md); }
+.profile-chip[data-shape="octagon"] { border-width: 2px; }
+
+.profile-header-strip { display: flex; gap: var(--sp3); align-items: center; }
+.profile-avatar { width: 3rem; height: 3rem; border-radius: 999px; object-fit: cover; }
+.profile-avatar--initials { display: grid; place-items: center; border: 1px solid currentColor; font-weight: 600; }
+.profile-name { margin: 0; font-weight: 600; }
+.profile-meta { margin: 0; opacity: 0.8; font-size: 0.9em; }
+.profile-alerts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp2); }
+.profile-rows, .call-history-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp2); }
+.profile-facts { display: grid; gap: var(--sp2); margin: 0; }
+.profile-facts dt { font-weight: 600; font-size: 0.85em; opacity: 0.8; }
+.profile-facts dd { margin: 0; }
+
+.call-history-toolbar { display: flex; flex-wrap: wrap; gap: var(--sp3); align-items: center; justify-content: space-between; margin-bottom: var(--sp3); }
+.call-row { display: grid; gap: var(--sp2); padding: var(--sp3); border: 1px solid currentColor; border-radius: var(--r-md); }
+.call-row-head { display: flex; flex-wrap: wrap; gap: var(--sp2); align-items: center; font-size: 0.9em; }
+.call-row-summary { margin: 0; }
+.call-row-summary--withheld { opacity: 0.7; font-style: italic; }
+.call-row-edited { opacity: 0.75; }
+.call-row-links { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp2); font-size: 0.85em; }
+/* >=44px target, keyboard reachable, never a hover-only affordance. */
+.call-row-copy { min-height: 44px; min-width: 44px; padding: 0 var(--sp3); display: inline-flex; align-items: center; gap: var(--sp1); border: 1px solid currentColor; border-radius: var(--r-md); background: transparent; color: inherit; cursor: pointer; justify-self: start; }
+.call-row-copy:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.call-history-announce { margin: var(--sp2) 0 0; min-height: 1.2em; }
+.copy-fallback { display: grid; gap: var(--sp2); padding: var(--sp3); border: 1px solid currentColor; border-radius: var(--r-md); margin-top: var(--sp3); }
+.copy-fallback textarea { width: 100%; font-family: inherit; }
+
+.patient-context-bar { display: flex; flex-wrap: wrap; gap: var(--sp3); align-items: center; padding: var(--sp2) var(--sp3); border: 1px solid currentColor; border-radius: var(--r-md); margin-bottom: var(--sp3); }
+.patient-context-bar .profile-avatar { width: 2rem; height: 2rem; }
+.context-bar-name { font-weight: 600; }
+.context-bar-meta { opacity: 0.8; font-size: 0.9em; }

@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { Button, Card, InlineAlert, useTheme } from "@mersal/design-system";
 import type {
   CallHistoryRow,
+  ProfileExportSummary,
   CallHistorySection,
   Localized,
   PatientProfile as PatientProfileContract,
@@ -11,6 +12,8 @@ import type {
 } from "@mersal/contracts";
 import { PROFILE_SECTION_KEYS } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
+import { useAuth } from "../auth/AuthProvider";
+import { permissionsForRole, hasPermission, type Permission, type Role } from "../authz/permissions";
 import { useAsync } from "../api/useAsync";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 import { useFormat } from "../i18n/useFormat";
@@ -54,7 +57,57 @@ const STR = {
   inbound: { en: "Inbound", ar: "وارد" },
   outbound: { en: "Outbound", ar: "صادر" },
   alerts: { en: "Alerts", ar: "تنبيهات" },
+  actions: { en: "Actions", ar: "إجراءات" },
+  print: { en: "Print summary", ar: "طباعة الملخص" },
+  printing: { en: "Preparing…", ar: "جارٍ التحضير…" },
+  printFailed: { en: "The summary could not be generated.", ar: "تعذّر إنشاء الملخص." },
 } satisfies Record<string, Localized>;
+
+/**
+ * The module deep-links each section offers, with the permission each one requires.
+ *
+ * <b>Permission-gated by RENDERING NOTHING, never by disabling.</b> A greyed-out "Start encounter" on a
+ * receptionist's screen advertises a capability they will never have and invites a support ticket; a link that
+ * 403s is worse still. The server is the authority either way — this list only decides what is worth offering.
+ */
+const SECTION_ACTIONS: Record<string, { label: Localized; permission: Permission; href: (id: string) => string }[]> = {
+  header: [
+    { label: { en: "Book appointment", ar: "حجز موعد" }, permission: "appointments.read",
+      href: (id) => `/reception/appointments?beneficiaryId=${encodeURIComponent(id)}` },
+  ],
+  encounters: [
+    { label: { en: "Start encounter", ar: "بدء زيارة" }, permission: "emr.write",
+      href: (id) => `/clinician/encounter?beneficiaryId=${encodeURIComponent(id)}` },
+  ],
+  investigations: [
+    { label: { en: "Raise investigation order", ar: "طلب فحص" }, permission: "orders.place",
+      href: (id) => `/clinician/orders?beneficiaryId=${encodeURIComponent(id)}` },
+  ],
+  prescriptions: [
+    { label: { en: "New prescription", ar: "وصفة جديدة" }, permission: "prescriptions.write",
+      href: (id) => `/clinician/prescriptions?beneficiaryId=${encodeURIComponent(id)}` },
+  ],
+  authorizations: [
+    { label: { en: "View authorizations", ar: "عرض الموافقات" }, permission: "approvals.worklist",
+      href: (id) => `/approvals/worklist?beneficiaryId=${encodeURIComponent(id)}` },
+  ],
+  financial: [
+    { label: { en: "Open claims", ar: "فتح المطالبات" }, permission: "claims.worklist",
+      href: (id) => `/claims/worklist?beneficiaryId=${encodeURIComponent(id)}` },
+  ],
+  documents: [
+    { label: { en: "Upload document", ar: "رفع مستند" }, permission: "beneficiary.manage",
+      href: (id) => `/beneficiaries/manage?beneficiaryId=${encodeURIComponent(id)}` },
+  ],
+  notes: [
+    { label: { en: "Add note", ar: "إضافة ملاحظة" }, permission: "policy.members",
+      href: (id) => `/policy/members?beneficiaryId=${encodeURIComponent(id)}` },
+  ],
+  caseManagement: [
+    { label: { en: "Open case", ar: "فتح الحالة" }, permission: "case.read",
+      href: (id) => `/cases/my-cases?beneficiaryId=${encodeURIComponent(id)}` },
+  ],
+};
 
 /** Bilingual section titles, keyed by the server's section keys (design 39 §3 order). */
 const SECTION_TITLES: Record<string, Localized> = {
@@ -103,12 +156,93 @@ export function PatientProfile({ beneficiaryId }: { beneficiaryId?: string }) {
 
   return (
     <>
-      <PageHeader title={t(STR.title)} />
+      <PageHeader title={t(STR.title)} actions={<PrintSummaryButton beneficiaryId={id} />} />
       <AsyncSection state={state} emptyLabel={STR.empty} isEmpty={(p) => p.sections.length === 0}>
         {(profile) => <ProfileBody profile={profile} onRetry={state.reload} />}
       </AsyncSection>
     </>
   );
+}
+
+/**
+ * The role-projected print summary.
+ *
+ * <b>It is fetched, never rendered from the DOM.</b> Printing what is on screen would make the export's
+ * contents a property of what this browser happened to have loaded and scrolled to — and it would bypass the
+ * separate PHI-export audit event entirely. The server composes it from the same projection, watermarks it
+ * with the viewer and timestamp, and records the export (design 39 §6).
+ *
+ * Offered only to roles holding `profile:export`; the button is absent otherwise rather than disabled.
+ */
+function PrintSummaryButton({ beneficiaryId }: { beneficiaryId: string }) {
+  const api = useApi();
+  const t = useLoc();
+  const { session } = useAuth();
+  const [state, setState] = useState<"idle" | "busy" | "failed">("idle");
+
+  const role = session?.role as Role | undefined;
+  if (!role || !hasPermission(permissionsForRole(role), "profile.export")) return null;
+
+  return (
+    <>
+      <Button
+        variant="secondary"
+        disabled={state === "busy"}
+        onClick={async () => {
+          setState("busy");
+          try {
+            const summary = await api.profileSummary(beneficiaryId);
+            openPrintable(summary);
+            setState("idle");
+          } catch {
+            setState("failed");
+          }
+        }}
+      >
+        {t(state === "busy" ? STR.printing : STR.print)}
+      </Button>
+      <span aria-live="polite" role="status" className="visually-hidden">
+        {state === "failed" ? t(STR.printFailed) : ""}
+      </span>
+      {state === "failed" ? <InlineAlert tone="bad">{t(STR.printFailed)}</InlineAlert> : null}
+    </>
+  );
+}
+
+/**
+ * Hand the server-composed summary to the browser's print dialog.
+ *
+ * The watermark comes from the PAYLOAD, not from anything added here: an export that can be printed without
+ * its viewer and timestamp is an export that leaves the building unattributed.
+ */
+function openPrintable(summary: ProfileExportSummary) {
+  const w = window.open("", "_blank", "noopener,noreferrer");
+  if (!w) return;
+  const esc = (v: unknown) =>
+    String(v ?? "").replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
+
+  const rows = summary.profile.sections
+    .map(
+      (s) =>
+        `<section><h2>${esc(s.key)}</h2>${
+          s.state === "Visible"
+            ? `<pre>${esc(JSON.stringify(s.data, null, 2))}</pre>`
+            : `<p><em>${esc(s.state)}${s.reasonCode ? ` — ${esc(s.reasonCode)}` : ""}</em></p>`
+        }</section>`,
+    )
+    .join("");
+
+  w.document.write(
+    `<title>${esc(summary.profile.beneficiaryId)}</title>` +
+      `<style>body{font:14px/1.5 system-ui;margin:2rem}pre{white-space:pre-wrap}` +
+      `.wm{border:1px solid #999;padding:.5rem;margin-bottom:1rem;font-size:12px}</style>` +
+      `<div class="wm">${esc(summary.watermark.viewerSubject)} · ${esc(summary.watermark.viewerRoles)}` +
+      ` · ${esc(summary.watermark.generatedAt)} · ${esc(summary.watermark.purpose)}</div>` +
+      rows,
+  );
+  w.document.close();
+  w.print();
 }
 
 function ProfileBody({ profile, onRetry }: { profile: PatientProfileContract; onRetry: () => void }) {
@@ -164,12 +298,46 @@ function SectionCard({
   return (
     <section id={`section-${section.key}`} aria-labelledby={`h-${section.key}`} className="profile-section">
       <Card style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp3)" }}>
-        <h2 id={`h-${section.key}`} style={{ margin: 0, fontSize: "1.05rem" }}>
-          {title}
-        </h2>
+        <div className="profile-section-head">
+          <h2 id={`h-${section.key}`} style={{ margin: 0, fontSize: "1.05rem" }}>
+            {title}
+          </h2>
+          <SectionActions section={section} beneficiaryId={beneficiaryId} />
+        </div>
         <SectionState section={section} beneficiaryId={beneficiaryId} onRetry={onRetry} />
       </Card>
     </section>
+  );
+}
+
+/**
+ * The module deep-links for one section, carrying the patient context.
+ *
+ * <b>Offered only when the section has content AND the role holds the permission.</b> A "Raise investigation
+ * order" link beside a Restricted card would invite a clinician to act on a record they were just told they
+ * cannot see, and a link the caller's role cannot use is a 403 waiting to be filed as a bug.
+ */
+function SectionActions({ section, beneficiaryId }: { section: ProfileSection; beneficiaryId: string }) {
+  const t = useLoc();
+  const { session } = useAuth();
+  const role = session?.role as Role | undefined;
+
+  if (section.state !== "Visible" || !role) return null;
+  const actions = SECTION_ACTIONS[section.key];
+  if (!actions?.length) return null;
+
+  const held = permissionsForRole(role);
+  const offered = actions.filter((a) => hasPermission(held, a.permission));
+  if (offered.length === 0) return null;
+
+  return (
+    <nav className="profile-section-actions" aria-label={t(STR.actions)}>
+      {offered.map((a) => (
+        <a key={a.permission} href={a.href(beneficiaryId)} className="profile-action-link">
+          {t(a.label)}
+        </a>
+      ))}
+    </nav>
   );
 }
 

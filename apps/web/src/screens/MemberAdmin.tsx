@@ -93,6 +93,7 @@ const S = {
   },
   exclusions: { en: "Exclusions", ar: "الاستثناءات" },
   terminate: { en: "Terminate", ar: "إنهاء" },
+  openProfile: { en: "Open full profile", ar: "فتح الملف الكامل" },
   reinstate: { en: "Reinstate", ar: "إعادة تفعيل" },
   changeGroup: { en: "Change group", ar: "تغيير المجموعة" },
   changePlan: { en: "Change plan", ar: "تغيير الخطة" },
@@ -333,6 +334,12 @@ export function MemberDetail({
         </div>
 
         <div className="pol-actions">
+          {/* Phase 20 — search result into the unified profile. One route for every role: the SERVER decides
+              what comes back, so a beneficiary-management officer and a clinician follow the same link and
+              receive different records. */}
+          <a className="profile-action-link" href={`/patients/${encodeURIComponent(row.beneficiaryId)}`}>
+            {t(S.openProfile)}
+          </a>
           <Button variant="secondary" onClick={() => setDialog("terminate")}>{t(S.terminate)}</Button>
           <Button variant="secondary" onClick={() => setDialog("reinstate")}>{t(S.reinstate)}</Button>
           <Button variant="secondary" onClick={() => setDialog("changeGroup")}>{t(S.changeGroup)}</Button>

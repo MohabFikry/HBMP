@@ -5,6 +5,7 @@ import type { LabOrder, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
 import { newIdempotencyKey } from "../api/http";
+import { PatientContextBar } from "./PatientProfile";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
@@ -103,6 +104,9 @@ export function LabQueue({ kind }: { kind: "lab" | "imaging" }) {
           </>
         }
       >
+        {/* Phase 20 — the context bar. A lab's projection is min-header + ALLERGIES only (design 39 §4),
+            which is exactly what matters at the bench: contrast and reagent reactions. */}
+        {active && <PatientContextBar beneficiaryId={active.patient.id} />}
         {active && (
           <InputField
             label={t(S.panels)}

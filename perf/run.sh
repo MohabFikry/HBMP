@@ -27,7 +27,7 @@ run_one() {
 
 if [[ "${1:-all}" == "all" ]]; then
   rc=0
-  for s in k6/01-eligibility.js k6/02-consume.js k6/03-worklists.js k6/04-dashboards.js k6/05-mixed-soak.js; do
+  for s in k6/01-eligibility.js k6/02-consume.js k6/03-worklists.js k6/04-dashboards.js k6/06-patient-profile.js k6/05-mixed-soak.js; do
     run_one "$s" || rc=1
   done
   echo "Summaries in $RESULTS_DIR/. Any threshold miss ⇒ non-zero exit (CI gate)."

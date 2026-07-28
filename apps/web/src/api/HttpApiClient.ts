@@ -13,6 +13,7 @@ import {
   zBeneficiaryRow,
   zPatientProfile,
   zCopySummariesResult,
+  zProfileExportSummary,
   type ProfileSectionKey,
   zRegisterResult,
   zStatusChangeResult,
@@ -1384,6 +1385,11 @@ export class HttpApiClient implements ApiClient {
     const r = await postRaw(
       `/beneficiaries/${encodeURIComponent(beneficiaryId)}/call-interactions/copy`, { callRefs });
     return parseOr(zCopySummariesResult, r);
+  }
+
+  async profileSummary(beneficiaryId: string) {
+    const r = await getRaw(`/patients/${encodeURIComponent(beneficiaryId)}/profile/summary`);
+    return parseOr(zProfileExportSummary, r);
   }
 
   async beneficiarySearch(query: { name?: string; status?: string }) {

@@ -141,6 +141,25 @@ export type ProfileSectionKey = (typeof PROFILE_SECTION_KEYS)[number];
 /** The context bar asks for these two only — it is on every clinical screen and cannot be slow. */
 export const CONTEXT_BAR_SECTIONS: ProfileSectionKey[] = ["header", "alerts"];
 
+/**
+ * The role-projected print/export summary. Composed SERVER-SIDE from the same projection the screen received
+ * and audited as a PHI export — it can never contain a section the viewer could not see (design 39 §6).
+ */
+export const zExportWatermark = z.object({
+  viewerSubject: z.string(),
+  viewerRoles: z.string(),
+  generatedAt: zInstant,
+  purpose: z.string(),
+});
+export type ExportWatermark = z.infer<typeof zExportWatermark>;
+
+export const zProfileExportSummary = z.object({
+  profile: zPatientProfile,
+  /** On the PAYLOAD, not decoration the client adds: an export printable without it leaves unattributed. */
+  watermark: zExportWatermark,
+});
+export type ProfileExportSummary = z.infer<typeof zProfileExportSummary>;
+
 /** The result of "copy all visible" — one server-generated block, one audit event. */
 export const zCopySummariesResult = z.object({
   level: z.string(),

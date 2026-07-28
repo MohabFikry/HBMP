@@ -17,6 +17,7 @@ import {
   zBeneficiary360,
   zPatientProfile,
   zCopySummariesResult,
+  zProfileExportSummary,
   type ProfileSectionKey,
   zCaseListItem,
   zCoordinationTask,
@@ -1164,6 +1165,24 @@ export class DevApiClient implements ApiClient {
         beneficiaryId,
         servedAt: new Date().toISOString(),
         sections: all.filter((s) => !wanted || wanted.has(s.key)),
+      }),
+    );
+  }
+
+  profileSummary(beneficiaryId: string) {
+    return this.gate(() =>
+      ok(zProfileExportSummary, {
+        profile: {
+          beneficiaryId,
+          servedAt: new Date().toISOString(),
+          sections: [{ key: "header", state: "Visible" as const, data: { beneficiaryId, displayName: "Amal Hassan", status: "Active", statusCue: { label: "Active", icon: "check-circle", shape: "circle", tone: "positive" } } }],
+        },
+        watermark: {
+          viewerSubject: "dev-user",
+          viewerRoles: "doctor",
+          generatedAt: new Date().toISOString(),
+          purpose: "profile-export",
+        },
       }),
     );
   }

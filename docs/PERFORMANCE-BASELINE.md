@@ -32,6 +32,26 @@ in perf data, logs, or this report (NFR-042).
 | 7 | Operational reports | p95 ≤ 3 s (NFR-006) | `04-dashboards.js` | PENDING | — | — |
 | 8 | Event bus sustained | ≥ 200 ev/s buffered, no loss (NFR-014) | `05-mixed-soak.js` | see durability check | — | — |
 | 9 | Mixed 1h soak | no latency creep past primary bar | `05-mixed-soak.js` | PENDING | — | — |
+| 10 | **Patient profile (full)** | p95 ≤ 2.5 s (design 39 / prompt 20.5) | `06-patient-profile.js` | PENDING | — | — |
+| 11 | **Patient context bar** | p95 ≤ 400 ms — on EVERY clinical screen | `06-patient-profile.js` | PENDING | — | — |
+
+## The context-bar budget is a correctness guard in disguise
+
+Scenario 11 is 400 ms because the patient context bar renders on the encounter, order, dispense, approval and
+call-centre screens — it is the strip that tells a clinician which record is open, so it is on the critical
+path of nearly every clinical interaction in the platform.
+
+It meets that budget by asking for `?sections=header,alerts` rather than the whole profile. A regression that
+made it fetch everything would still be **correct** — the design-39 §4 matrix still decides what comes back —
+and would silently add seconds to every one of those screens. No correctness test would fail. That is why
+`06-patient-profile.js` asserts the response is a **subset** as well as timing it: the latency is the symptom,
+the subset is the cause.
+
+Note also what the profile budget is NOT met by: a cache. The composition depends on role, treating
+relationship, branch, payer scope and live sensitive-result grants, and a cache keyed on fewer dimensions than
+the decision depends on is a breach rather than a bug (ADR-0026, restating the phase-18 X9 lesson). The budget
+is met by parallel fan-out with per-section timeouts, and a slow upstream shows up as a degraded section —
+visible, and visibly better than a cached lie.
 
 ## Concurrency (the invariant, not just latency)
 

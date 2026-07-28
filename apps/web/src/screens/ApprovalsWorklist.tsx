@@ -21,6 +21,7 @@ import {
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
 import { newIdempotencyKey } from "../api/http";
+import { PatientContextBar } from "./PatientProfile";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
@@ -193,6 +194,8 @@ function DecisionForm({ review, t, onDone }: { review: ApprovalReview; t: (l: Lo
 
   return (
     <Card as="section" style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp4)" }}>
+      {/* Phase 20 — the context bar, so an approval is never decided against the wrong record. */}
+      <PatientContextBar beneficiaryId={review.patient.id} />
       {/* Field-scoped review (min-necessary): coded reason + justification + docs — not the full EMR. */}
       <div>
         <h2 style={{ margin: 0 }}>{review.service.code} · {t(review.service.label)}</h2>

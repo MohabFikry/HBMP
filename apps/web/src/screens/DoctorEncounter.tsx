@@ -14,6 +14,7 @@ import type { Column } from "@mersal/design-system";
 import type { Encounter, Localized, PatientListItem } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
+import { PatientContextBar } from "./PatientProfile";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
@@ -117,6 +118,9 @@ function EncounterPanel({ patientId, t }: { patientId: string; t: (l: Localized)
     <AsyncSection state={enc} emptyLabel={S.pickPatient}>
       {(e) => (
         <Card as="section" style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp4)" }}>
+          {/* Phase 20 — the patient context bar. A safety control, not a convenience: the failure it exists
+              to prevent is prescribing or ordering against the wrong person's record. */}
+          <PatientContextBar beneficiaryId={patientId} />
           <div className="result-head">
             <h2 style={{ margin: 0 }}>{t(e.patientName)}</h2>
             <div className="row-actions">
