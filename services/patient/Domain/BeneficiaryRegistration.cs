@@ -42,8 +42,18 @@ public sealed class BeneficiaryRegistrar(IIdentifierLookup lookup, TimeProvider 
         var errors = new List<string>();
 
         if (string.IsNullOrWhiteSpace(req.GivenName)) errors.Add("givenName is required");
+        else if (!PersonFieldValidation.IsValidName(req.GivenName)) errors.Add("givenName contains characters that do not appear in names");
         if (string.IsNullOrWhiteSpace(req.FamilyName)) errors.Add("familyName is required");
+        else if (!PersonFieldValidation.IsValidName(req.FamilyName)) errors.Add("familyName contains characters that do not appear in names");
         if (req.Identifiers is null || req.Identifiers.Count == 0) errors.Add("at least one identifier is required");
+
+        // Contacts were stored UNVALIDATED (QA P0-2: a phone of "abcdefg" persisted). A junk phone is worse
+        // than no phone — every later workflow (eligibility SMS, call-centre callback) trusts this value.
+        foreach (var c in req.Contacts ?? [])
+        {
+            if (!PersonFieldValidation.IsValidContact(c.Type, c.Value))
+                errors.Add($"'{c.Value}' is not a valid {c.Type}");
+        }
 
         foreach (var id in req.Identifiers ?? [])
         {

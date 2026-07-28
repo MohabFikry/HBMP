@@ -41,3 +41,42 @@ public static partial class IdentifierValidation
 
     private static Regex AlnumDash(int min, int max) => new($@"^[A-Za-z0-9\-]{{{min},{max}}}$");
 }
+
+/// <summary>
+/// Person-name and contact-value validation (QA P0-2: `&lt;script&gt;x&lt;/script&gt;` and `abcdefg` both
+/// reached the register as a family name and a phone number).
+///
+/// Names use a Unicode-letter ALLOWLIST, not a markup denylist: this registry serves Arabic, Latin and
+/// other scripts, and enumerating the dangerous characters is the approach that misses one. Letters, marks
+/// (Arabic diacritics), spaces, hyphen, apostrophe and period cover real names; angle brackets do not
+/// appear in any of them. The record is rendered today by React (which escapes) but tomorrow by PDF
+/// exports, SMS templates and CSVs — the store is the last common gate.
+/// </summary>
+public static partial class PersonFieldValidation
+{
+    public static bool IsValidName(string value) =>
+        !string.IsNullOrWhiteSpace(value) && value.Trim().Length <= 100 && Name().IsMatch(value.Trim());
+
+    /// <summary>
+    /// Phone: optional leading +, then 8–15 digits (E.164 range), separators tolerated and stripped.
+    /// Deliberately NOT Egyptian-mobile-only: this population carries foreign numbers, and a rule that
+    /// rejects a reachable Sudanese number to enforce a local format loses the one way to reach someone.
+    /// </summary>
+    public static bool IsValidPhone(string value)
+    {
+        var v = (value ?? "").Trim().Replace(" ", "").Replace("-", "").Replace("(", "").Replace(")", "");
+        return Phone().IsMatch(v);
+    }
+
+    public static bool IsValidContact(ContactType type, string value) => type switch
+    {
+        ContactType.Phone => IsValidPhone(value),
+        ContactType.Email => Email().IsMatch((value ?? "").Trim()),
+        // Address / emergency-contact are free text; length-bound only.
+        _ => !string.IsNullOrWhiteSpace(value) && value.Trim().Length <= 300,
+    };
+
+    [GeneratedRegex(@"^[\p{L}\p{M}][\p{L}\p{M}'\-\. ]*$")] private static partial Regex Name();
+    [GeneratedRegex(@"^\+?\d{8,15}$")] private static partial Regex Phone();
+    [GeneratedRegex(@"^[^@\s]+@[^@\s]+\.[^@\s]+$")] private static partial Regex Email();
+}
