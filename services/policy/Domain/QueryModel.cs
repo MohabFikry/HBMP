@@ -1,4 +1,5 @@
 using System.Globalization;
+using Mersal.BenefitPricing;
 
 namespace Mersal.Policy.Domain;
 
@@ -13,27 +14,10 @@ namespace Mersal.Policy.Domain;
 // So the bands, the sort allow-lists and the paging clamps live here, in the domain, and the read paths depend
 // on them rather than restating them.
 
-/// <summary>How much of a member's (or a policy's) accumulating entitlement is gone. Bands rather than a raw
-/// percentage because the question they answer is triage — "who do I look at first" — and a band survives the
-/// rounding argument that a percentage invites.</summary>
-public enum UtilizationBand
-{
-    /// <summary>Nothing consumed. Worth its own band: a member who has used NOTHING all year is either healthy,
-    /// unaware of their entitlement, or wrongly enrolled — and the third case is only findable this way.</summary>
-    Zero,
-    /// <summary>Above zero, below 50%.</summary>
-    Low,
-    /// <summary>50% up to (not including) 80%.</summary>
-    Medium,
-    /// <summary>80% up to (not including) 100% — the threshold-crossing band.</summary>
-    High,
-    /// <summary>At or over the limit. Over 100% is possible and legitimate (a limit reduced mid-period), and it
-    /// stays in this band rather than being clamped away.</summary>
-    Exhausted,
-    /// <summary>Covered with no accumulating ceiling. NOT the same as Zero, and the distinction matters: an
-    /// unlimited benefit reported as 0% invites "plenty left" on something that was never metered.</summary>
-    Unlimited,
-}
+// 19.6b — UtilizationBand / UtilizationBands MOVED to libs/benefit-pricing so reporting-service can classify
+// members with the same code this query does. The vocabulary comment above demanded one definition; keeping it
+// in a single service's domain guaranteed a second one the moment a different service needed it. Re-exported
+// here so every existing `Mersal.Policy.Domain.UtilizationBand` reference still resolves.
 
 /// <summary>Where a member stands against their waiting period on a given date.</summary>
 public enum WaitingPeriodState
@@ -45,30 +29,6 @@ public enum WaitingPeriodState
     Serving,
     /// <summary>Served out; the member is fully in benefit.</summary>
     Served,
-}
-
-public static class UtilizationBands
-{
-    /// <summary>Classify from the accumulator totals. <paramref name="hasCoverage"/> separates "unlimited" from
-    /// "not covered at all", which are otherwise identical (both sum to a zero limit).</summary>
-    public static UtilizationBand Of(decimal limit, decimal consumed, bool hasCoverage)
-    {
-        if (limit <= 0m) return hasCoverage ? UtilizationBand.Unlimited : UtilizationBand.Zero;
-        if (consumed <= 0m) return UtilizationBand.Zero;
-        if (consumed >= limit) return UtilizationBand.Exhausted;
-
-        var percent = consumed / limit * 100m;
-        return percent >= 80m ? UtilizationBand.High
-             : percent >= 50m ? UtilizationBand.Medium
-             : UtilizationBand.Low;
-    }
-
-    /// <summary>The percentage a band is rendered with; null for Unlimited (see <see cref="UtilizationBand"/>).</summary>
-    public static decimal? PercentUsed(decimal limit, decimal consumed) =>
-        limit <= 0m ? null : Math.Round(consumed / limit * 100m, 1, MidpointRounding.AwayFromZero);
-
-    public static bool TryParse(string? raw, out UtilizationBand band) =>
-        Enum.TryParse(raw, ignoreCase: true, out band);
 }
 
 /// <summary>A member-count band for policy query — "policies with 100–499 members".</summary>

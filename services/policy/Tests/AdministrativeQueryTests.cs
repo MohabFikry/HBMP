@@ -1,3 +1,4 @@
+using Mersal.BenefitPricing;
 using System.Reflection;
 using FluentAssertions;
 using Mersal.Authz;

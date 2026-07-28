@@ -19,6 +19,16 @@ public sealed class ReportingDbContext(DbContextOptions<ReportingDbContext> opti
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
     public DbSet<ReportJob> ReportJobs => Set<ReportJob>();
 
+    // 19.6b — the policy/member analytical read model.
+    public DbSet<EnrolmentFact> EnrolmentFacts => Set<EnrolmentFact>();
+    public DbSet<MemberUtilizationFact> MemberUtilizationFacts => Set<MemberUtilizationFact>();
+    public DbSet<CostFact> CostFacts => Set<CostFact>();
+    public DbSet<DimensionLabel> DimensionLabels => Set<DimensionLabel>();
+
+    /// <summary>fact_cost's money columns, hoisted so the model builder does not allocate the array per call.</summary>
+    private static readonly string[] MoneyColumns =
+        ["ClaimedAmount", "ApprovedAmount", "AdjustedAmount", "NetPayable"];
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.AddOutbox("reporting");
@@ -68,5 +78,51 @@ public sealed class ReportingDbContext(DbContextOptions<ReportingDbContext> opti
         });
         b.Entity<ProcessedEvent>(e => { e.ToTable("processed_event"); e.HasKey(x => x.EventId); });
         b.Entity<ReportJob>(e => { e.ToTable("report_job"); e.HasKey(x => x.JobId); });
+
+        // ── 19.6b analytics ───────────────────────────────────────────────────────────────────────────────
+        // Indexes are shaped by the filter bar, not by the columns: every view filters tenant + period first,
+        // then narrows on payer/plan. A dashboard that had to scan a year of facts to answer "this month, this
+        // payer" is the slow live query 19.6b forbids.
+        b.Entity<EnrolmentFact>(e =>
+        {
+            e.ToTable("fact_enrolment");
+            e.HasKey(x => x.FactId);
+            e.HasIndex(x => x.EventId).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.Period });
+            e.HasIndex(x => new { x.TenantId, x.PayerId, x.Period });
+            e.HasIndex(x => new { x.TenantId, x.PolicyPlanId, x.Period });
+            e.HasIndex(x => new { x.TenantId, x.EnrollmentId, x.Period });
+        });
+        b.Entity<MemberUtilizationFact>(e =>
+        {
+            e.ToTable("fact_utilization");
+            e.HasKey(x => x.FactId);
+            e.HasIndex(x => x.EventId).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.Period });
+            e.HasIndex(x => new { x.TenantId, x.PayerId, x.Period });
+            e.HasIndex(x => new { x.TenantId, x.BenefitCategoryCode, x.Period });
+            e.HasIndex(x => new { x.TenantId, x.Band, x.Period });
+            e.Property(x => x.LimitValue).HasColumnType("numeric(18,2)");
+            e.Property(x => x.ConsumedValue).HasColumnType("numeric(18,2)");
+            e.Property(x => x.Remaining).HasColumnType("numeric(18,2)");
+        });
+        b.Entity<CostFact>(e =>
+        {
+            e.ToTable("fact_cost");
+            e.HasKey(x => x.FactId);
+            e.HasIndex(x => x.EventId).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.Period });
+            e.HasIndex(x => new { x.TenantId, x.PayerId, x.Period });
+            e.HasIndex(x => new { x.TenantId, x.NetworkTierCode, x.Period });
+            foreach (var money in MoneyColumns) e.Property(money).HasColumnType("numeric(18,2)");
+        });
+        b.Entity<DimensionLabel>(e =>
+        {
+            e.ToTable("dim_label");
+            // Composite key: the same id can be two kinds only by accident, but a policy and its default plan
+            // sharing an id is not worth a runtime surprise.
+            e.HasKey(x => new { x.DimensionId, x.Kind });
+            e.HasIndex(x => new { x.TenantId, x.Kind });
+        });
     }
 }

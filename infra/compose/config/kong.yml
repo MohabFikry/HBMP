@@ -213,7 +213,7 @@ services:
     plugins: *edge_jwt
     routes:
       - name: reporting-routes
-        paths: ["/api/v1/reports", "/api/v1/dashboards"]
+        paths: ["/api/v1/reports", "/api/v1/dashboards", "/api/v1/analytics"]
         strip_path: false
 
   # --- admin-service: platform administration + caller's own branch context (/me) ---

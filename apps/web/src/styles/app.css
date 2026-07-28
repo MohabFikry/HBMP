@@ -1027,3 +1027,80 @@ nav.mrs-rail {
 
 .pol-dialog { display: grid; gap: var(--sp3); border: 2px solid var(--accent); }
 .pol-dialog-actions { display: flex; gap: var(--sp2); flex-wrap: wrap; }
+
+/* ── 19.6b analytics dashboard ─────────────────────────────────────────────────────────────────────────── */
+
+/* The filter bar. A grid rather than a row: twelve controls in one line wrap unpredictably between locales,
+   and an Arabic label is routinely longer than its English counterpart. */
+.pol-filterbar { display: grid; gap: var(--sp4); }
+.pol-filtergrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sp3);
+}
+.pol-filteractions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp4);
+  align-items: center;
+  justify-content: space-between;
+}
+.pol-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp2);
+  min-height: 44px;              /* ≥44px target — the checkbox itself is smaller than the rule allows */
+  color: var(--text-1);
+}
+.pol-check input { width: 20px; height: 20px; }
+
+.pol-view { display: grid; gap: var(--sp5); }
+.pol-view-actions { display: flex; justify-content: flex-end; }
+
+.pol-series { display: grid; gap: var(--sp3); }
+.pol-series-summary { color: var(--text-2); margin: 0; }
+
+/* Bars are decoration (aria-hidden); the table beside them is the content. */
+.pol-bars { display: grid; gap: var(--sp2); }
+.pol-bar-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 3fr minmax(80px, auto);
+  gap: var(--sp3);
+  align-items: center;
+}
+.pol-bar-label { color: var(--text-2); overflow-wrap: anywhere; }
+.pol-bar-track {
+  background: var(--surface-2);
+  border-radius: var(--r-pill);
+  height: 14px;
+  overflow: hidden;
+}
+.pol-bar-fill { display: block; height: 100%; background: var(--accent); border-radius: var(--r-pill); }
+/* PATTERN, not colour alone (0A §5.2 / 21). A print-out, a colour-blind reader and a monochrome screenshot
+   all still distinguish the series — and the printed value beside it carries the number regardless. */
+.pol-bar-fill.p-1 { background-image: repeating-linear-gradient(45deg, transparent 0 4px, rgb(255 255 255 / 45%) 4px 8px); }
+.pol-bar-fill.p-2 { background-image: repeating-linear-gradient(-45deg, transparent 0 3px, rgb(255 255 255 / 45%) 3px 6px); }
+.pol-bar-fill.p-3 { background-image: repeating-linear-gradient(90deg, transparent 0 5px, rgb(255 255 255 / 45%) 5px 8px); }
+.pol-bar-value { color: var(--text-1); font-variant-numeric: tabular-nums; text-align: end; }
+
+/* Wide tables scroll inside their own container so the page body never scrolls sideways. */
+.pol-tablewrap { overflow-x: auto; }
+
+.pol-deltas { display: grid; gap: var(--sp3); }
+.pol-deltagrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--sp3);
+}
+.pol-delta {
+  display: grid;
+  gap: var(--sp1);
+  padding: var(--sp3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+}
+.pol-delta-label { color: var(--text-1); font-weight: 600; }
+.pol-delta-values { color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+.pol-drill { display: grid; gap: var(--sp3); }

@@ -154,6 +154,7 @@ export const PORTALS: PortalDef[] = [
       { key: "members", path: "members", label: { en: "Members", ar: "الأعضاء" }, group: G.membership, icon: "user", permission: "policy.members" },
       { key: "groups", path: "groups", label: { en: "Groups", ar: "المجموعات" }, group: G.membership, icon: "refer", permission: "policy.groups" },
       { key: "utilization", path: "utilization", label: { en: "Utilization", ar: "الاستخدام" }, group: G.insights, icon: "chart", permission: "policy.utilization" },
+      { key: "analytics", path: "analytics", label: { en: "Analytics", ar: "التحليلات" }, group: G.insights, icon: "chart", permission: "policy.analytics" },
       { key: "bulk", path: "bulk", label: { en: "Bulk & imports", ar: "الرفع الجماعي" }, group: G.membership, icon: "doc", permission: "policy.bulk" },
     ],
   },
@@ -202,6 +203,9 @@ export const PORTALS: PortalDef[] = [
       { key: "settlements", path: "settlements", label: { en: "Provider settlements", ar: "تسويات مقدمي الخدمة" }, group: G.finance, icon: "doc", permission: "finance.settlements" },
       { key: "summaries", path: "summaries", label: { en: "Financial summaries", ar: "ملخصات مالية" }, group: G.finance, icon: "check2", permission: "finance.summaries" },
       { key: "exports", path: "exports", label: { en: "Exports", ar: "التصدير" }, group: G.finance, icon: "refer", permission: "finance.export" },
+      // 19.6b — the financial and network views are the money questions this role exists to answer. Still no
+      // clinical route: the dashboard's fact tables carry no diagnosis column at all.
+      { key: "analytics", path: "analytics", label: { en: "Analytics", ar: "التحليلات" }, group: G.insights, icon: "chart", permission: "policy.analytics" },
     ],
   },
   {
@@ -232,6 +236,9 @@ export const PORTALS: PortalDef[] = [
       { key: "members", path: "members", label: { en: "Members", ar: "الأعضاء" }, group: G.membership, icon: "user", permission: "policy.members" },
       { key: "groups", path: "groups", label: { en: "Groups", ar: "المجموعات" }, group: G.membership, icon: "refer", permission: "policy.groups" },
       { key: "utilization", path: "utilization", label: { en: "Utilization", ar: "الاستخدام" }, group: G.insights, icon: "chart", permission: "policy.utilization" },
+      // 19.6b — the analytical layer over 19.1–19.5b. Served by reporting-service from a pre-aggregated read
+      // model, never by querying the benefit spine the reception desk is using.
+      { key: "analytics", path: "analytics", label: { en: "Analytics", ar: "التحليلات" }, group: G.insights, icon: "chart", permission: "policy.analytics" },
       { key: "bulk", path: "bulk", label: { en: "Bulk & imports", ar: "الرفع الجماعي" }, group: G.membership, icon: "plus", permission: "policy.bulk" },
       // Read-only here: policy administration prices benefits AT a tier; the Network Team decides which tier
       // a provider sits in. Same section, different capability (see `mayAdministerTiers`).

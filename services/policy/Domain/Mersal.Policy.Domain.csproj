@@ -1,1 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><RootNamespace>Mersal.Policy.Domain</RootNamespace></PropertyGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><RootNamespace>Mersal.Policy.Domain</RootNamespace></PropertyGroup>  <ItemGroup>
+    <ProjectReference Include="../../../libs/benefit-pricing/Mersal.BenefitPricing.csproj" />
+  </ItemGroup>
+</Project>

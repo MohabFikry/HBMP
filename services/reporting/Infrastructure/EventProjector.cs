@@ -19,7 +19,8 @@ public sealed record ReportingEvent(
 /// (redelivery is a no-op). It never writes to source domains and never stores row-level PHI — only coded
 /// aggregates, counts, amounts and timings. Financial facts are built from service codes/amounts only (no
 /// diagnosis).</summary>
-public sealed class EventProjector(ReportingDbContext db, TimeProvider clock, IBusinessCalendar calendar)
+public sealed class EventProjector(
+    ReportingDbContext db, TimeProvider clock, IBusinessCalendar calendar, AnalyticsProjector analytics)
 {
     /// <summary>Returns true if the event was projected, false if it was a duplicate / unmapped.</summary>
     public async Task<bool> ProjectAsync(ReportingEvent ev, CancellationToken ct = default)
@@ -29,7 +30,10 @@ public sealed class EventProjector(ReportingDbContext db, TimeProvider clock, IB
             return false;
 
         var period = calendar.DateOf(ev.OccurredAt);   // 18.A3 — the Cairo day the event happened on
-        var handled = Apply(ev, period);
+        // 19.6b's analytics facts share this dedupe ledger and this transaction deliberately. A second ledger
+        // would let one projector accept an event the other rejected, and the two read models would disagree
+        // about how many members exist — with no way to tell which was right.
+        var handled = Apply(ev, period) | await analytics.ProjectAsync(ev, period, ct);
 
         db.ProcessedEvents.Add(new ProcessedEvent { EventId = ev.EventId, EventType = ev.EventType, ConsumedAt = clock.GetUtcNow() });
         try { await db.SaveChangesAsync(ct); }

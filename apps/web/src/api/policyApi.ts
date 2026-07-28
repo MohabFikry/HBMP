@@ -300,6 +300,91 @@ export interface CarryPreviewRow {
   exhausted: boolean;
 }
 
+
+// ── Analytics (19.6b) ───────────────────────────────────────────────────────────────────────────────────
+
+/** One plotted value. `dimensionId` is what makes a drill-down possible without the client resolving a label
+ *  back to an id — a round trip that guesses, and guesses wrong the moment two plans share a label. */
+export interface AnalyticsPoint {
+  key: string;
+  labelEn: string;
+  labelAr: string;
+  value: number;
+  dimensionId?: string | null;
+  secondary?: number | null;
+}
+
+/**
+ * A chart AND the accessible table that always accompanies it.
+ *
+ * `columns` and `summaryEn`/`summaryAr` come from the server rather than being composed here: a caption the
+ * client invents drifts from the data the moment a series changes shape, and the R2 audit finding (U6) is
+ * specifically that an alternative nobody maintains is not an alternative.
+ */
+export interface AnalyticsSeries {
+  key: string;
+  titleEn: string;
+  titleAr: string;
+  unit: "count" | "currency" | "percent" | string;
+  points: AnalyticsPoint[];
+  summaryEn: string;
+  summaryAr: string;
+  columns: string[];
+}
+
+/** A period-over-period movement. `direction` is a WORD because the four-cue rule needs a text cue, and
+ *  `better` is separate because direction and desirability are different facts. */
+export interface AnalyticsDelta {
+  key: string;
+  labelEn: string;
+  labelAr: string;
+  current: number;
+  previous: number;
+  percentChange?: number | null;
+  direction: "Up" | "Down" | "Flat";
+  better?: boolean | null;
+}
+
+export interface AnalyticsViewResult {
+  view: string;
+  series: AnalyticsSeries[];
+  deltas: AnalyticsDelta[];
+  /** True when the caller's payer scope narrowed the aggregate — surfaced so a small number reads as
+   *  "your scope" rather than "the programme shrank". */
+  payerScopeApplied: boolean;
+  unavailable: string[];
+}
+
+/** A drill-down row: pointers and figures, never identity. Resolving the person is the audited step after. */
+export interface OutlierRow {
+  enrollmentId: string;
+  beneficiaryId: string;
+  policyId: string;
+  policyPlanId?: string | null;
+  limit: number;
+  consumed: number;
+  band: string;
+}
+
+/** The shared filter bar, in the same vocabulary as policy/member query. Serialised straight into the URL. */
+export interface AnalyticsFilters {
+  payerId?: string;
+  policyId?: string;
+  policyPlanId?: string;
+  groupId?: string;
+  branchId?: string;
+  tier?: string;
+  category?: string;
+  status?: string;
+  relationship?: string;
+  band?: string;
+  from?: string;
+  to?: string;
+  asOf?: string;
+  plans?: string;
+  compare?: string;
+}
+
 export interface TierCostShare {
   networkTierId: string;
   tierCode: string;
@@ -696,6 +781,14 @@ export interface PolicyApi {
   previewPlanChange(enrollmentId: string, policyPlanId: string, effectiveDate: string): Promise<PlanChangePreviewView>;
   coverageDetails(enrollmentId: string, asOf?: string): Promise<MemberCoverageDetail>;
 
+  /** The six analytical views. `reporting-service`, not policy — the dashboard reads a pre-aggregated read
+   *  model and never the transactional benefit spine. */
+  analytics(view: string, filters: AnalyticsFilters): Promise<AnalyticsViewResult>;
+  /** The member rows behind an outlier segment. Audited server-side: this is where a total becomes a list of
+   *  specific people. */
+  analyticsOutlierMembers(band: string, filters: AnalyticsFilters, limit?: number): Promise<OutlierRow[]>;
+  analyticsExport(view: string, filters: AnalyticsFilters): Promise<string>;
+
   // Notes (19.3) — shared by policy and member
   notes(scope: "policies" | "enrollments", id: string): Promise<NoteView[]>;
   addNote(scope: "policies" | "enrollments", id: string, body: unknown, idempotencyKey: string): Promise<NoteView>;
@@ -734,6 +827,15 @@ export interface PolicyApi {
    *  the bytes never leave the authenticated request the way a signed URL would. */
   exportUtilization(scope: string, scopeId: string, from?: string, to?: string): Promise<string>;
 }
+
+/**
+ * Analytics is served by reporting-service, not policy-service.
+ *
+ * Both sit behind the same gateway prefix, so the path has to say which one — a relative `/analytics/...`
+ * would resolve against whichever service happens to own `/api/v1` today and break silently the moment that
+ * changes. The API base already carries `/api/v1`, so this is the sibling segment.
+ */
+const ANALYTICS = "/analytics";
 
 const q = (filters: Record<string, string | number | undefined>): string => {
   const p = new URLSearchParams();
@@ -815,6 +917,15 @@ export function createHttpPolicyApi(): PolicyApi {
     commitBulk: (jobId, key) => postRaw(`/bulk-jobs/${jobId}/commit`, {}, key) as Promise<BulkCommitView>,
     bulkRows: (jobId, status) => getRaw(`/bulk-jobs/${jobId}/rows${q({ status })}`) as Promise<BulkRowView[]>,
     bulkReconciliation: (jobId) => getRaw(`/bulk-jobs/${jobId}/reconciliation`) as Promise<BulkReconciliationView>,
+
+    // Analytics lives under a different service, so it does NOT go through the /api/v1 policy base — Kong
+    // routes /api/v1/analytics to reporting-service. `analyticsBase` keeps that explicit rather than letting
+    // a relative path silently land on whichever service owns the prefix today.
+    analytics: (view, filters) =>
+      getRaw(`${ANALYTICS}/${view}${q(filters as Record<string, string | undefined>)}`) as Promise<AnalyticsViewResult>,
+    analyticsOutlierMembers: (band, filters, limit) =>
+      getRaw(`${ANALYTICS}/outliers/members${q({ ...filters, band, limit })}`) as Promise<OutlierRow[]>,
+    analyticsExport: (view, filters) => getText(`${ANALYTICS}/${view}/export${q(filters as Record<string, string | undefined>)}`),
 
     exportUtilization: (scope, scopeId, from, to) =>
       getText(`/utilization/export${q({ scope, scopeId, from, to })}`),
