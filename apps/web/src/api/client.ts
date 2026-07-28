@@ -1,9 +1,17 @@
 import type {
   AccessReviewCampaign,
+  AccessSession,
+  BranchScopeGrant,
+  EffectiveAccess,
+  MembershipDetail,
+  MembershipRow,
+  ProgramEnablement,
   AppointmentRow,
   BeneficiaryRow,
   RegisterBeneficiaryInput,
   RegisterResult,
+  RegistrationDecisionResult,
+  RegistrationWorkItem,
   StatusChangeResult,
   ApprovalItem,
   ApprovalReview,
@@ -187,6 +195,39 @@ export interface ApiClient {
   adminMasterData(): Promise<MasterDataVersion[]>;
   adminSystemConfig(): Promise<SystemConfigEntry[]>;
 
+  // User & access model (Phase 21.6, design 40) — the MEMBERSHIP is the principal, never the identity.
+  /** The tenant's membership roster. Server-side tenant-pinned: asking for another tenant is 403 + audited. */
+  memberships(tenant?: string, status?: string, query?: string): Promise<MembershipRow[]>;
+  membership(membershipId: string): Promise<MembershipDetail>;
+  /**
+   * Set or replace one per-membership override — the SoD-guarded exception path (§2).
+   *
+   * A reason is part of the signature, not an option: the server refuses without one, and an exception
+   * nobody explained cannot be judged at review time. An Allow that would create a forbidden combination
+   * comes back 409 with both halves of the duty named.
+   */
+  setMembershipOverride(
+    membershipId: string,
+    input: { scopeKey: string; effect: "Allow" | "Deny"; reason: string; validUntil: string | null },
+  ): Promise<void>;
+  /**
+   * Mode-2 effective access — "what can this person actually do, and why".
+   *
+   * Recomputed server-side from the store. The browser never reduces the set algebra itself: a third
+   * implementation would be a third opinion about who can do what, and the parity suite only covers the two
+   * on the server (§5).
+   */
+  effectiveAccess(membershipId: string): Promise<EffectiveAccess>;
+  /** Reach, from admin-service — branch grants are a different service from the authority above (§3). */
+  branchScopeGrants(subject: string, tenant?: string): Promise<BranchScopeGrant[]>;
+  /** Sessions for a membership's underlying identity, and the revoke behind the sessions tab. */
+  accessSessions(userId: string): Promise<AccessSession[]>;
+  revokeAccessSession(userId: string, sessionId: string): Promise<void>;
+  /** Programme enablement (§4). Reads are open to org admins; the writes below are platform-admin only. */
+  programEnablement(tenant: string): Promise<ProgramEnablement>;
+  setProgramFeature(tenant: string, key: string, enabled: boolean, reason: string): Promise<void>;
+  setProgramLimit(tenant: string, key: string, maxValue: number, reason: string): Promise<void>;
+
   // Provider network — the tenant's provider directory (Phase 2b). Network-Team scope; no beneficiary PHI.
   providerList(): Promise<ProviderSummary[]>;
   providerLocations(providerId: string): Promise<ProviderLocation[]>;
@@ -218,6 +259,17 @@ export interface ApiClient {
   beneficiarySearch(query: { name?: string; status?: string }): Promise<BeneficiaryRow[]>;
   registerBeneficiary(input: RegisterBeneficiaryInput, idempotencyKey?: string): Promise<RegisterResult>;
   changeBeneficiaryStatus(id: string, toStatus: string, reason: string): Promise<StatusChangeResult>;
+  /** The approver's queue (US-003): Pending beneficiaries + their latest application. Oldest first. */
+  registrationWorklist(): Promise<RegistrationWorkItem[]>;
+  /** Open an application for a beneficiary that has none (legacy rows) or whose last one was Rejected. */
+  createRegistration(beneficiaryId: string, idempotencyKey?: string): Promise<void>;
+  /** The officer's preparation step — the two approval guards the server checks before Approve. */
+  setRegistrationChecks(id: string, checks: { documentsVerified?: boolean; coverageBound?: boolean }): Promise<void>;
+  /**
+   * The approver's decision. Supervisor-only ON THE SERVER (urn:hbmp:approver-required) — the officer who
+   * vouched for the documents must not be the one who activates. Approve returns the issued member number.
+   */
+  decideRegistration(id: string, decision: "Approve" | "RequestInfo" | "Reject", notes?: string): Promise<RegistrationDecisionResult>;
 }
 
 /**

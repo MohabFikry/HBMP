@@ -33,6 +33,14 @@ import {
   zBreakGlassGrant,
   zMasterDataVersion,
   zSystemConfigEntry,
+  zRegistrationWorkItem,
+  zRegistrationDecisionResult,
+  zMembershipRow,
+  zMembershipDetail,
+  zEffectiveAccess,
+  zBranchScopeGrant,
+  zAccessSession,
+  zProgramEnablement,
   zProviderSummary,
   zProviderLocation,
   zProviderContract,
@@ -1205,6 +1213,10 @@ export class DevApiClient implements ApiClient {
       { id: "BEN-1", memberNo: "MRS-M-10231", givenName: "Omar", familyName: "Khaled", chip: { kind: "info" as const, label: loc("Pending", "قيد الانتظار") }, raw: "Pending", ids: [{ type: "NationalID", value: "•••2931", isPrimary: true }] },
       { id: "BEN-2", memberNo: "MRS-M-10555", givenName: "Salma", familyName: "Adel", chip: { kind: "ok" as const, label: loc("Active", "نشط") }, raw: "Active", ids: [{ type: "UNHCRNo", value: "801-•••45", isPrimary: true }] },
       { id: "BEN-3", memberNo: undefined, givenName: "Amina", familyName: "Yusuf", chip: { kind: "warn" as const, label: loc("Suspended", "موقوف") }, raw: "Suspended", ids: [{ type: "Passport", value: "A•••221", isPrimary: true }] },
+      // The awkward states are the ones the status screen exists to make legible: a fraud-Blocked record
+      // the desk must NOT be able to touch, and an Expired one whose only edge is renewal.
+      { id: "BEN-4", memberNo: "MRS-M-10102", givenName: "Hassan", familyName: "Tariq", chip: { kind: "bad" as const, label: loc("Blocked", "محظور") }, raw: "Blocked", ids: [{ type: "UNHCRNo", value: "802-•••71", isPrimary: true }] },
+      { id: "BEN-5", memberNo: "MRS-M-10077", givenName: "Layla", familyName: "Nasser", chip: { kind: "neu" as const, label: loc("Expired", "منتهٍ") }, raw: "Expired", ids: [{ type: "NationalID", value: "•••8843", isPrimary: true }] },
     ].filter((b) => (!query.name || (b.givenName + " " + b.familyName).toLowerCase().includes(query.name.toLowerCase())) && (!query.status || b.raw === query.status));
     return this.gate(
       () => ok(z.array(zBeneficiaryRow), all.map((b) => ({
@@ -1221,6 +1233,54 @@ export class DevApiClient implements ApiClient {
   changeBeneficiaryStatus(id: string, toStatus: string, reason: string) {
     void reason;
     return this.gate(() => ok(zStatusChangeResult, { id, status: { kind: toStatus === "Active" ? "ok" : "warn", label: loc(toStatus, toStatus) } }));
+  }
+
+  // Registration approval worklist (US-003). The three shapes the screen must make legible: an application
+  // mid-preparation, one bounced back for more information, and a legacy beneficiary with no application.
+  registrationWorklist() {
+    return this.gate(
+      () =>
+        ok(z.array(zRegistrationWorkItem), [
+          {
+            beneficiary: {
+              id: "BEN-1", memberNo: undefined, givenName: "Omar", familyName: "Khaled",
+              status: { kind: "info", label: loc("Pending", "قيد الانتظار") }, statusRaw: "Pending",
+              identifiers: [{ type: "NationalID", value: "•••2931", isPrimary: true }],
+            },
+            registration: { id: "REG-1", status: "Pending", documentsVerified: true, coverageBound: false, notes: null },
+          },
+          {
+            beneficiary: {
+              id: "BEN-6", memberNo: undefined, givenName: "Rania", familyName: "Mostafa",
+              status: { kind: "info", label: loc("Pending", "قيد الانتظار") }, statusRaw: "Pending",
+              identifiers: [{ type: "RefugeeID", value: "R•••501", isPrimary: true }],
+            },
+            registration: { id: "REG-2", status: "InfoRequested", documentsVerified: false, coverageBound: false, notes: "UNHCR letter is expired — request a current one" },
+          },
+          {
+            beneficiary: {
+              id: "BEN-7", memberNo: undefined, givenName: "Karim", familyName: "Fawzy",
+              status: { kind: "info", label: loc("Pending", "قيد الانتظار") }, statusRaw: "Pending",
+              identifiers: [{ type: "UNHCRNo", value: "803-•••12", isPrimary: true }],
+            },
+            registration: null,
+          },
+        ]),
+      [],
+    );
+  }
+  createRegistration() {
+    return this.gate(() => undefined);
+  }
+  setRegistrationChecks() {
+    return this.gate(() => undefined);
+  }
+  decideRegistration(_id: string, decision: "Approve" | "RequestInfo" | "Reject") {
+    return this.gate(() =>
+      ok(zRegistrationDecisionResult, decision === "Approve"
+        ? { status: "Active", memberNo: "MRS-M-2026-000418" }
+        : { status: decision === "Reject" ? "Rejected" : "InfoRequested" }),
+    );
   }
 
   adminMasterData() {
@@ -1241,4 +1301,156 @@ export class DevApiClient implements ApiClient {
       [],
     );
   }
+
+  // ---- User & access model (Phase 21.6, design 40) -------------------------------------------------------
+  //
+  // The fixtures deliberately include the awkward states, because those are the ones the screens exist to
+  // make legible: a suspended membership, a lapsed override, an open-ended branch grant, a cap already
+  // exceeded, and a feature nobody has configured either way.
+
+  memberships() {
+    return this.gate(() => ok(z.array(zMembershipRow), DEV_MEMBERSHIPS), []);
+  }
+
+  membership(membershipId: string) {
+    const row = DEV_MEMBERSHIPS.find((m) => m.membershipId === membershipId) ?? DEV_MEMBERSHIPS[0];
+    return this.gate(() =>
+      ok(zMembershipDetail, {
+        ...row,
+        providerId: null,
+        homeBranchId: "b1000000-0000-0000-0000-000000000001",
+        overrides: [
+          {
+            id: "OV-1", scope: "orders:read", effect: "Deny", reason: "Under investigation — access narrowed pending review",
+            grantedBy: "admin@mersal", validUntil: null, expired: false,
+          },
+          {
+            id: "OV-2", scope: "reports:export", effect: "Allow", reason: "Covering the monthly extract while N. is on leave",
+            grantedBy: "admin@mersal", validUntil: "2026-08-31T00:00:00Z", expired: false,
+          },
+          // Lapsed on purpose: the screen must show it as expired rather than hide it, so an administrator
+          // can explain why this person lost the key overnight.
+          {
+            id: "OV-3", scope: "claims:submit", effect: "Allow", reason: "Ramadan surge cover",
+            grantedBy: "admin@mersal", validUntil: "2026-04-30T00:00:00Z", expired: true,
+          },
+        ],
+      }),
+    );
+  }
+
+  setMembershipOverride() {
+    return this.gate(() => undefined);
+  }
+
+  effectiveAccess(membershipId: string) {
+    return this.gate(() =>
+      ok(zEffectiveAccess, {
+        membershipId,
+        keys: [
+          { key: "encounters:read", source: "role", via: "doctor" },
+          { key: "prescriptions:write", source: "role", via: "doctor" },
+          { key: "reports:export", source: "override", via: "admin@mersal", reason: "Covering the monthly extract while N. is on leave" },
+          { key: "labs:read", source: "role", via: "doctor", deprecated: true, replacedBy: "investigations:read" },
+          { key: "orders:read", source: "denied", via: "admin@mersal", reason: "Under investigation — access narrowed pending review" },
+        ],
+      }),
+    );
+  }
+
+  branchScopeGrants() {
+    return this.gate(
+      () =>
+        ok(z.array(zBranchScopeGrant), [
+          {
+            grantId: "G-1", branchId: "b1000000-0000-0000-0000-000000000001", isHome: true,
+            validFrom: "2026-01-01", validUntil: null, grantedBy: "admin@mersal", grantedReason: "Home branch",
+          },
+          {
+            grantId: "G-2", branchId: "b1000000-0000-0000-0000-000000000002", isHome: false,
+            validFrom: "2026-10-01", validUntil: "2026-10-31", grantedBy: "admin@mersal",
+            grantedReason: "Covering Alexandria for October",
+          },
+        ]),
+      [],
+    );
+  }
+
+  accessSessions() {
+    return this.gate(
+      () =>
+        ok(z.array(zAccessSession), [
+          { sessionId: "S-1", device: "Chrome on Windows", createdAt: "2026-07-28T06:10:00Z", lastSeenAt: "2026-07-28T09:31:00Z", current: true },
+          { sessionId: "S-2", device: "Safari on iPhone", createdAt: "2026-07-20T18:02:00Z", lastSeenAt: "2026-07-26T07:44:00Z", current: false },
+        ]),
+      [],
+    );
+  }
+
+  revokeAccessSession() {
+    return this.gate(() => undefined);
+  }
+
+  programEnablement(tenant: string) {
+    return this.gate(() =>
+      ok(zProgramEnablement, {
+        tenantId: tenant,
+        features: [
+          { key: "approvals", enabled: true, configured: true, changedBy: "programme@mersal", changedAt: "2026-05-01T09:00:00Z" },
+          { key: "callcentre", enabled: true, configured: true, changedBy: "programme@mersal", changedAt: "2026-06-11T09:00:00Z" },
+          { key: "claims", enabled: false, configured: true, changedBy: "programme@mersal", changedAt: "2026-02-14T09:00:00Z" },
+          // Never configured either way — shown as its own state, not folded into "off".
+          { key: "interop", enabled: false, configured: false, changedBy: null, changedAt: null },
+        ],
+        limits: [
+          { key: "active_users", maxValue: 50, currentUsage: 42, changedBy: "programme@mersal", changedAt: "2026-05-01T09:00:00Z" },
+          // Already over its cap: legitimate after a cap is tightened, and the screen must say so plainly
+          // rather than render a bar that silently overflows.
+          { key: "active_provider_users", maxValue: 10, currentUsage: 12, changedBy: "programme@mersal", changedAt: "2026-07-01T09:00:00Z" },
+          { key: "monthly_extracts", maxValue: 20, currentUsage: null, changedBy: null, changedAt: null },
+          { key: "storage_mb", maxValue: null, currentUsage: null, changedBy: null, changedAt: null },
+        ],
+      }),
+    );
+  }
+
+  setProgramFeature() {
+    return this.gate(() => undefined);
+  }
+
+  setProgramLimit() {
+    return this.gate(() => undefined);
+  }
 }
+
+/** One identity holding two memberships with different authority — invariant 1, made visible. */
+const DEV_MEMBERSHIPS = [
+  {
+    membershipId: "11111111-1111-1111-1111-111111111111",
+    userId: "aaaaaaaa-1111-1111-1111-111111111111",
+    username: "s.ibrahim", displayName: "Sara Ibrahim",
+    tenantId: "mersal", status: { kind: "ok" as const, label: loc("Active", "نشِطة") },
+    roles: [{ name: "doctor", level: 3 }], level: 3, isPlatformAdmin: false,
+    overrideCount: 3, expiredOverrideCount: 1,
+    activatedAt: "2026-01-15T08:00:00Z", endedAt: null,
+  },
+  {
+    // Same person, different organisation, genuinely different authority — never a blended principal.
+    membershipId: "22222222-2222-2222-2222-222222222222",
+    userId: "aaaaaaaa-1111-1111-1111-111111111111",
+    username: "s.ibrahim", displayName: "Sara Ibrahim",
+    tenantId: "partner-ngo", status: { kind: "ok" as const, label: loc("Active", "نشِطة") },
+    roles: [{ name: "provider_admin", level: 2 }], level: 2, isPlatformAdmin: false,
+    overrideCount: 0, expiredOverrideCount: 0,
+    activatedAt: "2026-03-02T08:00:00Z", endedAt: null,
+  },
+  {
+    membershipId: "33333333-3333-3333-3333-333333333333",
+    userId: "bbbbbbbb-2222-2222-2222-222222222222",
+    username: "m.farouk", displayName: "Mohamed Farouk",
+    tenantId: "mersal", status: { kind: "warn" as const, label: loc("Suspended", "موقوفة") },
+    roles: [{ name: "pharmacist", level: 4 }], level: 4, isPlatformAdmin: false,
+    overrideCount: 0, expiredOverrideCount: 0,
+    activatedAt: "2026-02-01T08:00:00Z", endedAt: null,
+  },
+];

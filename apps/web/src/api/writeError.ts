@@ -22,6 +22,23 @@ export interface WriteError {
   action: "retry" | "reload" | "reauth" | "stop";
   /** True when the operation may ALREADY have succeeded, so a blind retry is unsafe. */
   possiblyApplied: boolean;
+  /**
+   * 21.6 — the HTTP status, when there was one (absent for network/schema failures).
+   *
+   * Carried so a screen can distinguish refusals that share an `action` but need different words: the
+   * membership-override form labels a 409 as the segregation-of-duties conflict it is, while a 422 stays a
+   * plain validation message. Screens must NOT re-derive their own copy from this — `message` and `action`
+   * remain the contract; this only lets a caller add domain-specific framing on top.
+   */
+  status?: number;
+  /**
+   * The RFC-7807 `type`, when the failure carried one — the same supplementary-framing contract as
+   * `status`. The register screen uses it to tell `urn:hbmp:duplicate-identifier` (this person already
+   * exists — go find them) from any other 409 (the record moved — reload), because sending an operator to
+   * reload the form when the right move is a search creates the duplicate the identifier check exists to
+   * prevent.
+   */
+  problemType?: string;
 }
 
 const M = {
@@ -82,6 +99,15 @@ function withDetail(base: Localized, detail?: string): Localized {
 }
 
 export function writeErrorMessage(e: unknown): WriteError {
+  const classified = classify(e);
+  // Attached once, here, rather than threaded through every branch below — the classification is what
+  // matters and the status/type are supplementary framing (see WriteError.status).
+  return e instanceof ApiError
+    ? { ...classified, status: e.status, problemType: e.problem?.type }
+    : classified;
+}
+
+function classify(e: unknown): WriteError {
   if (!(e instanceof ApiError)) {
     return { message: M.unknown, action: "reload", possiblyApplied: true };
   }
@@ -104,6 +130,11 @@ export function writeErrorMessage(e: unknown): WriteError {
     // must NOT be retried blindly — but they are different moves and the operator needs to know which.
     case 409: return { message: withDetail(M.conflict, detail), action: "reload", possiblyApplied: true };
     case 412: return { message: withDetail(M.precondition, detail), action: "reload", possiblyApplied: false };
+    // 400 rides with 422: several services return minimal-API ValidationProblem (400) for exactly the
+    // failures others express as 422 (patient-service's register, notably). Both mean "fix the input and
+    // resubmit" — the old fall-through to `unknown` told the operator to RELOAD, which throws away the very
+    // form contents they need to correct.
+    case 400:
     case 422: return { message: withDetail(M.unprocessable, detail), action: "retry", possiblyApplied: false };
     case 429: return { message: M.rateLimited, action: "retry", possiblyApplied: false };
     default:

@@ -49,3 +49,36 @@ export const zStatusChangeResult = z.object({
   status: zStatus,
 });
 export type StatusChangeResult = z.infer<typeof zStatusChangeResult>;
+
+/**
+ * The registration APPLICATION riding a Pending beneficiary (US-003). Distinct from beneficiary status:
+ * the person stays Pending until an approver activates them; these are the approval-workflow facts.
+ */
+export const zRegistrationInfo = z.object({
+  id: zId,
+  status: z.enum(["Pending", "InfoRequested", "Rejected", "Active"]),
+  /** The two approval guards — the server refuses Approve until both are true. */
+  documentsVerified: z.boolean(),
+  coverageBound: z.boolean(),
+  /** The approver's notes — what is missing (RequestInfo) or why refused (Reject). */
+  notes: z.string().nullable(),
+});
+export type RegistrationInfo = z.infer<typeof zRegistrationInfo>;
+
+/**
+ * One row of the approver's worklist: a Pending beneficiary + its latest application, or null for people
+ * registered before applications were auto-created (the queue must still show them — a person the queue
+ * cannot show is a person nobody reviews).
+ */
+export const zRegistrationWorkItem = z.object({
+  beneficiary: zBeneficiaryRow,
+  registration: zRegistrationInfo.nullable(),
+});
+export type RegistrationWorkItem = z.infer<typeof zRegistrationWorkItem>;
+
+/** Outcome of a registration decision. `memberNo` is present exactly when the decision was Approve. */
+export const zRegistrationDecisionResult = z.object({
+  status: z.string(),
+  memberNo: z.string().optional(),
+});
+export type RegistrationDecisionResult = z.infer<typeof zRegistrationDecisionResult>;

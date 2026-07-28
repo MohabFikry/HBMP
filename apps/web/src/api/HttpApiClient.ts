@@ -74,9 +74,17 @@ import {
   zIdentityUser,
   zRoleScopeGrant,
   zReportAccessRequestRow,
+  zRegistrationWorkItem,
+  zRegistrationDecisionResult,
+  zMembershipRow,
+  zMembershipDetail,
+  zEffectiveAccess,
+  zBranchScopeGrant,
+  zAccessSession,
+  zProgramEnablement,
 } from "@mersal/contracts";
 import type { ApiClient } from "./client";
-import { getRaw, postRaw, postForm, parseOr, getAbsolute } from "./http";
+import { getRaw, postRaw, putRaw, patchRaw, postForm, parseOr, getAbsolute, postAbsolute, deleteAbsolute } from "./http";
 import { GATEWAY_BASE } from "../config";
 
 /* This client is a deliberate adapter between loosely-typed service JSON and the strict portal contracts;
@@ -1434,6 +1442,47 @@ export class HttpApiClient implements ApiClient {
     return parseOr(zStatusChangeResult, { id: r?.beneficiaryId ?? id, status: beneficiaryStatusChip(r?.status ?? toStatus) });
   }
 
+  // Registration approval workflow (US-003). The worklist row carries the beneficiary through the same
+  // field-projected disclosure the directory search uses, so the mapping tolerates classes the caller's
+  // role cannot read.
+  async registrationWorklist() {
+    const r = (await getRaw(`/registrations`)) as any;
+    const items: any[] = r?.items ?? [];
+    return items.map((it: any) => {
+      const b = it?.beneficiary ?? {};
+      return parseOr(zRegistrationWorkItem, {
+        beneficiary: {
+          id: b.beneficiaryId,
+          memberNo: b.memberNo ?? undefined,
+          givenName: String(b.givenName ?? ""),
+          familyName: String(b.familyName ?? ""),
+          status: beneficiaryStatusChip(b.status),
+          statusRaw: String(b.status ?? ""),
+          identifiers: (b.identifiers ?? []).map((i: any) => ({ type: String(i.type ?? ""), value: String(i.value ?? ""), isPrimary: Boolean(i.isPrimary) })),
+        },
+        registration: it?.registration
+          ? {
+              id: it.registration.registrationId,
+              status: String(it.registration.status ?? "Pending"),
+              documentsVerified: it.registration.documentsVerified === true,
+              coverageBound: it.registration.coverageBound === true,
+              notes: it.registration.notes ?? null,
+            }
+          : null,
+      });
+    });
+  }
+  async createRegistration(beneficiaryId: string, idempotencyKey?: string) {
+    await postRaw(`/registrations`, { beneficiaryId }, idempotencyKey ?? `regwf:${beneficiaryId}`);
+  }
+  async setRegistrationChecks(id: string, checks: { documentsVerified?: boolean; coverageBound?: boolean }) {
+    await patchRaw(`/registrations/${encodeURIComponent(id)}`, checks);
+  }
+  async decideRegistration(id: string, decision: "Approve" | "RequestInfo" | "Reject", notes?: string) {
+    const r = (await postRaw(`/registrations/${encodeURIComponent(id)}/decision`, { decision, notes: notes ?? null })) as any;
+    return parseOr(zRegistrationDecisionResult, { status: String(r?.status ?? ""), memberNo: r?.memberNo ?? undefined });
+  }
+
   // Governance reads (Phase 8b.2) — the master-data versions + typed system-config currently in force. Reference
   // configuration, not PHI; every admin read is audited server-side.
   async adminMasterData() {
@@ -1462,5 +1511,218 @@ export class HttpApiClient implements ApiClient {
         versionNo: Number(c.versionNo ?? 0),
       }),
     );
+  }
+
+  // ---- User & access model (Phase 21.6, design 40) -------------------------------------------------------
+  //
+  // Authority (memberships, overrides, effective set, sessions) comes from identity-service on the absolute
+  // `/identity` path; reach (branch grants) and programme enablement come from admin-service under
+  // `/api/v1`. The split is the service boundary, not an accident of routing — see design 40 §3.
+
+  async memberships(tenant?: string, status?: string, query?: string) {
+    const qs = new URLSearchParams();
+    if (tenant) qs.set("tenant", tenant);
+    if (status) qs.set("status", status);
+    if (query) qs.set("query", query);
+    const suffix = qs.toString() ? `?${qs}` : "";
+    const r = (await getAbsolute(`${GATEWAY_BASE}/identity/admin/memberships${suffix}`)) as any[];
+    return (Array.isArray(r) ? r : []).map((m: any) => parseOr(zMembershipRow, membershipRowOf(m)));
+  }
+
+  async membership(membershipId: string) {
+    const m = (await getAbsolute(
+      `${GATEWAY_BASE}/identity/admin/memberships/${encodeURIComponent(membershipId)}`,
+    )) as any;
+    return parseOr(zMembershipDetail, {
+      ...membershipRowOf(m),
+      providerId: m?.providerId ?? null,
+      homeBranchId: m?.homeBranchId ?? null,
+      overrides: (Array.isArray(m?.overrides) ? m.overrides : []).map((o: any) => ({
+        id: String(o.id),
+        scope: String(o.scope ?? ""),
+        effect: o.effect === "Deny" ? "Deny" : "Allow",
+        reason: String(o.reason ?? ""),
+        grantedBy: o.grantedBy ?? null,
+        validUntil: o.validUntil ?? null,
+        expired: o.expired === true,
+      })),
+    });
+  }
+
+  async setMembershipOverride(
+    membershipId: string,
+    input: { scopeKey: string; effect: "Allow" | "Deny"; reason: string; validUntil: string | null },
+  ) {
+    await postAbsolute(
+      `${GATEWAY_BASE}/identity/admin/memberships/${encodeURIComponent(membershipId)}/overrides`,
+      input,
+    );
+  }
+
+  /**
+   * Mode 2, rendered verbatim.
+   *
+   * The server returns the granted set plus the deprecation pointers; the DENIED keys are the ones that make
+   * the screen useful ("orders:read — denied by override, because X" explains an absence that otherwise
+   * looks like a broken role), so they are composed here from the membership's Deny overrides rather than
+   * recomputed: this maps two server answers together, it does not re-run the algebra.
+   */
+  async effectiveAccess(membershipId: string) {
+    const [set, detail] = await Promise.all([
+      getAbsolute(`${GATEWAY_BASE}/identity/admin/memberships/${encodeURIComponent(membershipId)}/effective`) as Promise<any>,
+      this.membership(membershipId),
+    ]);
+
+    const deprecated = new Map<string, string | null>(
+      (Array.isArray(set?.deprecated) ? set.deprecated : []).map((d: any) => [String(d.key), d.replacedBy ?? null]),
+    );
+    const allows = new Map(detail.overrides.filter((o) => o.effect === "Allow" && !o.expired).map((o) => [o.scope, o]));
+    const denies = detail.overrides.filter((o) => o.effect === "Deny" && !o.expired);
+    // Which keys the A1 short-circuit accounts for, as the SERVER marks them. Without this a key the
+    // platform-admin flag granted would render "from role", which is the one provenance error that matters
+    // on this screen: A1's boundary is exactly what an administrator opens it to see.
+    const platformAdmin = new Set<string>(
+      (Array.isArray(set?.platformAdminKeys) ? set.platformAdminKeys : []).map(String),
+    );
+
+    const granted = (Array.isArray(set?.scopes) ? set.scopes : []).map((k: any) => {
+      const key = String(k);
+      const allow = allows.get(key);
+      // An explicit Allow override outranks the flag as an EXPLANATION: someone wrote it down, with a
+      // reason, and that is the more useful thing to show a reviewer.
+      const source = allow ? "override" : platformAdmin.has(key) && detail.isPlatformAdmin ? "platform-admin" : "role";
+      return {
+        key,
+        source,
+        via: allow ? (allow.grantedBy ?? undefined) : undefined,
+        deprecated: deprecated.has(key) || undefined,
+        replacedBy: deprecated.get(key) ?? undefined,
+        reason: allow?.reason,
+      };
+    });
+
+    // Listed, not filtered — an absence with a reason attached is the single most useful line here.
+    const removed = denies.map((o) => ({
+      key: o.scope,
+      source: "denied" as const,
+      via: o.grantedBy ?? undefined,
+      reason: o.reason,
+    }));
+
+    return parseOr(zEffectiveAccess, { membershipId, keys: [...granted, ...removed] });
+  }
+
+  async branchScopeGrants(subject: string, tenant?: string) {
+    const r = (await getRaw(
+      `/admin/users/${encodeURIComponent(subject)}/branches${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`,
+    )) as any[];
+    return (Array.isArray(r) ? r : []).map((g: any) =>
+      parseOr(zBranchScopeGrant, {
+        grantId: String(g.assignmentId ?? g.grantId ?? g.id),
+        branchId: String(g.branchId ?? ""),
+        isHome: g.isHome === true || g.assignmentType === "Home",
+        validFrom: String(g.validFrom ?? "").slice(0, 10),
+        validUntil: g.validTo || g.validUntil ? String(g.validTo ?? g.validUntil).slice(0, 10) : null,
+        grantedBy: g.grantedBy ?? null,
+        grantedReason: g.grantedReason ?? null,
+      }),
+    );
+  }
+
+  async accessSessions(userId: string) {
+    const r = (await getAbsolute(`${GATEWAY_BASE}/identity/admin/users/${encodeURIComponent(userId)}/sessions`)) as any[];
+    return (Array.isArray(r) ? r : []).map((s: any) =>
+      parseOr(zAccessSession, {
+        sessionId: String(s.sessionId),
+        // Enough to RECOGNISE a device, which is all the server sends (min-necessary session view).
+        device: String(s.userAgent ?? s.device ?? "—"),
+        createdAt: s.createdAt ?? new Date().toISOString(),
+        lastSeenAt: s.lastSeenAt ?? null,
+        current: s.current === true,
+      }),
+    );
+  }
+
+  async revokeAccessSession(userId: string, sessionId: string) {
+    await deleteAbsolute(
+      `${GATEWAY_BASE}/identity/admin/users/${encodeURIComponent(userId)}/sessions/${encodeURIComponent(sessionId)}`,
+    );
+  }
+
+  async programEnablement(tenant: string) {
+    const r = (await getRaw(`/admin/programs/${encodeURIComponent(tenant)}`)) as any;
+    return parseOr(zProgramEnablement, {
+      tenantId: String(r?.tenantId ?? tenant),
+      features: (Array.isArray(r?.features) ? r.features : []).map((f: any) => ({
+        key: String(f.key ?? ""),
+        enabled: f.enabled === true,
+        configured: f.configured === true,
+        changedBy: f.changedBy ?? null,
+        changedAt: f.changedAt ?? null,
+      })),
+      limits: (Array.isArray(r?.limits) ? r.limits : []).map((l: any) => ({
+        key: String(l.key ?? ""),
+        // `?? null` and NOT `?? 0`: null means unlimited for the cap and "not counted here" for the usage.
+        // Coercing either to zero would state a fact the server never asserted.
+        maxValue: l.maxValue ?? null,
+        currentUsage: l.currentUsage ?? null,
+        changedBy: l.changedBy ?? null,
+        changedAt: l.changedAt ?? null,
+      })),
+    });
+  }
+
+  async setProgramFeature(tenant: string, key: string, enabled: boolean, reason: string) {
+    await putRaw(`/admin/programs/${encodeURIComponent(tenant)}/features/${encodeURIComponent(key)}`, { enabled, reason });
+  }
+
+  async setProgramLimit(tenant: string, key: string, maxValue: number, reason: string) {
+    await putRaw(`/admin/programs/${encodeURIComponent(tenant)}/limits/${encodeURIComponent(key)}`, { maxValue, reason });
+  }
+}
+
+/** Shared mapping for the roster row and the detail's base, so the two cannot drift apart. */
+function membershipRowOf(m: any) {
+  const status = String(m?.status ?? "");
+  return {
+    membershipId: String(m?.membershipId),
+    userId: String(m?.userId),
+    username: String(m?.username ?? ""),
+    displayName: String(m?.displayName ?? m?.username ?? ""),
+    tenantId: String(m?.tenantId ?? ""),
+    status: membershipStatusChip(status),
+    roles: (Array.isArray(m?.roles) ? m.roles : []).map((r: any) => ({
+      name: String(r.name ?? ""),
+      level: r.level ?? null,
+    })),
+    level: Number(m?.level ?? 0),
+    isPlatformAdmin: m?.isPlatformAdmin === true,
+    overrideCount: Number(m?.overrideCount ?? 0),
+    expiredOverrideCount: Number(m?.expiredOverrideCount ?? 0),
+    activatedAt: m?.activatedAt ?? null,
+    endedAt: m?.endedAt ?? null,
+  };
+}
+
+/**
+ * Membership status as a four-cue chip.
+ *
+ * Only Active is a usable principal (design 40 §1) and the other three are all "not right now" — but they
+ * are shown as three DIFFERENT states rather than one "inactive", because the remedy differs: an Invited
+ * membership needs the person to accept, a Suspended one needs an administrator, and an Ended one needs a
+ * new membership entirely.
+ */
+function membershipStatusChip(status: string) {
+  switch (status) {
+    case "Active":
+      return { kind: "ok" as const, label: { en: "Active", ar: "نشِطة" } };
+    case "Invited":
+      return { kind: "info" as const, label: { en: "Invited", ar: "مدعوّة" } };
+    case "Suspended":
+      return { kind: "warn" as const, label: { en: "Suspended", ar: "موقوفة" } };
+    case "Ended":
+      return { kind: "neu" as const, label: { en: "Ended", ar: "منتهية" } };
+    default:
+      return { kind: "neu" as const, label: { en: status || "Unknown", ar: status || "غير معروفة" } };
   }
 }

@@ -113,6 +113,17 @@ export function postAbsolute(url: string, body: unknown): Promise<unknown> {
 }
 
 /**
+ * 21.6 — DELETE against an absolute gateway path. The membership admin screens revoke a single session on
+ * `/identity/admin/users/{id}/sessions/{sid}`, which is outside `/api/v1` for the same reason the GET above
+ * is: the issuer's own admin surface is not a versioned domain API. Routed through `request` so a revoke
+ * that fails still comes back as RFC-7807 — a session revoke reporting a false success is the one outcome
+ * this must not produce.
+ */
+export function deleteAbsolute(url: string): Promise<unknown> {
+  return request(url, { method: "DELETE" }, true);
+}
+
+/**
  * Raw GET/POST that return the untyped body. Used by {@link HttpApiClient} when a service's response shape
  * differs from the shared contract (e.g. a service emits a plain string where the portal contract wants a
  * bilingual object): the client maps the raw body to the contract shape, then validates that mapping. This
@@ -147,6 +158,11 @@ export function putRaw(path: string, body: unknown, idempotencyKey?: string): Pr
 }
 export function deleteRaw(path: string): Promise<unknown> {
   return request(path, { method: "DELETE" });
+}
+/** PATCH with the same auth/branch/RFC-7807 handling — the registration checks are a partial update, and
+ *  expressing one as PUT would demand the caller echo state it does not own. */
+export function patchRaw(path: string, body: unknown): Promise<unknown> {
+  return request(path, { method: "PATCH", body: JSON.stringify(body) });
 }
 
 /**
