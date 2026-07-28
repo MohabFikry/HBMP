@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Mersal.Audit.Client;
 using Mersal.Auth;
+using Mersal.Authz;
 using Mersal.Identity.Domain;
 using Mersal.Identity.Infrastructure;
 using Microsoft.AspNetCore.Authentication;
@@ -176,7 +177,155 @@ public static class AdminEndpoints
                 $"{{\"tenant\":\"{tenant}\",\"scopes\":[{string.Join(",", req.Scopes.Select(s => $"\"{s}\""))}]}}");
             return Results.Ok(new { tenant, role, scopes = req.Scopes });
         });
+
+        // ---- Per-membership overrides (21.2, design 40 §2) -------------------------------------------------
+        //
+        // The exception path. It is the most dangerous surface in this service — a way to hand one person a
+        // key their role does not carry — so it is the most constrained: a reason is mandatory, the grant is
+        // vetted by the SAME SoD engine that vets role grants, and every outcome is audited including the
+        // refusals.
+        g.MapPost("/memberships/{membershipId:guid}/overrides", async (
+            HttpContext http, Guid membershipId, SetOverrideRequest req,
+            IdentityStoreDbContext db, MembershipService memberships, IEffectiveSetService effective,
+            IAuditClient audit, TimeProvider clock) =>
+        {
+            var (me, err) = await Guard(http, "admin:write");
+            if (err is not null) return err;
+
+            if (string.IsNullOrWhiteSpace(req.Reason))
+                return Results.Problem(statusCode: 422, title: "reason-required",
+                    detail: "an override without a reason cannot be reviewed later");
+            if (req.Effect is not (nameof(OverrideEffect.Allow) or nameof(OverrideEffect.Deny)))
+                return Results.Problem(statusCode: 422, title: "unknown-effect", detail: "effect must be Allow or Deny");
+
+            var membership = await db.Memberships
+                .FirstOrDefaultAsync(m => m.MembershipId == membershipId && !m.IsDeleted, http.RequestAborted);
+            if (membership is null) return Results.Problem(statusCode: 404, title: "not-found");
+
+            if (!await db.Scopes.AnyAsync(s => s.Name == req.ScopeKey, http.RequestAborted))
+                return Results.Problem(statusCode: 422, title: "unknown-scope");
+
+            var effect = Enum.Parse<OverrideEffect>(req.Effect);
+
+            // SoD — an Allow override goes through the same conflict matrix as a role grant. An exception
+            // path that skipped this would simply be the supported way to hold both halves of a duty the
+            // matrix splits, which is worse than no exception path at all. A DENY is always safe: taking
+            // authority away cannot create a forbidden combination.
+            if (effect == OverrideEffect.Allow)
+            {
+                var held = await memberships.RolesForAsync(membershipId, http.RequestAborted);
+                var violations = SegregationOfDuties.EvaluateScopeGrant(held, req.ScopeKey);
+                if (violations.Count > 0)
+                {
+                    await Audit(audit, me, "identity.membership_override", membershipId.ToString(),
+                        AuditAction.Update, "OverrideRefusedSoD",
+                        $"{{\"scope\":\"{req.ScopeKey}\",\"conflicts\":[{string.Join(",", violations.Select(v => $"\"{v.ConflictingToken}\""))}]}}");
+                    return Results.Problem(statusCode: 409, title: "sod-conflict",
+                        detail: string.Join("; ", violations.Select(v => $"{v.HeldToken} vs {v.ConflictingToken}: {v.Reason}")));
+                }
+            }
+
+            var now = clock.GetUtcNow();
+            var actor = me!.GetClaim(Claims.Subject) ?? "admin";
+            var existing = await db.Overrides.FirstOrDefaultAsync(
+                o => o.MembershipId == membershipId && o.ScopeKey == req.ScopeKey && !o.IsDeleted, http.RequestAborted);
+
+            if (existing is null)
+            {
+                existing = new MembershipOverride
+                {
+                    OverrideId = Guid.NewGuid(), MembershipId = membershipId, ScopeKey = req.ScopeKey,
+                    Effect = effect, Reason = req.Reason, GrantedBy = actor, ValidUntil = req.ValidUntil,
+                    CreatedBy = actor, CreatedAt = now, UpdatedBy = actor, UpdatedAt = now,
+                };
+                db.Overrides.Add(existing);
+            }
+            else
+            {
+                existing.Effect = effect;
+                existing.Reason = req.Reason;
+                existing.ValidUntil = req.ValidUntil;
+                existing.GrantedBy = actor;
+                existing.UpdatedBy = actor;
+                existing.UpdatedAt = now;
+                existing.RowVersion++;
+            }
+
+            db.OverrideHistory.Add(HistoryOf(existing, actor, now, "override set (21.2)"));
+            await db.SaveChangesAsync(http.RequestAborted);
+
+            // RE-RESOLUTION (design 40 §5): mode 2 must never serve authority that has just been changed.
+            // The in-session token keeps its old set until it expires — that is the documented staleness
+            // window, bounded by the short access TTL, and the next refresh recomputes from the store.
+            effective.Invalidate(membershipId);
+
+            await Audit(audit, me, "identity.membership_override", existing.OverrideId.ToString(),
+                AuditAction.Update, "OverrideSet",
+                $"{{\"membership\":\"{membershipId}\",\"scope\":\"{req.ScopeKey}\",\"effect\":\"{effect}\"}}");
+            return Results.Ok(new
+            {
+                id = existing.OverrideId, membershipId, scope = req.ScopeKey,
+                effect = effect.ToString(), validUntil = existing.ValidUntil,
+            });
+        });
+
+        g.MapDelete("/memberships/{membershipId:guid}/overrides/{scopeKey}", async (
+            HttpContext http, Guid membershipId, string scopeKey,
+            IdentityStoreDbContext db, IEffectiveSetService effective, IAuditClient audit, TimeProvider clock) =>
+        {
+            var (me, err) = await Guard(http, "admin:write");
+            if (err is not null) return err;
+
+            var existing = await db.Overrides.FirstOrDefaultAsync(
+                o => o.MembershipId == membershipId && o.ScopeKey == scopeKey && !o.IsDeleted, http.RequestAborted);
+            if (existing is null) return Results.Problem(statusCode: 404, title: "not-found");
+
+            var now = clock.GetUtcNow();
+            var actor = me!.GetClaim(Claims.Subject) ?? "admin";
+            // Soft delete — an override is evidence of a decision, and revoking it must not erase the record
+            // that it once existed (CLAUDE.md § Audit — no hard deletes).
+            existing.IsDeleted = true;
+            existing.UpdatedBy = actor;
+            existing.UpdatedAt = now;
+            existing.RowVersion++;
+            db.OverrideHistory.Add(HistoryOf(existing, actor, now, "override revoked (21.2)"));
+            await db.SaveChangesAsync(http.RequestAborted);
+
+            effective.Invalidate(membershipId);
+
+            await Audit(audit, me, "identity.membership_override", existing.OverrideId.ToString(),
+                AuditAction.SoftDelete, "OverrideRevoked", $"{{\"membership\":\"{membershipId}\",\"scope\":\"{scopeKey}\"}}");
+            return Results.Ok(new { id = existing.OverrideId, membershipId, scope = scopeKey, revoked = true });
+        });
+
+        // "What would this person actually see" — mode 2, which is the only way to answer it without
+        // minting a token for someone else.
+        g.MapGet("/memberships/{membershipId:guid}/effective", async (
+            HttpContext http, Guid membershipId, IEffectiveSetService effective) =>
+        {
+            var (_, err) = await Guard(http, "admin:read");
+            if (err is not null) return err;
+
+            var set = await effective.ForMembershipAsync(membershipId, http.RequestAborted);
+            return set is null
+                ? Results.Problem(statusCode: 404, title: "not-found")
+                : Results.Ok(new
+                {
+                    membershipId,
+                    scopes = set.Keys.OrderBy(k => k, StringComparer.Ordinal),
+                    deprecated = set.DeprecatedInUse.Select(d => new { key = d.Key, replacedBy = d.ReplacedBy }),
+                });
+        });
     }
+
+    private static MembershipOverrideHistory HistoryOf(
+        MembershipOverride o, string actor, DateTimeOffset now, string reason) => new()
+    {
+        OverrideId = o.OverrideId, MembershipId = o.MembershipId, ScopeKey = o.ScopeKey,
+        Effect = o.Effect.ToString(), Reason = o.Reason, ValidUntil = o.ValidUntil,
+        IsDeleted = o.IsDeleted, RowVersion = o.RowVersion, ChangedBy = actor, ChangedAt = now,
+        ChangeReason = reason,
+    };
 
     // ---- guard + audit ------------------------------------------------------------------------------------
 
@@ -208,6 +357,12 @@ public static class AdminEndpoints
         });
 
     // ---- requests ----------------------------------------------------------------------------------------
+
+    /// <summary>21.2 — set or replace one per-membership override. <c>Reason</c> is mandatory by contract as
+    /// well as by schema: an unexplained exception is indistinguishable from a mistake at review time.</summary>
+    public sealed record SetOverrideRequest(
+        string ScopeKey, string Effect, string Reason, DateTimeOffset? ValidUntil = null);
+
     public sealed record CreateUserRequest(
         string Username, string DisplayName, string Password, string TenantId,
         string? Email = null, Guid? ProviderId = null, IReadOnlyList<string> Roles = null!)

@@ -166,4 +166,56 @@ public static class SegregationOfDuties
     /// would breach SoD.</summary>
     public static bool Conflicts(IEnumerable<string> held, IEnumerable<string> proposed) =>
         Evaluate(held, proposed).Count > 0;
+
+    /// <summary>
+    /// 21.2 — the bridge from a CATALOG KEY to the duty token(s) granting it confers (design 40 §2).
+    ///
+    /// Overrides hand out scope keys, but SoD is defined over duties, and the two are different
+    /// vocabularies: no scope key in the catalog is spelled the same as a duty token, so running an
+    /// override's key through <see cref="Evaluate"/> unmapped would silently never conflict — an SoD check
+    /// that always passes, which is worse than none because it looks like a control.
+    ///
+    /// This map is deliberately SMALL and covers only the duties 10-role-matrix §7 actually splits. A key
+    /// with no entry is SoD-neutral, which is the correct answer for the great majority: reading a lab
+    /// result is not half of a separated duty. It is a judgement call about which key expresses which half
+    /// (ADR-0021 records it), so it is stated here once, in the open, rather than inferred per caller.
+    /// </summary>
+    public static IReadOnlySet<string> TokensForScope(string scopeKey)
+    {
+        ArgumentNullException.ThrowIfNull(scopeKey);
+        return scopeKey switch
+        {
+            // Money: raising a payment vs releasing it.
+            "finance:write" => One(Tokens.FinancePaymentInitiate),
+            "finance:approve" => One(Tokens.FinancePaymentRelease),
+
+            // Claims: raising a claim vs deciding it vs settling it.
+            "claims:submit" or "claims:reimburse:submit" => One(Tokens.ClaimsSubmitter),
+            "claims:adjudicate" or "claims:decide" or "claims:review" => One(Tokens.ClaimsOfficer),
+            "claims:settle" => One(Tokens.ClaimsSettlementIssuer),
+
+            // Beneficiary identity: creating/merging a record vs approving the merge.
+            "beneficiary:merge" => One(Tokens.BeneficiaryCreateMerge),
+            "beneficiary:merge:approve" => One(Tokens.BeneficiaryMergeApprove),
+
+            _ => new HashSet<string>(StringComparer.Ordinal),
+        };
+
+        static IReadOnlySet<string> One(string t) => new HashSet<string>([t], StringComparer.Ordinal);
+    }
+
+    /// <summary>Every violation that granting the catalog key <paramref name="scopeKey"/> would introduce for
+    /// a principal already holding <paramref name="heldRoles"/>. Empty when the key carries no separated
+    /// duty — the common case, and a genuine "no conflict" rather than an unchecked one.</summary>
+    public static IReadOnlyList<Violation> EvaluateScopeGrant(IEnumerable<string> heldRoles, string scopeKey)
+    {
+        var held = Expand(heldRoles);
+        // Only duties this grant actually INTRODUCES. A role may already imply both halves of a split duty
+        // — `finance` expands to initiate AND release — and in that case an override naming one of them
+        // changes nothing about what the person can do. Reporting it would refuse a no-op while leaving the
+        // real problem (the role definition) untouched, and would teach administrators that the SoD refusal
+        // is noise to be worked around.
+        var proposed = TokensForScope(scopeKey).Where(t => !held.Contains(t)).ToArray();
+        return proposed.Length == 0 ? [] : Evaluate(heldRoles, proposed);
+    }
 }
