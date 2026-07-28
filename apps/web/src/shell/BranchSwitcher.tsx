@@ -1,5 +1,6 @@
-import { useId, useState } from "react";
-import { Icon, useTheme } from "@mersal/design-system";
+import { useState } from "react";
+import { Icon, Select, useTheme } from "@mersal/design-system";
+import type { SelectOption } from "@mersal/design-system";
 import { L } from "../i18n/strings";
 
 /** A permitted branch for the switcher. `isHome` marks the user's home branch (design 37 §2.3). */
@@ -25,36 +26,43 @@ export interface BranchSwitcherProps {
 /**
  * Phase 14.8 — the app-bar branch context control (design 37 §7). BranchScoped roles get a switcher over their
  * permitted branches (Home marked); selecting one changes the active branch and announces it via aria-live.
- * MemberScoped roles see an "All branches" indicator plus an OPTIONAL filter — never a restriction. Native
- * <select> keeps it keyboard-operable, ≥44px, focus-ringed and RTL-mirrored with no custom ARIA to get wrong.
+ * MemberScoped roles see an "All branches" indicator plus an OPTIONAL filter — never a restriction.
+ *
+ * Built on the design-system Select rather than a native <select>: the OS draws a native option list itself,
+ * so it came up system-blue and square-cornered against a teal app bar and no CSS could reach it. Select keeps
+ * the same keyboard contract (arrows, Home/End, typeahead, Escape) with the list under our own tokens.
  */
 export function BranchSwitcher({ memberScoped, branches, activeBranchId, onSwitch, onFilter }: BranchSwitcherProps) {
   const { lang } = useTheme();
   const t = (l: { en: string; ar: string }) => l[lang as "en" | "ar"];
-  const selectId = useId();
   const [announce, setAnnounce] = useState("");
 
-  const label = (b: BranchOption) => (b.isHome ? `${b.name} · ${t(L.homeBranch)}` : b.name);
+  // "Home" is a qualifier on the name, not part of it — it goes in `hint` so it renders muted instead of
+  // competing with the branch name at the same weight.
+  const toOption = (b: BranchOption): SelectOption => ({
+    value: b.id,
+    label: b.name,
+    hint: b.isHome ? t(L.homeBranch) : undefined,
+  });
 
   if (memberScoped) {
     return (
       <div className="branch-switcher branch-switcher--member">
-        <Icon name="branch" aria-hidden />
-        <span data-testid="all-branches-indicator">{t(L.allBranches)}</span>
-        {onFilter && branches.length > 0 && (
+        {onFilter && branches.length > 0 ? (
+          <Select
+            className="branch-select"
+            shape="pill"
+            aria-label={t(L.branch)}
+            leadingIcon={<Icon name="branch" aria-hidden />}
+            placeholder={t(L.allBranches)}
+            value={activeBranchId}
+            options={[{ value: "", label: t(L.allBranches) }, ...branches.map(toOption)]}
+            onChange={(v) => onFilter(v || null)}
+          />
+        ) : (
           <>
-            <label htmlFor={selectId} className="sr-only">{t(L.branch)}</label>
-            <select
-              className="branch-select"
-              id={selectId}
-              value={activeBranchId ?? ""}
-              onChange={(e) => onFilter(e.target.value || null)}
-            >
-              <option value="">{t(L.allBranches)}</option>
-              {branches.map((b) => (
-                <option key={b.id} value={b.id}>{label(b)}</option>
-              ))}
-            </select>
+            <Icon name="branch" className="branch-glyph" aria-hidden />
+            <span data-testid="all-branches-indicator">{t(L.allBranches)}</span>
           </>
         )}
       </div>
@@ -63,25 +71,21 @@ export function BranchSwitcher({ memberScoped, branches, activeBranchId, onSwitc
 
   return (
     <div className="branch-switcher">
-      {/* The icon carries the meaning and the accessible name lives on the select — "Active branch" as a
-          visible label spent a third of the app bar restating what the control already shows. */}
-      <Icon name="branch" aria-hidden />
-      <label htmlFor={selectId} className="sr-only">{t(L.activeBranch)}</label>
-      <select
+      {/* The icon sits inside the control and carries the meaning; the accessible name is on the combobox, so
+          "Active branch" no longer spends a third of the app bar restating what the control already shows. */}
+      <Select
         className="branch-select"
-        id={selectId}
-        value={activeBranchId ?? ""}
-        onChange={(e) => {
-          const id = e.target.value;
+        shape="pill"
+        aria-label={t(L.activeBranch)}
+        leadingIcon={<Icon name="branch" aria-hidden />}
+        value={activeBranchId}
+        options={branches.map(toOption)}
+        onChange={(id) => {
           const picked = branches.find((b) => b.id === id);
           onSwitch(id);
           if (picked) setAnnounce(`${t(L.branchSwitched)} ${picked.name}`);
         }}
-      >
-        {branches.map((b) => (
-          <option key={b.id} value={b.id}>{label(b)}</option>
-        ))}
-      </select>
+      />
       {/* Non-visual: announce the change to screen readers (design 37 §7 / a11y DoD). */}
       <span aria-live="polite" className="sr-only" data-testid="branch-live">{announce}</span>
     </div>

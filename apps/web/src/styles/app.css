@@ -1184,10 +1184,10 @@ nav.mrs-rail {
 .pol-drill { display: grid; gap: var(--sp3); }
 
 /* ── Branch switcher (app bar) ───────────────────────────────────────────────
-   The control WAS a bare browser <select> beside a bold "Active branch" label: unstyled against a glass
-   bar, and a visible label restating what the control already shows. Now: the branch icon carries the
-   meaning (accessible name moved to a sr-only label), and the select wears the app's own field styling
-   with a pill silhouette to match the app-bar search. */
+   The control WAS a bare browser <select> beside a bold "Active branch" label: unstyled against a glass bar,
+   a visible label restating what the control already shows, and — the part CSS could not fix — an option list
+   drawn by the OS in system blue. It is now the design-system Select (see .mrs-select), which owns its own
+   list; this file only sizes it for the app bar. */
 .branch-switcher {
   display: flex;
   align-items: center;
@@ -1195,30 +1195,16 @@ nav.mrs-rail {
   min-height: 44px;
   color: var(--text-2);
 }
-.branch-switcher > svg {
-  inline-size: 18px;
-  block-size: 18px;
+/* The standalone glyph, used only by the member-scoped indicator that has no control to sit inside. Matched
+   to the 20px the Select gives its own leading icon so the two variants read at the same weight. */
+.branch-glyph {
+  inline-size: 20px;
+  block-size: 20px;
   flex: none;
   color: var(--accent);
 }
 .branch-select {
-  min-height: 38px;
-  min-inline-size: 170px;
-  padding: 0 var(--sp3);
-  border: 1px solid var(--border-input, var(--border));
-  border-radius: var(--r-pill);
-  background: var(--surface-1);
-  color: var(--text-1);
-  font: inherit;
-  font-weight: 500;
-  cursor: pointer;
-}
-.branch-select:hover {
-  border-color: var(--accent);
-}
-.branch-select:focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: 2px;
+  min-inline-size: 208px;
 }
 .branch-switcher--member > span:not(.sr-only) {
   font-weight: 500;
@@ -1226,14 +1212,14 @@ nav.mrs-rail {
 }
 
 /* ── Account pane settings rows ──────────────────────────────────────────────
-   The rows sat flush against their divider and the two buttons were different widths, so the pair read as
-   ragged rather than as a column of settings. */
-.upane-row {
-  padding-block: var(--sp2);
+   The two buttons were different widths and the divider had 12px above it and 8px below, so the pair read as
+   ragged rather than as a column of settings. Inline padding stays 0 on purpose: .upane-section already pads
+   to the pane edge, and adding it here would indent the rows away from the section heading above them. */
+.upane-section {
+  gap: 0;
 }
-.upane-row + .upane-row {
-  margin-top: var(--sp2);
-  padding-top: var(--sp3);
+.upane-row {
+  padding-block: var(--sp3);
 }
 .upane-row > span:first-child {
   font-weight: 500;

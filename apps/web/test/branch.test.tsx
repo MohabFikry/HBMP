@@ -18,22 +18,62 @@ describe("14.8 — branch switcher", () => {
     const onSwitch = vi.fn();
     renderNode(<BranchSwitcher memberScoped={false} branches={branches} activeBranchId="b-maadi" onSwitch={onSwitch} />);
 
-    const select = screen.getByLabelText(/active branch/i) as HTMLSelectElement;
-    expect(within(select).getByRole("option", { name: /Maadi · Home/ })).toBeInTheDocument();
+    // A combobox, not a native <select>: the OS draws a native option list itself, so it could never wear
+    // the app's surface/accent. Closed, it must contribute no listbox at all.
+    const combo = screen.getByRole("combobox", { name: /active branch/i });
+    expect(combo).toHaveTextContent(/Maadi · Home/);
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
 
-    await userEvent.selectOptions(select, "b-dokki");
+    await userEvent.click(combo);
+    const list = screen.getByRole("listbox");
+    expect(within(list).getByRole("option", { name: /Maadi · Home/ })).toHaveAttribute("aria-selected", "true");
+
+    await userEvent.click(within(list).getByRole("option", { name: "Dokki" }));
     expect(onSwitch).toHaveBeenCalledWith("b-dokki");
     expect(screen.getByTestId("branch-live")).toHaveTextContent(/Dokki/);
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("BranchScoped: is operable by keyboard alone, with focus kept on the combobox", async () => {
+    const onSwitch = vi.fn();
+    renderNode(<BranchSwitcher memberScoped={false} branches={branches} activeBranchId="b-maadi" onSwitch={onSwitch} />);
+    const combo = screen.getByRole("combobox", { name: /active branch/i });
+
+    // A real <button>, so it is in the tab order without a tabindex of its own (the harness renders a skip
+    // link ahead of it, so reach it directly rather than counting tab stops).
+    expect(combo.tagName).toBe("BUTTON");
+    expect(combo).not.toHaveAttribute("tabindex");
+    combo.focus();
+    expect(combo).toHaveFocus();
+    await userEvent.keyboard("{ArrowDown}"); // opens, active = the selection
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    await userEvent.keyboard("{ArrowDown}"); // → Dokki
+    // Focus never moves into the list; the active option is named by aria-activedescendant instead.
+    expect(combo).toHaveFocus();
+    const activeId = combo.getAttribute("aria-activedescendant");
+    expect(document.getElementById(activeId ?? "")).toHaveTextContent("Dokki");
+
+    await userEvent.keyboard("{Enter}");
+    expect(onSwitch).toHaveBeenCalledWith("b-dokki");
   });
 
   it("MemberScoped: shows an All branches indicator, never a restriction", () => {
     renderNode(<BranchSwitcher memberScoped branches={[]} activeBranchId={null} onSwitch={vi.fn()} />);
     expect(screen.getByTestId("all-branches-indicator")).toHaveTextContent(/all branches/i);
-    expect(screen.queryByLabelText(/active branch/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   });
 
   it("has no serious/critical a11y violations", async () => {
     const { container } = renderNode(<BranchSwitcher memberScoped={false} branches={branches} activeBranchId="b-maadi" onSwitch={vi.fn()} />);
+    expect(await axe(container, { rules: { "color-contrast": { enabled: false } } })).toHaveNoViolations();
+  });
+
+  it("has no serious/critical a11y violations with the list OPEN", async () => {
+    // The listbox only exists while open, so the closed-state sweep above never sees the new markup —
+    // aria-activedescendant, the option roles and the required-children relationship all live here.
+    const { container } = renderNode(<BranchSwitcher memberScoped={false} branches={branches} activeBranchId="b-maadi" onSwitch={vi.fn()} />);
+    await userEvent.click(screen.getByRole("combobox", { name: /active branch/i }));
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
     expect(await axe(container, { rules: { "color-contrast": { enabled: false } } })).toHaveNoViolations();
   });
 });

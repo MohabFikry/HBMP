@@ -8,6 +8,8 @@ export { InputField, TextareaField } from "./Field";
 export type { InputFieldProps, TextareaFieldProps } from "./Field";
 export { SearchField } from "./SearchField";
 export type { SearchFieldProps } from "./SearchField";
+export { Select } from "./Select";
+export type { SelectOption, SelectProps } from "./Select";
 export { Card } from "./Card";
 export type { CardProps } from "./Card";
 export { KpiCard } from "./KpiCard";
