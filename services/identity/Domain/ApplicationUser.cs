@@ -26,4 +26,18 @@ public sealed class ApplicationUser : IdentityUser<Guid>
     /// <summary>Soft-deactivation: a disabled account cannot authenticate (deprovisioning keeps the audit trail;
     /// no hard delete of identity records, per CLAUDE.md § Audit).</summary>
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// 21.1 (adaptation A1) — grants <b>platform administration only</b>: tenants, the scope catalog,
+    /// identities, infrastructure config. It is <b>never a PHI wildcard</b>. The 21.2 evaluator short-circuits
+    /// only catalog keys flagged as platform-administration keys and hard-excludes every clinical/benefit key;
+    /// it does not bypass field projection, ABAC conditions, RLS, branch scope, or the sensitive gate
+    /// (design 37 §6). Break-glass remains the only elevation into clinical data, and it is loud.
+    /// Grantable only by another platform admin, and both sides of the grant are audited.
+    /// </summary>
+    public bool IsPlatformAdmin { get; set; }
+
+    /// <summary>21.1 — this identity's memberships. THE principal is the membership, not this user
+    /// (design 40 §1, invariant 1); an identity on its own authorizes nothing.</summary>
+    public ICollection<TenantMembership> Memberships { get; } = [];
 }

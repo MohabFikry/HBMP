@@ -123,12 +123,14 @@ followed; the prompt describes tables that do not exist under those names):
 | `branch_scope_grant(membership_id, branch_code)`, sentinel `branch_code = '__none__'` | `admin.user_branch_assignment(branch_id uuid)`; `provider.branch` has both `branch_id` and `branch_code varchar(8)`; `libs/auth` `IBranchContext`/`BranchAssignment` are uuid-keyed | 21.3 keys grants on `branch_id uuid` and uses a **reserved uuid** sentinel, not the string `'__none__'` |
 | `user_branch_assignment` implied to sit in `identity` | it is in the **`admin`** schema | 21.3's migration is an admin-service migration |
 
-**Pre-existing defect surfaced by this work** (not introduced here): `RoleScopeMatrixTests` — the tests that
-assert the DB catalog equals the frozen vocabulary — are gated on `IDENTITY_TEST_DB` and were **skipping**.
-Run against the live dev DB they fail: the DB holds 19 roles against the code's frozen 17 (`policy_admin`,
-`beneficiary_mgmt_supervisor` added by phase 19) and 71 scopes against 74 (missing `patient:read` and two
-others from phase 20). Catalog drift is exactly what 21.2 restructures, so it is tracked there rather than
-patched blind here.
+**Note on the live dev database (operational, not a code defect).** `RoleScopeMatrixTests` — the tests
+asserting the DB catalog equals the frozen vocabulary — are gated on `IDENTITY_TEST_DB`, so they skip on a
+DB-less run. Pointed at the **running dev DB** on `:55432` they fail (19 roles against the frozen 17; 71
+scopes against 74, missing `patient:read`). Pointed at a **freshly migrated** database they all pass — 39/39.
+So the migrations and the code are consistent with each other, and CI is unaffected (`print-test-db-env.sh`
+does export `IDENTITY_TEST_DB`, against a clean Postgres service): the dev database has simply drifted behind
+the phase-19/20 migrations. Re-migrate it rather than changing code. Phase 21 work uses a scratch
+`hbmp_p21` database provisioned by `tools/ci/apply-migrations.sh` for exactly this reason.
 
 ## Alternatives considered
 
