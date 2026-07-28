@@ -139,6 +139,25 @@ confirmed against callcentre-service, which remains the only place the verificat
 convenience; the check is the control. Relying on the facade alone would mean the profile's own front door was
 open to a call-centre token that skipped it.
 
+### Deliberate deviation: the case PORTAL still calls the case endpoint, which delegates
+
+Build prompt 20.2 says "the case portal calls the profile endpoint with
+`?sections=header,alerts,coverage,caseManagement,notes,timeline`". It does not; it still calls
+`/api/v1/cases/{id}/beneficiary-360`, and that endpoint now delegates to the profile.
+
+The same prompt also rules "no behaviour change for existing callers", and those two instructions pull in
+opposite directions: re-pointing the SPA means the case screen renders profile sections instead of the
+`Beneficiary360` shape, which is a behaviour change to that screen. Keeping the delegating endpoint satisfies
+20.2's stated acceptance — *"grep shows no second aggregation path; each old endpoint either delegates or is
+gone"* — because there is exactly one aggregation path and the case endpoint is on the delegating side of it.
+
+What is deferred is presentational, not architectural: the day the case screen wants a section the
+`Beneficiary360` shape cannot carry, it should call the profile directly and that DTO should be deleted. Until
+then, deleting it would mean rewriting a working screen to reach the same data by a different name.
+
+`Beneficiary360` and `Member360` therefore still exist. 20.2's "delete the superseded bespoke DTOs **once
+callers move**" has not triggered, because the callers have not moved.
+
 ## Consequences
 
 - **Positive.** One place to reason about who sees what about a patient. The matrix is readable against the

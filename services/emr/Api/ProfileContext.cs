@@ -27,7 +27,7 @@ public static class ProfileContextEndpoint
     {
         app.MapGet("/api/v1/beneficiaries/{beneficiaryId:guid}/profile-context", async (
             Guid beneficiaryId, EmrDbContext db, ITreatingRelationship treating, IAuditClient audit,
-            IHbmpPrincipalAccessor me, CancellationToken ct) =>
+            FieldProjector projector, IHbmpPrincipalAccessor me, CancellationToken ct) =>
         {
             var principal = me.Principal;
             if (principal is null) return GateResults.Unauthenticated();
@@ -43,6 +43,23 @@ public static class ProfileContextEndpoint
                 principal, context, ProfileSections.PastMedicalHistory, ProfileSections.Encounters);
             if (denied is not null) return denied;
 
+            // PER-SECTION, not per-endpoint. ProfileSeam.Check passes when ANY of the sections is visible,
+            // which is right for "may you make this call" and WRONG for "what may you receive": reception has
+            // an encounters cell and NO past-medical-history cell, so a single gate would hand it the ICD
+            // diagnosis list and the clinician's narrative.
+            //
+            // profile-service would drop that section afterwards and the screen would look correct — which is
+            // exactly why this has to be fixed HERE. Design 39 §1 is two INDEPENDENT layers; a layer that
+            // over-serves and relies on the next one to trim is not a layer, and anything else that calls this
+            // seam gets the untrimmed answer.
+            var mayReadHistory =
+                ProfilePolicies.Decide(ProfileSections.PastMedicalHistory, context)
+                    is { State: ProfileSectionState.Visible };
+            var mayReadEncounters =
+                ProfilePolicies.Decide(ProfileSections.Encounters, context)
+                    is { State: ProfileSectionState.Visible };
+
+            // Rows nobody may receive are not read, so they cannot be logged, traced or accidentally returned.
             var encounters = await db.Encounters.AsNoTracking()
                 .Where(e => e.BeneficiaryId == beneficiaryId)
                 .OrderByDescending(e => e.StartedAt)
@@ -54,11 +71,13 @@ public static class ProfileContextEndpoint
             // ACTIVE conditions only. A resolved diagnosis from 2019 belongs in the record, but the profile's
             // past-medical-history section answers "what is true about this person now" — a list mixing the two
             // reads as a much sicker patient than the one in front of you.
-            var diagnoses = await db.Diagnoses.AsNoTracking()
-                .Where(d => encounterIds.Contains(d.EncounterId)
-                            && d.ClinicalStatus == ClinicalStatus.Active && !d.IsDeleted)
-                .OrderByDescending(d => d.RecordedAt)
-                .ToListAsync(ct);
+            var diagnoses = mayReadHistory
+                ? await db.Diagnoses.AsNoTracking()
+                    .Where(d => encounterIds.Contains(d.EncounterId)
+                                && d.ClinicalStatus == ClinicalStatus.Active && !d.IsDeleted)
+                    .OrderByDescending(d => d.RecordedAt)
+                    .ToListAsync(ct)
+                : [];
 
             // Appointments supply the LOGISTICS an encounter row shows — branch, type, and whether it began as
             // a referral or a follow-up. The clinical reason for the visit is not read from here: it is not an
@@ -72,10 +91,12 @@ public static class ProfileContextEndpoint
 
             // The narrative: the most recent SIGNED note's assessment. Unsigned notes are excluded — a draft a
             // clinician has not stood behind must not become another role's summary of the patient.
-            var latestNote = await db.Notes.AsNoTracking()
-                .Where(n => encounterIds.Contains(n.EncounterId) && n.IsSigned && !n.IsDeleted)
-                .OrderByDescending(n => n.AuthoredAt)
-                .FirstOrDefaultAsync(ct);
+            var latestNote = mayReadHistory
+                ? await db.Notes.AsNoTracking()
+                    .Where(n => encounterIds.Contains(n.EncounterId) && n.IsSigned && !n.IsDeleted)
+                    .OrderByDescending(n => n.AuthoredAt)
+                    .FirstOrDefaultAsync(ct)
+                : null;
 
             // Display is the CODE. Resolving "E11" to "Type 2 diabetes mellitus" is masterdata-service's job
             // and its catalogue is bilingual — doing it here would put an English-only label into a payload the
@@ -84,14 +105,31 @@ public static class ProfileContextEndpoint
                 "ICD-10", d.IcdCode, d.IcdCode, d.ClinicalStatus.ToString(),
                 DateOnly.FromDateTime(d.RecordedAt.UtcDateTime)));
 
+            // The narrative is the one free-text CLINICAL-class field in this response, so it goes through the
+            // SAME FieldProjector emr's clinical-context read already uses (20.2: reuse that logic, do not
+            // fork it). The section gate above and the field-class matrix here answer different questions —
+            // "may you have this section" and "may you read this class" — and the narrative is the field where
+            // getting either wrong is most costly, so it passes both.
+            string? narrative = null;
+            if (mayReadHistory && (latestNote?.Assessment ?? latestNote?.Plan) is { } text)
+            {
+                var projected = await projector.ProjectAsync(principal, "clinical_note",
+                    new Dictionary<string, (object?, string)>(StringComparer.Ordinal)
+                    {
+                        ["narrative"] = (text, DefaultPolicies.Classes.Clinical),
+                    }, ct);
+                narrative = projected.TryGetValue("narrative", out var v) ? v as string : null;
+            }
+
             var view = new ProfileContextView(
                 conditions,
-                latestNote?.Assessment ?? latestNote?.Plan,
+                narrative,
                 // emr owns no documents — the uploaded historical records on a member live in policy-service
                 // (19.3b) and reach the profile through ITS provider. An empty array here rather than a second
                 // document path: one place decides a document's classification.
                 [],
-                [.. encounters.Select(e =>
+                mayReadEncounters
+                ? [.. encounters.Select(e =>
                 {
                     var appointment = e.AppointmentId is { } id ? appointmentById.GetValueOrDefault(id) : null;
                     return new ProfileEncounterView(
@@ -103,7 +141,8 @@ public static class ProfileContextEndpoint
                         // Deliberately null: see the appointment comment above.
                         null,
                         e.Status.ToString());
-                })]);
+                })]
+                : []);
 
             // ONE PHI-read audit event for the pair, naming the field classes served.
             await audit.EmitAsync(new AuditEventDraft
@@ -114,8 +153,11 @@ public static class ProfileContextEndpoint
                 TenantId = principal.TenantId,
                 Purpose = "patient-profile",
                 DecisionOutcome = "ProfileContextRead",
-                DecisionReasonCode = $"encounters:{encounters.Count};conditions:{conditions.Count}",
-                FieldClasses = ["diagnosis", "clinical", "operational"],
+                DecisionReasonCode =
+                    $"encounters:{(mayReadEncounters ? encounters.Count : 0)};conditions:{conditions.Count}",
+                // Only the classes actually SERVED — an audit trail claiming a diagnosis read that never
+                // happened is as misleading as one that omits a read that did.
+                FieldClasses = mayReadHistory ? ["diagnosis", "clinical", "operational"] : ["operational"],
                 Severity = AuditSeverity.Notice,
             }, ct);
 
