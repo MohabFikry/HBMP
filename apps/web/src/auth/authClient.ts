@@ -49,6 +49,7 @@ const DISPLAY_NAMES: Record<Role, string> = {
   pharmacy: "Mersal Pharmacy",
   medical_approval: "Dr. Reviewer",
   beneficiary_mgmt: "Registration Desk",
+  beneficiary_mgmt_supervisor: "Registration Supervisor",
   case_manager: "Case Manager Layla",
   call_center: "Call Agent Sara",
   claims_officer: "Claims Officer Tarek",

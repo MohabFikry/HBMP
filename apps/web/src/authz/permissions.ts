@@ -46,6 +46,7 @@ export type Permission =
   | "beneficiary.register"
   | "beneficiary.manage"
   | "beneficiary.status"
+  | "beneficiary.approvals"
   // Case management
   | "case.read"
   | "case.beneficiary360"
@@ -97,6 +98,9 @@ export type Permission =
   | "admin.tenants"
   | "admin.audit"
   | "admin.config"
+  // User & access model (Phase 21.6, design 40)
+  | "admin.access"
+  | "admin.programs"
   // Medical director oversight
   | "director.dashboards"
   | "director.oversight"
@@ -114,6 +118,7 @@ export type Role =
   | "pharmacy"
   | "medical_approval"
   | "beneficiary_mgmt"
+  | "beneficiary_mgmt_supervisor"
   | "case_manager"
   | "call_center"
   | "claims_officer"
@@ -152,12 +157,25 @@ export const rolePermissions: Record<Role, Permission[]> = {
     "beneficiary.register",
     "beneficiary.manage",
     "beneficiary.status",
+    // The officer PREPARES approvals (verifies documents, binds coverage); the decision buttons are
+    // supervisor-only and the server enforces it (urn:hbmp:approver-required).
+    "beneficiary.approvals",
     "eligibility.check",
     "policy.members",
     "policy.groups",
     "policy.utilization",
     "policy.bulk",
     "policy.analytics",
+  ],
+  // 19.7's approver persona (US-003): reviews what the officer prepared and decides. No register permission
+  // — the person who creates a record must not be the person who activates it, and the split starts here.
+  beneficiary_mgmt_supervisor: [
+    "beneficiary.approvals",
+    "beneficiary.manage",
+    "beneficiary.status",
+    "eligibility.check",
+    "policy.members",
+    "policy.groups",
   ],
   case_manager: ["case.read", "case.beneficiary360", "case.escalations"],
   // Call Centre — a call workspace + call history. No clinical permission exists here (min-necessary).
@@ -191,9 +209,11 @@ export const rolePermissions: Record<Role, Permission[]> = {
     "policy.analytics",
     "network.tiers",
   ],
-  org_admin: ["admin.users", "admin.policies", "admin.masterdata", "admin.tenants", "admin.audit", "admin.config"],
+  org_admin: ["admin.users", "admin.policies", "admin.masterdata", "admin.tenants", "admin.audit", "admin.config", "admin.access"],
   // Super admin can administer globally; sensitive PHI reads remain break-glass on the server, not routine UI.
-  super_admin: ["admin.users", "admin.policies", "admin.masterdata", "admin.tenants", "admin.audit", "admin.config"],
+  // `admin.programs` is super-admin only: enablement is set by Mersal programme administration, and a tenant
+  // that can switch on its own programmes is not gated at all (design 40 §4, A4).
+  super_admin: ["admin.users", "admin.policies", "admin.masterdata", "admin.tenants", "admin.audit", "admin.config", "admin.access", "admin.programs"],
   medical_director: ["director.dashboards", "director.oversight", "director.quality", "director.escalations", "approvals.sla"],
 };
 

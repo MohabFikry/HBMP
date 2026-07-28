@@ -146,6 +146,9 @@ export const PORTALS: PortalDef[] = [
     eyebrow: { en: "Beneficiary mgmt", ar: "إدارة المستفيدين" },
     sections: [
       { key: "register", path: "register", label: { en: "Register new", ar: "تسجيل جديد" }, group: G.registration, icon: "plus", permission: "beneficiary.register" },
+      // US-003 — the officer PREPARES the application here (documents verified, coverage bound); the
+      // decision buttons belong to the supervisor's portal below and the server enforces the split.
+      { key: "approvals", path: "approvals", label: { en: "Registration approvals", ar: "اعتماد التسجيلات" }, group: G.registration, icon: "check2", permission: "beneficiary.approvals" },
       { key: "manage", path: "manage", label: { en: "Search / manage", ar: "بحث / إدارة" }, group: G.registration, icon: "user", permission: "beneficiary.manage" },
       { key: "status", path: "status", label: { en: "Status & reactivation", ar: "الحالة وإعادة التفعيل" }, group: G.registration, icon: "clock", permission: "beneficiary.status" },
       { key: "eligibility", path: "eligibility", label: { en: "Eligibility check", ar: "التحقق من الأهلية" }, group: G.access, icon: "check2", permission: "eligibility.check" },
@@ -156,6 +159,24 @@ export const PORTALS: PortalDef[] = [
       { key: "utilization", path: "utilization", label: { en: "Utilization", ar: "الاستخدام" }, group: G.insights, icon: "chart", permission: "policy.utilization" },
       { key: "analytics", path: "analytics", label: { en: "Analytics", ar: "التحليلات" }, group: G.insights, icon: "chart", permission: "policy.analytics" },
       { key: "bulk", path: "bulk", label: { en: "Bulk & imports", ar: "الرفع الجماعي" }, group: G.membership, icon: "doc", permission: "policy.bulk" },
+    ],
+  },
+  {
+    // 19.7's approver persona (US-003). Same base as the officer's portal — one person holds one role at a
+    // time, so the paths never collide — but a deliberately narrower section list: the supervisor DECIDES
+    // registrations and must not hold the register pen (the SoD split the server enforces on the decision
+    // endpoint starts in the navigation).
+    role: "beneficiary_mgmt_supervisor",
+    base: "beneficiaries",
+    title: { en: "Registration review", ar: "مراجعة التسجيلات" },
+    eyebrow: { en: "Registration supervisor", ar: "مشرف التسجيل" },
+    sections: [
+      { key: "approvals", path: "approvals", label: { en: "Registration approvals", ar: "اعتماد التسجيلات" }, group: G.registration, icon: "check2", permission: "beneficiary.approvals" },
+      { key: "manage", path: "manage", label: { en: "Search / manage", ar: "بحث / إدارة" }, group: G.registration, icon: "user", permission: "beneficiary.manage" },
+      { key: "status", path: "status", label: { en: "Status & reactivation", ar: "الحالة وإعادة التفعيل" }, group: G.registration, icon: "clock", permission: "beneficiary.status" },
+      { key: "eligibility", path: "eligibility", label: { en: "Eligibility check", ar: "التحقق من الأهلية" }, group: G.access, icon: "check2", permission: "eligibility.check" },
+      { key: "members", path: "members", label: { en: "Members", ar: "الأعضاء" }, group: G.membership, icon: "user", permission: "policy.members" },
+      { key: "groups", path: "groups", label: { en: "Groups", ar: "المجموعات" }, group: G.membership, icon: "refer", permission: "policy.groups" },
     ],
   },
   {
@@ -257,6 +278,8 @@ export const PORTALS: PortalDef[] = [
       { key: "tenants", path: "tenants", label: { en: "Tenants / providers", ar: "المستأجرون / مقدمو الخدمة" }, group: G.admin, icon: "refer", permission: "admin.tenants" },
       { key: "audit", path: "audit", label: { en: "Audit & access reviews", ar: "التدقيق والمراجعات" }, group: G.oversight, icon: "clock", permission: "admin.audit" },
       { key: "config", path: "config", label: { en: "System config", ar: "إعدادات النظام" }, group: G.admin, icon: "info", permission: "admin.config" },
+      // 21.6 — memberships, exceptions, branch reach and the effective-access preview (design 40).
+      { key: "access", path: "access", label: { en: "Users & access", ar: "المستخدمون والصلاحيات" }, group: G.admin, icon: "user", permission: "admin.access" },
     ],
   },
   {
@@ -271,6 +294,10 @@ export const PORTALS: PortalDef[] = [
       { key: "tenants", path: "tenants", label: { en: "Tenants / providers", ar: "المستأجرون / مقدمو الخدمة" }, group: G.admin, icon: "refer", permission: "admin.tenants" },
       { key: "audit", path: "audit", label: { en: "Audit & access reviews", ar: "التدقيق والمراجعات" }, group: G.oversight, icon: "clock", permission: "admin.audit" },
       { key: "config", path: "config", label: { en: "System config", ar: "إعدادات النظام" }, group: G.admin, icon: "info", permission: "admin.config" },
+      { key: "access", path: "access", label: { en: "Users & access", ar: "المستخدمون والصلاحيات" }, group: G.admin, icon: "user", permission: "admin.access" },
+      // Platform administration only — programme enablement is set by Mersal, never by the tenant, so it
+      // appears on this portal alone. The hiding is cosmetic; the API requires the platform-admin role.
+      { key: "programs", path: "programs", label: { en: "Programme enablement", ar: "تفعيل البرامج" }, group: G.admin, icon: "check2", permission: "admin.programs" },
     ],
   },
   {

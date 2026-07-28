@@ -17,6 +17,8 @@ const ReceptionCheckIn = lazy(() => import("./ReceptionDesk").then((m) => ({ def
 const BeneficiaryRegister = lazy(() => import("./BeneficiaryPortal").then((m) => ({ default: m.BeneficiaryRegister })));
 const BeneficiaryManage = lazy(() => import("./BeneficiaryPortal").then((m) => ({ default: m.BeneficiaryManage })));
 const BeneficiaryStatus = lazy(() => import("./BeneficiaryPortal").then((m) => ({ default: m.BeneficiaryStatus })));
+// US-003 — the approval worklist, shared by the officer (prepares) and the supervisor (decides).
+const RegistrationApprovals = lazy(() => import("./BeneficiaryPortal").then((m) => ({ default: m.RegistrationApprovals })));
 const DoctorEncounter = lazy(() => import("./DoctorEncounter").then((m) => ({ default: m.DoctorEncounter })));
 // 18.C2 (W4) — the sensitive-result approver inbox, shared by the Doctor and Medical Director portals.
 const ReportAccessInbox = lazy(() => import("./ReportAccessInbox").then((m) => ({ default: m.ReportAccessInbox })));
@@ -91,12 +93,17 @@ const PatientProfile = lazy(() => import("./PatientProfile").then((m) => ({ defa
 // 19.6b — the analytical dashboard. Its own chunk: it is the heaviest screen in the portal and three of the
 // four roles that can reach it open it rarely.
 const PolicyAnalytics = lazy(() => import("./PolicyAnalytics").then((m) => ({ default: m.PolicyAnalytics })));
+// User & access model (Phase 21.6, design 40) — the membership roster and its detail tabs share one chunk;
+// programme enablement is a separate chunk because only platform administration ever opens it.
+const MembershipRoster = lazy(() => import("./AccessAdmin").then((m) => ({ default: m.MembershipRoster })));
+const ProgramAdmin = lazy(() => import("./ProgramAdmin").then((m) => ({ default: m.ProgramAdmin })));
 
 export const SCREENS: Record<string, () => ReactNode> = {
   // 1. Reception — eligibility (also surfaced in the beneficiary-management portal).
   "/reception/eligibility": () => <ReceptionEligibility />,
   "/beneficiaries/eligibility": () => <ReceptionEligibility />,
   "/beneficiaries/register": () => <BeneficiaryRegister />,
+  "/beneficiaries/approvals": () => <RegistrationApprovals />,
   "/beneficiaries/manage": () => <BeneficiaryManage />,
   "/beneficiaries/status": () => <BeneficiaryStatus />,
   "/reception/queue": () => <ReceptionVisits />,
@@ -204,6 +211,12 @@ const ADMIN_SECTIONS: Record<string, () => ReactNode> = {
   audit: () => <AdminGovernance />,
   "master-data": () => <AdminMasterData />,
   config: () => <AdminConfig />,
+  // 21.6 — the membership roster. Mounted under BOTH admin bases: an org admin administers their own
+  // tenant's memberships, and the server pins the tenant either way (asking for another is 403 + audited).
+  access: () => <MembershipRoster />,
+  // Platform administration only. The catalog omits it from the org-admin portal, but that is cosmetic —
+  // the write endpoints require the platform-admin role and refuse regardless of who reaches the route.
+  programs: () => <ProgramAdmin />,
 };
 
 export function screenFor(fullPath: string): (() => ReactNode) | undefined {
