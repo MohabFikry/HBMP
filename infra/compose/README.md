@@ -53,6 +53,7 @@ As each .NET service is built, uncomment/copy the template at the bottom of `com
 - [ ] **Secrets:** move everything out of `.env` into **OpenBao** (real server, not `-dev`); inject via app; rotate. Never commit `.env`.
 - [ ] **OpenSearch:** set `OPENSEARCH_DISABLE_SECURITY=false`, configure users/roles + TLS.
 - [ ] **Keycloak:** run in production mode (`start` + `KC_HOSTNAME` + TLS), not `start-dev`.
+- [ ] **Auth dev relaxations:** this file sets `Auth__RequireHttpsMetadata=false` and `Auth__ProtectedScopeRequiresMfa=false` on every service. Both default to **`true`** in code (`libs/auth/HbmpAuthOptions.cs`) and nothing under `infra/helm` overrides them, so deployed tiers stay secure — but never carry these two lines over into a Helm values file or a real `.env`.
 - [ ] **Disk:** enable **LUKS** full-disk encryption on the host; confirm **pgcrypto** for PHI/PII columns.
 - [ ] **Backups/DR:** wire **pgBackRest** (Postgres PITR) + **restic** (MinIO/files) with an **offsite** copy; test a restore. (Velero applies once you move to k3s.)
 - [ ] **Network:** firewall the host; bind admin UIs (RabbitMQ, Grafana, Kong admin, OpenBao) to localhost or a VPN.
