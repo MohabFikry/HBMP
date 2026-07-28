@@ -49,6 +49,7 @@ public static class DependencyInjection
         // issuance) and the interface (mode 2, out-of-session) so they cannot drift into two objects.
         services.AddMemoryCache();
         services.AddSingleton<DeprecationReporter>();
+        services.AddScoped<SessionService>();      // 21.5 — session/device controls + login history
         services.AddScoped<EffectiveSetService>();
         services.AddScoped<IEffectiveSetService>(sp => sp.GetRequiredService<EffectiveSetService>());
         services.AddScoped<UserClaimsService>();

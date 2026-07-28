@@ -166,27 +166,52 @@ public static class ConnectEndpoints
 
         app.MapPost("/connect/login", async (
             HttpContext http, [FromForm] string username, [FromForm] string password, [FromForm] string? returnUrl,
-            IAntiforgery antiforgery, SignInManager<ApplicationUser> signIn, UserManager<ApplicationUser> users) =>
+            IAntiforgery antiforgery, SignInManager<ApplicationUser> signIn, UserManager<ApplicationUser> users,
+            SessionService sessions) =>
         {
             var lang = LangOf(http);
+            var agent = http.Request.Headers.UserAgent.ToString();
+            var ip = http.Connection.RemoteIpAddress;
+
+            // 21.5 — every outcome is recorded, failures included. A history containing only the successes
+            // cannot show anyone that their account is being attacked. Both the "no such user" and the
+            // "wrong password" paths record the SAME coarse reason, so the distinction cannot leak into a
+            // support screen and become a user-enumeration oracle.
+            IResult Failed() => Results.Content(AccountPages.LoginPage(lang, returnUrl,
+                AccountPages.AntiforgeryField(antiforgery, http), error: true), "text/html");
+
             var user = await users.FindByNameAsync(username);
             if (user is null || !user.IsActive)
-                return Results.Content(AccountPages.LoginPage(lang, returnUrl,
-                    AccountPages.AntiforgeryField(antiforgery, http), error: true), "text/html");
+            {
+                await sessions.RecordAttemptAsync(
+                    user?.Id, username, false,
+                    user is null ? LoginFailureReasons.BadCredentials : LoginFailureReasons.Inactive,
+                    agent, ip, http.RequestAborted);
+                return Failed();
+            }
 
             var result = await signIn.PasswordSignInAsync(user, password, isPersistent: false, lockoutOnFailure: true);
             if (result.RequiresTwoFactor)
             {
+                // Not an outcome yet — the attempt is recorded when the second factor resolves it.
                 var q = string.IsNullOrEmpty(returnUrl) ? "" : $"?returnUrl={Uri.EscapeDataString(AccountPages.SafeReturn(returnUrl))}";
                 return Results.Redirect($"/connect/2fa{q}");
             }
             if (!result.Succeeded)
-                return Results.Content(AccountPages.LoginPage(lang, returnUrl,
-                    AccountPages.AntiforgeryField(antiforgery, http), error: true), "text/html");
+            {
+                await sessions.RecordAttemptAsync(
+                    user.Id, username, false,
+                    result.IsLockedOut ? LoginFailureReasons.LockedOut : LoginFailureReasons.BadCredentials,
+                    agent, ip, http.RequestAborted);
+                return Failed();
+            }
 
             // Single-factor success: stamp amr=pwd. Protected scopes will still be denied downstream until the
             // user enrols a second factor (/connect/enroll-2fa) — that is the MFA gate (C3) on the new issuer.
             await AccountPages.StampSignIn(http, signIn, user, ["pwd"]);
+            await sessions.RecordAttemptAsync(user.Id, username, true, null, agent, ip, http.RequestAborted);
+            // 21.5 — opening the session also applies the concurrent cap, revoking the oldest.
+            await sessions.OpenAsync(user.Id, null, agent, ip, http.RequestAborted);
             return Results.Redirect(AccountPages.SafeReturn(returnUrl));
         }).RequireRateLimiting(IssuerRateLimits.Credential);
 

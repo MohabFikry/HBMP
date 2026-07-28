@@ -29,6 +29,10 @@ public sealed class IdentityStoreDbContext(DbContextOptions<IdentityStoreDbConte
     public DbSet<MembershipRole> MembershipRoles => Set<MembershipRole>();
     public DbSet<TenantMembershipHistory> MembershipHistory => Set<TenantMembershipHistory>();
 
+    /// <summary>21.5 — session/device controls and sign-in history (design 40 §6).</summary>
+    public DbSet<UserSession> Sessions => Set<UserSession>();
+    public DbSet<LoginAttempt> LoginAttempts => Set<LoginAttempt>();
+
     /// <summary>21.2 — the per-membership override overlay (design 40 §2).</summary>
     public DbSet<MembershipOverride> Overrides => Set<MembershipOverride>();
     public DbSet<MembershipOverrideHistory> OverrideHistory => Set<MembershipOverrideHistory>();
@@ -132,6 +136,27 @@ public sealed class IdentityStoreDbContext(DbContextOptions<IdentityStoreDbConte
             e.Property(o => o.RowVersion).HasDefaultValue(0);
             e.HasOne<TenantMembership>().WithMany().HasForeignKey(o => o.MembershipId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(o => new { o.MembershipId, o.ScopeKey }).IsUnique().HasFilter("NOT is_deleted");
+        });
+
+        // ---- 21.5 sessions + login history (Migrations/0014_sessions_and_login_history.sql) ----
+        builder.Entity<UserSession>(e =>
+        {
+            e.ToTable("user_session");
+            e.HasKey(s => s.SessionId);
+            e.Property(s => s.UserAgent).HasMaxLength(400);
+            e.Property(s => s.RevokeReason).HasMaxLength(200);
+            e.HasOne<ApplicationUser>().WithMany().HasForeignKey(s => s.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(s => new { s.UserId, s.CreatedAt });
+        });
+
+        builder.Entity<LoginAttempt>(e =>
+        {
+            e.ToTable("login_attempt");
+            e.HasKey(a => a.AttemptId);
+            e.Property(a => a.UsernameTried).HasMaxLength(256).IsRequired();
+            e.Property(a => a.FailureReason).HasMaxLength(40);
+            e.Property(a => a.UserAgent).HasMaxLength(400);
+            e.HasOne<ApplicationUser>().WithMany().HasForeignKey(a => a.UserId).OnDelete(DeleteBehavior.SetNull);
         });
 
         builder.Entity<MembershipOverrideHistory>(e =>
