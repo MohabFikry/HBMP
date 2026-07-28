@@ -147,7 +147,10 @@ html[data-theme="dark"] .mrs-btn.mrs-primary {
   margin-top: 6px;
   min-height: 44px;
   border-radius: var(--r-md);
-  border: 1px solid var(--border);
+  /* --border is a decorative hairline and sat at ~2:1 against the dark card — an empty input was
+     indistinguishable from the surface behind it (QA P2-16). Form-control boundaries are UI, not
+     decoration, and get their own ≥3:1 token. */
+  border: 1px solid var(--border-input, var(--border));
   background: var(--surface-1);
   color: var(--text-1);
   padding: 10px 12px;
@@ -164,6 +167,10 @@ html[data-theme="dark"] .mrs-btn.mrs-primary {
   font-size: var(--fs-caption);
   color: var(--text-2);
   margin-top: 4px;
+}
+.mrs-label .mrs-req {
+  color: var(--st-bad-fg);
+  font-weight: 700;
 }
 .mrs-field .mrs-error {
   color: var(--st-bad-fg);

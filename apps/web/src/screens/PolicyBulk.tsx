@@ -10,9 +10,14 @@ import type {
   PolicyApi,
 } from "../api/policyApi";
 import { createHttpPolicyApi } from "../api/policyApi";
+
+/** ONE client for the module, not one per render: a default parameter re-evaluates on every call,
+ *  and screens key their load effects on the api instance — a fresh instance per render turned the
+ *  first failing (or even succeeding) fetch into an unbounded request loop (QA P0-1: ~400 req/s).*/
+const httpPolicyApi = createHttpPolicyApi();
 import { API_BASE } from "../config";
 import { writeErrorMessage } from "../api/writeError";
-import { PageHeader, useLoc } from "./_shared";
+import { PageHeader, useLoc, readErrorMessage } from "./_shared";
 import { useIdempotencyKey } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
 
@@ -109,7 +114,7 @@ function jobStatusKind(status: string): "ok" | "warn" | "bad" | "neu" | "info" {
   }
 }
 
-export function BulkJobs({ api = createHttpPolicyApi() }: { api?: PolicyApi }) {
+export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const t = useLoc();
   const fmt = useFormat();
   const { lang } = useTheme();
@@ -188,7 +193,7 @@ export function BulkJobs({ api = createHttpPolicyApi() }: { api?: PolicyApi }) {
       setRecon(await api.bulkReconciliation(job.jobId));
       setAnnounce(t(S.reconcile));
     } catch (e) {
-      setError(writeErrorMessage(e).message);
+      setError(readErrorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -202,20 +207,26 @@ export function BulkJobs({ api = createHttpPolicyApi() }: { api?: PolicyApi }) {
       <div aria-live="polite" role="status" className="sr-only">{announce}</div>
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
 
-      <Card>
-        <label htmlFor="bulk-type">{t(S.jobType)}</label>
-        <select id="bulk-type" value={jobType} onChange={(e) => { setJobType(e.target.value); reset(); }}>
-          {JOB_TYPES.map((x) => (
-            <option key={x} value={x}>
-              {x}
-            </option>
-          ))}
-        </select>
+      <Card style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp4)" }}>
+        {/* QA P1-10: this card was raw browser controls crammed into one unspaced row while every other
+            screen wears the design system — the controls now use the shared field classes and breathe. */}
+        <div className="mrs-field" style={{ maxWidth: 360 }}>
+          <label className="mrs-label" htmlFor="bulk-type">{t(S.jobType)}</label>
+          <select className="mrs-control" id="bulk-type" value={jobType} onChange={(e) => { setJobType(e.target.value); reset(); }}>
+            {JOB_TYPES.map((x) => (
+              <option key={x} value={x}>
+                {x}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <InlineAlert tone="info">{t(S.templateHint)}</InlineAlert>
-        <a className="mrs-btn secondary" href={`${API_BASE}/bulk-templates/${jobType}`} download>
-          {t(S.template)}
-        </a>
+        <div>
+          <a className="mrs-btn secondary" href={`${API_BASE}/bulk-templates/${jobType}`} download>
+            {t(S.template)}
+          </a>
+        </div>
 
         {template && (
           <table className="pol-costshare">
@@ -239,16 +250,21 @@ export function BulkJobs({ api = createHttpPolicyApi() }: { api?: PolicyApi }) {
           </table>
         )}
 
-        <label htmlFor="bulk-file">{t(S.file)}</label>
-        <input
-          id="bulk-file"
-          type="file"
-          accept=".csv,.xlsx"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-        />
-        <Button variant="primary" onClick={doUpload} disabled={!file || busy}>
-          {t(S.upload)}
-        </Button>
+        <div className="mrs-field" style={{ maxWidth: 480 }}>
+          <label className="mrs-label" htmlFor="bulk-file">{t(S.file)}</label>
+          <input
+            className="mrs-control"
+            id="bulk-file"
+            type="file"
+            accept=".csv,.xlsx"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          />
+        </div>
+        <div>
+          <Button variant="primary" onClick={doUpload} loading={busy} disabled={!file || busy}>
+            {t(S.upload)}
+          </Button>
+        </div>
       </Card>
 
       {job && (

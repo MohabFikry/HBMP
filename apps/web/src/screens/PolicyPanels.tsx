@@ -10,7 +10,7 @@ import type {
   TimelineEntryView,
 } from "../api/policyApi";
 import { useFormat } from "../i18n/useFormat";
-import { useLoc } from "./_shared";
+import { useLoc, readErrorMessage } from "./_shared";
 
 /**
  * Phase 19.6 — the panels shared by the POLICY and MEMBER detail screens: notes, documents, the change
@@ -208,7 +208,7 @@ export function NotesPanel({ api, scope, scopeRef, canAdd = true }: NotesPanelPr
       setNotes(await api.notes(scope, scopeRef));
       setLoadError(null);
     } catch (e) {
-      setLoadError(writeErrorMessage(e).message);
+      setLoadError(readErrorMessage(e));
     }
   }, [api, scope, scopeRef]);
 
@@ -412,7 +412,7 @@ export function DocumentsPanel({
       const { url } = await api.documentDownloadUrl(linkId);
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (e) {
-      setError(writeErrorMessage(e).message);
+      setError(readErrorMessage(e));
     }
   }
 
@@ -479,7 +479,7 @@ export function ChangeTimeline({
         setEntries((prev) => (from ? [...prev, ...page.entries] : page.entries));
         setCursor(page.nextCursor ?? null);
       } catch (e) {
-        setError(writeErrorMessage(e).message);
+        setError(readErrorMessage(e));
       }
     },
     [api, scope, scopeRef],

@@ -24,8 +24,13 @@ import type {
   PolicyPlanView,
 } from "../api/policyApi";
 import { createHttpPolicyApi } from "../api/policyApi";
+
+/** ONE client for the module, not one per render: a default parameter re-evaluates on every call,
+ *  and screens key their load effects on the api instance — a fresh instance per render turned the
+ *  first failing (or even succeeding) fetch into an unbounded request loop (QA P0-1: ~400 req/s).*/
+const httpPolicyApi = createHttpPolicyApi();
 import { writeErrorMessage } from "../api/writeError";
-import { PageHeader, useLoc } from "./_shared";
+import { PageHeader, useLoc, readErrorMessage } from "./_shared";
 import { ChangeTimeline, DocumentsPanel, LimitMeters, NotesPanel, useIdempotencyKey } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
 
@@ -158,7 +163,7 @@ function statusKind(status: string): "ok" | "warn" | "bad" | "neu" | "info" {
 
 // ── Member query ────────────────────────────────────────────────────────────────────────────────────────
 
-export function MemberSearch({ api = createHttpPolicyApi() }: { api?: PolicyApi }) {
+export function MemberSearch({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const t = useLoc();
   const fmt = useFormat();
   const [query, setQuery] = useState("");
@@ -177,7 +182,7 @@ export function MemberSearch({ api = createHttpPolicyApi() }: { api?: PolicyApi 
       try {
         setPage(await api.memberQuery({ name, pageSize: 50 }));
       } catch (e) {
-        setError(writeErrorMessage(e).message);
+        setError(readErrorMessage(e));
       }
     },
     [api],
@@ -281,7 +286,7 @@ export function MemberDetail({
     try {
       setCoverage(await api.coverageDetails(row.enrollmentId));
     } catch (e) {
-      setError(writeErrorMessage(e).message);
+      setError(readErrorMessage(e));
     }
   }, [api, row.enrollmentId]);
 

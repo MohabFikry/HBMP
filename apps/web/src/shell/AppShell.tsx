@@ -83,6 +83,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const branchCtx = useBranchContext(session?.role ?? undefined);
   const [paneOpen, setPaneOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);   // 18.F2 — ⌘K / Ctrl+K
+  const [searchText, setSearchText] = useState("");
+  const [paletteSeed, setPaletteSeed] = useState("");
   const [userPaneOpen, setUserPaneOpen] = useState(false);
   const [notifyRefresh, setNotifyRefresh] = useState(0);
   const unread = useUnreadCount(canNotify, notifyRefresh);
@@ -154,6 +156,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     label: tr(s.label),
     group: tr(s.group),
     icon: <Icon name={s.icon} />,
+    // A real URL per item: middle-click/ctrl-click open tabs, and screen readers hear links (QA P2-17).
+    href: `/${portal.base}/${s.path}`,
   }));
 
   const activePath = location.pathname.split("/")[2] ?? accessible[0]?.path;
@@ -164,7 +168,24 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="mrs-glass app-bar" role="banner">
         <Logo variant="lockup" height={48} />
         <div className="app-search">
-          <SearchField aria-label={L.search[lang]} placeholder={L.search[lang]} ref={searchRef} />
+          {/* QA P1-5: this field rendered, focused and did nothing. It is now the palette's wide-open
+              front door — Enter hands the typed text to the command palette, which is where section
+              search actually lives. One search, one implementation. */}
+          <SearchField
+            aria-label={L.search[lang]}
+            placeholder={L.search[lang]}
+            ref={searchRef}
+            value={searchText}
+            onChange={(e) => setSearchText(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                setPaletteSeed(searchText);
+                setPaletteOpen(true);
+                setSearchText("");
+              }
+            }}
+          />
         </div>
         <div className="app-actions">
           {!branchCtx.memberScoped && branchCtx.branches.length > 0 && (
@@ -219,10 +240,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <CommandPalette
         open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
+        onClose={() => { setPaletteOpen(false); setPaletteSeed(""); }}
         sections={accessible}
         portalBase={portal.base}
         onNavigate={navigate}
+        initialQuery={paletteSeed}
       />
 
       <NavRail

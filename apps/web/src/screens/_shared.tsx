@@ -6,7 +6,7 @@ import { portalForRole } from "../portals/catalog";
 import { kindFromProblemType, type AccessDeniedKind } from "../routing/AccessDenied";
 import { L } from "../i18n/strings";
 import type { AsyncState } from "../api/useAsync";
-import type { ApiError } from "../api/http";
+import { ApiError } from "../api/http";
 
 /** Returns a picker that resolves a bilingual `{en, ar}` value to the active language. */
 export function useLoc(): (l: Localized) => string {
@@ -86,6 +86,18 @@ export function classifyReadError(err: ApiError | null | undefined): { headline:
       // 404, 5xx and anything unrecognised: a reload is plausibly useful and cannot do harm on a read.
       return { headline: STR.errorHttp, remedy: "retry" };
   }
+}
+
+/**
+ * The read-side counterpart of `writeErrorMessage(e).message`, for screens that hold a `Localized` error.
+ *
+ * QA P1-4: several load paths ran their failures through the WRITE classifier, so a 403 on a GET told the
+ * user "Your access has changed and no longer covers this action. Nothing was saved." — nothing was being
+ * saved, and "has changed" invents a history that never happened. Reads answer with what the read failure
+ * actually is (including the three distinct 403 treatments).
+ */
+export function readErrorMessage(e: unknown): Localized {
+  return classifyReadError(e instanceof ApiError ? e : null).headline;
 }
 
 /** Inline (one-line) forms of the three 403 treatments. The full-page route versions carry the longer

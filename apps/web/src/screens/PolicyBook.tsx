@@ -9,8 +9,13 @@ import type {
   ScopeUtilizationView,
 } from "../api/policyApi";
 import { createHttpPolicyApi } from "../api/policyApi";
+
+/** ONE client for the module, not one per render: a default parameter re-evaluates on every call,
+ *  and screens key their load effects on the api instance — a fresh instance per render turned the
+ *  first failing (or even succeeding) fetch into an unbounded request loop (QA P0-1: ~400 req/s).*/
+const httpPolicyApi = createHttpPolicyApi();
 import { writeErrorMessage } from "../api/writeError";
-import { PageHeader, useLoc } from "./_shared";
+import { PageHeader, useLoc, readErrorMessage } from "./_shared";
 import { ChangeTimeline, DocumentsPanel, LimitMeters, NotesPanel } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
 import { useTheme } from "@mersal/design-system";
@@ -76,7 +81,7 @@ function bandKind(band: string): "ok" | "warn" | "bad" | "neu" {
   return "ok";
 }
 
-export function PolicyList({ api = createHttpPolicyApi() }: { api?: PolicyApi }) {
+export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const t = useLoc();
   const fmt = useFormat();
   const { lang } = useTheme();
@@ -90,7 +95,7 @@ export function PolicyList({ api = createHttpPolicyApi() }: { api?: PolicyApi })
     api
       .policyQuery({ pageSize: 50 })
       .then((p) => live && setPage(p))
-      .catch((e) => live && setError(writeErrorMessage(e).message));
+      .catch((e) => live && setError(readErrorMessage(e)));
     return () => { live = false; };
   }, [api]);
 
@@ -173,7 +178,7 @@ function PolicyPlansTab({ api, policyId }: { api: PolicyApi; policyId: string })
   useEffect(() => {
     let live = true;
     setRows(null);
-    api.policyPlans(policyId).then((r) => live && setRows(r)).catch((e) => live && setError(writeErrorMessage(e).message));
+    api.policyPlans(policyId).then((r) => live && setRows(r)).catch((e) => live && setError(readErrorMessage(e)));
     return () => { live = false; };
   }, [api, policyId]);
 
@@ -214,7 +219,7 @@ function PolicyGroupsTab({ api, policyId }: { api: PolicyApi; policyId: string }
   useEffect(() => {
     let live = true;
     setRows(null);
-    api.policyGroups(policyId).then((r) => live && setRows(r)).catch((e) => live && setError(writeErrorMessage(e).message));
+    api.policyGroups(policyId).then((r) => live && setRows(r)).catch((e) => live && setError(readErrorMessage(e)));
     return () => { live = false; };
   }, [api, policyId]);
 
@@ -348,7 +353,7 @@ export function ScopeUtilizationPanel({
  * row count. Building the CSV client-side from data already on screen would have been easier and would have
  * produced a file nobody could later account for.
  */
-export function UtilizationScreen({ api = createHttpPolicyApi() }: { api?: PolicyApi }) {
+export function UtilizationScreen({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const t = useLoc();
   const [policies, setPolicies] = useState<PolicyQueryRow[]>([]);
   const [scope, setScope] = useState<"policies" | "groups" | "plans" | "payers">("policies");
@@ -365,7 +370,7 @@ export function UtilizationScreen({ api = createHttpPolicyApi() }: { api?: Polic
         setPolicies(p.items);
         setScopeId(p.items[0]?.policyId ?? "");
       })
-      .catch((e) => live && setError(writeErrorMessage(e).message));
+      .catch((e) => live && setError(readErrorMessage(e)));
     return () => { live = false; };
   }, [api]);
 
@@ -381,7 +386,7 @@ export function UtilizationScreen({ api = createHttpPolicyApi() }: { api?: Polic
       URL.revokeObjectURL(url);
       setAnnounce(t(S.exported));
     } catch (e) {
-      setError(writeErrorMessage(e).message);
+      setError(readErrorMessage(e));
     }
   }
 
@@ -390,22 +395,28 @@ export function UtilizationScreen({ api = createHttpPolicyApi() }: { api?: Polic
       <PageHeader title={t(S.tabUtilization)} />
       <div aria-live="polite" role="status" className="sr-only">{announce}</div>
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
-      <Card>
-        <label htmlFor="util-policy">{t(S.policyNo)}</label>
-        <select
-          id="util-policy"
-          value={scopeId}
-          onChange={(e) => {
-            setScope("policies");
-            setScopeId(e.target.value);
-          }}
-        >
-          {policies.map((p) => (
-            <option key={p.policyId} value={p.policyId}>
-              {p.policyNo}
-            </option>
-          ))}
-        </select>
+      <Card style={{ padding: "var(--sp4)", display: "flex", gap: "var(--sp4)", alignItems: "end", flexWrap: "wrap" }}>
+        {/* QA P1-11: the label ran into a zero-width bare select. Real field markup, a minimum width, and
+            an explicit empty option — an empty select must LOOK empty, not collapsed. */}
+        <div className="mrs-field" style={{ minWidth: 280 }}>
+          <label className="mrs-label" htmlFor="util-policy">{t(S.policyNo)}</label>
+          <select
+            className="mrs-control"
+            id="util-policy"
+            value={scopeId}
+            onChange={(e) => {
+              setScope("policies");
+              setScopeId(e.target.value);
+            }}
+          >
+            {policies.length === 0 ? <option value="">—</option> : null}
+            {policies.map((p) => (
+              <option key={p.policyId} value={p.policyId}>
+                {p.policyNo}
+              </option>
+            ))}
+          </select>
+        </div>
         <Button variant="secondary" onClick={exportCsv} disabled={!scopeId}>
           {t(S.export)}
         </Button>
@@ -424,7 +435,7 @@ const scopeMap: Record<"policies" | "groups" | "plans" | "payers", string> = {
 };
 
 /** The standalone Groups section: every group across the policies the caller can see, with its utilization. */
-export function GroupsScreen({ api = createHttpPolicyApi() }: { api?: PolicyApi }) {
+export function GroupsScreen({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const t = useLoc();
   const fmt = useFormat();
   const [policies, setPolicies] = useState<PolicyQueryRow[]>([]);
@@ -442,7 +453,7 @@ export function GroupsScreen({ api = createHttpPolicyApi() }: { api?: PolicyApi 
         setPolicies(p.items);
         setPolicyId(p.items[0]?.policyId ?? null);
       })
-      .catch((e) => live && setError(writeErrorMessage(e).message));
+      .catch((e) => live && setError(readErrorMessage(e)));
     return () => { live = false; };
   }, [api]);
 
@@ -452,7 +463,7 @@ export function GroupsScreen({ api = createHttpPolicyApi() }: { api?: PolicyApi 
       setGroups(await api.policyGroups(policyId));
       setSelected(null);
     } catch (e) {
-      setError(writeErrorMessage(e).message);
+      setError(readErrorMessage(e));
     }
   }, [api, policyId]);
 
@@ -464,15 +475,18 @@ export function GroupsScreen({ api = createHttpPolicyApi() }: { api?: PolicyApi 
     <div className="pol-screen">
       <PageHeader title={t(S.groupsTitle)} />
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
-      <Card>
-        <label htmlFor="grp-policy">{t(S.policyNo)}</label>
-        <select id="grp-policy" value={policyId ?? ""} onChange={(e) => setPolicyId(e.target.value)}>
-          {policies.map((p) => (
-            <option key={p.policyId} value={p.policyId}>
-              {p.policyNo}
-            </option>
-          ))}
-        </select>
+      <Card style={{ padding: "var(--sp4)" }}>
+        <div className="mrs-field" style={{ maxWidth: 320 }}>
+          <label className="mrs-label" htmlFor="grp-policy">{t(S.policyNo)}</label>
+          <select className="mrs-control" id="grp-policy" value={policyId ?? ""} onChange={(e) => setPolicyId(e.target.value)}>
+            {policies.length === 0 ? <option value="">—</option> : null}
+            {policies.map((p) => (
+              <option key={p.policyId} value={p.policyId}>
+                {p.policyNo}
+              </option>
+            ))}
+          </select>
+        </div>
       </Card>
       <Card>
         <DataTable

@@ -3,10 +3,15 @@ import { Button, Card, DataTable, InlineAlert, InputField, StatusChip } from "@m
 import type { Localized } from "@mersal/contracts";
 import type { NetworkTierView, PolicyApi, TierAssignmentView, TierResolutionView } from "../api/policyApi";
 import { createHttpPolicyApi } from "../api/policyApi";
+
+/** ONE client for the module, not one per render: a default parameter re-evaluates on every call,
+ *  and screens key their load effects on the api instance — a fresh instance per render turned the
+ *  first failing (or even succeeding) fetch into an unbounded request loop (QA P0-1: ~400 req/s).*/
+const httpPolicyApi = createHttpPolicyApi();
 import { writeErrorMessage } from "../api/writeError";
 import { useAuth } from "../auth/AuthProvider";
 import { mayAdministerTiers } from "../authz/permissions";
-import { PageHeader, useLoc } from "./_shared";
+import { PageHeader, useLoc, readErrorMessage } from "./_shared";
 import { useIdempotencyKey } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
 
@@ -63,7 +68,7 @@ const S = {
   revoked: { en: "Assignment revoked.", ar: "تم سحب الإسناد." },
 } satisfies Record<string, Localized>;
 
-export function NetworkTiers({ api = createHttpPolicyApi() }: { api?: PolicyApi }) {
+export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const t = useLoc();
   const fmt = useFormat();
   const { session } = useAuth();
@@ -86,7 +91,7 @@ export function NetworkTiers({ api = createHttpPolicyApi() }: { api?: PolicyApi 
     try {
       setTiers(await api.networkTiers());
     } catch (e) {
-      setError(writeErrorMessage(e).message);
+      setError(readErrorMessage(e));
     }
   }, [api]);
 
@@ -201,7 +206,7 @@ export function NetworkTiers({ api = createHttpPolicyApi() }: { api?: PolicyApi 
                           setAnnounce(t(S.revoked));
                           setAssignments(await api.tierAssignments(selected));
                         } catch (e) {
-                          setError(writeErrorMessage(e).message);
+                          setError(readErrorMessage(e));
                         }
                       }}
                     >
@@ -240,7 +245,7 @@ function ResolveAtDate({ api }: { api: PolicyApi }) {
           try {
             setResult(await api.resolveTier(providerId, serviceDate, locationId || undefined));
           } catch (e) {
-            setError(writeErrorMessage(e).message);
+            setError(readErrorMessage(e));
             setResult(null);
           }
         }}

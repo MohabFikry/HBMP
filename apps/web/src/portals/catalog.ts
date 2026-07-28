@@ -154,11 +154,13 @@ export const PORTALS: PortalDef[] = [
       { key: "eligibility", path: "eligibility", label: { en: "Eligibility check", ar: "التحقق من الأهلية" }, group: G.access, icon: "check2", permission: "eligibility.check" },
       // Phase 19.6 — the membership book. Registration answers "who is this person"; these answer "what are
       // they entitled to, under whose policy, and what have they used".
+      // Bulk sits WITH its membership siblings: the rail groups consecutive runs, so an out-of-order entry
+      // renders a second "MEMBERSHIP" heading after INSIGHTS (QA P1-9).
       { key: "members", path: "members", label: { en: "Members", ar: "الأعضاء" }, group: G.membership, icon: "user", permission: "policy.members" },
       { key: "groups", path: "groups", label: { en: "Groups", ar: "المجموعات" }, group: G.membership, icon: "refer", permission: "policy.groups" },
+      { key: "bulk", path: "bulk", label: { en: "Bulk & imports", ar: "الرفع الجماعي" }, group: G.membership, icon: "doc", permission: "policy.bulk" },
       { key: "utilization", path: "utilization", label: { en: "Utilization", ar: "الاستخدام" }, group: G.insights, icon: "chart", permission: "policy.utilization" },
       { key: "analytics", path: "analytics", label: { en: "Analytics", ar: "التحليلات" }, group: G.insights, icon: "chart", permission: "policy.analytics" },
-      { key: "bulk", path: "bulk", label: { en: "Bulk & imports", ar: "الرفع الجماعي" }, group: G.membership, icon: "doc", permission: "policy.bulk" },
     ],
   },
   {

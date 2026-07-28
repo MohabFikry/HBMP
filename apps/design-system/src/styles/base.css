@@ -73,7 +73,9 @@ h3 {
   inset-inline-start: 12px;
   top: -48px;
   background: var(--accent);
-  color: #fff;
+  /* QA P2-16: white on the dark theme's light-teal accent was 1.79:1 — the first focusable element on
+     every page, unreadable exactly where a keyboard user starts. */
+  color: var(--on-accent, #fff);
   padding: 10px 14px;
   border-radius: var(--r-sm);
   z-index: 60;

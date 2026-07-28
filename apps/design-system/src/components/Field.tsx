@@ -9,6 +9,10 @@ interface FieldBase {
   /** Error message — rendered with icon+text+red border (never color alone). */
   error?: string;
   className?: string;
+  /** Marks the label with a required indicator. The native `required` attribute (which also sets
+   *  aria-required) still passes through to the control — this is only the VISIBLE half, so sighted users
+   *  learn a field is mandatory before failing it, not after (QA P2-12). */
+  requiredMark?: boolean;
 }
 
 export interface InputFieldProps extends FieldBase, Omit<InputHTMLAttributes<HTMLInputElement>, "className"> {}
@@ -27,12 +31,16 @@ function Labelled({
   error,
   base,
   className,
+  requiredMark,
   children,
 }: FieldBase & { base: string; children: ReactNode }) {
   return (
     <div className={cx("mrs-field", className)}>
       <label className="mrs-label" htmlFor={base}>
         {label}
+        {requiredMark && (
+          <span className="mrs-req" aria-hidden="true"> *</span>
+        )}
       </label>
       {children}
       {help && (
@@ -55,7 +63,7 @@ export function InputField({ label, help, error, className, id, ...rest }: Input
   const auto = useId();
   const base = id ?? auto;
   return (
-    <Labelled label={label} help={help} error={error} base={base} className={className}>
+    <Labelled label={label} help={help} error={error} base={base} className={className} requiredMark={rest.required}>
       <input
         id={base}
         className="mrs-control"
@@ -72,7 +80,7 @@ export function TextareaField({ label, help, error, className, id, ...rest }: Te
   const auto = useId();
   const base = id ?? auto;
   return (
-    <Labelled label={label} help={help} error={error} base={base} className={className}>
+    <Labelled label={label} help={help} error={error} base={base} className={className} requiredMark={rest.required}>
       <textarea
         id={base}
         className="mrs-control"

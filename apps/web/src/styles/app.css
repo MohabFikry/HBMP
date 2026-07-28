@@ -123,6 +123,9 @@ nav.mrs-rail {
   /* Never let a wide child (e.g. a data table) scroll the whole page sideways — inner panes own their
      own horizontal scroll (.mrs-wl-scroll). Explicit x:hidden also stops y:auto promoting x to auto. */
   overflow-x: hidden;
+  /* Reserve the scrollbar's lane whether or not it is needed, so pages with and without a vertical
+     scrollbar stop shifting ~16px horizontally against each other (QA P2-21). */
+  scrollbar-gutter: stable;
   padding: var(--sp6);
 }
 .app-crumb {
@@ -763,6 +766,7 @@ nav.mrs-rail {
      text is ~2.2:1 and fails WCAG AA for the initials it carries. --accent is the action colour and is
      specified at 5.2:1 in light and re-derived for dark. */
   background: var(--accent);
+  color: var(--on-accent, #fff);
   color: #fff;
   font-weight: 700;
   font-size: 13px;

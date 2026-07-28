@@ -12,7 +12,7 @@ import type {
 } from "../api/policyApi";
 import { createHttpPolicyApi } from "../api/policyApi";
 import { writeErrorMessage } from "../api/writeError";
-import { PageHeader, useLoc } from "./_shared";
+import { PageHeader, useLoc, readErrorMessage } from "./_shared";
 import { useFormat } from "../i18n/useFormat";
 
 /**
@@ -278,7 +278,7 @@ function ViewPanel({
       download(`${view}.csv`, csv);
       setAnnounce(t(S.exported));
     } catch (e) {
-      setError(writeErrorMessage(e).message);
+      setError(readErrorMessage(e));
     }
   }
 
@@ -286,7 +286,7 @@ function ViewPanel({
     try {
       setDrill({ band, rows: await api.analyticsOutlierMembers(band, filters, 50) });
     } catch (e) {
-      setError(writeErrorMessage(e).message);
+      setError(readErrorMessage(e));
     }
   }
 

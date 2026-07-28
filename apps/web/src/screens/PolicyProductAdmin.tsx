@@ -14,8 +14,13 @@ import type {
   PolicyApi,
 } from "../api/policyApi";
 import { createHttpPolicyApi } from "../api/policyApi";
+
+/** ONE client for the module, not one per render: a default parameter re-evaluates on every call,
+ *  and screens key their load effects on the api instance — a fresh instance per render turned the
+ *  first failing (or even succeeding) fetch into an unbounded request loop (QA P0-1: ~400 req/s).*/
+const httpPolicyApi = createHttpPolicyApi();
 import { writeErrorMessage } from "../api/writeError";
-import { PageHeader, useLoc } from "./_shared";
+import { PageHeader, useLoc, readErrorMessage } from "./_shared";
 import { useIdempotencyKey } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
 
@@ -97,14 +102,14 @@ const RESET_PERIODS = ["None", "Monthly", "Quarterly", "Yearly"];
 
 // ── Payers ──────────────────────────────────────────────────────────────────────────────────────────────
 
-export function PolicyPayers({ api = createHttpPolicyApi() }: { api?: PolicyApi }) {
+export function PolicyPayers({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const t = useLoc();
   const [rows, setRows] = useState<PayerView[] | null>(null);
   const [error, setError] = useState<Localized | null>(null);
 
   useEffect(() => {
     let live = true;
-    api.payers().then((r) => live && setRows(r)).catch((e) => live && setError(writeErrorMessage(e).message));
+    api.payers().then((r) => live && setRows(r)).catch((e) => live && setError(readErrorMessage(e)));
     return () => { live = false; };
   }, [api]);
 
@@ -138,7 +143,7 @@ function BiName({ en, ar }: { en: string; ar: string }) {
 
 // ── Plans + the version editor ──────────────────────────────────────────────────────────────────────────
 
-export function PolicyPlans({ api = createHttpPolicyApi() }: { api?: PolicyApi }) {
+export function PolicyPlans({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const t = useLoc();
   const fmt = useFormat();
   const [plans, setPlans] = useState<PlanView[] | null>(null);
@@ -159,7 +164,7 @@ export function PolicyPlans({ api = createHttpPolicyApi() }: { api?: PolicyApi }
         setCategories(c);
         setTiers(tr);
       })
-      .catch((e) => live && setError(writeErrorMessage(e).message));
+      .catch((e) => live && setError(readErrorMessage(e)));
     return () => { live = false; };
   }, [api]);
 
@@ -170,7 +175,7 @@ export function PolicyPlans({ api = createHttpPolicyApi() }: { api?: PolicyApi }
         setVersions(v);
         setSelectedVersion(v[0]?.planVersionId ?? null);
       } catch (e) {
-        setError(writeErrorMessage(e).message);
+        setError(readErrorMessage(e));
       }
     },
     [api],

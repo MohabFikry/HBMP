@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button, Card, DataTable, InlineAlert, InputField, Modal, StatusChip, useToast } from "@mersal/design-system";
 import { useWrite } from "../api/useWrite";
 import type { Column } from "@mersal/design-system";
@@ -16,6 +17,15 @@ const S = {
   searchField: { en: "Search by name", ar: "ابحث بالاسم" },
   search: { en: "Search", ar: "بحث" },
   idle: { en: "Search for a beneficiary by name.", ar: "ابحث عن مستفيد بالاسم." },
+  manageIntro: {
+    en: "Find a beneficiary and open their record. Registration state changes live in Status & reactivation.",
+    ar: "ابحث عن مستفيد وافتح سجلّه. تغييرات حالة التسجيل في «الحالة وإعادة التفعيل».",
+  },
+  statusIntro: {
+    en: "Find a beneficiary, then apply a lifecycle change — reinstate, suspend, renew or deactivate. Every change is recorded with its reason.",
+    ar: "ابحث عن مستفيد ثم طبّق تغييرًا في دورة الحياة — إعادة تفعيل، إيقاف، تجديد أو إلغاء تفعيل. يُسجَّل كل تغيير مع سببه.",
+  },
+  open: { en: "Open", ar: "فتح" },
   none: { en: "No beneficiaries match that search.", ar: "لا يوجد مستفيدون مطابقون." },
   retry: { en: "Retry", ar: "إعادة المحاولة" },
   name: { en: "Name", ar: "الاسم" },
@@ -54,8 +64,14 @@ const S = {
   idValue: { en: "Identifier value", ar: "قيمة المعرّف" },
   phone: { en: "Phone", ar: "الهاتف" },
   register: { en: "Register beneficiary", ar: "تسجيل المستفيد" },
-  registered: { en: "Beneficiary registered (Pending) — proceed to eligibility.", ar: "تم التسجيل (قيد الانتظار)." },
+  registered: { en: "Registered (Pending).", ar: "تم التسجيل (قيد الانتظار)." },
+  registeredId: { en: "Record", ar: "السجل" },
+  openProfile: { en: "Open profile", ar: "فتح الملف" },
+  toEligibility: { en: "Check eligibility", ar: "التحقق من الأهلية" },
+  fixMarked: { en: "Fix the marked fields to continue.", ar: "صحّح الحقول المحدّدة للمتابعة." },
   required: { en: "Required.", ar: "مطلوب." },
+  nameInvalid: { en: "Names can contain letters, spaces, hyphens, apostrophes and periods only.", ar: "الأسماء تحتوي على حروف ومسافات وشرطات وفواصل عليا ونقاط فقط." },
+  phoneInvalid: { en: "Enter 8–15 digits, with an optional leading + (e.g. +201234567890).", ar: "أدخل ٨–١٥ رقمًا، مع + اختيارية في البداية (مثال: +201234567890)." },
   // The one 409 with a happy path: the person exists. Reloading the form (the generic conflict guidance)
   // would lead the operator to re-type and re-submit — manufacturing the duplicate record the identifier
   // check exists to prevent. The remedy is the search screen.
@@ -66,6 +82,14 @@ const S = {
 } satisfies Record<string, Localized>;
 
 const ID_TYPES = ["NationalID", "Passport", "RefugeeID", "UNHCRNo"] as const;
+
+/** The shape hint shown when an identifier value fails its type's format — the rule, not just "invalid". */
+const ID_INVALID: Record<(typeof ID_TYPES)[number], Localized> = {
+  NationalID: { en: "An Egyptian National ID is exactly 14 digits.", ar: "الرقم القومي المصري ١٤ رقمًا بالضبط." },
+  Passport: { en: "A passport number is 5–20 letters and digits.", ar: "رقم جواز السفر ٥–٢٠ حرفًا ورقمًا." },
+  RefugeeID: { en: "A refugee ID is 4–30 letters, digits or dashes.", ar: "بطاقة اللاجئ ٤–٣٠ حرفًا أو رقمًا أو شرطة." },
+  UNHCRNo: { en: "A UNHCR number is 6–20 letters, digits or dashes.", ar: "رقم المفوضية ٦–٢٠ حرفًا أو رقمًا أو شرطة." },
+};
 
 const ID_TYPE_LABELS: Record<(typeof ID_TYPES)[number], Localized> = {
   NationalID: { en: "National ID", ar: "الرقم القومي" },
@@ -109,7 +133,7 @@ function beneficiaryColumns(t: (l: Localized) => string): Column<BeneficiaryRow>
 }
 
 /** A shared name search that renders its results through a caller-supplied column set. */
-function BeneficiarySearch({ title, extraCols }: { title: Localized; extraCols?: (reload: () => void) => Column<BeneficiaryRow> }) {
+function BeneficiarySearch({ title, intro, extraCols }: { title: Localized; intro?: Localized; extraCols?: (reload: () => void) => Column<BeneficiaryRow> }) {
   const api = useApi();
   const t = useLoc();
   const [query, setQuery] = useState("");
@@ -141,6 +165,9 @@ function BeneficiarySearch({ title, extraCols }: { title: Localized; extraCols?:
     <>
       <PageHeader title={t(title)} />
       <Card as="section" style={{ padding: "var(--sp5)" }}>
+        {/* QA P1-6: this screen is shared by two sections that rendered byte-identically before the first
+            search — the caller now states what the page DOES, so an operator knows which door they are in. */}
+        {intro ? <p className="muted" style={{ marginTop: 0 }}>{t(intro)}</p> : null}
         <form onSubmit={run} className="stack" aria-label={t(title)}>
           <InputField label={t(S.searchField)} value={query} onChange={(e) => setQuery(e.currentTarget.value)} autoComplete="off" />
           <div><Button type="submit" variant="primary" loading={status === "loading"}>{t(S.search)}</Button></div>
@@ -172,9 +199,22 @@ function BeneficiarySearch({ title, extraCols }: { title: Localized; extraCols?:
   );
 }
 
-/** Search / manage — find beneficiaries by name (read-only min-necessary identity view). */
+/** Search / manage — find a beneficiary and OPEN them (QA P1-7: the rows were a dead end, on the very
+ *  screen the duplicate-registration message sends people to). Opens the unified patient profile, whose
+ *  server-side projection decides what this role sees of it. */
 export function BeneficiaryManage() {
-  return <BeneficiarySearch title={S.manageTitle} />;
+  const t = useLoc();
+  const navigate = useNavigate();
+  const openCol = (): Column<BeneficiaryRow> => ({
+    key: "open",
+    header: "",
+    cell: (r) => (
+      <Button variant="secondary" size="sm" onClick={() => navigate(`/patients/${encodeURIComponent(r.id)}`)}>
+        {t(S.open)}
+      </Button>
+    ),
+  });
+  return <BeneficiarySearch title={S.manageTitle} intro={S.manageIntro} extraCols={openCol} />;
 }
 
 /** Status & reactivation — find a beneficiary, then apply a LEGAL lifecycle transition with a reason. */
@@ -199,7 +239,7 @@ export function BeneficiaryStatus() {
 
   return (
     <>
-      <BeneficiarySearch title={S.statusTitle} extraCols={actionCol} />
+      <BeneficiarySearch title={S.statusTitle} intro={S.statusIntro} extraCols={actionCol} />
       {target ? (
         <StatusChangeModal
           row={target.row}
@@ -281,7 +321,9 @@ export function BeneficiaryRegister() {
   const t = useLoc();
   const [f, setF] = useState({ givenName: "", familyName: "", birthDate: "", idType: "NationalID", idValue: "", phone: "" });
   const [status, setStatus] = useState<"idle" | "saving" | "done">("idle");
+  const [created, setCreated] = useState<{ id: string } | null>(null);
   const [touched, setTouched] = useState(false);
+  const navigate = useNavigate();
   const write = useWrite();          // 18.D1 — per-form idempotency key + typed failures
   // The value is read BEFORE the functional updater: React nulls `currentTarget` once the handler returns,
   // and the updater can run after that (re-render rebasing) — the old screen carried this crash latently.
@@ -293,20 +335,51 @@ export function BeneficiaryRegister() {
   // Per-field errors at the field, not one banner naming everything at once — the operator fixes what is
   // marked. Birth date is validated as a REAL calendar date: "2026-02-31" matches YYYY-MM-DD and the old
   // screen forwarded it to the server, whose 400 came back mapped to "reload the page".
+  // Mirrors of the server's rules (QA P0-2): the National ID length, the phone shape and the name
+  // allowlist are checked here so a typo is a field message, not an RFC-7807 round trip — and checked
+  // AGAIN on the server, because the client is a courtesy and not a gate.
+  const idType = f.idType as (typeof ID_TYPES)[number];
+  const nameError = (v: string) =>
+    v.trim() === "" ? t(S.required) : !NAME_PATTERN.test(v.trim()) ? t(S.nameInvalid) : undefined;
   const errors = {
-    givenName: touched && f.givenName.trim() === "" ? t(S.required) : undefined,
-    familyName: touched && f.familyName.trim() === "" ? t(S.required) : undefined,
-    idValue: touched && f.idValue.trim() === "" ? t(S.required) : undefined,
+    givenName: touched ? nameError(f.givenName) : undefined,
+    familyName: touched ? nameError(f.familyName) : undefined,
+    idValue: touched
+      ? f.idValue.trim() === ""
+        ? t(S.required)
+        : !ID_PATTERNS[idType].test(f.idValue.trim().replace(/\s/g, ""))
+          ? t(ID_INVALID[idType])
+          : undefined
+      : undefined,
+    phone: touched && f.phone.trim() !== "" && !isValidPhone(f.phone.trim()) ? t(S.phoneInvalid) : undefined,
     birthDate: touched && f.birthDate.trim() !== "" && !isRealPastDate(f.birthDate.trim()) ? t(S.birthDateInvalid) : undefined,
   };
+  const fieldInvalid = (key: "givenName" | "familyName" | "idValue" | "phone" | "birthDate"): boolean => {
+    switch (key) {
+      case "givenName": return nameError(f.givenName) !== undefined;
+      case "familyName": return nameError(f.familyName) !== undefined;
+      case "idValue": return f.idValue.trim() === "" || !ID_PATTERNS[idType].test(f.idValue.trim().replace(/\s/g, ""));
+      case "phone": return f.phone.trim() !== "" && !isValidPhone(f.phone.trim());
+      case "birthDate": return f.birthDate.trim() !== "" && !isRealPastDate(f.birthDate.trim());
+    }
+  };
   const invalid = () =>
-    f.givenName.trim() === "" || f.familyName.trim() === "" || f.idValue.trim() === "" ||
-    (f.birthDate.trim() !== "" && !isRealPastDate(f.birthDate.trim()));
+    (["givenName", "familyName", "idValue", "phone", "birthDate"] as const).some(fieldInvalid);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setTouched(true);
-    if (invalid()) return;
+    if (invalid()) {
+      // QA P2-14: three inline errors painted and NOTHING moved — a keyboard or screen-reader user got no
+      // signal the submit was refused. Focus lands on the first invalid control (its error is tied via
+      // aria-describedby, so it is announced), and a summary renders in the live region below.
+      const first = ["reg-given", "reg-family", "reg-birth", "reg-phone", "reg-id-value"].find((fid) => {
+        const key = ({ "reg-given": "givenName", "reg-family": "familyName", "reg-birth": "birthDate", "reg-phone": "phone", "reg-id-value": "idValue" } as const)[fid]!;
+        return fieldInvalid(key);
+      });
+      if (first) document.getElementById(first)?.focus();
+      return;
+    }
     setStatus("saving");
     const input: RegisterBeneficiaryInput = {
       givenName: f.givenName.trim(),
@@ -318,9 +391,11 @@ export function BeneficiaryRegister() {
     };
     // 18.D1 (U1): registering a beneficiary failed silently. The operator saw the spinner stop with the form
     // still full, retried, and created a second record for the same person — which then has to be merged.
-    const ok = await write.run((key) => api.registerBeneficiary(input, key));
+    let result: { id: string } | null = null;
+    const ok = await write.run(async (key) => (result = await api.registerBeneficiary(input, key)));
     if (ok) {
       setStatus("done");
+      setCreated(result);
       setTouched(false);
       // Clear ONLY on confirmed success: wiping a form after a failure destroys the operator's typing.
       setF({ givenName: "", familyName: "", birthDate: "", idType: "NationalID", idValue: "", phone: "" });
@@ -335,14 +410,20 @@ export function BeneficiaryRegister() {
     <>
       <PageHeader title={t(S.registerTitle)} />
       <Card as="section" style={{ padding: "var(--sp5)" }}>
-        <form onSubmit={submit} className="stack" aria-label={t(S.registerTitle)}>
+        {/* noValidate: the inputs carry `required` for assistive tech and autofill, but the browser's
+            native bubbles must not pre-empt our submit handler — the app renders its own field errors,
+            summary and focus management, in both languages. */}
+        <form onSubmit={submit} noValidate className="stack" aria-label={t(S.registerTitle)}>
           {/* NOT a <dl>: this reuses the kv-grid LAYOUT for form fields. A definition list here would be
               invalid (InputField renders no dt/dd) and would announce the form as a term/value list. */}
           <div className="kv-grid">
-            <InputField label={t(S.givenName)} value={f.givenName} error={errors.givenName} onChange={set("givenName")} autoComplete="off" />
-            <InputField label={t(S.familyName)} value={f.familyName} error={errors.familyName} onChange={set("familyName")} autoComplete="off" />
-            <InputField label={t(S.birthDate)} help={t(S.birthDateHelp)} value={f.birthDate} error={errors.birthDate} onChange={set("birthDate")} inputMode="numeric" autoComplete="off" />
-            <InputField label={t(S.phone)} value={f.phone} onChange={set("phone")} inputMode="tel" autoComplete="off" />
+            <InputField id="reg-given" name="givenName" required label={t(S.givenName)} value={f.givenName} error={errors.givenName} onChange={set("givenName")} autoComplete="given-name" />
+            <InputField id="reg-family" name="familyName" required label={t(S.familyName)} value={f.familyName} error={errors.familyName} onChange={set("familyName")} autoComplete="family-name" />
+            {/* Deliberately text, not type="date": staff transcribe partial or estimated dates from
+                heterogeneous refugee documents, and a native picker refuses anything it cannot fully
+                parse. The trade-off with Analytics' pickers (QA P2-13) is documented, not accidental. */}
+            <InputField id="reg-birth" name="birthDate" label={t(S.birthDate)} help={t(S.birthDateHelp)} value={f.birthDate} error={errors.birthDate} onChange={set("birthDate")} inputMode="numeric" autoComplete="bday" />
+            <InputField id="reg-phone" name="phone" label={t(S.phone)} value={f.phone} error={errors.phone} onChange={set("phone")} inputMode="tel" autoComplete="tel" />
             {/* A closed vocabulary rendered as one — the old free-text field asked the operator to TYPE an
                 enum member from a parenthetical hint, and "nationalid" (wrong case) was a validation error. */}
             <div className="mrs-field">
@@ -351,9 +432,12 @@ export function BeneficiaryRegister() {
                 {ID_TYPES.map((v) => <option key={v} value={v}>{t(ID_TYPE_LABELS[v])}</option>)}
               </select>
             </div>
-            <InputField label={t(S.idValue)} value={f.idValue} error={errors.idValue} onChange={set("idValue")} autoComplete="off" />
+            <InputField id="reg-id-value" name="identifierValue" required label={t(S.idValue)} value={f.idValue} error={errors.idValue} onChange={set("idValue")} autoComplete="off" />
           </div>
-          <div aria-live="polite" className="stack" style={{ gap: "var(--sp2)" }}>
+          <div aria-live="polite" className="stack" style={{ gap: "var(--sp2)", minHeight: 32 }}>
+            {touched && status === "idle" && !write.error && invalid() && (
+              <InlineAlert tone="bad">{t(S.fixMarked)}</InlineAlert>
+            )}
             {/* 18.D1 (U2): the server's own reason, translated and typed — a 409 reads differently from a
                 dropped connection, because they demand opposite actions. The duplicate-identifier 409 gets
                 its own copy: its remedy is the SEARCH screen, and the generic conflict guidance ("reload")
@@ -363,7 +447,16 @@ export function BeneficiaryRegister() {
                 {isDuplicate ? t(S.alreadyRegistered) : t(write.error.message)}
               </InlineAlert>
             )}
-            {status === "done" && <StatusChip kind="ok" label={t(S.registered)} />}
+            {status === "done" && created && (
+              <div style={{ display: "flex", gap: "var(--sp3)", alignItems: "center", flexWrap: "wrap" }}>
+                <StatusChip kind="ok" label={t(S.registered)} />
+                <span className="muted tnum">{t(S.registeredId)}: {created.id.slice(0, 8)}</span>
+                {/* The message used to say "proceed to eligibility" with no way to get there and no record
+                    of what was just made (QA P2-20). The two next steps ARE the message now. */}
+                <Button variant="ghost" size="sm" onClick={() => navigate(`/patients/${encodeURIComponent(created.id)}`)}>{t(S.openProfile)}</Button>
+                <Button variant="ghost" size="sm" onClick={() => navigate("/beneficiaries/eligibility")}>{t(S.toEligibility)}</Button>
+              </div>
+            )}
             <div><Button type="submit" variant="primary" loading={status === "saving"}>{t(S.register)}</Button></div>
           </div>
         </form>
@@ -371,6 +464,20 @@ export function BeneficiaryRegister() {
     </>
   );
 }
+
+/**
+ * Client mirrors of the SERVER's validation (IdentifierValidation / PersonFieldValidation in
+ * patient-service). The server remains authoritative; these exist so the operator hears about a
+ * two-character National ID at the field, not as an RFC-7807 round trip.
+ */
+const ID_PATTERNS: Record<(typeof ID_TYPES)[number], RegExp> = {
+  NationalID: /^\d{14}$/,
+  Passport: /^[A-Za-z0-9]{5,20}$/,
+  RefugeeID: /^[A-Za-z0-9-]{4,30}$/,
+  UNHCRNo: /^[A-Za-z0-9-]{6,20}$/,
+};
+const NAME_PATTERN = /^[\p{L}\p{M}][\p{L}\p{M}'\-. ]*$/u;
+const isValidPhone = (v: string) => /^\+?\d{8,15}$/.test(v.replace(/[\s\-()]/g, ""));
 
 /** True for a syntactically valid YYYY-MM-DD naming a real calendar day that is not in the future. */
 function isRealPastDate(value: string): boolean {
@@ -526,7 +633,13 @@ export function RegistrationApprovals() {
       // officer's to-do item, and hiding it in a detail view is how it gets missed.
       key: "notes",
       header: t(A.notes),
-      cell: (r) => <span className="muted">{r.registration?.notes ?? "—"}</span>,
+      // Bounded and wrapping (QA P2-18): the approver's note is prose and was clipping mid-word at the
+      // viewport edge, forcing the whole table sideways.
+      cell: (r) => (
+        <span className="muted" style={{ display: "inline-block", maxWidth: 260, whiteSpace: "normal", overflowWrap: "break-word" }}>
+          {r.registration?.notes ?? "—"}
+        </span>
+      ),
     },
     {
       key: "action",
@@ -537,7 +650,7 @@ export function RegistrationApprovals() {
         ) : isSupervisor ? (
           <Button variant="primary" size="sm" onClick={() => setTarget(r)}>{t(A.decide)}</Button>
         ) : (
-          <span className="muted">{t(A.supervisorOnly)}</span>
+          <span className="muted" style={{ display: "inline-block", maxWidth: 220, whiteSpace: "normal" }}>{t(A.supervisorOnly)}</span>
         ),
     },
   ];

@@ -32,6 +32,8 @@ export interface CommandPaletteProps {
   sections: Section[];
   portalBase: string;
   onNavigate: (path: string) => void;
+  /** Seed query — the app-bar search hands its typed text over on Enter (QA P1-5). */
+  initialQuery?: string;
 }
 
 const S = {
@@ -65,7 +67,7 @@ function score(haystack: string, needle: string): number | null {
   return first * 2 + (last - first);   // earlier start and tighter span rank higher (lower is better)
 }
 
-export function CommandPalette({ open, onClose, sections, portalBase, onNavigate }: CommandPaletteProps) {
+export function CommandPalette({ open, onClose, sections, portalBase, onNavigate, initialQuery }: CommandPaletteProps) {
   const { lang } = useTheme();
   const t = (l: Localized) => (lang === "ar" ? l.ar : l.en);
   const [query, setQuery] = useState("");
@@ -82,17 +84,18 @@ export function CommandPalette({ open, onClose, sections, portalBase, onNavigate
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections, query, lang]);
 
-  // Reset on each open: a palette that remembers the last query makes the second use slower than the first.
+  // Reset on each open (to the seed, when the app-bar search handed one over): a palette that remembers
+  // the LAST query makes the second use slower than the first.
   useEffect(() => {
     if (open) {
-      setQuery("");
+      setQuery(initialQuery ?? "");
       setActive(0);
       // Focus directly rather than via requestAnimationFrame: the effect already runs after the dialog is
       // in the DOM, and deferring a frame leaves a window in which the first keystroke goes to the page
       // behind the palette — which for ⌘K-then-type (the normal usage) loses the first character.
       inputRef.current?.focus();
     }
-  }, [open]);
+  }, [open, initialQuery]);
 
   useEffect(() => setActive(0), [query]);
 

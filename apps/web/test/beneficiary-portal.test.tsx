@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { AppProviders } from "../src/App";
 import { DevAuthClient } from "../src/auth/authClient";
@@ -25,7 +26,7 @@ function renderScreen(ui: React.ReactElement, client: ApiClient = new DevApiClie
   seedSession("beneficiary_mgmt");
   return render(
     <AppProviders authClient={new DevAuthClient()} apiClient={client}>
-      {ui}
+      <MemoryRouter>{ui}</MemoryRouter>
     </AppProviders>,
   );
 }

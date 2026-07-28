@@ -63,6 +63,8 @@ html[data-theme="light"] {
 
   --accent: #007a7a; /* teal-700 actions/links 5.2:1 */
   --accent-press: #005c5c;
+  --on-accent: #ffffff; /* text/icons ON the accent — re-derived per theme (QA P2-16) */
+  --border-input: #6a9393; /* form-control boundary ≥3:1 vs surface (WCAG 1.4.11); hairlines stay --border */
   --accent-tint: #e1f1f1;
   --brand: #00acac; /* decorative only */
   --gold: #b57a00; /* text-safe accent variant used decoratively */
@@ -102,6 +104,8 @@ html[data-theme="dark"] {
 
   --accent: #5fd3d3; /* lightened for AA on dark */
   --accent-press: #86e3e3;
+  --on-accent: #04282a; /* white on the light teal is 1.79:1 — ink, like the primary button already does */
+  --border-input: #3a8286; /* 3.04:1 vs the dark card — the field boundary was 2.05:1 and near-invisible */
   --accent-tint: #0e4649;
   --brand: #00acac;
   --gold: #ebc169;

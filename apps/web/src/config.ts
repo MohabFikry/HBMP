@@ -88,7 +88,10 @@ const ROLE_MAP: Array<[string, Role]> = [
   // supervisor carries the officer role too, and matching the officer first would land them on the portal
   // without the supervisory affordances they were promoted for.
   ["policy_admin", "policy_admin"],
-  ["beneficiary_mgmt_supervisor", "beneficiary_mgmt"],
+  // Mapped to ITSELF since the supervisor gained its own portal (registration approvals — US-003). This
+  // row used to read `"beneficiary_mgmt"`, which quietly handed the approver the OFFICER's portal: the
+  // register pen they must not hold, and none of the approval affordances they exist for (QA P0-3).
+  ["beneficiary_mgmt_supervisor", "beneficiary_mgmt_supervisor"],
   ["case_manager", "case_manager"],
   ["call_center", "call_center"],
   ["claims_officer", "claims_officer"],
