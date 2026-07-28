@@ -49,10 +49,31 @@ public sealed record RowScope
         BeneficiaryIds = beneficiaryIds,
     };
 
-    /// <summary>Layer the branch dimension onto an existing scope (design 37 §3.1). BranchScoped ⇒ narrow to the
-    /// active branch; MemberScoped/ProviderScoped ⇒ branch-unrestricted. Never widens the other dimensions.</summary>
-    public RowScope WithBranchScope(ScopeMode mode, IBranchContext branch) =>
-        mode == ScopeMode.BranchScoped && branch.ActiveBranchId is { } active
-            ? this with { BranchIds = new HashSet<Guid> { active } }
-            : this with { BranchUnrestricted = true };
+    /// <summary>
+    /// 21.3 — the branch SENTINEL (design 40 §3): a branch id that can never be a real branch, injected when
+    /// a BranchScoped caller's reach cannot be resolved.
+    ///
+    /// The alternative is an EMPTY predicate, and an empty branch predicate does not mean "nothing" — it
+    /// means "every branch in the tenant". That is why this exists as a value rather than as a null check:
+    /// the failure mode it prevents is a resolution bug quietly turning into a tenant-wide disclosure of
+    /// clinical worklists. A uuid, not a string like '__none__', because every branch column on the platform
+    /// is uuid-typed and a string sentinel would have to be coerced somewhere (ADR-0021).
+    /// </summary>
+    public static readonly Guid NoBranchSentinel = new("00000000-0000-0000-0000-0000000000ff");
+
+    /// <summary>
+    /// Layer the branch dimension onto an existing scope (design 37 §3.1, design 40 §3). BranchScoped ⇒
+    /// narrow to the active branch; MemberScoped/ProviderScoped ⇒ branch-unrestricted.
+    ///
+    /// A BranchScoped caller whose active branch did NOT resolve gets the sentinel, so the query returns
+    /// zero rows. Before 21.3 this case fell through to <c>BranchUnrestricted = true</c> — a caller who was
+    /// supposed to see one branch saw the entire tenant precisely when resolution had gone wrong.
+    /// </summary>
+    public RowScope WithBranchScope(ScopeMode mode, IBranchContext branch)
+    {
+        if (mode != ScopeMode.BranchScoped) return this with { BranchUnrestricted = true };
+
+        var active = branch.ActiveBranchId ?? NoBranchSentinel;
+        return this with { BranchIds = new HashSet<Guid> { active }, BranchUnrestricted = false };
+    }
 }

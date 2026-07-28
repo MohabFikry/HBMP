@@ -53,11 +53,34 @@ public static class BranchAssignmentRules
         assignments.Where(a => a.AssignmentType == BranchAssignmentType.Home && IsEffective(a, on))
                    .Select(a => (Guid?)a.BranchId).FirstOrDefault();
 
-    public enum ResolveOutcome { ResolvedHome, ResolvedRequested, DeniedNotPermitted, NoHome }
+    public enum ResolveOutcome
+    {
+        ResolvedHome,
+        ResolvedRequested,
+        DeniedNotPermitted,
+        NoHome,
+
+        /// <summary>21.3 — a stale PERSISTED PREFERENCE was skipped and the caller fell through to a branch
+        /// they can actually reach. Not a failure: the request proceeds, and the caller is told which branch
+        /// it ran under so the UI can correct its switcher silently.</summary>
+        ResolvedAfterStalePreference,
+
+        /// <summary>21.3 — no home branch, but the caller has reach somewhere; step ④ picked the first
+        /// accessible branch in a stable order.</summary>
+        ResolvedFirstAccessible,
+    }
 
     public sealed record Resolution(ResolveOutcome Outcome, Guid? BranchId, IReadOnlySet<Guid> Permitted)
     {
-        public bool Allowed => Outcome is ResolveOutcome.ResolvedHome or ResolveOutcome.ResolvedRequested;
+        /// <summary>Whether the request may proceed. 21.3 added the two fall-through outcomes: a stale
+        /// preference and a home-less caller both still resolve to a branch they can actually reach, so
+        /// leaving them out here would turn "your cookie is out of date" into a failed request.</summary>
+        public bool Allowed => Outcome is ResolveOutcome.ResolvedHome or ResolveOutcome.ResolvedRequested
+            or ResolveOutcome.ResolvedAfterStalePreference or ResolveOutcome.ResolvedFirstAccessible;
+
+        /// <summary>21.3 — the resolved branch differs from what the client believed. The caller surfaces
+        /// this to the SPA (a response header) so the switcher corrects itself silently.</summary>
+        public bool PreferenceWasStale => Outcome is ResolveOutcome.ResolvedAfterStalePreference;
     }
 
     /// <summary>Resolve the active branch. Requested (from the header) must be in the permitted set — otherwise
@@ -75,5 +98,55 @@ public static class BranchAssignmentRules
         return home is null
             ? new Resolution(ResolveOutcome.NoHome, null, permitted)
             : new Resolution(ResolveOutcome.ResolvedHome, home, permitted);
+    }
+
+    /// <summary>
+    /// 21.3 — the full active-branch precedence chain (design 40 §3):
+    ///
+    ///   ① explicit <c>X-Active-Branch</c> header  ② persisted user preference
+    ///   ③ the membership's home branch           ④ first accessible, in a stable order
+    ///
+    /// DUAL FAILURE SEMANTICS, and the distinction is the whole point. An explicit HEADER outside the grant
+    /// set is DENIED (403 + audit): a programmatic caller asked for a specific dataset, and silently serving
+    /// it a different one is how a batch job writes to the wrong branch. A stale PREFERENCE is SKIPPED and
+    /// the chain falls through: a remembered UI selection is a convenience, and expiring someone's October
+    /// cover should not lock them out of their own session on the 1st of November.
+    /// </summary>
+    /// <param name="assignments">The caller's grants (expired ones simply stop matching).</param>
+    /// <param name="requested">The header value, if the client sent one.</param>
+    /// <param name="preference">The persisted soft preference, if any.</param>
+    /// <param name="on">The date reach is judged on.</param>
+    public static Resolution ResolveActiveBranch(
+        IEnumerable<BranchAssignment> assignments, Guid? requested, Guid? preference, DateOnly on)
+    {
+        var list = assignments as ICollection<BranchAssignment> ?? assignments.ToList();
+        var permitted = PermittedBranches(list, on);
+
+        // ① The header is an assertion, not a hint. Out of scope ⇒ refuse.
+        if (requested is { } r)
+            return permitted.Contains(r)
+                ? new Resolution(ResolveOutcome.ResolvedRequested, r, permitted)
+                : new Resolution(ResolveOutcome.DeniedNotPermitted, null, permitted);
+
+        // ② The preference is a hint. Out of scope ⇒ skip it and keep going, but REMEMBER that we did, so
+        // the caller can tell the UI to update its switcher instead of leaving a dead selection on screen.
+        var stale = preference is { } p && !permitted.Contains(p);
+        if (preference is { } pref && permitted.Contains(pref))
+            return new Resolution(ResolveOutcome.ResolvedRequested, pref, permitted);
+
+        // ③ Home.
+        if (HomeBranch(list, on) is { } home)
+            return new Resolution(
+                stale ? ResolveOutcome.ResolvedAfterStalePreference : ResolveOutcome.ResolvedHome, home, permitted);
+
+        // ④ First accessible, ordered so the same person lands on the same branch every time — an unstable
+        // order here would silently move someone between branches between requests.
+        var first = permitted.OrderBy(b => b).Cast<Guid?>().FirstOrDefault();
+        if (first is { } f)
+            return new Resolution(
+                stale ? ResolveOutcome.ResolvedAfterStalePreference : ResolveOutcome.ResolvedFirstAccessible, f, permitted);
+
+        // Nothing is reachable. The caller injects the sentinel — never an empty predicate.
+        return new Resolution(ResolveOutcome.NoHome, null, permitted);
     }
 }
