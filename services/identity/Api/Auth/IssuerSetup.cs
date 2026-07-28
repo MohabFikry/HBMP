@@ -72,6 +72,16 @@ public static class IssuerSetup
             .AddCore(o => o.UseEntityFrameworkCore().UseDbContext<IdentityStoreDbContext>())
             .AddServer(o =>
             {
+                // PIN THE ISSUER. Without this OpenIddict derives its issuer from the REQUEST — so a token
+                // minted at http://localhost:8090/ (the browser's URL) was rejected by identity-service's own
+                // local validation when the same request arrived through Kong, whose Host is localhost:8000:
+                // "The issuer associated to the specified token is not valid" (ID2088). Every /identity/admin
+                // surface 401ed through the gateway while working perfectly on the direct port, which is the
+                // worst shape a bug can take — it looks like a permissions problem and it is a URL problem.
+                // The 19 JWKS-validating services already pin theirs via Auth__ValidIssuers; this is the
+                // issuer's own half of the same fix.
+                o.SetIssuer(new Uri(config["Issuer:PublicUrl"] ?? "http://localhost:8090/"));
+
                 o.SetAuthorizationEndpointUris("connect/authorize")
                  .SetTokenEndpointUris("connect/token")
                  .SetUserinfoEndpointUris("connect/userinfo")

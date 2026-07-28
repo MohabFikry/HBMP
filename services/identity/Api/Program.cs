@@ -14,7 +14,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddIdentityInfrastructure(builder.Configuration);
 builder.Services.AddMersalIssuer(builder.Configuration, builder.Environment);
 // 18.B3 (S3) — named policies for the admin surface + the catalog (see IdentityAdminPolicies).
-builder.Services.AddIdentityAdminPolicies();
+builder.Services.AddIdentityAdminPolicies(builder.Configuration);
 builder.Services.AddIssuerRateLimits();   // 18.B3 (S9) — per-route limits on the credential endpoints
 // Phase 17.4 — audited admin actions (C3): durable outbox + hash-chained audit spine.
 builder.Services.AddHbmpAuditClient("identity-service");

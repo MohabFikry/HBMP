@@ -562,7 +562,7 @@ public static class AdminEndpoints
             return (null, Results.Problem(statusCode: 403, title: "insufficient-scope", detail: $"requires {scope}"));
 
         var amr = p.GetClaims(AccountPages.AmrClaim);
-        if (!MfaEvaluator.IsSatisfied(p.GetClaim(HbmpClaimTypes.Acr), amr))
+        if (IdentityAdminPolicies.MfaRequired && !MfaEvaluator.IsSatisfied(p.GetClaim(HbmpClaimTypes.Acr), amr))
             return (null, Results.Problem(statusCode: 403, title: "mfa-required", detail: "admin actions require a step-up (MFA) session"));
 
         return (p, null);

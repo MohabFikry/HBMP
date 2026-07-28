@@ -160,7 +160,7 @@ public static class AccessReviewEndpoints
             return Results.Problem(statusCode: 401, title: "unauthenticated");
         if (!auth.Principal.HasScope(scope))
             return Results.Problem(statusCode: 403, title: "insufficient-scope", detail: $"requires {scope}");
-        if (!MfaEvaluator.IsSatisfied(auth.Principal.GetClaim(HbmpClaimTypes.Acr),
+        if (IdentityAdminPolicies.MfaRequired && !MfaEvaluator.IsSatisfied(auth.Principal.GetClaim(HbmpClaimTypes.Acr),
                                       auth.Principal.GetClaims(AccountPages.AmrClaim)))
             return Results.Problem(statusCode: 403, title: "mfa-required");
         return null;

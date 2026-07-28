@@ -172,7 +172,7 @@ public static class SessionEndpoints
         if (!p.HasScope(scope))
             return Results.Problem(statusCode: 403, title: "insufficient-scope", detail: $"requires {scope}");
 
-        if (!MfaEvaluator.IsSatisfied(p.GetClaim(HbmpClaimTypes.Acr), p.GetClaims(AccountPages.AmrClaim)))
+        if (IdentityAdminPolicies.MfaRequired && !MfaEvaluator.IsSatisfied(p.GetClaim(HbmpClaimTypes.Acr), p.GetClaims(AccountPages.AmrClaim)))
             return Results.Problem(statusCode: 403, title: "mfa-required",
                 detail: "administrative session actions require a step-up (MFA) session");
 

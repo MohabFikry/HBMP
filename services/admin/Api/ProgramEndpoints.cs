@@ -167,7 +167,10 @@ public sealed class ProgramAdminService(AdminDbContext db, IAuditClient audit, T
         var featureRows = await db.Database
             .SqlQueryRaw<FeatureRow>(
                 """
-                SELECT feature_key AS "Key", enabled AS "Enabled", changed_by AS "ChangedBy", changed_at AS "ChangedAt"
+                -- AdminDbContext uses the snake_case naming convention, so a FromSql projection is matched
+                -- on snake_case column names, NOT on the record's property names. Aliasing to "Key"/"ChangedAt"
+                -- produced 'The required column changed_at was not present' at runtime.
+                SELECT feature_key AS key, enabled, changed_by, changed_at
                 FROM admin.tenant_feature WHERE tenant_id = {0}
                 """, tenantId)
             .ToListAsync(ct);
@@ -175,7 +178,7 @@ public sealed class ProgramAdminService(AdminDbContext db, IAuditClient audit, T
         var limitRows = await db.Database
             .SqlQueryRaw<LimitRow>(
                 """
-                SELECT limit_key AS "Key", max_value AS "MaxValue", changed_by AS "ChangedBy", changed_at AS "ChangedAt"
+                SELECT limit_key AS key, max_value, changed_by, changed_at
                 FROM admin.tenant_limit WHERE tenant_id = {0}
                 """, tenantId)
             .ToListAsync(ct);

@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Mersal.Auth;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Abstractions;
 using OpenIddict.Validation.AspNetCore;
@@ -34,9 +35,31 @@ public static class IdentityAdminPolicies
     /// administrative action but is not for anonymous eyes either.</summary>
     public const string Authenticated = "identity-authenticated";
 
-    public static IServiceCollection AddIdentityAdminPolicies(this IServiceCollection services) =>
+    /// <summary>
+    /// Whether an MFA step-up is required to reach the administrative surfaces.
+    ///
+    /// Honours the SAME switch every other service reads (<c>Auth:ProtectedScopeRequiresMfa</c>) and defaults
+    /// to <b>true</b>, so deployed tiers are unchanged. The Tier-1 Compose starter sets it false because it
+    /// seeds demo users WITHOUT enrolled TOTP: with the gate on, every admin screen answers 401/403 and the
+    /// platform looks broken to anyone evaluating it locally. Never carry this into a Helm values file —
+    /// a role grant or password reset without a step-up is precisely the finding this control exists for.
+    /// </summary>
+    private static bool RequiresMfa(IConfiguration config) =>
+        config.GetValue("Auth:ProtectedScopeRequiresMfa", true);
+
+    /// <summary>
+    /// The resolved switch, for the per-handler <c>Guard</c> checks — the second layer that exists so the
+    /// control does not depend on a route group being wired correctly. Set once at startup; a static rather
+    /// than an injected option because those guards are static helpers on minimal-API handlers, and
+    /// threading configuration through every one of them would be churn with no added safety.
+    /// </summary>
+    public static bool MfaRequired { get; private set; } = true;
+
+    public static IServiceCollection AddIdentityAdminPolicies(this IServiceCollection services, IConfiguration config) =>
         services.AddAuthorization(o =>
         {
+            var requireMfa = RequiresMfa(config);
+            MfaRequired = requireMfa;
             o.AddPolicy(Authenticated, p => p
                 .AddAuthenticationSchemes(Bearer)
                 .RequireAuthenticatedUser());
@@ -49,8 +72,8 @@ public static class IdentityAdminPolicies
                 // handler remembering it — a role grant or a password reset without a step-up is the finding.
                 .RequireAssertion(ctx =>
                     (HasScope(ctx.User, "admin:read") || HasScope(ctx.User, "admin:write"))
-                    && MfaEvaluator.IsSatisfied(ctx.User.GetClaim(HbmpClaimTypes.Acr),
-                                                ctx.User.GetClaims(AccountPages.AmrClaim))));
+                    && (!requireMfa || MfaEvaluator.IsSatisfied(ctx.User.GetClaim(HbmpClaimTypes.Acr),
+                                                                ctx.User.GetClaims(AccountPages.AmrClaim)))));
         });
 
     /// <summary>OAuth2 <c>scope</c> is a space-delimited string in one claim, and OpenIddict may also project

@@ -59,7 +59,15 @@ services:
     <<: *restart
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      # Tier-1 dev only: the seeded demo users have no enrolled TOTP, and identity's admin surfaces
+      # require a step-up — with the gate on, every access-model screen answers 401. Defaults to true in
+      # code; never carry this into a Helm values file (see docs/adr/0015 + the .env warning).
+      Auth__ProtectedScopeRequiresMfa: "false"
       ConnectionStrings__Identity: "Host=postgres;Database=hbmp;Username=hbmp_app;Password=${HBMP_APP_PASSWORD}"
+      # The issuer identifier this service publishes AND validates against — must match the URL the browser
+      # uses, and must NOT be derived from the request (Kong's Host is localhost:8000). Trailing slash is
+      # significant: it is compared as a string.
+      Issuer__PublicUrl: "http://localhost:8090/"
       Issuer__WebRedirectUri: "http://localhost:5173/"
       Issuer__WebPostLogoutUri: "http://localhost:5173/"
       Issuer__ServiceClientSecret: "${IDENTITY_SERVICE_SECRET}"
