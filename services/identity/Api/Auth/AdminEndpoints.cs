@@ -187,6 +187,120 @@ public static class AdminEndpoints
             return Results.Ok(new { tenant, role, scopes = req.Scopes });
         });
 
+        // ---- Membership administration reads (21.6, design 40 §1 + §6) -------------------------------------
+        //
+        // The roster behind the admin UI. Deliberately NOT the access-review snapshot: that recomputes every
+        // membership's effective set and is audited as an EXPORT, because signing a review pack is a bulk
+        // disclosure of the tenant's whole posture. Browsing a list is not. Reusing it here would make the
+        // screen O(memberships) evaluator calls to render a table that shows none of those keys, and would
+        // bury the real exports under routine navigation — the audit trail's value is that Export means
+        // something.
+        //
+        // TENANT-PINNED. The tenant is the isolation boundary (§1), so a caller sees its OWN tenant unless the
+        // identity carries the platform-admin flag — and per A1 that flag buys administrative reach only,
+        // which is exactly what a membership roster is. It is not a step towards PHI.
+        g.MapGet("/memberships", async (
+            HttpContext http, string? tenant, string? status, string? query,
+            IdentityStoreDbContext db, IAuditClient audit, TimeProvider clock) =>
+        {
+            var (me, err) = await Guard(http, "admin:read");
+            if (err is not null) return err;
+
+            var (scopeTenant, denied) = await ResolveTenantReachAsync(db, me!, tenant, audit, http.RequestAborted);
+            if (denied is not null) return denied;
+
+            MembershipStatus? wanted = null;
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                if (!Enum.TryParse(status, ignoreCase: true, out MembershipStatus parsed))
+                    return Results.Problem(statusCode: 422, title: "unknown-status",
+                        detail: $"status must be one of {string.Join(", ", Enum.GetNames<MembershipStatus>())}");
+                wanted = parsed;
+            }
+
+            var q = db.Memberships.AsNoTracking().Where(m => !m.IsDeleted);
+            if (scopeTenant is not null) q = q.Where(m => m.TenantId == scopeTenant);
+            if (wanted is not null) q = q.Where(m => m.Status == wanted);
+
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                var norm = query.ToUpperInvariant();
+                var matching = db.Users.AsNoTracking()
+                    .Where(u => u.NormalizedUserName!.Contains(norm) || EF.Functions.ILike(u.DisplayName, $"%{query}%"))
+                    .Select(u => u.Id);
+                q = q.Where(m => matching.Contains(m.UserId));
+            }
+
+            var rows = await q
+                .OrderBy(m => m.TenantId).ThenBy(m => m.CreatedAt)
+                .Take(500)
+                .ToListAsync(http.RequestAborted);
+
+            // Batched, not per-row: the access review can afford a query per membership because it runs once
+            // for a signed report; a screen someone pages through cannot.
+            var views = await ProjectAsync(db, rows, clock.GetUtcNow(), http.RequestAborted);
+
+            await Audit(audit, me, "identity.tenant_membership", scopeTenant ?? "(all-tenants)",
+                AuditAction.Read, "MembershipRosterRead",
+                $"{{\"tenant\":\"{scopeTenant ?? "*"}\",\"count\":{views.Count}}}");
+            return Results.Ok(views);
+        });
+
+        // One membership in full — the detail screen's roles/overrides tabs. Branch grants and programme
+        // enablement are NOT copied in here: they live in admin-service and the UI composes the two calls,
+        // for the same reason the access review references them rather than reading across the boundary.
+        g.MapGet("/memberships/{membershipId:guid}", async (
+            HttpContext http, Guid membershipId,
+            IdentityStoreDbContext db, IAuditClient audit, TimeProvider clock) =>
+        {
+            var (me, err) = await Guard(http, "admin:read");
+            if (err is not null) return err;
+
+            var membership = await db.Memberships.AsNoTracking()
+                .FirstOrDefaultAsync(m => m.MembershipId == membershipId && !m.IsDeleted, http.RequestAborted);
+            if (membership is null) return Results.Problem(statusCode: 404, title: "not-found");
+
+            // The tenant check happens AFTER the lookup but the answer is the same either way — a caller
+            // outside the tenant gets 403 whether or not the row exists. Returning 404 for out-of-tenant rows
+            // would leak nothing here (the id is a v4 guid), but 403 is the honest answer to "may I".
+            var (_, denied) = await ResolveTenantReachAsync(db, me!, membership.TenantId, audit, http.RequestAborted);
+            if (denied is not null) return denied;
+
+            var now = clock.GetUtcNow();
+            var view = (await ProjectAsync(db, [membership], now, http.RequestAborted))[0];
+
+            var overrides = await db.Overrides.AsNoTracking()
+                .Where(o => o.MembershipId == membershipId && !o.IsDeleted)
+                .OrderBy(o => o.ScopeKey)
+                .ToListAsync(http.RequestAborted);
+
+            await Audit(audit, me, "identity.tenant_membership", membershipId.ToString(),
+                AuditAction.Read, "MembershipRead", $"{{\"tenant\":\"{membership.TenantId}\"}}");
+
+            return Results.Ok(new
+            {
+                view.MembershipId, view.UserId, view.Username, view.DisplayName, view.TenantId,
+                view.Status, view.ProviderId, view.HomeBranchId, view.Roles, view.Level,
+                view.IsPlatformAdmin, view.ActivatedAt, view.EndedAt,
+                // The counts are part of the roster row's shape, and the detail is a SUPERSET of that row —
+                // the SPA's MembershipDetail contract extends MembershipRow, so omitting them here makes the
+                // detail fail its own contract while the list passes.
+                view.OverrideCount, view.ExpiredOverrideCount,
+                // Every override with its reason and grantor: an exception shown without them cannot be
+                // judged, and a reviewer who cannot judge one either rubber-stamps it or escalates all of
+                // them (the failure mode 21.5's review pack was shaped to avoid).
+                overrides = overrides.Select(o => new
+                {
+                    id = o.OverrideId, scope = o.ScopeKey, effect = o.Effect.ToString(),
+                    reason = o.Reason, grantedBy = o.GrantedBy, validUntil = o.ValidUntil,
+                    // Lapsed overrides are LISTED as expired rather than filtered out. The evaluator already
+                    // ignores them; hiding them here would leave an administrator unable to see why someone's
+                    // access changed last night.
+                    expired = o.ValidUntil is not null && o.ValidUntil <= now,
+                }),
+            });
+        });
+
         // ---- Per-membership overrides (21.2, design 40 §2) -------------------------------------------------
         //
         // The exception path. It is the most dangerous surface in this service — a way to hand one person a
@@ -310,21 +424,118 @@ public static class AdminEndpoints
         // "What would this person actually see" — mode 2, which is the only way to answer it without
         // minting a token for someone else.
         g.MapGet("/memberships/{membershipId:guid}/effective", async (
-            HttpContext http, Guid membershipId, IEffectiveSetService effective) =>
+            HttpContext http, Guid membershipId, IEffectiveSetService effective, IdentityStoreDbContext db) =>
         {
             var (_, err) = await Guard(http, "admin:read");
             if (err is not null) return err;
 
             var set = await effective.ForMembershipAsync(membershipId, http.RequestAborted);
-            return set is null
-                ? Results.Problem(statusCode: 404, title: "not-found")
-                : Results.Ok(new
-                {
-                    membershipId,
-                    scopes = set.Keys.OrderBy(k => k, StringComparer.Ordinal),
-                    deprecated = set.DeprecatedInUse.Select(d => new { key = d.Key, replacedBy = d.ReplacedBy }),
-                });
+            if (set is null) return Results.Problem(statusCode: 404, title: "not-found");
+
+            // 21.6 — which of these keys are platform-ADMINISTRATION keys.
+            //
+            // The evaluator adds them under the A1 short-circuit but the EffectiveSet records only the union,
+            // so a preview reading the union alone would label a key the flag granted as "from role" — the
+            // one provenance mistake that matters here, because A1 is the invariant people most want to see
+            // the boundary of. Returned as the catalog's own marking rather than a recomputation: this
+            // reports metadata, it does not re-run the algebra (the parity suite covers that, and a third
+            // implementation would be a third opinion).
+            var adminKeys = await db.Scopes.AsNoTracking()
+                .Where(s => s.IsPlatformAdminKey)
+                .Select(s => s.Name)
+                .ToListAsync(http.RequestAborted);
+
+            return Results.Ok(new
+            {
+                membershipId,
+                scopes = set.Keys.OrderBy(k => k, StringComparer.Ordinal),
+                deprecated = set.DeprecatedInUse.Select(d => new { key = d.Key, replacedBy = d.ReplacedBy }),
+                platformAdminKeys = adminKeys.Where(set.Keys.Contains).OrderBy(k => k, StringComparer.Ordinal),
+            });
         });
+    }
+
+    // ---- 21.6 membership projection ----------------------------------------------------------------------
+
+    /// <summary>
+    /// Resolve which tenant this caller may read, and refuse — loudly — if it is not the one asked for.
+    ///
+    /// Per A2, a denied privileged read is audited rather than quietly narrowed to the caller's own tenant.
+    /// Silently rewriting the filter would show an administrator a page of THEIR tenant under another
+    /// tenant's heading, which is worse than an error: they would review the wrong organisation and believe
+    /// they had reviewed the right one.
+    /// </summary>
+    /// <returns>The tenant to filter on (null = every tenant, platform admin only), or the 403 to return.</returns>
+    private static async Task<(string? Tenant, IResult? Denied)> ResolveTenantReachAsync(
+        IdentityStoreDbContext db, ClaimsPrincipal me, string? requested, IAuditClient audit, CancellationToken ct)
+    {
+        var own = me.GetClaim(HbmpClaimTypes.TenantId);
+        var isPlatformAdmin = Guid.TryParse(me.GetClaim(Claims.Subject), out var sub)
+            && await db.Users.AsNoTracking().Where(u => u.Id == sub).Select(u => u.IsPlatformAdmin)
+                .FirstOrDefaultAsync(ct);
+
+        // No tenant asked for: a platform admin legitimately means "all of them", anyone else means "mine".
+        if (string.IsNullOrWhiteSpace(requested))
+            return isPlatformAdmin ? (null, null) : (own, null);
+
+        if (isPlatformAdmin || string.Equals(requested, own, StringComparison.Ordinal))
+            return (requested, null);
+
+        await Audit(audit, me, "identity.tenant_membership", requested, AuditAction.Read,
+            "CrossTenantMembershipReadDenied", $"{{\"requested\":\"{requested}\",\"own\":\"{own}\"}}");
+        return (null, Results.Problem(statusCode: 403, title: "cross-tenant-read-denied",
+            detail: "reading another tenant's memberships requires the platform-administration flag"));
+    }
+
+    /// <summary>Project memberships for the roster, batching the user/role/override lookups so the cost does
+    /// not scale with the page size.</summary>
+    private static async Task<IReadOnlyList<MembershipView>> ProjectAsync(
+        IdentityStoreDbContext db, IReadOnlyList<TenantMembership> rows, DateTimeOffset now, CancellationToken ct)
+    {
+        var ids = rows.Select(m => m.MembershipId).ToList();
+        var userIds = rows.Select(m => m.UserId).Distinct().ToList();
+
+        var users = await db.Users.AsNoTracking()
+            .Where(u => userIds.Contains(u.Id))
+            .Select(u => new { u.Id, u.UserName, u.DisplayName, u.IsPlatformAdmin })
+            .ToDictionaryAsync(u => u.Id, ct);
+
+        var roles = (await db.MembershipRoles.AsNoTracking()
+                .Where(mr => ids.Contains(mr.MembershipId))
+                .Join(db.Roles, mr => mr.RoleId, r => r.Id,
+                    (mr, r) => new { mr.MembershipId, r.Name, r.Level })
+                .ToListAsync(ct))
+            .GroupBy(x => x.MembershipId)
+            .ToDictionary(gr => gr.Key, gr => gr.ToList());
+
+        var overrides = (await db.Overrides.AsNoTracking()
+                .Where(o => ids.Contains(o.MembershipId) && !o.IsDeleted)
+                .Select(o => new { o.MembershipId, o.ValidUntil })
+                .ToListAsync(ct))
+            .GroupBy(x => x.MembershipId)
+            .ToDictionary(gr => gr.Key, gr => gr.ToList());
+
+        return [.. rows.Select(m =>
+        {
+            var held = roles.TryGetValue(m.MembershipId, out var r) ? r : [];
+            var ovr = overrides.TryGetValue(m.MembershipId, out var o) ? o : [];
+            users.TryGetValue(m.UserId, out var u);
+
+            return new MembershipView(
+                m.MembershipId, m.UserId, u?.UserName ?? "(unknown)", u?.DisplayName ?? "",
+                m.TenantId, m.Status.ToString(), m.ProviderId, m.HomeBranchId,
+                [.. held.Select(x => new MembershipRoleView(x.Name ?? "", x.Level))
+                        .OrderBy(x => x.Name, StringComparer.Ordinal)],
+                // "Lower = more privileged", so the most privileged tier held is the MINIMUM — the same
+                // convention the access review uses, and the only one that answers "is this an
+                // administrative persona" correctly for someone holding two roles.
+                held.Where(x => x.Level.HasValue).Select(x => x.Level!.Value).DefaultIfEmpty().Min(),
+                u?.IsPlatformAdmin ?? false, m.ActivatedAt, m.EndedAt,
+                ovr.Count,
+                // Surfaced as its own count so the list can badge it: an override quietly lapsing is a
+                // change in someone's authority that nobody requested and nobody is told about.
+                ovr.Count(x => x.ValidUntil is not null && x.ValidUntil <= now));
+        })];
     }
 
     private static MembershipOverrideHistory HistoryOf(
@@ -364,6 +575,21 @@ public static class AdminEndpoints
             EntityType = entityType, EntityId = entityId, Action = action,
             ActorUserId = me?.GetClaim(Claims.Subject), DecisionOutcome = outcome, AfterState = afterState,
         });
+
+    // ---- views -------------------------------------------------------------------------------------------
+
+    /// <summary>One role as the roster shows it. <c>Level</c> is nullable because a role without a tier is a
+    /// real state (nothing has classified it yet) and defaulting it to 0 would read as "most privileged".</summary>
+    public sealed record MembershipRoleView(string Name, int? Level);
+
+    /// <summary>A membership as the 21.6 admin roster shows it — authority (roles, level, overrides) but no
+    /// reach: branch grants live in admin-service and the UI composes them (design 40 §3).</summary>
+    public sealed record MembershipView(
+        Guid MembershipId, Guid UserId, string Username, string DisplayName, string TenantId,
+        string Status, Guid? ProviderId, Guid? HomeBranchId,
+        IReadOnlyList<MembershipRoleView> Roles, int Level, bool IsPlatformAdmin,
+        DateTimeOffset? ActivatedAt, DateTimeOffset? EndedAt,
+        int OverrideCount, int ExpiredOverrideCount);
 
     // ---- requests ----------------------------------------------------------------------------------------
 

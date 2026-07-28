@@ -45,6 +45,34 @@ caught. A grant that would breach SoD is rejected `409` with the conflict reason
 - **Policy proposals** — `POST /policy-proposals` (Super Admin only) **stages** a versioned bundle diff with a
   rationale; it never hot-patches live ABAC — deployment goes through the audited CI path (Security + DPO review).
 
+## Programme enablement (phase 21.4/21.6, design 40 §4)
+
+The **third, orthogonal gate**: checked *after* authorization and *before* execution, so a fully authorized
+principal can still be refused. Per adaptation **A4** this is not commercial entitlement — Mersal is a
+charity, its tenants are partner NGOs and clinics, and the switches say "this organisation has been
+onboarded onto the claims programme". The refusal's remedy is "contact Mersal programme administration",
+never "upgrade"; `program-not-enabled` and `program-limit-reached` are deliberately DISTINCT problem types
+from a permission denial, because the three send people to three different places.
+
+- `GET /programs/{tenantId}` — every known feature and cap, present or not. Absent rows return as
+  disabled/unconfigured and unlimited rather than being omitted: a screen listing only configured keys
+  cannot configure the others, and "off" must be distinguishable from "never set up".
+- `PUT /programs/{tenantId}/features/{key}` and `PUT /programs/{tenantId}/limits/{key}` — **platform
+  administration only** (`super_admin`; `AdminGate` alone would let an Org Admin holding
+  `admin:manage-tenant` enable programmes for their own tenant, which is not a gate at all). Reason
+  mandatory, history row + audit event on every change.
+- **Caps are counted live, never stored.** `TenantProgramStore.CheckLimitAsync` recounts inside the
+  mutating transaction under a per-(tenant, limit) advisory lock; the screen's `currentUsage` is advisory.
+  A `null` usage means *this service does not own that count* (extracts and storage belong to reporting- and
+  document-service) — it is not zero, and must never render as zero.
+- **Enablement never grants.** A switched-on module still requires the permission; a switched-off one hides
+  nothing retroactively from audit, and a cap set below current usage removes nothing — it refuses the next
+  addition only.
+
+> **Outstanding (carried out of phase 21):** no service calls the gate yet. The mechanism and its admin
+> surface are complete and tested, but `ProgramEnablement` has no production call site, so nothing currently
+> returns `program-not-enabled`. Wiring the check into the feature-owning services is open work.
+
 ## Governance — master data / templates / config (phase 8b.2)
 
 All governance edits are **effective-dated**: a change appends a new version and closes the prior version's window,

@@ -149,13 +149,13 @@ Phases run in dependency order; **one sub-prompt ≈ one reviewable PR** (see `H
 | 20 | Patient Profile | 20.4 Profile screen + patient context bar + search entry + module deep-links | ☐ | |
 | 20 | Patient Profile | 20.5 Performance budgets, Kong routes, docs + ADR-0023 | ☐ | |
 
-| 21 | User & Access Model | 21.0 ADR-0021 + additive token-contract extension (byte-compat test on old + new fixtures) | ☐ | |
-| 21 | User & Access Model | 21.1 `tenant_membership` principal + tenant-local roles + access-neutral backfill | ☐ | |
-| 21 | User & Access Model | 21.2 Catalog + overrides + one evaluator, two modes, parity suite + the A1 no-PHI-wildcard test | ☐ | |
-| 21 | User & Access Model | 21.3 Time-bounded branch-scope grants, precedence chain, sentinel fail-closed | ☐ | |
-| 21 | User & Access Model | 21.4 Program enablement: features + live-count caps, distinct problem types | ☐ | |
-| 21 | User & Access Model | 21.5 Attribution, access-review snapshot, switch guards, session degradation (A6) | ☐ | |
-| 21 | User & Access Model | 21.6 Admin UI (memberships, overrides, grants, features, effective-access preview) + routes + docs | ☐ | |
+| 21 | User & Access Model | 21.0 ADR-0021 + additive token-contract extension (byte-compat test on old + new fixtures) | ✅ | |
+| 21 | User & Access Model | 21.1 `tenant_membership` principal + tenant-local roles + access-neutral backfill | ✅ | |
+| 21 | User & Access Model | 21.2 Catalog + overrides + one evaluator, two modes, parity suite + the A1 no-PHI-wildcard test | ✅ | |
+| 21 | User & Access Model | 21.3 Time-bounded branch-scope grants, precedence chain, sentinel fail-closed | ✅ | |
+| 21 | User & Access Model | 21.4 Program enablement: features + live-count caps, distinct problem types | 🟡 | Mechanism + admin surface built and tested; **no service calls the gate yet** — see the note below |
+| 21 | User & Access Model | 21.5 Attribution, access-review snapshot, switch guards, session degradation (A6) | ✅ | |
+| 21 | User & Access Model | 21.6 Admin UI (memberships, overrides, grants, features, effective-access preview) + routes + docs | ✅ | |
 
 > **Phase 21 (User & Access Model)** implements [`../HBMP-Design/40-user-access-model.md`](../HBMP-Design/40-user-access-model.md), adapting an external
 > reference design. **Doc 40 §0 (adaptations A1–A6) is normative**: the platform-admin flag is never a PHI wildcard (A1);
@@ -235,11 +235,35 @@ the identity, so one person can hold genuinely different authority in two organi
   with a concurrent cap that revokes the OLDEST; login-attempt history with a COARSE failure reason;
   access-review snapshot (JSON + CSV) audited as an export, carrying overrides WITH their reasons.
 - **21.6** explicit Kong routes for the new surfaces (route-coverage guard green), docs (40 indexed, 22
-  gains the table catalog, 18 gains the degradation policy), and the admin UI.
+  gains the table catalog, 18 gains the degradation policy), and the admin UI: the membership roster and its
+  five detail tabs (roles, exceptions, branch reach, sessions, effective-access preview), plus the
+  programme-enablement screen. Backed by two new read surfaces — `GET /identity/admin/memberships[/{id}]`,
+  deliberately NOT the access-review snapshot (that recomputes every effective set and is audited as an
+  Export; browsing a roster is neither) — and `/api/v1/admin/programs`, platform-admin only. Identity also
+  gained a per-session administrative revoke: the only prior option was revoke-all, which is the right tool
+  for off-boarding and the wrong one for one stolen device, and its cost meant the safe action got postponed.
+  Cross-tenant roster reads are **403 + audited, never silently narrowed** — a page of your own tenant under
+  another tenant's heading is worse than an error, because the reviewer believes they reviewed the right one.
 
-Full suite **1592 passing / 0 failing**. Twelve mutations were used to prove the new guards actually bite —
-platform-admin-as-wildcard, allow-beats-deny, ignored expiry, deleting the A1 test, the branch fail-open, the
-missing cap lock, and reversing the A6 pairing were each killed by the test written for them.
+### Known gap carried out of Phase 21
+
+**21.4's enablement gate has no production call site.** `ProgramEnablement` and `TenantProgramStore` are
+complete, correct and well tested — the advisory lock, the live counting, the two distinct problem types —
+but grepping for their callers outside tests returns nothing. No service checks a feature switch or a cap
+before executing, so the third orthogonal gate (design 40 §4) does not currently refuse anything: the SPA's
+`program-not-enabled` treatment renders a problem type no server emits. 21.6 makes the switches
+administrable and visible, which is what made the gap legible, but wiring the check into the feature-owning
+services is outstanding work and is **not** claimed as done.
+
+Full backend suite **1953 passing / 0 failing / 1 skipped**, run against a Postgres with all 128 migrations
+applied so the env-gated integration and RLS suites actually execute — DB-less, 356 of them skip and the
+number reads ~1598. Frontend **220** (contracts 9 + design-system 18 + web 193), including the axe sweep,
+which is table-driven over the portal catalog and therefore covered the three new routes in EN/AR × light/dark
+without anyone adding them to it.
+
+Twelve mutations were used to prove the new guards actually bite — platform-admin-as-wildcard,
+allow-beats-deny, ignored expiry, deleting the A1 test, the branch fail-open, the missing cap lock, and
+reversing the A6 pairing were each killed by the test written for them.
 
 Divergences from the build prompt and the defects found along the way are recorded in **ADR-0021 §4–§5**.
 

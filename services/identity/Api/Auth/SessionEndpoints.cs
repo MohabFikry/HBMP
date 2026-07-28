@@ -99,6 +99,32 @@ public static class SessionEndpoints
             return Results.Ok(new { userId = id, revoked = count });
         });
 
+        // 21.6 — revoke ONE session administratively.
+        //
+        // Until now an administrator's only option was the revoke-all above. That is the right tool for
+        // off-boarding and the wrong one for "this one device looks stolen": signing someone out of every
+        // device to kill one of them is a clinical interruption, and the cost of it means the safe action
+        // gets postponed. Same fail-closed persistence as revoke-all — a revoke nobody can confirm must not
+        // report success.
+        admin.MapDelete("/sessions/{sessionId:guid}", async (
+            HttpContext http, Guid id, Guid sessionId,
+            SessionService sessions, IdentityStoreDbContext db, IAuditClient audit) =>
+        {
+            var err = await Guard(http, "admin:write");
+            if (err is not null) return err;
+
+            // The session must belong to the user in the route. Without this the id in the path would be
+            // decoration and any session could be killed through any user's URL — the same reasoning as the
+            // self-service ownership check above, which exists because a session id is not a secret.
+            var owned = await db.Sessions.AsNoTracking()
+                .AnyAsync(s => s.SessionId == sessionId && s.UserId == id, http.RequestAborted);
+            if (!owned) return Results.Problem(statusCode: 404, title: "not-found");
+
+            await sessions.RevokeAsync(sessionId, ActorOf(http), "administrative revoke (single session)", http.RequestAborted);
+            await Emit(audit, ActorOf(http), sessionId.ToString(), "SessionRevokedByAdmin");
+            return Results.Ok(new { userId = id, sessionId, revoked = true });
+        });
+
         admin.MapGet("/login-history", async (HttpContext http, Guid id, SessionService sessions, int? take) =>
         {
             var err = await Guard(http, "admin:read");

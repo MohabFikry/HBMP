@@ -75,6 +75,20 @@ public class UiGatingIsCosmeticTests
                 ("read another user's login history", () => client.GetAsync(
                     $"/identity/admin/users/{victimId}/login-history")),
 
+                // 21.6 — the roster and detail behind the membership admin screens. Added with the screens
+                // themselves: an endpoint that ships without an entry here is one whose only gate is a
+                // button, which is no gate at all.
+                ("list the tenant's memberships", () => client.GetAsync(
+                    $"/identity/admin/memberships?tenant={TestFlow.TenantA}")),
+
+                ("open one membership", () => client.GetAsync(
+                    $"/identity/admin/memberships/{membershipId}")),
+
+                // The per-session administrative revoke 21.6 added, so an administrator can kill one stolen
+                // device without signing a clinician out of every device mid-shift.
+                ("revoke one of another user's sessions", () => client.DeleteAsync(
+                    $"/identity/admin/users/{victimId}/sessions/{Guid.NewGuid()}")),
+
                 ("create a user", () => client.PostAsJsonAsync("/identity/admin/users", new
                 {
                     username = "smuggled", displayName = "S", password = Password,

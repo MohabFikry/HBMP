@@ -30,6 +30,30 @@ Env-gated on `IDENTITY_TEST_DB` (a connection string to a migrated DB). Cover th
 role→scope resolution + min-necessary hard rules, and a user store round-trip proving the DDL matches the
 EF model. DB-less CI skips them.
 
+## Membership administration (phase 21.6, design 40 §1/§6)
+
+The read surface behind the admin SPA's user & access screens. All of it requires `admin:read` (writes
+`admin:write`) **and** an MFA session, enforced at the pipeline and again per action.
+
+- `GET /identity/admin/memberships?tenant=&status=&query=` — the roster: status, roles with their tier,
+  platform-admin flag, and live/lapsed override counts. **Tenant-pinned**: a caller sees their own tenant
+  unless the identity carries the platform-admin flag, and asking for another tenant is **403 + audited**,
+  never silently narrowed — a page of your own tenant under another tenant's heading would let someone
+  review the wrong organisation while believing they reviewed the right one.
+- `GET /identity/admin/memberships/{id}` — one membership with every override, each carrying its reason and
+  grantor. Lapsed overrides are returned flagged `expired`, not dropped: the evaluator already ignores them,
+  and hiding them leaves nobody able to explain why someone's access changed overnight.
+- `GET /identity/admin/memberships/{id}/effective` — mode-2 effective access, plus `platformAdminKeys` so a
+  preview can show which keys the A1 short-circuit accounts for rather than mislabelling them as role grants.
+- `DELETE /identity/admin/users/{id}/sessions/{sessionId}` — revoke ONE session. The prior surface only
+  offered revoke-all, which is right for off-boarding and wrong for a single stolen device; the cost of
+  signing a clinician out everywhere meant the safe action got postponed.
+
+Deliberately **not** the access-review snapshot (`/identity/admin/access-review/{tenant}`): that recomputes
+every membership's effective set and is audited as an **Export**, because signing a review pack is a bulk
+disclosure. Browsing a roster is not, and reusing it here would make the screen O(memberships) evaluator
+calls while burying the real exports under routine navigation.
+
 ## Phase map
 17.1 store + roles/scopes-as-data (**this**) → 17.2 OpenIddict issuer (frozen claims) → 17.3 login + TOTP
 2FA → 17.4 in-app admin (closes C3) → 17.5 SPA rewire (closes H6) → 17.6 cutover + Keycloak retirement.

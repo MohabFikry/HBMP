@@ -33,6 +33,8 @@ builder.Services.AddScoped<TenantAdminService>();
 builder.Services.AddScoped<DashboardService>();
 builder.Services.AddScoped<BranchAssignmentService>();   // 14.2
 builder.Services.AddScoped<PayerAssignmentService>();   // 19.5 — payer scope (design 38 §6)
+builder.Services.AddScoped<ProgramAdminService>();      // 21.6 — programme enablement administration (design 40 §4)
+builder.Services.AddScoped<TenantProgramStore>();       // 21.4 — the gate itself (features + live-counted caps)
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("admin-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
@@ -60,6 +62,7 @@ app.MapGovernance();     // 8b.2 master-data versioning + template linter + syst
 app.MapPlatform();       // 8b.3 tenant admin + break-glass lifecycle + governance dashboards
 app.MapBranchAssignments(); // 14.2 staff↔branch assignment + active-branch context
 app.MapPayerAssignments();  // 19.5 user↔payer restriction + GET /me/payers (read by IPayerDirectory)
+app.MapPrograms();          // 21.6 programme enablement admin — features + live-counted caps (design 40 §4)
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 
