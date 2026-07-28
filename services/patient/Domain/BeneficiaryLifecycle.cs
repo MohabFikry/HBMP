@@ -42,6 +42,30 @@ public static class BeneficiaryLifecycle
         if (RequiresReason(to) && string.IsNullOrWhiteSpace(reason)) return $"a reason is required to move to {to}";
         return null;
     }
+
+    // 23 §1's Actor column, enforced for the two transitions where the actor IS the control. Blocked means
+    // "fraud/abuse confirmed": the spec reserves blocking for Super Admin / Director and unblocking for a
+    // Director's case review. Until now any patient:write holder could quietly lift a fraud block — the
+    // exact erasure 18.A4 removed the Blocked→Inactive edge to prevent, still reachable one edge over.
+    //
+    // The OTHER actor cells (suspend = case manager/finance, reactivate = registration, …) are deliberately
+    // NOT enforced here: they describe who routinely performs a step, several name non-role actors
+    // ("System (timer)", "policy-service"), and locking them down would break legitimate desk work the
+    // portal already ships. The fraud edges are different in kind — they are the control, not the workflow.
+    private static readonly Dictionary<(BeneficiaryStatus From, BeneficiaryStatus To), string[]> RestrictedActors = new()
+    {
+        [(BeneficiaryStatus.Active, BeneficiaryStatus.Blocked)] = ["super_admin", "medical_director"],
+        [(BeneficiaryStatus.Suspended, BeneficiaryStatus.Blocked)] = ["super_admin", "medical_director"],
+        [(BeneficiaryStatus.Blocked, BeneficiaryStatus.Active)] = ["medical_director"],
+    };
+
+    /// <summary>Whether <paramref name="roles"/> may perform this transition (23 §1 Actor column). Returns
+    /// null when permitted, else the roles that could. Unlisted transitions are open to any authorized
+    /// caller — scope and engine checks still apply upstream.</summary>
+    public static string? DeniedActor(BeneficiaryStatus from, BeneficiaryStatus to, IEnumerable<string> roles) =>
+        RestrictedActors.TryGetValue((from, to), out var allowed) && !roles.Any(allowed.Contains)
+            ? string.Join(" / ", allowed)
+            : null;
 }
 
 /// <summary>Issues monotonic Member No business keys <c>MRS-M-YYYY-NNNNNN</c> per year (0A §3).</summary>

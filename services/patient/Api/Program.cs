@@ -87,6 +87,16 @@ v1.MapPost("", async (
 
         case RegistrationResult.Created created:
             db.Beneficiaries.Add(created.Beneficiary);
+            // The registration APPLICATION opens with the person, in the same transaction. Until now nothing
+            // created these rows — the approval endpoints existed but the worklist behind US-003 was empty
+            // unless someone hand-called POST /registrations, which no screen did. A beneficiary without an
+            // open application is a person nobody is going to review.
+            db.Registrations.Add(new Registration
+            {
+                RegistrationId = Guid.NewGuid(), BeneficiaryId = created.Beneficiary.BeneficiaryId,
+                TenantId = created.Beneficiary.TenantId, Status = RegistrationStatus.Pending,
+                CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow(),
+            });
             await db.SaveChangesAsync(ct);
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -131,7 +141,13 @@ read.MapGet("", async (string? identifierType, string? identifierValue, string? 
         q = q.Where(x => ids.Contains(x.BeneficiaryId));
     }
     if (!string.IsNullOrWhiteSpace(name))
-        q = q.Where(x => EF.Functions.ILike(x.GivenName, $"%{name}%") || EF.Functions.ILike(x.FamilyName, $"%{name}%"));
+    {
+        // Escape LIKE metacharacters: the value is already parameterized (no injection), but an unescaped
+        // "%" here makes a search for "100%" match every row — a full-directory disclosure, each row of
+        // which is then individually PHI-read-audited as if it were deliberate.
+        var pattern = $"%{name.Replace(@"\", @"\\").Replace("%", @"\%").Replace("_", @"\_")}%";
+        q = q.Where(x => EF.Functions.ILike(x.GivenName, pattern, @"\") || EF.Functions.ILike(x.FamilyName, pattern, @"\"));
+    }
     if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<BeneficiaryStatus>(status, out var st))
         q = q.Where(x => x.Status == st);
 
@@ -163,16 +179,71 @@ read.MapGet("/{id:guid}", async (Guid id, PatientDbContext db, BeneficiaryReadGu
 
 // ================================================================ REGISTRATION WORKFLOW (1.4, US-003/004)
 var reg = app.MapGroup("/api/v1/registrations").RequireAuthorization(HbmpPolicies.Scope("patient:write"));
+var regRead = app.MapGroup("/api/v1/registrations").RequireAuthorization(HbmpPolicies.Scope("patient:read"));
 
-// Create a registration for an existing (Pending) beneficiary.
+// The approver's WORKLIST (US-003): every Pending beneficiary with its latest application state — including
+// the ones with no application row at all (registered before applications were auto-created), because a
+// person the queue cannot show is a person nobody reviews. Reads take patient:read; every disclosed row is
+// engine-authorized and PHI-read-audited individually, exactly as the directory search is, and rows the
+// caller may not read are dropped rather than 403ing the page.
+regRead.MapGet("", async (int? page, int? pageSize, PatientDbContext db, BeneficiaryReadGuard guard, CancellationToken ct) =>
+{
+    var (p, ps) = (Math.Max(page ?? 1, 1), Math.Clamp(pageSize ?? 25, 1, 100));
+
+    // Oldest first: this is a queue, and a queue that shows the newest first starves whoever arrived first.
+    var pending = await db.Beneficiaries.AsNoTracking()
+        .Where(x => !x.IsDeleted && x.Status == BeneficiaryStatus.Pending)
+        .Include(x => x.Identifiers).Include(x => x.Contacts)
+        .OrderBy(x => x.CreatedAt)
+        .Skip((p - 1) * ps).Take(ps)
+        .ToListAsync(ct);
+
+    var ids = pending.Select(b => b.BeneficiaryId).ToList();
+    var latest = (await db.Registrations.AsNoTracking()
+            .Where(r => ids.Contains(r.BeneficiaryId))
+            .ToListAsync(ct))
+        .GroupBy(r => r.BeneficiaryId)
+        .ToDictionary(gr => gr.Key, gr => gr.OrderByDescending(r => r.CreatedAt).First());
+
+    var items = new List<object>();
+    foreach (var b in pending)
+    {
+        if (await guard.AuthorizeAsync(b, ct) is not null) continue;
+        var disclosed = await guard.DiscloseAsync(b, "approval-worklist", ct);
+        latest.TryGetValue(b.BeneficiaryId, out var r);
+        items.Add(new
+        {
+            beneficiary = disclosed,
+            registration = r is null ? null : new
+            {
+                r.RegistrationId,
+                status = r.Status.ToString(),
+                r.DocumentsVerified,
+                r.CoverageBound,
+                r.Notes,
+                r.UpdatedAt,
+            },
+        });
+    }
+    return Results.Ok(new { page = p, pageSize = ps, items });
+});
+
+// Create a registration for an existing (Pending) beneficiary — the re-review path (a Rejected application
+// is final, so a fresh look is a fresh row) and the backfill for beneficiaries registered before
+// applications were auto-created.
 reg.MapPost("", async (CreateRegistration req, HttpRequest http, PatientDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(http.Headers["Idempotency-Key"]))
         return Results.Problem(statusCode: 400, title: "Idempotency-Key header is required");
-    if (!await db.Beneficiaries.AnyAsync(x => x.BeneficiaryId == req.BeneficiaryId && !x.IsDeleted, ct))
+    var beneficiary = await db.Beneficiaries.AsNoTracking()
+        .FirstOrDefaultAsync(x => x.BeneficiaryId == req.BeneficiaryId && !x.IsDeleted, ct);
+    if (beneficiary is null)
         return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
     var now = clock.GetUtcNow();
-    var r = new Registration { RegistrationId = Guid.NewGuid(), BeneficiaryId = req.BeneficiaryId, Status = RegistrationStatus.Pending, CreatedAt = now, UpdatedAt = now };
+    // TenantId comes from the beneficiary. It used to be left at its CLR default (""), which the FORCED RLS
+    // policy on patient.registration refuses to insert under the NOBYPASSRLS runtime role — the endpoint
+    // only ever worked in tests, which connect as the table owner and bypass the policy entirely.
+    var r = new Registration { RegistrationId = Guid.NewGuid(), BeneficiaryId = req.BeneficiaryId, TenantId = beneficiary.TenantId, Status = RegistrationStatus.Pending, CreatedAt = now, UpdatedAt = now };
     db.Registrations.Add(r);
     await db.SaveChangesAsync(ct);
     await audit.EmitAsync(new AuditEventDraft { EntityType = "registration", EntityId = r.RegistrationId.ToString(), Action = AuditAction.Create, ActorUserId = me.Principal?.Subject }, ct);
@@ -200,6 +271,19 @@ reg.MapPost("/{id:guid}/decision", async (Guid id, DecisionRequest req, PatientD
 {
     if (!Enum.TryParse<RegistrationDecision>(req.Decision, ignoreCase: true, out var decision))
         return Results.Problem(statusCode: 400, title: $"invalid decision '{req.Decision}'");
+
+    // US-003 names the APPROVER, and the separation is the point: the officer who registered a person and
+    // vouched for their documents must not be the one who activates them. patient:write alone would let
+    // exactly that happen — both roles hold it, because the officer needs it for everything else. The
+    // denial is audited: a refused self-approval is evidence, not noise.
+    if (me.Principal is { } who && !who.IsInRole("beneficiary_mgmt_supervisor"))
+    {
+        await audit.EmitAsync(new AuditEventDraft { EntityType = "registration", EntityId = id.ToString(), Action = AuditAction.Decision, ActorUserId = who.Subject, DecisionOutcome = "DecisionDenied", DecisionReasonCode = "approver role required (US-003)" }, ct);
+        return Results.Problem(statusCode: 403, title: "approver-required",
+            detail: "registration decisions are made by a beneficiary-management supervisor (US-003)",
+            type: "urn:hbmp:approver-required");
+    }
+
     var r = await db.Registrations.FirstOrDefaultAsync(x => x.RegistrationId == id, ct);
     if (r is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
@@ -238,7 +322,7 @@ reg.MapPost("/{id:guid}/decision", async (Guid id, DecisionRequest req, PatientD
 });
 
 // ================================================================ LIFECYCLE TRANSITIONS (US-004)
-v1.MapPost("/{id:guid}/status", async (Guid id, StatusChange req, PatientDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
+v1.MapPost("/{id:guid}/status", async (Guid id, StatusChange req, PatientDbContext db, MemberNoIssuer memberNos, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
 {
     if (!Enum.TryParse<BeneficiaryStatus>(req.ToStatus, ignoreCase: true, out var to))
         return Results.Problem(statusCode: 400, title: $"invalid status '{req.ToStatus}'");
@@ -251,12 +335,47 @@ v1.MapPost("/{id:guid}/status", async (Guid id, StatusChange req, PatientDbConte
         await audit.EmitAsync(new AuditEventDraft { EntityType = "beneficiary", EntityId = id.ToString(), Action = AuditAction.StateChange, ActorUserId = me.Principal?.Subject, DecisionOutcome = "TransitionDenied", DecisionReasonCode = error }, ct);
         return Results.Problem(statusCode: 409, title: "transition-denied", detail: error);
     }
+
+    // 23 §1's Actor column for the FRAUD edges. Blocking and unblocking were reachable by any patient:write
+    // holder, so a fraud block could be quietly lifted at the desk — the same erasure 18.A4 closed the
+    // Blocked→Inactive edge against. Denied attempts are audited: a refused unblock is exactly the event a
+    // fraud review wants to see.
+    if (BeneficiaryLifecycle.DeniedActor(b.Status, to, me.Principal?.Roles ?? new HashSet<string>()) is { } requiredRoles)
+    {
+        await audit.EmitAsync(new AuditEventDraft { EntityType = "beneficiary", EntityId = id.ToString(), Action = AuditAction.StateChange, ActorUserId = me.Principal?.Subject, DecisionOutcome = "TransitionDenied", DecisionReasonCode = $"{b.Status}->{to} requires {requiredRoles}" }, ct);
+        return Results.Problem(statusCode: 403, title: "transition-actor-denied",
+            detail: $"moving a beneficiary {b.Status} → {to} requires {requiredRoles} (23 §1)",
+            type: "urn:hbmp:transition-actor-denied");
+    }
+
     var from = b.Status;
     b.Status = to; b.UpdatedBy = me.Principal?.Subject; b.UpdatedAt = clock.GetUtcNow();
+
+    // First activation issues the member number, whichever door it came through. The registration-decision
+    // path below has always done this; this path (Pending→Active at the desk, Inactive→Active reactivation
+    // of a never-carded record) previously produced an ACTIVE member with no MRS-M number — nothing
+    // downstream could reference them, and no BeneficiaryActivated event ever told eligibility they exist.
+    // Renewal/unblock of an already-carded member keeps its existing number: the number is an identity fact,
+    // not a status fact.
+    string? issuedMemberNo = null;
+    if (to == BeneficiaryStatus.Active && string.IsNullOrEmpty(b.MemberNo))
+    {
+        issuedMemberNo = await memberNos.NextAsync(calendar.Today().Year, ct);
+        b.MemberNo = issuedMemberNo;
+        db.Identifiers.Add(new BeneficiaryIdentifier
+        {
+            IdentifierId = Guid.NewGuid(), BeneficiaryId = b.BeneficiaryId,
+            IdentifierType = IdentifierType.MemberNo, IdentifierValue = issuedMemberNo, IsPrimary = false,
+        });
+    }
+
     await db.SaveChangesAsync(ct);
-    await audit.EmitAsync(new AuditEventDraft { EntityType = "beneficiary", EntityId = id.ToString(), Action = AuditAction.StateChange, ActorUserId = me.Principal?.Subject, BeforeState = $"{{\"status\":\"{from}\"}}", AfterState = $"{{\"status\":\"{to}\"}}", DecisionReasonCode = req.Reason }, ct);
+    await audit.EmitAsync(new AuditEventDraft { EntityType = "beneficiary", EntityId = id.ToString(), Action = AuditAction.StateChange, ActorUserId = me.Principal?.Subject, BeforeState = $"{{\"status\":\"{from}\"}}", AfterState = issuedMemberNo is null ? $"{{\"status\":\"{to}\"}}" : $"{{\"status\":\"{to}\",\"memberNo\":\"{issuedMemberNo}\"}}", DecisionReasonCode = req.Reason }, ct);
     await outbox.EnqueueAsync("BeneficiaryStatusChanged", "patient.events", new { tenantId = b.TenantId, beneficiaryId = id, from = from.ToString(), to = to.ToString(), reason = req.Reason }, ct);
-    return Results.Ok(new { beneficiaryId = id, from = from.ToString(), to = to.ToString() });
+    if (issuedMemberNo is not null)
+        await outbox.EnqueueAsync("BeneficiaryActivated", "patient.events", new { tenantId = b.TenantId, beneficiaryId = b.BeneficiaryId, memberNo = issuedMemberNo, givenName = b.GivenName, familyName = b.FamilyName }, ct);
+
+    return Results.Ok(new { beneficiaryId = id, from = from.ToString(), to = to.ToString(), status = to.ToString(), memberNo = b.MemberNo });
 }).RequireAuthorization(HbmpPolicies.Scope("patient:write"));
 
 app.MapBeneficiarySummaries();   // 19.5 — name-only batch for one page of policy-service's member query

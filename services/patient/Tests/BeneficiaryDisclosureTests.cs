@@ -54,6 +54,20 @@ public class BeneficiaryDisclosureTests
     }
 
     [Fact]
+    public void The_supervisor_reads_what_the_registrar_it_reviews_could()
+    {
+        // 19.7 added the supervisor role at the issuer with patient:read, and this bundle was never amended.
+        // The failure was SILENT: the search endpoint drops engine-denied rows rather than 403ing (so a name
+        // query cannot become an existence oracle), which meant a supervisor's every search legitimately
+        // returned an empty page. A reviewer who approves registrations must be able to see at least what
+        // the registrar saw when creating them — a review conducted over less than the evidence is not one.
+        PatientPolicies.Rules().Single().Roles.Should().Contain("beneficiary_mgmt_supervisor",
+            "a role the engine rule omits is dropped from every search page with no error anywhere");
+        Readable("beneficiary_mgmt_supervisor").Should().BeEquivalentTo(Readable("beneficiary_mgmt"),
+            "the reviewer's evidence is the registrar's record");
+    }
+
+    [Fact]
     public void Technicians_and_pharmacists_get_neither_pii_nor_contact()
     {
         // A lab technician confirming whose specimen this is needs the name and member number (baseline

@@ -37,7 +37,7 @@ public static class PatientPolicies
     /// the claims side never sees clinical context, and it does not need the identifier set either).</summary>
     private static readonly string[] Readers =
     [
-        "reception", "call_center", "beneficiary_mgmt", "case_manager",
+        "reception", "call_center", "beneficiary_mgmt", "beneficiary_mgmt_supervisor", "case_manager",
         "doctor", "nurse", "medical_approval", "medical_director",
     ];
 
@@ -76,6 +76,11 @@ public static class PatientPolicies
         ["reception"] = Set(Classes.Contact, Classes.Coverage),          // reach the member; NOT the ID values
         ["call_center"] = Set(Classes.Contact),                           // 15.x verify-before-disclose sits on top
         ["beneficiary_mgmt"] = Set(Classes.Pii, Classes.Contact, Classes.Coverage), // registers against documents
+        // 19.7 added the supervisor role to the issuer with patient:read, but this bundle was never
+        // amended — so the role's searches returned silently-empty pages (the search endpoint DROPS rows
+        // the engine denies rather than 403ing) and every by-id read was refused. A reviewer who approves
+        // registrations must be able to read at least what the registrar could when creating them.
+        ["beneficiary_mgmt_supervisor"] = Set(Classes.Pii, Classes.Contact, Classes.Coverage),
         ["case_manager"] = Set(Classes.Contact, Classes.Coverage, Classes.Diagnosis),
         ["doctor"] = Set(Classes.Pii, Classes.Contact, Classes.Diagnosis, Classes.Clinical, Classes.Prescription, Classes.Result, Classes.Coverage),
         ["nurse"] = Set(Classes.Contact, Classes.Clinical, Classes.Result, Classes.Coverage),

@@ -38,6 +38,57 @@ public class RlsIsolationTests
         finally { await Cleanup(); }
     }
 
+    [SkippableFact]
+    public async Task A_registration_with_an_empty_tenant_cannot_be_inserted_under_the_app_role()
+    {
+        // The bug this pins: Registration.TenantId defaulted to "" and POST /registrations never set it, so
+        // under the FORCED RLS policy the insert was refused for the runtime role — the endpoint only ever
+        // worked in tests, which connect as the table owner and bypass the policy. The fix copies the
+        // beneficiary's tenant; this proves the failure mode is real (empty tenant → refused) and the fixed
+        // shape works (beneficiary's tenant under the matching GUC → inserted and visible).
+        Skip.If(Owner is null || App is null, "test DB not configured — set the *_TEST_DB env vars to run this.");
+
+        await Seed();
+        try
+        {
+            await using var conn = new NpgsqlConnection(App);
+            await conn.OpenAsync();
+            await using (var set = new NpgsqlCommand("SELECT set_config('app.tenant_id',$1,false)", conn))
+            {
+                set.Parameters.AddWithValue(TenantA);
+                await set.ExecuteNonQueryAsync();
+            }
+
+            // The pre-fix shape: tenant left at the CLR default.
+            await using (var bad = new NpgsqlCommand(
+                @"INSERT INTO patient.registration (registration_id, tenant_id, beneficiary_id) VALUES ($1,'',$2)", conn))
+            {
+                bad.Parameters.AddWithValue(Guid.NewGuid());
+                bad.Parameters.AddWithValue(BenA);
+                var refused = async () => await bad.ExecuteNonQueryAsync();
+                (await refused.Should().ThrowAsync<PostgresException>("RLS must refuse a row outside the caller's tenant"))
+                    .Which.SqlState.Should().Be("42501");
+            }
+
+            // The fixed shape: the beneficiary's tenant, matching the GUC.
+            var regId = Guid.NewGuid();
+            await using (var good = new NpgsqlCommand(
+                @"INSERT INTO patient.registration (registration_id, tenant_id, beneficiary_id) VALUES ($1,$2,$3)", conn))
+            {
+                good.Parameters.AddWithValue(regId);
+                good.Parameters.AddWithValue(TenantA);
+                good.Parameters.AddWithValue(BenA);
+                await good.ExecuteNonQueryAsync();
+            }
+            await using (var check = new NpgsqlCommand("SELECT count(*) FROM patient.registration WHERE registration_id = $1", conn))
+            {
+                check.Parameters.AddWithValue(regId);
+                Convert.ToInt64(await check.ExecuteScalarAsync(), System.Globalization.CultureInfo.InvariantCulture).Should().Be(1);
+            }
+        }
+        finally { await Cleanup(); }
+    }
+
     private static async Task<List<string>> VisibleNames(string tenant)
     {
         await using var conn = new NpgsqlConnection(App);
@@ -73,6 +124,12 @@ public class RlsIsolationTests
     {
         await using var conn = new NpgsqlConnection(Owner);
         await conn.OpenAsync();
+        // Registrations reference the seeded beneficiaries and must go first (FK).
+        await using (var regs = new NpgsqlCommand(
+            "DELETE FROM patient.registration WHERE beneficiary_id IN (SELECT beneficiary_id FROM patient.beneficiary WHERE given_name LIKE 'RLS-%')", conn))
+        {
+            await regs.ExecuteNonQueryAsync();
+        }
         await using var cmd = new NpgsqlCommand("DELETE FROM patient.beneficiary WHERE given_name LIKE 'RLS-%'", conn);
         await cmd.ExecuteNonQueryAsync();
     }
