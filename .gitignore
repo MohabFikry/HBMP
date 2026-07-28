@@ -29,6 +29,9 @@ playwright-report/
 # Env & secrets — NEVER commit plaintext secrets (use OpenBao + SOPS)
 .env
 *.env
+# Timestamped .env backups written by the local-dev key-rotation flow (e.g. .env.bak.prekongfix.*) —
+# same secrets as .env itself, so the same rule: never in history.
+.env.bak.*
 !*.env.example
 !.env.example
 *.pem
