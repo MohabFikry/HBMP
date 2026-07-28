@@ -413,18 +413,18 @@ function OverridesTab({ membership, onChanged }: { membership: MembershipDetail;
           error={scopeError}
           onChange={(e) => setScope(e.currentTarget.value)}
         />
-        <fieldset style={{ border: 0, padding: 0, margin: "var(--sp3) 0" }}>
-          <legend>{t(S.effect)}</legend>
+        <fieldset className="mrs-choice" style={{ margin: "var(--sp3) 0" }}>
+          <legend className="mrs-label">{t(S.effect)}</legend>
           {(["Allow", "Deny"] as const).map((v) => (
-            <label key={v} style={{ marginInlineEnd: "var(--sp4)" }}>
+            <label key={v} className="mrs-choice-opt">
               <input
                 type="radio"
                 name="effect"
                 value={v}
                 checked={effect === v}
                 onChange={() => setEffect(v)}
-              />{" "}
-              {t(v === "Deny" ? S.deny : S.allow)}
+              />
+              <span>{t(v === "Deny" ? S.deny : S.allow)}</span>
             </label>
           ))}
         </fieldset>

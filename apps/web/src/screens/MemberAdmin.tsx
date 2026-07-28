@@ -5,7 +5,6 @@ import {
   DataTable,
   InlineAlert,
   InputField,
-  SearchField,
   StatusChip,
   Tabs,
   TextareaField,
@@ -196,20 +195,27 @@ export function MemberSearch({ api = httpPolicyApi }: { api?: PolicyApi }) {
     <div className="pol-screen">
       <PageHeader title={t(S.title)} />
       <Card>
-        <div className="pol-searchbar">
-          <SearchField
-            aria-label={t(S.search)}
-            placeholder={t(S.search)}
+        {/* The app's one search-bar vocabulary (QA follow-up): a labeled standard control + the solid
+            primary action, exactly as Reception's eligibility search and the register form render theirs.
+            The pill SearchField belongs to the app bar; borrowing it in-page paired a 999px-radius input
+            with a differently-shaped secondary button and matched nothing else on screen. */}
+        <form
+          className="pol-searchbar"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void run(query.trim() || undefined);
+          }}
+        >
+          <InputField
+            label={t(S.search)}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void run(query.trim() || undefined);
-            }}
+            onChange={(e) => setQuery(e.currentTarget.value)}
+            autoComplete="off"
           />
-          <Button variant="secondary" onClick={() => run(query.trim() || undefined)}>
+          <Button type="submit" variant="primary">
             {t(S.find)}
           </Button>
-        </div>
+        </form>
       </Card>
 
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}

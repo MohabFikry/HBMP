@@ -952,9 +952,10 @@ nav.mrs-rail {
 
 .pol-searchbar { display: flex; gap: var(--sp3); align-items: center; flex-wrap: wrap; }
 .pol-searchbar > *:first-child { flex: 1 1 22rem; }
-/* The search control is a 44px pill; a squarer-cornered button at its side reads as a mismatch. The pair
-   share one silhouette. */
-.pol-searchbar .mrs-btn { border-radius: var(--r-pill); }
+/* The pair aligns at the control line: the labeled field is taller than the button, and centring would
+   float the button against the label instead of the input. */
+.pol-searchbar { align-items: end; }
+.pol-searchbar .mrs-btn { margin-bottom: 1px; }
 
 .pol-kpis { display: flex; flex-wrap: wrap; gap: var(--sp5); margin: 0; }
 .pol-kpis > div { display: grid; gap: var(--sp1); }

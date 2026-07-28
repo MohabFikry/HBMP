@@ -298,12 +298,12 @@ function StatusChangeModal({ row, onClose, onChanged }: { row: BeneficiaryRow; o
     >
       {write.error ? <InlineAlert tone="bad">{t(write.error.message)}</InlineAlert> : null}
 
-      <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
-        <legend>{t(S.newStatus)}</legend>
+      <fieldset className="mrs-choice">
+        <legend className="mrs-label">{t(S.newStatus)}</legend>
         {options.map((o) => (
-          <label key={o.to} style={{ display: "block", padding: "var(--sp1) 0" }}>
-            <input type="radio" name="transition" value={o.to} checked={choice === o.to} onChange={() => setChoice(o.to)} />{" "}
-            {t(o.label)}
+          <label key={o.to} className="mrs-choice-opt">
+            <input type="radio" name="transition" value={o.to} checked={choice === o.to} onChange={() => setChoice(o.to)} />
+            <span>{t(o.label)}</span>
           </label>
         ))}
       </fieldset>
@@ -605,6 +605,7 @@ export function RegistrationApprovals() {
         <label style={{ display: "inline-flex", alignItems: "center", gap: "var(--sp2)" }}>
           <input
             type="checkbox"
+            className="mrs-checkbox"
             checked={r.registration?.documentsVerified ?? false}
             disabled={!r.registration || write.busy}
             onChange={() => void toggle(r, "documentsVerified")}
@@ -620,6 +621,7 @@ export function RegistrationApprovals() {
         <label style={{ display: "inline-flex", alignItems: "center", gap: "var(--sp2)" }}>
           <input
             type="checkbox"
+            className="mrs-checkbox"
             checked={r.registration?.coverageBound ?? false}
             disabled={!r.registration || write.busy}
             onChange={() => void toggle(r, "coverageBound")}
@@ -724,22 +726,25 @@ function DecisionModal({ item, onClose, onDecided }: { item: RegistrationWorkIte
     >
       {write.error ? <InlineAlert tone="bad">{t(write.error.message)}</InlineAlert> : null}
 
-      <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
-        <legend>{t(A.decisionLabel)}</legend>
-        <label style={{ display: "block", padding: "var(--sp1) 0" }}>
-          <input type="radio" name="decision" value="Approve" disabled={!canApprove} checked={decision === "Approve"} onChange={() => setDecision("Approve")} />{" "}
-          {t(A.approve)}
+      <fieldset className="mrs-choice">
+        <legend className="mrs-label">{t(A.decisionLabel)}</legend>
+        <label className="mrs-choice-opt">
+          <input type="radio" name="decision" value="Approve" disabled={!canApprove} checked={decision === "Approve"} onChange={() => setDecision("Approve")} />
+          <span>
+            {t(A.approve)}
+            {/* Disabled WITH the reason inside the option (§6 — the server re-checks either way): an
+                approve option that is simply missing reads as a broken screen, not an incomplete
+                application. */}
+            {!canApprove ? <span className="mrs-choice-hint">{t(A.approveBlocked)}</span> : null}
+          </span>
         </label>
-        {/* Disabled WITH the reason beside it (§6 — the server re-checks either way): an approve option
-            that is simply missing reads as a broken screen, not an incomplete application. */}
-        {!canApprove ? <InlineAlert tone="info">{t(A.approveBlocked)}</InlineAlert> : null}
-        <label style={{ display: "block", padding: "var(--sp1) 0" }}>
-          <input type="radio" name="decision" value="RequestInfo" checked={decision === "RequestInfo"} onChange={() => setDecision("RequestInfo")} />{" "}
-          {t(A.requestInfo)}
+        <label className="mrs-choice-opt">
+          <input type="radio" name="decision" value="RequestInfo" checked={decision === "RequestInfo"} onChange={() => setDecision("RequestInfo")} />
+          <span>{t(A.requestInfo)}</span>
         </label>
-        <label style={{ display: "block", padding: "var(--sp1) 0" }}>
-          <input type="radio" name="decision" value="Reject" checked={decision === "Reject"} onChange={() => setDecision("Reject")} />{" "}
-          {t(A.reject)}
+        <label className="mrs-choice-opt">
+          <input type="radio" name="decision" value="Reject" checked={decision === "Reject"} onChange={() => setDecision("Reject")} />
+          <span>{t(A.reject)}</span>
         </label>
       </fieldset>
 
