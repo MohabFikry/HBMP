@@ -1182,3 +1182,59 @@ nav.mrs-rail {
 .pol-delta-values { color: var(--text-3); font-variant-numeric: tabular-nums; }
 
 .pol-drill { display: grid; gap: var(--sp3); }
+
+/* ── Branch switcher (app bar) ───────────────────────────────────────────────
+   The control WAS a bare browser <select> beside a bold "Active branch" label: unstyled against a glass
+   bar, and a visible label restating what the control already shows. Now: the branch icon carries the
+   meaning (accessible name moved to a sr-only label), and the select wears the app's own field styling
+   with a pill silhouette to match the app-bar search. */
+.branch-switcher {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+  min-height: 44px;
+  color: var(--text-2);
+}
+.branch-switcher > svg {
+  inline-size: 18px;
+  block-size: 18px;
+  flex: none;
+  color: var(--accent);
+}
+.branch-select {
+  min-height: 38px;
+  min-inline-size: 170px;
+  padding: 0 var(--sp3);
+  border: 1px solid var(--border-input, var(--border));
+  border-radius: var(--r-pill);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.branch-select:hover {
+  border-color: var(--accent);
+}
+.branch-select:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.branch-switcher--member > span:not(.sr-only) {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* ── Account pane settings rows ──────────────────────────────────────────────
+   The rows sat flush against their divider and the two buttons were different widths, so the pair read as
+   ragged rather than as a column of settings. */
+.upane-row {
+  padding-block: var(--sp2);
+}
+.upane-row + .upane-row {
+  margin-top: var(--sp2);
+  padding-top: var(--sp3);
+}
+.upane-row > span:first-child {
+  font-weight: 500;
+}

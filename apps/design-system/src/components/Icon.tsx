@@ -23,6 +23,9 @@ export const iconPaths = {
   check2: '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
   chevron: '<path d="m6 9 6 6 6-6"/>',
   bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
+  /** Branch / clinic site — a building with a cross. Replaces the 🏥 emoji the switcher used: an emoji
+   *  renders in the platform font, ignores currentColor and sits off the icon baseline. */
+  branch: '<path d="M4 21V7l8-4 8 4v14"/><path d="M9 21v-6h6v6"/><path d="M12 8v3M10.5 9.5h3"/>',
 } as const;
 
 export type IconName = keyof typeof iconPaths;

@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { useTheme } from "@mersal/design-system";
+import { Icon, useTheme } from "@mersal/design-system";
 import { L } from "../i18n/strings";
 
 /** A permitted branch for the switcher. `isHome` marks the user's home branch (design 37 §2.3). */
@@ -38,17 +38,17 @@ export function BranchSwitcher({ memberScoped, branches, activeBranchId, onSwitc
 
   if (memberScoped) {
     return (
-      <div className="branch-switcher branch-switcher--member" style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 44 }}>
-        <span aria-hidden style={{ opacity: 0.8 }}>🏥</span>
+      <div className="branch-switcher branch-switcher--member">
+        <Icon name="branch" aria-hidden />
         <span data-testid="all-branches-indicator">{t(L.allBranches)}</span>
         {onFilter && branches.length > 0 && (
           <>
             <label htmlFor={selectId} className="sr-only">{t(L.branch)}</label>
             <select
+              className="branch-select"
               id={selectId}
               value={activeBranchId ?? ""}
               onChange={(e) => onFilter(e.target.value || null)}
-              style={{ minHeight: 44 }}
             >
               <option value="">{t(L.allBranches)}</option>
               {branches.map((b) => (
@@ -62,9 +62,13 @@ export function BranchSwitcher({ memberScoped, branches, activeBranchId, onSwitc
   }
 
   return (
-    <div className="branch-switcher" style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 44 }}>
-      <label htmlFor={selectId} style={{ fontWeight: 600 }}>{t(L.activeBranch)}</label>
+    <div className="branch-switcher">
+      {/* The icon carries the meaning and the accessible name lives on the select — "Active branch" as a
+          visible label spent a third of the app bar restating what the control already shows. */}
+      <Icon name="branch" aria-hidden />
+      <label htmlFor={selectId} className="sr-only">{t(L.activeBranch)}</label>
       <select
+        className="branch-select"
         id={selectId}
         value={activeBranchId ?? ""}
         onChange={(e) => {
@@ -73,7 +77,6 @@ export function BranchSwitcher({ memberScoped, branches, activeBranchId, onSwitc
           onSwitch(id);
           if (picked) setAnnounce(`${t(L.branchSwitched)} ${picked.name}`);
         }}
-        style={{ minHeight: 44, minWidth: 160 }}
       >
         {branches.map((b) => (
           <option key={b.id} value={b.id}>{label(b)}</option>
