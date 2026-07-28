@@ -23,7 +23,8 @@ public sealed record UserTokenFacts(
 /// the tenant-local roles/scopes-as-data resolver. This is the seam the OpenIddict token/authorize handlers
 /// call.</summary>
 public sealed class UserClaimsService(
-    UserManager<ApplicationUser> users, RoleScopeResolver resolver, MembershipService memberships)
+    UserManager<ApplicationUser> users, RoleScopeResolver resolver, MembershipService memberships,
+    EffectiveSetService effective)
 {
     /// <summary>
     /// Facts for a user acting under <paramref name="membership"/>.
@@ -36,7 +37,11 @@ public sealed class UserClaimsService(
         ApplicationUser user, TenantMembership membership, CancellationToken ct = default)
     {
         var roles = await memberships.RolesForAsync(membership.MembershipId, ct);
-        var scopes = await resolver.ResolveScopesAsync(roles, membership.TenantId, ct);
+
+        // 21.2 MODE 1 — the token's scope claim is now the EFFECTIVE set, not the raw role grants: the
+        // same algebra mode 2 runs, so per-membership allows and denies reach the token instead of being a
+        // second, out-of-session opinion about the same question (design 40 §5, invariant 5).
+        var scopes = (await effective.ComputeAsync(membership, "identity-service:token", ct)).Keys;
 
         return new UserTokenFacts(
             user.Id.ToString(), roles, scopes,

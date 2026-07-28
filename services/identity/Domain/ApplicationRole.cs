@@ -20,4 +20,15 @@ public sealed class ApplicationRole : IdentityRole<Guid>
 
     /// <summary>Human-readable purpose of the role (bilingual copy lives in the SPA; this is an operator note).</summary>
     public string? Description { get; set; }
+
+    /// <summary>
+    /// 21.2 — the ordinal trust tier (design 40 §2). LOWER = MORE PRIVILEGED, seeded as 4 − sensitivity
+    /// tier so the T4 platform-critical personas land at 0. Null for a role the seed did not cover.
+    ///
+    /// It answers ONLY tier-shaped questions — is this an administrative persona (MFA-required tiers per
+    /// 17, peer-review-required grants per 8b). CAPABILITY QUESTIONS USE KEYS. Asking "level &lt;= 1" instead
+    /// of asking for the key is how a case manager quietly acquires a doctor's reach, so the two are never
+    /// substituted for one another (docs/CONVENTIONS.md).
+    /// </summary>
+    public int? Level { get; set; }
 }

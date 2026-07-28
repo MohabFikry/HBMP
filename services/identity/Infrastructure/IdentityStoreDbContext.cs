@@ -29,6 +29,10 @@ public sealed class IdentityStoreDbContext(DbContextOptions<IdentityStoreDbConte
     public DbSet<MembershipRole> MembershipRoles => Set<MembershipRole>();
     public DbSet<TenantMembershipHistory> MembershipHistory => Set<TenantMembershipHistory>();
 
+    /// <summary>21.2 — the per-membership override overlay (design 40 §2).</summary>
+    public DbSet<MembershipOverride> Overrides => Set<MembershipOverride>();
+    public DbSet<MembershipOverrideHistory> OverrideHistory => Set<MembershipOverrideHistory>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -65,6 +69,11 @@ public sealed class IdentityStoreDbContext(DbContextOptions<IdentityStoreDbConte
             e.HasKey(s => s.Name);
             e.Property(s => s.Name).HasMaxLength(64);
             e.Property(s => s.Domain).HasMaxLength(32);
+            // 21.2 catalog metadata (0013). Both flags default FALSE, so a key that predates this migration
+            // is neither deprecated nor reachable by the platform-admin short-circuit.
+            e.Property(s => s.Deprecated).HasDefaultValue(false);
+            e.Property(s => s.ReplacedBy).HasMaxLength(64);
+            e.Property(s => s.IsPlatformAdminKey).HasDefaultValue(false);
         });
 
         builder.Entity<RoleScope>(e =>
@@ -107,6 +116,31 @@ public sealed class IdentityStoreDbContext(DbContextOptions<IdentityStoreDbConte
             e.HasKey(h => h.HistoryId);
             e.Property(h => h.Status).HasMaxLength(10);
             e.Property(h => h.TenantId).IsRequired();
+        });
+
+        // ---- 21.2 per-membership overrides (Migrations/0013_catalog_and_overrides.sql) ----
+        builder.Entity<MembershipOverride>(e =>
+        {
+            e.ToTable("membership_override");
+            e.HasKey(o => o.OverrideId);
+            e.Property(o => o.ScopeKey).HasMaxLength(64);
+            // Stored as the CHECK-constrained string, for the same reason the membership status is: an
+            // operator reading this table during an incident should see 'Deny', not a 1.
+            e.Property(o => o.Effect).HasMaxLength(5).HasConversion<string>();
+            e.Property(o => o.Reason).HasMaxLength(300).IsRequired();
+            e.Property(o => o.IsDeleted).HasDefaultValue(false);
+            e.Property(o => o.RowVersion).HasDefaultValue(0);
+            e.HasOne<TenantMembership>().WithMany().HasForeignKey(o => o.MembershipId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(o => new { o.MembershipId, o.ScopeKey }).IsUnique().HasFilter("NOT is_deleted");
+        });
+
+        builder.Entity<MembershipOverrideHistory>(e =>
+        {
+            e.ToTable("membership_override_history");
+            e.HasKey(h => h.HistoryId);
+            e.Property(h => h.ScopeKey).HasMaxLength(64);
+            e.Property(h => h.Effect).HasMaxLength(5);
+            e.Property(h => h.Reason).HasMaxLength(300);
         });
     }
 }

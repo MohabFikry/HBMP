@@ -1,3 +1,4 @@
+using Mersal.Authz;
 using Mersal.Identity.Domain;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -44,6 +45,12 @@ public static class DependencyInjection
         // makes the Infrastructure package self-contained, following the libs/* precedent.
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<MembershipService>();   // 21.1c — resolves the active membership (the principal)
+        // 21.2 — one evaluator, two modes. Registered against both the concrete type (mode 1, token
+        // issuance) and the interface (mode 2, out-of-session) so they cannot drift into two objects.
+        services.AddMemoryCache();
+        services.AddSingleton<DeprecationReporter>();
+        services.AddScoped<EffectiveSetService>();
+        services.AddScoped<IEffectiveSetService>(sp => sp.GetRequiredService<EffectiveSetService>());
         services.AddScoped<UserClaimsService>();
         return services;
     }

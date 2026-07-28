@@ -3,6 +3,9 @@
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Identity.Domain.csproj" />
     <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
+    <!-- 21.2 — the ONE effective-set evaluator lives in libs/authz so identity-service and every
+         out-of-session consumer run the same algebra (design 40 §5, invariant 5). -->
+    <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
