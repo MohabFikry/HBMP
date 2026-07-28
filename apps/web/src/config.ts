@@ -13,10 +13,24 @@ import type { Role } from "./authz/permissions";
  */
 const env = (import.meta as { env?: Record<string, string | undefined> }).env ?? {};
 
-export const LIVE = env.VITE_LIVE === "1";
+/**
+ * Read a build-time variable, treating BLANK as absent.
+ *
+ * `??` alone is wrong here, because it only falls back on null/undefined. `apps/web/Dockerfile` declares
+ * these as ARGs whose defaults are the EMPTY STRING, so a build that does not pass `--build-arg` bakes
+ * `VITE_OIDC_AUTHORITY:""` — a value `??` happily keeps. The result was a bundle with an empty issuer and
+ * an empty client id: login could not even begin, and nothing in the build or the browser said why. Defaults
+ * that only apply when a variable is *undefined* are no defence against a toolchain that supplies "".
+ */
+const fromEnv = (value: string | undefined, fallback: string): string =>
+  value !== undefined && value.trim() !== "" ? value : fallback;
+
+/** Live mode. Accepts `1` or `true`: compose and the Dockerfile disagreed on spelling, and the losing
+ * spelling silently downgraded the app to fixture mode against a fully working backend. */
+export const LIVE = ["1", "true"].includes((env.VITE_LIVE ?? "").trim().toLowerCase());
 
 /** Base URL for the API gateway (Kong). All service calls are `${API_BASE}/<path>`. */
-export const API_BASE = env.VITE_API_BASE ?? "http://localhost:8000/api/v1";
+export const API_BASE = fromEnv(env.VITE_API_BASE, "http://localhost:8000/api/v1");
 
 /**
  * The gateway ORIGIN, without the `/api/v1` prefix. 18.C2 (audit R2 W5): identity-service serves the in-app
@@ -28,9 +42,9 @@ export const GATEWAY_BASE = API_BASE.replace(/\/api\/v1\/?$/, "");
 export const OIDC = {
   /** The in-app issuer (identity-service, OpenIddict), as the *browser* reaches it (must match token `iss`).
    * Phase 17.5: this replaced Keycloak — endpoints are `/connect/*` and JWKS is at `/.well-known/jwks`. */
-  authority: env.VITE_OIDC_AUTHORITY ?? "http://localhost:8090",
-  clientId: env.VITE_OIDC_CLIENT_ID ?? "hbmp-web",
-  redirectUri: env.VITE_OIDC_REDIRECT ?? "http://localhost:5173/",
+  authority: fromEnv(env.VITE_OIDC_AUTHORITY, "http://localhost:8090"),
+  clientId: fromEnv(env.VITE_OIDC_CLIENT_ID, "hbmp-web"),
+  redirectUri: fromEnv(env.VITE_OIDC_REDIRECT, "http://localhost:5173/"),
   /**
    * The full space-delimited scope set the SPA requests: exactly `IdentityContract.InteractiveScopes` plus
    * `openid` and `offline_access`. The services enforce a scope PER endpoint (e.g. `finance:read`);
@@ -70,6 +84,11 @@ const ROLE_MAP: Array<[string, Role]> = [
   ["org_admin", "org_admin"],
   ["medical_director", "medical_director"],
   ["medical_approval", "medical_approval"],
+  // 19.7 — ABOVE beneficiary_mgmt in the list, which is what makes the priority order load-bearing: a
+  // supervisor carries the officer role too, and matching the officer first would land them on the portal
+  // without the supervisory affordances they were promoted for.
+  ["policy_admin", "policy_admin"],
+  ["beneficiary_mgmt_supervisor", "beneficiary_mgmt"],
   ["case_manager", "case_manager"],
   ["call_center", "call_center"],
   ["claims_officer", "claims_officer"],

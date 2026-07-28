@@ -76,6 +76,10 @@ export type Permission =
   | "policy.groups"
   | "policy.utilization"
   | "policy.bulk"
+  // 19.6b — the analytical layer. Its own permission rather than riding on `policy.utilization`, because the
+  // dashboard aggregates across the WHOLE book (payers, plans, cost) while utilization answers one scope's
+  // consumption. Granting the second should not silently grant the first.
+  | "policy.analytics"
   // Network / provider admin
   | "provider.directory"
   | "provider.onboarding"
@@ -153,13 +157,18 @@ export const rolePermissions: Record<Role, Permission[]> = {
     "policy.groups",
     "policy.utilization",
     "policy.bulk",
+    "policy.analytics",
   ],
   case_manager: ["case.read", "case.beneficiary360", "case.escalations"],
   // Call Centre — a call workspace + call history. No clinical permission exists here (min-necessary).
   call_center: ["callcentre.workspace", "callcentre.history", "appointments.read"],
   // Claims officer — worklist + reconciliation + PHI-free KPIs. No clinical/diagnosis permission (finance-parity).
   claims_officer: ["claims.worklist", "claims.reconciliation", "claims.insights"],
-  finance: ["finance.utilization", "finance.settlements", "finance.summaries", "finance.export"],
+  // Finance gets the analytics section too: the financial and network views are exactly the money questions
+  // this role exists to answer, and reporting-service gates those two views on the FINANCIAL zone anyway —
+  // so the section is visible and the views a finance user may not read are refused by the server, not hidden
+  // by a nav rule the server does not know about.
+  finance: ["finance.utilization", "finance.settlements", "finance.summaries", "finance.export", "policy.analytics"],
   provider_admin: [
     "provider.directory",
     "provider.onboarding",
@@ -179,6 +188,7 @@ export const rolePermissions: Record<Role, Permission[]> = {
     "policy.groups",
     "policy.utilization",
     "policy.bulk",
+    "policy.analytics",
     "network.tiers",
   ],
   org_admin: ["admin.users", "admin.policies", "admin.masterdata", "admin.tenants", "admin.audit", "admin.config"],

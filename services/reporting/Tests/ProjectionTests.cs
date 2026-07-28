@@ -32,7 +32,7 @@ public class ProjectionTests
         try
         {
             await using var db = new ReportingDbContext(Options());
-            var proj = new EventProjector(db, TimeProvider.System, new BusinessCalendar(TimeProvider.System));
+            var proj = new EventProjector(db, TimeProvider.System, new BusinessCalendar(TimeProvider.System), new AnalyticsProjector(db, TimeProvider.System));
             // three approved with TATs 100/200/900, one breaching SLA
             await proj.ProjectAsync(Ev("AuthApproved", tenant, day, ("authNo", "AUTH-1"), ("priority", "Urgent"), ("tatSeconds", "100"), ("slaBreached", "false")));
             await proj.ProjectAsync(Ev("AuthApproved", tenant, day, ("authNo", "AUTH-2"), ("priority", "Urgent"), ("tatSeconds", "200"), ("slaBreached", "false")));
@@ -59,7 +59,7 @@ public class ProjectionTests
         try
         {
             await using var db = new ReportingDbContext(Options());
-            var proj = new EventProjector(db, TimeProvider.System, new BusinessCalendar(TimeProvider.System));
+            var proj = new EventProjector(db, TimeProvider.System, new BusinessCalendar(TimeProvider.System), new AnalyticsProjector(db, TimeProvider.System));
             await proj.ProjectAsync(Ev("AuthSubmitted", tenant, now.AddHours(-30), ("authorizationId", authId.ToString()), ("priority", "Routine")));
 
             var q = new ReportQueries(db, TimeProvider.System);
@@ -84,7 +84,7 @@ public class ProjectionTests
         try
         {
             await using var db = new ReportingDbContext(Options());
-            var proj = new EventProjector(db, TimeProvider.System, new BusinessCalendar(TimeProvider.System));
+            var proj = new EventProjector(db, TimeProvider.System, new BusinessCalendar(TimeProvider.System), new AnalyticsProjector(db, TimeProvider.System));
             var ev = Ev("DiagnosisRecorded", tenant, day, ("icd", "E11.9"));
             (await proj.ProjectAsync(ev)).Should().BeTrue();
             (await proj.ProjectAsync(ev)).Should().BeFalse();   // redelivery
@@ -105,7 +105,7 @@ public class ProjectionTests
         try
         {
             await using var db = new ReportingDbContext(Options());
-            var proj = new EventProjector(db, TimeProvider.System, new BusinessCalendar(TimeProvider.System));
+            var proj = new EventProjector(db, TimeProvider.System, new BusinessCalendar(TimeProvider.System), new AnalyticsProjector(db, TimeProvider.System));
             await proj.ProjectAsync(Ev("EncounterCreated", tenant, day, ("clinicId", "C1")));
             await proj.ProjectAsync(Ev("EncounterCreated", tenant, day, ("clinicId", "C1")));
             await proj.ProjectAsync(Ev("AppointmentBooked", tenant, day, ("clinicId", "C1")));
@@ -133,7 +133,7 @@ public class ProjectionTests
         try
         {
             await using var db = new ReportingDbContext(Options());
-            var proj = new EventProjector(db, TimeProvider.System, new BusinessCalendar(TimeProvider.System));
+            var proj = new EventProjector(db, TimeProvider.System, new BusinessCalendar(TimeProvider.System), new AnalyticsProjector(db, TimeProvider.System));
             await proj.ProjectAsync(Ev("ServiceValued", tenant, day, ("serviceLine", "Lab"), ("serviceCode", "80053"), ("amount", "150.00")));
             await proj.ProjectAsync(Ev("ServiceValued", tenant, day, ("serviceLine", "Lab"), ("serviceCode", "80053"), ("amount", "50.00")));
 

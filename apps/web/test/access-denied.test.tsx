@@ -11,8 +11,11 @@ import { L } from "../src/i18n/strings";
  * your administrator, Mersal, or you. A test that only checked "a 403 page renders" would pass just as
  * happily after someone collapsed them back into one generic page.
  */
-function renderIn(lang: "en" | "ar", ui: React.ReactElement) {
-  return render(<ThemeProvider lang={lang}>{ui}</ThemeProvider>);
+// ThemeProvider takes no `lang` prop — it resolves the language once at module load from localStorage
+// (see the Arabic-copy test below). These renders are therefore language-agnostic: what they assert is the
+// treatment's STRUCTURE (icon, heading, data-treatment), and the bilingual copy is asserted from the table.
+function renderIn(ui: React.ReactElement) {
+  return render(<ThemeProvider>{ui}</ThemeProvider>);
 }
 
 describe("403 treatments (21.6)", () => {
@@ -32,21 +35,21 @@ describe("403 treatments (21.6)", () => {
   });
 
   it("THE acceptance case — the three treatments render different copy and different actions", () => {
-    const { unmount: u1 } = renderIn("en", <AccessDenied kind="forbidden" onRequestAccess={() => {}} />);
+    const { unmount: u1 } = renderIn(<AccessDenied kind="forbidden" onRequestAccess={() => {}} />);
     expect(screen.getByRole("heading")).toHaveTextContent(L.forbiddenTitle.en);
     expect(screen.getByRole("button", { name: L.requestAccess.en })).toBeInTheDocument();
     // It must NOT tell someone with a permission problem to contact Mersal.
     expect(screen.queryByRole("button", { name: L.contactMersal.en })).not.toBeInTheDocument();
     u1();
 
-    const { unmount: u2 } = renderIn("en", <AccessDenied kind="program-not-enabled" detailKey="claims" />);
+    const { unmount: u2 } = renderIn(<AccessDenied kind="program-not-enabled" detailKey="claims" />);
     expect(screen.getByRole("heading")).toHaveTextContent(L.notEnabledTitle.en);
     expect(screen.getByRole("button", { name: L.contactMersal.en })).toBeInTheDocument();
     // …and it must NOT tell someone with an enablement gap to ask their own administrator.
     expect(screen.queryByRole("button", { name: L.requestAccess.en })).not.toBeInTheDocument();
     u2();
 
-    renderIn("en", <AccessDenied kind="branch-out-of-scope" onSwitchBranch={() => {}} />);
+    renderIn(<AccessDenied kind="branch-out-of-scope" onSwitchBranch={() => {}} />);
     expect(screen.getByRole("heading")).toHaveTextContent(L.branchOutOfScopeTitle.en);
     // The only one the user can fix themselves, so it offers the switcher rather than a person to ask.
     expect(screen.getByRole("button", { name: L.switchBranch.en })).toBeInTheDocument();
@@ -54,13 +57,13 @@ describe("403 treatments (21.6)", () => {
   });
 
   it("names the specific programme rather than showing a generic wall", () => {
-    renderIn("en", <AccessDenied kind="program-not-enabled" detailKey="callcentre" />);
+    renderIn(<AccessDenied kind="program-not-enabled" detailKey="callcentre" />);
     // A generic wall produces a support ticket that has to be answered with a question.
     expect(screen.getByText("callcentre")).toBeInTheDocument();
   });
 
   it("A4 — the not-enabled copy never reads as a paywall", () => {
-    renderIn("en", <AccessDenied kind="program-not-enabled" />);
+    renderIn(<AccessDenied kind="program-not-enabled" />);
     const text = document.body.textContent ?? "";
     for (const word of ["upgrade", "subscription", "billing", "purchase", "trial", "pricing"]) {
       expect(text.toLowerCase()).not.toContain(word);
@@ -88,11 +91,11 @@ describe("403 treatments (21.6)", () => {
   it("carries a non-colour cue for each treatment", () => {
     // 21-accessibility: status is never carried by hue alone. The data-treatment hook is the machine-
     // readable cue, and each heading text differs, which is the human one.
-    const { container, unmount } = renderIn("en", <AccessDenied kind="program-limit-reached" />);
+    const { container, unmount } = renderIn(<AccessDenied kind="program-limit-reached" />);
     expect(container.querySelector('[data-treatment="program-limit-reached"]')).toBeTruthy();
     unmount();
 
-    const { container: c2 } = renderIn("en", <AccessDenied kind="forbidden" />);
+    const { container: c2 } = renderIn(<AccessDenied kind="forbidden" />);
     expect(c2.querySelector('[data-treatment="forbidden"]')).toBeTruthy();
   });
 });

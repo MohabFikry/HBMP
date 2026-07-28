@@ -88,6 +88,9 @@ const NetworkTiers = lazy(() => import("./NetworkTierAdmin").then((m) => ({ defa
 // almost every portal links into it, and duplicating it per portal would duplicate the one component whose
 // whole design is that there is exactly one of it.
 const PatientProfile = lazy(() => import("./PatientProfile").then((m) => ({ default: m.PatientProfile })));
+// 19.6b — the analytical dashboard. Its own chunk: it is the heaviest screen in the portal and three of the
+// four roles that can reach it open it rarely.
+const PolicyAnalytics = lazy(() => import("./PolicyAnalytics").then((m) => ({ default: m.PolicyAnalytics })));
 
 export const SCREENS: Record<string, () => ReactNode> = {
   // 1. Reception — eligibility (also surfaced in the beneficiary-management portal).
@@ -144,6 +147,10 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/finance/settlements": () => <FinanceSettlements />,
   "/finance/summaries": () => <FinanceSummaries />,
   "/finance/exports": () => <FinanceExports />,
+  // The same screen for all three roles. reporting-service gates the financial and network views on the
+  // financial zone, so a beneficiary-management officer opening it sees four views and a 403 on two — the
+  // server decides, not a second copy of the screen.
+  "/finance/analytics": () => <PolicyAnalytics />,
   // 9. Provider network (Phase 2b) — Network-Team directory + onboarding + contracts/locations + performance.
   "/network/directory": () => <NetworkDirectory />,
   "/network/onboarding": () => <NetworkOnboarding />,
@@ -165,6 +172,7 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/policy/groups": () => <GroupsScreen />,
   "/policy/utilization": () => <UtilizationScreen />,
   "/policy/bulk": () => <BulkJobs />,
+  "/policy/analytics": () => <PolicyAnalytics />,
   "/policy/tiers": () => <NetworkTiers />,
   // 13. The membership sections the beneficiary-management portal shares with policy administration. Same
   // screens, same server-side projection — a second implementation would be a second answer to "may this
@@ -173,6 +181,7 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/beneficiaries/groups": () => <GroupsScreen />,
   "/beneficiaries/utilization": () => <UtilizationScreen />,
   "/beneficiaries/bulk": () => <BulkJobs />,
+  "/beneficiaries/analytics": () => <PolicyAnalytics />,
   // 14. Network tiers under the Network Team's own portal (write) — the same screen policy admins read.
   "/network/tiers": () => <NetworkTiers />,
   // 15. The unified patient profile (Phase 20, design 39). Reachable from every portal that can open a

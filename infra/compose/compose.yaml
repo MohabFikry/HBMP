@@ -5,7 +5,7 @@
 #
 # ⚠️ STARTER, NOT PRODUCTION-HARDENED. Before real data:
 #   - move every secret out of .env into OpenBao; enable TLS at the edge (Traefik + Let's Encrypt + ModSecurity/OWASP CRS)
-#   - turn OpenSearch security ON; run Keycloak in production mode; run OpenBao as a real server (not -dev)
+#   - turn OpenSearch security ON; run identity-service in production mode; run OpenBao as a real server (not -dev)
 #   - enable LUKS full-disk encryption on the host; wire pgBackRest + restic offsite backups
 # See README.md and phase-11-hardening-and-nfr.md.
 
@@ -295,7 +295,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Messaging__Uri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       Messaging__Queue: "audit.events"
       Worm__Endpoint: "http://minio:9000"
@@ -325,7 +325,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8091:8080"]
     depends_on:
@@ -346,7 +346,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8092:8080"]
@@ -366,7 +366,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8093:8080"]
@@ -386,7 +386,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       ClamAV__Host: "clamav"
       Blob__Endpoint: "http://minio:9000"
       Blob__AccessKey: "${MINIO_ROOT_USER}"
@@ -411,7 +411,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Cache__Valkey: "valkey:6379,password=${VALKEY_PASSWORD}"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
@@ -434,7 +434,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Eligibility__BaseUrl: "http://eligibility-service:8080"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
@@ -456,7 +456,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Masterdata__BaseUrl: "http://masterdata-service:8080"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
@@ -478,7 +478,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8098:8080"]
@@ -499,7 +499,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8099:8080"]
@@ -520,7 +520,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8100:8080"]
@@ -541,7 +541,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8101:8080"]
@@ -562,7 +562,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8102:8080"]
@@ -583,7 +583,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8103:8080"]
@@ -604,7 +604,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8104:8080"]
@@ -625,7 +625,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8105:8080"]
@@ -646,7 +646,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Siblings__Provider: "http://provider-service:8080"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
@@ -668,7 +668,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       Siblings__Eligibility: "http://eligibility-service:8080"
       Siblings__Emr: "http://emr-service:8080"
       Siblings__Patient: "http://patient-service:8080"
@@ -726,7 +726,7 @@ services:
       Auth__Audience: "hbmp-api"
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
-      Auth__ValidIssuers__0: "http://localhost:8090"
+      Auth__ValidIssuers__0: "http://localhost:8090/"
       # The façade owns NO data: every read and every safe create is proxied to the OWNING service under the
       # caller's own bearer token, so each one re-authorizes independently (ADR-0016).
       Siblings__Patient: "http://patient-service:8080"
@@ -747,17 +747,29 @@ services:
   # 18.C2 (audit R2 W6): commented out since phase 9. `docker compose up` brought up twenty services and no
   # user interface, so every "is the platform running?" check had to be a curl against a JSON endpoint.
   web:
-    build: { context: ../.., dockerfile: apps/web/Dockerfile }
+    # BUILD args, not `environment:`. Vite inlines VITE_* when the bundle is compiled; the same names under
+    # `environment:` go to the nginx container at runtime, which ignores them — so the image kept the
+    # Dockerfile's blank ARG defaults and shipped an EMPTY OIDC authority and client id. Sign-in could not
+    # start, and the misconfiguration was invisible from both the build log and the running container.
+    #
+    # The browser reaches Kong at :8000 and the issuer at :8090 — both host-side origins, because these are
+    # baked into the bundle the BROWSER runs, not resolved inside the compose network. The issuer is reached
+    # directly rather than through the gateway because the token's `iss` must be the issuer as the browser
+    # sees it; identity-service allows this origin via CORS (services/identity/Api/Program.cs).
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_BASE: "http://localhost:8000/api/v1"
+        VITE_OIDC_AUTHORITY: "http://localhost:8090"
+        VITE_OIDC_CLIENT_ID: "hbmp-web"
+        VITE_OIDC_REDIRECT: "http://localhost:5173/"
+        # "1", not "true" — config.ts now accepts either, but this is the spelling the Dockerfile documents.
+        VITE_LIVE: "1"
     <<: *restart
-    environment:
-      # The browser reaches Kong at :8000 and the issuer at :8090 — both host-side origins, because these are
-      # baked into the bundle the BROWSER runs, not resolved inside the compose network.
-      VITE_API_BASE: "http://localhost:8000/api/v1"
-      VITE_OIDC_AUTHORITY: "http://localhost:8090"
-      VITE_OIDC_CLIENT_ID: "hbmp-web"
-      VITE_OIDC_REDIRECT: "http://localhost:5173/"
-      VITE_LIVE: "true"
-    ports: ["127.0.0.1:5173:80"]
+    # The image's nginx listens on 8080 (apps/web/nginx.conf + Dockerfile EXPOSE), not 80 — mapping to :80
+    # published a port nothing was bound to, so :5173 reset the connection with the container "Up".
+    ports: ["127.0.0.1:5173:8080"]
     depends_on:
       kong: { condition: service_started }
       identity-service: { condition: service_started }

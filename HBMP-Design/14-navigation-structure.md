@@ -272,3 +272,31 @@ Focus is trapped inside modals and returned to the invoking control on close (WC
 - Permission-driven menu generation: [11-permission-matrix.md](11-permission-matrix.md) · Roles: [10-role-matrix.md](10-role-matrix.md)
 - Accessibility of navigation: [21-accessibility-checklist.md](21-accessibility-checklist.md)
 - Branch switcher, scope modes, restricted-result locked state & release workflow: [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md)
+
+---
+
+## Phase 19 portals
+
+### Policy administration (`/policy/*`) — Policy Administrator
+`payers · plans & versions · policies · members · groups · utilization · analytics · bulk & imports · network tiers (read-only)`
+
+**No clinical route exists in this portal at all** — the absence is the control, not a hidden nav item. The
+plan-version editor is a **two-level grid**: one row per benefit category, each expanding into a cost-share
+matrix with a column per Active tier. An Active version renders read-only with an explicit
+"immutable — amend to change" affordance driven by the server's `editable` flag.
+
+### Beneficiary Management (`/beneficiaries/*`) — additions
+`+ members · groups · utilization · analytics · bulk & imports`
+
+The membership half of the same screens the Policy Administrator sees — **the same components**, so a second
+implementation cannot become a second answer to "may this officer see the money". This portal has **no**
+`payers` or `plans` section: the person enrolling a member does not decide what the plan pays for.
+
+### Network Team (`/network/*`) — addition
+`+ network tiers` (**write**). The same screen policy administration reads. Write affordances are **absent**
+for a policy administrator rather than present-and-refused (ADR-0019).
+
+### Finance (`/finance/*`) — addition
+`+ analytics`. The financial and network views are the money questions this role exists to answer; the server
+gates those two views on the financial reporting zone, so the section is visible and the views a caller may
+not read are refused by the service rather than hidden by a nav rule the service does not know about.

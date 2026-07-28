@@ -54,6 +54,13 @@ public sealed record EnrollCommand(
 
 public sealed record EnrollOutcome(Enrollment Enrollment, int CoverageCount, bool WasReplay);
 public sealed record GroupChangeOutcome(Enrollment Enrollment, Guid? PreviousGroupId);
+/// <summary>The analytic dimensions every membership event carries (19.6b). Flat, and spread into the payload
+/// rather than nested, because the projector reads a flat field bag — a nested object would arrive as one
+/// unparsed string and the dashboard would aggregate everything into "unknown".</summary>
+public sealed record EventDimensions(
+    Guid? PayerId, Guid PolicyId, Guid? PolicyPlanId, Guid? GroupId, Guid? BranchId,
+    string Relationship, string Status);
+
 public sealed record PlanChangeOutcome(
     Enrollment Enrollment, PolicyPlan Plan, Guid PreviousPolicyPlanId, Guid PlanVersionId,
     string ConsumptionPolicy, IReadOnlyList<CarriedLimit> Carried,
@@ -217,12 +224,18 @@ public sealed class MembershipCommands(
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<EnrollOutcome>(default, conflict);
 
         await audit.EmitAsync(Draft("enrollment", enrollment.EnrollmentId, AuditAction.Create, actor), ct);
+        // 19.6b widened the payload with the ANALYTIC DIMENSIONS (payer, group, branch, relationship). The
+        // dashboard aggregates by them, and an event that says "a member was enrolled" without saying under
+        // which payer forces every consumer to go back and ask — which for reporting-service means querying
+        // the transactional benefit spine, the one thing a read model exists to avoid.
         await outbox.EnqueueAsync("MemberEnrolled", "policy.events", new
         {
             tenantId = enrollment.TenantId, enrollmentId = enrollment.EnrollmentId,
             beneficiaryId = enrollment.BeneficiaryId, policyId = enrollment.PolicyId,
             policyPlanId = plan.PolicyPlanId, enrollment.MemberNo,
             effectiveFrom = enrollment.EffectiveFrom, waitingPeriodEndsOn = enrollment.WaitingPeriodEndsOn,
+            payerId = policy.PayerId, groupId = enrollment.GroupId, branchId = enrollment.BranchId,
+            relationship = enrollment.Relationship.ToString(), status = enrollment.Status.ToString(),
         }, ct);
         await outbox.EnqueueAsync("CoverageGenerated", "policy.events", new
         {
@@ -278,10 +291,13 @@ public sealed class MembershipCommands(
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<Enrollment>(default, conflict);
 
         await audit.EmitAsync(Draft("enrollment", enrollmentId, AuditAction.StateChange, actor, "terminated", reason), ct);
+        var termDims = await DimensionsAsync(e, ct);
         await outbox.EnqueueAsync("MemberTerminated", "policy.events", new
         {
             tenantId = e.TenantId, enrollmentId, beneficiaryId = e.BeneficiaryId,
             effectiveDate, reason,
+            termDims.PayerId, termDims.PolicyId, termDims.PolicyPlanId, termDims.GroupId, termDims.BranchId,
+            termDims.Relationship, termDims.Status,
         }, ct);
         return MembershipResults.Success(e);
     }
@@ -311,8 +327,13 @@ public sealed class MembershipCommands(
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<Enrollment>(default, conflict);
 
         await audit.EmitAsync(Draft("enrollment", enrollmentId, AuditAction.StateChange, actor, "reinstated", reason), ct);
-        await outbox.EnqueueAsync("MemberReinstated", "policy.events",
-            new { tenantId = e.TenantId, enrollmentId, beneficiaryId = e.BeneficiaryId }, ct);
+        var reinDims = await DimensionsAsync(e, ct);
+        await outbox.EnqueueAsync("MemberReinstated", "policy.events", new
+        {
+            tenantId = e.TenantId, enrollmentId, beneficiaryId = e.BeneficiaryId, effectiveDate,
+            reinDims.PayerId, reinDims.PolicyId, reinDims.PolicyPlanId, reinDims.GroupId, reinDims.BranchId,
+            reinDims.Relationship, reinDims.Status,
+        }, ct);
         return MembershipResults.Success(e);
     }
 
@@ -498,11 +519,14 @@ public sealed class MembershipCommands(
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<PlanChangeOutcome>(default, conflict);
 
         await audit.EmitAsync(Draft("enrollment", enrollmentId, AuditAction.StateChange, actor, "plan-changed", reason), ct);
+        var planDims = await DimensionsAsync(e, ct);
         await outbox.EnqueueAsync("MemberPlanChanged", "policy.events", new
         {
             tenantId = e.TenantId, enrollmentId, beneficiaryId = e.BeneficiaryId,
             policyPlanId = plan.PolicyPlanId, planVersionId = version.PlanVersionId,
             effectiveDate, consumptionPolicy = policyChoice.ToString(),
+            planDims.PayerId, planDims.PolicyId, planDims.GroupId, planDims.BranchId,
+            planDims.Relationship, planDims.Status,
         }, ct);
 
         return MembershipResults.Success(new PlanChangeOutcome(
@@ -539,12 +563,33 @@ public sealed class MembershipCommands(
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<Enrollment>(default, conflict);
 
         await audit.EmitAsync(Draft("enrollment", enrollmentId, AuditAction.StateChange, actor, "cancelled", reason), ct);
-        await outbox.EnqueueAsync("MemberEnrolmentCancelled", "policy.events",
-            new { tenantId = e.TenantId, enrollmentId, beneficiaryId = e.BeneficiaryId, reason }, ct);
+        var cancelDims = await DimensionsAsync(e, ct);
+        await outbox.EnqueueAsync("MemberEnrolmentCancelled", "policy.events", new
+        {
+            tenantId = e.TenantId, enrollmentId, beneficiaryId = e.BeneficiaryId, reason,
+            cancelDims.PayerId, cancelDims.PolicyId, cancelDims.PolicyPlanId, cancelDims.GroupId,
+            cancelDims.BranchId, cancelDims.Relationship, cancelDims.Status,
+        }, ct);
         return MembershipResults.Success(e);
     }
 
     // ---- helpers -----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The analytic dimensions a membership event carries for 19.6b: the payer the policy is with, plus the
+    /// member's group, branch, relationship and status.
+    ///
+    /// <para>Resolved here rather than left to the consumer. reporting-service aggregates by payer, and a
+    /// consumer that has to look the payer up is a consumer querying the transactional benefit spine —
+    /// precisely what a read model exists to stop. One indexed lookup on the write path buys that.</para>
+    /// </summary>
+    private async Task<EventDimensions> DimensionsAsync(Enrollment e, CancellationToken ct)
+    {
+        var payerId = await db.Policies.AsNoTracking()
+            .Where(p => p.PolicyId == e.PolicyId).Select(p => p.PayerId).FirstOrDefaultAsync(ct);
+        return new EventDimensions(payerId, e.PolicyId, e.PolicyPlanId, e.GroupId, e.BranchId,
+            e.Relationship.ToString(), e.Status.ToString());
+    }
 
     private static EnrollmentEvent Event(
         Enrollment e, EnrollmentEventType type, DateOnly effectiveDate, string? reason,

@@ -60,6 +60,8 @@ Each role is bound to a **scope** — the horizon of records it may ever touch, 
 | Finance | MemberScoped |
 | Claims Officer / Claims Reviewer | MemberScoped |
 | Network Team | MemberScoped |
+| Policy Administrator (§3.22) | MemberScoped *(all branches — a benefit product is not a branch-local fact)* |
+| Beneficiary-Management Supervisor (§3.23) | MemberScoped *(all branches — supervises officers wherever they sit)* |
 | Org Admin / Super Admin | MemberScoped *(administrative; branch is a filter, not a boundary)* |
 | Reporting/manager views | MemberScoped |
 | Labs · Imaging Centers · Pharmacies · Provider Admin | ProviderScoped |
@@ -225,6 +227,26 @@ Each role below follows the same template: **Purpose · Portal · Typical users 
 - **Key capabilities:** Onboard/offboard providers; manage contracts, rates, credentialing; approve provider catalogs/prices; monitor network performance and compliance.
 - **Highest tier:** **T2** (provider contracts/financial terms).
 - **Notes:** Operates on provider metadata, not beneficiary PHI. Rate/catalog changes are SoD-controlled with Finance/Medical Director where clinical-cost policy is affected.
+
+### 3.22 Policy Administrator  *(phase 19)*
+- **Purpose:** Author the benefit PRODUCT — payers, plans, effective-dated plan versions, benefit rules and per-tier cost-share — and the policies written against it.
+- **Portal:** Policy administration portal (`/policy/*`).
+- **Typical users:** Mersal benefit/product managers.
+- **Scope:** `tenant:own` across payers, plans, plan versions, policies, member groups and enrolments; **payer-restricted** where an assignment exists (a user assigned to specific payers sees only those payers' policies — see ADR-0024).
+- **Scope mode:** **MemberScoped (all branches).**
+- **Key capabilities:** Create/amend/activate plan versions (Draft-only editing, ADR-0017); issue, amend and renew policies; attach plans to a policy; read the membership book and its utilization; cancel another user's note and approve a retro-effective change (`policy:supervise`); read network tiers.
+- **Highest tier:** **T2** (entitlement and money).
+- **Notes:** **HARD RULE — no clinical route exists in this portal at all.** Policy administration reads entitlement and money, never a diagnosis; `Clinical`/`Restricted` note bodies and document content are withheld by CLASS (ADR-0018/0021), not by a role list. **Network tiers are READ-ONLY here:** this role prices benefits *at* a tier while the Network Team decides *which* tier a provider sits in (ADR-0019) — granting both would let one role reprice the network by moving a provider. Holds `reporting:read` for the 19.6b dashboard's operational views but **not** `reporting:read-financial`: cost-per-member and net-payable stay with Finance.
+
+### 3.23 Beneficiary-Management Supervisor  *(phase 19)*
+- **Purpose:** The supervisory increment over member administration — the two acts that exist for a second pair of eyes.
+- **Portal:** Beneficiary Management portal (same portal as the officer; the supervisory affordances appear).
+- **Typical users:** Beneficiary-management team leads.
+- **Scope:** everything the Beneficiary Management officer holds, plus `policy:supervise`.
+- **Scope mode:** **MemberScoped (all branches).**
+- **Key capabilities:** Everything at §3.4, plus cancelling **another user's** note (with a mandatory reason, ADR-0018) and approving a **retro-effective** enrolment change.
+- **Highest tier:** **T2.**
+- **Notes:** Deliberately a separate role rather than a flag on the officer role — a supervisory power every officer holds is not a supervisory power. Listed in full in the identity seed rather than inherited, because role inheritance is invisible at the point of audit and "why could this person cancel that note" must be answerable from one row.
 
 ### 3.15 Org Admin
 - **Purpose:** Administer the Mersal (tenant) organization — internal users, role assignments, org-level configuration, and policy within one tenant.

@@ -27,6 +27,14 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ReportingGate>();
 builder.Services.AddScoped<ReportContext>();
 builder.Services.AddScoped<Mersal.Reporting.Infrastructure.DashboardBuilder>();
+builder.Services.AddScoped<AnalyticsContext>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddMemoryCache();
+// 19.6b — payer scope. The token contract is frozen and carries no payer claim, so the restriction is resolved
+// per request from admin-service, exactly as policy-service does. It FAILS CLOSED to "restricted to nothing",
+// because payer scope's empty set means UNRESTRICTED and an outage must never widen a dashboard's aggregate.
+builder.Services.AddHttpClient<IPayerDirectory, ReportingPayerDirectory>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Admin:BaseUrl"] ?? "http://admin-service:8080"));
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("reporting-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
@@ -48,6 +56,7 @@ if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "reporting-service" })).AllowAnonymous();
 
 app.MapReports(); // phase 8.2 — KPI read-model APIs + projection seam + audited export
+app.MapAnalytics(); // phase 19.6b — the policy & member analytical dashboard (6 views, drill-down, export)
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

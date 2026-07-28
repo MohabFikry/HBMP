@@ -1,3 +1,4 @@
+using Mersal.BenefitPricing;
 using FluentAssertions;
 using Mersal.Authz;
 using Mersal.Policy.Domain;

@@ -83,6 +83,9 @@ function fakeApi(overrides: Partial<PolicyApi> = {}): PolicyApi {
     bulkRows: () => Promise.resolve([]),
     bulkReconciliation: reject,
     exportUtilization: () => Promise.resolve(""),
+    analytics: reject,
+    analyticsOutlierMembers: () => Promise.resolve([]),
+    analyticsExport: () => Promise.resolve(""),
     ...overrides,
   } as PolicyApi;
 }

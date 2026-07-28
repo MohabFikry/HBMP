@@ -51,8 +51,10 @@ public class ScopeIntegrityTests
         ["approvals_team"] = "named by one approvals rule; medical_approval is the vocabulary role for the same people",
         ["finance_approver"] = "the second signature on a finance approval; finance holds finance:approve today, so dual control rests on the handler's SoD check alone",
         ["call_center_supervisor"] = "15.6 supervisor KPI surface; call_center covers the agent rules",
-        ["policy_admin"] = "38 §6 Policy Administrator — the role that authors benefit configuration; phase 19.7 adds it to the frozen vocabulary, and org_admin/super_admin hold policy:admin until then",
-        ["beneficiary_mgmt_supervisor"] = "38 §6 Beneficiary-Management supervisor — cancels another user's note and approves retro-effective changes; phase 19.7 adds it, and org_admin/super_admin hold policy:supervise until then",
+        // 19.7 REMOVED policy_admin and beneficiary_mgmt_supervisor from this list: both now exist in the
+        // frozen vocabulary with a seeded scope set, so the reachability check above applies to them for
+        // real. That is the point of the staleness assertion below — an exception that outlives its reason
+        // is a check quietly switched off.
     };
 
     [Fact]

@@ -23,6 +23,10 @@ public sealed class AuditDbContext(DbContextOptions<AuditDbContext> options) : D
             // Composite PK includes the range-partition column (occurred_at), as PG requires.
             e.HasKey(x => new { x.AuditEventId, x.OccurredAt });
 
+            // Every other property below is mapped explicitly; this one was missed, and being the PK it
+            // appears in every SELECT and INSERT — so both the read API and the append path failed with
+            // `42703: column a.AuditEventId does not exist` rather than anything audit-shaped.
+            e.Property(x => x.AuditEventId).HasColumnName("audit_event_id");
             e.Property(x => x.PartitionKey).HasColumnName("partition_key").IsRequired();
             e.Property(x => x.ServiceName).HasColumnName("service_name").IsRequired();
             e.Property(x => x.SourceService).HasColumnName("source_service").IsRequired();

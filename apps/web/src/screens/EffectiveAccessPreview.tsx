@@ -53,7 +53,7 @@ export function EffectiveAccessPreview({ membershipId, keys, loading, error }: E
   );
 
   if (loading) return <Card style={{ padding: "var(--sp5)" }}><p className="muted">…</p></Card>;
-  if (error) return <InlineAlert tone="danger">{error}</InlineAlert>;
+  if (error) return <InlineAlert tone="bad">{error}</InlineAlert>;
 
   return (
     <Card

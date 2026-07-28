@@ -4,5 +4,6 @@
     <!-- Phase 20.3: the beneficiary photo's role allow-list lives in libs/authz (ProfilePhotoAccess) and is
          shared with profile-service. Two copies of "who may see a face" is one copy too many. -->
     <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
+    <ProjectReference Include="../../../libs/benefit-pricing/Mersal.BenefitPricing.csproj" />
   </ItemGroup>
 </Project>

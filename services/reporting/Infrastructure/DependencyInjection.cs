@@ -17,7 +17,9 @@ public static class DependencyInjection
              .UseSnakeCaseNamingConvention()
              .AddHbmpRlsInterceptors(sp));
 
+        services.AddScoped<AnalyticsProjector>();
         services.AddScoped<EventProjector>();
+        services.AddScoped<AnalyticsQueries>();
         services.AddScoped<ReportQueries>();
         return services;
     }

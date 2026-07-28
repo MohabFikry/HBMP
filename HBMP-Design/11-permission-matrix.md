@@ -281,6 +281,35 @@ The contact centre owns two resources in the `callcentre` schema: `call_interact
 > 4. **MemberScoped / all branches.** The Call Centre is a central hotline: its bundle sets `RowScope.BranchUnrestricted`, so **no `BSC` predicate applies**. Branch and specialty are **selectors** on search/booking, never restrictions; a cross-branch read is normal, not a denial.
 > 5. **Reuse, don't fork.** Appointment writes delegate to the existing emr endpoints and inherit their guarantees (no double-booking, `Idempotency-Key`, `If-Match`); contact writes delegate to patient-service and inherit its one-primary rule and history. The call centre stores the **linkage** (`interaction_id` / `call_ref`), never a second copy of the record.
 
+### 3.7 Policy-administration resources (Phase 19 — see [38-policy-member-administration.md](38-policy-member-administration.md))
+
+Phase 19 adds the benefit spine to the `policy` schema — `payer`, `plan`, `plan_version`, `benefit_rule` (+ `benefit_rule_tier`), `policy_plan`, `member_group`, `enrollment`, `note`, and the document LINKAGE — plus `network_tier` / `provider_network_assignment` in the `provider` schema.
+
+| Role | payer · plan · plan_version · benefit_rule | policy · policy_plan | member_group · enrollment | note (body) | policy/member document (content) | network_tier · assignment |
+|---|---|---|---|---|---|---|
+| **Policy Administrator** (§3.22) | C✅ R✅ U🟠(**Draft only** — ADR-0017) | C✅ R✅ U✅ | R✅ *(reads the book its product applies to)* | C✅ R🔒**by class** X✅(`policy:supervise`) | R🔒**by class** | **R✅ only** — prices *at* a tier, never moves a provider between tiers |
+| **Beneficiary Management** (§3.4) | R✅ *(the rules it enrols against)* | R✅ | C✅ R✅ U✅ | C✅ R🔒**by class** X🟠(own notes only) | R🔒**by class** | ❌ |
+| **Beneficiary-Mgmt Supervisor** (§3.23) | R✅ | R✅ | C✅ R✅ U✅ | C✅ R🔒**by class** X✅(`policy:supervise`) | R🔒**by class** | ❌ |
+| **Network Team** (§3.14) | ❌ | ❌ | ❌ | ❌ | ❌ | **C✅ R✅ U✅** *(owns the tier structure — ADR-0019)* |
+| Finance | R✅ *(limits and cost-share are money)* | R✅ | R🔒 *(counts + utilization, no clinical field)* | R🔒 **Administrative/Financial only** | R🔒 **Administrative/Financial only** | R✅ |
+| Claims Officer / Reviewer | R✅ *(adjudicates against the rules)* | R✅ | R🔒 | R🔒 **Administrative/Financial only** | R🔒 **Administrative/Financial only** | R✅ |
+| Call Center | ❌ | R🔒 *(coverage summary only, via §3.6's 360 under `CVP`)* | R🔒**CVP** | R🔒 **Administrative only** | ❌ | ❌ |
+| Reception | ❌ | R🔒 *(eligibility verdict card — 07 FR-ELG-003)* | R🔒 | ❌ | ❌ | ❌ |
+| Doctors / Nurses / Labs / Imaging / Pharmacies | ❌ | R🔒 *(entitlement as it gates their own act)* | ❌ | ❌ | ❌ | ❌ |
+| Medical Approval / Medical Director | R✅ *(the rule being adjudicated)* | R✅ | R🔒 | R🔒 **incl. Clinical** | R🔒 **incl. Clinical** | R✅ |
+| Case Managers | R✅ | R✅ | R🔒ASG | R🔒**by class**, ASG | R🔒**by class**, ASG | ❌ |
+| Org Admin / Super Admin | C✅ R✅ U✅ | C✅ R✅ U✅ | C✅ R✅ U✅ | R🧨 X✅ | R🧨 | C✅ R✅ U✅ |
+| Reporting / analytics | R🔒 **aggregate only** (19.6b read model — no note body, no document, no name) | R🔒 aggregate | R🔒 aggregate + an **audited** id-only drill-down | ❌ | ❌ | R🔒 aggregate |
+| DPO / compliance reviewer | R🔒 | R🔒 | R🔒 | R🔒(register: existence, class, author, date — not the body) | R🔒(register) | R🔒 |
+| *audit service* | — | — | — | — | — | — |
+
+> **Hard-rule check (must always hold) — policy administration:**
+> 1. **(a) Finance and the Call Centre never receive a `Clinical` or `Restricted` note body — and never a `Clinical`/`Identity`/`Restricted` document's content.** The projection withholds by **CLASS**, not by role list, so a note written today is still correctly withheld from a role invented next year. The note's **existence, type, author and date remain visible** with a stated reason: concealing the note entirely would let a Finance reader conclude nothing was recorded (ADR-0018/0021).
+> 2. **(b) Notes are append-only.** No role, including Super Admin, has a `U` on `note.body`. A withdrawal is a **cancellation** with a mandatory reason, and the cancelled note stays fully visible, struck through, with its canceller and reason. A correction is a **new note** that supersedes the old one.
+> 3. **(c) Payer scope is a restriction, not an entitlement.** A user with no payer assignment is payer-**unrestricted**; a user with assignments sees only those payers' policies, groups, members and aggregates — and **never an unattributed row** (`payer_id IS NULL`). Resolution **fails closed**: when the directory cannot be reached the caller is restricted to nothing, because payer scope's empty set means *unrestricted* and an outage must never widen access (ADR-0024).
+> 4. **(d) An Active plan version is immutable.** Editing is Draft-only, enforced by a database trigger and not merely by the service; changing a live plan is `amend → new Draft → activate` (ADR-0017). The read-only affordance in the UI comes from the server's `editable` flag, never re-derived from the status.
+> 5. **(e) Tier authorship and tier pricing are different authorities.** Policy administration sets cost-share **at** a tier; the Network Team decides **which** tier a provider sits in, effective-dated, and cost-share resolves per tier **at the service date** (ADR-0019). No role holds both.
+
 ---
 
 ## 3b. Patient profile — the role × section matrix (Phase 20, HARD RULE)

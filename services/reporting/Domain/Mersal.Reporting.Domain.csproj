@@ -1,3 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><RootNamespace>Mersal.Reporting.Domain</RootNamespace></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../libs/benefit-pricing/Mersal.BenefitPricing.csproj" />
+  </ItemGroup>
 </Project>

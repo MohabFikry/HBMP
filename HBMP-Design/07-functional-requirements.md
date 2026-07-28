@@ -509,3 +509,20 @@ This document specifies the **functional requirements (FRs)** for the Mersal HBM
 - Lifecycles referenced: [23-state-machines.md](23-state-machines.md)
 - Claims module design (phase 10b): [36-claims-management.md](36-claims-management.md)
 - Branch scoping, practitioner specialty & clinical sensitivity design (phase 14): [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md)
+
+### 4.x Policy & member administration (Phase 19 — see [38-policy-member-administration.md](38-policy-member-administration.md))
+
+| ID | Requirement | Notes |
+|---|---|---|
+| **FR-POL-020** | A plan's benefit configuration is held in **effective-dated plan versions**; an Active version is immutable and is changed only by amend → new Draft → activate. | ADR-0017. Draft-only editing is enforced by a database trigger, not only by the service. |
+| **FR-POL-021** | Activation **validates** the version and refuses an incoherent one (covered category with neither a limit nor an explicit unlimited; pre-auth threshold above the limit it guards; cost-share priced on a retired tier). | A version that cannot be adjudicated must never become the one in force. |
+| **FR-POL-022** | Every adjudicating read resolves the version **in force on the service date**, never the latest version. | Eligibility, approvals and claims share one resolver. |
+| **FR-POL-023** | A policy may carry **multiple plans** (`policy_plan`), exactly one of which is the default; a member elects one. | 19.2b. The default is what lets an enrolment that names no plan still resolve. |
+| **FR-POL-024** | On a **plan change**, coverage regenerates from the new version and consumption is carried across per the configured policy. | ADR-0020 — a SETTING, not a constant, because the decision is not signed off. A server-side **dry run** shows the officer the resulting balances, the benefits being withdrawn, and the rule in force, before they confirm. |
+| **FR-POL-025** | A member's **coverage records its provenance** (`source_plan_version_id`), so "why am I covered for this, and for how much" resolves to a dated, immutable configuration. | Survives the version being superseded. |
+| **FR-NET-010** | **Network tiers** are owned by network administration; a provider's tier is **effective-dated** and cost-share resolves per tier **at the service date**. | ADR-0019. Policy administration prices *at* a tier and cannot move a provider between tiers. |
+| **FR-NET-011** | A default tier set (**T1** in-network, **OON** out-of-network) exists per tenant so the resolver always has an answer and leakage has a denominator. | 19.7 backfill. |
+| **FR-NOTE-010** | Notes on a policy or member are **append-only and signed**: never edited, never deleted, withdrawn only by an audited **cancellation with a mandatory reason**. | ADR-0018. A cancelled note stays fully visible, struck through, with its canceller and reason. |
+| **FR-NOTE-011** | A note's **body** is projected by **visibility class**, not by role list. A caller who may not read the class receives existence + type + author + date with the body withheld and a stated reason. | Finance and the Call Centre never receive a `Clinical`/`Restricted` body — and are never shown an empty note instead. |
+| **FR-NOTE-012** | Cancelling **another user's** note requires the supervisory increment (`policy:supervise`). | Held by Policy Administrator and Beneficiary-Management Supervisor. |
+| **FR-DOC-010** | A policy/member document carries a **classification** that decides who may read its content; a class may be **raised, never lowered**. | ADR-0021. Downgrading is the one operation that retroactively exposes a document with no trace in the document itself. |
