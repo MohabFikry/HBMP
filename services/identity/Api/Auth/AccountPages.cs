@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
 using Mersal.Identity.Domain;
+using Mersal.Identity.Infrastructure;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
@@ -50,19 +51,34 @@ public static class AccountPages
 
         app.MapPost("/connect/2fa", async (
             HttpContext http, [FromForm] string code, [FromForm] bool? recovery, [FromForm] string? returnUrl,
-            IAntiforgery antiforgery, SignInManager<ApplicationUser> signIn, UserManager<ApplicationUser> users) =>
+            IAntiforgery antiforgery, SignInManager<ApplicationUser> signIn, UserManager<ApplicationUser> users,
+            SessionService sessions) =>
         {
             var user = await signIn.GetTwoFactorAuthenticationUserAsync();
             if (user is null) return Results.Redirect("/connect/login");
+
+            var agent = http.Request.Headers.UserAgent.ToString();
+            var ip = http.Connection.RemoteIpAddress;
 
             var stripped = code.Replace(" ", "").Replace("-", "");
             var ok = recovery is true
                 ? (await signIn.TwoFactorRecoveryCodeSignInAsync(stripped)).Succeeded
                 : (await signIn.TwoFactorAuthenticatorSignInAsync(stripped, isPersistent: false, rememberClient: false)).Succeeded;
             if (!ok)
+            {
+                // 21.5 — THIS is where a two-factor login becomes an outcome. The password step deliberately
+                // records nothing when it returns RequiresTwoFactor: doing so would file a "failure" against
+                // every successful MFA sign-in and make the history unreadable for exactly the accounts that
+                // are best protected.
+                await sessions.RecordAttemptAsync(
+                    user.Id, user.UserName ?? "", false, LoginFailureReasons.TwoFactorFailed,
+                    agent, ip, http.RequestAborted);
                 return Results.Content(TwoFactorPage(Lang(http), returnUrl, AntiforgeryField(antiforgery, http), error: true), "text/html");
+            }
 
             await StampSignIn(http, signIn, user, ["pwd", "otp"]);
+            await sessions.RecordAttemptAsync(user.Id, user.UserName ?? "", true, null, agent, ip, http.RequestAborted);
+            await sessions.OpenAsync(user.Id, null, agent, ip, http.RequestAborted);
             return Results.Redirect(SafeReturn(returnUrl));
         }).RequireRateLimiting(IssuerRateLimits.Credential);
 

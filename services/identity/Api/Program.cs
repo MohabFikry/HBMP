@@ -50,6 +50,8 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "id
 app.MapConnect();  // 17.2 — /connect/{authorize,token,userinfo,login,logout}
 app.MapAccount();  // 17.3 — /connect/{2fa,enroll-2fa} login UI + TOTP 2FA + recovery codes
 app.MapAdmin();    // 17.4 — /identity/admin/* user+role+scope admin (bearer admin scope + MFA, audited)
+app.MapSessions(); // 21.5 — /identity/me/sessions + /identity/admin/users/{id}/sessions|login-history
+app.MapAccessReview(); // 21.5 — /identity/admin/access-review/{tenant} (JSON + CSV, audited as an export)
 
 // Read-only roles/scopes-as-data catalog (verification of the 17.1 seed). The mutating admin surface is in
 // 17.4 behind admin RBAC + SoD.
