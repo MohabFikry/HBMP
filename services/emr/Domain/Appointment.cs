@@ -48,6 +48,10 @@ public sealed class Appointment
 
     public string? IdempotencyKey { get; set; }
     public string? CreatedBy { get; set; }
+    /// <summary>Who performed the most recent transition (phase 23). Snapshotted into appointment_history by
+    /// the row trigger, which is what lets the visit timeline attribute each step. NULL on rows written before
+    /// this existed — their transitions genuinely were not attributed.</summary>
+    public string? UpdatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     /// <summary>PostgreSQL <c>xmin</c> optimistic-concurrency token (drives the 3.2 If-Match ETag).</summary>

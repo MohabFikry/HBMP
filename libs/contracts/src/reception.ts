@@ -98,3 +98,18 @@ export const zBookableClinic = z.object({
   openSlots: z.number().int().nonnegative(),
 });
 export type BookableClinic = z.infer<typeof zBookableClinic>;
+
+/**
+ * One step of an appointment's operational history: the status it moved into, when, and who did it. `by` is
+ * absent for transitions recorded before actor attribution existed — showing no actor is honest, where falling
+ * back to whoever booked it would claim they performed a step they did not.
+ *
+ * This is the OPERATIONAL timeline, not the compliance audit trail: that lives in audit-service, is
+ * hash-chained, and requires audit:read (Security/Compliance/DPO).
+ */
+export const zTimelineStep = z.object({
+  status: z.string().min(1),
+  at: zInstant,
+  by: z.string().nullish(),
+});
+export type TimelineStep = z.infer<typeof zTimelineStep>;

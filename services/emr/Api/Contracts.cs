@@ -104,3 +104,9 @@ public sealed record QueueItemView(
 /// directory (which reception is correctly refused). Ids plus a count — names are a separate label lookup, so
 /// this endpoint cannot become a way to enumerate the network.</summary>
 public sealed record BranchClinicResponse(Guid ProviderId, Guid LocationId, Guid? BranchId, int OpenSlots);
+
+/// <summary>One step in an appointment's operational timeline: the status it moved INTO, when, and who did it.
+/// Minimum-necessary by construction — the row snapshots in emr.appointment_history hold the whole appointment,
+/// and only these three fields leave the service. Not the compliance audit trail: that lives in audit-service,
+/// is hash-chained, and needs audit:read.</summary>
+public sealed record TimelineStep(string Status, DateTimeOffset At, string? By);

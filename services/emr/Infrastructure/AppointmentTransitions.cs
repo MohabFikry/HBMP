@@ -43,7 +43,7 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
     /// queue (3.3). Transition legality goes through <see cref="AppointmentWorkflow"/>.</summary>
     public async Task<TransitionResult> CheckInAsync(
         Guid appointmentId, string? memberNo, string? displayName, int priority, uint? ifMatch,
-        DateTimeOffset now, CancellationToken ct = default)
+        DateTimeOffset now, string? actor = null, CancellationToken ct = default)
     {
         var appt = await db.Appointments.FirstOrDefaultAsync(a => a.AppointmentId == appointmentId, ct);
         if (appt is null) return TransitionResult.Fail(TransitionOutcome.NotFound);
@@ -52,6 +52,7 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
 
         appt.Status = AppointmentStatus.CheckedIn;
         appt.UpdatedAt = now;
+        appt.UpdatedBy = actor;
         ApplyIfMatch(appt, ifMatch);
         db.Set<QueueTicket>().Add(new QueueTicket
         {
@@ -69,7 +70,7 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
     }
 
     public async Task<TransitionResult> RescheduleAsync(
-        Guid appointmentId, Guid newSlotId, uint? ifMatch, DateTimeOffset now, CancellationToken ct = default)
+        Guid appointmentId, Guid newSlotId, uint? ifMatch, DateTimeOffset now, string? actor = null, CancellationToken ct = default)
     {
         var appt = await db.Appointments.FirstOrDefaultAsync(a => a.AppointmentId == appointmentId, ct);
         if (appt is null) return TransitionResult.Fail(TransitionOutcome.NotFound);
@@ -103,6 +104,7 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
             appt.ScheduledStart = newSlot.SlotStart;
             appt.ScheduledEnd = newSlot.SlotEnd;
             appt.UpdatedAt = now;
+            appt.UpdatedBy = actor;
             ApplyIfMatch(appt, ifMatch);
             try
             {
@@ -122,7 +124,7 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
     /// live queue ticket, or a waitlist entry promoted against a cancel that never landed.
     /// </summary>
     public async Task<TransitionResult> CancelAsync(
-        Guid appointmentId, string? reason, uint? ifMatch, DateTimeOffset now, CancellationToken ct = default)
+        Guid appointmentId, string? reason, uint? ifMatch, DateTimeOffset now, string? actor = null, CancellationToken ct = default)
     {
         return await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
@@ -135,6 +137,7 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
             appt.Status = AppointmentStatus.Cancelled;
             appt.CancelReason = reason;
             appt.UpdatedAt = now;
+            appt.UpdatedBy = actor;
             ApplyIfMatch(appt, ifMatch);
             MarkQueueTicketsRemoved(await ActiveQueueTicketsAsync(appointmentId, ct));   // cancel clears the queue (3.3)
 
@@ -153,7 +156,7 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
 
     /// <summary>18.A3: no-show is ONE transaction, for the same reason as <see cref="CancelAsync"/>.</summary>
     public async Task<TransitionResult> NoShowAsync(
-        Guid appointmentId, uint? ifMatch, DateTimeOffset now, TimeSpan grace, CancellationToken ct = default)
+        Guid appointmentId, uint? ifMatch, DateTimeOffset now, TimeSpan grace, string? actor = null, CancellationToken ct = default)
     {
         return await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
@@ -165,6 +168,7 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
             appt.Status = AppointmentStatus.NoShow;
             appt.NoShow = true;                       // reporting flag (US-022)
             appt.UpdatedAt = now;
+            appt.UpdatedBy = actor;
             ApplyIfMatch(appt, ifMatch);
             MarkQueueTicketsRemoved(await ActiveQueueTicketsAsync(appointmentId, ct));   // no-show clears the queue (3.3)
 

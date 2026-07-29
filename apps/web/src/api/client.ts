@@ -8,6 +8,7 @@ import type {
   ProgramEnablement,
   AppointmentRow,
   BookableClinic,
+  TimelineStep,
   BookableSlot,
   BookingRequest,
   BookingResult,
@@ -108,6 +109,9 @@ export interface ApiClient {
   /** Mark a booked appointment as a no-show (US-022). Guarded server-side by the grace period, so call this
    * only for a row whose `noShowEligible` is true; `rowVersion` is echoed as `If-Match`. */
   noShow(appointmentId: string, rowVersion?: number): Promise<CheckInResult>;
+  /** How this appointment reached its current status — booked, checked in, no-showed, cancelled — with who and
+   * when. Operational history from emr, NOT the audit store (which needs audit:read). */
+  appointmentTimeline(appointmentId: string): Promise<TimelineStep[]>;
   /** Start the visit for a checked-in appointment (CheckedIn → an open encounter). Server-gated: the caller
    * must be the assigned practitioner, or the appointment must name none. Returns the encounter id. */
   startVisit(appointmentId: string, beneficiaryId: string): Promise<{ encounterId: string }>;

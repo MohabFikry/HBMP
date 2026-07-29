@@ -2,6 +2,7 @@ import {
   zAccessReviewCampaign,
   zAppointmentRow,
   zBookableClinic,
+  zTimelineStep,
   zBookableSlot,
   zBookingResult,
   zApprovalItem,
@@ -448,6 +449,11 @@ export class HttpApiClient implements ApiClient {
       rowVersion !== undefined ? { ifMatch: rowVersion } : undefined,
     )) as any;
     return parseOr(zCheckInResult, { id: r?.appointmentId ?? appointmentId, status: apptStatusChip(r?.status ?? "NoShow") });
+  }
+
+  async appointmentTimeline(appointmentId: string) {
+    const r = (await getRaw(`/appointments/${encodeURIComponent(appointmentId)}/timeline`)) as any[];
+    return (r ?? []).map((x: any) => parseOr(zTimelineStep, { status: x.status, at: x.at, by: x.by ?? null }));
   }
 
   async startVisit(appointmentId: string, beneficiaryId: string) {

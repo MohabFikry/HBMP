@@ -142,6 +142,32 @@ public static class AppointmentsModule
             return Results.Ok(clinics);
         });
 
+        // GET /appointments/{id}/timeline — how this appointment got to where it is.
+        //
+        // Sourced from emr.appointment_history, which a row trigger has been filling since phase 3: every insert
+        // and update snapshots the whole appointment as JSONB. That makes the timeline a read of data already
+        // being kept rather than a new thing to maintain.
+        //
+        // Deliberately NOT the audit store. audit-service holds the hash-chained compliance record and requires
+        // audit:read — Security/Compliance/DPO — because it spans every entity and carries before/after states.
+        // The desk and the treating clinician need a far narrower thing: the status steps of ONE appointment. So
+        // this serves exactly that, under the appointment:read they already hold, and only three fields per step
+        // leave the service even though each snapshot contains the entire row.
+        read.MapGet("/appointments/{id:guid}/timeline", async (
+            Guid id, BranchScopeState branch, EmrDbContext db, CancellationToken ct) =>
+        {
+            // Same branch rule as reading the appointment itself — a timeline is a read of that appointment.
+            if (await AppointmentEndpointsShared.DenyIfOutsideBranchAsync(id, branch, db, ct) is { } outOfScope)
+                return outOfScope;
+
+            var exists = await db.Appointments.AsNoTracking().AnyAsync(a => a.AppointmentId == id, ct);
+            if (!exists) return Results.Problem(statusCode: 404, title: "Not Found",
+                type: "https://mersal.foundation/problems/not-found");
+
+            var steps = await AppointmentTimeline.ReadAsync(db, id, ct);
+            return Results.Ok(steps);
+        });
+
         // POST /appointments — concurrency-safe booking (US-020).
         write.MapPost("/appointments", async (
             BookAppointmentRequest req, HttpRequest http, EmrDbContext db, AppointmentBookingService booking,
@@ -318,7 +344,7 @@ public static class AppointmentsModule
             var (replay, key) = await CheckIdempotency(http, idem, db, ct);
             if (replay is not null) return replay;
 
-            var result = await transitions.RescheduleAsync(id, req.NewSlotId, IfMatch(http), clock.GetUtcNow(), ct);
+            var result = await transitions.RescheduleAsync(id, req.NewSlotId, IfMatch(http), clock.GetUtcNow(), me.Principal?.Subject, ct);
             var problem = MapFailure(result.Outcome);
             if (problem is not null) return await AuditAndReturn(problem, audit, me, "ApptRescheduleDenied", id, result.Outcome, ct);
 
@@ -349,7 +375,7 @@ public static class AppointmentsModule
             var (replay, key) = await CheckIdempotency(http, idem, db, ct);
             if (replay is not null) return replay;
 
-            var result = await transitions.CancelAsync(id, req.Reason, IfMatch(http), clock.GetUtcNow(), ct);
+            var result = await transitions.CancelAsync(id, req.Reason, IfMatch(http), clock.GetUtcNow(), me.Principal?.Subject, ct);
             var problem = MapFailure(result.Outcome);
             if (problem is not null) return await AuditAndReturn(problem, audit, me, "ApptCancelDenied", id, result.Outcome, ct);
 
@@ -378,7 +404,7 @@ public static class AppointmentsModule
             var (replay, key) = await CheckIdempotency(http, idem, db, ct);
             if (replay is not null) return replay;
 
-            var result = await transitions.NoShowAsync(id, IfMatch(http), clock.GetUtcNow(), NoShowGrace, ct);
+            var result = await transitions.NoShowAsync(id, IfMatch(http), clock.GetUtcNow(), NoShowGrace, me.Principal?.Subject, ct);
             var problem = MapFailure(result.Outcome);
             if (problem is not null) return await AuditAndReturn(problem, audit, me, "ApptNoShowDenied", id, result.Outcome, ct);
 

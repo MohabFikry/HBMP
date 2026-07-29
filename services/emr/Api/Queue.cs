@@ -38,7 +38,7 @@ public static class QueueModule
             }
 
             var result = await transitions.CheckInAsync(id, req.MemberNo, req.DisplayName, req.Priority,
-                AppointmentEndpointsShared.IfMatch(http), clock.GetUtcNow(), ct);
+                AppointmentEndpointsShared.IfMatch(http), clock.GetUtcNow(), me.Principal?.Subject, ct);
             var problem = AppointmentEndpointsShared.MapFailure(result.Outcome);
             if (problem is not null) return problem;
 

@@ -8,6 +8,7 @@ import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
 import { ApiError } from "../api/http";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
+import { VisitTimelineButton } from "./VisitTimeline";
 
 const S = {
   visitsTitle: { en: "Today's visits", ar: "زيارات اليوم" },
@@ -120,6 +121,7 @@ export function ReceptionAppointments() {
       header: t(S.actions),
       cell: (r) => (
         <span className="row-actions">
+          <VisitTimelineButton row={r} />
           {r.checkInEligible && (
             <Button variant="primary" size="sm" loading={desk.busy === `in:${r.id}`}
                     onClick={() => void desk.run(`in:${r.id}`, () => api.checkIn(r.id, r.rowVersion))}>

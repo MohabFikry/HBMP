@@ -31,6 +31,7 @@ import {
   zAccessReviewCampaign,
   zAppointmentRow,
   zBookableClinic,
+  zTimelineStep,
   zBookableSlot,
   zBookingResult,
   zBreakGlassGrant,
@@ -211,6 +212,19 @@ export class DevApiClient implements ApiClient {
           startVisitEligible: r.st === "CheckedIn",
           rowVersion: 1,
         }))),
+      [],
+    );
+  }
+  appointmentTimeline(_appointmentId: string) {
+    void _appointmentId;
+    return this.gate(
+      () =>
+        ok(z.array(zTimelineStep), [
+          { status: "Booked", at: "2026-07-22T08:00:00Z", by: "reception" },
+          // Deliberately unattributed: a step recorded before actor attribution existed.
+          { status: "CheckedIn", at: "2026-07-22T08:55:00Z", by: null },
+          { status: "Completed", at: "2026-07-22T09:40:00Z", by: "doctor" },
+        ]),
       [],
     );
   }

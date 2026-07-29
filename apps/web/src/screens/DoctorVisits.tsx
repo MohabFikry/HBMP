@@ -8,6 +8,7 @@ import { useAsync } from "../api/useAsync";
 import { ApiError } from "../api/http";
 import { useFormat } from "../i18n/useFormat";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
+import { VisitTimelineButton } from "./VisitTimeline";
 
 const S = {
   title: { en: "My visits", ar: "زياراتي" },
@@ -103,16 +104,20 @@ export function DoctorVisits() {
     {
       key: "actions",
       header: t(S.actions),
-      cell: (r) =>
-        r.startVisitEligible ? (
-          <Button variant="primary" size="sm" loading={busy === r.id} onClick={() => void start(r)}>
-            {t(S.startVisit)}
-          </Button>
-        ) : r.checkInEligible ? (
-          // A Booked row is not the doctor's to act on yet — say what is being waited for rather than
-          // rendering a dead cell the clinician reads as a broken screen.
-          <span className="muted">{t(S.waiting)}</span>
-        ) : null,
+      cell: (r) => (
+        <span className="row-actions">
+          <VisitTimelineButton row={r} />
+          {r.startVisitEligible ? (
+            <Button variant="primary" size="sm" loading={busy === r.id} onClick={() => void start(r)}>
+              {t(S.startVisit)}
+            </Button>
+          ) : r.checkInEligible ? (
+            // A Booked row is not the doctor's to act on yet — say what is being waited for rather than
+            // rendering a dead cell the clinician reads as a broken screen.
+            <span className="muted">{t(S.waiting)}</span>
+          ) : null}
+        </span>
+      ),
     },
   ];
 

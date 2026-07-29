@@ -1315,3 +1315,59 @@ nav.mrs-rail {
 .book-actions {
   margin-block-start: var(--sp4);
 }
+
+/* ── Visit timeline (23 §1) ──────────────────────────────────────────────────
+   An ordered list, not a table: the sequence IS the content, and a screen reader should announce it as one. */
+.vt-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp2);
+}
+.vt-step {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--sp3);
+  padding: var(--sp2) var(--sp3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+}
+/* The connecting rule between steps — decorative, so it carries no meaning the text does not already. */
+.vt-step + .vt-step {
+  position: relative;
+}
+.vt-step + .vt-step::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: var(--sp5);
+  inset-block-start: calc(-1 * var(--sp2));
+  block-size: var(--sp2);
+  border-inline-start: 2px solid var(--border-strong);
+}
+.vt-when {
+  color: var(--text-2);
+}
+.vt-who {
+  color: var(--text-2);
+  white-space: nowrap;
+}
+@media (max-width: 560px) {
+  .vt-step {
+    grid-template-columns: 1fr;
+    gap: var(--sp1);
+  }
+  .vt-who {
+    white-space: normal;
+  }
+}
+.vt-actor {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-caption);
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-1);
+}
