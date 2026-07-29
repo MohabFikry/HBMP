@@ -873,7 +873,7 @@ nav.mrs-rail {
   flex-wrap: wrap;
 }
 .cc-results { list-style: none; margin: var(--sp3) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp2); }
-.cc-result { display: flex; justify-content: space-between; gap: var(--sp4); inline-size: 100%;
+.cc-result { display: flex; align-items: center; justify-content: space-between; gap: var(--sp4); inline-size: 100%;
   min-block-size: 44px; padding: 0 var(--sp4); border: 1px solid var(--border); border-radius: var(--r-sm);
   background: var(--surface-1); color: var(--text-1); cursor: pointer; }
 .cc-result[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
