@@ -377,6 +377,23 @@ export class HttpApiClient implements ApiClient {
     // ?mine is resolved from the TOKEN's subject server-side — the caller cannot ask for another doctor's list.
     if (mine) qs.set("mine", "true");
     const r = (await getRaw(`/appointments${qs.toString() ? `?${qs}` : ""}`)) as any[];
+
+    // Put names to the branches on THIS page — one request for the distinct ids, and a failure leaves the name
+    // null rather than failing the board. Branch names live behind provider:read, which the desks and the call
+    // centre do not hold, so they come from the label-only lookup (see /branch-labels).
+    const branchIds = [...new Set((r ?? []).map((a: any) => a.branchId).filter(Boolean).map(String))];
+    const branchNames = new Map<string, string>();
+    if (branchIds.length > 0) {
+      try {
+        const rows = (await getRaw(`/branch-labels?branchIds=${encodeURIComponent(branchIds.join(","))}`)) as any[];
+        for (const row of rows ?? []) {
+          if (row?.branchId && row?.nameEn) branchNames.set(String(row.branchId), String(row.nameEn));
+        }
+      } catch {
+        // Unnamed is better than no board.
+      }
+    }
+
     return (r ?? []).map((a: any) =>
       parseOr(zAppointmentRow, {
         id: a.appointmentId,
@@ -390,6 +407,8 @@ export class HttpApiClient implements ApiClient {
         noShowEligible: a.noShowEligible === true,
         // Derived from the server's own status + doctor assignment, echoed back on the row.
         startVisitEligible: String(a.status ?? "") === "CheckedIn",
+        branchId: a.branchId ?? null,
+        branchName: a.branchId ? branchNames.get(String(a.branchId)) ?? null : null,
         rowVersion: typeof a.rowVersion === "number" ? a.rowVersion : undefined,
       }),
     );

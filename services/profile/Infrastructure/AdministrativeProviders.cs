@@ -107,9 +107,14 @@ public sealed class CoverageSectionProvider(AdministrativeSource source, CallerS
             {
                 foreach (var line in detail.RootElement.Array("categories"))
                 {
+                    // policy-service names these benefitCategoryCode and limit. Reading "category" and
+                    // "annualLimit" — neither of which it has ever sent — rendered every coverage line as
+                    // "(unknown): 100 / —": the remaining balance was right, and the two things that say WHAT
+                    // it is a balance OF were both missing. The alternate spellings stay as fallbacks.
                     categories.Add(new CoverageLimitLine(
-                        line.Str("category") ?? line.Str("benefitCategory") ?? "(unknown)",
-                        line.Dec("annualLimit"), line.Dec("consumed"), line.Dec("remaining"),
+                        line.Str("benefitCategoryCode") ?? line.Str("category") ?? line.Str("benefitCategory") ?? "(unknown)",
+                        line.Dec("limit") ?? line.Dec("configuredLimit") ?? line.Dec("annualLimit"),
+                        line.Dec("consumed"), line.Dec("remaining"),
                         line.Dec("costSharePercent"), line.Str("costShareTier")));
                 }
             }

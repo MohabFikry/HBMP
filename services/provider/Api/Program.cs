@@ -104,6 +104,28 @@ var read = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("prov
  * locations it already learned about from the slots it is allowed to see.
  */
 var labels = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("appointment:read"));
+/*
+ * Branch LABELS, same shape and same reasoning as clinic-labels below: names for ids the caller already holds,
+ * and nothing else. The cross-branch appointment boards show which branch each appointment belongs to, and the
+ * only branch names on the platform live here behind provider:read — which the call centre and the desks do not
+ * have, and should not, since the branch DIRECTORY is network administration.
+ */
+labels.MapGet("/branch-labels", async (string? branchIds, ProviderDbContext db, CancellationToken ct) =>
+{
+    var ids = (branchIds ?? "")
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(x => Guid.TryParse(x, out var g) ? g : (Guid?)null)
+        .Where(g => g is not null).Select(g => g!.Value).Distinct().Take(200).ToList();
+    // No ids ⇒ empty, never the whole branch list.
+    if (ids.Count == 0) return Results.Ok(Array.Empty<object>());
+
+    var rows = await db.Branches.AsNoTracking()
+        .Where(b => ids.Contains(b.BranchId) && !b.IsDeleted)
+        .Select(b => new { b.BranchId, nameEn = b.NameEn, nameAr = b.NameAr })
+        .ToListAsync(ct);
+    return Results.Ok(rows);
+});
+
 labels.MapGet("/clinic-labels", async (string? locationIds, ProviderDbContext db, IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
     var tenant = me.Principal?.TenantId;

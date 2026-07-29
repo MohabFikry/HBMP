@@ -210,6 +210,8 @@ export class DevApiClient implements ApiClient {
           checkedIn: r.st === "CheckedIn",
           noShowEligible: r.noShowEligible ?? false,
           startVisitEligible: r.st === "CheckedIn",
+          branchId: "br-dokki",
+          branchName: "Dokki",
           rowVersion: 1,
         }))),
       [],

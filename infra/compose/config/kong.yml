@@ -176,6 +176,8 @@ services:
           # Label-only clinic lookup for schedulers (appointment:read). Names for ids the caller already
           # holds — never the provider directory, which stays behind provider:read.
           - /api/v1/clinic-labels
+          # Branch names for the cross-branch boards (appointment:read, explicit ids only).
+          - /api/v1/branch-labels
           # 19.1b — network tiers + effective-dated tier assignment + the service-date resolver.
           - /api/v1/network-tiers
         strip_path: false

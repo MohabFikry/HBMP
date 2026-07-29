@@ -33,6 +33,10 @@ export const zAppointmentRow = z.object({
   /** True when a visit may be started from this row: CheckedIn, and assigned to the caller (or unassigned).
    *  The server owns it — the doctor's board must not re-derive a treating-relationship rule. */
   startVisitEligible: z.boolean(),
+  /** The branch this appointment belongs to, and its name once resolved. Null for an external provider
+   *  location, which belongs to no Mersal branch. A cross-branch board is unreadable without it. */
+  branchId: zId.nullish(),
+  branchName: z.string().nullish(),
   /** The emr row's `xmin` optimistic-concurrency token (opt-in): echoed as `If-Match` on check-in so a
    * stale board loses to a concurrent transition with 412 instead of silently double-acting. Optional —
    * absent for a fixture/older service, in which case check-in proceeds without the guard. */

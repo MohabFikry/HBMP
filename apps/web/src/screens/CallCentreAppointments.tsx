@@ -32,6 +32,8 @@ const S = {
   type: { en: "Type", ar: "النوع" },
   time: { en: "Time", ar: "الوقت" },
   status: { en: "Status", ar: "الحالة" },
+  branch: { en: "Branch", ar: "الفرع" },
+  noBranch: { en: "External", ar: "خارجي" },
 } satisfies Record<string, Localized>;
 
 /**
@@ -52,6 +54,9 @@ export function CallCentreAppointments() {
 
   const cols: Column<AppointmentRow>[] = [
     { key: "beneficiary", header: t(S.beneficiary), cell: (r) => <span className="tnum">{r.beneficiary.token}</span> },
+    // WHICH branch, on a board that deliberately spans all of them. Without it the agent can tell a caller the
+    // time of an appointment but not where to go, which is worse than not showing it at all.
+    { key: "branch", header: t(S.branch), cell: (r) => r.branchName ?? (r.branchId ? "—" : t(S.noBranch)) },
     { key: "type", header: t(S.type), cell: (r) => r.appointmentType },
     { key: "time", header: t(S.time), cell: (r) => <span className="tnum">{fmt.time(r.scheduledStart)}</span> },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
