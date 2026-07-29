@@ -3,7 +3,7 @@ using System.Security.Claims;
 namespace Mersal.Auth;
 
 /// <summary>
-/// The authenticated principal, normalized from a Keycloak access token, exposing
+/// The authenticated principal, normalized from a validated access token, exposing
 /// every ABAC-relevant claim the services and <c>libs/authz</c> need. Immutable.
 /// See HBMP-Design/18-security-model.md and CLAUDE.md § Security.
 /// </summary>
@@ -64,9 +64,8 @@ public sealed record HbmpPrincipal
     public bool IsInRole(string role) => Roles.Contains(role.ToLowerInvariant());
 
     /// <summary>
-    /// Build a principal from a validated <see cref="ClaimsPrincipal"/>. Handles Keycloak's
-    /// nested <c>realm_access.roles</c> / <c>resource_access.*.roles</c> role shapes and the
-    /// space-delimited <c>scope</c> claim.
+    /// Build a principal from a validated <see cref="ClaimsPrincipal"/>: flat <c>roles</c> claims, the
+    /// space-delimited <c>scope</c> claim, and the multi-valued amr/features claims.
     /// </summary>
     public static HbmpPrincipal FromClaims(ClaimsPrincipal user)
     {
@@ -76,9 +75,9 @@ public sealed record HbmpPrincipal
                   ?? user.FindFirstValue(ClaimTypes.NameIdentifier)
                   ?? throw new InvalidOperationException("Access token has no subject (sub) claim.");
 
-        var roles = KeycloakClaims.ExtractRoles(user);
-        var scopes = KeycloakClaims.ExtractScopes(user);
-        var amr = KeycloakClaims.ExtractMulti(user, HbmpClaimTypes.Amr);
+        var roles = TokenClaims.ExtractRoles(user);
+        var scopes = TokenClaims.ExtractScopes(user);
+        var amr = TokenClaims.ExtractMulti(user, HbmpClaimTypes.Amr);
         var acr = user.FindFirstValue(HbmpClaimTypes.Acr);
 
         return new HbmpPrincipal
@@ -96,7 +95,7 @@ public sealed record HbmpPrincipal
             MfaSatisfied = MfaEvaluator.IsSatisfied(acr, amr),
             MembershipId = user.FindFirstValue(HbmpClaimTypes.MembershipId),
             Level = int.TryParse(user.FindFirstValue(HbmpClaimTypes.Level), out var lvl) ? lvl : null,
-            Features = KeycloakClaims.ExtractMulti(user, HbmpClaimTypes.Features).ToHashSet(StringComparer.Ordinal),
+            Features = TokenClaims.ExtractMulti(user, HbmpClaimTypes.Features).ToHashSet(StringComparer.Ordinal),
         };
     }
 }

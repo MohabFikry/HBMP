@@ -1,8 +1,10 @@
 namespace Mersal.Auth;
 
 /// <summary>
-/// Canonical claim types the platform reads off a Keycloak-issued access token.
-/// Keycloak emits some of these under non-standard names (realm_access.roles,
+/// Canonical claim types the platform reads off an identity-service access token (the frozen token
+/// contract — docs/security/token-contract.md).
+/// The retired Keycloak issuer (Phase 17, ADR-0015) emitted some of these under non-standard names
+/// (realm_access.roles,
 /// azp, etc.); <see cref="HbmpPrincipal"/> normalizes them.
 /// See HBMP-Design/18-security-model.md (§ authentication, ABAC attributes).
 /// </summary>
@@ -26,10 +28,10 @@ public static class HbmpClaimTypes
     /// <summary>Provider the principal belongs to, for provider-scoped users (ABAC: provider-ownership).</summary>
     public const string ProviderId = "provider_id";
 
-    /// <summary>Keycloak session id (sid) — correlates sessions for revoke/timeout.</summary>
+    /// <summary>Session id (sid) — correlates sessions for revoke/timeout.</summary>
     public const string SessionId = "sid";
 
-    /// <summary>Source IP, surfaced for conditional access / audit (Keycloak can map this).</summary>
+    /// <summary>Source IP, surfaced for conditional access / audit.</summary>
     public const string SourceIp = "src_ip";
 
     // ---- Phase 21 (ADR-0021) — ADDITIVE to the frozen contract. Every one of these is OPTIONAL:
@@ -59,6 +61,6 @@ public static class MfaSignals
     /// <summary>AMR values that each independently indicate a second factor.</summary>
     public static readonly string[] Amr = ["mfa", "otp", "hwk", "totp", "webauthn", "sms"];
 
-    /// <summary>ACR values Keycloak may emit for a step-up / MFA flow.</summary>
+    /// <summary>ACR values an issuer may emit for a step-up / MFA flow.</summary>
     public static readonly string[] Acr = ["mfa", "aal2", "aal3", "loa2", "loa3", "2fa"];
 }

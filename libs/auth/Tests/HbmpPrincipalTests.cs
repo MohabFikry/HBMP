@@ -48,21 +48,43 @@ public class HbmpPrincipalTests
     }
 
     [Fact]
-    public void ExtractRoles_reads_keycloak_realm_access_and_resource_access()
+    public void Flat_role_claims_are_lower_cased_and_deduplicated()
     {
         var user = User(
             new Claim("sub", "u"),
-            new Claim("realm_access", """{"roles":["Doctor","reception"]}"""),
+            new Claim("roles", "Doctor"),
+            new Claim("roles", "reception"),
+            new Claim("roles", "DOCTOR"));
+
+        var p = HbmpPrincipal.FromClaims(user);
+
+        p.Roles.Should().BeEquivalentTo("doctor", "reception");
+        p.IsInRole("Doctor").Should().BeTrue(); // case-insensitive
+    }
+
+    /// <summary>
+    /// Phase 17 (ADR-0015) retired Keycloak, whose roles arrived nested under `realm_access.roles` and
+    /// `resource_access.{client}.roles`. This reader still merged both, which left a role source with NO
+    /// PRODUCER — a second, unowned way for authority to enter the authorization path, kept out only by the
+    /// accident that nothing emitted that shape. identity-service emits flat `roles`, so a nested object is
+    /// now exactly what it looks like: a claim we do not read.
+    /// </summary>
+    [Fact]
+    public void Nested_keycloak_role_shapes_grant_nothing()
+    {
+        var user = User(
+            new Claim("sub", "u"),
+            new Claim("realm_access", """{"roles":["super_admin","doctor"]}"""),
             new Claim("resource_access", """{"hbmp-api":{"roles":["orders-consumer"]}}"""));
 
         var p = HbmpPrincipal.FromClaims(user);
 
-        p.Roles.Should().Contain(new[] { "doctor", "reception", "orders-consumer" });
-        p.IsInRole("Doctor").Should().BeTrue(); // case-insensitive
+        p.Roles.Should().BeEmpty("the retired issuer's nested shapes are no longer a source of roles");
+        p.IsInRole("super_admin").Should().BeFalse();
     }
 
     [Fact]
-    public void Malformed_realm_access_json_is_ignored_not_thrown()
+    public void A_malformed_unread_claim_is_ignored_not_thrown()
     {
         var user = User(new Claim("sub", "u"), new Claim("realm_access", "{not-json"));
         var p = HbmpPrincipal.FromClaims(user);
