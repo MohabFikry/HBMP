@@ -6,12 +6,14 @@ namespace Mersal.Eligibility.Tests;
 
 public class ReceptionSearchTests
 {
+    private static readonly Guid SeededBeneficiary = Guid.NewGuid();
+
     private static async Task<InMemoryReceptionIndex> Seed()
     {
         var idx = new InMemoryReceptionIndex();
         await idx.UpsertAsync(new ReceptionDocument
         {
-            BeneficiaryId = Guid.NewGuid(), MemberNo = "MRS-M-2026-000001",
+            BeneficiaryId = SeededBeneficiary, MemberNo = "MRS-M-2026-000001",
             GivenName = "Layla", FamilyName = "Haddad", Status = "Active",
             NationalId = "29001011234567", Passport = "A1234567", RefugeeId = "REF-99",
             UnhcrNo = "UNHCR-42", PolicyNo = "POL-1", PrimaryPhone = "+201000000001",
@@ -54,6 +56,31 @@ public class ReceptionSearchTests
         card.Coverage.Should().Contain("CONSULT");
         card.RemainingLimits.Should().ContainSingle(l => l.Remaining == 9);
         card.VisitHistory.Count.Should().Be(0); // summary only — no diagnoses/notes
+    }
+
+    /// <summary>
+    /// A caller that already holds a beneficiary id must be able to redeem it for that member's card. Every
+    /// clause matched a human-facing identifier — member no, national id, passport, phone, name — so a GUID
+    /// query matched nothing, and the call-centre 360, which looks the member up by id after verification,
+    /// answered 404 every single time. The reservation panel behind it was unreachable in the UI as a result.
+    /// </summary>
+    [Fact]
+    public async Task A_beneficiary_id_resolves_to_that_members_card()
+    {
+        var idx = await Seed();
+        var hits = await idx.SearchAsync(SeededBeneficiary.ToString(), 10);
+
+        hits.Should().ContainSingle();
+        hits[0].BeneficiaryId.Should().Be(SeededBeneficiary);
+        hits[0].MemberNo.Should().Be("MRS-M-2026-000001");
+    }
+
+    [Fact]
+    public async Task An_unknown_id_finds_nothing_rather_than_everything()
+    {
+        // Exact match on a key the caller already has: it redeems an id, it does not enumerate.
+        var idx = await Seed();
+        (await idx.SearchAsync(Guid.NewGuid().ToString(), 10)).Should().BeEmpty();
     }
 
     [Fact]

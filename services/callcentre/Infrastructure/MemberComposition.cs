@@ -15,5 +15,9 @@ public interface IMemberDirectory
     /// <summary>Post-verification 360 — the composed, projected view across ALL branches. Null if the member
     /// cannot be resolved (the endpoint then 404s); a partially-unreachable sibling degrades to an empty section,
     /// never fabricated data.</summary>
-    Task<Member360?> AssembleAsync(Guid beneficiaryId, string? bearerToken, CancellationToken ct = default);
+    /// <summary><paramref name="interactionId"/> is the call the caller was verified ON. profile-service applies
+    /// the call-centre verification gate itself and needs to be TOLD which interaction to check — omitting it
+    /// meant profile refused every 360 with 403, which this layer turned into null and the endpoint reported as
+    /// 404 "not found". The member existed and was verified; nothing said so.</summary>
+    Task<Member360?> AssembleAsync(Guid beneficiaryId, string? bearerToken, Guid? interactionId = null, CancellationToken ct = default);
 }

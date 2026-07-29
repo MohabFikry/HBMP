@@ -1,6 +1,7 @@
 using Mersal.Audit.Client;
 using Mersal.Auth.Authorization;
 using Mersal.Authz;
+using Mersal.CallCentre.Domain;
 using Mersal.CallCentre.Infrastructure;
 
 namespace Mersal.CallCentre.Api;
@@ -24,7 +25,21 @@ public static class Members
                 return Results.Problem(statusCode: 400, title: "q-required",
                     detail: "A query is required (phone / member no / national ID / passport / refugee ID / UNHCR no).");
 
-            var result = await directory.SearchAsync(q, http.Headers.Authorization, ct);
+            MemberSearchResult result;
+            try
+            {
+                result = await directory.SearchAsync(q, http.Headers.Authorization, ct);
+            }
+            catch (SiblingRefusedException ex)
+            {
+                // A refusal upstream is a permissions/configuration fault, NOT an absent member. Reported as
+                // itself so the agent does not tell a registered member they are not registered.
+                await deps.AuditAsync("call_centre_search", q, AuditAction.Read, $"upstream refused ({ex.Status})",
+                    callRef: null, fieldClasses: ["identity"]);
+                return Results.Problem(statusCode: 502, title: "member-directory-unavailable",
+                    type: "urn:hbmp:upstream-refused",
+                    detail: "Member search could not be completed. This is a permissions or configuration fault, not an absent member.");
+            }
             // Every search is audited (min-necessary: only the count + query class, no member content).
             await deps.AuditAsync("call_centre_search", q, AuditAction.Read, $"{result.MatchCount} match(es)",
                 callRef: null, fieldClasses: ["identity"]);
@@ -50,7 +65,7 @@ public static class Members
                     type: "urn:hbmp:callcentre-not-verified");
             }
 
-            var summary = await directory.AssembleAsync(beneficiaryId, http.Headers.Authorization, ct);
+            var summary = await directory.AssembleAsync(beneficiaryId, http.Headers.Authorization, interactionId, ct);
             if (summary is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
             var interaction = await deps.Db.Interactions.FindAsync([interactionId], ct);

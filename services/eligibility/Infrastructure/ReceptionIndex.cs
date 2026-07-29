@@ -54,7 +54,16 @@ public sealed class PostgresReceptionIndex(EligibilityDbContext db) : IReception
         var terms = term.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         IQueryable<MemberProjection> query;
-        if (terms.Length <= 1)
+        // A bare beneficiary id resolves to that ONE member. Callers that already hold an id and need the card
+        // behind it — the call-centre 360 is the live case — had no way to ask: every clause matched a
+        // human-facing identifier, so a GUID query returned nothing and the 360 answered 404 forever. It is an
+        // exact match on a key the caller already has, so it widens nothing: you cannot discover an id this way,
+        // only redeem one.
+        if (Guid.TryParse(term, out var beneficiaryId))
+        {
+            query = db.Members.AsNoTracking().Where(m => m.BeneficiaryId == beneficiaryId);
+        }
+        else if (terms.Length <= 1)
         {
             var like = $"%{term}%";
             query = db.Members.AsNoTracking().Where(m =>
@@ -119,6 +128,10 @@ public sealed class InMemoryReceptionIndex : IReceptionIndex
     public Task<IReadOnlyList<ReceptionDocument>> SearchAsync(string q, int limit, CancellationToken ct = default)
     {
         var term = q.Trim();
+        // Mirrors the DB index: an id redeems to its own card.
+        if (Guid.TryParse(term, out var byId))
+            return Task.FromResult<IReadOnlyList<ReceptionDocument>>(
+                _docs.TryGetValue(byId, out var only) ? [only] : []);
         bool Match(ReceptionDocument d) =>
             d.MemberNo == term || d.NationalId == term || d.Passport == term || d.RefugeeId == term
             || d.UnhcrNo == term || d.PolicyNo == term || d.PrimaryPhone == term

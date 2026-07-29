@@ -87,7 +87,18 @@ public sealed class FakeMemberDirectory : IMemberDirectory
         Task.FromResult(new MemberSearchResult(query, 1,
             [new MemberMatch(BeneficiaryId, "Amal Hassan", "MRS-M-1001", ["MemberNo", "DateOfBirth", "Phone"])]));
 
-    public Task<Member360?> AssembleAsync(Guid beneficiaryId, string? bearer, CancellationToken ct = default) =>
+    /// <summary>Records the interaction it was asked about: profile-service gates the 360 on a verification for
+    /// THAT call, so a directory that drops the id produces a 403 the endpoint reports as 404.</summary>
+    public Guid? LastInteractionId { get; private set; }
+
+    public Task<Member360?> AssembleAsync(
+        Guid beneficiaryId, string? bearer, Guid? interactionId = null, CancellationToken ct = default)
+    {
+        LastInteractionId = interactionId;
+        return AssembleCore(beneficiaryId);
+    }
+
+    private static Task<Member360?> AssembleCore(Guid beneficiaryId) =>
         Task.FromResult<Member360?>(new Member360(
             new MemberIdentity(beneficiaryId, "MRS-M-1001", "Amal Hassan", "30-39", "Active", StatusCue.For("Active")),
             [new CoverageLine("Outpatient", 10000m, 7500m)],

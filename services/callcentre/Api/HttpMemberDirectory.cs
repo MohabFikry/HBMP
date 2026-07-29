@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Mersal.CallCentre.Domain;
@@ -20,7 +21,8 @@ public sealed class HttpMemberDirectory(IHttpClientFactory factory) : IMemberDir
 
     public async Task<MemberSearchResult> SearchAsync(string query, string? bearer, CancellationToken ct = default)
     {
-        var resp = await GetAsync<ReceptionSearchDto>("eligibility", $"/api/v1/reception/search?q={Uri.EscapeDataString(query)}", bearer, ct);
+        // Required: an empty search result and a refused search must never look the same to the agent.
+        var resp = await GetAsync<ReceptionSearchDto>("eligibility", $"/api/v1/reception/search?q={Uri.EscapeDataString(query)}", bearer, ct, required: true);
         var matches = (resp?.Results ?? []).Select(card =>
         {
             var challenges = new List<string>();
@@ -35,11 +37,13 @@ public sealed class HttpMemberDirectory(IHttpClientFactory factory) : IMemberDir
         return new MemberSearchResult(query, matches.Count, matches);
     }
 
-    public async Task<Member360?> AssembleAsync(Guid beneficiaryId, string? bearer, CancellationToken ct = default)
+    public async Task<Member360?> AssembleAsync(
+        Guid beneficiaryId, string? bearer, Guid? interactionId = null, CancellationToken ct = default)
     {
+        _ = interactionId;   // this path reads eligibility/emr directly; only profile-service gates on it.
         // Identity + coverage are the spine — resolved via the reception card (clinical-free). Without it the member
         // cannot be presented, so return null (→ 404). A search by the id surfaces the single card.
-        var recep = await GetAsync<ReceptionSearchDto>("eligibility", $"/api/v1/reception/search?q={beneficiaryId}", bearer, ct);
+        var recep = await GetAsync<ReceptionSearchDto>("eligibility", $"/api/v1/reception/search?q={beneficiaryId}", bearer, ct, required: true);
         var card = (recep?.Results ?? []).FirstOrDefault(c => c.Identity?.BeneficiaryId == beneficiaryId)
                    ?? (recep?.Results ?? []).FirstOrDefault();
         if (card?.Identity is null) return null;
@@ -64,7 +68,15 @@ public sealed class HttpMemberDirectory(IHttpClientFactory factory) : IMemberDir
     private static bool IsChangeable(string? status) =>
         status is "Scheduled" or "Booked" or "Confirmed";
 
-    private async Task<T?> GetAsync<T>(string client, string path, string? bearer, CancellationToken ct)
+    /// <summary>Read a sibling service.
+    ///
+    /// <paramref name="required"/> marks a call the caller CANNOT do without. Everything used to degrade to
+    /// default on any failure, which meant a 403 from a sibling — a scope the agent lacks, i.e. a configuration
+    /// fault — arrived at the UI as "no such member". A wrong answer that looks like a valid one is worse than
+    /// an error: the agent tells the member they are not registered. Required calls now surface the refusal;
+    /// optional side panels still degrade, because an appointment list that failed to load is genuinely better
+    /// shown empty than blocking the whole 360.</summary>
+    private async Task<T?> GetAsync<T>(string client, string path, string? bearer, CancellationToken ct, bool required = false)
     {
         try
         {
@@ -76,6 +88,8 @@ public sealed class HttpMemberDirectory(IHttpClientFactory factory) : IMemberDir
                 req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             }
             using var resp = await http.SendAsync(req, ct);
+            if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden && required)
+                throw new SiblingRefusedException(client, path, (int)resp.StatusCode);
             if (!resp.IsSuccessStatusCode) return default;
             await using var stream = await resp.Content.ReadAsStreamAsync(ct);
             return await JsonSerializer.DeserializeAsync<T>(stream, Json, ct);
@@ -94,4 +108,14 @@ public sealed class HttpMemberDirectory(IHttpClientFactory factory) : IMemberDir
     private sealed record ContactDto(Guid ContactId, string? Kind, string? Value, bool IsPrimary, string? PreferredChannel);
     private sealed record ReferralDto(string? ReferralRef, string? Status, string? RequestedSpecialty, DateTimeOffset? CreatedAt);
     private sealed record FollowUpDto(Guid? OriginEncounterId, string? Reason, DateOnly? DueDate, string? Specialty);
+}
+
+
+/// <summary>A sibling service refused this call (401/403). Distinct from "found nothing" on purpose: the two used
+/// to be indistinguishable, and the UI presented a permissions fault as an absent member.</summary>
+public sealed class SiblingRefusedException(string service, string path, int status)
+    : Exception($"{service} refused {path} with {status}")
+{
+    public string Service { get; } = service;
+    public int Status { get; } = status;
 }

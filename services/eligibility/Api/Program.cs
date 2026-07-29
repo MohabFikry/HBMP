@@ -147,7 +147,15 @@ v1.MapGet("/members/{beneficiaryId:guid}/status", async (
 // ================================================================ RECEPTION SEARCH (2.2, US-010)
 // Reception may confirm eligibility fast WITHOUT ever seeing clinical/EMR data. The result card is a
 // server-side min-necessary projection — EMR fields are absent by construction (11-permission-matrix).
-var reception = app.MapGroup("/api/v1/reception").RequireAuthorization(HbmpPolicies.Scope("reception:search"));
+// Member lookup is a front-of-house capability, and there are two front-of-house surfaces: the branch desk
+// (reception:search) and the call centre (callcentre:read, its own gated "may look a member up" grant). The call
+// centre's façade forwards the AGENT's token here, so requiring reception:search alone meant every call-centre
+// member search was refused — and HttpMemberDirectory turned that refusal into an empty result, so the agent saw
+// "No match — try a phone number or another identifier" for a member who plainly exists. Granting the call
+// centre reception:search would have worked too, but it would entrench a misnomer on a role that is not
+// reception; accepting either scope says what is actually true.
+var reception = app.MapGroup("/api/v1/reception")
+    .RequireAuthorization(HbmpPolicies.AnyScope("reception:search", "callcentre:read"));
 
 reception.MapGet("/search", async (
     string? q, IReceptionIndex index, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>

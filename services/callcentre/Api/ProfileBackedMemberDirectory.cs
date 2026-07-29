@@ -38,9 +38,10 @@ public sealed class ProfileBackedMemberDirectory(IHttpClientFactory factory, Htt
     public Task<MemberSearchResult> SearchAsync(string query, string? bearerToken, CancellationToken ct = default) =>
         inner.SearchAsync(query, bearerToken, ct);
 
-    public async Task<Member360?> AssembleAsync(Guid beneficiaryId, string? bearer, CancellationToken ct = default)
+    public async Task<Member360?> AssembleAsync(
+        Guid beneficiaryId, string? bearer, Guid? interactionId = null, CancellationToken ct = default)
     {
-        var profile = await GetProfileAsync(beneficiaryId, bearer, ct);
+        var profile = await GetProfileAsync(beneficiaryId, bearer, interactionId, ct);
         // Fail-CLOSED: without the profile there is no identity spine, and a 360 that invents one is worse than
         // a 404 — an agent would read a member's coverage next to somebody else's name.
         if (profile is null) return null;
@@ -57,7 +58,7 @@ public sealed class ProfileBackedMemberDirectory(IHttpClientFactory factory, Htt
 
         // The call-centre ACTION affordances, from the services that own them. Fail-soft exactly as before: an
         // unreachable section degrades to empty, never to fabricated data.
-        var actions = await inner.AssembleAsync(beneficiaryId, bearer, ct);
+        var actions = await inner.AssembleAsync(beneficiaryId, bearer, interactionId, ct);
 
         return new Member360(
             new MemberIdentity(
@@ -103,13 +104,16 @@ public sealed class ProfileBackedMemberDirectory(IHttpClientFactory factory, Htt
                 Moment(r, "createdAt")))];
     }
 
-    private async Task<JsonDocument?> GetProfileAsync(Guid beneficiaryId, string? bearer, CancellationToken ct)
+    private async Task<JsonDocument?> GetProfileAsync(Guid beneficiaryId, string? bearer, Guid? interactionId, CancellationToken ct)
     {
         try
         {
             var http = factory.CreateClient("profile");
             using var request = new HttpRequestMessage(
-                HttpMethod.Get, $"/api/v1/patients/{beneficiaryId}/profile?sections={Sections}&purpose=call-centre");
+                HttpMethod.Get,
+                // interactionId is what lets profile-service confirm the caller was verified on THIS call.
+                $"/api/v1/patients/{beneficiaryId}/profile?sections={Sections}&purpose=call-centre"
+                + (interactionId is { } id ? $"&interactionId={id}" : ""));
             if (!string.IsNullOrWhiteSpace(bearer))
             {
                 var token = bearer.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)

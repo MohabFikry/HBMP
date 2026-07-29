@@ -43,6 +43,11 @@ public class CallCentreE2ETests(CallCentreFactory factory) : IClassFixture<CallC
             // 4. 360 — no clinical field in the serialized payload
             var s360 = await client.GetAsync($"/api/v1/call-centre/members/{ben}/summary?interactionId={interactionId}");
             s360.StatusCode.Should().Be(HttpStatusCode.OK);
+            // The interaction has to reach the directory. profile-service applies the call-centre verification
+            // gate ITSELF and needs telling which call to check; dropping the id made it refuse with 403, which
+            // this service reported as 404 "not found" — for a member that existed and was verified.
+            factory.Directory.LastInteractionId.Should().Be(interactionId,
+                "the 360 must tell profile-service which interaction the caller was verified on");
             var json = (await s360.Content.ReadAsStringAsync()).ToLowerInvariant();
             foreach (var c in Clinical) json.Should().NotContain(c);
 
