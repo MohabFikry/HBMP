@@ -61,6 +61,7 @@ const FinanceSettlements = lazy(() => import("./FinancePortal").then((m) => ({ d
 const FinanceSummaries = lazy(() => import("./FinancePortal").then((m) => ({ default: m.FinanceSummaries })));
 const FinanceExports = lazy(() => import("./FinancePortal").then((m) => ({ default: m.FinanceExports })));
 // Call Centre portal (Phase 15.5) — the call-shaped workspace + call history share one chunk.
+const CallCentreAppointments = lazy(() => import("./CallCentreAppointments").then((m) => ({ default: m.CallCentreAppointments })));
 const CallCentreWorkspace = lazy(() => import("./CallCentre").then((m) => ({ default: m.CallCentreWorkspace })));
 const CallHistory = lazy(() => import("./CallCentre").then((m) => ({ default: m.CallHistory })));
 // Claims portal (Phase 10b) — worklist / reconciliation / insights share one chunk. Codes + amounts only, no diagnosis.
@@ -170,6 +171,7 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/network/performance": () => <NetworkPerformance />,
   // 10. Call Centre (Phase 15) — the call-shaped workspace + call history. No clinical route exists.
   "/call-centre/workspace": () => <CallCentreWorkspace />,
+  "/call-centre/appointments": () => <CallCentreAppointments />,
   "/call-centre/history": () => <CallHistory />,
   // 11. Claims (Phase 10b) — worklist / reconciliation / insights. Codes + amounts only; no clinical route exists.
   "/claims/worklist": () => <ClaimsWorklist />,
