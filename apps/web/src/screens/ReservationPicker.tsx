@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, useTheme } from "@mersal/design-system";
+import { Button, Select, useTheme } from "@mersal/design-system";
 import { L } from "../i18n/strings";
 import { useFormat } from "../i18n/useFormat";
 import type { CcApi, CcClinic, CcSlot } from "./CallCentre";
@@ -126,26 +126,33 @@ export function ReservationPicker({
         <p role="status">{t(L.ccNoClinics)}</p>
       ) : (
         <>
-          <label className="cc-field">
-            <span>{t(L.ccBranch)}</span>
-            <select value={r.branchKey} onChange={(e) => r.pickBranch(e.currentTarget.value)}>
-              <option value="">{t(L.ccPickBranch)}</option>
-              {r.branches.map(([id, name]) => (
-                <option key={id} value={id}>{name}</option>
-              ))}
-            </select>
-          </label>
-          <label className="cc-field">
-            <span>{t(L.ccClinic)}</span>
-            <select value={r.clinicKey} disabled={!r.branchKey} onChange={(e) => r.pickClinic(e.currentTarget.value)}>
-              <option value="">{r.branchKey ? t(L.ccPickClinic) : t(L.ccPickBranchFirst)}</option>
-              {r.branchClinics.map((c) => (
-                <option key={`${c.providerId}|${c.locationId}`} value={`${c.providerId}|${c.locationId}`}>
-                  {c.label} · {c.openSlots}
-                </option>
-              ))}
-            </select>
-          </label>
+          {/* The design-system Select, not a native one: a native <select> draws its option list in the OS, so
+              it arrives system-blue with square corners no matter what CSS we write — the same reason the
+              branch switcher was rebuilt onto this component. */}
+          <div className="cc-field">
+            <span id="cc-branch-label">{t(L.ccBranch)}</span>
+            <Select
+              aria-labelledby="cc-branch-label"
+              value={r.branchKey || null}
+              placeholder={t(L.ccPickBranch)}
+              options={r.branches.map(([id, name]) => ({ value: id, label: name }))}
+              onChange={r.pickBranch}
+            />
+          </div>
+          <div className="cc-field">
+            <span id="cc-clinic-label">{t(L.ccClinic)}</span>
+            <Select
+              aria-labelledby="cc-clinic-label"
+              value={r.clinicKey || null}
+              disabled={!r.branchKey}
+              placeholder={r.branchKey ? t(L.ccPickClinic) : t(L.ccPickBranchFirst)}
+              options={r.branchClinics.map((c) => ({
+                value: `${c.providerId}|${c.locationId}`,
+                label: `${c.label} · ${c.openSlots}`,
+              }))}
+              onChange={r.pickClinic}
+            />
+          </div>
           {r.chosenClinic && r.slots.length === 0 && <p role="status">{t(L.ccNoSlots)}</p>}
           {Object.entries(byDay).map(([day, daySlots]) => (
             <div key={day} className="cc-day">

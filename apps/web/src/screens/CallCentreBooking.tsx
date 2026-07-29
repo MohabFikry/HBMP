@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Button, Card, Icon, InputField, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, Icon, InputField, Select, StatusChip, useTheme } from "@mersal/design-system";
 import { L } from "../i18n/strings";
 import { PageHeader } from "./_shared";
 import { identifierTypeLabel, memberStatus } from "./statusLabels";
@@ -150,15 +150,16 @@ export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
       <Card>
         <h2 className="cc-step">{t(L.ccStepFind)}</h2>
         <div className="cc-search">
-          <label className="cc-field">
-            <span>{t(L.ccSearchBy)}</span>
-            <select value={searchBy} onChange={(e) => setSearchBy(e.currentTarget.value)}>
-              <option value="">{t(L.ccSearchByAny)}</option>
-              {SEARCH_BY.map((s) => (
-                <option key={s.key} value={s.key}>{t(identifierTypeLabel(s.key))}</option>
-              ))}
-            </select>
-          </label>
+          <div className="cc-field">
+            <span id="cc-searchby-label">{t(L.ccSearchBy)}</span>
+            <Select
+              aria-labelledby="cc-searchby-label"
+              value={searchBy || null}
+              placeholder={t(L.ccSearchByAny)}
+              options={SEARCH_BY.map((s) => ({ value: s.key, label: t(identifierTypeLabel(s.key)) }))}
+              onChange={setSearchBy}
+            />
+          </div>
           <InputField
             label={chosen ? t(identifierTypeLabel(chosen.key)) : t(L.ccSearchLabel)}
             // Honest help text: the server matches the term against EVERY indexed identifier, so this picker

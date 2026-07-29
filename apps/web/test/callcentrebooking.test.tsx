@@ -48,6 +48,13 @@ async function findAndSelect(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: /Hana Mansour/i }));
 }
 
+/** Branch and clinic are the design-system Select (a native <select> cannot style its own option list), so
+ *  they are a combobox + listbox rather than something `selectOptions` can drive. */
+async function choose(user: ReturnType<typeof userEvent.setup>, name: RegExp, option: RegExp) {
+  await user.click(await screen.findByRole("combobox", { name }));
+  await user.click(screen.getByRole("option", { name: option }));
+}
+
 async function verifyPass(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByLabelText("Member number"));
   await user.click(screen.getByLabelText("Date of birth"));
@@ -88,7 +95,7 @@ describe("20.4 — standalone Book appointment (call centre)", () => {
 
     expect(await screen.findByTestId("cc-lockchip")).toBeInTheDocument();
     // No booking surface at all: not the branch picker, not the Book button.
-    expect(screen.queryByLabelText(/^branch$/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /^branch$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^book$/i })).not.toBeInTheDocument();
     // And the clinic list is not even fetched — an unverified call has no business enumerating availability.
     expect(api.clinics).not.toHaveBeenCalled();
@@ -113,8 +120,8 @@ describe("20.4 — standalone Book appointment (call centre)", () => {
     await findAndSelect(user);
     await verifyPass(user);
 
-    await user.selectOptions(await screen.findByLabelText(/^branch$/i), "br-nasr");
-    await user.selectOptions(screen.getByLabelText(/clinic/i), "p2|l2");
+    await choose(user, /^branch$/i, /^Nasr City$/);
+    await choose(user, /^clinic$/i, /Nasr Clinic/);
     await user.click((await screen.findAllByRole("radio"))[0]);
     await user.click(screen.getByRole("button", { name: /^book$/i }));
 
@@ -139,7 +146,7 @@ describe("20.4 — standalone Book appointment (call centre)", () => {
     renderNode(<CallCentreBooking api={fakeApi()} />);
     await findAndSelect(user);
     await verifyPass(user);
-    await screen.findByLabelText(/^branch$/i);
+    await screen.findByRole("combobox", { name: /^branch$/i });
 
     expect(screen.queryByRole("button", { name: /check.?in/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /no.?show/i })).not.toBeInTheDocument();
@@ -152,8 +159,8 @@ describe("20.4 — standalone Book appointment (call centre)", () => {
     renderNode(<CallCentreBooking api={api} />);
     await findAndSelect(user);
     await verifyPass(user);
-    await user.selectOptions(await screen.findByLabelText(/^branch$/i), "br-dokki");
-    await user.selectOptions(screen.getByLabelText(/clinic/i), "p1|l1");
+    await choose(user, /^branch$/i, /^Dokki$/);
+    await choose(user, /^clinic$/i, /Dokki Clinic/);
     await user.click((await screen.findAllByRole("radio"))[0]);
 
     const before = (api.slots as ReturnType<typeof vi.fn>).mock.calls.length;
@@ -209,7 +216,7 @@ describe("20.4 — standalone Book appointment (call centre)", () => {
     const { container } = renderNode(<CallCentreBooking api={fakeApi()} />);
     await findAndSelect(user);
     await verifyPass(user);
-    await screen.findByLabelText(/^branch$/i);
+    await screen.findByRole("combobox", { name: /^branch$/i });
 
     expect(await axe(container)).toHaveNoViolations();
   });

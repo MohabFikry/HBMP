@@ -44,11 +44,28 @@ async function openReservePanel(user: ReturnType<typeof userEvent.setup>) {
   if (open) await user.click(open);
 }
 
+/**
+ * Branch and clinic are the design-system Select, not a native <select>: a native one draws its option list in
+ * the OS, so it cannot wear the Mersal surface at all. That makes it a combobox + listbox rather than something
+ * `selectOptions` can drive, and these helpers are what the agent actually does.
+ */
+async function choose(user: ReturnType<typeof userEvent.setup>, name: RegExp, option: RegExp) {
+  await user.click(await screen.findByRole("combobox", { name }));
+  await user.click(screen.getByRole("option", { name: option }));
+}
+
+async function optionsOf(user: ReturnType<typeof userEvent.setup>, name: RegExp) {
+  await user.click(await screen.findByRole("combobox", { name }));
+  const names = screen.getAllByRole("option").map((o) => o.textContent ?? "");
+  await user.keyboard("{Escape}");
+  return names;
+}
+
 async function pickClinicAndTime(user: ReturnType<typeof userEvent.setup>) {
   await openReservePanel(user);
   // Branch FIRST: the agent names the branch the appointment is for, then the clinic within it.
-  await user.selectOptions(await screen.findByLabelText(/^branch$/i), "br-dokki");
-  await user.selectOptions(await screen.findByLabelText(/clinic/i), "p1|l1");
+  await choose(user, /^branch$/i, /^Dokki$/);
+  await choose(user, /^clinic$/i, /Dokki Clinic/);
   const times = await screen.findAllByRole("radio");
   await user.click(times[times.length - 1]);
 }
@@ -269,15 +286,13 @@ describe("15.3 — the call centre names the branch it is booking into", () => {
     renderNode(<CallCentreWorkspace api={fakeApi()} />);
     await verifyAndOpen(user);
 
-    const branch = await screen.findByLabelText(/^branch$/i);
-    const names = [...branch.querySelectorAll("option")].map((o) => o.textContent);
-    expect(names).toEqual(expect.arrayContaining(["Dokki", "Nasr City"]));
+    expect(await optionsOf(user, /^branch$/i)).toEqual(expect.arrayContaining(["Dokki", "Nasr City"]));
 
     // The clinic picker is inert until a branch is named — a clinic list spanning branches is how someone books
     // Maadi for a caller expecting Dokki.
-    expect(screen.getByLabelText(/clinic/i)).toBeDisabled();
-    await user.selectOptions(branch, "br-nasr");
-    expect(screen.getByLabelText(/clinic/i)).toBeEnabled();
+    expect(screen.getByRole("combobox", { name: /^clinic$/i })).toBeDisabled();
+    await choose(user, /^branch$/i, /^Nasr City$/);
+    expect(screen.getByRole("combobox", { name: /^clinic$/i })).toBeEnabled();
   });
 
   it("shows only the chosen branch's clinics", async () => {
@@ -285,9 +300,8 @@ describe("15.3 — the call centre names the branch it is booking into", () => {
     renderNode(<CallCentreWorkspace api={fakeApi()} />);
     await verifyAndOpen(user);
 
-    await user.selectOptions(await screen.findByLabelText(/^branch$/i), "br-nasr");
-    const clinicNames = [...screen.getByLabelText(/clinic/i).querySelectorAll("option")]
-      .map((o) => o.textContent ?? "");
+    await choose(user, /^branch$/i, /^Nasr City$/);
+    const clinicNames = await optionsOf(user, /^clinic$/i);
     expect(clinicNames.some((n) => /Nasr Clinic/.test(n))).toBe(true);
     expect(clinicNames.some((n) => /Dokki Clinic/.test(n))).toBe(false);
   });
@@ -297,14 +311,14 @@ describe("15.3 — the call centre names the branch it is booking into", () => {
     renderNode(<CallCentreWorkspace api={fakeApi()} />);
     await verifyAndOpen(user);
 
-    await user.selectOptions(await screen.findByLabelText(/^branch$/i), "br-dokki");
-    await user.selectOptions(screen.getByLabelText(/clinic/i), "p1|l1");
+    await choose(user, /^branch$/i, /^Dokki$/);
+    await choose(user, /^clinic$/i, /Dokki Clinic/);
     await user.click((await screen.findAllByRole("radio"))[0]);
     expect(screen.getByRole("button", { name: /^book$/i })).toBeEnabled();
 
-    await user.selectOptions(screen.getByLabelText(/^branch$/i), "br-nasr");
-    // Nothing carried over: no clinic, no time, so nothing bookable.
-    expect(screen.getByLabelText(/clinic/i)).toHaveValue("");
+    await choose(user, /^branch$/i, /^Nasr City$/);
+    // Nothing carried over: the clinic falls back to its placeholder, so nothing is bookable.
+    expect(screen.getByRole("combobox", { name: /^clinic$/i })).toHaveTextContent(/choose a clinic/i);
     expect(screen.getByRole("button", { name: /^book$/i })).toBeDisabled();
   });
 
@@ -314,8 +328,8 @@ describe("15.3 — the call centre names the branch it is booking into", () => {
     renderNode(<CallCentreWorkspace api={api} />);
     await verifyAndOpen(user);
 
-    await user.selectOptions(await screen.findByLabelText(/^branch$/i), "br-nasr");
-    await user.selectOptions(screen.getByLabelText(/clinic/i), "p2|l2");
+    await choose(user, /^branch$/i, /^Nasr City$/);
+    await choose(user, /^clinic$/i, /Nasr Clinic/);
     await user.click((await screen.findAllByRole("radio"))[0]);
     await user.click(screen.getByRole("button", { name: /^book$/i }));
 
