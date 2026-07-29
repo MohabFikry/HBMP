@@ -116,7 +116,8 @@ var v1 = app.MapGroup("/api/v1/encounters").RequireAuthorization(HbmpPolicies.Sc
 v1.MapPost("", async (
     CreateEncounterRequest req, HttpRequest http,
     IMemberStatusProvider status, EmrDbContext db, EncounterNoIssuer encounterNos,
-    IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+    IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, BranchScopeState branchScope,
+    TimeProvider clock, CancellationToken ct) =>
 {
     var idem = http.Headers["Idempotency-Key"].ToString();
     if (string.IsNullOrWhiteSpace(idem))
@@ -128,6 +129,47 @@ v1.MapPost("", async (
         return Results.Ok(EncounterResponse.From(existing));
 
     var actor = me.Principal?.Subject;
+
+    // A visit started FROM an appointment carries two rules that belong here rather than on the button: this is
+    // where an encounter comes into existence, so a caller going straight to POST /encounters is bound by them
+    // too. Both are 23 §1 transitions, not UI preferences.
+    if (req.AppointmentId is { } fromApptId)
+    {
+        if (await AppointmentEndpointsShared.DenyIfOutsideBranchAsync(fromApptId, branchScope, db, ct) is { } outOfBranch)
+            return outOfBranch;
+
+        var appt = await db.Appointments.AsNoTracking().FirstOrDefaultAsync(a => a.AppointmentId == fromApptId, ct);
+        if (appt is null)
+            return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+        // 1. The patient has to have ARRIVED. Starting a visit for someone still Booked records care for a
+        //    person who is not in the building; starting one twice creates a second encounter for one visit.
+        if (appt.Status != AppointmentStatus.CheckedIn)
+            return Results.Problem(statusCode: 409, title: "appointment-not-checked-in",
+                type: "urn:hbmp:transition-denied",
+                detail: $"the appointment is {appt.Status}; a visit starts from CheckedIn",
+                extensions: new Dictionary<string, object?> { ["appointmentStatus"] = appt.Status.ToString() });
+
+        // 2. It has to be the doctor's OWN appointment. A NULL doctor is a general clinic session that belongs
+        //    to whoever is on shift, so it stays open; a named one does not (VisitStartRules).
+        if (!VisitStartRules.MayStart(appt, Guid.TryParse(actor, out var callerId) ? callerId : null))
+        {
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "appointment", EntityId = fromApptId.ToString(), Action = AuditAction.Decision,
+                ActorUserId = actor, DecisionOutcome = "VisitStartDenied", DecisionReasonCode = "not-assigned-doctor",
+            }, ct);
+            return Results.Problem(statusCode: 403, title: "not-the-assigned-doctor",
+                type: "urn:hbmp:not-assigned", detail: "this appointment is assigned to another practitioner");
+        }
+
+        // An encounter already open against this appointment IS the visit — return it rather than opening a
+        // second one. The Idempotency-Key replay above only catches a repeat of the SAME request.
+        var open = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(
+            e => e.AppointmentId == fromApptId && e.Status == EncounterStatus.InProgress, ct);
+        if (open is not null) return Results.Ok(EncounterResponse.From(open));
+    }
+
     var memberStatus = await status.GetStatusAsync(req.BeneficiaryId, http.Headers.Authorization.ToString(), ct);
 
     // Gate: unknown member or non-Active status → blocked, nothing persisted (audited).

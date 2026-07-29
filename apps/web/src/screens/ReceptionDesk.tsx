@@ -64,7 +64,9 @@ function boardColumns(t: (l: Localized) => string, fmt: Formatters): Column<Appo
 function patientFileColumn(t: (l: Localized) => string, go: (to: string) => void): Column<AppointmentRow> {
   return {
     key: "file",
-    header: "",
+    // A real header, not "": an empty <th> has no accessible name (axe empty-table-header). The fixture routes
+    // render no rows, which is why the route-level sweep never surfaced this.
+    header: t(S.openFile),
     cell: (r) => (
       <Button variant="secondary" size="sm" onClick={() => go(`/patients/${encodeURIComponent(r.beneficiary.id)}`)}>
         {t(S.openFile)}

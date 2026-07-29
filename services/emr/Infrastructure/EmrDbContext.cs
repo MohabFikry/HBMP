@@ -38,7 +38,9 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             e.HasIndex(x => x.SlotId);
             e.HasIndex(x => x.IdempotencyKey);
             e.Property(x => x.BranchId).HasColumnName("branch_id");   // phase 14
+            e.Property(x => x.DoctorId).HasColumnName("doctor_id");   // phase 23 — the doctor's own worklist
             e.HasIndex(x => new { x.BranchId, x.ScheduledStart });
+            e.HasIndex(x => new { x.DoctorId, x.ScheduledStart });
         });
 
         b.Entity<AppointmentSlot>(e =>

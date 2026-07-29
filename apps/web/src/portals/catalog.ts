@@ -74,6 +74,7 @@ export const PORTALS: PortalDef[] = [
     title: { en: "Consultation", ar: "الكشف" },
     eyebrow: { en: "Doctor", ar: "الطبيب" },
     sections: [
+      { key: "visits", path: "visits", label: { en: "My visits", ar: "زياراتي" }, group: G.clinical, icon: "clock", permission: "appointments.read" },
       { key: "patients", path: "patients", label: { en: "My patients", ar: "مرضاي" }, group: G.clinical, icon: "user", permission: "emr.read" },
       { key: "encounter", path: "encounter", label: { en: "Encounter workspace", ar: "مساحة اللقاء" }, group: G.clinical, icon: "doc", permission: "emr.write" },
       { key: "orders", path: "orders", label: { en: "Orders", ar: "الطلبات" }, group: G.clinical, icon: "flask", permission: "orders.place" },

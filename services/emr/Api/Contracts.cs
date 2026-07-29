@@ -48,7 +48,7 @@ public sealed record BookAppointmentRequest(
 public sealed record AppointmentResponse(
     Guid AppointmentId, Guid BeneficiaryId, Guid ProviderId, Guid LocationId, Guid? SlotId,
     string AppointmentType, string Status, DateTimeOffset ScheduledStart, DateTimeOffset ScheduledEnd,
-    string? ReferralRef, Guid? OriginEncounterId, uint RowVersion, Guid? BranchId,
+    string? ReferralRef, Guid? OriginEncounterId, uint RowVersion, Guid? BranchId, Guid? DoctorId,
     bool NoShowEligible)
 {
     /// <summary>Project an appointment. <paramref name="now"/> is required to answer
@@ -59,7 +59,7 @@ public sealed record AppointmentResponse(
     public static AppointmentResponse From(Appointment a, DateTimeOffset? now = null) => new(
         a.AppointmentId, a.BeneficiaryId, a.ProviderId, a.LocationId, a.SlotId,
         a.AppointmentType.ToString(), a.Status.ToString(), a.ScheduledStart, a.ScheduledEnd,
-        a.ReferralRef, a.OriginEncounterId, a.RowVersion, a.BranchId,
+        a.ReferralRef, a.OriginEncounterId, a.RowVersion, a.BranchId, a.DoctorId,
         now is { } t && AppointmentWorkflow.CanNoShow(a, t, AppointmentWorkflow.NoShowGrace));
 }
 

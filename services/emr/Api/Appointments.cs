@@ -202,7 +202,12 @@ public static class AppointmentsModule
                 AppointmentId = Guid.NewGuid(),
                 BeneficiaryId = req.BeneficiaryId, ProviderId = req.ProviderId, LocationId = req.LocationId,
                 BranchId = bookingBranch,
-                SlotId = slot?.SlotId, AppointmentType = type, Status = AppointmentStatus.Booked,
+                SlotId = slot?.SlotId,
+                // The slot is the authority when there is one — it is what the availability rule assigned the
+                // practitioner to. A slotless walk-in has only what the caller stated. Without this the
+                // doctor's own worklist has nothing to filter on (migration 0009).
+                DoctorId = slot?.DoctorId ?? req.DoctorId,
+                AppointmentType = type, Status = AppointmentStatus.Booked,
                 ScheduledStart = slot?.SlotStart ?? req.ScheduledStart ?? now,
                 ScheduledEnd = slot?.SlotEnd ?? req.ScheduledEnd ?? now.AddMinutes(15),
                 ReferralRef = req.ReferralRef, OriginEncounterId = req.OriginEncounterId,
@@ -255,7 +260,8 @@ public static class AppointmentsModule
         // GET /appointments — reception's day board (US-020). Defaults to today's appointments; an optional
         // ?status= filters to a single status (e.g. Scheduled for the check-in worklist). Ordered by start time.
         read.MapGet("/appointments", async (
-            DateTimeOffset? date, string? status, Guid? branchId, BranchScopeState branch, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
+            DateTimeOffset? date, string? status, Guid? branchId, bool? mine, BranchScopeState branch,
+            IHbmpPrincipalAccessor me, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             // The Cairo civil day, not the UTC one — the board renders Cairo times, so it must select by them
             // (AppointmentDay explains the two-hour mismatch this replaces). Normalized to UTC for the query:
@@ -269,6 +275,18 @@ public static class AppointmentsModule
             // 14.4 — BranchScoped callers see ONLY their active branch; member-scoped may optionally filter.
             if (branch.Context.ActiveBranchId is { } active) q = q.Where(a => a.BranchId == active);
             else if (branchId is { } bid) q = q.Where(a => a.BranchId == bid);
+
+            // ?mine=true — the doctor's OWN list. Narrows to appointments assigned to the caller, and does so
+            // from the TOKEN's subject, never from a client-supplied id: a doctor asking for "my visits" must
+            // not be able to ask for someone else's by changing a query parameter. An unparseable subject
+            // yields no rows rather than everyone's (default-deny).
+            if (mine == true)
+            {
+                var subject = me.Principal?.Subject;
+                q = Guid.TryParse(subject, out var meId)
+                    ? q.Where(a => a.DoctorId == meId)
+                    : q.Where(_ => false);
+            }
             var rows = await q.OrderBy(a => a.ScheduledStart).Take(200).ToListAsync(ct);
             // The board's no-show button comes from the server's clock, not the browser's.
             var asOf = clock.GetUtcNow();

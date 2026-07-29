@@ -27,6 +27,11 @@ public sealed class Appointment
     /// provider location — branch scoping applies only to branch-bound rows (design 37 §3).</summary>
     public Guid? BranchId { get; set; }
     public Guid? SlotId { get; set; }
+    /// <summary>The practitioner this appointment belongs to, when it belongs to one (phase 23). NULL for a
+    /// general clinic session with no named doctor. Inherited from the slot when booked against one, or stated
+    /// directly for a slotless walk-in — without it "the visits related to me" is not a query the doctor's
+    /// worklist can ask.</summary>
+    public Guid? DoctorId { get; set; }
     public AppointmentType AppointmentType { get; set; }
     public AppointmentStatus Status { get; set; } = AppointmentStatus.Booked;
     public DateTimeOffset ScheduledStart { get; set; }

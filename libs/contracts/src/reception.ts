@@ -30,6 +30,9 @@ export const zAppointmentRow = z.object({
    * wrong clock would be wrong in whichever direction it drifted.
    */
   noShowEligible: z.boolean(),
+  /** True when a visit may be started from this row: CheckedIn, and assigned to the caller (or unassigned).
+   *  The server owns it — the doctor's board must not re-derive a treating-relationship rule. */
+  startVisitEligible: z.boolean(),
   /** The emr row's `xmin` optimistic-concurrency token (opt-in): echoed as `If-Match` on check-in so a
    * stale board loses to a concurrent transition with 412 instead of silently double-acting. Optional —
    * absent for a fixture/older service, in which case check-in proceeds without the guard. */

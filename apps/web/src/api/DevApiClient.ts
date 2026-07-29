@@ -188,7 +188,8 @@ export class DevApiClient implements ApiClient {
   }
 
   // ---- Reception day board -----------------------------------------------
-  appointments(filter: "all" | "booked" | "checked-in" = "all") {
+  appointments(filter: "all" | "booked" | "checked-in" = "all", _mine = false) {
+    void _mine;
     const rows = [
       { id: "appt-1", token: "•••4821", type: "Consultation", ar: "كشف", st: "Booked", chip: { kind: "info" as const, label: loc("Booked", "محجوز") }, at: "2026-07-22T09:00:00Z", eligible: true },
       { id: "appt-2", token: "•••7710", type: "FollowUp", ar: "متابعة", st: "CheckedIn", chip: { kind: "ok" as const, label: loc("Checked in", "تم الوصول") }, at: "2026-07-22T09:30:00Z", eligible: false },
@@ -207,10 +208,15 @@ export class DevApiClient implements ApiClient {
           checkInEligible: r.eligible,
           checkedIn: r.st === "CheckedIn",
           noShowEligible: r.noShowEligible ?? false,
+          startVisitEligible: r.st === "CheckedIn",
           rowVersion: 1,
         }))),
       [],
     );
+  }
+  startVisit(_appointmentId: string, _beneficiaryId: string) {
+    void _appointmentId; void _beneficiaryId;
+    return this.gate(() => ({ encounterId: "enc-1" }));
   }
   noShow(appointmentId: string, _rowVersion?: number) {
     void _rowVersion;

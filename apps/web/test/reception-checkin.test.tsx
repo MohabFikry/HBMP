@@ -19,6 +19,7 @@ function booked(rowVersion?: number): AppointmentRow {
     checkInEligible: true,
     checkedIn: false,
     noShowEligible: false,
+    startVisitEligible: false,
     rowVersion,
   };
 }

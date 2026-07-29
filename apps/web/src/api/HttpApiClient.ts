@@ -369,9 +369,13 @@ export class HttpApiClient implements ApiClient {
   // Reception day board (Phase 3, US-020) — the emr appointments list is date/status scoped (no clinic params
   // required, unlike the clinical walk-in queue). Reception sees a masked beneficiary token + type/time/status
   // only. `checkIn` posts a minimal body (normal priority); member details on the queue ticket are optional.
-  async appointments(filter: "all" | "booked" | "checked-in" = "all") {
+  async appointments(filter: "all" | "booked" | "checked-in" = "all", mine = false) {
     const status = filter === "booked" ? "Booked" : filter === "checked-in" ? "CheckedIn" : "";
-    const r = (await getRaw(`/appointments${status ? `?status=${status}` : ""}`)) as any[];
+    const qs = new URLSearchParams();
+    if (status) qs.set("status", status);
+    // ?mine is resolved from the TOKEN's subject server-side — the caller cannot ask for another doctor's list.
+    if (mine) qs.set("mine", "true");
+    const r = (await getRaw(`/appointments${qs.toString() ? `?${qs}` : ""}`)) as any[];
     return (r ?? []).map((a: any) =>
       parseOr(zAppointmentRow, {
         id: a.appointmentId,
@@ -383,6 +387,8 @@ export class HttpApiClient implements ApiClient {
         checkedIn: String(a.status ?? "") === "CheckedIn",
         // Straight from the server — the grace period is its rule, evaluated against its clock.
         noShowEligible: a.noShowEligible === true,
+        // Derived from the server's own status + doctor assignment, echoed back on the row.
+        startVisitEligible: String(a.status ?? "") === "CheckedIn",
         rowVersion: typeof a.rowVersion === "number" ? a.rowVersion : undefined,
       }),
     );
@@ -442,6 +448,13 @@ export class HttpApiClient implements ApiClient {
       rowVersion !== undefined ? { ifMatch: rowVersion } : undefined,
     )) as any;
     return parseOr(zCheckInResult, { id: r?.appointmentId ?? appointmentId, status: apptStatusChip(r?.status ?? "NoShow") });
+  }
+
+  async startVisit(appointmentId: string, beneficiaryId: string) {
+    // POST /encounters is where the CheckedIn + assigned-doctor rules are enforced, so starting a visit goes
+    // through it rather than through a UI-only shortcut.
+    const r = (await postRaw("/encounters", { beneficiaryId, appointmentId }, crypto.randomUUID())) as any;
+    return { encounterId: String(r?.encounterId ?? "") };
   }
 
   // Booking (Phase 3.1, US-020). Slot availability is the SERVER's answer — it holds the no-double-book

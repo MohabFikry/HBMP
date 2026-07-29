@@ -101,13 +101,16 @@ export interface ApiClient {
 
   // Reception — day board (Phase 3). `filter` scopes the board: all / booked (arrivals to process) /
   // checked-in (waiting). checkIn transitions Booked → CheckedIn and enqueues a walk-in ticket.
-  appointments(filter?: "all" | "booked" | "checked-in"): Promise<AppointmentRow[]>;
+  appointments(filter?: "all" | "booked" | "checked-in", mine?: boolean): Promise<AppointmentRow[]>;
   /** `rowVersion` (opt-in): the value read on the board, echoed as `If-Match` so a stale check-in loses to a
    * concurrent transition with 412 instead of double-acting. Omit to check in without the guard. */
   checkIn(appointmentId: string, rowVersion?: number): Promise<CheckInResult>;
   /** Mark a booked appointment as a no-show (US-022). Guarded server-side by the grace period, so call this
    * only for a row whose `noShowEligible` is true; `rowVersion` is echoed as `If-Match`. */
   noShow(appointmentId: string, rowVersion?: number): Promise<CheckInResult>;
+  /** Start the visit for a checked-in appointment (CheckedIn → an open encounter). Server-gated: the caller
+   * must be the assigned practitioner, or the appointment must name none. Returns the encounter id. */
+  startVisit(appointmentId: string, beneficiaryId: string): Promise<{ encounterId: string }>;
 
   /** The clinics the caller may book into, in their active branch (or `branchId` for cross-branch callers).
    * Derived from bookable SLOTS, so a clinic with no availability never appears — and reception never needs
