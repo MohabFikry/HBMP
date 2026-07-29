@@ -24,9 +24,10 @@ const row: AppointmentRow = {
 
 const steps: TimelineStep[] = [
   // Real actors are subject GUIDs, not names — the fixtures reflect that.
-  { status: "Booked", at: "2026-07-22T08:00:00Z", by: "0cccc773-ce39-495c-bcac-0e67d746b7e9" },
-  { status: "CheckedIn", at: "2026-07-22T08:55:00Z", by: null },
-  { status: "NoShow", at: "2026-07-22T09:40:00Z", by: "129d2a05-8c27-43c7-aae2-f2cc4c7fda30" },
+  // A resolved name, an unattributed step, and an actor whose name could NOT be resolved — the three states.
+  { status: "Booked", at: "2026-07-22T08:00:00Z", by: "0cccc773-ce39-495c-bcac-0e67d746b7e9", byName: "Nada Reception" },
+  { status: "CheckedIn", at: "2026-07-22T08:55:00Z", by: null, byName: null },
+  { status: "NoShow", at: "2026-07-22T09:40:00Z", by: "129d2a05-8c27-43c7-aae2-f2cc4c7fda30", byName: null },
 ];
 
 function renderBtn(api: ApiClient) {
@@ -75,14 +76,16 @@ describe("Visit timeline", () => {
     await user.click(screen.getByRole("button", { name: /timeline/i }));
 
     const items = within(await screen.findByRole("list")).getAllByRole("listitem");
-    // The actor is a subject id, shown truncated and monospaced so it reads as an identifier rather than a
-    // name — with the full value recoverable from the title.
-    expect(items[0]).toHaveTextContent("0cccc773");
-    expect(within(items[0]).getByTitle(/0cccc773-ce39-495c-bcac-0e67d746b7e9/)).toBeInTheDocument();
+    // Resolved: a NAME, not a GUID, and no identifier styling.
+    expect(items[0]).toHaveTextContent("Nada Reception");
+    expect(items[0]).not.toHaveTextContent("0cccc773");
     // Falling back to the booker would claim they checked the patient in — a lie the desk would act on.
     expect(items[1]).toHaveTextContent(/actor not recorded/i);
-    expect(items[1]).not.toHaveTextContent("0cccc773");
+    expect(items[1]).not.toHaveTextContent("Nada Reception");
+    // Unresolvable: the id still shows, truncated and monospaced, full value in the title. An approximate actor
+    // would be worse than a visible identifier.
     expect(items[2]).toHaveTextContent("129d2a05");
+    expect(within(items[2]).getByTitle(/129d2a05-8c27-43c7-aae2-f2cc4c7fda30/)).toBeInTheDocument();
   });
 
   it("an empty history says so rather than showing an empty box", async () => {

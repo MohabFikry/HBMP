@@ -454,7 +454,34 @@ export class HttpApiClient implements ApiClient {
 
   async appointmentTimeline(appointmentId: string) {
     const r = (await getRaw(`/appointments/${encodeURIComponent(appointmentId)}/timeline`)) as any[];
-    return (r ?? []).map((x: any) => parseOr(zTimelineStep, { status: x.status, at: x.at, by: x.by ?? null }));
+    const steps = r ?? [];
+
+    // Put names to the actor ids. One request for the DISTINCT ids on this timeline, not one per step — a
+    // rebooked appointment repeats the same actor several times. A failure here degrades to the id rather than
+    // failing the timeline: knowing when a no-show was marked is worth more than knowing nobody's name.
+    const ids = [...new Set(steps.map((x: any) => x.by).filter(Boolean).map(String))];
+    const names = new Map<string, string>();
+    if (ids.length > 0) {
+      try {
+        const rows = (await getAbsolute(
+          `${GATEWAY_BASE}/identity/user-labels?subjectIds=${encodeURIComponent(ids.join(","))}`,
+        )) as any[];
+        for (const row of rows ?? []) {
+          if (row?.subjectId && row?.displayName) names.set(String(row.subjectId), String(row.displayName));
+        }
+      } catch {
+        // Left unresolved on purpose — see above.
+      }
+    }
+
+    return steps.map((x: any) =>
+      parseOr(zTimelineStep, {
+        status: x.status,
+        at: x.at,
+        by: x.by ?? null,
+        byName: x.by ? names.get(String(x.by)) ?? null : null,
+      }),
+    );
   }
 
   async startVisit(appointmentId: string, beneficiaryId: string) {

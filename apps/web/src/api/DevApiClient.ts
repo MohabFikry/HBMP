@@ -220,10 +220,11 @@ export class DevApiClient implements ApiClient {
     return this.gate(
       () =>
         ok(z.array(zTimelineStep), [
-          { status: "Booked", at: "2026-07-22T08:00:00Z", by: "reception" },
+          { status: "Booked", at: "2026-07-22T08:00:00Z", by: "0cccc773-ce39-495c-bcac-0e67d746b7e9", byName: "Nada Reception" },
           // Deliberately unattributed: a step recorded before actor attribution existed.
-          { status: "CheckedIn", at: "2026-07-22T08:55:00Z", by: null },
-          { status: "Completed", at: "2026-07-22T09:40:00Z", by: "doctor" },
+          { status: "CheckedIn", at: "2026-07-22T08:55:00Z", by: null, byName: null },
+          // An actor whose name could not be resolved (deactivated, or another tenant) — the id still shows.
+          { status: "Completed", at: "2026-07-22T09:40:00Z", by: "129d2a05-8c27-43c7-aae2-f2cc4c7fda30", byName: null },
         ]),
       [],
     );

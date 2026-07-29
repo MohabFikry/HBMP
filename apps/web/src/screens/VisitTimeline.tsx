@@ -90,13 +90,17 @@ export function VisitTimelineButton({ row }: { row: AppointmentRow }) {
                   {/* An unrecorded actor says so. Falling back to whoever booked it would claim they performed
                       a step they did not — the timeline exists to answer "who", so guessing defeats it. */}
                   <span className="vt-who">
-                    {s.by ? (
+                    {s.byName ? (
+                      // A resolved name renders as a name.
+                      <>
+                        {t(S.by)} <span className="vt-name">{s.byName}</span>
+                      </>
+                    ) : s.by ? (
+                      // Unresolved — a deactivated account, or another tenant's actor. Truncated and monospaced
+                      // with the full value in the title, so it reads as an identifier instead of being mistaken
+                      // for a person's name. Never guessed at: an approximate actor is worse than a visible id.
                       <>
                         {t(S.by)}{" "}
-                        {/* The server returns the actor's SUBJECT id. Rendering it truncated and monospaced —
-                            with the full value in the title — says "identifier" rather than passing a GUID off
-                            as a person's name. Resolving names needs an identity lookup the desk's scopes do
-                            not cover; showing an opaque-but-traceable reference beats inventing a label. */}
                         <code className="vt-actor" title={`${t(S.userRef)}: ${s.by}`}>{s.by.slice(0, 8)}</code>
                       </>
                     ) : (

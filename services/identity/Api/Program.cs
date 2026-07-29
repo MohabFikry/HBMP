@@ -105,6 +105,39 @@ cat.MapGet("/scopes", async (IdentityStoreDbContext db, CancellationToken ct) =>
     Results.Ok(await db.Scopes.AsNoTracking().OrderBy(s => s.Name)
         .Select(s => new { name = s.Name, domain = s.Domain, serviceOnly = s.ServiceOnly }).ToListAsync(ct)));
 
+/*
+ * Actor LABELS — a display name for a subject id the caller already holds.
+ *
+ * Records across the platform store WHO did something as a subject GUID, and screens were rendering that GUID:
+ * the visit timeline says a no-show was marked by "0cccc773", which is traceable but useless to the receptionist
+ * standing in front of the patient. Every route to a name went through /identity/admin/users, which requires the
+ * identity ADMIN policy — nobody at a desk has it, and nobody at a desk should.
+ *
+ * So this returns NOTHING BUT NAMES, under three constraints that together make it uninteresting to an attacker:
+ *   - explicit ids only, and no ids means an empty list, never "everyone" — it cannot enumerate staff;
+ *   - tenant-scoped, so one tenant cannot put names to another's actors;
+ *   - display_name only. No email, no roles, no login state, no tenant membership, no is_platform_admin.
+ *
+ * Authentication is the gate, matching the catalog above: any staff member may legitimately learn who acted on a
+ * record they can already read, and the ids come only from records they were already allowed to see. A caller
+ * who cannot read the record has no id to ask about. These are STAFF names, not patient data.
+ */
+cat.MapGet("/user-labels", async (string? subjectIds, HttpContext http, IdentityStoreDbContext db, CancellationToken ct) =>
+{
+    var tenant = http.User.FindFirst("tenant_id")?.Value;
+    var ids = (subjectIds ?? "")
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(x => Guid.TryParse(x, out var g) ? g : (Guid?)null)
+        .Where(g => g is not null).Select(g => g!.Value).Distinct().Take(200).ToList();
+    if (ids.Count == 0) return Results.Ok(Array.Empty<object>());
+
+    var rows = await db.Users.AsNoTracking()
+        .Where(u => ids.Contains(u.Id) && u.TenantId == tenant)
+        .Select(u => new { subjectId = u.Id, displayName = u.DisplayName ?? u.UserName })
+        .ToListAsync(ct);
+    return Results.Ok(rows);
+});
+
 // The scope union a user with these roles would receive — the exact seam the 17.2 issuer uses for the
 // `scope` claim. Query: /identity/effective-scopes?role=finance&role=reception[&tenant=<id>]
 // 21.1b: grants are tenant-local, so the answer depends on the tenant; omitting it asks the platform default.

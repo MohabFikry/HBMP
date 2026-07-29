@@ -115,5 +115,9 @@ export const zTimelineStep = z.object({
   status: z.string().min(1),
   at: zInstant,
   by: z.string().nullish(),
+  /** The actor's display name, when it could be resolved. Kept SEPARATE from `by` so the UI can render a name as
+   *  a name and an unresolved id as an identifier — collapsing them would mean showing a GUID styled as a
+   *  person, or worse, treating a name as an id and truncating it to eight characters. */
+  byName: z.string().nullish(),
 });
 export type TimelineStep = z.infer<typeof zTimelineStep>;

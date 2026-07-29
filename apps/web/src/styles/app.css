@@ -1377,3 +1377,4 @@ nav.mrs-rail {
 .cc-field { display: grid; gap: 6px; max-inline-size: 420px; }
 .cc-field > span { font-weight: 500; }
 .cc-slots { display: flex; flex-wrap: wrap; gap: var(--sp2); }
+.vt-name { color: var(--text-1); font-weight: 500; }
