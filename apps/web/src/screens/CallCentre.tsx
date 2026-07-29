@@ -76,16 +76,31 @@ const CANCEL_REASON_LABELS: Record<string, { en: string; ar: string }> = {
 };
 const OUTCOMES = ["Resolved", "FollowUpRequired", "Transferred", "Abandoned", "NoAction"];
 
-async function req<T>(method: string, path: string, body?: unknown): Promise<{ status: number; data: T | null }> {
+async function req<T>(
+  method: string, path: string, body?: unknown, idempotencyKey?: string,
+): Promise<{ status: number; data: T | null }> {
   const token = getToken();
   const resp = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: { ...(body ? { "Content-Type": "application/json" } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    headers: {
+      ...(body ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = resp.status === 204 ? null : ((await resp.json().catch(() => null)) as T | null);
   return { status: resp.status, data };
 }
+
+/**
+ * The key for one BOOKING INTENT. Derived from the interaction, the member and the slot, so pressing Book twice
+ * after a timeout replays the same write instead of holding two slots, while choosing a different time is a
+ * genuinely new one. emr REQUIRES this header and rejects the request without it — the call centre sent none, so
+ * every reservation came back 400 "Idempotency-Key header is required" long before the slot was ever considered.
+ */
+const bookingKey = (interactionId: string, beneficiaryId: string, slotId: string) =>
+  `cc-book:${interactionId}:${beneficiaryId}:${slotId}`;
 
 /** The live gateway-backed implementation (used in the app; tests inject a fake instead). */
 export function createHttpCcApi(): CcApi {
@@ -131,17 +146,19 @@ export function createHttpCcApi(): CcApi {
       // the call centre made could ever hold a real time.
       const r = await req("POST", "/call-centre/appointments", {
         interactionId, beneficiaryId, slotId, branchId, appointmentType: "Scheduled",
-      });
+      }, bookingKey(interactionId, beneficiaryId, slotId));
       if (r.status === 409) return "conflict";
       return r.status >= 200 && r.status < 300 ? "ok" : "error";
     },
     async reschedule(interactionId, appointmentId, newSlotId) {
-      const r = await req("POST", `/call-centre/appointments/${appointmentId}/reschedule`, { interactionId, newSlotId });
+      const r = await req("POST", `/call-centre/appointments/${appointmentId}/reschedule`, { interactionId, newSlotId },
+        bookingKey(interactionId, appointmentId, newSlotId));
       if (r.status === 409) return "conflict";
       return r.status >= 200 && r.status < 300 ? "ok" : "error";
     },
     async cancel(interactionId, appointmentId, reasonCode) {
-      const r = await req("POST", `/call-centre/appointments/${appointmentId}/cancel`, { interactionId, reasonCode });
+      const r = await req("POST", `/call-centre/appointments/${appointmentId}/cancel`, { interactionId, reasonCode },
+        `cc-cancel:${interactionId}:${appointmentId}`);
       return r.status >= 200 && r.status < 300 ? "ok" : "error";
     },
     async close(interactionId, outcome, notes) {
@@ -161,7 +178,18 @@ export function createHttpCcApi(): CcApi {
  * enforced again server-side). Verification result + booking outcomes announce via aria-live. No clinical field
  * exists anywhere in this graph.
  */
-export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }) {
+/**
+ * ONE client for the module, not one per render.
+ *
+ * `api = createHttpCcApi()` as a default PARAMETER builds a new object every time the component renders, so any
+ * effect keyed on `api` re-runs on every render and its cleanup marks the previous request stale. The clinic list
+ * fetched fine — five times, 200 each — and never landed in state, because each run was discarded by the next.
+ * The same shape caused a request storm in the policy screens; there it wasted requests, here it silently
+ * emptied the reservation panel. Tests still inject their own client through the prop.
+ */
+const defaultCcApi = createHttpCcApi();
+
+export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
   const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const { lang } = useTheme();
   const t = (l: { en: string; ar: string }) => l[lang];
@@ -254,7 +282,7 @@ export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }
     // controls that can disagree about where the patient is expected is how someone gets sent to Maadi for a
     // Dokki appointment.
     const r = await api.book(interactionId, verifiedFor, slotId, chosenClinic.branchId ?? null);
-    setAnnounce(r === "ok" ? t(L.ccBooked) : r === "conflict" ? t(L.ccSlotTaken) : t(L.ccFailed));
+    setAnnounce(r === "ok" ? t(L.ccBooked) : r === "conflict" ? t(L.ccSlotTaken) : t(L.ccBookFailed));
     if (r === "ok") { setSlotId(""); void api.slots(chosenClinic.providerId, chosenClinic.locationId).then(setSlots); }
     // A 409 means the slot went between load and submit — re-read rather than leaving a dead choice selected.
     if (r === "conflict") void api.slots(chosenClinic.providerId, chosenClinic.locationId).then(setSlots);
@@ -265,14 +293,14 @@ export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }
     if (!cancelReason) { setCancelError(true); return; }
     setCancelError(false);
     const r = await api.cancel(interactionId, appointmentId, cancelReason);
-    setAnnounce(r === "ok" ? t(L.ccBooked) : t(L.ccFailed));
+    setAnnounce(r === "ok" ? t(L.ccCancelled) : t(L.ccBookFailed));
     setCancelFor(null);
   }, [api, interactionId, cancelReason, t]);
 
   const reschedule = useCallback(async (appointmentId: string) => {
     if (!interactionId || !slotId) { setAnnounce(t(L.ccPickTime)); return; }
     const r = await api.reschedule(interactionId, appointmentId, slotId);
-    setAnnounce(r === "ok" ? t(L.ccRescheduled) : r === "conflict" ? t(L.ccSlotTaken) : t(L.ccFailed));
+    setAnnounce(r === "ok" ? t(L.ccRescheduled) : r === "conflict" ? t(L.ccSlotTaken) : t(L.ccBookFailed));
   }, [api, interactionId, slotId, t]);
 
   const isVerified = !!selected && verifiedFor === selected.beneficiaryId;
@@ -444,22 +472,38 @@ export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }
                           </select>
                         </label>
                         {chosenClinic && slots.length === 0 && <p role="status">{t(L.ccNoSlots)}</p>}
-                        {slots.length > 0 && (
-                          <div className="cc-slots" role="radiogroup" aria-label={t(L.ccTime)}>
-                            {slots.map((sl) => (
-                              <button
-                                key={sl.slotId}
-                                type="button"
-                                role="radio"
-                                aria-checked={slotId === sl.slotId}
-                                className="book-slot"
-                                onClick={() => setSlotId(sl.slotId)}
-                              >
-                                <span className="tnum">{fmt.time(sl.start)}</span>
-                              </button>
-                            ))}
-                          </div>
-                        )}
+                        {/* GROUPED BY DAY. Availability spans a week, so a flat wall of times repeats "09:40"
+                            once per day with nothing to tell them apart — the agent cannot book a specific day,
+                            which is most of what a caller rings to do. Each day is its own labelled group. */}
+                        {slots.length > 0 &&
+                          Object.entries(
+                            slots.reduce<Record<string, CcSlot[]>>((byDay, sl) => {
+                              const day = fmt.date(sl.start);
+                              (byDay[day] ??= []).push(sl);
+                              return byDay;
+                            }, {}),
+                          ).map(([day, daySlots]) => (
+                            <div key={day} className="cc-day">
+                              <h4 className="cc-day-label">{day}</h4>
+                              <div className="cc-slots" role="radiogroup" aria-label={`${t(L.ccTime)} — ${day}`}>
+                                {daySlots.map((sl) => (
+                                  <button
+                                    key={sl.slotId}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={slotId === sl.slotId}
+                                    // The accessible name carries the DAY too, so a screen-reader user is not
+                                    // offered eighty identical "09:40" buttons.
+                                    aria-label={`${day} ${fmt.time(sl.start)}`}
+                                    className="book-slot"
+                                    onClick={() => setSlotId(sl.slotId)}
+                                  >
+                                    <span className="tnum">{fmt.time(sl.start)}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
                       </>
                     )}
                     {/* Disabled until a real slot is chosen: the id used to be invented client-side, so every
@@ -496,7 +540,7 @@ export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }
 }
 
 /** Phase 15.5 — the agent's own call history (supervisors see the team, server-side). */
-export function CallHistory({ api = createHttpCcApi() }: { api?: CcApi }) {
+export function CallHistory({ api = defaultCcApi }: { api?: CcApi }) {
   const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const { lang } = useTheme();
   const t = (l: { en: string; ar: string }) => l[lang];

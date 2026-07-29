@@ -39,6 +39,15 @@ public static class PatientPolicies
     [
         "reception", "call_center", "beneficiary_mgmt", "beneficiary_mgmt_supervisor", "case_manager",
         "doctor", "nurse", "medical_approval", "medical_director",
+        // policy_admin enrols people into policies, and policy-service refuses to enrol without first reading
+        // the beneficiary's status — deliberately not fail-soft, because it cannot otherwise tell an Active
+        // member from a Blocked one. But no enrolment-capable role was a beneficiary reader, so the status probe
+        // 403'd and EVERY enrolment through the API failed with an unhandled 500. That is why the only
+        // enrollments in the dev database belong to beneficiaries patient-service has never heard of: they were
+        // written straight to the table because the API could not do it. Knowing who you are enrolling, and
+        // whether they are active, is squarely this role's job; the read stays tenant-gated, field-projected
+        // and audited as Sensitive like every other.
+        "policy_admin",
     ];
 
     public static IReadOnlyList<PolicyRule> Rules() =>

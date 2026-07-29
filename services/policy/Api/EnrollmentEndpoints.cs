@@ -249,7 +249,20 @@ public static class EnrollmentEndpoints
             var command = new EnrollCommand(
                 req.BeneficiaryId, req.PolicyId, req.PolicyPlanId, req.GroupId, req.Relationship,
                 req.PrincipalEnrollmentId, req.EffectiveFrom, req.EffectiveTo, req.BranchId, req.AgeYears);
-            var result = await membership.EnrollAsync(command, idempotencyKey, Bearer(http), Actor(gate), ct);
+            MembershipResult<EnrollOutcome> result;
+            try
+            {
+                result = await membership.EnrollAsync(command, idempotencyKey, Bearer(http), Actor(gate), ct);
+            }
+            catch (BeneficiaryProbeRefusedException ex)
+            {
+                // Reported as the permissions problem it is. It used to escape as an unhandled 500 "An error
+                // occurred while processing your request", which told the operator nothing actionable.
+                return Results.Problem(statusCode: 403, title: "beneficiary-read-required",
+                    type: "urn:hbmp:beneficiary-read-required",
+                    detail: $"Enrolment must read the beneficiary's status first, and patient-service refused ({ex.Status}). "
+                          + "The caller needs permission to read beneficiaries.");
+            }
             if (!result.Ok) return Problem(result.Error!);
 
             var outcome = result.Value!;

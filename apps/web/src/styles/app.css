@@ -1378,3 +1378,5 @@ nav.mrs-rail {
 .cc-field > span { font-weight: 500; }
 .cc-slots { display: flex; flex-wrap: wrap; gap: var(--sp2); }
 .vt-name { color: var(--text-1); font-weight: 500; }
+.cc-day { display: grid; gap: var(--sp2); margin-block-start: var(--sp2); }
+.cc-day-label { font-size: var(--fs-subhead); font-weight: 600; color: var(--text-2); margin: 0; }

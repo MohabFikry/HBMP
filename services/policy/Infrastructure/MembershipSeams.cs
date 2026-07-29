@@ -36,6 +36,11 @@ public sealed class HttpBeneficiaryStatusProbe(HttpClient http) : IBeneficiarySt
 
         using var resp = await http.SendAsync(req, ct);
         if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        // A REFUSAL is not an outage. EnsureSuccessStatusCode turned a 403 into an unhandled
+        // HttpRequestException and the caller got 500 "An error occurred" — which says nothing about the actual
+        // problem: this caller may not read beneficiaries. Named so the endpoint can report it.
+        if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            throw new BeneficiaryProbeRefusedException((int)resp.StatusCode);
         // NOT fail-soft. An unreachable patient-service means we cannot tell an Active beneficiary from a
         // Blocked one, and enrolling on that basis is exactly the mistake this check exists to prevent.
         resp.EnsureSuccessStatusCode();
@@ -74,4 +79,14 @@ public sealed class SequentialMemberNoIssuer(PolicyDbContext db) : IMemberNoIssu
         if (highest is not null && int.TryParse(highest[prefix.Length..], out var parsed)) next = parsed + 1;
         return $"{prefix}{next:D6}";
     }
+}
+
+
+/// <summary>patient-service refused the status lookup an enrolment depends on (401/403). Distinct from an
+/// outage: it means the CALLER may not read beneficiaries, which is a permissions problem with a fix, and it
+/// used to surface as an unhandled 500.</summary>
+public sealed class BeneficiaryProbeRefusedException(int status)
+    : Exception($"patient-service refused the beneficiary status lookup with {status}")
+{
+    public int Status { get; } = status;
 }

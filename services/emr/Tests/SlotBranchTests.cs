@@ -40,6 +40,19 @@ public class SlotBranchTests
     }
 
     [Fact]
+    public void Generated_slots_are_UTC_so_they_can_actually_be_persisted()
+    {
+        // Npgsql refuses a non-zero offset on timestamptz. Emitting Cairo-offset instants made every
+        // POST /appointment-slots fail with an unhandled 500, so availability could only be inserted by hand.
+        var slots = SlotGeneration.Generate(Rule(Guid.NewGuid()), new DateOnly(2026, 7, 22), new DateOnly(2026, 7, 22), TimeSpan.FromHours(3));
+
+        slots.Should().NotBeEmpty();
+        slots.Should().OnlyContain(s => s.SlotStart.Offset == TimeSpan.Zero && s.SlotEnd.Offset == TimeSpan.Zero);
+        // The same INSTANT as the local wall-clock window: 09:00 at +03:00 is 06:00Z.
+        slots[0].SlotStart.UtcDateTime.Should().Be(new DateTime(2026, 7, 22, 6, 0, 0, DateTimeKind.Utc));
+    }
+
+    [Fact]
     public void A_rule_with_no_branch_still_generates_branchless_slots()
     {
         // An external provider location has no Mersal branch, and that has to stay expressible: inheriting is

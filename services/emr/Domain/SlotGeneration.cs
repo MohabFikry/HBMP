@@ -37,8 +37,13 @@ public static class SlotGeneration
                     // materialized slot branchless and therefore unreachable by branch.
                     BranchId = availability.BranchId,
                     DoctorId = availability.DoctorId,
-                    SlotStart = start,
-                    SlotEnd = start + step,
+                    // Normalized to UTC. The instant is identical either way, but Npgsql refuses to write a
+                    // non-zero offset to timestamptz, so emitting these at the Cairo offset made every call to
+                    // POST /appointment-slots fail with an unhandled 500 — availability could only ever be
+                    // inserted by hand. The window arithmetic above still happens in local wall-clock, which is
+                    // the whole point of taking an offset.
+                    SlotStart = start.ToUniversalTime(),
+                    SlotEnd = (start + step).ToUniversalTime(),
                 });
             }
         }

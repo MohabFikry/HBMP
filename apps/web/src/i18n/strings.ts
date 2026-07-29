@@ -67,6 +67,10 @@ export const L = {
   ccCancelReasonRequired: { en: "A cancellation reason is required.", ar: "سبب الإلغاء مطلوب." },
   ccSlotTaken: { en: "That slot was just taken — pick another.", ar: "تم حجز هذا الموعد للتو — اختر موعدًا آخر." },
   ccBooked: { en: "Appointment booked and confirmed to the member.", ar: "تم حجز الموعد وتأكيده للمستفيد." },
+  // ccFailed says "Verification failed", which is true for a verification and a lie for a booking — the same
+  // string was announced for both, so a rejected reservation told the agent the caller was not verified.
+  ccBookFailed: { en: "That did not go through — nothing was changed.", ar: "لم تُنفَّذ العملية — لم يتغيّر شيء." },
+  ccCancelled: { en: "Appointment cancelled and confirmed to the member.", ar: "تم إلغاء الموعد وتأكيده للمستفيد." },
   ccClinic: { en: "Clinic", ar: "العيادة" },
   ccPickClinic: { en: "Choose a clinic", ar: "اختر العيادة" },
   ccTime: { en: "Time", ar: "الوقت" },
