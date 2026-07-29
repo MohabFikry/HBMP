@@ -16,7 +16,11 @@ public sealed record UserTokenFacts(
     string TenantId,
     Guid? ProviderId,
     string DisplayName,
-    Guid? MembershipId = null);
+    Guid? MembershipId = null,
+    /// <summary>21.4 — the tenant's ENABLED programme switches (design 40 §4/§5). A gate, never a grant: a
+    /// feature listed here still requires the endpoint's scope, and one absent can only subtract. Empty on the
+    /// membership-less legacy path, which is correct — that path resolves no tenant context to switch on.</summary>
+    IReadOnlyList<string>? Features = null);
 
 /// <summary>Assembles <see cref="UserTokenFacts"/> from the store: roles + tenant + provider from the ACTIVE
 /// MEMBERSHIP (design 40 §1, invariant 1 — authority lives on the membership, never the identity), scopes via
@@ -24,7 +28,7 @@ public sealed record UserTokenFacts(
 /// call.</summary>
 public sealed class UserClaimsService(
     UserManager<ApplicationUser> users, RoleScopeResolver resolver, MembershipService memberships,
-    EffectiveSetService effective)
+    EffectiveSetService effective, TenantFeatureStore features)
 {
     /// <summary>
     /// Facts for a user acting under <paramref name="membership"/>.
@@ -43,9 +47,15 @@ public sealed class UserClaimsService(
         // second, out-of-session opinion about the same question (design 40 §5, invariant 5).
         var scopes = (await effective.ComputeAsync(membership, "identity-service:token", ct)).Keys;
 
+        // 21.4 — the THIRD gate rides along, resolved from the membership's TENANT rather than the identity:
+        // the same person under a membership in another organisation gets that organisation's programme, which
+        // is invariant 1 again. Read from the local projection of admin.tenant_feature, so issuing a token
+        // makes no cross-service call.
+        var enabled = await features.EnabledForAsync(membership.TenantId, ct);
+
         return new UserTokenFacts(
             user.Id.ToString(), roles, scopes,
-            membership.TenantId, membership.ProviderId, user.DisplayName, membership.MembershipId);
+            membership.TenantId, membership.ProviderId, user.DisplayName, membership.MembershipId, enabled);
     }
 
     /// <summary>

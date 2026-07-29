@@ -2,6 +2,7 @@
   <PropertyGroup><RootNamespace>Mersal.Identity.Api</RootNamespace></PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Mersal.Identity.Tests" />
+    <PackageReference Include="RabbitMQ.Client" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Identity.Domain.csproj" />

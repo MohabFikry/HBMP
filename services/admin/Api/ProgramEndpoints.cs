@@ -4,6 +4,7 @@ using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Auth.Authorization;
 using Mersal.Authz;
+using Mersal.Events;
 using Microsoft.EntityFrameworkCore;
 
 namespace Mersal.Admin.Api;
@@ -160,7 +161,7 @@ public sealed record ProgramEnablementView(
     string TenantId, IReadOnlyList<ProgramFeatureView> Features, IReadOnlyList<ProgramLimitView> Limits);
 
 /// <summary>Reads and writes the enablement tables, with history + audit on every change.</summary>
-public sealed class ProgramAdminService(AdminDbContext db, IAuditClient audit, TimeProvider clock)
+public sealed class ProgramAdminService(AdminDbContext db, IAuditClient audit, TimeProvider clock, IOutbox outbox)
 {
     public async Task<ProgramEnablementView> DescribeAsync(string tenantId, CancellationToken ct = default)
     {
@@ -259,6 +260,20 @@ public sealed class ProgramAdminService(AdminDbContext db, IAuditClient audit, T
             Severity = AuditSeverity.Notice,
             AfterState = $"{{\"feature\":\"{featureKey}\",\"enabled\":{(enabled ? "true" : "false")},\"reason\":{Json(reason)}}}",
         }, ct);
+
+        // 21.4 PROPAGATION — the switch is administered here but ENFORCED wherever the module lives, off the
+        // `features` claim (design 40 §5 mode 1: resolved once at token issuance, carried in the token). The
+        // issuer cannot read admin.tenant_feature — that is another service's schema — so the change travels
+        // as an event and identity-service keeps a projection of it. Staged in the SAME transaction as the
+        // row and its history by the outbox, so a switch that was recorded is a switch that will propagate:
+        // the alternative is a tenant whose screen says "enabled" while every token still says otherwise.
+        //
+        // `changedAt` rides along because delivery is at-least-once and NOT ordered. The projection compares
+        // it and refuses to move backwards, so a redelivered "off" from five minutes ago cannot undo the "on"
+        // that followed it.
+        await outbox.EnqueueAsync(
+            "TenantFeatureChanged", "admin.events",
+            new { tenantId, featureKey, enabled, changedAt = now, changedBy = actor.UserId }, ct);
     }
 
     public async Task SetLimitAsync(

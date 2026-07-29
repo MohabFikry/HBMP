@@ -53,6 +53,11 @@ public static class DependencyInjection
         services.AddScoped<EffectiveSetService>();
         services.AddScoped<IEffectiveSetService>(sp => sp.GetRequiredService<EffectiveSetService>());
         services.AddScoped<UserClaimsService>();
+        // 21.4 — the issuer's projection of the programme switches, read at token issuance.
+        services.AddScoped<TenantFeatureStore>();
+        // DURABLE dedupe, replacing the in-memory default AddHbmpEvents registers: the question this store
+        // answers is "have I EVER processed this id", which a process lifetime cannot answer.
+        services.AddScoped<Mersal.Events.IProcessedEventStore, DbProcessedEventStore>();
         return services;
     }
 }

@@ -23,6 +23,12 @@ public sealed class TokenPrincipalFactory
     /// client-credentials tokens and on the legacy membership-less path.</summary>
     public const string MembershipClaim = "membership_id";
 
+    /// <summary>21.4 — the tenant's enabled programme switches (token-contract §2, design 40 §4/§5). Emitted as
+    /// REPEATED claims, which is the shape `libs/auth` TokenClaims.ExtractMulti reads; a JSON array would also
+    /// parse but repeated claims keep the token readable in a debugger. Optional by contract: a token with no
+    /// `features` claim enables nothing, so the claim's absence can never widen access.</summary>
+    public const string FeaturesClaim = "features";
+
     /// <summary>The OIDC/OAuth2 scopes that are not part of the platform vocabulary and are not role-derived.
     /// They govern the SHAPE of the response (an id token, a refresh token), not access to any resource, so
     /// they are granted on request rather than by entitlement.</summary>
@@ -80,6 +86,7 @@ public sealed class TokenPrincipalFactory
         if (facts.ProviderId is { } pid) identity.SetClaim(ProviderClaim, pid.ToString());
         if (facts.MembershipId is { } mid) identity.SetClaim(MembershipClaim, mid.ToString());
         foreach (var role in facts.Roles) identity.AddClaim(new Claim(RolesClaim, role));
+        foreach (var feature in facts.Features ?? []) identity.AddClaim(new Claim(FeaturesClaim, feature));
         foreach (var a in amr.Distinct(StringComparer.OrdinalIgnoreCase)) identity.AddClaim(new Claim(AmrClaim, a));
 
         var principal = new ClaimsPrincipal(identity);

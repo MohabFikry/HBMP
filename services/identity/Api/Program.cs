@@ -1,6 +1,7 @@
 using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Events;
+using Mersal.Identity.Api;
 using Mersal.Identity.Api.Auth;
 using Mersal.Identity.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -22,6 +23,12 @@ builder.Services.AddHbmpEvents(builder.Configuration);
 builder.Services.AddHbmpDurableOutbox<IdentityStoreDbContext>();
 builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddSingleton(TimeProvider.System);
+
+// 21.4 propagation — tail admin.events so the `features` claim reflects the switches a platform administrator
+// actually set. Fail-soft on a missing broker: see ProgramEventConsumer for why a broker outage must not become
+// an authentication outage.
+builder.Services.Configure<ProgramConsumerOptions>(builder.Configuration.GetSection(ProgramConsumerOptions.SectionName));
+builder.Services.AddHostedService<ProgramEventConsumer>();
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("identity-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())

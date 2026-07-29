@@ -245,15 +245,33 @@ the identity, so one person can hold genuinely different authority in two organi
   Cross-tenant roster reads are **403 + audited, never silently narrowed** — a page of your own tenant under
   another tenant's heading is worse than an error, because the reviewer believes they reviewed the right one.
 
-### Known gap carried out of Phase 21
+### Known gap carried out of Phase 21 — PROPAGATION CLOSED 2026-07-29, CALL SITES STILL OPEN
 
-**21.4's enablement gate has no production call site.** `ProgramEnablement` and `TenantProgramStore` are
-complete, correct and well tested — the advisory lock, the live counting, the two distinct problem types —
-but grepping for their callers outside tests returns nothing. No service checks a feature switch or a cap
-before executing, so the third orthogonal gate (design 40 §4) does not currently refuse anything: the SPA's
-`program-not-enabled` treatment renders a problem type no server emits. 21.6 makes the switches
-administrable and visible, which is what made the gap legible, but wiring the check into the feature-owning
-services is outstanding work and is **not** claimed as done.
+**What was wrong.** `ProgramEnablement` and `TenantProgramStore` were complete and well tested — the advisory
+lock, the live counting, the two distinct problem types — but nothing called them, so the third orthogonal
+gate (design 40 §4) refused nothing and the SPA's `program-not-enabled` treatment rendered a problem type no
+server emitted. Investigating it surfaced a second, larger hole underneath: **the `features` claim was
+documented in the token contract and read by `HbmpPrincipal.Features`, but the issuer never emitted it.**
+Every `HasFeature` call in the platform would have returned false, so wiring a gate would have refused
+everything rather than nothing — and because the switches live in `admin.tenant_feature`, another service's
+schema, the issuer had no way to know them.
+
+**Closed now (propagation).** `SetFeatureAsync` stages `TenantFeatureChanged` to `admin.events` in the same
+transaction as the row and its history; identity-service tails that queue into `identity.tenant_feature`
+(migration 0015) and reads it at issuance, so the claim is resolved once per token and every later check is an
+in-memory lookup — design 40 §5 mode 1. The projection compares the admin-stamped `changed_at` and refuses to
+move backwards, because delivery is at-least-once and unordered and a redelivered stale "off" would otherwise
+darken a live module with nothing reporting a failure; dedupe is a durable table, since "have I ever seen this
+id" is not a question a process lifetime can answer. Both are one transaction, so a crash cannot mark an event
+processed without applying it. **Existing tenants were backfilled ON** (admin 0009, identity 0015): absence
+means disabled, which is right for a new tenant and would otherwise have taken every current partner off every
+module the moment a gate appeared. Verified end to end in the running stack: `PUT .../features/interop`
+`{enabled:false}` → 200 → the projection followed (`source_event_id` set) → the next token carried 10 features
+instead of 11 → restored, and both tables agree at 11.
+
+**Still open (call sites).** No endpoint calls `RequireFeature`/`IsEnabled` yet, so the gate still refuses
+nothing — it is now merely *able* to. That wiring, per feature-owning service, remains outstanding and is
+**not** claimed as done. The caps (`CheckLimitAsync`) likewise have no production caller.
 
 Full backend suite **1953 passing / 0 failing / 1 skipped**, run against a Postgres with all 128 migrations
 applied so the env-gated integration and RLS suites actually execute — DB-less, 356 of them skip and the
