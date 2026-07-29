@@ -34,6 +34,12 @@ playwright-report/
 .env.bak.*
 !*.env.example
 !.env.example
+# Bearer tokens captured while poking at the local stack. Short-lived, but a token in history is a token
+# anyone with the history can replay until it expires — and these files are exactly what a `git add -A`
+# sweeps up, since unlike .env nothing else in the ignore list matches them.
+token.txt
+*.token
+tokens.txt
 *.pem
 *.key
 !*.pub
