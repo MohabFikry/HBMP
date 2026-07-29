@@ -247,7 +247,7 @@ export class DevApiClient implements ApiClient {
     return this.gate(
       () =>
         ok(z.array(zBookableClinic), [
-          { providerId: "prov-1", locationId: "loc-1", label: "Mersal Dokki · Dokki Clinic", openSlots: 2 },
+          { providerId: "prov-1", locationId: "loc-1", branchId: "br-dokki", label: "Mersal Dokki · Dokki Clinic", openSlots: 2 },
         ]),
       [],
     );

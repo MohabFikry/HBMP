@@ -30,7 +30,10 @@ public static class IdentityContract
         "reception:search",
         "emr:read", "emr:write", "encounter:write",
         "rx:write", "patient:read", "patient:write", "eligibility:check",
-        "appointment:read", "appointment:write",
+        // appointment:reserve is booking WITHOUT the arrival decisions. The call centre reserves across
+        // branches and must never check a patient in or mark a no-show; one write scope for both would have
+        // forced granting it check-in it should not have.
+        "appointment:read", "appointment:write", "appointment:reserve",
         "document:write",
         "case:read", "case:write", "case:manage",
         "finance:read", "finance:write", "finance:approve", "finance:export", "finance:project",

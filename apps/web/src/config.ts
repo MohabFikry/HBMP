@@ -59,7 +59,10 @@ export const OIDC = {
    * scopes added since were never added here.
    */
   scope:
-    "openid offline_access admin:break-glass admin:read admin:write appointment:read appointment:write " +
+    "openid offline_access admin:break-glass admin:read admin:write appointment:read " +
+    // appointment:reserve is the call centre's booking power WITHOUT check-in/no-show. Requested here for
+    // everyone; the token only ever carries what the caller's ROLE grants, so asking is not receiving.
+    "appointment:reserve appointment:write " +
     "audit:read auth:decide auth:emergency auth:manual auth:override auth:read auth:review callcentre:act " +
     "callcentre:history:read callcentre:interaction callcentre:read callcentre:verify case:manage " +
     "case:read case:write " +

@@ -22,6 +22,8 @@ export interface CcAppointment {
   canReschedule: boolean; canCancel: boolean;
 }
 export interface CcReferral { referralRef: string; status: string; requestedSpecialty?: string | null }
+export interface CcClinic { providerId: string; locationId: string; branchId?: string | null; label: string; openSlots: number }
+export interface CcSlot { slotId: string; start: string }
 export interface Cc360 {
   identity: { beneficiaryId: string; memberNo?: string | null; displayName: string; ageBand?: string | null; status: string };
   coverage: CcCoverageLine[];
@@ -37,8 +39,13 @@ export interface CcApi {
   verify(interactionId: string, beneficiaryId: string, types: string[], pass: boolean): Promise<boolean>;
   search(q: string): Promise<CcMatch[]>;
   summary(beneficiaryId: string, interactionId: string): Promise<Cc360 | null>;
-  book(interactionId: string, beneficiaryId: string): Promise<"ok" | "conflict" | "error">;
-  reschedule(interactionId: string, appointmentId: string): Promise<"ok" | "conflict" | "error">;
+  /** Clinics with bookable times, across every branch the agent can reach. Each option carries its branch, so
+   *  choosing a clinic IS choosing a branch — no second picker that could disagree with it. */
+  clinics(): Promise<CcClinic[]>;
+  slots(providerId: string, locationId: string): Promise<CcSlot[]>;
+  /** A REAL slot id and the branch it belongs to. Both used to be invented client-side. */
+  book(interactionId: string, beneficiaryId: string, slotId: string, branchId?: string | null): Promise<"ok" | "conflict" | "error">;
+  reschedule(interactionId: string, appointmentId: string, newSlotId: string): Promise<"ok" | "conflict" | "error">;
   cancel(interactionId: string, appointmentId: string, reasonCode: string): Promise<"ok" | "error">;
   close(interactionId: string, outcome: string, notes: string): Promise<void>;
   history(): Promise<CcCallRow[]>;
@@ -99,15 +106,37 @@ export function createHttpCcApi(): CcApi {
       const r = await req<Cc360>("GET", `/call-centre/members/${beneficiaryId}/summary?interactionId=${interactionId}`);
       return r.status === 200 ? r.data : null;
     },
-    async book(interactionId, beneficiaryId) {
-      const r = await req("POST", "/call-centre/appointments", { interactionId, beneficiaryId, slotId: crypto.randomUUID(), appointmentType: "Consultation" });
+    async clinics() {
+      // emr answers which clinics have bookable times; provider-service puts names to the ids. Neither needs
+      // provider:read, which the call centre does not hold.
+      const r = await req<any[]>("GET", "/branch-clinics");
+      const rows = r.data ?? [];
+      if (rows.length === 0) return [];
+      const ids = rows.map((c) => c.locationId).filter(Boolean).join(",");
+      const labels = new Map<string, string>();
+      const l = await req<any[]>("GET", `/clinic-labels?locationIds=${encodeURIComponent(ids)}`);
+      for (const row of l.data ?? []) labels.set(String(row.locationId), `${row.providerName} · ${row.locationName}`);
+      return rows.map((c) => ({
+        providerId: String(c.providerId), locationId: String(c.locationId), branchId: c.branchId ?? null,
+        label: labels.get(String(c.locationId)) ?? String(c.locationId).slice(0, 8),
+        openSlots: Number(c.openSlots ?? 0),
+      }));
+    },
+    async slots(providerId, locationId) {
+      const r = await req<any[]>("GET", `/appointment-slots?providerId=${providerId}&locationId=${locationId}&onlyOpen=true`);
+      return (r.data ?? []).map((x) => ({ slotId: String(x.slotId), start: String(x.slotStart) }));
+    },
+    async book(interactionId, beneficiaryId, slotId, branchId) {
+      // slotId used to be crypto.randomUUID(): a slot that cannot exist, so emr answered 404 and no reservation
+      // the call centre made could ever hold a real time.
+      const r = await req("POST", "/call-centre/appointments", {
+        interactionId, beneficiaryId, slotId, branchId, appointmentType: "Scheduled",
+      });
       if (r.status === 409) return "conflict";
       return r.status >= 200 && r.status < 300 ? "ok" : "error";
     },
-    async reschedule(interactionId, appointmentId) {
-      // Slot discovery is not yet surfaced in this workspace, so — like book — a placeholder slot id is sent;
-      // the emr engine holds the no-double-book invariant and returns 409 on a taken slot.
-      const r = await req("POST", `/call-centre/appointments/${appointmentId}/reschedule`, { interactionId, newSlotId: crypto.randomUUID() });
+    async reschedule(interactionId, appointmentId, newSlotId) {
+      const r = await req("POST", `/call-centre/appointments/${appointmentId}/reschedule`, { interactionId, newSlotId });
       if (r.status === 409) return "conflict";
       return r.status >= 200 && r.status < 300 ? "ok" : "error";
     },
@@ -191,11 +220,45 @@ export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }
     }
   }, [api, interactionId, selected, ticks, t]);
 
+  // Reservation panel: clinic → time. Loaded once the caller is verified, because that is the point at which
+  // the agent is allowed to act on the booking at all.
+  const [clinics, setClinics] = useState<CcClinic[]>([]);
+  const [clinicKey, setClinicKey] = useState("");
+  const [slots, setSlots] = useState<CcSlot[]>([]);
+  const [slotId, setSlotId] = useState("");
+  const chosenClinic = clinics.find((c) => `${c.providerId}|${c.locationId}` === clinicKey) ?? null;
+
+  useEffect(() => {
+    if (!verifiedFor) return;
+    let live = true;
+    void api.clinics().then((c) => live && setClinics(c)).catch(() => live && setClinics([]));
+    return () => { live = false; };
+  }, [api, verifiedFor]);
+
+  useEffect(() => {
+    // A clinic is a provider+location pair chosen as ONE value, so there is no render where the pair is half
+    // updated and the times belong to a clinic nobody picked.
+    setSlots([]);
+    setSlotId("");
+    if (!chosenClinic) return;
+    let live = true;
+    void api.slots(chosenClinic.providerId, chosenClinic.locationId)
+      .then((sl) => live && setSlots(sl))
+      .catch(() => live && setSlots([]));
+    return () => { live = false; };
+  }, [api, chosenClinic?.providerId, chosenClinic?.locationId]);
+
   const book = useCallback(async () => {
-    if (!interactionId || !verifiedFor) return;
-    const r = await api.book(interactionId, verifiedFor);
+    if (!interactionId || !verifiedFor || !slotId || !chosenClinic) return;
+    // The branch comes from the CLINIC, not a separate control: the call centre is cross-branch, and two
+    // controls that can disagree about where the patient is expected is how someone gets sent to Maadi for a
+    // Dokki appointment.
+    const r = await api.book(interactionId, verifiedFor, slotId, chosenClinic.branchId ?? null);
     setAnnounce(r === "ok" ? t(L.ccBooked) : r === "conflict" ? t(L.ccSlotTaken) : t(L.ccFailed));
-  }, [api, interactionId, verifiedFor, t]);
+    if (r === "ok") { setSlotId(""); void api.slots(chosenClinic.providerId, chosenClinic.locationId).then(setSlots); }
+    // A 409 means the slot went between load and submit — re-read rather than leaving a dead choice selected.
+    if (r === "conflict") void api.slots(chosenClinic.providerId, chosenClinic.locationId).then(setSlots);
+  }, [api, interactionId, verifiedFor, slotId, chosenClinic, t]);
 
   const cancel = useCallback(async (appointmentId: string) => {
     if (!interactionId) return;
@@ -207,10 +270,10 @@ export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }
   }, [api, interactionId, cancelReason, t]);
 
   const reschedule = useCallback(async (appointmentId: string) => {
-    if (!interactionId) return;
-    const r = await api.reschedule(interactionId, appointmentId);
+    if (!interactionId || !slotId) { setAnnounce(t(L.ccPickTime)); return; }
+    const r = await api.reschedule(interactionId, appointmentId, slotId);
     setAnnounce(r === "ok" ? t(L.ccRescheduled) : r === "conflict" ? t(L.ccSlotTaken) : t(L.ccFailed));
-  }, [api, interactionId, t]);
+  }, [api, interactionId, slotId, t]);
 
   const isVerified = !!selected && verifiedFor === selected.beneficiaryId;
 
@@ -358,7 +421,51 @@ export function CallCentreWorkspace({ api = createHttpCcApi() }: { api?: CcApi }
                       </li>
                     ))}
                   </ul>
-                  <Button variant="primary" onClick={book}>{t(L.ccBook)}</Button>
+                  {/* Reservation panel. The clinic list is cross-branch by design — that IS the call centre's
+                      wider scope — and each option carries its branch, so choosing a clinic chooses the branch.
+                      Arrivals are deliberately absent: no check-in, no no-show, no start-visit. The server
+                      enforces that with appointment:reserve rather than appointment:write, so hiding the
+                      buttons is presentation, not the boundary. */}
+                  <div className="cc-reserve">
+                    <p className="cc-muted">{t(L.ccReserveOnly)}</p>
+                    {clinics.length === 0 ? (
+                      <p role="status">{t(L.ccNoClinics)}</p>
+                    ) : (
+                      <>
+                        <label className="cc-field">
+                          <span>{t(L.ccClinic)}</span>
+                          <select value={clinicKey} onChange={(e) => setClinicKey(e.currentTarget.value)}>
+                            <option value="">{t(L.ccPickClinic)}</option>
+                            {clinics.map((c) => (
+                              <option key={`${c.providerId}|${c.locationId}`} value={`${c.providerId}|${c.locationId}`}>
+                                {c.label} · {c.openSlots}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        {chosenClinic && slots.length === 0 && <p role="status">{t(L.ccNoSlots)}</p>}
+                        {slots.length > 0 && (
+                          <div className="cc-slots" role="radiogroup" aria-label={t(L.ccTime)}>
+                            {slots.map((sl) => (
+                              <button
+                                key={sl.slotId}
+                                type="button"
+                                role="radio"
+                                aria-checked={slotId === sl.slotId}
+                                className="book-slot"
+                                onClick={() => setSlotId(sl.slotId)}
+                              >
+                                <span className="tnum">{fmt.time(sl.start)}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {/* Disabled until a real slot is chosen: the id used to be invented client-side, so every
+                        reservation the call centre made referred to a slot that could not exist. */}
+                    <Button variant="primary" onClick={book} disabled={!slotId}>{t(L.ccBook)}</Button>
+                  </div>
                 </section>
 
                 {summary.openReferrals.length > 0 && (

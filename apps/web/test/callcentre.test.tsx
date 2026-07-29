@@ -20,12 +20,36 @@ function make360(): Cc360 {
   };
 }
 
+/**
+ * Choose a clinic and a time. Reserving used to need neither — the slot id was invented with
+ * crypto.randomUUID(), so every call-centre booking named a slot that could not exist and emr answered 404.
+ * The Book button is disabled until a real one is picked, so these steps are the contract now.
+ */
+async function verifyAndOpen(user: ReturnType<typeof userEvent.setup>) {
+  await startAndSelect(user);
+  await user.click(screen.getByLabelText("MemberNo"));
+  await user.click(screen.getByLabelText("DateOfBirth"));
+  await user.click(screen.getByRole("button", { name: /verify — pass/i }));
+  await screen.findByTestId("cc-360");
+}
+
+async function pickClinicAndTime(user: ReturnType<typeof userEvent.setup>) {
+  await user.selectOptions(await screen.findByLabelText(/clinic/i), "p1|l1");
+  const times = await screen.findAllByRole("radio");
+  await user.click(times[times.length - 1]);
+}
+
 function fakeApi(over: Partial<CcApi> = {}): CcApi {
   return {
     openInteraction: vi.fn().mockResolvedValue({ interactionId: "i1", callRef: "CALL-2026-000001" }),
     verify: vi.fn().mockImplementation((_i, _b, types: string[], pass: boolean) => Promise.resolve(pass && types.length >= 2)),
     search: vi.fn().mockResolvedValue([{ beneficiaryId: BEN, displayName: "Amal Hassan", memberNo: "MRS-M-1001", challengeableIdentifierTypes: ["MemberNo", "DateOfBirth", "Phone"] }]),
     summary: vi.fn().mockResolvedValue(make360()),
+    // Cross-branch clinic list, each option carrying its own branch (15.3).
+    clinics: vi.fn().mockResolvedValue([
+      { providerId: "p1", locationId: "l1", branchId: "br-dokki", label: "Mersal Dokki · Dokki Clinic", openSlots: 2 },
+    ]),
+    slots: vi.fn().mockResolvedValue([{ slotId: "slot-1", start: "2026-07-22T11:00:00Z" }]),
     book: vi.fn().mockResolvedValue("ok"),
     reschedule: vi.fn().mockResolvedValue("ok"),
     cancel: vi.fn().mockResolvedValue("ok"),
@@ -97,6 +121,7 @@ describe("15.5 — Call Centre workspace: act", () => {
     await user.click(screen.getByRole("button", { name: /verify — pass/i }));
     await screen.findByTestId("cc-360");
 
+    await pickClinicAndTime(user);
     await user.click(screen.getByRole("button", { name: /^book$/i }));
     await waitFor(() => expect(screen.getByTestId("cc-live")).toHaveTextContent(/just taken/i));
   });
@@ -129,8 +154,10 @@ describe("15.5 — Call Centre workspace: act", () => {
     await screen.findByTestId("cc-360");
 
     // Only the changeable appointment (a1) offers Reschedule.
+    await pickClinicAndTime(user);
     await user.click(screen.getByRole("button", { name: /^reschedule$/i }));
-    expect(api.reschedule).toHaveBeenCalledWith("i1", "a1");
+    // A REAL slot id now, taken from the picker rather than generated.
+    expect(api.reschedule).toHaveBeenCalledWith("i1", "a1", "slot-1");
     await waitFor(() => expect(screen.getByTestId("cc-live")).toHaveTextContent(/rescheduled/i));
   });
 
@@ -143,12 +170,55 @@ describe("15.5 — Call Centre workspace: act", () => {
     await user.click(screen.getByRole("button", { name: /verify — pass/i }));
     await screen.findByTestId("cc-360");
 
+    await pickClinicAndTime(user);
     await user.click(screen.getByRole("button", { name: /^reschedule$/i }));
     await waitFor(() => expect(screen.getByTestId("cc-live")).toHaveTextContent(/just taken/i));
   });
 });
 
 describe("15.5 — Call history: load failure is distinct from empty", () => {
+  /**
+   * "Reservation-only, wider scope" (15.3). The wider scope is the cross-branch clinic list; the narrower power
+   * is the absence of arrivals. Hiding buttons is NOT the boundary — the server enforces it by granting the
+   * call centre appointment:reserve instead of appointment:write — but the screen must not offer what the
+   * server will refuse, or every agent learns to ignore a 403.
+   */
+  it("offers reservation actions only — never check-in, no-show or start-visit", async () => {
+    const user = userEvent.setup();
+    renderNode(<CallCentreWorkspace api={fakeApi()} />);
+    await verifyAndOpen(user);
+
+    // Present: the reservation verbs.
+    expect(screen.getByRole("button", { name: /^book$/i })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^reschedule$/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /cancel appointment/i }).length).toBeGreaterThan(0);
+
+    // Absent: everything that records a patient physically arriving or being seen.
+    expect(screen.queryByRole("button", { name: /check.?in/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /no.?show/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /start visit/i })).not.toBeInTheDocument();
+    // And it says so, so the absence reads as deliberate rather than as a missing feature.
+    expect(screen.getByText(/reservations only/i)).toBeInTheDocument();
+  });
+
+  it("will not reserve until a real time is chosen", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi();
+    renderNode(<CallCentreWorkspace api={api} />);
+    await verifyAndOpen(user);
+
+    // The button is disabled rather than sending an invented slot id, which is what it used to do.
+    expect(screen.getByRole("button", { name: /^book$/i })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /^book$/i }));
+    expect(api.book).not.toHaveBeenCalled();
+
+    await pickClinicAndTime(user);
+    expect(screen.getByRole("button", { name: /^book$/i })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: /^book$/i }));
+    // The branch travels with the clinic — the agent never states it separately.
+    expect(api.book).toHaveBeenCalledWith("i1", BEN, "slot-1", "br-dokki");
+  });
+
   it("renders an error + retry (not 'no calls') when history fails to load", async () => {
     const user = userEvent.setup();
     const history = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce([]);

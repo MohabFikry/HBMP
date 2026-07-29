@@ -28,10 +28,13 @@ public sealed class ScopePolicyProvider : IAuthorizationPolicyProvider
     {
         if (policyName.StartsWith(HbmpPolicies.ScopePrefix, StringComparison.Ordinal))
         {
-            var scope = policyName[HbmpPolicies.ScopePrefix.Length..];
+            // "scope:a" — one scope. "scope:a|b" — either (HbmpPolicies.AnyScope), for an endpoint two roles
+            // reach legitimately without being owed the same powers.
+            var scopes = policyName[HbmpPolicies.ScopePrefix.Length..]
+                .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             var policy = new AuthorizationPolicyBuilder()
                 .RequireAuthenticatedUser()
-                .AddRequirements(new ScopeRequirement(scope, _requireMfaForScopes))
+                .AddRequirements(new ScopeRequirement(scopes, _requireMfaForScopes))
                 .Build();
             return Task.FromResult<AuthorizationPolicy?>(policy);
         }
@@ -57,4 +60,9 @@ public static class HbmpPolicies
 
     /// <summary>Policy name requiring the given OAuth2 scope (and MFA when configured).</summary>
     public static string Scope(string scope) => ScopePrefix + scope;
+
+    /// <summary>Policy name satisfied by ANY of the given scopes. Use when one endpoint is legitimately reached
+    /// by roles that must not share powers — e.g. reserving an appointment (reception AND the call centre)
+    /// versus checking a patient in (reception only).</summary>
+    public static string AnyScope(params string[] scopes) => ScopePrefix + string.Join("|", scopes);
 }

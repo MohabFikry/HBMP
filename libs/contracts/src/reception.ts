@@ -93,6 +93,10 @@ export type BookingResult = z.infer<typeof zBookingResult>;
 export const zBookableClinic = z.object({
   providerId: zId,
   locationId: zId,
+  /** The branch this clinic sits in. Carried so a CROSS-branch caller (the call centre) can state the branch it
+   *  is booking into without a second picker — the clinic already determines it. Null for an external
+   *  provider location, which belongs to no Mersal branch. */
+  branchId: zId.nullish(),
   /** Display label, resolved from the label lookup; falls back to the ids when unavailable. */
   label: z.string().min(1),
   openSlots: z.number().int().nonnegative(),

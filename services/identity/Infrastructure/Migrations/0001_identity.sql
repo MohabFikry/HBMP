@@ -116,6 +116,9 @@ INSERT INTO identity.scope (name, domain, service_only) VALUES
     ('emr:read','emr',false), ('emr:write','emr',false), ('encounter:write','emr',false),
     ('rx:write','rx',false), ('patient:write','patient',false), ('eligibility:check','eligibility',false),
     ('appointment:read','appointment',false), ('appointment:write','appointment',false),
+    -- Reservation without the arrival decisions: the call centre books across branches but must never check a
+    -- patient in or mark a no-show, which stay behind appointment:write.
+    ('appointment:reserve','appointment',false),
     ('document:write','document',false),
     ('case:read','case',false), ('case:write','case',false), ('case:manage','case',false),
     ('finance:read','finance',false), ('finance:write','finance',false), ('finance:approve','finance',false),
@@ -154,7 +157,10 @@ SELECT rs.role, rs.scope FROM (VALUES
 
     ('call_center','callcentre:read'), ('call_center','callcentre:act'),
     ('call_center','callcentre:interaction'), ('call_center','callcentre:verify'),
-    ('call_center','appointment:read'), ('call_center','notification:read'),
+    -- Reservation-only by construction: appointment:reserve books/reschedules/cancels, while check-in and
+    -- no-show sit behind appointment:write, which the call centre deliberately does NOT hold.
+    ('call_center','appointment:read'), ('call_center','appointment:reserve'),
+    ('call_center','notification:read'),
 
     ('beneficiary_mgmt','patient:write'), ('beneficiary_mgmt','eligibility:check'),
     ('beneficiary_mgmt','notification:read'),

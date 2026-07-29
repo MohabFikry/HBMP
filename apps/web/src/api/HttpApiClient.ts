@@ -435,6 +435,7 @@ export class HttpApiClient implements ApiClient {
       parseOr(zBookableClinic, {
         providerId: c.providerId,
         locationId: c.locationId,
+        branchId: c.branchId ?? null,
         label: labels.get(String(c.locationId)) ?? String(c.locationId).slice(0, 8),
         openSlots: typeof c.openSlots === "number" ? c.openSlots : 0,
       }),

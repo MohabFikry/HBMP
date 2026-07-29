@@ -28,8 +28,18 @@ public static class AppointmentsModule
 
     public static void MapAppointments(this WebApplication app)
     {
+        // Desk writes: booking's own slot administration, plus the arrival decisions (check-in, no-show) that
+        // only someone physically at the branch can make.
         var write = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("appointment:write"));
         var read = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("appointment:read"));
+
+        // RESERVATION writes — book, reschedule, cancel. Reachable by the desk (appointment:write) OR by a
+        // reservation-only caller such as the call centre (appointment:reserve), which must never be able to
+        // check a patient in or mark a no-show. Before this split there was one write scope for both, so the
+        // call centre could either be given check-in it must not have, or be unable to book at all: it had the
+        // latter, and its entire booking path returned a bare 403 from this service.
+        var reserve = app.MapGroup("/api/v1")
+            .RequireAuthorization(HbmpPolicies.AnyScope("appointment:write", "appointment:reserve"));
 
         // POST /appointment-slots — materialize bookable slots from a recurring availability rule.
         write.MapPost("/appointment-slots", async (
@@ -169,7 +179,7 @@ public static class AppointmentsModule
         });
 
         // POST /appointments — concurrency-safe booking (US-020).
-        write.MapPost("/appointments", async (
+        reserve.MapPost("/appointments", async (
             BookAppointmentRequest req, HttpRequest http, EmrDbContext db, AppointmentBookingService booking,
             ReminderDispatcher reminders, IPractitionerBranchDirectory practitioners, IAuditClient audit,
             IOutbox outbox, IHbmpPrincipalAccessor me, BranchScopeState branch, TimeProvider clock, CancellationToken ct) =>
@@ -226,7 +236,14 @@ public static class AppointmentsModule
             var appt = new Appointment
             {
                 AppointmentId = Guid.NewGuid(),
-                BeneficiaryId = req.BeneficiaryId, ProviderId = req.ProviderId, LocationId = req.LocationId,
+                BeneficiaryId = req.BeneficiaryId,
+                // The SLOT is authoritative for where the appointment is, exactly as it is for the doctor
+                // below: it is what the availability rule assigned. The call-centre façade sends only a
+                // beneficiary, a slot and a branch — everything else it would have to guess — and trusting
+                // req.* there wrote appointments with an all-zero provider and location while holding a real
+                // slot: a booking that claimed to be at no clinic.
+                ProviderId = slot?.ProviderId ?? req.ProviderId,
+                LocationId = slot?.LocationId ?? req.LocationId,
                 BranchId = bookingBranch,
                 SlotId = slot?.SlotId,
                 // The slot is the authority when there is one — it is what the availability rule assigned the
@@ -331,7 +348,7 @@ public static class AppointmentsModule
         });
 
         // POST /appointments/{id}/reschedule — atomic release-old + book-new (US-021).
-        write.MapPost("/appointments/{id:guid}/reschedule", async (
+        reserve.MapPost("/appointments/{id:guid}/reschedule", async (
             Guid id, RescheduleRequest req, HttpRequest http, EmrDbContext db, AppointmentTransitionService transitions,
             IdempotencyStore idem, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me,
             BranchScopeState branch, TimeProvider clock, CancellationToken ct) =>
@@ -362,7 +379,7 @@ public static class AppointmentsModule
         });
 
         // POST /appointments/{id}/cancel — release slot + reason; promote waitlist (US-021).
-        write.MapPost("/appointments/{id:guid}/cancel", async (
+        reserve.MapPost("/appointments/{id:guid}/cancel", async (
             Guid id, CancelRequest req, HttpRequest http, EmrDbContext db, AppointmentTransitionService transitions,
             IdempotencyStore idem, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me,
             BranchScopeState branch, TimeProvider clock, CancellationToken ct) =>

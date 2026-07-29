@@ -30,7 +30,8 @@ public sealed class ScopeAuthorizationHandler(IAuthEventSink events)
             return Task.CompletedTask;
         }
 
-        if (!principal.HasScope(requirement.Scope))
+        // Any-of: holding one accepted scope is enough (see ScopeRequirement).
+        if (!requirement.Scopes.Any(principal.HasScope))
         {
             events.Record(new AuthEvent(
                 AuthEventKind.AuthorizationDenied, principal.Subject,

@@ -1371,3 +1371,9 @@ nav.mrs-rail {
   background: var(--surface-2);
   color: var(--text-1);
 }
+
+/* ── Call-centre reservation panel (15.3) ────────────────────────────────────── */
+.cc-reserve { display: grid; gap: var(--sp3); margin-block-start: var(--sp4); }
+.cc-field { display: grid; gap: 6px; max-inline-size: 420px; }
+.cc-field > span { font-weight: 500; }
+.cc-slots { display: flex; flex-wrap: wrap; gap: var(--sp2); }
