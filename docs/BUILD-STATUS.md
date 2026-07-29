@@ -336,6 +336,73 @@ reversing the A6 pairing were each killed by the test written for them.
 
 Divergences from the build prompt and the defects found along the way are recorded in **ADR-0021 §4–§5**.
 
+## Fixed 2026-07-29 — "it signs me out rapidly": the session was 5 minutes, not 30
+
+**Reported symptom:** being signed out again and again, shortly after signing in.
+
+**It was not a timeout value.** The clocks are: access token 5 min (frozen contract, 300s), refresh token 10 h
+(frozen, SSO max), and the SPA hangs its warn/logout timers off the ACCESS token's `exp`, attempting a silent
+renew first. So the session lasts 5 minutes *unless the renew works* — and the renew was failing:
+`grant_type=refresh_token` → `invalid_grant` / "The specified token is invalid" in the issuer log.
+
+**Cause: `IssuerKeys` used `AddEphemeralEncryptionKey()` in Development, and that key wraps refresh tokens as
+JWE.** Every restart of identity-service therefore made every outstanding refresh token undecryptable. The user
+sees a session that dies minutes after signing in; nothing on screen connects it to a container restart. The
+same ephemeral SIGNING key was separately responsible for the `{"message":"Invalid signature"}` toil at the
+gateway, because its `kid` changed on every restart and Kong pins the public key.
+
+**Fix: persistent issuer keys in Tier 1.** The configuration path already existed
+(`Issuer:SigningKeyPemPath` / `Issuer:EncryptionKeyPemPath`) but Development ignored it. Development now PREFERS
+configured keys and falls back to ephemeral only when they are absent, so `docker compose up` still works
+unconfigured. Both or neither: a persistent signing key with an ephemeral encryption key would keep the gateway
+happy while still logging everyone out on restart — the confusing half-fix. `up.sh` generates the pair once into
+`infra/compose/secrets/` (gitignored by `*.pem`), owned by uid 10001 mode 400, chowned via a throwaway root
+container so it needs no host sudo; Compose mounts them read-only. **OpenBao's transit engine remains the
+production home (the Phase-12 follow-up already recorded against 17.6) — this is the Tier 1 arrangement, on the
+same LUKS-encrypted disk as the database.**
+
+Verified: `kid` identical across two container recreates (so Kong's pinned key no longer goes stale), and a
+refresh token captured BEFORE a recreate exchanged successfully AFTER it — HTTP 200 with a fresh access, id and
+rotated refresh token, where it previously returned `invalid_grant`. Effective session is now up to the 10-hour
+refresh window with silent renewal every 5 minutes, rather than 5 minutes total.
+
+**Not changed:** the 5-minute access token and 10-hour refresh lifetimes are frozen-contract values and cover a
+working shift; neither was touched.
+
+## Fixed 2026-07-29 — sign-in returned HTTP 500 after any identity-service restart
+
+**Reported symptom:** `POST /connect/login` → `{"title":"An error occurred while processing your request.","status":500}`.
+**Cause:** data protection was never configured, so ASP.NET Core used an EPHEMERAL, in-process key ring. Every
+restart invalidated every anti-forgery token in flight, so anyone sitting on the login page when the container
+was recreated got a 500 on submit with nothing on screen to suggest that reloading would fix it — and a deploy
+does that to everyone who happens to be signing in. It also made more than one replica impossible: each would
+hold its own ring and reject forms served by the others, non-deterministically.
+
+Two fixes, because there were two defects:
+
+1. **The key ring is persisted** to `/var/lib/hbmp/dpkeys` on a named volume (`identitykeys`), named per
+   application, path overridable via `DataProtection:KeyRingPath`. The directory is created **and chowned in the
+   Dockerfile**: Docker initialises a fresh named volume from the image's contents and ownership, so without that
+   it came up root-owned, the non-root app could not write to it, and the first token failed with "Access to the
+   path … is denied" — a 500 at first use rather than at startup. The startup probe now WRITES a file rather than
+   calling `CreateDirectory`, which succeeds on a directory that already exists and was exactly why the
+   root-owned volume passed the check.
+2. **A stale token is a user event, not a server fault.** The four rendered form POSTs bind `[FromForm]`, and
+   that binding validates the token before the handler body runs, so no handler could answer for itself. One
+   middleware now catches it for those four paths and re-renders the login page with a distinct bilingual
+   message — deliberately NOT "invalid credentials", which would send someone to reset a password that was never
+   wrong. 200, not 4xx: it is a usable page, and a 4xx makes tooling treat it as a failed request.
+
+Verified: token captured → `docker compose restart identity-service` → the SAME pre-restart form posted → 302
+(was 500), with the identical key file on the volume. A genuinely corrupt token → 200 with "This sign-in form
+expired." A full browser sign-in issues a token carrying all 11 features.
+
+**Related, still open:** the issuer's RS256 SIGNING key is also ephemeral, so every identity-service restart
+still invalidates Kong's pinned public key and needs `jwks-to-pem.py | set-env-key.py` re-run plus a Kong
+recreate (symptom: `{"message":"Invalid signature"}` at the gateway). That is the existing Phase-12 OpenBao
+follow-up already recorded against 17.6, and persisting signing keys is a security decision rather than a
+tidy-up — not changed here.
+
 ## Fixed 2026-07-29 — two things that had never worked
 
 - **`tools/ci/apply-migrations.sh` could not be re-run.** identity `0001` seeds `role_scope` with

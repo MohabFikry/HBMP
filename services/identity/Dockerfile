@@ -8,6 +8,11 @@ RUN dotnet publish services/identity/Api/Mersal.Identity.Api.csproj -c Release -
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 RUN adduser --disabled-password --gecos "" --uid 10001 appuser
+# The data-protection key ring lives here and is mounted as a named volume by Compose. Created AND CHOWNED in
+# the image because Docker initialises a fresh named volume from the image's contents and ownership: without
+# this the volume comes up owned by root, the non-root app cannot write to it, and the first anti-forgery token
+# fails with "Access to the path … is denied" — a 500 on the login page, at first use rather than at startup.
+RUN mkdir -p /var/lib/hbmp/dpkeys && chown -R appuser:appuser /var/lib/hbmp
 COPY --from=build /app ./
 USER appuser
 ENV ASPNETCORE_URLS=http://+:8080

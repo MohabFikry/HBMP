@@ -24,6 +24,38 @@ internal static class IssuerKeys
     {
         if (isDevelopment)
         {
+            // Development PREFERS configured keys when they are present, and only falls back to ephemeral ones
+            // when they are not — so `docker compose up` still works with no configuration, while a dev
+            // environment that wants stability can have it.
+            //
+            // WHY THIS MATTERS MORE THAN IT LOOKS. An ephemeral ENCRYPTION key is what wraps refresh tokens
+            // (JWE), so every restart of this service made every outstanding refresh token undecryptable:
+            // `grant_type=refresh_token` answered `invalid_grant` / "The specified token is invalid", the SPA's
+            // silent renew failed, and the user was signed out at the 5-minute access-token expiry. That reads
+            // as "the session length is far too short" when the session length was never the problem. The
+            // ephemeral SIGNING key has a second cost: its `kid` changes on every restart, so Kong's pinned
+            // public key goes stale and the gateway answers "Invalid signature" until someone re-runs
+            // jwks-to-pem.py. Persist both and the whole class of symptom disappears.
+            var devSigning = LoadRsa(config, "SigningKey", required: false);
+            var devEncryption = LoadRsa(config, "EncryptionKey", required: false);
+
+            // Both or neither: a persistent signing key with an ephemeral encryption key would keep the gateway
+            // happy while still logging everybody out on restart, which is the confusing half-fix.
+            if (devSigning is not null && devEncryption is not null)
+            {
+                o.AddSigningKey(new RsaSecurityKey(devSigning)
+                {
+                    KeyId = config["Issuer:SigningKeyId"] ?? Kid(devSigning),
+                });
+                o.AddEncryptionKey(new RsaSecurityKey(devEncryption)
+                {
+                    KeyId = config["Issuer:EncryptionKeyId"] ?? Kid(devEncryption),
+                });
+                return;
+            }
+
+            devSigning?.Dispose();
+            devEncryption?.Dispose();
             o.AddEphemeralEncryptionKey();  // wraps auth codes / refresh tokens (JWE)
             o.AddEphemeralSigningKey();      // RS256 access-token signature, published via JWKS
             return;

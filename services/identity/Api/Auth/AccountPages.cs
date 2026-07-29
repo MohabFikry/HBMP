@@ -175,11 +175,20 @@ public static class AccountPages
         """;
     }
 
-    public static string LoginPage(string lang, string? returnUrl, string antiforgeryField, bool error = false)
+    /// <summary>
+    /// <paramref name="expired"/> renders a DIFFERENT message from <paramref name="error"/> on purpose. A stale
+    /// anti-forgery token — the form was open across an identity-service restart, or simply for a long time — is
+    /// not a wrong password, and saying "invalid credentials" sends someone to reset a password that was never
+    /// wrong. Before this the case did not reach here at all: it surfaced as HTTP 500.
+    /// </summary>
+    public static string LoginPage(
+        string lang, string? returnUrl, string antiforgeryField, bool error = false, bool expired = false)
     {
         var s = Strings(lang);
         var ret = Enc.Encode(SafeReturn(returnUrl));
-        var err = error ? $"<p class=\"err\" role=\"alert\">{s["loginError"]}</p>" : "";
+        var err = expired
+            ? $"<p class=\"err\" role=\"alert\">{s["formExpired"]}</p>"
+            : error ? $"<p class=\"err\" role=\"alert\">{s["loginError"]}</p>" : "";
         var body = $"""
         <h1>{s["signIn"]}</h1>{err}
         <form method="post" action="/connect/login">
@@ -311,6 +320,7 @@ public static class AccountPages
         {
             ["signIn"] = "تسجيل الدخول", ["username"] = "اسم المستخدم", ["password"] = "كلمة المرور",
             ["loginError"] = "بيانات الدخول غير صحيحة.", ["twoFactor"] = "التحقق بخطوتين",
+            ["formExpired"] = "انتهت صلاحية النموذج. أعد إدخال بياناتك من فضلك.",
             ["twoFactorHint"] = "أدخل الرمز من تطبيق المصادقة.", ["code"] = "الرمز", ["verify"] = "تحقّق",
             ["useRecovery"] = "استخدام رمز الاسترداد", ["codeError"] = "رمز غير صحيح.",
             ["enroll"] = "تفعيل التحقق بخطوتين", ["enrollHint"] = "أضف المفتاح إلى تطبيق المصادقة ثم أدخل الرمز.",
@@ -325,6 +335,7 @@ public static class AccountPages
         {
             ["signIn"] = "Sign in", ["username"] = "Username", ["password"] = "Password",
             ["loginError"] = "Invalid credentials.", ["twoFactor"] = "Two-factor verification",
+            ["formExpired"] = "This sign-in form expired. Please enter your details again.",
             ["twoFactorHint"] = "Enter the code from your authenticator app.", ["code"] = "Code", ["verify"] = "Verify",
             ["useRecovery"] = "Use a recovery code instead", ["codeError"] = "Invalid code.",
             ["enroll"] = "Enable two-factor", ["enrollHint"] = "Add the key to your authenticator app, then enter the code.",

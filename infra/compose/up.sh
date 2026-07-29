@@ -67,6 +67,24 @@ echo " ok"
 # dropped only the opening line and orphaned the rest of the PEM, after which every `docker compose`
 # command in this script failed with `unexpected character "/" in variable name` and was never checked,
 # leaving Kong up with a key the issuer had already replaced. set-env-key.py writes one escaped line.
+# ── Persistent issuer keys ────────────────────────────────────────────────────────────────────────────────
+# Generated ONCE and kept, because ephemeral issuer keys cost two things that both look like other bugs:
+#   * the ENCRYPTION key wraps refresh tokens (JWE), so every restart made outstanding refresh tokens
+#     undecryptable — the SPA's silent renew answered invalid_grant and the user was signed out at the
+#     5-minute access-token expiry, which reads as "the session timeout is far too short";
+#   * the SIGNING key's `kid` changed on every restart, so Kong's pinned public key went stale and the
+#     gateway answered "Invalid signature" until the step below was re-run.
+# Owned by uid 10001 (the container's appuser) and mode 400, chowned via a throwaway root container so this
+# needs no sudo on the host. Gitignored by *.pem. OpenBao's transit engine remains the production home.
+if [ ! -f ./secrets/issuer-signing.pem ] || [ ! -f ./secrets/issuer-encryption.pem ]; then
+  echo "==> Generating persistent issuer keys (once) into ./secrets…"
+  mkdir -p ./secrets
+  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out ./secrets/issuer-signing.pem 2>/dev/null
+  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out ./secrets/issuer-encryption.pem 2>/dev/null
+  docker run --rm -v "$PWD/secrets:/s" alpine:3 sh -c 'chown 10001:10001 /s/*.pem && chmod 400 /s/*.pem'
+  echo "    - issuer-signing.pem, issuer-encryption.pem (uid 10001, mode 400)"
+fi
+
 echo "==> Deriving IDENTITY_JWKS_PUBLIC_KEY from the issuer's live JWKS…"
 python3 ./jwks-to-pem.py http://localhost:8090/.well-known/jwks \
   | python3 ./set-env-key.py IDENTITY_JWKS_PUBLIC_KEY .env

@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Antiforgery;
 using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Events;
@@ -17,6 +19,48 @@ builder.Services.AddMersalIssuer(builder.Configuration, builder.Environment);
 // 18.B3 (S3) — named policies for the admin surface + the catalog (see IdentityAdminPolicies).
 builder.Services.AddIdentityAdminPolicies(builder.Configuration);
 builder.Services.AddIssuerRateLimits();   // 18.B3 (S9) — per-route limits on the credential endpoints
+
+// ── Data Protection: the key ring that encrypts anti-forgery tokens ───────────────────────────────────────
+// This was never configured, so ASP.NET Core fell back to an EPHEMERAL, in-process key ring. Two consequences,
+// both of which bite in exactly the situation you least want them to:
+//
+//   1. Every restart invalidated every anti-forgery token in flight. A user sitting on the login page when the
+//      container was recreated got HTTP 500 on submit — "the key {…} was not found in the key ring" — with
+//      nothing on screen to suggest reloading would fix it. That is not a rare edge: a deploy does it to
+//      everyone who happens to be signing in.
+//   2. More than one replica could never work at all: each would hold its own ring, so a form served by one
+//      and posted to another would fail every time, non-deterministically.
+//
+// Persisted to disk under a path that Compose mounts as a volume, so a restart keeps the ring, and so Tier 2/3
+// can point every replica at ONE shared location. The keys are protected at rest by the same full-disk
+// encryption as the database (Tier 1, per 0C); moving them into OpenBao's transit engine is the same follow-up
+// already recorded for the issuer's RS256 signing keys, and is tracked with it rather than invented here.
+var keyRingPath = builder.Configuration["DataProtection:KeyRingPath"] ?? "/var/lib/hbmp/dpkeys";
+try
+{
+    Directory.CreateDirectory(keyRingPath);
+    // Probe by WRITING, not by existing. CreateDirectory succeeds on a directory that is already there, so a
+    // root-owned volume mounted under a non-root process passed this check and then failed on the first token
+    // with "Access to the path … is denied" — a 500 on the login page, discovered by a user rather than at
+    // startup. The whole point of the check is to fail loudly here instead.
+    var probe = Path.Combine(keyRingPath, ".write-probe");
+    File.WriteAllText(probe, "ok");
+    File.Delete(probe);
+    builder.Services.AddDataProtection()
+        // Named so a future second service sharing the volume cannot silently read this one's ring.
+        .SetApplicationName("mersal-identity-service")
+        .PersistKeysToFileSystem(new DirectoryInfo(keyRingPath));
+}
+catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+{
+    // An unwritable path must not stop the issuer from starting — being unable to sign anyone in is far worse
+    // than losing key persistence. Loud, though: the ephemeral fallback is the behaviour described above, and
+    // silence is how it went unnoticed in the first place.
+    Console.Error.WriteLine(
+        $"WARNING: data-protection key ring path '{keyRingPath}' is not writable ({ex.GetType().Name}). " +
+        "Falling back to an EPHEMERAL key ring: anti-forgery tokens will not survive a restart and multiple " +
+        "replicas will reject each other's forms. Fix the volume mount or set DataProtection:KeyRingPath.");
+}
 // Phase 17.4 — audited admin actions (C3): durable outbox + hash-chained audit spine.
 builder.Services.AddHbmpAuditClient("identity-service");
 builder.Services.AddHbmpEvents(builder.Configuration);
@@ -82,7 +126,54 @@ app.UseCors(SpaCorsPolicy);
 app.UseRateLimiter();      // 18.B3 (S9) — before auth: a rejected flood must not cost a token validation
 app.UseAuthentication();
 app.UseAuthorization();
-app.UseAntiforgery();      // 18.B3 (S4) — validates the token on the three rendered form POSTs
+app.UseAntiforgery();      // 18.B3 (S4) — validates the token on the rendered form POSTs
+
+// A STALE anti-forgery token is a user event, not a server fault.
+//
+// The four rendered form POSTs (/connect/login, /connect/2fa, /connect/enroll-2fa,
+// /connect/select-membership) bind [FromForm] parameters, and that binding validates the token BEFORE the
+// handler body runs — so the handler cannot answer for itself, and the failure surfaced as an unhandled
+// BadHttpRequestException, i.e. HTTP 500 with a bare problem+json body. Someone sitting on the login page when
+// this service restarted therefore got "An error occurred while processing your request" on submit, with
+// nothing on screen to suggest that reloading was all it took.
+//
+// Handled once here rather than at four endpoints: whichever form went stale, the remedy is the same — start
+// signing in again — and one place cannot drift from the other three. The key ring is now persisted (see above)
+// so a restart no longer causes this, but a form left open long enough still can, and it must not read as an
+// outage. Registered before the endpoints so the try/catch wraps their execution.
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next(context);
+    }
+    catch (BadHttpRequestException ex)
+        when (ex.InnerException is Microsoft.AspNetCore.Antiforgery.AntiforgeryValidationException)
+    {
+        // Only the rendered forms: /connect/token is a machine endpoint where a 400 is the correct answer, and
+        // handing it an HTML page would be worse than the 500.
+        var path = context.Request.Path.Value ?? string.Empty;
+        var isRenderedForm =
+            path.StartsWith("/connect/login", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/connect/2fa", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/connect/enroll-2fa", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/connect/select-membership", StringComparison.OrdinalIgnoreCase);
+
+        // HasStarted: binding fails before the handler writes anything, so this should not happen — but
+        // rewriting a response already on the wire produces a corrupt page rather than an error.
+        if (!isRenderedForm || context.Response.HasStarted) throw;
+
+        var antiforgery = context.RequestServices.GetRequiredService<IAntiforgery>();
+        var lang = context.Request.Query["lang"].ToString() is { Length: > 0 } q ? q : "en";
+        context.Response.Clear();
+        // 200, not 400: this IS the login page, rendered for a human to use, and a 4xx makes intermediaries and
+        // browser tooling treat a perfectly usable page as a failed request.
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = "text/html";
+        await context.Response.WriteAsync(AccountPages.LoginPage(
+            lang, returnUrl: null, AccountPages.AntiforgeryField(antiforgery, context), expired: true));
+    }
+});
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "identity-service" })).AllowAnonymous();
