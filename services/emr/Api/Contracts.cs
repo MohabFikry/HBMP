@@ -48,12 +48,12 @@ public sealed record BookAppointmentRequest(
 public sealed record AppointmentResponse(
     Guid AppointmentId, Guid BeneficiaryId, Guid ProviderId, Guid LocationId, Guid? SlotId,
     string AppointmentType, string Status, DateTimeOffset ScheduledStart, DateTimeOffset ScheduledEnd,
-    string? ReferralRef, Guid? OriginEncounterId, uint RowVersion)
+    string? ReferralRef, Guid? OriginEncounterId, uint RowVersion, Guid? BranchId)
 {
     public static AppointmentResponse From(Appointment a) => new(
         a.AppointmentId, a.BeneficiaryId, a.ProviderId, a.LocationId, a.SlotId,
         a.AppointmentType.ToString(), a.Status.ToString(), a.ScheduledStart, a.ScheduledEnd,
-        a.ReferralRef, a.OriginEncounterId, a.RowVersion);
+        a.ReferralRef, a.OriginEncounterId, a.RowVersion, a.BranchId);
 }
 
 public sealed record SlotResponse(

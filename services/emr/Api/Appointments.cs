@@ -104,7 +104,7 @@ public static class AppointmentsModule
         write.MapPost("/appointments", async (
             BookAppointmentRequest req, HttpRequest http, EmrDbContext db, AppointmentBookingService booking,
             ReminderDispatcher reminders, IPractitionerBranchDirectory practitioners, IAuditClient audit,
-            IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+            IOutbox outbox, IHbmpPrincipalAccessor me, BranchScopeState branch, TimeProvider clock, CancellationToken ct) =>
         {
             var idem = http.Headers["Idempotency-Key"].ToString();
             if (string.IsNullOrWhiteSpace(idem))
@@ -116,10 +116,20 @@ public static class AppointmentsModule
                     title: type == AppointmentType.Referral ? "Referral bookings require a referralRef (REF-*)"
                                                             : "Follow-up bookings require an originEncounterId");
 
+            // 14.4/37 §3 — the booking's branch is decided HERE, server-side, before anything is written. A
+            // BranchScoped desk books into its own active branch and may not name another; a call-centre agent
+            // books into the branch it named. The row was previously created with branch_id NULL no matter who
+            // booked it, which meant the reception board — which filters on exactly that column — could never
+            // show a single appointment anyone had booked.
+            var (bookingBranch, denied) = AppointmentEndpointsShared.ResolveBookingBranch(branch, req.BranchId);
+            if (denied is not null) return denied;
+
             // 18.C2 (W7 / FR-BRN-027) — the second gate. Availability is not the only route to an appointment:
             // a walk-in is slotless, and a booking may name a doctor directly. Both bypass the slot table
-            // entirely, so the check has to be repeated here rather than assumed from 026.
-            if (req.DoctorId is { } bookDoctorId && req.BranchId is { } bookBranchId)
+            // entirely, so the check has to be repeated here rather than assumed from 026. It runs against the
+            // RESOLVED branch, so a desk that names only a doctor is still checked against the branch it is
+            // actually booking into.
+            if (req.DoctorId is { } bookDoctorId && bookingBranch is { } bookBranchId)
             {
                 var serves = await practitioners.ServesBranchAsync(bookDoctorId, bookBranchId, ct);
                 if (PractitionerBranchRules.Refuse(serves, bookDoctorId, bookBranchId) is { } reason)
@@ -149,6 +159,7 @@ public static class AppointmentsModule
             {
                 AppointmentId = Guid.NewGuid(),
                 BeneficiaryId = req.BeneficiaryId, ProviderId = req.ProviderId, LocationId = req.LocationId,
+                BranchId = bookingBranch,
                 SlotId = slot?.SlotId, AppointmentType = type, Status = AppointmentStatus.Booked,
                 ScheduledStart = slot?.SlotStart ?? req.ScheduledStart ?? now,
                 ScheduledEnd = slot?.SlotEnd ?? req.ScheduledEnd ?? now.AddMinutes(15),
@@ -231,9 +242,14 @@ public static class AppointmentsModule
         // POST /appointments/{id}/reschedule — atomic release-old + book-new (US-021).
         write.MapPost("/appointments/{id:guid}/reschedule", async (
             Guid id, RescheduleRequest req, HttpRequest http, EmrDbContext db, AppointmentTransitionService transitions,
-            IdempotencyStore idem, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock,
-            CancellationToken ct) =>
+            IdempotencyStore idem, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me,
+            BranchScopeState branch, TimeProvider clock, CancellationToken ct) =>
         {
+            // 14.4 — the read endpoints refused cross-branch rows; the writes did not, so knowing an id was
+            // enough to act on another branch's appointment.
+            if (await AppointmentEndpointsShared.DenyIfOutsideBranchAsync(id, branch, db, ct) is { } outOfScope)
+                return await AuditAndReturn(outOfScope, audit, me, "BranchScopeDenied", id, TransitionOutcome.NotFound, ct);
+
             var (replay, key) = await CheckIdempotency(http, idem, db, ct);
             if (replay is not null) return replay;
 
@@ -257,9 +273,14 @@ public static class AppointmentsModule
         // POST /appointments/{id}/cancel — release slot + reason; promote waitlist (US-021).
         write.MapPost("/appointments/{id:guid}/cancel", async (
             Guid id, CancelRequest req, HttpRequest http, EmrDbContext db, AppointmentTransitionService transitions,
-            IdempotencyStore idem, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock,
-            CancellationToken ct) =>
+            IdempotencyStore idem, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me,
+            BranchScopeState branch, TimeProvider clock, CancellationToken ct) =>
         {
+            // 14.4 — the read endpoints refused cross-branch rows; the writes did not, so knowing an id was
+            // enough to act on another branch's appointment.
+            if (await AppointmentEndpointsShared.DenyIfOutsideBranchAsync(id, branch, db, ct) is { } outOfScope)
+                return await AuditAndReturn(outOfScope, audit, me, "BranchScopeDenied", id, TransitionOutcome.NotFound, ct);
+
             var (replay, key) = await CheckIdempotency(http, idem, db, ct);
             if (replay is not null) return replay;
 
@@ -281,9 +302,14 @@ public static class AppointmentsModule
         // POST /appointments/{id}/no-show — guarded; reporting flag + backfill (US-022).
         write.MapPost("/appointments/{id:guid}/no-show", async (
             Guid id, HttpRequest http, EmrDbContext db, AppointmentTransitionService transitions,
-            IdempotencyStore idem, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock,
-            CancellationToken ct) =>
+            IdempotencyStore idem, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me,
+            BranchScopeState branch, TimeProvider clock, CancellationToken ct) =>
         {
+            // 14.4 — the read endpoints refused cross-branch rows; the writes did not, so knowing an id was
+            // enough to act on another branch's appointment.
+            if (await AppointmentEndpointsShared.DenyIfOutsideBranchAsync(id, branch, db, ct) is { } outOfScope)
+                return await AuditAndReturn(outOfScope, audit, me, "BranchScopeDenied", id, TransitionOutcome.NotFound, ct);
+
             var (replay, key) = await CheckIdempotency(http, idem, db, ct);
             if (replay is not null) return replay;
 

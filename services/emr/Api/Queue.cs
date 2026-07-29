@@ -23,8 +23,20 @@ public static class QueueModule
         // POST /appointments/{id}/check-in — Booked→CheckedIn + enqueue.
         write.MapPost("/appointments/{id:guid}/check-in", async (
             Guid id, CheckInRequest req, HttpRequest http, AppointmentTransitionService transitions,
-            IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+            IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, BranchScopeState branch,
+            EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
+            // 14.4 — a desk may only check in its own branch's arrivals.
+            if (await AppointmentEndpointsShared.DenyIfOutsideBranchAsync(id, branch, db, ct) is { } outOfScope)
+            {
+                await audit.EmitAsync(new AuditEventDraft
+                {
+                    EntityType = "appointment", EntityId = id.ToString(), Action = AuditAction.Decision,
+                    ActorUserId = me.Principal?.Subject, DecisionOutcome = "BranchScopeDenied",
+                }, ct);
+                return outOfScope;
+            }
+
             var result = await transitions.CheckInAsync(id, req.MemberNo, req.DisplayName, req.Priority,
                 AppointmentEndpointsShared.IfMatch(http), clock.GetUtcNow(), ct);
             var problem = AppointmentEndpointsShared.MapFailure(result.Outcome);

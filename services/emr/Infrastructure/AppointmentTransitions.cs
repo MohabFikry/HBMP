@@ -57,6 +57,9 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
         {
             QueueId = Guid.NewGuid(), AppointmentId = appt.AppointmentId, BeneficiaryId = appt.BeneficiaryId,
             ProviderId = appt.ProviderId, LocationId = appt.LocationId,
+            // The ticket inherits the appointment's branch. GET /queues filters on exactly this column for a
+            // BranchScoped caller, so a ticket without it is invisible to the desk that just created it.
+            BranchId = appt.BranchId,
             MemberNo = memberNo, DisplayName = displayName, AppointmentType = appt.AppointmentType,
             Priority = priority, State = QueueTicketState.Waiting, EnqueuedAt = now,
         });

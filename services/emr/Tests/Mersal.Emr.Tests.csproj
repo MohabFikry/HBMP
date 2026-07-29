@@ -8,6 +8,7 @@
     <PackageReference Include="Npgsql" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../Api/Mersal.Emr.Api.csproj" />
     <ProjectReference Include="../Domain/Mersal.Emr.Domain.csproj" />
     <ProjectReference Include="../Infrastructure/Mersal.Emr.Infrastructure.csproj" />
     <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />

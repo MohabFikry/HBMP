@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { AppProviders } from "../src/App";
 import { DevAuthClient } from "../src/auth/authClient";
@@ -32,6 +33,11 @@ function checkedIn(rowVersion?: number): AppointmentRow {
   };
 }
 
+/** MemoryRouter keeps its history in memory, so window.location never moves — read the router's own. */
+function Where() {
+  return <span data-testid="where">{useLocation().pathname}</span>;
+}
+
 function fakeApi(over: Partial<ApiClient> = {}): ApiClient {
   return {
     appointments: vi.fn().mockResolvedValue([booked(42)]),
@@ -42,8 +48,12 @@ function fakeApi(over: Partial<ApiClient> = {}): ApiClient {
 
 function renderCheckIn(api: ApiClient) {
   return render(
+    // Inside a Router: the board's "Patient file" action navigates, exactly as it does in the app.
     <AppProviders authClient={new DevAuthClient()} apiClient={api}>
-      <ReceptionCheckIn />
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <ReceptionCheckIn />
+        <Where />
+      </MemoryRouter>
     </AppProviders>,
   );
 }
@@ -96,5 +106,23 @@ describe("17.0 — reception check-in optimistic concurrency (If-Match opt-in)",
     expect(screen.queryByText(/^Checked in$/)).not.toBeInTheDocument();
     // …and the board is re-loaded (initial load + reload).
     await waitFor(() => expect(appointments).toHaveBeenCalledTimes(2));
+  });
+});
+
+/**
+ * Design 39 §6 — the unified patient profile is opened FOR someone from a worklist, never from a menu. Every
+ * clinical worklist gained that entry point; reception's boards, which are the list the DESK works from all
+ * day, had none, so on this side of the building the profile was unreachable.
+ */
+describe("Reception boards — patient-file entry point", () => {
+  it("offers a Patient file action on every row and routes to that beneficiary", async () => {
+    const user = userEvent.setup();
+    renderCheckIn(fakeApi());
+
+    const openFile = await screen.findByRole("button", { name: /patient file/i });
+    await user.click(openFile);
+
+    // The row's beneficiary id is what the deep link must carry — not the appointment id.
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/patients/b1"));
   });
 });

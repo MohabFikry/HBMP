@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useFormat, type Formatters } from "../i18n/useFormat";
 import { Button, Card, DataTable, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
@@ -22,6 +23,7 @@ const S = {
   action: { en: "Action", ar: "إجراء" },
   checkIn: { en: "Check in", ar: "تسجيل الوصول" },
   checkedIn: { en: "Checked in", ar: "تم الوصول" },
+  openFile: { en: "Patient file", ar: "ملف المريض" },
   stale: {
     en: "This appointment changed since the board loaded — refreshing.",
     ar: "تغيّر هذا الموعد منذ تحميل اللوحة — يجري التحديث.",
@@ -47,13 +49,32 @@ function boardColumns(t: (l: Localized) => string, fmt: Formatters): Column<Appo
   ];
 }
 
+/**
+ * The patient-file action (design 39 §6 — the profile is opened FOR someone from a worklist, never from a
+ * menu). Reception's boards are the list the desk actually works from, and every row already names a
+ * beneficiary; without this the unified profile had no entry point on this side of the building at all.
+ * The SERVER decides which sections reception may see, so the same route serves every portal.
+ */
+function patientFileColumn(t: (l: Localized) => string, go: (to: string) => void): Column<AppointmentRow> {
+  return {
+    key: "file",
+    header: "",
+    cell: (r) => (
+      <Button variant="secondary" size="sm" onClick={() => go(`/patients/${encodeURIComponent(r.beneficiary.id)}`)}>
+        {t(S.openFile)}
+      </Button>
+    ),
+  };
+}
+
 /** Today's visits — everyone who has arrived and is waiting (CheckedIn). */
 export function ReceptionVisits() {
   const api = useApi();
   const t = useLoc();
   const fmt = useFormat();   // 18.D2 (U7) — Cairo appointment times, app locale
+  const navigate = useNavigate();
   const state = useAsync<AppointmentRow[]>(() => api.appointments("checked-in"), []);
-  const cols = boardColumns(t, fmt);
+  const cols = [...boardColumns(t, fmt), patientFileColumn(t, navigate)];
   return (
     <>
       <PageHeader title={t(S.visitsTitle)} />
@@ -71,8 +92,9 @@ export function ReceptionAppointments() {
   const api = useApi();
   const t = useLoc();
   const fmt = useFormat();   // 18.D2 (U7) — Cairo appointment times, app locale
+  const navigate = useNavigate();
   const state = useAsync<AppointmentRow[]>(() => api.appointments("all"), []);
-  const cols = boardColumns(t, fmt);
+  const cols = [...boardColumns(t, fmt), patientFileColumn(t, navigate)];
   return (
     <>
       <PageHeader title={t(S.apptTitle)} />
@@ -90,6 +112,7 @@ export function ReceptionCheckIn() {
   const api = useApi();
   const t = useLoc();
   const fmt = useFormat();   // 18.D2 (U7) — Cairo appointment times, app locale
+  const navigate = useNavigate();
   const state = useAsync<AppointmentRow[]>(() => api.appointments("booked"), []);
   const [busy, setBusy] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
@@ -127,6 +150,7 @@ export function ReceptionCheckIn() {
 
   const cols: Column<AppointmentRow>[] = [
     ...boardColumns(t, fmt),
+    patientFileColumn(t, navigate),
     {
       key: "action",
       header: t(S.action),

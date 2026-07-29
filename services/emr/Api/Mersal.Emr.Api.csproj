@@ -1,6 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup><RootNamespace>Mersal.Emr.Api</RootNamespace></PropertyGroup>
   <ItemGroup>
+    <!-- The branch-scope helpers in AppointmentEndpointsShared are endpoint plumbing, not public API, but they
+         decide who may write to whose appointment — that rule is worth testing directly. -->
+    <InternalsVisibleTo Include="Mersal.Emr.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Emr.Domain.csproj" />
     <ProjectReference Include="../Infrastructure/Mersal.Emr.Infrastructure.csproj" />
     <ProjectReference Include="../../../libs/auth/Mersal.Auth.csproj" />

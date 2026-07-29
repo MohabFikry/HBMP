@@ -38,6 +38,17 @@ export function renderApp(initialPath = "/", role?: Role, apiClient: ApiClient =
   );
 }
 
-export function renderNode(ui: ReactElement) {
-  return render(<AppProviders authClient={new DevAuthClient()}>{ui}</AppProviders>);
+/**
+ * Render a single screen or component in isolation.
+ *
+ * Wrapped in a Router even though no route is being exercised: in the real app EVERY screen renders inside
+ * one, so a screen that reaches for `useNavigate` — as any worklist with a "Patient file" action must — threw
+ * only in the test. That made the harness, not the code, the thing under test.
+ */
+export function renderNode(ui: ReactElement, apiClient: ApiClient = new DevApiClient({ latencyMs: 0 })) {
+  return render(
+    <AppProviders authClient={new DevAuthClient()} apiClient={apiClient}>
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>{ui}</MemoryRouter>
+    </AppProviders>,
+  );
 }
