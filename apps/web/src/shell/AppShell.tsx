@@ -188,13 +188,25 @@ export function AppShell({ children }: { children: ReactNode }) {
           />
         </div>
         <div className="app-actions">
-          {!branchCtx.memberScoped && branchCtx.branches.length > 0 && (
-            <BranchSwitcher
-              memberScoped={false}
-              branches={branchCtx.branches}
-              activeBranchId={branchCtx.activeBranchId}
-              onSwitch={branchCtx.switchBranch}
-            />
+          {/* Branch context is shown to EVERYONE, because "which branch am I working in?" has an answer for
+              every role — it is just a different answer. A branch-scoped desk gets the switcher over its
+              permitted set; a member-scoped role (call centre, approvals, finance, director) gets the
+              "All branches" indicator, which is the point: their reach is not tied to one branch.
+
+              Only the switcher was ever wired. BranchSwitcher has had the member-scoped variant since 14.8 and
+              nothing rendered it, so those roles saw no branch context at all and had no way to tell an
+              unrestricted scope from a missing feature. */}
+          {branchCtx.memberScoped ? (
+            <BranchSwitcher memberScoped branches={[]} activeBranchId={null} onSwitch={() => {}} />
+          ) : (
+            branchCtx.branches.length > 0 && (
+              <BranchSwitcher
+                memberScoped={false}
+                branches={branchCtx.branches}
+                activeBranchId={branchCtx.activeBranchId}
+                onSwitch={branchCtx.switchBranch}
+              />
+            )
           )}
           {canNotify && (
             <button
