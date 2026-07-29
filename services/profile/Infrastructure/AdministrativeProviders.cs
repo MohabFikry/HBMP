@@ -28,9 +28,19 @@ public sealed class HeaderSectionProvider(AdministrativeSource source) : ISectio
             ? membership.Str("status") ?? "Pending"
             : beneficiary?.Str("status") ?? "Pending";
 
+        // patient-service emits the name as givenName + familyName (BeneficiaryReadGuard.Fields), classified
+        // Identity so every role that may read the record gets it. This looked only for displayName / fullNameEn
+        // / name — none of which patient-service has ever sent — so EVERY profile header rendered
+        // "(name unavailable)". Worst where it matters most: the call-centre agent completes verify-before-
+        // disclose specifically so they can greet the caller by name, and then could not see it.
+        var composed = string.Join(" ", new[] { beneficiary?.Str("givenName"), beneficiary?.Str("familyName") }
+            .Where(part => !string.IsNullOrWhiteSpace(part)));
         var displayName = beneficiary?.Str("displayName")
             ?? beneficiary?.Str("fullNameEn")
             ?? beneficiary?.Str("name")
+            ?? (composed.Length > 0 ? composed : null)
+            // Still explicit rather than blank: a missing name is a real state (an incomplete registration) and
+            // must not read as an empty label.
             ?? "(name unavailable)";
 
         return new HeaderSection(
@@ -44,12 +54,29 @@ public sealed class HeaderSectionProvider(AdministrativeSource source) : ISectio
             StatusCue.For(status),
             beneficiary?.Str("branchName"),
             beneficiary?.Str("preferredLanguage"),
-            beneficiary?.Str("primaryPhone") is { } phone
+            // Same mismatch: patient-service sends contacts[] (class Contact), not a flat primaryPhone, so the
+            // header's contact line was always empty for callers who ARE allowed the phone number.
+            PrimaryPhone(beneficiary) is { } phone
                 ? new ContactSummary(phone, beneficiary?.Str("preferredChannel"))
                 : null,
             // A relative path to this service's own gated endpoint, never a blob URL. The bytes are behind a
             // second authorization check and a short-TTL signature (design 39 §5).
             $"/api/v1/patients/{request.BeneficiaryId}/photo");
+    }
+
+    /// <summary>The primary phone out of patient-service's contacts[], preferring the one flagged primary and
+    /// falling back to the first phone. Absent when the caller's field projection withheld contacts entirely,
+    /// which is a different thing from the member having no phone — hence null, not an empty string.</summary>
+    private static string? PrimaryPhone(JsonElement? beneficiary)
+    {
+        if (beneficiary?.Array("contacts") is not { } contacts) return null;
+        var phones = contacts
+            .Where(c => c.ValueKind == JsonValueKind.Object
+                        && string.Equals(c.Str("type"), "Phone", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (phones.Count == 0) return null;
+        var primary = phones.FirstOrDefault(c => c.TryGetProperty("isPrimary", out var f) && f.ValueKind == JsonValueKind.True);
+        return (primary.ValueKind == JsonValueKind.Object ? primary : phones[0]).Str("value");
     }
 }
 

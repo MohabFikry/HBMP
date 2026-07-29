@@ -20,19 +20,19 @@ public static class CoverageDetailEndpoints
 {
     public static void MapCoverageDetails(this IEndpointRouteBuilder app)
     {
-        var read = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("policy:read"));
+        // PROFILE SECTION SOURCES. Both of these fill sections of the unified patient profile, so they are
+        // reachable with policy:read OR profile:read. Design 39 forbids service accounts — profile-service
+        // forwards the CALLER's bearer (NoServiceAccountArchitectureTests asserts it on the wire) — which means
+        // every role whose profile projection includes the header or coverage section must be able to open the
+        // endpoint that fills it. The call centre holds profile:read and not policy:read, so requiring
+        // policy:read alone composed header, alerts and coverage as Unavailable/upstream-error and made the
+        // workspace report a live member as 404 Not Found. Min-necessary is untouched: ProfilePolicies still
+        // decides, per role, which sections come back and with which field variant.
+        var sections = app.MapGroup("/api/v1")
+            .RequireAuthorization(HbmpPolicies.AnyScope("policy:read", "profile:read"));
 
-        MapCoverageDetail(read);
-        // administrative-360 is a PROFILE SECTION SOURCE, not a policy-administration read, so it is reachable
-        // with either scope. Design 39 forbids service accounts — profile-service forwards the CALLER's bearer
-        // (NoServiceAccountArchitectureTests asserts it on the wire) — which means every role whose profile
-        // projection includes the header/coverage sections must be able to open this endpoint itself. The call
-        // centre holds profile:read and not policy:read, so requiring policy:read alone made its 360 compose
-        // header, alerts and coverage as Unavailable/upstream-error, and the workspace reported the member as
-        // 404 Not Found. Min-necessary is not weakened by this: ProfilePolicies still decides, per role, which
-        // sections come back and with which field variant.
-        MapAdministrative360(app.MapGroup("/api/v1")
-            .RequireAuthorization(HbmpPolicies.AnyScope("policy:read", "profile:read")));
+        MapCoverageDetail(sections);
+        MapAdministrative360(sections);
     }
 
     // ---- Coverage details --------------------------------------------------------------------------------

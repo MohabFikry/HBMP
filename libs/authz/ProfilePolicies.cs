@@ -253,6 +253,12 @@ public static class ProfilePolicies
     {
         var row = Reception();
         row[ProfileSections.CallHistory] = Vis(ProfileVariants.Full);
+        // Alerts are ALLERGIES — clinical, and emr guards them with a clinical scope the call centre must never
+        // hold. Granting the section anyway produced a permanently broken tile: the agent saw an "Unavailable /
+        // upstream-error" alerts panel on every single call, which reads as an outage and trains everyone to
+        // ignore a state that is supposed to mean something. Removing it makes the section NotApplicable, which
+        // is the truth — a telephone agent has no business with a patient's allergy list.
+        row.Remove(ProfileSections.Alerts);
         return row;
     }
 

@@ -288,3 +288,36 @@ public class ProfilePoliciesTests
     public void The_context_bar_asks_for_header_and_alerts_only() =>
         ProfileSections.ContextBar.Should().BeEquivalentTo([ProfileSections.Header, ProfileSections.Alerts]);
 }
+
+/// <summary>
+/// A section the caller can never actually be served is worse than no section: it renders as
+/// "Unavailable — upstream-error" on every request, which reads as an outage and teaches the operator to ignore
+/// a state that is meant to carry information.
+/// </summary>
+public class CallCentreSectionRealismTests
+{
+    [Fact]
+    public void The_call_centre_is_not_offered_clinical_alerts()
+    {
+        // Alerts are allergies. emr guards them with a clinical scope a telephone agent must never hold, so the
+        // section could only ever fail — it is NotApplicable, and that is the honest answer.
+        ProfilePolicies.RolesWithSection(ProfileSections.Alerts).Should().NotContain("call_center");
+    }
+
+    [Fact]
+    public void It_still_gets_the_sections_its_job_needs()
+    {
+        ProfilePolicies.RolesWithSection(ProfileSections.Header).Should()
+            .Contain("call_center", "the agent must be able to name the caller they verified");
+        ProfilePolicies.RolesWithSection(ProfileSections.Coverage).Should()
+            .Contain("call_center", "answering coverage questions is the job");
+        ProfilePolicies.RolesWithSection(ProfileSections.CallHistory).Should().Contain("call_center");
+    }
+
+    [Fact]
+    public void And_never_the_clinical_record()
+    {
+        foreach (var clinical in new[] { ProfileSections.PastMedicalHistory, ProfileSections.Investigations, ProfileSections.Prescriptions })
+            ProfilePolicies.RolesWithSection(clinical).Should().NotContain("call_center");
+    }
+}
