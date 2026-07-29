@@ -188,25 +188,19 @@ export function AppShell({ children }: { children: ReactNode }) {
           />
         </div>
         <div className="app-actions">
-          {/* Branch context is shown to EVERYONE, because "which branch am I working in?" has an answer for
-              every role — it is just a different answer. A branch-scoped desk gets the switcher over its
-              permitted set; a member-scoped role (call centre, approvals, finance, director) gets the
-              "All branches" indicator, which is the point: their reach is not tied to one branch.
-
-              Only the switcher was ever wired. BranchSwitcher has had the member-scoped variant since 14.8 and
-              nothing rendered it, so those roles saw no branch context at all and had no way to tell an
-              unrestricted scope from a missing feature. */}
-          {branchCtx.memberScoped ? (
-            <BranchSwitcher memberScoped branches={[]} activeBranchId={null} onSwitch={() => {}} />
-          ) : (
-            branchCtx.branches.length > 0 && (
-              <BranchSwitcher
-                memberScoped={false}
-                branches={branchCtx.branches}
-                activeBranchId={branchCtx.activeBranchId}
-                onSwitch={branchCtx.switchBranch}
-              />
-            )
+          {/* Only a BRANCH-SCOPED role gets a branch control here, because only they have one active branch to
+              be in. A member-scoped role is not tied to a branch, and an "All branches" chip in the app bar
+              states that at the top of every screen while doing nothing — worse, it reads as a global filter
+              the user might expect to change what they see. Where the branch actually matters for those roles is
+              at the point of a decision: the call centre picks the branch it is booking INTO, inside the
+              reservation flow. */}
+          {!branchCtx.memberScoped && branchCtx.branches.length > 0 && (
+            <BranchSwitcher
+              memberScoped={false}
+              branches={branchCtx.branches}
+              activeBranchId={branchCtx.activeBranchId}
+              onSwitch={branchCtx.switchBranch}
+            />
           )}
           {canNotify && (
             <button

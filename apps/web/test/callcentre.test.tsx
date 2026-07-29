@@ -34,6 +34,8 @@ async function verifyAndOpen(user: ReturnType<typeof userEvent.setup>) {
 }
 
 async function pickClinicAndTime(user: ReturnType<typeof userEvent.setup>) {
+  // Branch FIRST: the agent names the branch the appointment is for, then the clinic within it.
+  await user.selectOptions(await screen.findByLabelText(/^branch$/i), "br-dokki");
   await user.selectOptions(await screen.findByLabelText(/clinic/i), "p1|l1");
   const times = await screen.findAllByRole("radio");
   await user.click(times[times.length - 1]);
@@ -47,7 +49,9 @@ function fakeApi(over: Partial<CcApi> = {}): CcApi {
     summary: vi.fn().mockResolvedValue(make360()),
     // Cross-branch clinic list, each option carrying its own branch (15.3).
     clinics: vi.fn().mockResolvedValue([
-      { providerId: "p1", locationId: "l1", branchId: "br-dokki", label: "Mersal Dokki · Dokki Clinic", openSlots: 2 },
+      { providerId: "p1", locationId: "l1", branchId: "br-dokki", branchName: "Dokki", label: "Mersal Dokki · Dokki Clinic", openSlots: 2 },
+      // A second BRANCH, so the branch step is a real choice rather than a formality.
+      { providerId: "p2", locationId: "l2", branchId: "br-nasr", branchName: "Nasr City", label: "Mersal Nasr · Nasr Clinic", openSlots: 5 },
     ]),
     slots: vi.fn().mockResolvedValue([{ slotId: "slot-1", start: "2026-07-22T11:00:00Z" }]),
     book: vi.fn().mockResolvedValue("ok"),
@@ -239,5 +243,70 @@ describe("15.5 — Call Centre workspace: a11y", () => {
     const { container } = renderNode(<CallCentreWorkspace api={fakeApi()} />);
     await startAndSelect(user);
     expect(await axe(container, { rules: { "color-contrast": { enabled: false } } })).toHaveNoViolations();
+  });
+});
+
+/**
+ * The branch belongs to the DECISION, not to the chrome. An app-bar "all branches" chip states the scope and
+ * changes nothing; what the agent actually needs is to name the branch the appointment is FOR, at the moment
+ * they make it — and then to be offered only clinics in that branch.
+ */
+describe("15.3 — the call centre names the branch it is booking into", () => {
+  it("offers every branch that has availability, and no clinic until one is chosen", async () => {
+    const user = userEvent.setup();
+    renderNode(<CallCentreWorkspace api={fakeApi()} />);
+    await verifyAndOpen(user);
+
+    const branch = await screen.findByLabelText(/^branch$/i);
+    const names = [...branch.querySelectorAll("option")].map((o) => o.textContent);
+    expect(names).toEqual(expect.arrayContaining(["Dokki", "Nasr City"]));
+
+    // The clinic picker is inert until a branch is named — a clinic list spanning branches is how someone books
+    // Maadi for a caller expecting Dokki.
+    expect(screen.getByLabelText(/clinic/i)).toBeDisabled();
+    await user.selectOptions(branch, "br-nasr");
+    expect(screen.getByLabelText(/clinic/i)).toBeEnabled();
+  });
+
+  it("shows only the chosen branch's clinics", async () => {
+    const user = userEvent.setup();
+    renderNode(<CallCentreWorkspace api={fakeApi()} />);
+    await verifyAndOpen(user);
+
+    await user.selectOptions(await screen.findByLabelText(/^branch$/i), "br-nasr");
+    const clinicNames = [...screen.getByLabelText(/clinic/i).querySelectorAll("option")]
+      .map((o) => o.textContent ?? "");
+    expect(clinicNames.some((n) => /Nasr Clinic/.test(n))).toBe(true);
+    expect(clinicNames.some((n) => /Dokki Clinic/.test(n))).toBe(false);
+  });
+
+  it("changing the branch clears the clinic and the times under it", async () => {
+    const user = userEvent.setup();
+    renderNode(<CallCentreWorkspace api={fakeApi()} />);
+    await verifyAndOpen(user);
+
+    await user.selectOptions(await screen.findByLabelText(/^branch$/i), "br-dokki");
+    await user.selectOptions(screen.getByLabelText(/clinic/i), "p1|l1");
+    await user.click((await screen.findAllByRole("radio"))[0]);
+    expect(screen.getByRole("button", { name: /^book$/i })).toBeEnabled();
+
+    await user.selectOptions(screen.getByLabelText(/^branch$/i), "br-nasr");
+    // Nothing carried over: no clinic, no time, so nothing bookable.
+    expect(screen.getByLabelText(/clinic/i)).toHaveValue("");
+    expect(screen.getByRole("button", { name: /^book$/i })).toBeDisabled();
+  });
+
+  it("books into the branch the agent named", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi();
+    renderNode(<CallCentreWorkspace api={api} />);
+    await verifyAndOpen(user);
+
+    await user.selectOptions(await screen.findByLabelText(/^branch$/i), "br-nasr");
+    await user.selectOptions(screen.getByLabelText(/clinic/i), "p2|l2");
+    await user.click((await screen.findAllByRole("radio"))[0]);
+    await user.click(screen.getByRole("button", { name: /^book$/i }));
+
+    expect(api.book).toHaveBeenCalledWith("i1", BEN, "slot-1", "br-nasr");
   });
 });

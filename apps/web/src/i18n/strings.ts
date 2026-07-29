@@ -71,6 +71,9 @@ export const L = {
   // string was announced for both, so a rejected reservation told the agent the caller was not verified.
   ccBookFailed: { en: "That did not go through — nothing was changed.", ar: "لم تُنفَّذ العملية — لم يتغيّر شيء." },
   ccCancelled: { en: "Appointment cancelled and confirmed to the member.", ar: "تم إلغاء الموعد وتأكيده للمستفيد." },
+  ccBranch: { en: "Branch", ar: "الفرع" },
+  ccPickBranch: { en: "Choose a branch", ar: "اختر الفرع" },
+  ccPickBranchFirst: { en: "Choose a branch first", ar: "اختر الفرع أولاً" },
   ccClinic: { en: "Clinic", ar: "العيادة" },
   ccPickClinic: { en: "Choose a clinic", ar: "اختر العيادة" },
   ccTime: { en: "Time", ar: "الوقت" },

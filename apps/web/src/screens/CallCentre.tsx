@@ -22,7 +22,7 @@ export interface CcAppointment {
   canReschedule: boolean; canCancel: boolean;
 }
 export interface CcReferral { referralRef: string; status: string; requestedSpecialty?: string | null }
-export interface CcClinic { providerId: string; locationId: string; branchId?: string | null; label: string; openSlots: number }
+export interface CcClinic { providerId: string; locationId: string; branchId?: string | null; branchName?: string | null; label: string; openSlots: number }
 export interface CcSlot { slotId: string; start: string }
 export interface Cc360 {
   identity: { beneficiaryId: string; memberNo?: string | null; displayName: string; ageBand?: string | null; status: string };
@@ -131,8 +131,18 @@ export function createHttpCcApi(): CcApi {
       const labels = new Map<string, string>();
       const l = await req<any[]>("GET", `/clinic-labels?locationIds=${encodeURIComponent(ids)}`);
       for (const row of l.data ?? []) labels.set(String(row.locationId), `${row.providerName} · ${row.locationName}`);
+
+      // Branch NAMES too: the agent chooses the branch they are booking into, so it has to be a name.
+      const branchIds = [...new Set(rows.map((c) => c.branchId).filter(Boolean).map(String))];
+      const branchNames = new Map<string, string>();
+      if (branchIds.length > 0) {
+        const b = await req<any[]>("GET", `/branch-labels?branchIds=${encodeURIComponent(branchIds.join(","))}`);
+        for (const row of b.data ?? []) branchNames.set(String(row.branchId), String(row.nameEn));
+      }
+
       return rows.map((c) => ({
         providerId: String(c.providerId), locationId: String(c.locationId), branchId: c.branchId ?? null,
+        branchName: c.branchId ? branchNames.get(String(c.branchId)) ?? null : null,
         label: labels.get(String(c.locationId)) ?? String(c.locationId).slice(0, 8),
         openSlots: Number(c.openSlots ?? 0),
       }));
@@ -251,10 +261,22 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
   // Reservation panel: clinic → time. Loaded once the caller is verified, because that is the point at which
   // the agent is allowed to act on the booking at all.
   const [clinics, setClinics] = useState<CcClinic[]>([]);
+  const [branchKey, setBranchKey] = useState("");
   const [clinicKey, setClinicKey] = useState("");
   const [slots, setSlots] = useState<CcSlot[]>([]);
   const [slotId, setSlotId] = useState("");
-  const chosenClinic = clinics.find((c) => `${c.providerId}|${c.locationId}` === clinicKey) ?? null;
+  /**
+   * The branches the agent may book into, derived from the clinics that actually have availability — so a branch
+   * is never offered that would then present no clinic. This is where the call centre's wider scope belongs: at
+   * the moment of the decision, naming the branch the appointment is FOR. It is deliberately not an app-bar
+   * filter: a global "all branches" chip states the scope and changes nothing, and invites the agent to think it
+   * is narrowing what they see.
+   */
+  const branches = [...new Map(
+    clinics.filter((c) => c.branchId).map((c) => [c.branchId!, c.branchName ?? c.branchId!]),
+  ).entries()];
+  const branchClinics = clinics.filter((c) => (c.branchId ?? "") === branchKey);
+  const chosenClinic = branchClinics.find((c) => `${c.providerId}|${c.locationId}` === clinicKey) ?? null;
 
   useEffect(() => {
     if (!verifiedFor) return;
@@ -262,6 +284,23 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
     void api.clinics().then((c) => live && setClinics(c)).catch(() => live && setClinics([]));
     return () => { live = false; };
   }, [api, verifiedFor]);
+
+  // Changing the branch invalidates the clinic chosen under the old one, and the times chosen under that clinic.
+  // Both are cleared in the SAME batch as the branch change, so no render ever sees a mismatched pair.
+  function pickBranch(key: string) {
+    setBranchKey(key);
+    setClinicKey("");
+    setSlots([]);
+    setSlotId("");
+
+  }
+
+  function pickClinic(key: string) {
+    setClinicKey(key);
+    setSlots([]);
+    setSlotId("");
+
+  }
 
   useEffect(() => {
     // A clinic is a provider+location pair chosen as ONE value, so there is no render where the pair is half
@@ -461,10 +500,23 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
                     ) : (
                       <>
                         <label className="cc-field">
+                          <span>{t(L.ccBranch)}</span>
+                          <select value={branchKey} onChange={(e) => pickBranch(e.currentTarget.value)}>
+                            <option value="">{t(L.ccPickBranch)}</option>
+                            {branches.map(([id, name]) => (
+                              <option key={id} value={id}>{name}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="cc-field">
                           <span>{t(L.ccClinic)}</span>
-                          <select value={clinicKey} onChange={(e) => setClinicKey(e.currentTarget.value)}>
-                            <option value="">{t(L.ccPickClinic)}</option>
-                            {clinics.map((c) => (
+                          <select
+                            value={clinicKey}
+                            disabled={!branchKey}
+                            onChange={(e) => pickClinic(e.currentTarget.value)}
+                          >
+                            <option value="">{branchKey ? t(L.ccPickClinic) : t(L.ccPickBranchFirst)}</option>
+                            {branchClinics.map((c) => (
                               <option key={`${c.providerId}|${c.locationId}`} value={`${c.providerId}|${c.locationId}`}>
                                 {c.label} · {c.openSlots}
                               </option>
