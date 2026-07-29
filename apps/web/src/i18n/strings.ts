@@ -96,6 +96,38 @@ export const L = {
   ccHistoryEmpty: { en: "No calls yet.", ar: "لا توجد مكالمات بعد." },
   ccHistoryError: { en: "Couldn't load call history.", ar: "تعذّر تحميل سجل المكالمات." },
   ccRescheduled: { en: "Appointment rescheduled and confirmed to the member.", ar: "تمت إعادة جدولة الموعد وتأكيده للمستفيد." },
+  // ── The member file: act from the file the agent is already looking at ────────────────────────────────
+  ccNewAppointment: { en: "New appointment", ar: "موعد جديد" },
+  ccCallNotes: { en: "Call notes", ar: "ملاحظات المكالمة" },
+  ccCallNotesHelp: {
+    en: "Saved to the call record when you close the call. No clinical detail — this is a contact log.",
+    ar: "تُحفظ في سجل المكالمة عند إنهائها. بدون أي تفاصيل طبية — هذا سجل تواصل.",
+  },
+  ccCopy: { en: "Copy notes", ar: "نسخ الملاحظات" },
+  ccCopied: { en: "Call notes copied to the clipboard.", ar: "تم نسخ ملاحظات المكالمة." },
+  ccCopyFailed: { en: "Couldn't copy — select the text and copy manually.", ar: "تعذّر النسخ — حدّد النص وانسخه يدويًا." },
+  // ── Standalone "Book appointment" journey ─────────────────────────────────────────────────────────────
+  ccBookTitle: { en: "Book appointment", ar: "حجز موعد" },
+  ccBookIntro: {
+    en: "Find the member, verify the caller, then choose the branch, clinic and time. The booking is logged against this call.",
+    ar: "ابحث عن المستفيد، تحقّق من المتصل، ثم اختر الفرع والعيادة والوقت. يُسجَّل الحجز على هذه المكالمة.",
+  },
+  ccSearchBy: { en: "Search by", ar: "البحث بواسطة" },
+  ccSearchByAny: { en: "Any identifier", ar: "أي هوية" },
+  ccSearchByHint: {
+    en: "Any of these finds the member — the choice only sets the keypad and the example.",
+    ar: "أي منها يجد المستفيد — الاختيار يحدّد لوحة الإدخال والمثال فقط.",
+  },
+  ccStepFind: { en: "1. Find the member", ar: "١. ابحث عن المستفيد" },
+  ccStepVerify: { en: "2. Verify the caller", ar: "٢. تحقّق من المتصل" },
+  ccStepChoose: { en: "3. Choose branch, clinic and time", ar: "٣. اختر الفرع والعيادة والوقت" },
+  ccBookAnother: { en: "Book for another member", ar: "حجز لمستفيد آخر" },
+  ccBookFinish: { en: "Finish and close the call", ar: "إنهاء المكالمة" },
+  ccBookClosed: { en: "Call closed.", ar: "تم إنهاء المكالمة." },
+  ccBookOpenFailed: {
+    en: "Couldn't open a call record — the booking was not started. Try again.",
+    ar: "تعذّر إنشاء سجل المكالمة — لم يبدأ الحجز. حاول مرة أخرى.",
+  },
   retry: { en: "Retry", ar: "إعادة المحاولة" },
   account: { en: "Account", ar: "الحساب" },
   accountOpen: { en: "Account menu", ar: "قائمة الحساب" },

@@ -27,13 +27,25 @@ function make360(): Cc360 {
  */
 async function verifyAndOpen(user: ReturnType<typeof userEvent.setup>) {
   await startAndSelect(user);
-  await user.click(screen.getByLabelText("MemberNo"));
-  await user.click(screen.getByLabelText("DateOfBirth"));
+  await user.click(screen.getByLabelText("Member number"));
+  await user.click(screen.getByLabelText("Date of birth"));
   await user.click(screen.getByRole("button", { name: /verify — pass/i }));
   await screen.findByTestId("cc-360");
+  await openReservePanel(user);
+}
+
+/**
+ * The reservation panel is an ACTION on the member file now, not a permanent fixture inside it: most calls are
+ * not bookings, so a booking form open under every member's appointment list is noise and an invitation to
+ * book by accident. Idempotent — the button is gone once the panel is showing — so helpers may both call it.
+ */
+async function openReservePanel(user: ReturnType<typeof userEvent.setup>) {
+  const open = screen.queryByRole("button", { name: /new appointment/i });
+  if (open) await user.click(open);
 }
 
 async function pickClinicAndTime(user: ReturnType<typeof userEvent.setup>) {
+  await openReservePanel(user);
   // Branch FIRST: the agent names the branch the appointment is for, then the clinic within it.
   await user.selectOptions(await screen.findByLabelText(/^branch$/i), "br-dokki");
   await user.selectOptions(await screen.findByLabelText(/clinic/i), "p1|l1");
@@ -78,7 +90,7 @@ describe("15.5 — Call Centre workspace: verify before disclose", () => {
 
     expect(screen.getByTestId("cc-lockchip")).toHaveTextContent(/not yet verified/i);
     // Challenge checkboxes are offered…
-    expect(screen.getByLabelText("MemberNo")).toBeInTheDocument();
+    expect(screen.getByLabelText("Member number")).toBeInTheDocument();
     // …but no coverage / appointment / contact detail is anywhere in the DOM.
     expect(screen.queryByTestId("cc-360")).not.toBeInTheDocument();
     expect(screen.queryByText(/Dr\. Nour/)).not.toBeInTheDocument();
@@ -91,7 +103,7 @@ describe("15.5 — Call Centre workspace: verify before disclose", () => {
     renderNode(<CallCentreWorkspace api={api} />);
     await startAndSelect(user);
 
-    await user.click(screen.getByLabelText("MemberNo"));           // only one
+    await user.click(screen.getByLabelText("Member number"));           // only one
     await user.click(screen.getByRole("button", { name: /verify — pass/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/at least two/i);
     expect(api.verify).not.toHaveBeenCalled();
@@ -102,8 +114,8 @@ describe("15.5 — Call Centre workspace: verify before disclose", () => {
     renderNode(<CallCentreWorkspace api={fakeApi()} />);
     await startAndSelect(user);
 
-    await user.click(screen.getByLabelText("MemberNo"));
-    await user.click(screen.getByLabelText("DateOfBirth"));
+    await user.click(screen.getByLabelText("Member number"));
+    await user.click(screen.getByLabelText("Date of birth"));
     await user.click(screen.getByRole("button", { name: /verify — pass/i }));
 
     expect(await screen.findByTestId("cc-360")).toBeInTheDocument();
@@ -120,7 +132,7 @@ describe("15.5 — Call Centre workspace: act", () => {
     const user = userEvent.setup();
     renderNode(<CallCentreWorkspace api={fakeApi({ book: vi.fn().mockResolvedValue("conflict") })} />);
     await startAndSelect(user);
-    await user.click(screen.getByLabelText("MemberNo"));
+    await user.click(screen.getByLabelText("Member number"));
     await user.click(screen.getByLabelText("Phone"));
     await user.click(screen.getByRole("button", { name: /verify — pass/i }));
     await screen.findByTestId("cc-360");
@@ -135,7 +147,7 @@ describe("15.5 — Call Centre workspace: act", () => {
     const api = fakeApi();
     renderNode(<CallCentreWorkspace api={api} />);
     await startAndSelect(user);
-    await user.click(screen.getByLabelText("MemberNo"));
+    await user.click(screen.getByLabelText("Member number"));
     await user.click(screen.getByLabelText("Phone"));
     await user.click(screen.getByRole("button", { name: /verify — pass/i }));
     await screen.findByTestId("cc-360");
@@ -152,7 +164,7 @@ describe("15.5 — Call Centre workspace: act", () => {
     const api = fakeApi();
     renderNode(<CallCentreWorkspace api={api} />);
     await startAndSelect(user);
-    await user.click(screen.getByLabelText("MemberNo"));
+    await user.click(screen.getByLabelText("Member number"));
     await user.click(screen.getByLabelText("Phone"));
     await user.click(screen.getByRole("button", { name: /verify — pass/i }));
     await screen.findByTestId("cc-360");
@@ -169,7 +181,7 @@ describe("15.5 — Call Centre workspace: act", () => {
     const user = userEvent.setup();
     renderNode(<CallCentreWorkspace api={fakeApi({ reschedule: vi.fn().mockResolvedValue("conflict") })} />);
     await startAndSelect(user);
-    await user.click(screen.getByLabelText("MemberNo"));
+    await user.click(screen.getByLabelText("Member number"));
     await user.click(screen.getByLabelText("Phone"));
     await user.click(screen.getByRole("button", { name: /verify — pass/i }));
     await screen.findByTestId("cc-360");

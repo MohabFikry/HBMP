@@ -46,6 +46,12 @@ const IDENTIFIER_TYPE: Record<string, Localized> = {
   Passport: { en: "Passport", ar: "جواز السفر" },
   DateOfBirth: { en: "Date of birth", ar: "تاريخ الميلاد" },
   Phone: { en: "Phone", ar: "الهاتف" },
+  // Both spellings of the UNHCR number occur on the wire: the identifier catalogue writes `UNHCRNo`, the
+  // eligibility projection column is `UnhcrNo`. An unmapped key falls through to the raw literal, so an
+  // Arabic-portal agent would be challenged on the English word "UnhcrNo".
+  UnhcrNo: { en: "UNHCR number", ar: "رقم المفوضية" },
+  RefugeeId: { en: "Refugee ID", ar: "رقم اللاجئ" },
+  FullName: { en: "Full name", ar: "الاسم الكامل" },
 };
 
 /** Appointment types (23-state-machines §6). */

@@ -182,7 +182,10 @@ export const rolePermissions: Record<Role, Permission[]> = {
   ],
   case_manager: ["case.read", "case.beneficiary360", "case.escalations"],
   // Call Centre — a call workspace + call history. No clinical permission exists here (min-necessary).
-  call_center: ["callcentre.workspace", "callcentre.history", "appointments.read"],
+  // `appointments.book` — RESERVE only. The call centre holds appointment:reserve, not appointment:write, so
+  // it can hold and move a time but cannot record an arrival; `checkin.write` is deliberately absent and the
+  // server refuses check-in regardless of what the nav shows.
+  call_center: ["callcentre.workspace", "callcentre.history", "appointments.read", "appointments.book"],
   // Claims officer — worklist + reconciliation + PHI-free KPIs. No clinical/diagnosis permission (finance-parity).
   claims_officer: ["claims.worklist", "claims.reconciliation", "claims.insights"],
   // Finance gets the analytics section too: the financial and network views are exactly the money questions

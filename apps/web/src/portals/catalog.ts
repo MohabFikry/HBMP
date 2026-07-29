@@ -202,6 +202,11 @@ export const PORTALS: PortalDef[] = [
     // No clinical routes exist here — min-necessary (the call centre gets no clinical data).
     sections: [
       { key: "workspace", path: "workspace", label: { en: "Call workspace", ar: "مساحة المكالمة" }, group: G.contact, icon: "user", permission: "callcentre.workspace" },
+      // Booking is the single most common reason a member rings, and in the workspace it is the fifth step of
+      // a general-purpose call. Its own item makes the journey the agent actually has in front of them. It
+      // does NOT skip verification: the screen opens its own call record and verifies inside itself, because
+      // every reserve path in callcentre-service demands an interaction with a recorded PASS.
+      { key: "book", path: "book", label: { en: "Book appointment", ar: "حجز موعد" }, group: G.contact, icon: "plus", permission: "appointments.book" },
       // The cross-branch appointment board. Read-only: every reserve path needs a VERIFIED interaction, which
       // only exists inside a call, so the board points at the workspace rather than offering dead buttons.
       { key: "appointments", path: "appointments", label: { en: "Appointments", ar: "المواعيد" }, group: G.contact, icon: "clock", permission: "appointments.read" },

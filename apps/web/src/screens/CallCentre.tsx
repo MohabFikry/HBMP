@@ -6,6 +6,8 @@ import { L } from "../i18n/strings";
 import { API_BASE } from "../config";
 import { getToken } from "../auth/tokenStore";
 import { PageHeader } from "./_shared";
+import { ReservationPicker, useReservation } from "./ReservationPicker";
+import { CallNotes } from "./CallNotes";
 
 // ── Types (mirror the callcentre-service DTOs; CLINICAL-FREE by construction) ───────────────────────────
 export interface CcMatch {
@@ -219,6 +221,13 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
   const [cancelError, setCancelError] = useState(false);
   const [outcome, setOutcome] = useState(OUTCOMES[0]);
   const [notes, setNotes] = useState("");
+  /**
+   * The reservation panel is an ACTION ON THE FILE rather than a permanent fixture inside it. Most calls are
+   * not bookings — an eligibility question, a contact correction — and a booking form sitting open under every
+   * member's appointment list is both noise and an invitation to book by accident. Cleared whenever the member
+   * changes, so the panel never carries a branch/clinic/time chosen for a different person.
+   */
+  const [showReserve, setShowReserve] = useState(false);
 
   const startCall = useCallback(async () => {
     const { interactionId: id } = await api.openInteraction(reason);
@@ -234,6 +243,7 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
 
   const select = useCallback((m: CcMatch) => {
     setSelected(m); setTicks(new Set()); setVerifiedFor(null); setSummary(null); setVerifyError(false);
+    setShowReserve(false);
   }, []);
 
   const toggle = (type: string) =>
@@ -258,74 +268,30 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
     }
   }, [api, interactionId, selected, ticks, t]);
 
-  // Reservation panel: clinic → time. Loaded once the caller is verified, because that is the point at which
-  // the agent is allowed to act on the booking at all.
-  const [clinics, setClinics] = useState<CcClinic[]>([]);
-  const [branchKey, setBranchKey] = useState("");
-  const [clinicKey, setClinicKey] = useState("");
-  const [slots, setSlots] = useState<CcSlot[]>([]);
-  const [slotId, setSlotId] = useState("");
-  /**
-   * The branches the agent may book into, derived from the clinics that actually have availability — so a branch
-   * is never offered that would then present no clinic. This is where the call centre's wider scope belongs: at
-   * the moment of the decision, naming the branch the appointment is FOR. It is deliberately not an app-bar
-   * filter: a global "all branches" chip states the scope and changes nothing, and invites the agent to think it
-   * is narrowing what they see.
-   */
-  const branches = [...new Map(
-    clinics.filter((c) => c.branchId).map((c) => [c.branchId!, c.branchName ?? c.branchId!]),
-  ).entries()];
-  const branchClinics = clinics.filter((c) => (c.branchId ?? "") === branchKey);
-  const chosenClinic = branchClinics.find((c) => `${c.providerId}|${c.locationId}` === clinicKey) ?? null;
-
-  useEffect(() => {
-    if (!verifiedFor) return;
-    let live = true;
-    void api.clinics().then((c) => live && setClinics(c)).catch(() => live && setClinics([]));
-    return () => { live = false; };
-  }, [api, verifiedFor]);
-
-  // Changing the branch invalidates the clinic chosen under the old one, and the times chosen under that clinic.
-  // Both are cleared in the SAME batch as the branch change, so no render ever sees a mismatched pair.
-  function pickBranch(key: string) {
-    setBranchKey(key);
-    setClinicKey("");
-    setSlots([]);
-    setSlotId("");
-
-  }
-
-  function pickClinic(key: string) {
-    setClinicKey(key);
-    setSlots([]);
-    setSlotId("");
-
-  }
-
-  useEffect(() => {
-    // A clinic is a provider+location pair chosen as ONE value, so there is no render where the pair is half
-    // updated and the times belong to a clinic nobody picked.
-    setSlots([]);
-    setSlotId("");
-    if (!chosenClinic) return;
-    let live = true;
-    void api.slots(chosenClinic.providerId, chosenClinic.locationId)
-      .then((sl) => live && setSlots(sl))
-      .catch(() => live && setSlots([]));
-    return () => { live = false; };
-  }, [api, chosenClinic?.providerId, chosenClinic?.locationId]);
+  const r = useReservation(api, verifiedFor !== null && showReserve);
 
   const book = useCallback(async () => {
-    if (!interactionId || !verifiedFor || !slotId || !chosenClinic) return;
+    if (!interactionId || !verifiedFor || !r.slotId || !r.chosenClinic) return;
     // The branch comes from the CLINIC, not a separate control: the call centre is cross-branch, and two
     // controls that can disagree about where the patient is expected is how someone gets sent to Maadi for a
     // Dokki appointment.
-    const r = await api.book(interactionId, verifiedFor, slotId, chosenClinic.branchId ?? null);
-    setAnnounce(r === "ok" ? t(L.ccBooked) : r === "conflict" ? t(L.ccSlotTaken) : t(L.ccBookFailed));
-    if (r === "ok") { setSlotId(""); void api.slots(chosenClinic.providerId, chosenClinic.locationId).then(setSlots); }
-    // A 409 means the slot went between load and submit — re-read rather than leaving a dead choice selected.
-    if (r === "conflict") void api.slots(chosenClinic.providerId, chosenClinic.locationId).then(setSlots);
-  }, [api, interactionId, verifiedFor, slotId, chosenClinic, t]);
+    const outcome = await api.book(interactionId, verifiedFor, r.slotId, r.chosenClinic.branchId ?? null);
+    setAnnounce(outcome === "ok" ? t(L.ccBooked) : outcome === "conflict" ? t(L.ccSlotTaken) : t(L.ccBookFailed));
+    // A 409 invalidates the list exactly as a success does: one consumed the slot, the other proves someone
+    // else did. Only a transport error leaves the loaded times still true.
+    if (outcome !== "error") r.refresh();
+  }, [api, interactionId, verifiedFor, r, t]);
+
+  const copyNotes = useCallback(async () => {
+    // Guard the METHOD, not just the object: a non-secure context exposes `navigator.clipboard` as undefined
+    // and jsdom exposes neither, so an unguarded call is an unhandled rejection in the agent's face.
+    try {
+      await navigator.clipboard?.writeText?.(notes);
+      setAnnounce(t(L.ccCopied));
+    } catch {
+      setAnnounce(t(L.ccCopyFailed));
+    }
+  }, [notes, t]);
 
   const cancel = useCallback(async (appointmentId: string) => {
     if (!interactionId) return;
@@ -337,10 +303,13 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
   }, [api, interactionId, cancelReason, t]);
 
   const reschedule = useCallback(async (appointmentId: string) => {
-    if (!interactionId || !slotId) { setAnnounce(t(L.ccPickTime)); return; }
-    const r = await api.reschedule(interactionId, appointmentId, slotId);
-    setAnnounce(r === "ok" ? t(L.ccRescheduled) : r === "conflict" ? t(L.ccSlotTaken) : t(L.ccBookFailed));
-  }, [api, interactionId, slotId, t]);
+    // Rescheduling needs a NEW time, which lives in the reservation panel — so opening the panel is part of
+    // the instruction, not a separate thing the agent has to work out.
+    if (!interactionId || !r.slotId) { setShowReserve(true); setAnnounce(t(L.ccPickTime)); return; }
+    const outcome = await api.reschedule(interactionId, appointmentId, r.slotId);
+    setAnnounce(outcome === "ok" ? t(L.ccRescheduled) : outcome === "conflict" ? t(L.ccSlotTaken) : t(L.ccBookFailed));
+    if (outcome !== "error") r.refresh();
+  }, [api, interactionId, r, t]);
 
   const isVerified = !!selected && verifiedFor === selected.beneficiaryId;
 
@@ -413,7 +382,10 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
                   <legend>{t(L.ccChallengeOn)}</legend>
                   {selected.challengeableIdentifierTypes.map((type) => (
                     <label key={type} className="cc-check">
-                      <input type="checkbox" checked={ticks.has(type)} onChange={() => toggle(type)} /> {type}
+                      {/* Localized: the raw enum literal was rendered, so an Arabic-portal agent was asked to
+                          challenge the caller on "DateOfBirth". */}
+                      <input type="checkbox" checked={ticks.has(type)} onChange={() => toggle(type)} />{" "}
+                      {t(identifierTypeLabel(type))}
                     </label>
                   ))}
                 </fieldset>
@@ -475,7 +447,7 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
                                 {t(L.ccCancelReason)}
                                 <select value={cancelReason} onChange={(e) => setCancelReason(e.target.value)}>
                                   <option value="">—</option>
-                                  {CANCEL_REASONS.map((r) => <option key={r} value={r}>{t(CANCEL_REASON_LABELS[r])}</option>)}
+                                  {CANCEL_REASONS.map((code) => <option key={code} value={code}>{t(CANCEL_REASON_LABELS[code])}</option>)}
                                 </select>
                               </label>
                               <Button variant="danger" onClick={() => cancel(a.appointmentId)}>{t(L.ccCancel)}</Button>
@@ -488,93 +460,41 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
                       </li>
                     ))}
                   </ul>
-                  {/* Reservation panel. The clinic list is cross-branch by design — that IS the call centre's
-                      wider scope — and each option carries its branch, so choosing a clinic chooses the branch.
-                      Arrivals are deliberately absent: no check-in, no no-show, no start-visit. The server
-                      enforces that with appointment:reserve rather than appointment:write, so hiding the
-                      buttons is presentation, not the boundary. */}
-                  <div className="cc-reserve">
-                    <p className="cc-muted">{t(L.ccReserveOnly)}</p>
-                    {clinics.length === 0 ? (
-                      <p role="status">{t(L.ccNoClinics)}</p>
-                    ) : (
-                      <>
-                        <label className="cc-field">
-                          <span>{t(L.ccBranch)}</span>
-                          <select value={branchKey} onChange={(e) => pickBranch(e.currentTarget.value)}>
-                            <option value="">{t(L.ccPickBranch)}</option>
-                            {branches.map(([id, name]) => (
-                              <option key={id} value={id}>{name}</option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="cc-field">
-                          <span>{t(L.ccClinic)}</span>
-                          <select
-                            value={clinicKey}
-                            disabled={!branchKey}
-                            onChange={(e) => pickClinic(e.currentTarget.value)}
-                          >
-                            <option value="">{branchKey ? t(L.ccPickClinic) : t(L.ccPickBranchFirst)}</option>
-                            {branchClinics.map((c) => (
-                              <option key={`${c.providerId}|${c.locationId}`} value={`${c.providerId}|${c.locationId}`}>
-                                {c.label} · {c.openSlots}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        {chosenClinic && slots.length === 0 && <p role="status">{t(L.ccNoSlots)}</p>}
-                        {/* GROUPED BY DAY. Availability spans a week, so a flat wall of times repeats "09:40"
-                            once per day with nothing to tell them apart — the agent cannot book a specific day,
-                            which is most of what a caller rings to do. Each day is its own labelled group. */}
-                        {slots.length > 0 &&
-                          Object.entries(
-                            slots.reduce<Record<string, CcSlot[]>>((byDay, sl) => {
-                              const day = fmt.date(sl.start);
-                              (byDay[day] ??= []).push(sl);
-                              return byDay;
-                            }, {}),
-                          ).map(([day, daySlots]) => (
-                            <div key={day} className="cc-day">
-                              <h4 className="cc-day-label">{day}</h4>
-                              <div className="cc-slots" role="radiogroup" aria-label={`${t(L.ccTime)} — ${day}`}>
-                                {daySlots.map((sl) => (
-                                  <button
-                                    key={sl.slotId}
-                                    type="button"
-                                    role="radio"
-                                    aria-checked={slotId === sl.slotId}
-                                    // The accessible name carries the DAY too, so a screen-reader user is not
-                                    // offered eighty identical "09:40" buttons.
-                                    aria-label={`${day} ${fmt.time(sl.start)}`}
-                                    className="book-slot"
-                                    onClick={() => setSlotId(sl.slotId)}
-                                  >
-                                    <span className="tnum">{fmt.time(sl.start)}</span>
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                      </>
-                    )}
-                    {/* Disabled until a real slot is chosen: the id used to be invented client-side, so every
-                        reservation the call centre made referred to a slot that could not exist. */}
-                    <Button variant="primary" onClick={book} disabled={!slotId}>{t(L.ccBook)}</Button>
-                  </div>
+                  {/* Booking is an ACTION ON THE FILE: the agent is already looking at this member's
+                      appointments, so "New appointment" belongs here rather than on another screen. The panel
+                      itself is shared with the standalone Book-appointment journey, so the branch → clinic →
+                      time rules cannot drift between the two. Arrivals are deliberately absent — no check-in,
+                      no no-show, no start-visit — and the server enforces that with appointment:reserve rather
+                      than appointment:write, so the missing buttons are presentation, not the boundary. */}
+                  {showReserve ? (
+                    <ReservationPicker r={r} onBook={book} bookLabel={t(L.ccBook)} />
+                  ) : (
+                    <Button variant="secondary" onClick={() => setShowReserve(true)}>
+                      <Icon name="plus" /> {t(L.ccNewAppointment)}
+                    </Button>
+                  )}
                 </section>
 
                 {summary.openReferrals.length > 0 && (
                   <section aria-label={t(L.ccReferrals)}>
                     <h3>{t(L.ccReferrals)}</h3>
-                    <ul>{summary.openReferrals.map((r) => <li key={r.referralRef}>{r.referralRef} · {r.status}{r.requestedSpecialty ? ` · ${r.requestedSpecialty}` : ""}</li>)}</ul>
+                    <ul>{summary.openReferrals.map((ref) => <li key={ref.referralRef}>{ref.referralRef} · {ref.status}{ref.requestedSpecialty ? ` · ${ref.requestedSpecialty}` : ""}</li>)}</ul>
                   </section>
                 )}
+
+                {/* Call notes ON THE FILE. They were only reachable in the wrap-up card at the very bottom, so
+                    an agent taking a note mid-call had to leave the member they were reading. Same state as
+                    what is sent on close — one note per call, not two that can disagree. */}
+                <section aria-label={t(L.ccCallNotes)}>
+                  <h3>{t(L.ccCallNotes)}</h3>
+                  <CallNotes value={notes} onChange={setNotes} onCopy={copyNotes} />
+                </section>
               </div>
             </Card>
           )}
 
-          {/* 6. WRAP UP */}
+          {/* 6. WRAP UP — the outcome, plus the notes when there is no member file to host them (a call that
+              never resolved to a member still has to be recorded). */}
           <Card>
             <div className="cc-wrapup" role="group" aria-label={t(L.ccWrapUp)}>
               <label>{t(L.ccOutcome)}
@@ -582,7 +502,11 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
                   {OUTCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
               </label>
-              <InputField label={t(L.ccNotes)} value={notes} onChange={(e) => setNotes(e.target.value)} />
+              {/* Rendered here ONLY when the file is not showing it — two controls with the same label is an
+                  ambiguous accessible name, and the duplicate is what makes an agent wonder which one saves. */}
+              {!(isVerified && summary) && (
+                <InputField label={t(L.ccCallNotes)} value={notes} onChange={(e) => setNotes(e.target.value)} />
+              )}
             </div>
           </Card>
         </>
