@@ -92,3 +92,8 @@ public sealed record QueueItemView(
         t.QueueId, t.AppointmentId, position, t.MemberNo, t.DisplayName,
         t.AppointmentType.ToString(), t.State.ToString(), (long)(now - t.EnqueuedAt).TotalSeconds);
 }
+
+/// <summary>A clinic the caller may book into, derived from the SLOTS that exist rather than from the provider
+/// directory (which reception is correctly refused). Ids plus a count — names are a separate label lookup, so
+/// this endpoint cannot become a way to enumerate the network.</summary>
+public sealed record BranchClinicResponse(Guid ProviderId, Guid LocationId, Guid? BranchId, int OpenSlots);

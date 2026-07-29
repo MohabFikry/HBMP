@@ -62,6 +62,8 @@ services:
           - /api/v1/encounters
           - /api/v1/appointments
           - /api/v1/appointment-slots
+          # The clinics a scheduler may book into, derived from slots in their branch (appointment:read).
+          - /api/v1/branch-clinics
           - /api/v1/queue
           - /api/v1/queues
           - /api/v1/treating-relationship
@@ -171,6 +173,9 @@ services:
           - /api/v1/branches
           - /api/v1/practitioners
           - /api/v1/specialties
+          # Label-only clinic lookup for schedulers (appointment:read). Names for ids the caller already
+          # holds — never the provider directory, which stays behind provider:read.
+          - /api/v1/clinic-labels
           # 19.1b — network tiers + effective-dated tier assignment + the service-date resolver.
           - /api/v1/network-tiers
         strip_path: false

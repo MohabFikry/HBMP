@@ -1,6 +1,7 @@
 import {
   zAccessReviewCampaign,
   zAppointmentRow,
+  zBookableClinic,
   zBookableSlot,
   zBookingResult,
   zApprovalItem,
@@ -394,6 +395,41 @@ export class HttpApiClient implements ApiClient {
       rowVersion !== undefined ? { ifMatch: rowVersion } : undefined,
     )) as any;
     return parseOr(zCheckInResult, { id: r?.appointmentId ?? appointmentId, status: apptStatusChip(r?.status ?? "CheckedIn") });
+  }
+
+  /**
+   * The clinics this caller may book into. Two calls on purpose:
+   *
+   * emr answers "which clinics have bookable slots in my branch?" from the slot table under appointment:read —
+   * the scope the desk already holds. provider-service then puts NAMES to those ids via a label-only lookup
+   * that returns nothing but names. Reception never gains provider:read, and neither call can enumerate the
+   * network: the labels require explicit ids, and the ids come only from slots the caller may already see.
+   *
+   * A failed label lookup degrades to the id rather than failing the booking — an unlabelled clinic is worse
+   * than no booking screen, but a broken booking screen is worse than both.
+   */
+  async bookableClinics(branchId?: string) {
+    const qs = branchId ? `?branchId=${encodeURIComponent(branchId)}` : "";
+    const clinics = (await getRaw(`/branch-clinics${qs}`)) as any[];
+    if (!clinics?.length) return [];
+
+    const ids = clinics.map((c) => c.locationId).filter(Boolean);
+    let labels = new Map<string, string>();
+    try {
+      const rows = (await getRaw(`/clinic-labels?locationIds=${encodeURIComponent(ids.join(","))}`)) as any[];
+      labels = new Map((rows ?? []).map((r: any) => [String(r.locationId), `${r.providerName} · ${r.locationName}`]));
+    } catch {
+      // Names are a nicety; the booking itself needs only the ids.
+    }
+
+    return clinics.map((c: any) =>
+      parseOr(zBookableClinic, {
+        providerId: c.providerId,
+        locationId: c.locationId,
+        label: labels.get(String(c.locationId)) ?? String(c.locationId).slice(0, 8),
+        openSlots: typeof c.openSlots === "number" ? c.openSlots : 0,
+      }),
+    );
   }
 
   // Booking (Phase 3.1, US-020). Slot availability is the SERVER's answer — it holds the no-double-book

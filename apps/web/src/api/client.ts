@@ -7,6 +7,7 @@ import type {
   MembershipRow,
   ProgramEnablement,
   AppointmentRow,
+  BookableClinic,
   BookableSlot,
   BookingRequest,
   BookingResult,
@@ -105,6 +106,10 @@ export interface ApiClient {
    * concurrent transition with 412 instead of double-acting. Omit to check in without the guard. */
   checkIn(appointmentId: string, rowVersion?: number): Promise<CheckInResult>;
 
+  /** The clinics the caller may book into, in their active branch (or `branchId` for cross-branch callers).
+   * Derived from bookable SLOTS, so a clinic with no availability never appears — and reception never needs
+   * `provider:read`, which it is correctly refused. */
+  bookableClinics(branchId?: string): Promise<BookableClinic[]>;
   /** Open slots for a clinic session, for the desk's booking screen. The SERVER marks `open` — it holds the
    * no-double-book invariant and knows about slots held by bookings the desk cannot see. */
   openSlots(providerId: string, locationId: string, from?: string, to?: string): Promise<BookableSlot[]>;

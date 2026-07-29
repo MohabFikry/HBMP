@@ -90,6 +90,46 @@ static ProviderView ToView(ProviderEntity p) => new(
 var write = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("provider:write"));
 var read = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("provider:read"));
 
+/*
+ * --- Clinic LABELS for schedulers (appointment:read) ------------------------------------------
+ *
+ * Reception has to name a clinic to book an appointment, and every read above needs provider:read — which
+ * the front desk correctly does not have: the provider DIRECTORY is contracts, onboarding state, capabilities
+ * and the shape of the network, none of which is reception's business. Refusing the whole directory was right;
+ * the consequence was that booking could not label a clinic at all.
+ *
+ * So this returns LABELS AND NOTHING ELSE — a name for an id the caller already holds. No contract, no status,
+ * no onboarding state, no address, no capability. It is gated on appointment:read (the scheduling scope) and
+ * requires explicit ids, so it cannot be used to enumerate the network: a caller can only put a name to
+ * locations it already learned about from the slots it is allowed to see.
+ */
+var labels = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("appointment:read"));
+labels.MapGet("/clinic-labels", async (string? locationIds, ProviderDbContext db, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+{
+    var tenant = me.Principal?.TenantId;
+    var ids = (locationIds ?? "")
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(s => Guid.TryParse(s, out var g) ? g : (Guid?)null)
+        .Where(g => g is not null).Select(g => g!.Value).Distinct().Take(200).ToList();
+    // No ids ⇒ empty, never "everything": this endpoint must not become a directory listing by omission.
+    if (ids.Count == 0) return Results.Ok(Array.Empty<object>());
+
+    var rows = await db.Locations.AsNoTracking()
+        .Where(l => ids.Contains(l.LocationId) && l.TenantId == tenant && !l.IsDeleted)
+        .Join(db.Providers.AsNoTracking().Where(p => p.TenantId == tenant && !p.IsDeleted),
+              l => l.ProviderId, p => p.ProviderId,
+              (l, p) => new { l.LocationId, l.ProviderId, LocationName = l.Name, p.LegalName })
+        .ToListAsync(ct);
+
+    return Results.Ok(rows.Select(r => new
+    {
+        r.LocationId,
+        r.ProviderId,
+        locationName = r.LocationName,
+        providerName = r.LegalName,
+    }));
+});
+
 // --- Create provider (Draft) → ProviderCreated -------------------------------------------------
 write.MapPost("/providers", async (CreateProvider req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
 {

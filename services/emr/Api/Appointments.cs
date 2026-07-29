@@ -34,16 +34,21 @@ public static class AppointmentsModule
         // POST /appointment-slots — materialize bookable slots from a recurring availability rule.
         write.MapPost("/appointment-slots", async (
             CreateSlotsRequest req, EmrDbContext db, IPractitionerBranchDirectory practitioners,
-            IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+            IHbmpPrincipalAccessor me, BranchScopeState branch, TimeProvider clock, CancellationToken ct) =>
         {
             if (req.SlotMinutes <= 0 || req.EndTime <= req.StartTime || req.ToDate < req.FromDate)
                 return Results.Problem(statusCode: 400, title: "Invalid availability window", type: "urn:hbmp:invalid-availability");
+
+            // Resolved the same way a booking is (design 37 §3): a branch-scoped caller materializes slots for
+            // its own branch and may not name another.
+            var (slotBranch, slotDenied) = AppointmentEndpointsShared.ResolveBookingBranch(branch, req.BranchId);
+            if (slotDenied is not null) return slotDenied;
 
             // 18.C2 (W7 / FR-BRN-026) — the FIRST of the two gates, and the one that matters more: refusing
             // here means the bad slots are never materialized, so no patient can be booked into them. Catching
             // it only at booking time would leave a doctor's calendar full of appointments at a branch they
             // do not work at, each needing to be cancelled and the patient rung back.
-            if (req.DoctorId is { } doctorId && req.BranchId is { } branchId)
+            if (req.DoctorId is { } doctorId && slotBranch is { } branchId)
             {
                 var serves = await practitioners.ServesBranchAsync(doctorId, branchId, ct);
                 if (PractitionerBranchRules.Refuse(serves, doctorId, branchId) is { } reason)
@@ -54,6 +59,9 @@ public static class AppointmentsModule
             var availability = new ProviderAvailability
             {
                 AvailabilityId = Guid.NewGuid(), ProviderId = req.ProviderId, LocationId = req.LocationId,
+                // Was validated and then dropped, so the rule — and every slot generated from it — ended up
+                // branchless. SlotGeneration copies this onto each slot.
+                BranchId = slotBranch,
                 DoctorId = req.DoctorId, DayOfWeek = req.DayOfWeek,
                 StartTime = req.StartTime, EndTime = req.EndTime, SlotMinutes = req.SlotMinutes,
             };
@@ -98,6 +106,40 @@ public static class AppointmentsModule
             var view = slots.Select(s => SlotResponse.From(s, open: !taken.Contains(s.SlotId) && s.SlotStart > now));
             if (onlyOpen) view = view.Where(s => s.Open);
             return Results.Ok(view);
+        });
+
+        // GET /branch-clinics — the clinics a caller may actually book into, derived from the slots that exist.
+        //
+        // Reception needs to name a provider + location to book, and /api/v1/providers is correctly 403 for the
+        // front desk: reading the provider DIRECTORY (contracts, onboarding state, the whole network) is not
+        // reception's business. What the desk legitimately needs is far narrower — "which clinics in my branch
+        // have times I can book?" — and that is answerable entirely from the slot table under the
+        // appointment:read scope the desk already holds. Deriving it from bookable slots rather than from a
+        // provider list also means a clinic with no availability never appears, so the desk cannot pick a
+        // clinic and then find it empty.
+        read.MapGet("/branch-clinics", async (
+            Guid? branchId, BranchScopeState branch, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
+        {
+            var now = clock.GetUtcNow();
+            var q = db.AppointmentSlots.AsNoTracking().Where(s => s.SlotStart > now);
+            // A branch-scoped caller sees only its active branch; an unrestricted caller (call centre) may
+            // narrow to one explicitly, and otherwise sees every branch it can reach.
+            if (branch.Context.ActiveBranchId is { } active) q = q.Where(s => s.BranchId == active);
+            else if (branchId is { } bid) q = q.Where(s => s.BranchId == bid);
+
+            var taken = await ActiveHeldSlotIds(db, ct);
+            var rows = await q
+                .Select(s => new { s.SlotId, s.ProviderId, s.LocationId, s.BranchId })
+                .Take(5000).ToListAsync(ct);
+
+            var clinics = rows
+                .Where(r => !taken.Contains(r.SlotId))
+                .GroupBy(r => new { r.ProviderId, r.LocationId, r.BranchId })
+                .Select(g => new BranchClinicResponse(
+                    g.Key.ProviderId, g.Key.LocationId, g.Key.BranchId, g.Count()))
+                .OrderByDescending(c => c.OpenSlots)
+                .ToList();
+            return Results.Ok(clinics);
         });
 
         // POST /appointments — concurrency-safe booking (US-020).

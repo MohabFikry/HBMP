@@ -32,6 +32,10 @@ public static class SlotGeneration
                     SlotId = Guid.NewGuid(),
                     ProviderId = availability.ProviderId,
                     LocationId = availability.LocationId,
+                    // The branch has to travel with the slot: it is what lets a branch-scoped desk find the
+                    // clinics it may book into. Copying provider and location but not branch left every
+                    // materialized slot branchless and therefore unreachable by branch.
+                    BranchId = availability.BranchId,
                     DoctorId = availability.DoctorId,
                     SlotStart = start,
                     SlotEnd = start + step,

@@ -30,6 +30,7 @@ import {
   zSodConflict,
   zAccessReviewCampaign,
   zAppointmentRow,
+  zBookableClinic,
   zBookableSlot,
   zBookingResult,
   zBreakGlassGrant,
@@ -215,6 +216,16 @@ export class DevApiClient implements ApiClient {
   }
 
   // ---- Booking -----------------------------------------------------------
+  bookableClinics(_branchId?: string) {
+    void _branchId;
+    return this.gate(
+      () =>
+        ok(z.array(zBookableClinic), [
+          { providerId: "prov-1", locationId: "loc-1", label: "Mersal Dokki · Dokki Clinic", openSlots: 2 },
+        ]),
+      [],
+    );
+  }
   // One slot is deliberately CLOSED: the desk must render availability from the server's answer, and a
   // fixture where everything is bookable would never exercise that.
   openSlots(_providerId: string, _locationId: string, _from?: string, _to?: string) {

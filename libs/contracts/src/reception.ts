@@ -74,3 +74,17 @@ export const zBookingResult = z.object({
   scheduledStart: zInstant,
 });
 export type BookingResult = z.infer<typeof zBookingResult>;
+
+/**
+ * A clinic the desk may book into. Derived server-side from the slots that exist in the caller's branch, not
+ * from the provider directory — the front desk is correctly refused `provider:read`, and a clinic with no
+ * availability should never be offerable in the first place.
+ */
+export const zBookableClinic = z.object({
+  providerId: zId,
+  locationId: zId,
+  /** Display label, resolved from the label lookup; falls back to the ids when unavailable. */
+  label: z.string().min(1),
+  openSlots: z.number().int().nonnegative(),
+});
+export type BookableClinic = z.infer<typeof zBookableClinic>;

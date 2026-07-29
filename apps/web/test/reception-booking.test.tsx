@@ -20,15 +20,13 @@ class BookingApi extends DevApiClient {
       { id: "ben-7", name: { en: "Omar Khalil", ar: "عمر خليل" }, cardNumber: "MRS-M-014882" },
     ]);
   }
-  override providerList() {
+  clinicsImpl: (() => Promise<any>) | null = null;
+  override bookableClinics() {
+    if (this.clinicsImpl) return this.clinicsImpl();
     return Promise.resolve([
-      { id: "prov-1", code: "P-1", legalName: "Mersal Dokki", providerType: "Clinic", onboardingState: "Active", status: { kind: "ok" as const, label: { en: "Active", ar: "نشط" } } },
-      { id: "prov-2", code: "P-2", legalName: "Mersal Maadi", providerType: "Clinic", onboardingState: "Active", status: { kind: "ok" as const, label: { en: "Active", ar: "نشط" } } },
+      { providerId: "prov-1", locationId: "loc-1", label: "Mersal Dokki · Dokki Clinic", openSlots: 2 },
+      { providerId: "prov-2", locationId: "loc-2", label: "Mersal Maadi · Maadi Clinic", openSlots: 5 },
     ]);
-  }
-  override providerLocations(providerId: string) {
-    void providerId;
-    return Promise.resolve([{ id: "loc-1", name: "Dokki Clinic", governorate: "Giza", isPrimary: true }]);
   }
   override openSlots() {
     this.slotCalls++;
@@ -54,10 +52,8 @@ async function fillForm(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: /^search$/i }));
   await user.click(await screen.findByRole("button", { name: /^choose$/i }));
 
-  await user.click(screen.getByRole("combobox", { name: /provider/i }));
+  await user.click(screen.getByRole("combobox", { name: /clinic/i }));
   await user.click(await screen.findByRole("option", { name: /Mersal Dokki/ }));
-  await user.click(screen.getByRole("combobox", { name: /^location$/i }));
-  await user.click(await screen.findByRole("option", { name: /Dokki Clinic/ }));
 
   const times = await screen.findAllByRole("radio");
   await user.click(times[0]);
@@ -93,10 +89,8 @@ describe("Reception booking (US-020)", () => {
     await user.type(screen.getByLabelText(/search by name/i), "Omar");
     await user.click(screen.getByRole("button", { name: /^search$/i }));
     await user.click(await screen.findByRole("button", { name: /^choose$/i }));
-    await user.click(screen.getByRole("combobox", { name: /provider/i }));
+    await user.click(screen.getByRole("combobox", { name: /clinic/i }));
     await user.click(await screen.findByRole("option", { name: /Mersal Dokki/ }));
-    await user.click(screen.getByRole("combobox", { name: /^location$/i }));
-    await user.click(await screen.findByRole("option", { name: /Dokki Clinic/ }));
 
     const times = await screen.findAllByRole("radio");
     expect(times).toHaveLength(2);
@@ -133,26 +127,34 @@ describe("Reception booking (US-020)", () => {
     await waitFor(() => expect(api.slotCalls).toBeGreaterThan(before));
   });
 
-  it("changing the provider clears the location and the slots loaded for the old clinic", async () => {
+  it("a clinic is one value, so switching it cannot leave the old clinic's times selected", async () => {
     const user = userEvent.setup();
     const api = new BookingApi({ latencyMs: 0 });
     renderNode(<ReceptionBooking />, api as unknown as ApiClient);
 
-    await user.click(screen.getByRole("combobox", { name: /provider/i }));
+    await user.click(screen.getByRole("combobox", { name: /clinic/i }));
     await user.click(await screen.findByRole("option", { name: /Mersal Dokki/ }));
-    await user.click(screen.getByRole("combobox", { name: /^location$/i }));
-    await user.click(await screen.findByRole("option", { name: /Dokki Clinic/ }));
-    expect(await screen.findAllByRole("radio")).toHaveLength(2);
+    const first = await screen.findAllByRole("radio");
+    await user.click(first[0]);
+    expect(first[0]).toHaveAttribute("aria-checked", "true");
 
-    // Switch to a DIFFERENT provider: the times belonged to the old provider/location pair, and leaving
-    // them would let the desk book a time at the wrong clinic.
-    await user.click(screen.getByRole("combobox", { name: /provider/i }));
+    // Provider+location are chosen as ONE value, so there is no transitional render with a new provider and
+    // a stale location — the pair can never be half-changed.
+    await user.click(screen.getByRole("combobox", { name: /clinic/i }));
     await user.click(await screen.findByRole("option", { name: /Mersal Maadi/ }));
-    // The times must not come back: a slot response still in flight for the OLD clinic would otherwise
-    // resolve after the clear and repopulate the list.
-    await waitFor(() => expect(screen.queryAllByRole("radio")).toHaveLength(0));
-    // The location is cleared too — it belonged to the previous provider.
-    expect(screen.getByRole("combobox", { name: /^location$/i })).toHaveTextContent(/choose a location/i);
+    await waitFor(() => {
+      const after = screen.queryAllByRole("radio");
+      expect(after.every((r) => r.getAttribute("aria-checked") === "false")).toBe(true);
+    });
+  });
+
+  it("says why it cannot book when no clinic in the branch has bookable times", async () => {
+    const api = new BookingApi({ latencyMs: 0 });
+    api.clinicsImpl = () => Promise.resolve([]);
+    renderNode(<ReceptionBooking />, api as unknown as ApiClient);
+
+    // An empty dropdown reads as "still loading" and the operator keeps clicking it.
+    expect(await screen.findByText(/no clinic in your branch has bookable times/i)).toBeInTheDocument();
   });
 
   it("has no serious/critical a11y violations", async () => {

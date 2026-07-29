@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, InputField, Select, StatusChip, InlineAlert } from "@mersal/design-system";
-import type { SelectOption } from "@mersal/design-system";
-import type { BookableSlot, EligibilityHit, Localized } from "@mersal/contracts";
+import type { BookableClinic, BookableSlot, EligibilityHit, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useWrite } from "../api/useWrite";
 import { useFormat } from "../i18n/useFormat";
@@ -24,15 +23,13 @@ const S = {
   chosen: { en: "Selected", ar: "المحدد" },
   change: { en: "Change", ar: "تغيير" },
   choose: { en: "Choose", ar: "اختيار" },
-  provider: { en: "Provider", ar: "مقدم الخدمة" },
-  location: { en: "Location", ar: "الموقع" },
+  clinic: { en: "Clinic", ar: "العيادة" },
   apptType: { en: "Appointment type", ar: "نوع الموعد" },
-  pickProvider: { en: "Choose a provider", ar: "اختر مقدم الخدمة" },
-  pickLocation: { en: "Choose a location", ar: "اختر الموقع" },
+  pickClinic: { en: "Choose a clinic", ar: "اختر العيادة" },
   slotsLoading: { en: "Loading available times…", ar: "جاري تحميل الأوقات المتاحة…" },
   noClinics: {
-    en: "No clinics are available to you for booking. Your role cannot read the provider directory — ask an administrator to expose your branch's clinics.",
-    ar: "لا توجد عيادات متاحة لك للحجز. لا يستطيع دورك قراءة دليل مقدمي الخدمة — اطلب من المسؤول إتاحة عيادات فرعك.",
+    en: "No clinic in your branch has bookable times. Ask the clinic to publish availability, or switch branches in the header.",
+    ar: "لا توجد عيادة في فرعك بأوقات متاحة للحجز. اطلب من العيادة نشر أوقاتها، أو بدّل الفرع من الأعلى.",
   },
   noSlots: {
     en: "No open times for this clinic. Try another location or a later date.",
@@ -82,11 +79,9 @@ export function ReceptionBooking() {
   const [patient, setPatient] = useState<EligibilityHit | null>(null);
 
   // Step 2 — clinic
-  const [providers, setProviders] = useState<SelectOption[]>([]);
-  const [providersFailed, setProvidersFailed] = useState(false);
-  const [providerId, setProviderId] = useState<string | null>(null);
-  const [locations, setLocations] = useState<SelectOption[]>([]);
-  const [locationId, setLocationId] = useState<string | null>(null);
+  const [clinics, setClinics] = useState<BookableClinic[]>([]);
+  const [clinicsEmpty, setClinicsEmpty] = useState(false);
+  const [clinicKey, setClinicKey] = useState<string | null>(null);
   const [apptType, setApptType] = useState<string>("Scheduled");
 
   // Step 3 — time
@@ -97,22 +92,22 @@ export function ReceptionBooking() {
   const [confirmed, setConfirmed] = useState<{ at: string } | null>(null);
   const [attempted, setAttempted] = useState(false);
 
+  // One question, one call: "which clinics can I book into?" — answered from the slots that exist in the
+  // caller's branch, so a clinic with nothing bookable is never offered.
   useEffect(() => {
     let live = true;
     void api
-      .providerList()
-      .then((ps) => {
+      .bookableClinics()
+      .then((cs) => {
         if (!live) return;
-        setProviders(ps.map((p) => ({ value: p.id, label: p.legalName, hint: p.code })));
+        setClinics(cs);
         // An EMPTY list is as unbookable as a failed one, and an empty dropdown reads as "still loading".
-        setProvidersFailed(ps.length === 0);
+        setClinicsEmpty(cs.length === 0);
       })
       .catch(() => {
         if (!live) return;
-        setProviders([]);
-        // Reception is correctly refused the provider directory (403 provider:read). Saying so beats an empty
-        // dropdown the operator will keep clicking.
-        setProvidersFailed(true);
+        setClinics([]);
+        setClinicsEmpty(true);
       });
     return () => {
       live = false;
@@ -120,40 +115,26 @@ export function ReceptionBooking() {
   }, [api]);
 
   /**
-   * Locations belong to a provider, so a new provider invalidates the location AND the slots loaded for the
-   * old pair — keeping them would let the desk book a time at the clinic they just navigated away from.
-   *
-   * The clearing happens HERE, in the same batch as the provider change, and deliberately not in an effect:
-   * an effect that cleared the location would run on a render where providerId was already the NEW one while
-   * locationId was still the OLD one, and the slot-loading effect — running in the same pass — would fetch
-   * for that mismatched pair. The times came back for a clinic nobody had selected.
+   * A clinic is a provider+location PAIR, so it is chosen as one thing. Splitting it into two dependent
+   * pickers meant the transitional render — new provider, stale location — could load slots for a pair nobody
+   * had selected, and required a generation guard to undo. One value cannot be half-changed.
    */
-  function pickProvider(id: string) {
-    setProviderId(id);
-    setLocationId(null);
-    setLocations([]);
+  const chosen = clinics.find((c) => `${c.providerId}|${c.locationId}` === clinicKey) ?? null;
+  const providerId = chosen?.providerId ?? null;
+  const locationId = chosen?.locationId ?? null;
+
+  // Every slot request carries a generation: the response for the PREVIOUS clinic can still be in flight when
+  // the desk switches, and letting it land would repopulate the times with another clinic's availability.
+  const slotGen = useRef(0);
+
+  function pickClinic(key: string) {
+    setClinicKey(key);
     slotGen.current++;   // abandon any slot request still in flight for the previous clinic
     setSlots(null);
     setSlotId(null);
     setSlotsBusy(false);
   }
 
-  useEffect(() => {
-    if (!providerId) return;
-    let live = true;
-    void api
-      .providerLocations(providerId)
-      .then((ls) => live && setLocations(ls.map((l) => ({ value: l.id, label: l.name, hint: l.governorate }))))
-      .catch(() => live && setLocations([]));
-    return () => {
-      live = false;
-    };
-  }, [api, providerId]);
-
-  // Every slot request carries a generation. Without it the response for the PREVIOUS clinic resolves after
-  // the switch has already cleared the list and repopulates it — the desk then picks a time that belongs to
-  // the clinic they navigated away from, which is exactly the wrong-clinic booking the clearing prevents.
-  const slotGen = useRef(0);
   const loadSlots = useCallback(() => {
     if (!providerId || !locationId) return;
     const gen = ++slotGen.current;
@@ -186,7 +167,7 @@ export function ReceptionBooking() {
     }
   }
 
-  const missing = !patient ? S.needPatient : !providerId || !locationId ? S.needClinic : !slotId ? S.needSlot : null;
+  const missing = !patient ? S.needPatient : !chosen ? S.needClinic : !slotId ? S.needSlot : null;
 
   async function doBook() {
     setAttempted(true);
@@ -289,27 +270,21 @@ export function ReceptionBooking() {
 
         {/* ── 2. Clinic ──────────────────────────────────────────────── */}
         <h3 className="section-h">{t(S.step2)}</h3>
-        {providersFailed && <InlineAlert tone="warn">{t(S.noClinics)}</InlineAlert>}
+        {clinicsEmpty && <InlineAlert tone="warn">{t(S.noClinics)}</InlineAlert>}
         <div className="book-grid">
           <label className="book-field">
-            <span className="mrs-label">{t(S.provider)}</span>
+            <span className="mrs-label">{t(S.clinic)}</span>
             <Select
-              aria-label={t(S.provider)}
-              options={providers}
-              value={providerId}
-              placeholder={t(S.pickProvider)}
-              onChange={pickProvider}
-            />
-          </label>
-          <label className="book-field">
-            <span className="mrs-label">{t(S.location)}</span>
-            <Select
-              aria-label={t(S.location)}
-              options={locations}
-              value={locationId}
-              placeholder={t(S.pickLocation)}
-              disabled={!providerId || locations.length === 0}
-              onChange={setLocationId}
+              aria-label={t(S.clinic)}
+              options={clinics.map((c) => ({
+                value: `${c.providerId}|${c.locationId}`,
+                label: c.label,
+                hint: String(c.openSlots),
+              }))}
+              value={clinicKey}
+              placeholder={t(S.pickClinic)}
+              disabled={clinics.length === 0}
+              onChange={pickClinic}
             />
           </label>
           <label className="book-field">
