@@ -24,7 +24,9 @@ public class AdminIntegrationTests
     {
         var outbox = new InMemoryAuditOutbox();
         var audit = new AuditClient(outbox, new AuditClientContext("admin-test"), clock);
-        return (new RoleAdminService(db, audit, clock), new AccessReviewService(db, audit, clock), outbox);
+        // 21.4 — the caps are counted live inside GrantAsync's transaction; with no admin.tenant_limit row for
+        // these tenants that is UNLIMITED, so these tests behave exactly as before.
+        return (new RoleAdminService(db, audit, clock, new TenantProgramStore(db)), new AccessReviewService(db, audit, clock), outbox);
     }
 
     private static readonly ActorContext Admin = new("admin-1", "org_admin", null, Mfa: true);

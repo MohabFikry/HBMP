@@ -245,7 +245,7 @@ the identity, so one person can hold genuinely different authority in two organi
   Cross-tenant roster reads are **403 + audited, never silently narrowed** — a page of your own tenant under
   another tenant's heading is worse than an error, because the reviewer believes they reviewed the right one.
 
-### Known gap carried out of Phase 21 — CLOSED 2026-07-29 except the caps
+### Known gap carried out of Phase 21 — CLOSED 2026-07-29 except two of the four caps
 
 **What was wrong.** `ProgramEnablement` and `TenantProgramStore` were complete and well tested — the advisory
 lock, the live counting, the two distinct problem types — but nothing called them, so the third orthogonal
@@ -299,9 +299,30 @@ come, when what it needs is to ask someone for access or for the module to be sw
 catches it and returns **Restricted / `owner-declined`**, keeping design 39 §6's three states distinct. The
 exception moved to Domain to make that possible — Domain must not reference Infrastructure.
 
-**Still open.** The caps (`TenantProgramStore.CheckLimitAsync`) still have no production caller: no mutation
-counts live rows against `active_users`/`active_provider_users` before inserting, so `program-limit-reached` is
-a problem type no server emits yet. Not claimed as done.
+**The caps — two of four wired.** `RoleAdminService.GrantAsync` now calls `CheckLimitAsync` for
+`active_users` and `active_provider_users`, inside an explicit transaction that also does the insert: the
+advisory lock is transaction-scoped, so outside one it would be released immediately and the serialization it
+exists for would silently not happen. A breached cap rolls back and answers with its own problem carrying
+`limit`/`max`/`current` — folded into the SoD conflict view it would arrive as "denied" with an empty violation
+list, telling an administrator nothing about whether to free a slot or ask Mersal to raise the cap.
+
+The semantics needed care, and both errors would have been invisible. A cap counts USERS, not bindings, so a
+second role for someone who already has one consumes no slot — enforcing per-binding would freeze role
+administration for every tenant sitting at its limit and read as a bug in role admin. And the two caps ask
+DIFFERENT questions of the same grant: a user active under a tenant-scoped role still takes a provider slot on
+their first provider-scoped binding, so sharing one "is this user new" test between them would let the provider
+cap be bypassed by granting a tenant-scoped role first. Five tests pin this, including that a revoke frees the
+slot immediately (true by construction — live rows, not a counter that drifts).
+
+**Still open: `monthly_extracts` and `storage_mb`, blocked on a design decision, not on effort.**
+`TenantProgramStore` takes an `AdminDbContext` — it reads `admin.tenant_limit` and takes its lock on admin's
+connection — so it is structurally admin-only, and the rows these two caps count live in reporting-service and
+document-service. Enforcing them needs the cap VALUE propagated to the owning service (the features-style
+event + projection; projecting a limit is fine, and does not contradict 0008's "caps are never cached", which
+is about the COUNT). Two further specifics: reporting has **no extract log table at all**, so `monthly_extracts`
+currently has nothing to count; and `storage_mb` does not fit `WouldBreach(max, liveCount)`, which hardcodes
+`liveCount + 1 > max` — adding a 5 MB file is not +1 MB, so that primitive needs an increment parameter.
+document-service does already record `size_bytes`, so it is the closer of the two.
 
 Full backend suite **1953 passing / 0 failing / 1 skipped**, run against a Postgres with all 128 migrations
 applied so the env-gated integration and RLS suites actually execute — DB-less, 356 of them skip and the

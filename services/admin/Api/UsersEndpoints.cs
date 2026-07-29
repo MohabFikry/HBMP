@@ -38,6 +38,11 @@ public static class UsersEndpoints
             if (result.Ok)
                 return Results.Created($"/api/v1/admin/role-bindings/{result.Binding!.BindingId}", BindingView.Of(result.Binding));
 
+            // A breached cap answers with its OWN problem, carrying the limit and the live count. Folded into
+            // the SoD conflict view it would arrive as "denied" with an empty violation list, which tells an
+            // administrator nothing about whether to free a slot or ask Mersal to raise the cap.
+            if (result.Problem is not null) return result.Problem;
+
             var conflicts = result.Violations
                 .Select(v => new SodViolationView(v.HeldToken, v.ConflictingToken, v.Reason)).ToList();
             return Results.Conflict(new GrantDeniedView(result.ReasonCode ?? "denied", conflicts));
