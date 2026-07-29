@@ -1,7 +1,7 @@
 using FluentAssertions;
 using Mersal.Auth.Authorization;
 
-namespace Mersal.Emr.Tests;
+namespace Mersal.Auth.Tests;
 
 /// <summary>
 /// Reserving an appointment and admitting a patient are different powers, and this is where they were the same
@@ -10,7 +10,7 @@ namespace Mersal.Emr.Tests;
 /// and being unable to book at all. It had the latter: every reservation ended in a bare 403 from emr AFTER
 /// passing every call-centre gate, which is why the failure looked like a call-centre bug and was not one.
 /// </summary>
-public class ReservationScopeTests
+public class ScopeAlternativesTests
 {
     [Fact]
     public void AnyScope_builds_a_policy_naming_every_alternative()
