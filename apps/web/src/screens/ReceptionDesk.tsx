@@ -24,6 +24,12 @@ const S = {
   checkIn: { en: "Check in", ar: "تسجيل الوصول" },
   checkedIn: { en: "Checked in", ar: "تم الوصول" },
   openFile: { en: "Patient file", ar: "ملف المريض" },
+  noShow: { en: "No-show", ar: "لم يحضر" },
+  noShowHint: {
+    en: "Available once the appointment window has passed.",
+    ar: "يتاح بعد انقضاء وقت الموعد.",
+  },
+  actions: { en: "Actions", ar: "الإجراءات" },
   stale: {
     en: "This appointment changed since the board loaded — refreshing.",
     ar: "تغيّر هذا الموعد منذ تحميل اللوحة — يجري التحديث.",
@@ -87,24 +93,98 @@ export function ReceptionVisits() {
   );
 }
 
-/** Full day board — every appointment scheduled for today, any status. */
+/**
+ * The day board — every appointment today in any status, and the two decisions the desk makes about each one:
+ * the patient arrived (check-in) or they did not (no-show).
+ *
+ * Both actions come from SERVER flags, never from re-reading the row's status or the clock here.
+ * `noShowEligible` in particular is a grace period after the scheduled end that only emr knows: offering the
+ * button early produces a 409 the receptionist cannot explain, offering it late leaves someone who never
+ * arrived sitting Booked all day, and a clinic PC with a drifting clock would be wrong either way.
+ */
 export function ReceptionAppointments() {
   const api = useApi();
   const t = useLoc();
   const fmt = useFormat();   // 18.D2 (U7) — Cairo appointment times, app locale
   const navigate = useNavigate();
   const state = useAsync<AppointmentRow[]>(() => api.appointments("all"), []);
-  const cols = [...boardColumns(t, fmt), patientFileColumn(t, navigate)];
+  const desk = useDeskTransitions(state.reload);
+
+  const cols: Column<AppointmentRow>[] = [
+    ...boardColumns(t, fmt),
+    patientFileColumn(t, navigate),
+    {
+      key: "actions",
+      header: t(S.actions),
+      cell: (r) => (
+        <span className="row-actions">
+          {r.checkInEligible && (
+            <Button variant="primary" size="sm" loading={desk.busy === `in:${r.id}`}
+                    onClick={() => void desk.run(`in:${r.id}`, () => api.checkIn(r.id, r.rowVersion))}>
+              {t(S.checkIn)}
+            </Button>
+          )}
+          {/* Shown only while the server says it is allowed — the desk is never offered a refusal. */}
+          {r.noShowEligible && (
+            <Button variant="secondary" size="sm" loading={desk.busy === `ns:${r.id}`}
+                    onClick={() => void desk.run(`ns:${r.id}`, () => api.noShow(r.id, r.rowVersion))}>
+              {t(S.noShow)}
+            </Button>
+          )}
+          {/* A Booked row whose window has not passed: say WHY there is no no-show button rather than
+              leaving an empty cell the receptionist reads as a broken screen. */}
+          {r.checkInEligible && !r.noShowEligible && <span className="muted">{t(S.noShowHint)}</span>}
+        </span>
+      ),
+    },
+  ];
+
   return (
     <>
       <PageHeader title={t(S.apptTitle)} />
       <Card as="section" style={{ padding: "var(--sp3)" }}>
         <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.apptEmpty}>
-          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.apptTitle)} />}
+          {(rows) => (
+            <div aria-live="polite">
+              {desk.stale && <StatusChip kind="warn" label={t(S.stale)} />}
+              <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.apptTitle)} />
+            </div>
+          )}
         </AsyncSection>
       </Card>
     </>
   );
+}
+
+/**
+ * Shared mechanics for a desk transition: one in flight at a time, a 412 re-reads the board instead of
+ * double-acting, and the row's own status — reloaded from the server — is the only thing that paints the
+ * result. 18.D1 (E3): a chip driven by "we sent the request" is a chip that lies after a partial failure.
+ */
+function useDeskTransitions(reload: () => void) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [stale, setStale] = useState(false);
+
+  async function run(key: string, action: () => Promise<unknown>) {
+    setBusy(key);
+    setStale(false);
+    try {
+      await action();
+      reload();
+    } catch (e) {
+      // 412 = the row moved under us (checked in at another desk, cancelled, already no-showed).
+      if (e instanceof ApiError && e.status === 412) {
+        setStale(true);
+        reload();
+      } else {
+        throw e;
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return { busy, stale, run };
 }
 
 /** Arrivals desk — Booked appointments with a check-in action (Booked → CheckedIn, enqueues a walk-in ticket). */

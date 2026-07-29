@@ -257,9 +257,12 @@ public static class AppointmentsModule
         read.MapGet("/appointments", async (
             DateTimeOffset? date, string? status, Guid? branchId, BranchScopeState branch, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
-            var day = (date ?? clock.GetUtcNow()).Date;
-            var lo = new DateTimeOffset(day, TimeSpan.Zero);
-            var hi = lo.AddDays(1);
+            // The Cairo civil day, not the UTC one — the board renders Cairo times, so it must select by them
+            // (AppointmentDay explains the two-hour mismatch this replaces). Normalized to UTC for the query:
+            // it is the same instant either way, but Npgsql rejects a non-zero offset on timestamptz.
+            var window = AppointmentDay.CairoWindow(date ?? clock.GetUtcNow(), CairoOffset);
+            var lo = window.Start.ToUniversalTime();
+            var hi = window.End.ToUniversalTime();
             var q = db.Appointments.AsNoTracking().Where(a => a.ScheduledStart >= lo && a.ScheduledStart < hi);
             if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<AppointmentStatus>(status, ignoreCase: true, out var st))
                 q = q.Where(a => a.Status == st);
@@ -267,10 +270,12 @@ public static class AppointmentsModule
             if (branch.Context.ActiveBranchId is { } active) q = q.Where(a => a.BranchId == active);
             else if (branchId is { } bid) q = q.Where(a => a.BranchId == bid);
             var rows = await q.OrderBy(a => a.ScheduledStart).Take(200).ToListAsync(ct);
-            return Results.Ok(rows.Select(AppointmentResponse.From));
+            // The board's no-show button comes from the server's clock, not the browser's.
+            var asOf = clock.GetUtcNow();
+            return Results.Ok(rows.Select(a => AppointmentResponse.From(a, asOf)));
         });
 
-        read.MapGet("/appointments/{id:guid}", async (Guid id, HttpResponse resp, BranchScopeState branch, EmrDbContext db, CancellationToken ct) =>
+        read.MapGet("/appointments/{id:guid}", async (Guid id, HttpResponse resp, BranchScopeState branch, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var a = await db.Appointments.AsNoTracking().FirstOrDefaultAsync(x => x.AppointmentId == id, ct);
             if (a is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
@@ -278,7 +283,7 @@ public static class AppointmentsModule
             if (branch.Context.ActiveBranchId is { } active && a.BranchId is not null && a.BranchId != active)
                 return Results.Problem(statusCode: 403, title: "branch-scope-denied", detail: "this appointment is not in your active branch");
             resp.Headers.ETag = $"\"{a.RowVersion}\"";   // clients echo this back as If-Match on transitions
-            return Results.Ok(AppointmentResponse.From(a));
+            return Results.Ok(AppointmentResponse.From(a, clock.GetUtcNow()));
         });
 
         // POST /appointments/{id}/reschedule — atomic release-old + book-new (US-021).
@@ -378,7 +383,9 @@ public static class AppointmentsModule
     }
 
     private const int RepeatNoShowThreshold = 3;
-    private static readonly TimeSpan NoShowGrace = TimeSpan.FromMinutes(15);
+    // The grace period is a DOMAIN rule (AppointmentWorkflow), not an endpoint detail: the board renders a
+    // no-show button from the same constant the transition enforces.
+    private static TimeSpan NoShowGrace => AppointmentWorkflow.NoShowGrace;
 
     private static uint? IfMatch(HttpRequest http) => AppointmentEndpointsShared.IfMatch(http);
 

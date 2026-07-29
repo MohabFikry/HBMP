@@ -23,6 +23,13 @@ export const zAppointmentRow = z.object({
    * to tell apart.
    */
   checkedIn: z.boolean(),
+  /**
+   * The SERVER's answer to "may this be marked a no-show yet?" — a Booked appointment whose scheduled end has
+   * passed by the grace period. Never re-derived from the browser clock: too early is a 409 the receptionist
+   * cannot explain, too late leaves a patient who never came sitting Booked all day, and a clinic PC with a
+   * wrong clock would be wrong in whichever direction it drifted.
+   */
+  noShowEligible: z.boolean(),
   /** The emr row's `xmin` optimistic-concurrency token (opt-in): echoed as `If-Match` on check-in so a
    * stale board loses to a concurrent transition with 412 instead of silently double-acting. Optional —
    * absent for a fixture/older service, in which case check-in proceeds without the guard. */
@@ -30,7 +37,7 @@ export const zAppointmentRow = z.object({
 });
 export type AppointmentRow = z.infer<typeof zAppointmentRow>;
 
-/** Result of checking a beneficiary in at the desk (Booked → CheckedIn, enqueues a walk-in ticket). */
+/** Result of a desk transition (check-in, no-show) — the row's new server-confirmed status. */
 export const zCheckInResult = z.object({
   id: zId,
   status: zStatus,

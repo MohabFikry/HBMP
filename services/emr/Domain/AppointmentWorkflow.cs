@@ -26,6 +26,11 @@ public static class AppointmentWorkflow
         _ => false,
     };
 
+    /// <summary>How long after the scheduled END a Booked appointment must sit before the desk may mark it a
+    /// no-show. Lives here, with the rule that uses it, so the flag the UI renders and the check the endpoint
+    /// enforces cannot drift apart — a button offered a minute early is a 409 the receptionist cannot explain.</summary>
+    public static readonly TimeSpan NoShowGrace = TimeSpan.FromMinutes(15);
+
     /// <summary>No-show guard (US-022): only a still-Booked appointment whose scheduled window has passed
     /// (beyond the grace period) and that never checked in may be marked NoShow.</summary>
     public static bool CanNoShow(Appointment appt, DateTimeOffset now, TimeSpan grace)

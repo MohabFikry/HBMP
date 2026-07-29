@@ -48,12 +48,19 @@ public sealed record BookAppointmentRequest(
 public sealed record AppointmentResponse(
     Guid AppointmentId, Guid BeneficiaryId, Guid ProviderId, Guid LocationId, Guid? SlotId,
     string AppointmentType, string Status, DateTimeOffset ScheduledStart, DateTimeOffset ScheduledEnd,
-    string? ReferralRef, Guid? OriginEncounterId, uint RowVersion, Guid? BranchId)
+    string? ReferralRef, Guid? OriginEncounterId, uint RowVersion, Guid? BranchId,
+    bool NoShowEligible)
 {
-    public static AppointmentResponse From(Appointment a) => new(
+    /// <summary>Project an appointment. <paramref name="now"/> is required to answer
+    /// <see cref="NoShowEligible"/>: the 15-minute grace period after the scheduled end is a SERVER rule, and a
+    /// client that re-derived it from the clock would offer the action early (a 409 the receptionist cannot
+    /// explain) or late (a patient who never arrived sitting Booked all day). Omit it only where the flag is
+    /// irrelevant — it then reports false, which offers nothing rather than offering something wrong.</summary>
+    public static AppointmentResponse From(Appointment a, DateTimeOffset? now = null) => new(
         a.AppointmentId, a.BeneficiaryId, a.ProviderId, a.LocationId, a.SlotId,
         a.AppointmentType.ToString(), a.Status.ToString(), a.ScheduledStart, a.ScheduledEnd,
-        a.ReferralRef, a.OriginEncounterId, a.RowVersion, a.BranchId);
+        a.ReferralRef, a.OriginEncounterId, a.RowVersion, a.BranchId,
+        now is { } t && AppointmentWorkflow.CanNoShow(a, t, AppointmentWorkflow.NoShowGrace));
 }
 
 public sealed record SlotResponse(

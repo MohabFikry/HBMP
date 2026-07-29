@@ -105,6 +105,9 @@ export interface ApiClient {
   /** `rowVersion` (opt-in): the value read on the board, echoed as `If-Match` so a stale check-in loses to a
    * concurrent transition with 412 instead of double-acting. Omit to check in without the guard. */
   checkIn(appointmentId: string, rowVersion?: number): Promise<CheckInResult>;
+  /** Mark a booked appointment as a no-show (US-022). Guarded server-side by the grace period, so call this
+   * only for a row whose `noShowEligible` is true; `rowVersion` is echoed as `If-Match`. */
+  noShow(appointmentId: string, rowVersion?: number): Promise<CheckInResult>;
 
   /** The clinics the caller may book into, in their active branch (or `branchId` for cross-branch callers).
    * Derived from bookable SLOTS, so a clinic with no availability never appears — and reception never needs

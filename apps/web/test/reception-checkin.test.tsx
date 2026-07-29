@@ -7,7 +7,7 @@ import { DevAuthClient } from "../src/auth/authClient";
 import { ApiError } from "../src/api/http";
 import type { ApiClient } from "../src/api/client";
 import type { AppointmentRow } from "@mersal/contracts";
-import { ReceptionCheckIn } from "../src/screens/ReceptionDesk";
+import { ReceptionAppointments, ReceptionCheckIn } from "../src/screens/ReceptionDesk";
 
 function booked(rowVersion?: number): AppointmentRow {
   return {
@@ -18,6 +18,7 @@ function booked(rowVersion?: number): AppointmentRow {
     scheduledStart: "2026-07-26T09:00:00Z",
     checkInEligible: true,
     checkedIn: false,
+    noShowEligible: false,
     rowVersion,
   };
 }
@@ -124,5 +125,67 @@ describe("Reception boards — patient-file entry point", () => {
 
     // The row's beneficiary id is what the deep link must carry — not the appointment id.
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/patients/b1"));
+  });
+});
+
+/**
+ * US-022 — the day board carries BOTH decisions the desk makes about an appointment: the patient arrived, or
+ * they did not. The no-show action is governed by a grace period after the scheduled end that only the server
+ * knows, so the board renders the server's flag and never re-derives it from the browser clock.
+ */
+describe("Reception day board — check-in and No-show (US-022)", () => {
+  const row = (over: Partial<AppointmentRow> = {}): AppointmentRow => ({ ...booked(7), ...over });
+
+  function renderBoard(api: ApiClient) {
+    return render(
+      <AppProviders authClient={new DevAuthClient()} apiClient={api}>
+        <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <ReceptionAppointments />
+        </MemoryRouter>
+      </AppProviders>,
+    );
+  }
+
+  it("offers No-show ONLY when the server says the window has passed", async () => {
+    const api = fakeApi({ appointments: vi.fn().mockResolvedValue([row({ noShowEligible: false })]) });
+    renderBoard(api);
+
+    expect(await screen.findByRole("button", { name: /check in/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /no-show/i })).not.toBeInTheDocument();
+    // An empty cell reads as a broken screen; the desk is told why the action is absent.
+    expect(screen.getByText(/once the appointment window has passed/i)).toBeInTheDocument();
+  });
+
+  it("shows No-show once eligible and sends the row version as If-Match", async () => {
+    const user = userEvent.setup();
+    const noShow = vi.fn().mockResolvedValue({ id: "appt-1", status: { kind: "warn", label: { en: "No-show", ar: "لم يحضر" } } });
+    const appointments = vi.fn().mockResolvedValue([row({ noShowEligible: true })]);
+    renderBoard(fakeApi({ noShow, appointments }));
+
+    await user.click(await screen.findByRole("button", { name: /no-show/i }));
+    expect(noShow).toHaveBeenCalledWith("appt-1", 7);
+    // The result is re-read from the server rather than painted locally (18.D1 E3).
+    await waitFor(() => expect(appointments).toHaveBeenCalledTimes(2));
+  });
+
+  it("a 412 on No-show shows the changed notice and re-reads instead of double-acting", async () => {
+    const user = userEvent.setup();
+    const noShow = vi.fn().mockRejectedValue(new ApiError("http", "Version mismatch", 412));
+    const appointments = vi.fn().mockResolvedValue([row({ noShowEligible: true })]);
+    renderBoard(fakeApi({ noShow, appointments }));
+
+    await user.click(await screen.findByRole("button", { name: /no-show/i }));
+    expect(await screen.findByText(/changed since the board loaded/i)).toBeInTheDocument();
+    await waitFor(() => expect(appointments).toHaveBeenCalledTimes(2));
+  });
+
+  it("a checked-in row offers neither action", async () => {
+    const api = fakeApi({
+      appointments: vi.fn().mockResolvedValue([row({ checkInEligible: false, checkedIn: true, noShowEligible: false })]),
+    });
+    renderBoard(api);
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: /check in/i })).not.toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /no-show/i })).not.toBeInTheDocument();
   });
 });

@@ -192,7 +192,8 @@ export class DevApiClient implements ApiClient {
     const rows = [
       { id: "appt-1", token: "•••4821", type: "Consultation", ar: "كشف", st: "Booked", chip: { kind: "info" as const, label: loc("Booked", "محجوز") }, at: "2026-07-22T09:00:00Z", eligible: true },
       { id: "appt-2", token: "•••7710", type: "FollowUp", ar: "متابعة", st: "CheckedIn", chip: { kind: "ok" as const, label: loc("Checked in", "تم الوصول") }, at: "2026-07-22T09:30:00Z", eligible: false },
-      { id: "appt-3", token: "•••2093", type: "Consultation", ar: "كشف", st: "Booked", chip: { kind: "info" as const, label: loc("Booked", "محجوز") }, at: "2026-07-22T10:00:00Z", eligible: true },
+            // Its window has passed by more than the grace period, so the SERVER would allow a no-show here.
+      { id: "appt-3", token: "•••2093", type: "Consultation", ar: "كشف", st: "Booked", chip: { kind: "info" as const, label: loc("Booked", "محجوز") }, at: "2026-07-22T10:00:00Z", eligible: true, noShowEligible: true },
       { id: "appt-4", token: "•••5540", type: "Procedure", ar: "إجراء", st: "NoShow", chip: { kind: "warn" as const, label: loc("No-show", "لم يحضر") }, at: "2026-07-22T08:30:00Z", eligible: false },
     ].filter((r) => (filter === "booked" ? r.st === "Booked" : filter === "checked-in" ? r.st === "CheckedIn" : true));
     return this.gate(
@@ -205,10 +206,15 @@ export class DevApiClient implements ApiClient {
           scheduledStart: r.at,
           checkInEligible: r.eligible,
           checkedIn: r.st === "CheckedIn",
+          noShowEligible: r.noShowEligible ?? false,
           rowVersion: 1,
         }))),
       [],
     );
+  }
+  noShow(appointmentId: string, _rowVersion?: number) {
+    void _rowVersion;
+    return this.gate(() => ok(zCheckInResult, { id: appointmentId, status: { kind: "warn", label: loc("No-show", "لم يحضر") } }));
   }
   checkIn(appointmentId: string, _rowVersion?: number) {
     void _rowVersion; // fixture path applies no concurrency guard; the live client echoes it as If-Match.

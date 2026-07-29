@@ -381,6 +381,8 @@ export class HttpApiClient implements ApiClient {
         scheduledStart: a.scheduledStart ?? new Date().toISOString(),
         checkInEligible: String(a.status ?? "") === "Booked",
         checkedIn: String(a.status ?? "") === "CheckedIn",
+        // Straight from the server — the grace period is its rule, evaluated against its clock.
+        noShowEligible: a.noShowEligible === true,
         rowVersion: typeof a.rowVersion === "number" ? a.rowVersion : undefined,
       }),
     );
@@ -430,6 +432,16 @@ export class HttpApiClient implements ApiClient {
         openSlots: typeof c.openSlots === "number" ? c.openSlots : 0,
       }),
     );
+  }
+
+  async noShow(appointmentId: string, rowVersion?: number) {
+    const r = (await postRaw(
+      `/appointments/${encodeURIComponent(appointmentId)}/no-show`,
+      {},
+      crypto.randomUUID(),
+      rowVersion !== undefined ? { ifMatch: rowVersion } : undefined,
+    )) as any;
+    return parseOr(zCheckInResult, { id: r?.appointmentId ?? appointmentId, status: apptStatusChip(r?.status ?? "NoShow") });
   }
 
   // Booking (Phase 3.1, US-020). Slot availability is the SERVER's answer — it holds the no-double-book
