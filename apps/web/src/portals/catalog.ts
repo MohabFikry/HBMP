@@ -64,6 +64,7 @@ export const PORTALS: PortalDef[] = [
       { key: "eligibility", path: "eligibility", label: { en: "Eligibility search", ar: "التحقق من الأهلية" }, group: G.access, icon: "user", permission: "eligibility.check" },
       { key: "queue", path: "queue", label: { en: "Today's visits", ar: "زيارات اليوم" }, group: G.access, icon: "check2", permission: "queue.reception" },
       { key: "appointments", path: "appointments", label: { en: "Appointments", ar: "المواعيد" }, group: G.access, icon: "clock", permission: "appointments.read" },
+      { key: "book", path: "book", label: { en: "Book appointment", ar: "حجز موعد" }, group: G.access, icon: "plus", permission: "appointments.book" },
       { key: "checkin", path: "check-in", label: { en: "Check-in", ar: "تسجيل الوصول" }, group: G.access, icon: "ok", permission: "checkin.write" },
     ],
   },

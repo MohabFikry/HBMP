@@ -16,6 +16,9 @@ export type Permission =
   | "eligibility.check"
   | "queue.reception"
   | "appointments.read"
+  // Booking is a separate grant from reading the board: the call centre may book across branches but must
+  // never check anyone in, and a read-only viewer must get neither.
+  | "appointments.book"
   | "checkin.write"
   // Clinical (treating-gated on the server)
   | "emr.read"
@@ -134,7 +137,7 @@ export type Role =
  * min-necessary hard rules are auditable at a glance (no clinical perms in Reception/Finance, etc.).
  */
 export const rolePermissions: Record<Role, Permission[]> = {
-  reception: ["eligibility.check", "queue.reception", "appointments.read", "checkin.write"],
+  reception: ["eligibility.check", "queue.reception", "appointments.read", "appointments.book", "checkin.write"],
   doctor: [
     "emr.read",
     "emr.write",

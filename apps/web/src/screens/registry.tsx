@@ -13,6 +13,7 @@ const ReceptionEligibility = lazy(() =>
 const ReceptionVisits = lazy(() => import("./ReceptionDesk").then((m) => ({ default: m.ReceptionVisits })));
 const ReceptionAppointments = lazy(() => import("./ReceptionDesk").then((m) => ({ default: m.ReceptionAppointments })));
 const ReceptionCheckIn = lazy(() => import("./ReceptionDesk").then((m) => ({ default: m.ReceptionCheckIn })));
+const ReceptionBooking = lazy(() => import("./ReceptionBooking").then((m) => ({ default: m.ReceptionBooking })));
 // Beneficiary-management portal (Phase 1) — register / manage / status share one chunk.
 const BeneficiaryRegister = lazy(() => import("./BeneficiaryPortal").then((m) => ({ default: m.BeneficiaryRegister })));
 const BeneficiaryManage = lazy(() => import("./BeneficiaryPortal").then((m) => ({ default: m.BeneficiaryManage })));
@@ -109,6 +110,7 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/reception/queue": () => <ReceptionVisits />,
   "/reception/appointments": () => <ReceptionAppointments />,
   "/reception/check-in": () => <ReceptionCheckIn />,
+  "/reception/book": () => <ReceptionBooking />,
   // 2. Doctor — consultation / EMR + cross-encounter worklists.
   "/clinician/encounter": () => <DoctorEncounter />,
   "/clinician/patients": () => <DoctorPatients />,

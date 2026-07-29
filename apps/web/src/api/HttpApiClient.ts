@@ -1,6 +1,8 @@
 import {
   zAccessReviewCampaign,
   zAppointmentRow,
+  zBookableSlot,
+  zBookingResult,
   zApprovalItem,
   zApprovalReview,
   zBreakGlassGrant,
@@ -83,6 +85,7 @@ import {
   zAccessSession,
   zProgramEnablement,
 } from "@mersal/contracts";
+import type { BookingRequest } from "@mersal/contracts";
 import type { ApiClient } from "./client";
 import { getRaw, postRaw, putRaw, patchRaw, postForm, parseOr, getAbsolute, postAbsolute, deleteAbsolute } from "./http";
 import { GATEWAY_BASE } from "../config";
@@ -391,6 +394,48 @@ export class HttpApiClient implements ApiClient {
       rowVersion !== undefined ? { ifMatch: rowVersion } : undefined,
     )) as any;
     return parseOr(zCheckInResult, { id: r?.appointmentId ?? appointmentId, status: apptStatusChip(r?.status ?? "CheckedIn") });
+  }
+
+  // Booking (Phase 3.1, US-020). Slot availability is the SERVER's answer — it holds the no-double-book
+  // invariant and can see slots held by bookings this desk is not allowed to read, so `open` is never
+  // re-derived here from times.
+  async openSlots(providerId: string, locationId: string, from?: string, to?: string) {
+    const qs = new URLSearchParams({ providerId, locationId, onlyOpen: "true" });
+    if (from) qs.set("from", from);
+    if (to) qs.set("to", to);
+    const r = (await getRaw(`/appointment-slots?${qs.toString()}`)) as any[];
+    return (r ?? []).map((s: any) =>
+      parseOr(zBookableSlot, {
+        id: s.slotId,
+        start: s.slotStart,
+        end: s.slotEnd,
+        open: s.open !== false,
+        doctorId: s.doctorId ?? undefined,
+      }),
+    );
+  }
+
+  async bookAppointment(input: BookingRequest) {
+    // Idempotency-Key is REQUIRED by the endpoint: a retried booking must not hold two slots for one patient.
+    const r = (await postRaw(
+      "/appointments",
+      {
+        beneficiaryId: input.beneficiaryId,
+        providerId: input.providerId,
+        locationId: input.locationId,
+        slotId: input.slotId,
+        appointmentType: input.appointmentType,
+        // Omitted by a branch-scoped desk — the server stamps its active branch and refuses a mismatch.
+        ...(input.branchId ? { branchId: input.branchId } : {}),
+        joinWaitlistIfFull: false,
+      },
+      crypto.randomUUID(),
+    )) as any;
+    return parseOr(zBookingResult, {
+      id: r?.appointmentId ?? "",
+      status: apptStatusChip(r?.status ?? "Booked"),
+      scheduledStart: r?.scheduledStart ?? new Date().toISOString(),
+    });
   }
 
   // Doctor / EMR (Phase 4, US-030) — the emr service is encounter-centric and treating-relationship gated: the

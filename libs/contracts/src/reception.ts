@@ -36,3 +36,41 @@ export const zCheckInResult = z.object({
   status: zStatus,
 });
 export type CheckInResult = z.infer<typeof zCheckInResult>;
+
+/**
+ * A bookable slot (Phase 3.1). The SERVER decides `open` — it holds the no-double-book invariant and knows
+ * about held slots the desk cannot see — so the screen never re-derives availability from times.
+ */
+export const zBookableSlot = z.object({
+  id: zId,
+  start: zInstant,
+  end: zInstant,
+  open: z.boolean(),
+  /** Present when the slot belongs to a named practitioner rather than a general clinic session. */
+  doctorId: zId.optional(),
+});
+export type BookableSlot = z.infer<typeof zBookableSlot>;
+
+/**
+ * A booking request from the desk. There is deliberately no `branchId`: a BranchScoped caller's branch is
+ * resolved server-side from their active branch, and a request that names another one is refused rather than
+ * silently rewritten. The call centre, which books across branches, states its branch explicitly instead.
+ */
+export const zBookingRequest = z.object({
+  beneficiaryId: zId,
+  providerId: zId,
+  locationId: zId,
+  slotId: zId,
+  appointmentType: z.string().min(1),
+  /** Cross-branch callers only (call centre). Omitted by a branch-scoped desk. */
+  branchId: zId.optional(),
+});
+export type BookingRequest = z.infer<typeof zBookingRequest>;
+
+/** What the desk shows after a successful booking — enough to confirm to the patient, nothing clinical. */
+export const zBookingResult = z.object({
+  id: zId,
+  status: zStatus,
+  scheduledStart: zInstant,
+});
+export type BookingResult = z.infer<typeof zBookingResult>;

@@ -30,6 +30,8 @@ import {
   zSodConflict,
   zAccessReviewCampaign,
   zAppointmentRow,
+  zBookableSlot,
+  zBookingResult,
   zBreakGlassGrant,
   zMasterDataVersion,
   zSystemConfigEntry,
@@ -83,6 +85,7 @@ import {
   type RoleScopeGrant,
   type ReportAccessRequestRow,
 } from "@mersal/contracts";
+import type { BookingRequest } from "@mersal/contracts";
 import type { ApiClient, ApiScenario } from "./client";
 import { ApiError } from "./http";
 
@@ -209,6 +212,31 @@ export class DevApiClient implements ApiClient {
   checkIn(appointmentId: string, _rowVersion?: number) {
     void _rowVersion; // fixture path applies no concurrency guard; the live client echoes it as If-Match.
     return this.gate(() => ok(zCheckInResult, { id: appointmentId, status: { kind: "ok", label: loc("Checked in", "تم الوصول") } }));
+  }
+
+  // ---- Booking -----------------------------------------------------------
+  // One slot is deliberately CLOSED: the desk must render availability from the server's answer, and a
+  // fixture where everything is bookable would never exercise that.
+  openSlots(_providerId: string, _locationId: string, _from?: string, _to?: string) {
+    void _providerId; void _locationId; void _from; void _to;
+    return this.gate(
+      () =>
+        ok(z.array(zBookableSlot), [
+          { id: "slot-1", start: "2026-07-22T11:00:00Z", end: "2026-07-22T11:15:00Z", open: true },
+          { id: "slot-2", start: "2026-07-22T11:15:00Z", end: "2026-07-22T11:30:00Z", open: false },
+          { id: "slot-3", start: "2026-07-22T11:30:00Z", end: "2026-07-22T11:45:00Z", open: true },
+        ]),
+      [],
+    );
+  }
+  bookAppointment(input: BookingRequest) {
+    return this.gate(() =>
+      ok(zBookingResult, {
+        id: `appt-${input.slotId}`,
+        status: { kind: "info", label: loc("Booked", "محجوز") },
+        scheduledStart: "2026-07-22T11:00:00Z",
+      }),
+    );
   }
 
   // ---- EMR ---------------------------------------------------------------

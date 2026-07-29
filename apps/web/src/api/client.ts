@@ -7,6 +7,9 @@ import type {
   MembershipRow,
   ProgramEnablement,
   AppointmentRow,
+  BookableSlot,
+  BookingRequest,
+  BookingResult,
   BeneficiaryRow,
   RegisterBeneficiaryInput,
   RegisterResult,
@@ -101,6 +104,13 @@ export interface ApiClient {
   /** `rowVersion` (opt-in): the value read on the board, echoed as `If-Match` so a stale check-in loses to a
    * concurrent transition with 412 instead of double-acting. Omit to check in without the guard. */
   checkIn(appointmentId: string, rowVersion?: number): Promise<CheckInResult>;
+
+  /** Open slots for a clinic session, for the desk's booking screen. The SERVER marks `open` — it holds the
+   * no-double-book invariant and knows about slots held by bookings the desk cannot see. */
+  openSlots(providerId: string, locationId: string, from?: string, to?: string): Promise<BookableSlot[]>;
+  /** Book a slot. A branch-scoped desk omits `branchId` — the server stamps its active branch and refuses a
+   * request naming a different one. Returns 409 (surfaced as ApiError) when the slot was taken concurrently. */
+  bookAppointment(input: BookingRequest): Promise<BookingResult>;
 
   // Doctor — EMR (Phase 4)
   listPatients(): Promise<PatientListItem[]>;
