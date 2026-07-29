@@ -11,8 +11,19 @@
 # Connection comes from standard libpq env vars (PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE); the user
 # must own/superuse the target so CREATE ROLE / CREATE EXTENSION succeed.
 #
-#   HBMP_APP_PASSWORD   — password to set on the hbmp_app role (default: a dev value).
-#   HBMP_AUDIT_PASSWORD — password for hbmp_audit, audit-service's own login role (18.B2).
+#   HBMP_APP_PASSWORD   — password to set on the hbmp_app role. Applied ONLY when the role is created,
+#                         or when HBMP_FORCE_ROLE_PASSWORDS=1 is also set (see below).
+#   HBMP_AUDIT_PASSWORD — same, for hbmp_audit (audit-service's own login role, 18.B2).
+#   HBMP_FORCE_ROLE_PASSWORDS=1 — reset the passwords of roles that ALREADY EXIST. Needed on a fresh CI
+#                         database only in the rare case the roles predate the run; NOT wanted against a
+#                         database a stack is running against.
+#
+# WHY THAT IS OPT-IN: the script used to ALTER both passwords unconditionally, to the built-in dev default
+# when the env vars were unset. Run against the live Tier 1 database — which is a reasonable thing to want,
+# since it is also how you apply a new migration locally — it silently changed the credentials out from under
+# every running service, and the only symptom was every container logging "password authentication failed"
+# until someone thought to connect the two events. Creating a role still sets its password, because a role
+# with no password cannot be logged into and there is nothing to preserve.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -23,23 +34,37 @@ export PGDATABASE
 
 run() { psql -v ON_ERROR_STOP=1 -q "$@"; }
 
+# Set a login role's password only when it is safe to: on a role we just created (it has none yet), or when
+# the caller explicitly asks. Never silently, because the credential may be in use by a running stack.
+ensure_role_password() {
+  local role="$1" password="$2"
+  if [ "${created_role:-0}" = "1" ] || [ "${HBMP_FORCE_ROLE_PASSWORDS:-0}" = "1" ]; then
+    run -c "ALTER ROLE ${role} PASSWORD '${password}';"
+    echo "    - ${role}: password set"
+  else
+    echo "    - ${role}: exists, password left as-is (HBMP_FORCE_ROLE_PASSWORDS=1 to reset)"
+  fi
+}
+
 echo "==> Provisioning hbmp_app runtime role (idempotent, NOBYPASSRLS)…"
+created_role=$(psql -tAc "SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname='hbmp_app') THEN 0 ELSE 1 END")
 run -c "DO \$\$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='hbmp_app') THEN
     CREATE ROLE hbmp_app LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
   END IF;
 END \$\$;"
-run -c "ALTER ROLE hbmp_app PASSWORD '${HBMP_APP_PASSWORD}';"
+ensure_role_password hbmp_app "${HBMP_APP_PASSWORD}"
 
 # 18.B2 — audit-service gets its own login role rather than hbmp_app, so the twenty services that share
 # hbmp_app cannot read the audit trail. audit 0002 grants it membership in hbmp_audit_writer.
 echo "==> Provisioning hbmp_audit runtime role (idempotent, NOBYPASSRLS)…"
+created_role=$(psql -tAc "SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname='hbmp_audit') THEN 0 ELSE 1 END")
 run -c "DO \$\$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='hbmp_audit') THEN
     CREATE ROLE hbmp_audit LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
   END IF;
 END \$\$;"
-run -c "ALTER ROLE hbmp_audit PASSWORD '${HBMP_AUDIT_PASSWORD}';"
+ensure_role_password hbmp_audit "${HBMP_AUDIT_PASSWORD}"
 
 total=0
 for mig_dir in services/*/Infrastructure/Migrations; do

@@ -245,7 +245,7 @@ the identity, so one person can hold genuinely different authority in two organi
   Cross-tenant roster reads are **403 + audited, never silently narrowed** — a page of your own tenant under
   another tenant's heading is worse than an error, because the reviewer believes they reviewed the right one.
 
-### Known gap carried out of Phase 21 — PROPAGATION CLOSED 2026-07-29, CALL SITES STILL OPEN
+### Known gap carried out of Phase 21 — CLOSED 2026-07-29 except the caps
 
 **What was wrong.** `ProgramEnablement` and `TenantProgramStore` were complete and well tested — the advisory
 lock, the live counting, the two distinct problem types — but nothing called them, so the third orthogonal
@@ -269,9 +269,39 @@ module the moment a gate appeared. Verified end to end in the running stack: `PU
 `{enabled:false}` → 200 → the projection followed (`source_event_id` set) → the next token carried 10 features
 instead of 11 → restored, and both tables agree at 11.
 
-**Still open (call sites).** No endpoint calls `RequireFeature`/`IsEnabled` yet, so the gate still refuses
-nothing — it is now merely *able* to. That wiring, per feature-owning service, remains outstanding and is
-**not** claimed as done. The caps (`CheckLimitAsync`) likewise have no production caller.
+**Closed now (call sites).** Ten services that ARE one module each — claims, callcentre, interop, pharmacy,
+orders, approvals, emr, finance, document, case — gate the whole service via `UseProgramFeature(...)`, placed
+immediately after `UseAuthorization()` so enablement is asked LAST and a caller lacking the scope still gets the
+authorization denial. Whole-service rather than per-group deliberately: these declare route groups across a
+dozen files (claims alone has four), so per-group gating is a dozen chances to miss one and the endpoint added
+next year defaults to ungated; here the default inverts. Reporting is the exception and uses the per-endpoint
+`RequireFeature(...)`, because `reporting_extracts` gates EXTRACTS only — a tenant not on that programme still
+reads its own dashboards on screen.
+
+Two kinds of request pass untouched, both because enablement is a question about an authenticated
+ORGANISATION: **anonymous** ones (the health probes — a gate that broke liveness would take a disabled module's
+container down instead of refusing its requests) and **tenant-less** ones (the client-credentials token behind
+the event pipeline's four `*:ingest`/`*:project` scopes belongs to no organisation; refusing it would stop the
+platform's own machinery for every tenant rather than enforce a policy). The carve-out is pinned by test so it
+cannot widen. The ADMINISTRATION surface is deliberately ungated — gating the screen that switches a feature
+back on would make a tenant with everything off unrecoverable.
+
+Verified live: doctor token → `GET /api/v1/appointments?mine=true` 200 → switch `emr` off → next token carried
+10 features → the SAME request 403 `program-not-enabled` naming `emr`, while `/health/live` on the same
+container stayed 200 → restored → 200 again.
+
+**One consequence, found by wiring it.** profile-service composes clinical sections from emr/orders/pharmacy
+under the caller's own bearer, so gating those services changes what the profile sees. `SectionForbiddenException`
+was thrown by `CallerScopedHttp` and **caught nowhere** — it fell into the composer's broad catch and reported
+`upstream-error`, so a section the owner declined (a caller without the scope then; a tenant not on the
+programme now) rendered as "temporarily broken". An organisation told that waits for a recovery that will never
+come, when what it needs is to ask someone for access or for the module to be switched on. The composer now
+catches it and returns **Restricted / `owner-declined`**, keeping design 39 §6's three states distinct. The
+exception moved to Domain to make that possible — Domain must not reference Infrastructure.
+
+**Still open.** The caps (`TenantProgramStore.CheckLimitAsync`) still have no production caller: no mutation
+counts live rows against `active_users`/`active_provider_users` before inserting, so `program-limit-reached` is
+a problem type no server emits yet. Not claimed as done.
 
 Full backend suite **1953 passing / 0 failing / 1 skipped**, run against a Postgres with all 128 migrations
 applied so the env-gated integration and RLS suites actually execute — DB-less, 356 of them skip and the
@@ -284,6 +314,29 @@ allow-beats-deny, ignored expiry, deleting the A1 test, the branch fail-open, th
 reversing the A6 pairing were each killed by the test written for them.
 
 Divergences from the build prompt and the defects found along the way are recorded in **ADR-0021 §4–§5**.
+
+## Fixed 2026-07-29 — two things that had never worked
+
+- **`tools/ci/apply-migrations.sh` could not be re-run.** identity `0001` seeds `role_scope` with
+  `ON CONFLICT (role_name, scope_name)`, but `0011` widened that PK to include `tenant_id`. Postgres resolves an
+  ON CONFLICT target against the constraints that exist when the statement RUNS, so from 0011 onwards the seed
+  failed — and under `ON_ERROR_STOP` that aborted the whole identity sequence, meaning **every later identity
+  migration silently stopped being applied to an existing database**. 19 statements across 9 files carried the
+  same named target; all now use a bare `ON CONFLICT DO NOTHING`, which matches whichever unique constraint the
+  table currently has and is correct on both a fresh and a migrated database. The script now completes: 133
+  files across 21 services, exit 0.
+- **The same script silently changed DB credentials.** It `ALTER`ed `hbmp_app`/`hbmp_audit` passwords
+  unconditionally, defaulting to a built-in CI value when the env vars were unset. Run against the live Tier 1
+  database — which is also how you apply a new migration locally — it changed the credentials out from under
+  every running container, whose only symptom was `password authentication failed` everywhere. Setting a
+  password is now limited to roles the script CREATES, or to an explicit `HBMP_FORCE_ROLE_PASSWORDS=1`.
+- **`alertmanager` had never started.** `config/alertmanager.yml` carried `url: "${ALERT_OPS_WEBHOOK}"` and two
+  siblings, with a comment claiming they were env-injected. Alertmanager does not expand environment variables,
+  Compose mounts the file verbatim, and those three variable names appeared nowhere else in the repo — so it
+  read the literal `${...}` as a URL and died with `invalid URL: unsupported scheme ""`, which also means none
+  of its routing had ever been exercised. The routing tree is kept and now loads; receivers deliver nowhere by
+  default, so alerts fire, group, inhibit and show in the UI. Rendering the file (Helm/envsubst) is what a real
+  deployment must do — the variable names are recorded in the file for that.
 
 ## Environment notes
 - .NET 8 SDK: user-local `~/.dotnet` (use `./dotnet.sh`). Node 20, psql 17 present.

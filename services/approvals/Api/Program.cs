@@ -49,6 +49,11 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseAuthentication();
 app.UseAuthorization();
+// 21.4 — the THIRD gate, asked LAST: after authorization, before execution (design 40 §4). Placed here
+// rather than on each route group because pre-authorization is one programme, and a per-group
+// filter is one chance per group to forget the next one. Health probes are anonymous and the event
+// pipeline is tenant-less, so neither needs an exemption.
+app.UseProgramFeature(ProgramFeatures.Approvals);
 app.UseHbmpRls(); // bind app.tenant_id GUC from the principal (RLS, ADR-0011)
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 

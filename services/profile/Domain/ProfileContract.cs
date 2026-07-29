@@ -69,3 +69,19 @@ public sealed record RequestAccessAction(string Kind, string Href, string? Label
         new("report-access-request", $"/api/v1/report-access-requests?beneficiaryId={beneficiaryId}",
             "Request access");
 }
+
+/// <summary>
+/// The owning service refused this caller — the second authorization layer holding (design 39 §1), or, since
+/// 21.4, the tenant's programme not being enabled for that module.
+///
+/// <para>Declared in Domain rather than Infrastructure so <c>ProfileComposer</c> can catch it: Domain must not
+/// reference Infrastructure, and before this the composer could only swallow it in its broad catch and report
+/// `upstream-error` — telling an organisation its record was temporarily broken when what it needed was to ask
+/// someone to grant access or switch a module on.</para>
+/// </summary>
+public sealed class SectionForbiddenException : Exception
+{
+    public SectionForbiddenException(string message) : base(message) { }
+    public SectionForbiddenException() { }
+    public SectionForbiddenException(string message, Exception inner) : base(message, inner) { }
+}

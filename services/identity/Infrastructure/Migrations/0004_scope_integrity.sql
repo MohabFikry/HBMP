@@ -19,7 +19,10 @@ SELECT role, 'patient:read' FROM (VALUES
     ('reception'), ('call_center'), ('beneficiary_mgmt'), ('case_manager'),
     ('doctor'), ('nurse'), ('medical_approval'), ('medical_director')
 ) AS r(role)
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;
 
 -- ---------------------------------------------------------------- 2. medical_director admin scopes
 -- AdminPolicies names medical_director on EditMasterData (FR-MDM-008 puts clinical governance in charge of
@@ -29,7 +32,10 @@ ON CONFLICT (role_name, scope_name) DO NOTHING;
 INSERT INTO identity.role_scope (role_name, scope_name) VALUES
     ('medical_director', 'admin:read'),
     ('medical_director', 'admin:write')
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;
 
 -- ---------------------------------------------------------------- 3. admin:break-glass (the emergency path)
 -- The BreakGlassRequest rule names seven originating roles — doctor, nurse, medical_approval,
@@ -42,4 +48,7 @@ INSERT INTO identity.role_scope (role_name, scope_name)
 SELECT role, 'admin:break-glass' FROM (VALUES
     ('doctor'), ('nurse'), ('medical_approval'), ('medical_director'), ('case_manager'), ('org_admin')
 ) AS r(role)
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;

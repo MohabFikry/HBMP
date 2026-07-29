@@ -110,6 +110,16 @@ public sealed class ProfileComposer(
                 ? ProfileSection.Unavailable(decision.Key, "unprojectable-payload")
                 : ProfileSection.Visible(decision.Key, projected);
         }
+        catch (SectionForbiddenException)
+        {
+            // The owning service declined this caller — the second layer doing its job (design 39 §1), not a
+            // fault. Since 21.4 wired programme enablement into ten module services, this is also how a tenant
+            // that is not on a programme sees its sections: RESTRICTED, not "upstream-error". The distinction is
+            // the whole point of keeping the three states apart — an organisation told its record is
+            // temporarily broken waits for it to recover, when what it needs is to ask Mersal to switch the
+            // module on. Nothing was thrown before this: the broad catch below swallowed it as an error.
+            return ProfileSection.Restricted(decision.Key, ProfileReasons.OwnerDeclined);
+        }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             // The SECTION's own timeout fired — it degrades, the rest of the profile still renders (design 39

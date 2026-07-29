@@ -175,6 +175,20 @@ public sealed class TestAuthHandler(
         if (Request.Headers.TryGetValue("X-Test-Tenant", out var tenant)) claims.Add(new Claim("tenant_id", tenant.ToString()));
         if (Request.Headers.ContainsKey("X-Test-Mfa")) claims.Add(new Claim("amr", "otp"));
 
+        // 21.4 — programme enablement. A tenant that exists is on its programmes (migration 0009/0015 backfill
+        // every existing tenant ON), so the harness mirrors that by default; otherwise the gate this service now
+        // applies would refuse every test in the file and the failure would look like an authorization bug.
+        // `X-Test-Features` overrides it — pass an empty value to assert the gate REFUSES.
+        if (Request.Headers.TryGetValue("X-Test-Features", out var features))
+        {
+            foreach (var f in features.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                claims.Add(new Claim("features", f));
+        }
+        else
+        {
+            claims.Add(new Claim("features", Mersal.Authz.ProgramFeatures.Interop));
+        }
+
         var identity = new ClaimsIdentity(claims, SchemeName);
         return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName)));
     }

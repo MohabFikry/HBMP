@@ -47,7 +47,10 @@ INSERT INTO identity.role_scope (role_name, scope_name) VALUES
     ('beneficiary_mgmt_supervisor', 'profile:read'),
     ('org_admin',                   'profile:read'),
     ('super_admin',                 'profile:read')
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;
 
 -- profile:export — the roles that need a printable, watermarked handover of a record they can already see.
 -- Deliberately NOT reception (the front desk hands over a card, not a clinical summary), not finance or claims
@@ -62,7 +65,10 @@ INSERT INTO identity.role_scope (role_name, scope_name) VALUES
     ('beneficiary_mgmt',            'profile:export'),
     ('beneficiary_mgmt_supervisor', 'profile:export'),
     ('super_admin',                 'profile:export')
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;
 
 -- callcentre:history:read — the roles whose profile carries a callHistory section at any level.
 -- Labs, pharmacies and platform admins are absent: their matrix rows have no callHistory cell at all, so the
@@ -81,4 +87,7 @@ INSERT INTO identity.role_scope (role_name, scope_name) VALUES
     ('claims_officer',              'callcentre:history:read'),
     ('beneficiary_mgmt',            'callcentre:history:read'),
     ('beneficiary_mgmt_supervisor', 'callcentre:history:read')
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;

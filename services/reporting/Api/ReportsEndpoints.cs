@@ -111,7 +111,11 @@ public static class ReportsEndpoints
             }, ct);
 
             return Results.Text(csv, "text/csv");
-        }).RequireAuthorization(HbmpPolicies.Scope("reporting:export"));
+        }).RequireAuthorization(HbmpPolicies.Scope("reporting:export"))
+        // 21.4 — `reporting_extracts` gates EXTRACTS ONLY, not reporting as a whole: a tenant not on the
+        // extracts programme still reads its own dashboards and views on screen. That is why reporting
+        // uses the per-endpoint filter where the other ten module services gate the whole service.
+        .RequireFeature(ProgramFeatures.ReportingExtracts);
 
         // ── Executive dashboard (phase 8.3) — composed widget contracts, each with an accessible dataTable +
         // bilingual labels. Gated on the operational zone; clinical + financial widgets are included only for a

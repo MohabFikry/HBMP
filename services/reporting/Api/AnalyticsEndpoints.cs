@@ -119,7 +119,11 @@ public static class AnalyticsEndpoints
             }, ct);
 
             return Results.Text(csv, "text/csv");
-        }).RequireAuthorization(HbmpPolicies.Scope("reporting:export"));
+        }).RequireAuthorization(HbmpPolicies.Scope("reporting:export"))
+        // 21.4 — `reporting_extracts` gates EXTRACTS ONLY, not reporting as a whole: a tenant not on the
+        // extracts programme still reads its own dashboards and views on screen. That is why reporting
+        // uses the per-endpoint filter where the other ten module services gate the whole service.
+        .RequireFeature(ProgramFeatures.ReportingExtracts);
     }
 
     /// <summary>Long-form CSV: one row per point, with the series it belongs to. Wide-per-series would need a

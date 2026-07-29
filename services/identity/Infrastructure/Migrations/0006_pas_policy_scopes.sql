@@ -33,12 +33,18 @@ SELECT role, 'policy:read' FROM (VALUES
     ('beneficiary_mgmt'), ('medical_approval'), ('finance'), ('claims_officer'),
     ('org_admin'), ('super_admin')
 ) AS r(role)
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;
 
 -- Member administration — the capability beneficiary_mgmt was always supposed to have.
 INSERT INTO identity.role_scope (role_name, scope_name) VALUES
     ('beneficiary_mgmt', 'policy:write')
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;
 
 -- Authoring the product + the supervisory increment. The dedicated `policy_admin` and
 -- `beneficiary_mgmt_supervisor` roles land in 19.7 (adding a role changes the frozen role vocabulary, the
@@ -49,4 +55,7 @@ INSERT INTO identity.role_scope (role_name, scope_name) VALUES
     ('org_admin',   'policy:supervise'),
     ('super_admin', 'policy:admin'),
     ('super_admin', 'policy:supervise')
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;

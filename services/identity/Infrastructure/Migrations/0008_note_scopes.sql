@@ -27,7 +27,10 @@ SELECT role, 'note:read' FROM (VALUES
     ('doctor'), ('nurse'), ('case_manager'), ('medical_director'), ('reception'),
     ('org_admin'), ('super_admin')
 ) AS r(role)
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;
 
 -- Authoring: the roles that record decisions about a case. Reception is READ-only here — they see that a note
 -- exists but do not author signed statements about a member's benefit.
@@ -37,4 +40,7 @@ SELECT role, 'note:write' FROM (VALUES
     ('doctor'), ('nurse'), ('case_manager'), ('medical_director'),
     ('org_admin'), ('super_admin')
 ) AS r(role)
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;

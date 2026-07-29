@@ -69,7 +69,10 @@ SELECT role, scope FROM (VALUES
     ('finance',        'claims:read'),
     ('finance',        'claims:export')
 ) AS g(role, scope)
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;
 
 -- ---------------------------------------------------------------- grants: front desk + prescriber + reporting
 INSERT INTO identity.role_scope (role_name, scope_name)
@@ -81,7 +84,10 @@ SELECT role, scope FROM (VALUES
     ('finance',          'reporting:export'),
     ('medical_director', 'reporting:read-financial')
 ) AS g(role, scope)
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;
 
 -- ---------------------------------------------------------------- grants: clinical oversight
 -- medical_director is the largest single gap: the role matrix (§3.10) puts clinical governance in charge of
@@ -95,7 +101,10 @@ SELECT 'medical_director', scope FROM (VALUES
     ('case:read'), ('case:write'), ('case:manage'),
     ('finance:read'), ('finance:approve'), ('finance:export')
 ) AS s(scope)
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;
 
 -- medical_approval reviews the clinical record behind an authorization; without emr:read it was deciding
 -- blind, which is the opposite of what the review step exists for.
@@ -109,4 +118,7 @@ INSERT INTO identity.role_scope (role_name, scope_name) VALUES
     ('lab_tech',         'provider:read'),
     ('imaging_tech',     'provider:read'),
     ('pharmacist',       'provider:read')
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;

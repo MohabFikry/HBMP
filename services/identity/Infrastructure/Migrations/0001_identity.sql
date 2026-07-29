@@ -211,4 +211,15 @@ SELECT rs.role, rs.scope FROM (VALUES
     ('super_admin','reporting:read'), ('super_admin','reporting:project'), ('super_admin','reporting:export'),
     ('super_admin','notification:read')
 ) AS rs(role, scope)
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Conflict target left UNNAMED deliberately. This named `(role_name, scope_name)` — role_scope's primary key
+-- at the time 0001 was written — but 0011 WIDENED that key to (tenant_id, role_name, scope_name). Postgres
+-- resolves an ON CONFLICT target against the constraints that exist WHEN THE STATEMENT RUNS, so from 0011
+-- onwards re-running 0001 failed with "there is no unique or exclusion constraint matching the ON CONFLICT
+-- specification" — and since apply-migrations.sh runs with ON_ERROR_STOP, that aborted the whole identity
+-- sequence and every LATER identity migration silently stopped being applied to an existing database.
+--
+-- Bare DO NOTHING matches whatever unique constraint the table currently has, so this statement is correct
+-- both on a fresh database (narrow key) and on one that has reached 0011 (widened key). The rows are seed
+-- grants inserted without tenant_id, which the column DEFAULT places in the '' bucket exactly as before, so
+-- the widened key still recognises a re-run as a duplicate.
+ON CONFLICT DO NOTHING;

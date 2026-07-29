@@ -1,6 +1,24 @@
 # Alertmanager routing for Mersal HBMP (Phase 11.3). Pages route to on-call; tickets to the
-# ops queue; security-labelled alerts also fan out to the security channel. Receivers use
-# env-injected webhooks (no secrets in config) — set via ${...} in the deployment.
+# ops queue; security-labelled alerts also fan out to the security channel.
+#
+# ── Why there are no ${...} placeholders here any more ────────────────────────────────────────────
+# This file used to carry `url: "${ALERT_OPS_WEBHOOK}"` and two siblings, with a comment saying they
+# were "env-injected in the deployment". ALERTMANAGER DOES NOT EXPAND ENVIRONMENT VARIABLES IN ITS
+# CONFIG, and Compose mounts this file verbatim — so it read the literal string `${ALERT_OPS_WEBHOOK}`
+# as a URL and died with `invalid URL: unsupported scheme ""`. No deployment substituted them either:
+# the three variable names appeared nowhere else in the repo. The container had therefore never
+# started, which also means none of the routing below had ever been exercised.
+#
+# The routing tree IS the part with design value (page/ticket/security fan-out + the inhibit rule), so
+# it is kept and is now actually loadable. The receivers deliver NOWHERE by default: alerts still
+# fire, group, inhibit and appear in the Alertmanager UI at :9093, they are simply not forwarded.
+# That is the correct default for a single-node Tier 1 stack, which has no Slack or pager to forward
+# to, and it fails visibly (an empty receiver) rather than silently (a dead webhook).
+#
+# TO DELIVER SOMEWHERE REAL (Tier 2/3): render this file — Helm templating, or `envsubst` in an init
+# step — and add `webhook_configs` back under the receiver. Do NOT re-add a `${...}` to a file that is
+# mounted directly; that is the exact failure above. The names the deployment should supply are
+# ALERT_OPS_WEBHOOK, ALERT_PAGER_WEBHOOK and ALERT_SECURITY_WEBHOOK, one per receiver below.
 global:
   resolve_timeout: 5m
 
@@ -17,19 +35,13 @@ route:
     - matchers: ['security="true"']
       receiver: security-oncall
 
+# A receiver with no configs is valid and delivers nothing — see the header. Each one is kept as its
+# own named receiver so the routing above stays meaningful and a deployment can fill in exactly one
+# without touching the tree.
 receivers:
-  - name: ops-tickets
-    webhook_configs:
-      - url: "${ALERT_OPS_WEBHOOK}"
-        send_resolved: true
-  - name: oncall-page
-    webhook_configs:
-      - url: "${ALERT_PAGER_WEBHOOK}"
-        send_resolved: true
-  - name: security-oncall
-    webhook_configs:
-      - url: "${ALERT_SECURITY_WEBHOOK}"
-        send_resolved: true
+  - name: ops-tickets      # ← ALERT_OPS_WEBHOOK
+  - name: oncall-page      # ← ALERT_PAGER_WEBHOOK
+  - name: security-oncall  # ← ALERT_SECURITY_WEBHOOK
 
 inhibit_rules:
   # A page suppresses the lower-severity ticket for the same job while firing.

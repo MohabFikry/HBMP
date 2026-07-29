@@ -52,7 +52,10 @@ INSERT INTO identity.role_scope (role_name, scope_name) VALUES
     -- The dashboard's audited CSV export. Same action as every other report export, so it inherits the
     -- audit-event guarantee rather than inventing a second export path.
     ('policy_admin', 'reporting:export')
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;
 
 -- beneficiary_mgmt_supervisor: everything the officer role holds, plus the supervisory increment. Listed in
 -- full rather than inherited: role inheritance is invisible at the point of audit, and "why could this person
@@ -69,7 +72,10 @@ INSERT INTO identity.role_scope (role_name, scope_name) VALUES
     ('beneficiary_mgmt_supervisor', 'notification:read'),
     ('beneficiary_mgmt_supervisor', 'reception:read'),
     ('beneficiary_mgmt_supervisor', 'reporting:read')
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;
 
 -- 19.6b — the dashboard's OPERATIONAL views for the roles that already work with this data.
 --
@@ -80,4 +86,7 @@ ON CONFLICT (role_name, scope_name) DO NOTHING;
 INSERT INTO identity.role_scope (role_name, scope_name) VALUES
     ('beneficiary_mgmt', 'reporting:read'),
     ('finance', 'reporting:read')
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;

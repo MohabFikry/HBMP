@@ -60,14 +60,6 @@ public sealed class SectionUnavailableException : Exception
     public SectionUnavailableException(string message, Exception inner) : base(message, inner) { }
 }
 
-/// <summary>The owning service refused this caller — the second authorization layer held.</summary>
-public sealed class SectionForbiddenException : Exception
-{
-    public SectionForbiddenException(string message) : base(message) { }
-    public SectionForbiddenException() { }
-    public SectionForbiddenException(string message, Exception inner) : base(message, inner) { }
-}
-
 /// <summary>Small, forgiving readers over an upstream document. The profile deliberately parses upstream JSON
 /// rather than taking a project reference on another service's DTOs: a compile-time coupling between fifteen
 /// services and their aggregator is how a composition layer becomes a deployment bottleneck.</summary>

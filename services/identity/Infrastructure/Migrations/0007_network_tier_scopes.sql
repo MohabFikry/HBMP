@@ -22,4 +22,7 @@ INSERT INTO identity.role_scope (role_name, scope_name) VALUES
     ('network_team', 'provider:admin'),
     ('org_admin',    'provider:admin'),
     ('super_admin',  'provider:admin')
-ON CONFLICT (role_name, scope_name) DO NOTHING;
+-- Bare conflict target: 0011 widened role_scope's PK to (tenant_id, role_name, scope_name), and an
+-- ON CONFLICT target is resolved against the constraints that exist when the statement RUNS — so naming
+-- the old pair made this file un-re-runnable from 0011 onwards. See 0001 for the full note.
+ON CONFLICT DO NOTHING;

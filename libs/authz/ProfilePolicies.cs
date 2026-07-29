@@ -152,6 +152,12 @@ public static class ProfileReasons
     public const string NotAssigned = "not-assigned";
     public const string RoleNotPermitted = "role-not-permitted";
     public const string SensitiveRequiresGrant = "sensitive-requires-grant";
+
+    /// <summary>The owning service refused this caller (21.4: its programme is not enabled for the tenant, or the
+    /// caller lacks its scope). Distinct from `upstream-error`, which is what a broken sibling is: these have
+    /// different remedies — "ask Mersal to enable the programme" or "ask your administrator" versus "this is a
+    /// fault, wait or report it" — and design 39 §6 requires Restricted and Unavailable to stay distinct.</summary>
+    public const string OwnerDeclined = "owner-declined";
 }
 
 /// <summary>Projection variants, named so the providers and the tests share one vocabulary.</summary>
