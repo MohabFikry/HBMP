@@ -103,8 +103,24 @@ import { GATEWAY_BASE } from "../config";
    it maps `any` service payloads then zod-validates the mapping, so `any` is intentional file-wide. */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-/** Wrap a plain service string as the bilingual shape the portal contracts use (same text both langs). */
-const loc = (s: unknown) => ({ en: String(s ?? ""), ar: String(s ?? "") });
+/**
+ * Wrap a LANGUAGE-NEUTRAL service value as the bilingual shape the portal contracts use.
+ *
+ * 24.4 — `neutral()` used to do double duty and the second job was a bug. Same text in both languages is
+ * correct for a value that has no language: an ICD or CPT code, a masked identifier, a drug name as the
+ * formulary records it, a chart label that is already a code. It is NOT correct for English UI text —
+ * "Under review", "Prescriber", "Awaiting decision" — where copying English into `ar` puts English in
+ * front of an Arabic-reading user and, worse, makes the payload LOOK translated to anything checking that
+ * both fields are populated. Ten such literals had reached the portal contracts that way.
+ *
+ * Renamed so the two cases cannot be confused: `neutral()` says the sameness is deliberate, `t()` below
+ * carries a real translation. HttpApiClientI18nTests forbids a hardcoded English literal reaching
+ * `neutral()`.
+ */
+const neutral = (s: unknown) => ({ en: String(s ?? ""), ar: String(s ?? "") });
+
+/** A translated UI string the API layer has to supply because the service sends no label at all. */
+const t = (en: string, ar: string) => ({ en, ar });
 /** Pre-format a numeric amount as the contract's display string, e.g. 12400 -> "EGP 12,400". */
 /**
  * 18.D2 (audit R2 U7) — the API layer now returns a NUMBER; formatting happens at render.
@@ -330,7 +346,7 @@ const drugCoded = (drugId: unknown) => {
   const d = DEMO_DRUG_LABELS[String(drugId)];
   return d
     ? { system: "ATC" as const, code: d.atc, label: { en: d.en, ar: d.ar } }
-    : { system: "ATC" as const, code: String(drugId ?? "").slice(0, 8), label: loc("Medication") };
+    : { system: "ATC" as const, code: String(drugId ?? "").slice(0, 8), label: t("Medication", "دواء") };
 };
 /** prescriptionId → its line ids (in order), cached from the queue so dispense can target concrete lines. */
 const rxLineIds = new Map<string, string[]>();
@@ -389,12 +405,12 @@ export class HttpApiClient implements ApiClient {
       const raw = c.identity?.status;
       return parseOr(zEligibilityHit, {
         id: c.identity?.beneficiaryId,
-        name: loc(c.identity?.displayName),
+        name: neutral(c.identity?.displayName),
         cardNumber: c.identity?.memberNo ?? "",
         // The server's own resolved semantics where present (label + non-colour tone), so the chip here says
         // exactly what the eligibility card says rather than a second opinion derived from the raw string.
         status: raw
-          ? { kind: toneToKind(c.identity?.statusSemantics?.tone), label: loc(c.identity?.statusSemantics?.label ?? raw) }
+          ? { kind: toneToKind(c.identity?.statusSemantics?.tone), label: neutral(c.identity?.statusSemantics?.label ?? raw) }
           : undefined,
         // Default-DENY on an absent or unrecognised status: "not stated" must not render as bookable.
         bookable: String(raw ?? "") === "Active",
@@ -411,16 +427,16 @@ export class HttpApiClient implements ApiClient {
     const active = String(identity.status ?? "").toLowerCase() === "active";
     return parseOr(zEligibilityResult, {
       verdict: statusToVerdict(identity.status),
-      status: { kind: toneToKind(identity.statusSemantics?.tone), label: loc(identity.statusSemantics?.label ?? identity.status) },
+      status: { kind: toneToKind(identity.statusSemantics?.tone), label: neutral(identity.statusSemantics?.label ?? identity.status) },
       beneficiary: {
         id: identity.beneficiaryId ?? beneficiaryId,
-        name: loc(identity.displayName),
+        name: neutral(identity.displayName),
         cardNumber: identity.memberNo ?? "",
       },
       coverage: categories.length
         ? {
             planName: { en: "Benefit coverage", ar: "التغطية التأمينية" },
-            band: loc(categories.join(" · ")),
+            band: neutral(categories.join(" · ")),
             annualCapRemaining: cap ? money(cap.remaining) : undefined,
           }
         : null,
@@ -677,7 +693,7 @@ export class HttpApiClient implements ApiClient {
       parseOr(zPatientListItem, {
         id: e.encounterId,
         beneficiaryId: String(e.beneficiaryId ?? ""),
-        name: loc(`Beneficiary •••${String(e.beneficiaryId ?? "").slice(-4)}`),
+        name: neutral(`Beneficiary •••${String(e.beneficiaryId ?? "").slice(-4)}`),
         mrn: e.encounterNo ?? "",
         treating: true,
         lastVisit: e.startedAt ? String(e.startedAt).slice(0, 10) : null,
@@ -697,7 +713,7 @@ export class HttpApiClient implements ApiClient {
     return parseOr(zEncounter, {
       id: e.encounterId ?? encounterId,
       patientId: e.beneficiaryId ?? "",
-      patientName: loc(`Beneficiary •••${String(e.beneficiaryId ?? "").slice(-4)}`),
+      patientName: neutral(`Beneficiary •••${String(e.beneficiaryId ?? "").slice(-4)}`),
       openedAt: e.startedAt ?? new Date().toISOString(),
       signed: (r?.notes ?? []).some((n: any) => n.isSigned),
       soap: {
@@ -716,13 +732,13 @@ export class HttpApiClient implements ApiClient {
       },
       allergies: (r?.allergies ?? []).map((a: any) => ({
         id: a.allergyId,
-        substance: loc(a.reaction ?? "Allergen"),
+        substance: neutral(a.reaction ?? "Allergen"),
         severity: String(a.severity ?? "mild").toLowerCase(),
       })),
       diagnoses: (r?.diagnoses ?? []).map((d: any) => ({
         system: "ICD-10",
         code: d.icdCode,
-        label: loc(d.icdCode),
+        label: neutral(d.icdCode),
       })),
     });
   }
@@ -846,8 +862,8 @@ export class HttpApiClient implements ApiClient {
         justification: String(q.justification ?? ""),
         requestedTtlHours: typeof q.requestedTtlHours === "number" ? q.requestedTtlHours : undefined,
         status: q.status === "UnderReview"
-          ? { kind: "info" as const, label: loc("Under review") }
-          : { kind: "warn" as const, label: loc("Awaiting decision") },
+          ? { kind: "info" as const, label: t("Under review", "قيد المراجعة") }
+          : { kind: "warn" as const, label: t("Awaiting decision", "في انتظار القرار") },
         createdAt: q.createdAt ?? new Date().toISOString(),
       }),
     );
@@ -901,7 +917,7 @@ export class HttpApiClient implements ApiClient {
         return parseOr(zLabOrder, {
           id: o.orderId,
           kind,
-          test: { system: codeSystem(line.codeSystem), code: line.code ?? "—", label: loc(line.description ?? line.code ?? "") },
+          test: { system: codeSystem(line.codeSystem), code: line.code ?? "—", label: neutral(line.description ?? line.code ?? "") },
           patient: { id: o.beneficiaryId, token: caseToken({ beneficiaryId: o.beneficiaryId }) },
           priority: "routine",
           status: orderStatus(o.status),
@@ -964,7 +980,7 @@ export class HttpApiClient implements ApiClient {
       return parseOr(zPrescription, {
         id: p.prescriptionId,
         patient: { id: p.beneficiaryId, token: caseToken({ beneficiaryId: p.beneficiaryId }) },
-        prescriber: { label: loc("Prescriber") },
+        prescriber: { label: t("Prescriber", "الطبيب الواصف") },
         submittedAt: p.submittedAt ?? new Date().toISOString(),
         status: rxStatus(p.status),
         lines: lines.map((l) => ({
@@ -1040,8 +1056,8 @@ export class HttpApiClient implements ApiClient {
       return parseOr(zApprovalItem, {
         id: a.authorizationId,
         patient: { id: a.beneficiaryId, token: caseToken({ beneficiaryId: a.beneficiaryId }) },
-        service: { system: "CPT", code, label: loc(code) },
-        requestedBy: loc("Provider"),
+        service: { system: "CPT", code, label: neutral(code) },
+        requestedBy: t("Provider", "مقدم الخدمة"),
         priority: String(a.priority ?? "routine").toLowerCase(),
         sla: {
           dueAt: a.slaDueAt ?? submittedAt,
@@ -1060,9 +1076,9 @@ export class HttpApiClient implements ApiClient {
     return parseOr(zApprovalReview, {
       id: a?.authorizationId ?? approvalId,
       patient: { id: a?.beneficiaryId ?? "", token: caseToken({ beneficiaryId: a?.beneficiaryId }) },
-      service: { system: "CPT", code: codes[0] ?? "—", label: loc(codes[0] ?? "") },
+      service: { system: "CPT", code: codes[0] ?? "—", label: neutral(codes[0] ?? "") },
       clinicalJustification: a?.emrSummary ?? "clinical context unavailable",
-      supportingCodes: codes.slice(1).map((c) => ({ system: "CPT" as const, code: c, label: loc(c) })),
+      supportingCodes: codes.slice(1).map((c) => ({ system: "CPT" as const, code: c, label: neutral(c) })),
       documents: (a?.documents ?? []).map((d: any) => ({ id: d.id ?? d.documentId ?? "", name: d.name ?? d.title ?? "document" })),
       requestedAmount: "—",
     });
@@ -1158,7 +1174,7 @@ export class HttpApiClient implements ApiClient {
         id: w.key,
         title: bi(w.title),
         chartType: chartTypeByKind[w.kind as number] ?? "bar",
-        series: points(w).map((p: any) => ({ label: loc(p.label), value: Number(p.value ?? 0), display: String(p.value ?? 0) })),
+        series: points(w).map((p: any) => ({ label: neutral(p.label), value: Number(p.value ?? 0), display: String(p.value ?? 0) })),
         dataTable: {
           columns: (w.dataTable?.columns ?? []).map(bi),
           rows: (w.dataTable?.rows ?? []).map((row: any[]) => row.map((c) => String(c))),
@@ -1262,7 +1278,7 @@ export class HttpApiClient implements ApiClient {
         priority: String(c.priority ?? "normal").toLowerCase(),
         status: caseStatus(c.status),
         openedAt: c.openedAt ?? new Date().toISOString(),
-        summary: c.summary ? loc(c.summary) : undefined,
+        summary: c.summary ? neutral(c.summary) : undefined,
       }),
     );
   }
@@ -1281,19 +1297,19 @@ export class HttpApiClient implements ApiClient {
       },
       coverage: {
         status: coverageChip(b.coverage?.status),
-        planName: loc(b.coverage?.policyName ?? "—"),
-        coverageCategory: loc(b.coverage?.coverageCategory ?? "—"),
+        planName: neutral(b.coverage?.policyName ?? "—"),
+        coverageCategory: neutral(b.coverage?.coverageCategory ?? "—"),
         annualCap: b.coverage?.annualLimit != null ? money(b.coverage.annualLimit) : undefined,
         remaining: b.coverage?.remainingLimit != null ? money(b.coverage.remainingLimit) : undefined,
       },
       carePlan: {
-        status: loc(b.carePlan?.status ?? "None"),
-        goals: (b.carePlan?.goals ?? []).map((g: unknown) => loc(g)),
+        status: neutral(b.carePlan?.status ?? "None"),
+        goals: (b.carePlan?.goals ?? []).map((g: unknown) => neutral(g)),
         reviewDue: b.carePlan?.reviewDue ?? undefined,
       },
       appointments: (b.appointments ?? []).map((a: any) => ({
         id: a.appointmentId ?? a.id,
-        clinic: loc(a.clinic ?? "—"),
+        clinic: neutral(a.clinic ?? "—"),
         when: a.when,
         status: coverageChip(a.status),
       })),
@@ -1308,7 +1324,7 @@ export class HttpApiClient implements ApiClient {
           system: (["ICD-10", "CPT", "LOINC", "ATC", "RxNorm"].includes(d.system) ? d.system : "ICD-10") as
             | "ICD-10" | "CPT" | "LOINC" | "ATC" | "RxNorm",
           code: d.code ?? "",
-          label: loc(d.display ?? d.label ?? d.code ?? ""),
+          label: neutral(d.display ?? d.label ?? d.code ?? ""),
         })),
         notes: maskedCount(b.clinical?.notes),
         prescriptions: maskedCount(b.clinical?.prescriptions),
@@ -1323,7 +1339,7 @@ export class HttpApiClient implements ApiClient {
       parseOr(zCoordinationTask, {
         id: t.taskId ?? t.id,
         caseId: t.caseId ?? caseId,
-        title: loc(t.title ?? t.description ?? ""),
+        title: neutral(t.title ?? t.description ?? ""),
         state: String(t.state ?? "todo").toLowerCase().replace(/inprogress/, "in_progress"),
         dueAt: t.dueAt ?? undefined,
         status: "ok",
@@ -1338,7 +1354,7 @@ export class HttpApiClient implements ApiClient {
         id: e.escalationId ?? e.id,
         caseId: e.caseId ?? "",
         caseNo: e.caseNo ?? "",
-        raisedToRole: loc(e.raisedToRole ?? e.targetRole ?? ""),
+        raisedToRole: neutral(e.raisedToRole ?? e.targetRole ?? ""),
         reason: String(e.reason ?? ""),
         status: "ok",
         raisedAt: e.raisedAt ?? e.createdAt ?? new Date().toISOString(),
@@ -1356,8 +1372,8 @@ export class HttpApiClient implements ApiClient {
       to: r?.to ?? "",
       rows: (r?.rows ?? []).map((x: any) => ({
         serviceCode: x.serviceCode,
-        serviceLine: loc(x.serviceLine),
-        coverageCategory: loc(x.coverageCategory),
+        serviceLine: neutral(x.serviceLine),
+        coverageCategory: neutral(x.coverageCategory),
         providerRef: x.providerRef ?? undefined,
         authorizedQty: x.authorizedQty ?? 0,
         deliveredQty: x.deliveredQty ?? 0,
@@ -1375,7 +1391,7 @@ export class HttpApiClient implements ApiClient {
         id: s.id,
         settlementNo: s.settlementNo,
         providerRef: s.providerRef ?? s.providerId ?? "",
-        providerName: loc(s.providerName ?? s.providerRef ?? ""),
+        providerName: neutral(s.providerName ?? s.providerRef ?? ""),
         periodStart: s.periodStart ?? "",
         periodEnd: s.periodEnd ?? "",
         currency: s.currency ?? "EGP",
@@ -1384,7 +1400,7 @@ export class HttpApiClient implements ApiClient {
         state: String(s.state ?? s.status ?? "draft").toLowerCase(),
         lines: (s.lines ?? []).map((l: any) => ({
           serviceCode: l.serviceCode,
-          serviceLine: loc(l.serviceLine),
+          serviceLine: neutral(l.serviceLine),
           deliveredQty: l.deliveredQty ?? 0,
           agreedUnitPrice: money(l.agreedUnitPrice),
           lineTotal: money(l.lineTotal),
@@ -1399,7 +1415,7 @@ export class HttpApiClient implements ApiClient {
     return parseOr(zFinancialSummary, {
       dimension: r?.dimension ?? dimension,
       buckets: buckets.map((b: any) => ({
-        key: loc(b.key),
+        key: neutral(b.key),
         deliveredQty: b.deliveredQty ?? 0,
         spend: money(b.spend),
         sharePercent: Math.round((Number(b.spend ?? 0) / total) * 100),
@@ -1506,7 +1522,7 @@ export class HttpApiClient implements ApiClient {
         role: String(b.role ?? ""),
         scope: String(b.scope ?? "Tenant"),
         tier: String(b.tier ?? ""),
-        status: { kind: "ok", label: loc("Active") },
+        status: { kind: "ok", label: t("Active", "نشط") },
         grantedAt: b.grantedAt ?? new Date().toISOString(),
         reviewDueAt: b.reviewDueAt ?? undefined,
       }),
@@ -1556,8 +1572,8 @@ export class HttpApiClient implements ApiClient {
         id: tn.tenantId ?? tn.id,
         name: String(tn.name ?? ""),
         status: tn.active === false
-          ? { kind: "neu" as const, label: loc("Inactive") }
-          : { kind: "ok" as const, label: loc("Active") },
+          ? { kind: "neu" as const, label: t("Inactive", "غير نشط") }
+          : { kind: "ok" as const, label: t("Active", "نشط") },
         createdAt: tn.createdAt ?? undefined,
       }),
     );
@@ -1575,8 +1591,8 @@ export class HttpApiClient implements ApiClient {
         id: c.campaignId ?? c.id,
         name: String(c.name ?? ""),
         status: String(c.status ?? "").toLowerCase() === "open"
-          ? { kind: "info" as const, label: loc("Open") }
-          : { kind: "neu" as const, label: loc("Closed") },
+          ? { kind: "info" as const, label: t("Open", "مفتوح") }
+          : { kind: "neu" as const, label: t("Closed", "مغلق") },
         minTier: c.minTier ?? undefined,
         dueAt: c.dueAt ?? undefined,
       }),
