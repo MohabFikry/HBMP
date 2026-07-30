@@ -175,10 +175,13 @@ write.MapPost("/providers", async (CreateProvider req, ProviderDbContext db, IAu
         ProviderType = type, Status = ProviderStatus.Suspended, OnboardingState = OnboardingState.Draft,
         CreatedAt = now, UpdatedAt = now,
     };
+    // 24.3 — the provider row and ProviderCreated commit together.
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
     db.Providers.Add(p);
     await db.SaveChangesAsync(ct);
     await audit.EmitAsync(new AuditEventDraft { EntityType = "provider", EntityId = p.ProviderId.ToString(), Action = AuditAction.Create, ActorUserId = me.Principal?.Subject, TenantId = tenant }, ct);
     await outbox.EnqueueAsync("ProviderCreated", "provider.events", new { providerId = p.ProviderId, p.ProviderCode, providerType = p.ProviderType.ToString(), tenantId = tenant }, ct);
+    await tx.CommitAsync(ct);
     return Results.Created($"/api/v1/providers/{p.ProviderId}", ToView(p));
 });
 
@@ -278,10 +281,14 @@ write.MapPost("/contracts/{contractId:guid}/activate", async (Guid contractId, P
     var c = await db.Contracts.Include(x => x.ServiceLines).FirstOrDefaultAsync(x => x.ContractId == contractId && x.TenantId == tenant && !x.IsDeleted, ct);
     if (c is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
     if (c.ServiceLines.Count == 0) return Results.Problem(statusCode: 422, title: "cannot activate a contract with no service lines");
+    // 24.3 — an active contract whose ContractActivated event was lost is a tariff nothing downstream
+    // prices against: claims adjudicate at the wrong rate and nobody sees why.
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
     c.Status = ContractStatus.Active;
     await db.SaveChangesAsync(ct);
     await audit.EmitAsync(new AuditEventDraft { EntityType = "provider_contract", EntityId = c.ContractId.ToString(), Action = AuditAction.StateChange, DecisionOutcome = "Active", ActorUserId = me.Principal?.Subject, TenantId = tenant }, ct);
     await outbox.EnqueueAsync("ContractActivated", "provider.events", new { contractId = c.ContractId, providerId = c.ProviderId, c.ContractNo, tenantId = tenant }, ct);
+    await tx.CommitAsync(ct);
     return Results.Ok(new { c.ContractId, status = c.Status.ToString() });
 });
 

@@ -166,12 +166,16 @@ public static class PractitionerEndpoints
             if (rows.Count == 0)
                 return Results.Problem(statusCode: 404, title: "no active assignment to that branch", type: "https://mersal.foundation/problems/not-found");
 
+            // 24.3 — revoking a practitioner's branch access is an authorization change. If the event is
+            // lost, downstream consumers keep treating them as assigned to a branch they no longer serve.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             foreach (var a in rows) a.Status = "Revoked";
             await db.SaveChangesAsync(ct);
 
             await audit.EmitAsync(Draft(p, AuditAction.Update, me, tenant, "branch-revoked", req.BranchId.ToString()), ct);
             await outbox.EnqueueAsync("PractitionerBranchRevoked", "provider.events",
                 new { practitionerId = id, branchId = req.BranchId, revoked = rows.Count }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(new { p.PractitionerId, req.BranchId, Revoked = rows.Count });
         });
 

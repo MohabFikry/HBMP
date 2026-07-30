@@ -37,8 +37,3 @@ services/policy/Api/EnrollmentEndpoints.cs 3
 services/policy/Api/NoteEndpoints.cs 2
 services/policy/Api/PlanEndpoints.cs 3
 services/policy/Api/PolicyDocumentEndpoints.cs 3
-services/provider/Api/Branches.cs 3
-services/provider/Api/NetworkTiers.cs 5
-services/provider/Api/Onboarding.cs 7
-services/provider/Api/Practitioners.cs 1
-services/provider/Api/Program.cs 2

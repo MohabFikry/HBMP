@@ -60,6 +60,9 @@ public static class NetworkTierEndpoints
                 IsOutOfNetwork = req.IsOutOfNetwork,
                 CreatedAt = now, UpdatedAt = now, CreatedBy = gate.Subject, UpdatedBy = gate.Subject,
             };
+            // 24.3 — the network tier IS the price a claim adjudicates at. A tier row whose event is lost
+            // is a tariff downstream never learns about; an event without the row is worse.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             db.NetworkTiers.Add(tier);
             if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
 
@@ -68,6 +71,7 @@ public static class NetworkTierEndpoints
             {
                 tenantId = tier.TenantId, networkTierId = tier.NetworkTierId, tier.TierCode, tier.Rank, tier.IsOutOfNetwork,
             }, ct);
+            await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/network-tiers/{tier.NetworkTierId}", NetworkTierView.From(tier));
         });
 
@@ -97,6 +101,7 @@ public static class NetworkTierEndpoints
             if (req.Rank is { } rank && rank <= 0)
                 return ProblemResults.Invalid("BAD_RANK", "Rank must be 1 or greater.");
 
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             if (req.NameEn is not null) tier.NameEn = req.NameEn;
             if (req.NameAr is not null) tier.NameAr = req.NameAr;
             if (req.Description is not null) tier.Description = req.Description;
@@ -108,6 +113,7 @@ public static class NetworkTierEndpoints
             await audit.EmitAsync(Draft(tier, AuditAction.Update, gate, "updated"), ct);
             await outbox.EnqueueAsync("NetworkTierUpdated", "provider.events",
                 new { tenantId = tier.TenantId, networkTierId = tier.NetworkTierId, tier.TierCode }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(NetworkTierView.From(tier));
         });
 
@@ -135,6 +141,7 @@ public static class NetworkTierEndpoints
                 return ProblemResults.Conflict("TIER_STILL_ASSIGNED",
                     $"{stillAssigned} assignment(s) still point at this tier; reassign or close them first.");
 
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             tier.Status = NetworkTierStatus.Retired;
             tier.UpdatedAt = clock.GetUtcNow();
             tier.UpdatedBy = gate.Subject;
@@ -143,6 +150,7 @@ public static class NetworkTierEndpoints
             await audit.EmitAsync(Draft(tier, AuditAction.StateChange, gate, "retired", req.Reason), ct);
             await outbox.EnqueueAsync("NetworkTierRetired", "provider.events",
                 new { tenantId = tier.TenantId, networkTierId = tier.NetworkTierId, tier.TierCode }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(NetworkTierView.From(tier));
         });
     }
@@ -179,6 +187,7 @@ public static class NetworkTierEndpoints
                 EffectiveFrom = req.EffectiveFrom, EffectiveTo = req.EffectiveTo,
                 CreatedAt = now, UpdatedAt = now, CreatedBy = gate.Subject, UpdatedBy = gate.Subject,
             };
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             db.NetworkAssignments.Add(assignment);
             if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
 
@@ -195,6 +204,7 @@ public static class NetworkTierEndpoints
                 scope = scope.ToString(), scopeRef = assignment.ScopeRef,
                 effectiveFrom = assignment.EffectiveFrom, effectiveTo = assignment.EffectiveTo,
             }, ct);
+            await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/network-tiers/assignments/{assignment.AssignmentId}",
                 TierAssignmentView.From(assignment, tier.TierCode));
         });
@@ -232,6 +242,9 @@ public static class NetworkTierEndpoints
             if (a.Status != NetworkAssignmentStatus.Active)
                 return Results.Ok(new { a.AssignmentId, outcome = $"Already{a.Status}" });
 
+            // 24.3 — a withdrawn or corrected assignment changes what a claim prices against. The write
+            // and its event commit together; every early return above changed nothing.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             var today = calendar.Today();
             var now = clock.GetUtcNow();
             string outcome;
@@ -281,6 +294,7 @@ public static class NetworkTierEndpoints
                     tenantId = a.TenantId, assignmentId = a.AssignmentId, networkTierId = a.NetworkTierId,
                     providerId = a.ProviderId, outcome, effectiveTo = a.EffectiveTo, reason,
                 }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(new { a.AssignmentId, outcome, effectiveTo = a.EffectiveTo });
         });
     }
