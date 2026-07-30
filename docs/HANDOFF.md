@@ -18,7 +18,7 @@ A phase-by-phase production build of the Mersal Healthcare Benefit Management Pl
 
 ## 3. Progress (commits, newest last)
 ```
-8208331 chore(platform): scaffold monorepo, CI/CD, dev IaC (0.1)
+82667bf chore(platform): scaffold monorepo, CI/CD, dev IaC (0.1)   <- SHA rewritten by the 2026-07-30 history purge (docs/runbooks/history-purge-2026-07-30.md)
 e4ec9dd feat(auth): libs/auth + Keycloak realm-as-code (0.2)
 6be102a feat(audit): audit spine — libs/audit-client + audit-service (0.3)
 f4d3624 feat(authz): libs/authz RBAC+ABAC row+field + break-glass (0.4)
