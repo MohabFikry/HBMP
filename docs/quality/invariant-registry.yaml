@@ -81,10 +81,14 @@ invariants:
       - apps/web/test/a11y-routes.test.tsx::U6 — axe over every route × locale × theme
       - apps/web/test/patient-profile-sections.test.tsx::is axe clean in Arabic RTL
     notes: >-
-      PARTIALLY PROVEN. Gate 4.1 found the nine policy-family screens and CallCentre have no fixture path,
-      so the axe sweep exercises only their ERROR state — a pass that measures nothing. Gate 4.2: contrast
-      is disabled under jsdom and needs the Playwright job. Gate 4.3: HttpApiClient sets the Arabic label
-      to the English string at ~45 sites, so live-mode Arabic is untested English.
+      Gate 4 closed all three holes, and the first one was NOT what the audit predicted. It guessed nine
+      policy-family screens plus CallCentre were being audited in their ERROR state; measured, no route
+      renders an error under test — instead the sweep waited for <main> to EXIST, which the shell satisfies
+      before any lazy route resolves, so 55 of 112 routes handed axe an EMPTY element. It waits for content
+      now and asserts it, and all 112 routes x 2 languages x 2 themes pass on real content. Contrast is
+      still disabled under jsdom by necessity (no layout, no paint) and is checked by the blocking
+      Playwright job, which had the identical empty-wait bug and now has the same fix. The Arabic labels
+      were ten hardcoded English literals, not ~45, split into neutral() and t(en, ar) with a guard test.
 
   - id: INV-TENANT-ISOLATION
     statement: >-
@@ -299,7 +303,17 @@ invariants:
       that first saw it has died.
     source: CLAUDE.md § Events and consistency; phase 22 Gate 3.4 (durable IProcessedEventStore)
     severity: Critical
-    tests: []
+    # Proven against the DURABLE store, the way the invariant is worded: a SECOND store instance on a fresh
+    # DbContext must refuse an id the first one claimed. Reusing one instance would prove only that a
+    # dictionary works. The registration test is the other half — AddHbmpEvents still falls back to
+    # InMemoryProcessedEventStore (a ConcurrentDictionary that empties on restart), so the guard names the
+    # services that consume events and requires each to have registered a durable one. The failure it
+    # prevents is an omission: a new consumer inheriting the fallback by writing no line at all.
+    tests:
+      - Mersal.Identity.Tests.ProcessedEventDurabilityTests.A_redelivered_event_is_refused_by_a_process_that_never_saw_the_first_delivery
+      - Mersal.Identity.Tests.ProcessedEventDurabilityTests.Two_consumers_racing_one_redelivery_yield_exactly_one_winner
+      - Mersal.Identity.Tests.ProcessedEventDurabilityTests.An_unrelated_event_is_still_allowed_through
+      - Mersal.Architecture.Tests.ProcessedEventStoreRegistrationTests.Every_service_that_consumes_events_registers_a_durable_dedupe_store
 
   - id: INV-ELIGIBILITY-MATRIX
     statement: >-

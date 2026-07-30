@@ -31,6 +31,14 @@ namespace Mersal.Policy.Tests;
 /// vocabulary the consumer reads — the field names below are the contract with
 /// <c>ProjectionUpdater.OnCoverageChanged</c>. Env-gated on <c>POLICY_TEST_DB</c>.</para>
 /// </summary>
+/// <remarks>
+/// [Collection("policy-db")] is load-bearing, not decoration. Teardown lifts the append-only trigger on
+/// enrollment_event for the duration of its DELETEs and restores it in a finally — and a sibling class doing
+/// the same thing in parallel re-enables it mid-teardown, so the DELETE meets a trigger that was supposed to
+/// be off and dies with "enrollment_event is append-only". It passed locally and failed in CI, which is the
+/// signature of a scheduling race rather than a logic error.
+/// </remarks>
+[Collection("policy-db")]
 public class EnrollmentPublishesCoverageTests
 {
     private static readonly string? Db = Environment.GetEnvironmentVariable("POLICY_TEST_DB");

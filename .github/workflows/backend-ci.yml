@@ -200,9 +200,10 @@ jobs:
       # Coverage is a proxy; this is the thing the proxy stands for. Deleting or [Skip]-ing an invariant
       # test now fails the build with the invariant's own sentence in the error.
       #
-      # --allow-unproven while Gate 3 fills the three known gaps (outbox-survives-crash,
-      # dedupe-survives-restart, eligibility-matrix). Drop the flag when they are covered; leaving it on
-      # permanently would turn "unproven" into a category nobody ever clears.
+      # It ran with --allow-unproven while Gate 3 filled the three known gaps — outbox-survives-crash,
+      # dedupe-survives-restart and eligibility-matrix. All three are now covered and the flag is GONE,
+      # which was always the point: leaving it on permanently would have turned "unproven" into a category
+      # nobody ever clears. An entry with tests: [] is a red build from here.
       - name: "gate: invariant registry"
         id: gate_invariant_registry
         if: always()
@@ -210,7 +211,9 @@ jobs:
         run: |
           python3 -m pip install --quiet --disable-pip-version-check pyyaml || true
           python3 tools/ci/check-invariant-registry.py --selftest
-          python3 tools/ci/check-invariant-registry.py --allow-unproven
+          # 24.3 EXIT CRITERION: --allow-unproven dropped. Every invariant in the registry now names a
+          # test that exists and runs, so an entry with tests: [] is a red build from here on.
+          python3 tools/ci/check-invariant-registry.py
 
       # 24.1.3 — floors ratchet up. A decrease needs an ADR that exists and names the module.
       - name: "gate: coverage-floor monotonicity"
