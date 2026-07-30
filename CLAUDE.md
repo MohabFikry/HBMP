@@ -110,3 +110,9 @@ Each service: `Api/ Domain/ Infrastructure/ Tests/` + `README.md` (template in `
 - .NET 8 SDK is installed **user-local** at `~/.dotnet` (no system install). Ensure `PATH` includes `~/.dotnet` and set `DOTNET_ROOT=~/.dotnet`, or use `./dotnet.sh` if provided at repo root.
 - Docker is required to run the Tier 1 infra (`infra/compose`) and needs root to install — see `docs/adr/0003-deployment-tier-strategy.md`.
 - Local Postgres 17 is available for quick DB work; the canonical dev DB is the Compose `postgres:16`.
+- **Running the DB-gated tests: `./dotnet.sh test --with-db <target>`.** ~100 integration, concurrency and RLS
+  tests are gated on `Skip.If(<SERVICE>_TEST_DB is null)`, so a plain `dotnet test` skips every one of them and
+  still reports green — the consume/dispense concurrency proofs, the RLS isolation suites and the break-glass
+  lifecycle among them. `--with-db` points them at the Compose Postgres (`:55432`) using
+  `tools/ci/print-test-db-env.sh`, the same variable list CI exports. It fails loudly if the DB is unreachable
+  rather than letting a run skip everything quietly. **A green suite is only meaningful with this flag.**
