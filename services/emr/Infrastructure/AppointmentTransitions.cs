@@ -53,6 +53,11 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
         appt.Status = AppointmentStatus.CheckedIn;
         appt.UpdatedAt = now;
         appt.UpdatedBy = actor;
+        // Backfill the name for an appointment booked before 0013 carried one. `??=` deliberately: the name
+        // the appointment was BOOKED under wins, because that is what the patient was told and what the desk's
+        // list has been showing all morning — check-in must not quietly rewrite it.
+        if (string.IsNullOrWhiteSpace(appt.BeneficiaryName) && !string.IsNullOrWhiteSpace(displayName))
+            appt.BeneficiaryName = displayName.Trim();
         ApplyIfMatch(appt, ifMatch);
         db.Set<QueueTicket>().Add(new QueueTicket
         {

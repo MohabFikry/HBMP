@@ -374,6 +374,9 @@ public static class AppointmentsModule
                 ScheduledEnd = slot?.SlotEnd ?? req.ScheduledEnd ?? now.AddMinutes(15),
                 ReferralRef = req.ReferralRef, OriginEncounterId = req.OriginEncounterId,
                 Note = note,
+                // Trimmed to null when blank: an empty string here would make the board render an empty name
+                // cell for a patient who does have one, which reads as data loss rather than as absence.
+                BeneficiaryName = string.IsNullOrWhiteSpace(req.BeneficiaryName) ? null : req.BeneficiaryName.Trim(),
                 IdempotencyKey = idem, CreatedBy = actor, CreatedAt = now, UpdatedAt = now,
             };
 
@@ -476,12 +479,12 @@ public static class AppointmentsModule
             }
             var rows = await q.OrderBy(a => a.ScheduledStart).Take(200).ToListAsync(ct);
 
-            // 14.5 — put the patient's NAME on the rows emr already knows one for. The queue ticket written
-            // at CHECK-IN captured it (CheckInRequest.DisplayName), so an arrived patient has a name here and
-            // a merely-booked one does not. That asymmetry is honest: emr holds no beneficiary demographics,
-            // and fetching them from a sibling to fill the gap is the aggregation shape the platform forbids.
-            // The reception dashboard shows names for today's VISITS — people who have arrived — which is
-            // exactly the set this covers.
+            // 14.5 — the patient's NAME on every row that has one.
+            //
+            // Two sources, in order: the appointment's own `beneficiary_name`, captured at BOOKING (0013),
+            // and — for rows booked before that column existed — the queue ticket written at check-in. emr
+            // holds no beneficiary demographics and never fetches them from a sibling to fill a gap; both
+            // sources are values an operator already had in hand and handed over.
             var ids = rows.Select(a => a.AppointmentId).ToList();
             var names = await db.Set<QueueTicket>().AsNoTracking()
                 .Where(t => ids.Contains(t.AppointmentId) && t.DisplayName != null)
@@ -494,7 +497,7 @@ public static class AppointmentsModule
             // The board's no-show button comes from the server's clock, not the browser's.
             var asOf = clock.GetUtcNow();
             return Results.Ok(rows.Select(a =>
-                AppointmentResponse.From(a, asOf, nameByAppt.GetValueOrDefault(a.AppointmentId))));
+                AppointmentResponse.From(a, asOf, a.BeneficiaryName ?? nameByAppt.GetValueOrDefault(a.AppointmentId))));
         });
 
         // GET /appointments/summary — the three counts the reception dashboard's cards show.
@@ -598,6 +601,48 @@ public static class AppointmentsModule
             await PromotionSideEffects(result, outbox, ct);
             await Record(idem, key, "cancel", id, 200, db, ct);
             return Results.Ok(AppointmentResponse.From(result.Appointment!));
+        });
+
+        // POST /appointments/{id}/note — amend the general/administrative booking note.
+        //
+        // On the RESERVE group, not the desk-only one: the call centre writes these notes and must be able to
+        // correct one it took down wrong mid-call. It is not a clinical write and never becomes one — the same
+        // cap and the same refusal-rather-than-truncation as at booking (AppointmentNote, migration 0011).
+        //
+        // The edit lands in emr.appointment_history through the row trigger, and AppointmentTimeline emits it
+        // as a `NoteEdited` step — so "who changed this and when" is answerable, which is the whole reason an
+        // edit is allowed at all rather than requiring a cancel-and-rebook.
+        reserve.MapPost("/appointments/{id:guid}/note", async (
+            Guid id, UpdateBookingNoteRequest req, EmrDbContext db, IAuditClient audit,
+            IHbmpPrincipalAccessor me, BranchScopeState branch, TimeProvider clock, CancellationToken ct) =>
+        {
+            if (await AppointmentEndpointsShared.DenyIfOutsideBranchAsync(id, branch, db, ct) is { } outOfScope)
+                return outOfScope;
+
+            var note = AppointmentNote.Normalize(req.Note);
+            if (AppointmentNote.Refuse(note) is { } problem)
+                return Results.Problem(statusCode: 400, title: "note-too-long",
+                    type: AppointmentNote.TooLongProblemType, detail: problem);
+
+            var appt = await db.Appointments.FirstOrDefaultAsync(a => a.AppointmentId == id, ct);
+            if (appt is null) return Results.Problem(statusCode: 404, title: "Not Found",
+                type: "https://mersal.foundation/problems/not-found");
+
+            appt.Note = note;
+            appt.UpdatedAt = clock.GetUtcNow();
+            appt.UpdatedBy = me.Principal?.Subject;
+            await db.SaveChangesAsync(ct);
+
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "appointment", EntityId = id.ToString(), Action = AuditAction.Update,
+                ActorUserId = me.Principal?.Subject, DecisionOutcome = "ApptNoteEdited",
+                // Presence, never the text — the same rule as at booking. Free text an operator typed must not
+                // be copied into the hash-chained store, which cannot be corrected afterwards.
+                AfterState = $"{{\"hasNote\":{(note is null ? "false" : "true")}}}",
+            }, ct);
+
+            return Results.Ok(AppointmentResponse.From(appt, clock.GetUtcNow(), appt.BeneficiaryName));
         });
 
         // POST /appointments/{id}/no-show — guarded; reporting flag + backfill (US-022).

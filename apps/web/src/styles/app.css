@@ -1808,3 +1808,57 @@ iframe.ben-doc-preview { block-size: min(70vh, 640px); }
   border-radius: var(--r-sm);
   background: var(--surface-1);
 }
+
+/* The dashboard's day selector: arrows either side of a centred label. `justify-content: center` on the row
+   with the label allowed to grow keeps the label optically centred whether it reads "Today" or a full date,
+   which a plain flex row does not. */
+.dash-daynav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp2);
+  margin-block-end: var(--sp3);
+}
+.dash-daynav-label {
+  min-inline-size: 12ch;
+  text-align: center;
+  font-size: var(--fs-subhead);
+}
+
+/* The day label is a button now, so it must not inherit button chrome — it reads as the heading it is. */
+button.dash-daynav-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 6px var(--sp2);
+  border-radius: var(--r-sm);
+}
+button.dash-daynav-label:hover { background: var(--accent-tint); }
+button.dash-daynav-label:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+button.dash-daynav-label svg { width: 14px; height: 14px; opacity: 0.7; }
+
+/* Tightened: the nav sat a full --sp3 below a page header that already carries its own bottom margin, so the
+   gap above the cards read as an empty band. */
+.dash-daynav { margin-block: calc(var(--sp3) * -1) var(--sp3); }
+
+/* Fixed height + scroll. A range that stretches to cover a 01:33 and a 21:00 is twenty-odd bands, and an
+   unbounded schedule pushes everything below it off the page. */
+.dash-day {
+  max-block-size: 420px;
+  overflow-y: auto;
+}
+
+/* Compact variant for the dashboard's jump-to-day picker. The booking calendar is the primary control on its
+   screen and earns its size; this one is a navigation aid inside a dialog, and at full scale it dominated a
+   dialog whose only other content is one button. */
+.bk-cal-sm { padding: var(--sp2); }
+.bk-cal-sm .bk-cal-day { min-block-size: 30px; }
+.bk-cal-sm .bk-cal-num { font-size: 12px; }
+.bk-cal-sm .bk-cal-month { font-size: var(--fs-caption); }
+.bk-cal-sm .bk-cal-weekdays span { font-size: 10px; }

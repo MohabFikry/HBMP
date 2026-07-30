@@ -529,7 +529,31 @@ html[dir="rtl"] .mrs-search input {
 .mrs-chipset {
   display: flex;
   flex-wrap: wrap;
+  /* Bottom-aligned, because a group's `extra` (the date range) is a label-over-control pair that is taller
+     than a chip. Without this the chips centre themselves against the tallest item and drift off the row. */
+  align-items: flex-end;
   gap: var(--sp2);
+}
+/*
+  A chip is sized by its LABEL and nothing else.
+
+  Once the custom-range fields moved inside the chipset, flex started handing them space and squeezing the
+  chips to fit — "Today" collapsed into a circle with its own text wrapped. A filter chip must never shrink
+  or wrap: it is a fixed vocabulary the operator recognises by shape.
+*/
+.mrs-filterchip {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* Caller-supplied fields inside a group are sized rather than left to sprawl: `.mrs-field` is display:block
+   with a 100%-wide control, so a pair of date inputs stretched to fill the row and pushed the second one
+   past the card's edge. */
+.mrs-chipset .mrs-field {
+  inline-size: 168px;
+  flex: 0 0 auto;
+}
+.mrs-chipset .mrs-field .mrs-control {
+  margin-top: 6px;
 }
 .mrs-filterchip {
   display: inline-flex;

@@ -78,6 +78,16 @@ export const zAppointmentRow = z.object({
    * The flag exists so the desk can act; it is the whole reconciliation.
    */
   needsReassignment: z.boolean().optional(),
+  /**
+   * The clinic session this appointment sits in.
+   *
+   * Carried so the edit dialog can load that session's OTHER open times without a second lookup — the board
+   * already knows them, and asking again per row would be a request per open dialog. Nullish because a
+   * fixture or an older service may not supply them, in which case the dialog says the appointment cannot be
+   * moved from here rather than silently hiding the option.
+   */
+  providerId: zId.nullish(),
+  locationId: zId.nullish(),
 });
 export type AppointmentRow = z.infer<typeof zAppointmentRow>;
 
@@ -123,6 +133,12 @@ export const zBookingRequest = z.object({
    * an operator write past it and lose the tail.
    */
   note: z.string().max(500).optional(),
+  /**
+   * The patient's display name, sent so every board row can show WHO the appointment is for rather than a
+   * masked token. Reception and the call centre are entitled to it and already have it on screen when they
+   * book; emr stores it as a minimum-necessary snapshot and never fetches demographics from a sibling.
+   */
+  beneficiaryName: z.string().optional(),
 });
 export type BookingRequest = z.infer<typeof zBookingRequest>;
 

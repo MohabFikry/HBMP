@@ -118,6 +118,8 @@ export interface ApiClient {
     filter?: "all" | "booked" | "checked-in",
     mine?: boolean,
     range?: { from: string; to: string },
+    /** Cross-branch callers only (the call centre). A branch-scoped desk's own branch is server-resolved. */
+    branchId?: string,
   ): Promise<AppointmentRow[]>;
   /** `rowVersion` (opt-in): the value read on the board, echoed as `If-Match` so a stale check-in loses to a
    * concurrent transition with 412 instead of double-acting. Omit to check in without the guard. */
@@ -125,6 +127,22 @@ export interface ApiClient {
   /** Mark a booked appointment as a no-show (US-022). Guarded server-side by the grace period, so call this
    * only for a row whose `noShowEligible` is true; `rowVersion` is echoed as `If-Match`. */
   noShow(appointmentId: string, rowVersion?: number): Promise<CheckInResult>;
+  /**
+   * Cancel an appointment, releasing its slot and promoting any waitlist entry behind it.
+   *
+   * A REASON is required — not by the schema but by us. A cancellation with no reason is unanswerable when
+   * the patient rings back asking why, and it is the field every no-show/rebook report is grouped by.
+   * `rowVersion` is echoed as `If-Match`, so cancelling a row someone else has already moved loses with 412
+   * rather than silently cancelling a different state than the one on screen.
+   */
+  cancelAppointment(appointmentId: string, reason: string, rowVersion?: number): Promise<CheckInResult>;
+  /**
+   * Amend the general/administrative booking note. Captured in the appointment's timeline as a `NoteEdited`
+   * step, which is the reason an edit is allowed at all rather than forcing a cancel-and-rebook.
+   */
+  updateAppointmentNote(appointmentId: string, note: string): Promise<void>;
+  /** Move an appointment onto a different slot. Atomic release-and-hold; a taken slot answers 409. */
+  rescheduleAppointment(appointmentId: string, newSlotId: string, rowVersion?: number): Promise<void>;
   /** How this appointment reached its current status — booked, checked in, no-showed, cancelled — with who and
    * when. Operational history from emr, NOT the audit store (which needs audit:read). */
   appointmentTimeline(appointmentId: string): Promise<TimelineStep[]>;

@@ -19,6 +19,15 @@ export interface FilterGroup {
   /** Currently selected value. `null` means "no filter" and renders no chip pressed. */
   value: string | null;
   onChange: (value: string | null) => void;
+  /**
+   * Extra controls belonging to THIS group, rendered immediately after its chips.
+   *
+   * The appointments board's custom date range is the case that needed it: those two fields exist only
+   * because the "Custom range" chip was pressed, and living in the toolbar's trailing slot left them at the
+   * far end of the bar, visually detached from the control that revealed them. A follow-up belongs next to
+   * what it follows.
+   */
+  extra?: ReactNode;
 }
 
 export interface TableToolbarProps {
@@ -107,6 +116,8 @@ export function TableToolbar({ search, filters = [], children, className }: Tabl
                 </button>
               );
             })}
+            {/* Inside the chipset so it wraps with the chips and shares their baseline. */}
+            {group.extra}
           </div>
         </fieldset>
       ))}

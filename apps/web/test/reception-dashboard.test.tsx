@@ -15,7 +15,7 @@ import { ReceptionDashboard } from "../src/screens/ReceptionDashboard";
  * provider-service rather than expected from emr.
  */
 describe("Reception dashboard", () => {
-  const visitsTable = () => within(screen.getByRole("table", { name: /today's visits/i }));
+  const visitsTable = () => within(screen.getByRole("table", { name: /^visits$/i }));
 
   it("takes the card figures from the server, not from counting the board", async () => {
     const counts = vi.fn().mockResolvedValue({ total: 137, checkedIn: 12, noShow: 4 });
@@ -86,5 +86,63 @@ describe("Reception dashboard", () => {
     const { container } = renderNode(<ReceptionDashboard />);
     await waitFor(() => expect(visitsTable().getByText("Amal Hassan")).toBeInTheDocument());
     expect(await axe(container, { rules: { "color-contrast": { enabled: false } } })).toHaveNoViolations();
+  });
+
+  /**
+   * The day selector. Today by default — that is what the desk opens the screen for — but "who is in
+   * tomorrow?" is asked constantly and previously meant leaving this screen to answer.
+   */
+  it("shows TODAY by default, named rather than dated", async () => {
+    renderNode(<ReceptionDashboard />);
+    // "Today" is how the desk refers to it; a date where "Today" belongs makes the reader stop and work out
+    // whether it is the current one.
+    expect(await screen.findByText(/^today$/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /back to today/i })).not.toBeInTheDocument();
+  });
+
+  it("steps to another day, shows its DATE, and offers a way back inside the picker", async () => {
+    const user = userEvent.setup();
+    const api = new DevApiClient({ latencyMs: 0 });
+    const counts = vi.fn().mockResolvedValue({ total: 0, checkedIn: 0, noShow: 0 });
+    (api as unknown as { appointmentCounts: unknown }).appointmentCounts = counts;
+    const board = vi.fn().mockResolvedValue([]);
+    (api as unknown as { appointments: unknown }).appointments = board;
+    renderNode(<ReceptionDashboard />, api as unknown as ApiClient);
+    await waitFor(() => expect(counts).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole("button", { name: /next day/i }));
+
+    // Off today, the label becomes the date — and every figure on the page re-reads for that day, so the
+    // cards, the visits table and the schedule cannot disagree about which day they describe.
+    await waitFor(() => expect(counts).toHaveBeenCalledTimes(2));
+    expect(board).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/^today$/i)).not.toBeInTheDocument();
+
+    // The way back lives INSIDE the month picker now, reached by clicking the label. A standalone button only
+    // appeared once you had navigated away, so the one moment you needed it was the one moment its position
+    // was unfamiliar — and it did nothing else.
+    await user.click(screen.getByRole("button", { name: /choose a day/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("button", { name: /^today$/i })).toBeInTheDocument();
+  });
+
+  it("asks the server for the SAME day across the cards and the board", async () => {
+    const user = userEvent.setup();
+    const api = new DevApiClient({ latencyMs: 0 });
+    const counts = vi.fn().mockResolvedValue({ total: 0, checkedIn: 0, noShow: 0 });
+    const board = vi.fn().mockResolvedValue([]);
+    (api as unknown as { appointmentCounts: unknown }).appointmentCounts = counts;
+    (api as unknown as { appointments: unknown }).appointments = board;
+    renderNode(<ReceptionDashboard />, api as unknown as ApiClient);
+    await waitFor(() => expect(counts).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole("button", { name: /next day/i }));
+    await waitFor(() => expect(counts).toHaveBeenCalledTimes(2));
+
+    // One piece of state drives both reads. Two clocks would drift the moment either call was slow.
+    const askedForByCards = counts.mock.calls[1][0] as string;
+    const askedForByBoard = (board.mock.calls[1][2] as { from: string; to: string });
+    expect(askedForByBoard.from).toBe(askedForByCards);
+    expect(askedForByBoard.to).toBe(askedForByCards);
   });
 });

@@ -63,6 +63,11 @@ export const L = {
   ccBook: { en: "Book", ar: "حجز" },
   ccReschedule: { en: "Reschedule", ar: "إعادة جدولة" },
   ccCancel: { en: "Cancel appointment", ar: "إلغاء الموعد" },
+  ccCancelConfirm: {
+    en: "The time is released for someone else and anyone on the waitlist may be offered it. Tell the caller before you confirm.",
+    ar: "سيُتاح الوقت لشخص آخر وقد يُعرض على من في قائمة الانتظار. أبلغ المتصل قبل التأكيد.",
+  },
+  ccKeep: { en: "Keep it", ar: "الاحتفاظ به" },
   ccCancelReason: { en: "Cancellation reason", ar: "سبب الإلغاء" },
   ccCancelReasonRequired: { en: "A cancellation reason is required.", ar: "سبب الإلغاء مطلوب." },
   ccSlotTaken: { en: "That slot was just taken — pick another.", ar: "تم حجز هذا الموعد للتو — اختر موعدًا آخر." },

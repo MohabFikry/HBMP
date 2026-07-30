@@ -51,6 +51,13 @@ public sealed class Appointment
     /// schema, because the API is not the only writer a table outlives.</para></summary>
     public string? Note { get; set; }
 
+    /// <summary>The patient's display name, captured at BOOKING from the request (0013).
+    /// <para>Minimum-necessary and a SNAPSHOT: a display name only, and deliberately not kept in sync with
+    /// patient-service — it is what the appointment was booked under, and a name that silently changed
+    /// underneath would make the desk's list disagree with the card the patient is holding. emr holds no
+    /// demographics and never fetches this from a sibling; the operator already has it when they book.</para></summary>
+    public string? BeneficiaryName { get; set; }
+
     /// <summary>Set when the assigned practitioner stopped serving this appointment's branch (14.5,
     /// <c>PractitionerBranchRevoked</c>). The appointment is NOT cancelled and NOT reassigned — both are
     /// decisions a background consumer must not make on a patient's behalf — it is marked so reception can

@@ -32,6 +32,12 @@ const STATUS_CHIP: Record<string, { kind: "ok" | "info" | "warn" | "neu"; label:
   Completed: { kind: "neu", label: { en: "Completed", ar: "مكتمل" } },
   NoShow: { kind: "warn", label: { en: "No-show", ar: "لم يحضر" } },
   Cancelled: { kind: "neu", label: { en: "Cancelled", ar: "ملغى" } },
+  // 14.5 — EDITS, not states. The timeline used to collapse purely on status, so a reschedule left no trace
+  // and the desk could not answer "why is this at 3pm when I was told 11?". These two are pseudo-statuses
+  // emitted by AppointmentTimeline; they describe an act rather than a state the row was ever in, which is
+  // why they read as verbs.
+  Rescheduled: { kind: "info", label: { en: "Moved to a new time", ar: "نُقل إلى وقت جديد" } },
+  NoteEdited: { kind: "neu", label: { en: "Note edited", ar: "تم تعديل الملاحظة" } },
 };
 
 /**

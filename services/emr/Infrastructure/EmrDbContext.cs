@@ -45,6 +45,7 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             // model and the schema must not be able to disagree about what fits.
             e.Property(x => x.Note).HasColumnName("note").HasMaxLength(AppointmentNote.MaxLength);
             e.Property(x => x.ReassignmentNeededAt).HasColumnName("reassignment_needed_at");   // 14.5
+            e.Property(x => x.BeneficiaryName).HasColumnName("beneficiary_name");               // 14.5 (0013)
             e.HasIndex(x => new { x.BranchId, x.ScheduledStart });
             e.HasIndex(x => new { x.DoctorId, x.ScheduledStart });
         });

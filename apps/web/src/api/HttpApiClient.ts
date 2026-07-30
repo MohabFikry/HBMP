@@ -437,6 +437,7 @@ export class HttpApiClient implements ApiClient {
     filter: "all" | "booked" | "checked-in" = "all",
     mine = false,
     range?: { from: string; to: string },
+    branchId?: string,
   ) {
     const status = filter === "booked" ? "Booked" : filter === "checked-in" ? "CheckedIn" : "";
     const qs = new URLSearchParams();
@@ -444,6 +445,9 @@ export class HttpApiClient implements ApiClient {
     // Sent as from/to rather than a single date: the server expands each end to its own Cairo civil day, so
     // the last day of the range includes its evening clinic.
     if (range) { qs.set("from", range.from); qs.set("to", range.to); }
+    // Cross-branch callers only. A branch-scoped desk's active branch is resolved server-side and naming
+    // another is refused, so sending one from reception could only ever produce a 403.
+    if (branchId) qs.set("branchId", branchId);
     // ?mine is resolved from the TOKEN's subject server-side — the caller cannot ask for another doctor's list.
     if (mine) qs.set("mine", "true");
     const r = (await getRaw(`/appointments${qs.toString() ? `?${qs}` : ""}`)) as any[];
@@ -485,6 +489,8 @@ export class HttpApiClient implements ApiClient {
         beneficiaryName: a.beneficiaryName ?? null,
         doctorId: a.doctorId ?? null,
         needsReassignment: a.needsReassignment === true,
+        providerId: a.providerId ?? null,
+        locationId: a.locationId ?? null,
       }),
     );
   }
@@ -544,6 +550,28 @@ export class HttpApiClient implements ApiClient {
       rowVersion !== undefined ? { ifMatch: rowVersion } : undefined,
     )) as any;
     return parseOr(zCheckInResult, { id: r?.appointmentId ?? appointmentId, status: apptStatusChip(r?.status ?? "NoShow") });
+  }
+
+  async cancelAppointment(appointmentId: string, reason: string, rowVersion?: number) {
+    const r = (await postRaw(
+      `/appointments/${encodeURIComponent(appointmentId)}/cancel`,
+      { reason },
+      crypto.randomUUID(),
+      rowVersion !== undefined ? { ifMatch: rowVersion } : undefined,
+    )) as any;
+    return parseOr(zCheckInResult, { id: r?.appointmentId ?? appointmentId, status: apptStatusChip(r?.status ?? "Cancelled") });
+  }
+
+  async updateAppointmentNote(appointmentId: string, note: string) {
+    await postRaw(`/appointments/${encodeURIComponent(appointmentId)}/note`, { note });
+  }
+  async rescheduleAppointment(appointmentId: string, newSlotId: string, rowVersion?: number) {
+    await postRaw(
+      `/appointments/${encodeURIComponent(appointmentId)}/reschedule`,
+      { newSlotId },
+      crypto.randomUUID(),
+      rowVersion !== undefined ? { ifMatch: rowVersion } : undefined,
+    );
   }
 
   async appointmentTimeline(appointmentId: string) {
@@ -624,6 +652,7 @@ export class HttpApiClient implements ApiClient {
         // there is one, and an explicit null would overwrite that with "no doctor".
         ...(input.doctorId ? { doctorId: input.doctorId } : {}),
         ...(input.note ? { note: input.note } : {}),
+        ...(input.beneficiaryName ? { beneficiaryName: input.beneficiaryName } : {}),
         joinWaitlistIfFull: false,
       },
       crypto.randomUUID(),

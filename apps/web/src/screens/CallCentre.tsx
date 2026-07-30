@@ -1,7 +1,7 @@
 import { memberStatus, callOutcomeLabel, identifierTypeLabel, appointmentTypeLabel } from "./statusLabels";
 import { useFormat } from "../i18n/useFormat";
 import { useCallback, useEffect, useState } from "react";
-import { Button, Card, Icon, InputField, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, Icon, InputField, Modal, StatusChip, useTheme } from "@mersal/design-system";
 import { L } from "../i18n/strings";
 import { API_BASE } from "../config";
 import { getToken } from "../auth/tokenStore";
@@ -469,25 +469,56 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
                           <Button variant="ghost" onClick={() => reschedule(a.appointmentId)}>{t(L.ccReschedule)}</Button>
                         )}
                         {a.canCancel && (
-                          cancelFor === a.appointmentId ? (
-                            <span className="cc-cancel">
-                              <label>
-                                {t(L.ccCancelReason)}
-                                <select value={cancelReason} onChange={(e) => setCancelReason(e.target.value)}>
-                                  <option value="">—</option>
-                                  {CANCEL_REASONS.map((code) => <option key={code} value={code}>{t(CANCEL_REASON_LABELS[code])}</option>)}
-                                </select>
-                              </label>
-                              <Button variant="danger" onClick={() => cancel(a.appointmentId)}>{t(L.ccCancel)}</Button>
-                              {cancelError && <span role="alert" className="cc-error">{t(L.ccCancelReasonRequired)}</span>}
-                            </span>
-                          ) : (
-                            <Button variant="ghost" onClick={() => { setCancelFor(a.appointmentId); setCancelReason(""); setCancelError(false); }}>{t(L.ccCancel)}</Button>
-                          )
+                          <Button
+                            variant="ghost"
+                            aria-label={`${t(L.ccCancel)} — ${fmt.date(a.scheduledStart)}`}
+                            leadingIcon={<Icon name="cross" />}
+                            onClick={() => { setCancelFor(a.appointmentId); setCancelReason(""); setCancelError(false); }}
+                          >
+                            {t(L.ccCancel)}
+                          </Button>
                         )}
                       </li>
                     ))}
                   </ul>
+                  {/*
+                    ONE confirmation dialog for the list, opened by whichever row was clicked.
+
+                    Cancelling releases the time and may hand it straight to someone on the waitlist. It is
+                    not undoable by clicking again, and the member usually finds out only when they arrive —
+                    so it gets a deliberate confirm rather than a second click in a dense list. The reason is
+                    a CODE here, not free text: the call centre's cancellations are what the no-show and
+                    rebook reports group by, and a typed sentence cannot be counted.
+                  */}
+                  <Modal
+                    open={cancelFor !== null}
+                    onOpenChange={(open: boolean) => { if (!open) setCancelFor(null); }}
+                    title={t(L.ccCancel)}
+                    description={t(L.ccCancelConfirm)}
+                    footer={
+                      <>
+                        {/* "Keep it", not "Cancel": a Cancel button on a cancellation dialog is read by half
+                            of operators as "cancel the appointment". */}
+                        <Button variant="secondary" onClick={() => setCancelFor(null)}>{t(L.ccKeep)}</Button>
+                        <Button variant="danger" onClick={() => cancelFor && cancel(cancelFor)}>{t(L.ccCancel)}</Button>
+                      </>
+                    }
+                  >
+                    <div className="cc-field">
+                      <span id="cc-cancel-reason">{t(L.ccCancelReason)}</span>
+                      <select
+                        aria-labelledby="cc-cancel-reason"
+                        className="mrs-control"
+                        value={cancelReason}
+                        onChange={(e) => setCancelReason(e.target.value)}
+                      >
+                        <option value="">—</option>
+                        {CANCEL_REASONS.map((code) => <option key={code} value={code}>{t(CANCEL_REASON_LABELS[code])}</option>)}
+                      </select>
+                      {cancelError && <span role="alert" className="cc-error">{t(L.ccCancelReasonRequired)}</span>}
+                    </div>
+                  </Modal>
+
                   {/* Booking is an ACTION ON THE FILE: the agent is already looking at this member's
                       appointments, so "New appointment" belongs here rather than on another screen. The panel
                       itself is shared with the standalone Book-appointment journey, so the branch → clinic →

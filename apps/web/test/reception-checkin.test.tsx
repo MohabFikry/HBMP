@@ -53,6 +53,11 @@ function Where() {
 function fakeApi(over: Partial<ApiClient> = {}): ApiClient {
   return {
     appointments: vi.fn().mockResolvedValue([booked(42)]),
+    // 14.5 — the board joins doctor + specialty in from provider-service. Empty here: these cases are about
+    // the desk's TRANSITIONS, and a doctor directory would only add noise to them.
+    practitioners: vi.fn().mockResolvedValue([]),
+    specialties: vi.fn().mockResolvedValue([]),
+    cancelAppointment: vi.fn().mockResolvedValue({ id: "appt-1", status: { kind: "neu", label: { en: "Cancelled", ar: "ملغى" } } }),
     checkIn: vi.fn().mockResolvedValue({ id: "appt-1", status: { kind: "ok", label: { en: "Checked in", ar: "تم الوصول" } } }),
     ...over,
   } as unknown as ApiClient;

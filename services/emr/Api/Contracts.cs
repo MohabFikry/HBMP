@@ -42,7 +42,10 @@ public sealed record BookAppointmentRequest(
     Guid? DoctorId = null, Guid? BranchId = null,
     // 14.5 — a short GENERAL/administrative note (access needs, interpreter, arrangements), shared between
     // reception, the call centre and the treating doctor. Never clinical — see AppointmentNote and 0011.
-    string? Note = null);
+    string? Note = null,
+    // 14.5 (0013) — the patient's display name, captured at the moment the operator already has it. Reception
+    // and the call centre may see it; emr holds no demographics and must not fetch it from a sibling.
+    string? BeneficiaryName = null);
 
 /// <summary>Minimum-necessary appointment view — scheduling + identity only, never EMR/clinical data.
 /// <see cref="RowVersion"/> is the row's <c>xmin</c> optimistic-concurrency token: it lets a client echo the
@@ -102,6 +105,12 @@ public sealed record WaitlistResponse(Guid WaitlistId, string Status, int Priori
 public sealed record RescheduleRequest(Guid NewSlotId);
 
 public sealed record CancelRequest(string? Reason);
+
+/// <summary>Amend the general/administrative BOOKING note (14.5) — deliberately not named `UpdateNoteRequest`,
+/// which is taken by the clinical SOAP note next door. The two must never be mistaken for one another: this
+/// one is written by reception and the call centre and carries no clinical content. Same cap and same
+/// refusal-rather-than-truncation as at booking; captured in the timeline as a <c>NoteEdited</c> step.</summary>
+public sealed record UpdateBookingNoteRequest(string? Note);
 
 // ---- Phase 3.3 queue + reminders ----
 

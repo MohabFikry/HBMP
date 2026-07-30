@@ -1,6 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Card, DataTable, Icon, InlineAlert, KpiCard, StatusChip } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, KpiCard, Modal, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { AppointmentCounts, AppointmentRow, Localized, Practitioner, Specialty } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -8,11 +8,20 @@ import { useAsync } from "../api/useAsync";
 import { useFormat } from "../i18n/useFormat";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 import { AppointmentNoteButton } from "./AppointmentNote";
+import { patientColumn } from "./booking/appointmentColumns";
 
 const S = {
   title: { en: "Dashboard", ar: "لوحة المتابعة" },
 
-  cardTotal: { en: "Appointments today", ar: "مواعيد اليوم" },
+  cardTotal: { en: "Appointments", ar: "المواعيد" },
+  today: { en: "Today", ar: "اليوم" },
+  prevDay: { en: "Previous day", ar: "اليوم السابق" },
+  nextDay: { en: "Next day", ar: "اليوم التالي" },
+  jumpToDay: { en: "Choose a day", ar: "اختر يومًا" },
+  goToday: { en: "Today", ar: "اليوم" },
+  prevMonth: { en: "Previous month", ar: "الشهر السابق" },
+  nextMonth: { en: "Next month", ar: "الشهر التالي" },
+  close: { en: "Close", ar: "إغلاق" },
   cardCheckedIn: { en: "Checked in", ar: "تم الوصول" },
   cardNoShow: { en: "No-shows", ar: "لم يحضروا" },
   countsFailed: {
@@ -21,8 +30,8 @@ const S = {
   },
   retry: { en: "Retry", ar: "إعادة المحاولة" },
 
-  visitsHeading: { en: "Today's visits", ar: "زيارات اليوم" },
-  visitsEmpty: { en: "No one has checked in yet today.", ar: "لم يسجّل أحد وصوله اليوم بعد." },
+  visitsHeading: { en: "Visits", ar: "الزيارات" },
+  visitsEmpty: { en: "No one has checked in on this day.", ar: "لم يسجّل أحد وصوله في هذا اليوم." },
   patient: { en: "Patient", ar: "المريض" },
   doctor: { en: "Doctor", ar: "الطبيب" },
   specialty: { en: "Specialty", ar: "التخصص" },
@@ -31,13 +40,30 @@ const S = {
   openFile: { en: "Patient file", ar: "ملف المريض" },
   unnamedDoctor: { en: "No named doctor", ar: "بدون طبيب محدد" },
 
-  calendarHeading: { en: "Today's schedule", ar: "جدول اليوم" },
-  calendarEmpty: { en: "No appointments booked for today.", ar: "لا توجد مواعيد محجوزة اليوم." },
-  unscheduled: { en: "Other", ar: "أخرى" },
+  calendarHeading: { en: "Schedule", ar: "الجدول" },
+  calendarEmpty: { en: "No appointments booked for this day.", ar: "لا توجد مواعيد محجوزة في هذا اليوم." },
 } satisfies Record<string, Localized>;
 
-/** The clinic's working span. Anything outside it falls into a final "Other" band rather than vanishing. */
-const HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
+const ZONE = "Africa/Cairo";
+
+/** `YYYY-MM-DD` in Cairo — the key the day nav and the server both speak. */
+const cairoDayKey = (d: Date) =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+
+const cairoToday = () => cairoDayKey(new Date());
+
+/** Noon UTC for a day key — the same calendar day in Cairo under either offset, and on either side of DST. */
+const dayInstant = (key: string) => `${key}T12:00:00Z`;
+
+/**
+ * The span the schedule shows when nothing forces it wider — ordinary clinic hours.
+ *
+ * It is a FLOOR, not a fixed list. An appointment outside it used to fall into a trailing "Other" band, so a
+ * 21:00 booking and a 01:33 one sat together at the bottom, out of sequence and detached from the timeline
+ * they belong to — which is precisely where an unusual appointment most needs to be seen in context.
+ */
+const DEFAULT_FIRST_HOUR = 8;
+const DEFAULT_LAST_HOUR = 18;
 
 /**
  * The reception dashboard (14.5).
@@ -61,8 +87,31 @@ export function ReceptionDashboard() {
   const fmt = useFormat();
   const navigate = useNavigate();
 
-  const counts = useAsync<AppointmentCounts>(() => api.appointmentCounts(), []);
-  const board = useAsync<AppointmentRow[]>(() => api.appointments("all"), []);
+  /**
+   * The day the whole dashboard is showing. Today by default — that is what the desk opens the screen for —
+   * but a receptionist is constantly asked "who is in tomorrow?" and had no way to answer without leaving
+   * this screen. One piece of state drives the cards, the visits table AND the schedule, so the three can
+   * never disagree about which day they are describing.
+   */
+  const [day, setDay] = useState(() => cairoToday());
+  const isToday = day === cairoToday();
+
+  const counts = useAsync<AppointmentCounts>(() => api.appointmentCounts(dayInstant(day)), [day]);
+  const board = useAsync<AppointmentRow[]>(
+    // A single day expressed as a one-day range: the server expands each end to its own Cairo civil day, so
+    // this picks up that day's evening clinic rather than stopping at midnight.
+    () => api.appointments("all", false, { from: dayInstant(day), to: dayInstant(day) }),
+    [day],
+  );
+
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerMonth, setPickerMonth] = useState(() => cairoToday().slice(0, 7));
+
+  function stepDay(delta: number) {
+    const d = new Date(`${day}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + delta);
+    setDay(cairoDayKey(d));
+  }
   const doctors = useAsync<Practitioner[]>(() => api.practitioners({ type: "Doctor" }), []);
   const specialties = useAsync<Specialty[]>(() => api.specialties(), []);
 
@@ -87,13 +136,9 @@ export function ReceptionDashboard() {
     counts.status === "loading" ? "…" : counts.status === "error" ? "—" : String(n ?? 0);
 
   const visitCols: Column<AppointmentRow>[] = [
-    {
-      key: "patient", header: t(S.patient), sortable: true,
-      // Falls back to the masked token rather than blank: a row with no name is still a real person the desk
-      // has to be able to identify.
-      cell: (r) => <strong>{r.beneficiaryName ?? <span className="tnum">{r.beneficiary.token}</span>}</strong>,
-      sortValue: (r) => r.beneficiaryName ?? r.beneficiary.token,
-    },
+    // The same patient column the boards use, so the three reception surfaces cannot drift on how a person
+    // is identified.
+    patientColumn({ t }),
     {
       key: "doctor", header: t(S.doctor), sortable: true,
       cell: (r) => {
@@ -137,6 +182,51 @@ export function ReceptionDashboard() {
   return (
     <>
       <PageHeader title={t(S.title)} />
+
+      {/*
+        The day selector. Centred label between two arrows, and it says "Today" rather than a date when it is
+        today — that is how the desk refers to it, and a date where "Today" belongs makes the reader stop and
+        work out whether it is the current one.
+      */}
+      <div className="dash-daynav">
+        <Button
+          variant="ghost" aria-label={t(S.prevDay)} title={t(S.prevDay)}
+          leadingIcon={<Icon name="chevron" style={{ transform: "rotate(90deg)" }} />}
+          onClick={() => stepDay(-1)}
+        />
+        {/* The LABEL is the control. A separate "Back to today" button only appeared once you had navigated
+            away, so the one moment you needed it was the one moment its position was unfamiliar — and it did
+            nothing else. Making the label open a month puts jumping anywhere, including back to today, in the
+            place you are already looking.
+            aria-live: the arrows replace every figure on the page, and a keyboard user would otherwise hear
+            nothing about which day they had moved to. */}
+        <button
+          type="button"
+          className="dash-daynav-label"
+          aria-haspopup="dialog"
+          aria-label={`${isToday ? t(S.today) : fmt.date(dayInstant(day))} — ${t(S.jumpToDay)}`}
+          onClick={() => { setPickerMonth(day.slice(0, 7)); setPickerOpen(true); }}
+        >
+          <span aria-live="polite">{isToday ? t(S.today) : fmt.date(dayInstant(day))}</span>
+          <Icon name="chevron" aria-hidden="true" />
+        </button>
+        <Button
+          variant="ghost" aria-label={t(S.nextDay)} title={t(S.nextDay)}
+          leadingIcon={<Icon name="chevron" style={{ transform: "rotate(-90deg)" }} />}
+          onClick={() => stepDay(1)}
+        />
+      </div>
+
+      <DayPickerModal
+        open={pickerOpen}
+        month={pickerMonth}
+        selected={day}
+        t={t}
+        fmt={fmt}
+        onMonth={setPickerMonth}
+        onPick={(picked) => { setDay(picked); setPickerOpen(false); }}
+        onClose={() => setPickerOpen(false)}
+      />
 
       {/* ── Cards ──────────────────────────────────────────────────────
           Counted server-side. Tallying the board here would be capped at its 200-row page and would
@@ -197,8 +287,8 @@ function DaySchedule({ rows }: { rows: AppointmentRow[] }) {
   const t = useLoc();
   const fmt = useFormat();
 
-  const byHour = useMemo(() => {
-    const m = new Map<number | "other", AppointmentRow[]>();
+  const { byHour, hours } = useMemo(() => {
+    const m = new Map<number, AppointmentRow[]>();
     for (const r of rows) {
       // The CAIRO hour, not the browser's: a clinic PC on UTC would file a 09:00 appointment under 07:00 and
       // draw a schedule two bands out of step with every time printed on it.
@@ -206,17 +296,25 @@ function DaySchedule({ rows }: { rows: AppointmentRow[] }) {
         new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo", hour: "2-digit", hour12: false })
           .format(new Date(r.scheduledStart)),
       );
-      const key: number | "other" = HOURS.includes(hour) ? hour : "other";
-      m.set(key, [...(m.get(key) ?? []), r]);
+      m.set(hour, [...(m.get(hour) ?? []), r]);
     }
-    return m;
+    // The range STRETCHES to cover whatever exists, rather than pushing outliers into a bucket at the end.
+    // An early or late appointment is exactly the one the desk needs to see in its place in the day.
+    const present = [...m.keys()];
+    const first = Math.min(DEFAULT_FIRST_HOUR, ...present);
+    const last = Math.max(DEFAULT_LAST_HOUR, ...present);
+    return {
+      byHour: m,
+      hours: Array.from({ length: last - first + 1 }, (_, i) => first + i),
+    };
   }, [rows]);
 
-  const other = byHour.get("other") ?? [];
-
   return (
+    // Fixed height + scroll: a stretched range can be twenty-odd rows, and letting the schedule grow
+    // unbounded pushes everything below it off the page. The band heights stay constant so an empty hour is
+    // still visibly empty — that gap is the answer to "can we fit a walk-in in?".
     <ol className="dash-day">
-      {HOURS.map((h) => {
+      {hours.map((h) => {
         const at = byHour.get(h) ?? [];
         return (
           <li key={h} className="dash-hour">
@@ -233,22 +331,103 @@ function DaySchedule({ rows }: { rows: AppointmentRow[] }) {
           </li>
         );
       })}
-      {/* Anything outside clinic hours. Shown rather than dropped: an appointment the schedule silently
-          omitted is one nobody prepares for. */}
-      {other.length > 0 && (
-        <li className="dash-hour">
-          <span className="dash-hour-label">{t(S.unscheduled)}</span>
-          <div className="dash-hour-items">
-            {other.map((r) => (
-              <span key={r.id} className="dash-appt">
-                <span className="tnum">{fmt.time(r.scheduledStart)}</span>
-                <span>{r.beneficiaryName ?? r.beneficiary.token}</span>
-                <StatusChip kind={r.status.kind} label={t(r.status.label)} />
-              </span>
-            ))}
-          </div>
-        </li>
-      )}
     </ol>
+  );
+}
+
+/**
+ * The month picker behind the day label.
+ *
+ * A modal rather than a popover: it is focus-trapped, dismissible with Escape and returns focus on close for
+ * free, and this is a deliberate jump rather than a hover-weight affordance. "Today" sits inside it, which is
+ * where someone looking for it will already be — the old standalone button only existed once you had
+ * navigated away, so it was unfamiliar at exactly the moment you wanted it.
+ */
+function DayPickerModal({
+  open, month, selected, t, fmt, onMonth, onPick, onClose,
+}: {
+  open: boolean;
+  month: string;
+  selected: string;
+  t: (l: Localized) => string;
+  fmt: ReturnType<typeof useFormat>;
+  onMonth: (m: string) => void;
+  onPick: (day: string) => void;
+  onClose: () => void;
+}) {
+  const [y, m] = month.split("-").map(Number);
+  const monthIndex = m - 1;
+
+  // Noon UTC anchors: Cairo is UTC+2/+3, so noon is the same calendar day under either offset and across a
+  // DST change. Midnight anchoring is what makes a month grid render the 1st twice or skip it.
+  const at = (yy: number, mm: number, dd: number) => new Date(Date.UTC(yy, mm, dd, 12));
+  const total = new Date(Date.UTC(y, monthIndex + 1, 0)).getUTCDate();
+  const days = Array.from({ length: total }, (_, i) => at(y, monthIndex, i + 1));
+  // Egypt's week starts SATURDAY; getUTCDay() counts from Sunday.
+  const lead = (days[0].getUTCDay() + 1) % 7;
+
+  const monthLabel = new Intl.DateTimeFormat(fmt.locale, {
+    timeZone: "Africa/Cairo", month: "long", year: "numeric",
+  }).format(at(y, monthIndex, 1));
+
+  const step = (delta: number) => onMonth(cairoDayKey(at(y, monthIndex + delta, 1)).slice(0, 7));
+
+  return (
+    <Modal
+      open={open}
+      onOpenChange={(o: boolean) => { if (!o) onClose(); }}
+      title={t(S.jumpToDay)}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>{t(S.close)}</Button>
+          <Button variant="primary" onClick={() => onPick(cairoToday())}>{t(S.goToday)}</Button>
+        </>
+      }
+    >
+      <div className="bk-cal bk-cal-sm">
+        <div className="bk-cal-head">
+          <Button
+            variant="ghost" size="sm" aria-label={t(S.prevMonth)} title={t(S.prevMonth)}
+            leadingIcon={<Icon name="chevron" style={{ transform: "rotate(90deg)" }} />}
+            onClick={() => step(-1)}
+          />
+          <strong className="bk-cal-month" aria-live="polite">{monthLabel}</strong>
+          <Button
+            variant="ghost" size="sm" aria-label={t(S.nextMonth)} title={t(S.nextMonth)}
+            leadingIcon={<Icon name="chevron" style={{ transform: "rotate(-90deg)" }} />}
+            onClick={() => step(1)}
+          />
+        </div>
+        {/* Weekday headings, from the same locale as the month name — a Latin header row over Arabic dates
+            would be worse than none. 1 Aug 2026 is a Saturday, which is where Egypt's week starts. */}
+        <div className="bk-cal-weekdays" aria-hidden="true">
+          {Array.from({ length: 7 }, (_, i) => (
+            <span key={i}>
+              {new Intl.DateTimeFormat(fmt.locale, { timeZone: "Africa/Cairo", weekday: "short" })
+                .format(at(2026, 7, 1 + i))}
+            </span>
+          ))}
+        </div>
+        <div className="bk-cal-grid" role="radiogroup" aria-label={t(S.jumpToDay)}>
+          {Array.from({ length: lead }, (_, i) => <span key={`pad-${i}`} className="bk-cal-pad" aria-hidden="true" />)}
+          {days.map((d) => {
+            const key = cairoDayKey(d);
+            return (
+              <button
+                key={key}
+                type="button"
+                role="radio"
+                aria-checked={key === selected}
+                className="bk-cal-day"
+                aria-label={fmt.date(dayInstant(key))}
+                onClick={() => onPick(key)}
+              >
+                <span className="bk-cal-num tnum">{d.getUTCDate()}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </Modal>
   );
 }

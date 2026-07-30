@@ -109,6 +109,9 @@ export function ReceptionBooking() {
         appointmentType: "Scheduled",
         doctorId: sel.doctorId ?? undefined,
         note: sel.note || undefined,
+        // The desk already has the name on screen — sending it is what lets every board row show WHO the
+        // appointment is for instead of a masked token. emr stores it as a snapshot; it never looks it up.
+        beneficiaryName: t(patient.name),
       }),
     );
     if (ok) {

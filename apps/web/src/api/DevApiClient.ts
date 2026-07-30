@@ -214,8 +214,8 @@ export class DevApiClient implements ApiClient {
   }
 
   // ---- Reception day board -----------------------------------------------
-  appointments(filter: "all" | "booked" | "checked-in" = "all", _mine = false, _range?: { from: string; to: string }) {
-    void _mine; void _range;
+  appointments(filter: "all" | "booked" | "checked-in" = "all", _mine = false, _range?: { from: string; to: string }, _branchId?: string) {
+    void _mine; void _range; void _branchId;
     const rows = [
       // A note on the FIRST row only: the board must show the note affordance on rows that have one and
       // nothing at all on rows that do not, and a fixture where every row has a note never proves the second half.
@@ -246,6 +246,8 @@ export class DevApiClient implements ApiClient {
           beneficiaryName: r.st === "CheckedIn" ? r.name ?? null : null,
           doctorId: r.doctorId ?? null,
           needsReassignment: r.needsReassignment ?? false,
+          providerId: "prov-1",
+          locationId: "loc-1",
         }))),
       [],
     );
@@ -254,6 +256,15 @@ export class DevApiClient implements ApiClient {
     void _date;
     return this.gate(() => ok(zAppointmentCounts, { total: 4, checkedIn: 1, noShow: 1 }));
   }
+  cancelAppointment(appointmentId: string, _reason: string) {
+    void _reason;
+    return this.gate(() => ok(zCheckInResult, {
+      id: appointmentId,
+      status: { kind: "neu", label: loc("Cancelled", "ملغى") },
+    }));
+  }
+  async updateAppointmentNote(_appointmentId: string, _note: string) { void _appointmentId; void _note; }
+  async rescheduleAppointment(_appointmentId: string, _slotId: string) { void _appointmentId; void _slotId; }
   appointmentTimeline(_appointmentId: string) {
     void _appointmentId;
     return this.gate(
