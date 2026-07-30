@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Mersal.Audit.Client;
 using Mersal.Events;
+using Mersal.Data;
 using Mersal.Policy.Domain;
 using Mersal.Policy.Infrastructure;
 using Mersal.Time;
@@ -44,8 +45,14 @@ public class EnrollmentPublishesCoverageTests
     private static readonly string? Db = Environment.GetEnvironmentVariable("POLICY_TEST_DB");
     private const string Tenant = "11111111-1111-1111-1111-111111111111";
 
+    // 24.x — the same tenant stamper the API composes. EnrollAsync writes enrolment, coverage and an
+    // append-only event; without the interceptor they carry the entity default of "" and the
+    // ck_*_tenant_not_blank constraints refuse them, which is exactly what production would do to a request
+    // with no tenant bound.
     private static PolicyDbContext Ctx() => new(new DbContextOptionsBuilder<PolicyDbContext>()
-        .UseNpgsql(Db).UseSnakeCaseNamingConvention().Options);
+        .UseNpgsql(Db).UseSnakeCaseNamingConvention()
+        .AddInterceptors(new TenantStampingInterceptor(new RlsContext { TenantId = Tenant }))
+        .Options);
 
     /// <summary>Enrolling must announce EVERY generated coverage as a row-level event, not a count.</summary>
     [SkippableFact]

@@ -11,6 +11,7 @@ namespace Mersal.Emr.Tests;
 public class ClinicalIntegrationTests
 {
     private static readonly string? Db = Environment.GetEnvironmentVariable("EMR_TEST_DB");
+    private const string Tenant = "11111111-1111-1111-1111-111111111111";
     private static DbContextOptions<EmrDbContext> Options() =>
         new DbContextOptionsBuilder<EmrDbContext>().UseNpgsql(Db).UseSnakeCaseNamingConvention().Options;
 
@@ -44,12 +45,12 @@ public class ClinicalIntegrationTests
             {
                 ctx.Notes.Add(new EmrNote
                 {
-                    NoteId = Guid.NewGuid(), EncounterId = encId, NoteType = NoteType.SOAP,
+                    NoteId = Guid.NewGuid(), EncounterId = encId, NoteType = NoteType.SOAP, TenantId = Tenant,
                     Assessment = "Acute pharyngitis", AuthoredBy = "dr-owner", AuthoredAt = DateTimeOffset.UtcNow,
                 });
                 ctx.Diagnoses.Add(new Diagnosis
                 {
-                    DiagnosisId = Guid.NewGuid(), EncounterId = encId, IcdCode = "J02.9",
+                    DiagnosisId = Guid.NewGuid(), EncounterId = encId, IcdCode = "J02.9", TenantId = Tenant,
                     DiagnosisRank = DiagnosisRank.Primary, ClinicalStatus = ClinicalStatus.Active,
                     RecordedBy = "dr-owner", RecordedAt = DateTimeOffset.UtcNow,
                 });
@@ -71,6 +72,13 @@ public class ClinicalIntegrationTests
         ctx.Encounters.Add(new Encounter
         {
             EncounterId = encId, EncounterNo = $"ENC-TEST-{encId.ToString()[..8]}", BeneficiaryId = beneficiary,
+            // 24.x — the fixture stamps the tenant because it builds the row through a PLAIN DbContext,
+            // with none of the interceptors the API composes. Production is stamped by
+            // TenantStampingInterceptor from the bound request; a fixture that skips that has to supply
+            // what the interceptor would have, or it writes a row belonging to no tenant — which the
+            // ck_encounter_tenant_not_blank constraint now refuses, and which used to be accepted in
+            // silence. Test data that could not exist in production tests nothing about production.
+            TenantId = Tenant,
             Status = EncounterStatus.InProgress, StartedAt = DateTimeOffset.UtcNow, CreatedBy = createdBy,
         });
         await ctx.SaveChangesAsync();

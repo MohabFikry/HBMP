@@ -62,6 +62,13 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
         db.Set<QueueTicket>().Add(new QueueTicket
         {
             QueueId = Guid.NewGuid(), AppointmentId = appt.AppointmentId, BeneficiaryId = appt.BeneficiaryId,
+            // 24.x — THE TICKET'S TENANT IS THE APPOINTMENT'S, and it is set here rather than left to the
+            // ambient stamper. The stamper fills a blank from RlsContext, which is empty on any path that
+            // does not run through UseHbmpRls — and a ticket written with tenant_id = '' belongs to nobody:
+            // invisible to every real tenant, so the person waiting simply disappears from the board. One
+            // such row was found on the dev database. The appointment is the authoritative source anyway;
+            // asking an ambient value for something the row already knows is how it went missing.
+            TenantId = appt.TenantId,
             ProviderId = appt.ProviderId, LocationId = appt.LocationId,
             // The ticket inherits the appointment's branch. GET /queues filters on exactly this column for a
             // BranchScoped caller, so a ticket without it is invisible to the desk that just created it.

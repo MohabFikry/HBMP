@@ -132,15 +132,22 @@ public class MembershipAttributionTests
     public async Task Attribution_and_tenant_stamping_are_independent()
     {
         // A service that binds a membership but no tenant (or vice versa) must still get the half it has,
-        // rather than losing both because one guard short-circuited the whole method.
+        // rather than losing both because one guard short-circuited the whole method. THAT is the claim,
+        // and it is unchanged.
+        //
+        // What changed is the vehicle. This used to demonstrate it with a tenant-scoped row carrying an
+        // EMPTY tenant, which the stamper now refuses: such a row belongs to nobody, and 1,191 of them were
+        // found on the dev database precisely because nothing objected. The entity supplies its own tenant
+        // here — the shape a background worker stamping from an event actually has — so the independence of
+        // the two stampers is still what is being tested, without an illegal row as the example.
         var rls = new RlsContext { TenantId = "", MembershipId = "m-42" };
         await using var db = Context(rls, nameof(Attribution_and_tenant_stamping_are_independent));
 
-        db.Rows.Add(new Attributed { Id = 1, Note = "x" });
+        db.Rows.Add(new Attributed { Id = 1, TenantId = "from-the-event", Note = "x" });
         await db.SaveChangesAsync();
 
         var row = db.Rows.Single();
-        row.CreatedBy.Should().Be("m-42");
-        row.TenantId.Should().BeEmpty();
+        row.CreatedBy.Should().Be("m-42", "the membership was bound, so attribution must happen");
+        row.TenantId.Should().Be("from-the-event", "and the caller's explicit tenant is never overwritten");
     }
 }

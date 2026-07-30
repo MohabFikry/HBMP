@@ -11,6 +11,8 @@
     <ProjectReference Include="../Infrastructure/Mersal.Policy.Infrastructure.csproj" />
     <ProjectReference Include="../Api/Mersal.Policy.Api.csproj" />
     <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
+    <!-- 24.x: the tenant stamper, so fixtures write rows shaped like production. -->
+    <ProjectReference Include="../../../libs/data/Mersal.Data.csproj" />
     <!-- 19.2 guardrail: generated coverage is fed to the REAL EligibilityEngine, not a stand-in. -->
     <ProjectReference Include="../../eligibility/Domain/Mersal.Eligibility.Domain.csproj" />
   </ItemGroup>

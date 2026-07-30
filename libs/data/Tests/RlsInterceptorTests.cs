@@ -75,18 +75,61 @@ public class RlsInterceptorTests
     }
 
     [Fact]
-    public async Task Nothing_is_stamped_when_no_tenant_is_bound()
+    public async Task An_insert_with_no_tenant_to_stamp_is_refused()
     {
-        // A background consumer that has not bound its tenant must NOT get an empty-string stamp that looks
-        // deliberate. Leaving the value alone lets the database's NOT NULL / policy reject it loudly, which
-        // is what 18.B2 made eligibility's consumer do rather than guessing a tenant.
+        // THIS ASSERTION WAS REVERSED, deliberately, and the reason matters more than the change.
+        //
+        // It used to assert the row was written with an empty tenant, on the stated reasoning that "leaving
+        // the value alone lets the database's NOT NULL / policy reject it loudly". The database does not
+        // reject it: '' is a perfectly good string, the column is NOT NULL and satisfied, and the RLS policy
+        // compares `tenant_id = current_setting(...)` which simply never matches a real tenant. So the row
+        // was accepted in silence and belonged to nobody — invisible to every real tenant, visible to any
+        // session binding an empty one. 1,191 rows across seven tables were found that way on the dev
+        // database, and the test asserting the behaviour is the reason nobody looked.
+        //
+        // The old comment was not careless; it was an assumption about the database that was never checked.
+        // A write with no tenant to stamp is a bug in the caller, and it is named here rather than left as
+        // an orphan row for someone to find later with no way to tell whose it was.
         var rls = new RlsContext();   // TenantId = ""
-        await using var db = Context(rls, nameof(Nothing_is_stamped_when_no_tenant_is_bound));
+        await using var db = Context(rls, nameof(An_insert_with_no_tenant_to_stamp_is_refused));
 
         db.Rows.Add(new Row { Id = 1, Note = "x" });
+
+        var act = async () => await db.SaveChangesAsync();
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .WithMessage("*belong to no tenant*",
+                "the exception has to say what the row would have BEEN, not just that a field was empty — " +
+                "the reader needs to know this is an isolation problem, not a validation nit");
+    }
+
+    [Fact]
+    public async Task An_entity_that_sets_its_own_tenant_is_still_accepted_with_no_ambient_one()
+    {
+        // The refusal above is about rows that would belong to NOBODY. A background worker that stamps the
+        // tenant from the event it is processing — which is what eligibility's consumer does — has answered
+        // the question already, and must not be blocked by the absence of a request principal.
+        var rls = new RlsContext();   // no ambient tenant
+        await using var db = Context(rls, nameof(An_entity_that_sets_its_own_tenant_is_still_accepted_with_no_ambient_one));
+
+        db.Rows.Add(new Row { Id = 1, TenantId = "from-the-event", Note = "x" });
         await db.SaveChangesAsync();
 
-        db.Rows.Single().TenantId.Should().BeEmpty();
+        db.Rows.Single().TenantId.Should().Be("from-the-event");
+    }
+
+    [Fact]
+    public async Task An_untenanted_entity_is_untouched_when_no_tenant_is_bound()
+    {
+        // Entities with no TenantId column are not tenant-scoped at all — a code catalogue, a dedupe
+        // ledger. They must keep saving without a tenant, or the guard above would stop the platform
+        // booting rather than stop it losing rows.
+        var rls = new RlsContext();
+        await using var db = Context(rls, nameof(An_untenanted_entity_is_untouched_when_no_tenant_is_bound));
+
+        db.Untenanteds.Add(new Untenanted { Id = 1, Note = "no tenant column" });
+        await db.SaveChangesAsync();
+
+        db.Untenanteds.Single().Note.Should().Be("no tenant column");
     }
 
     [Fact]

@@ -4,6 +4,7 @@ using FluentAssertions;
 using Mersal.Audit.Client;
 using Mersal.Authz;
 using Mersal.Events;
+using Mersal.Data;
 using Mersal.Policy.Domain;
 using Mersal.Policy.Infrastructure;
 using Mersal.Time;
@@ -27,8 +28,20 @@ public class BulkStoreTests
     private static readonly string? Db = Environment.GetEnvironmentVariable("POLICY_TEST_DB");
     private const string Tenant = "11111111-1111-1111-1111-111111111111";
 
+    /// <summary>
+    /// 24.x — the context carries the SAME tenant stamper the API composes.
+    ///
+    /// <para>These tests used a bare DbContext, so nothing stamped tenant_id and every row they wrote
+    /// landed with the entity's `= ""` default — belonging to no tenant, invisible to every real one. 100
+    /// bulk_job and 93 extract_run rows on the dev database came from exactly this. The database now
+    /// refuses them (ck_*_tenant_not_blank), and the right response is to make the fixture behave like
+    /// production rather than to relax the constraint: a test writing data production could never write is
+    /// not testing production.</para>
+    /// </summary>
     private static PolicyDbContext Ctx() => new(new DbContextOptionsBuilder<PolicyDbContext>()
-        .UseNpgsql(Db).UseSnakeCaseNamingConvention().Options);
+        .UseNpgsql(Db).UseSnakeCaseNamingConvention()
+        .AddInterceptors(new TenantStampingInterceptor(new RlsContext { TenantId = Tenant }))
+        .Options);
 
     // ---- Commit: idempotency + partial failure ------------------------------------------------------------
 
