@@ -16,6 +16,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { permissionsForRole, hasPermission, type Permission, type Role } from "../authz/permissions";
 import { useAsync } from "../api/useAsync";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
+import { SectionView } from "./ProfileSectionViews";
 import { useFormat } from "../i18n/useFormat";
 
 /**
@@ -440,14 +441,22 @@ function SectionState({
   return <SectionContent section={section} beneficiaryId={beneficiaryId} />;
 }
 
-/** Visible content. Call history has a bespoke renderer (design 39 §5b); everything else is a generic view. */
+/**
+ * Visible content.
+ *
+ * Identity, alerts and call history are bespoke here — identity is the safety strip the context bar reuses,
+ * alerts carry the four-cue treatment, and call history has its own server-generated clipboard contract
+ * (design 39 §5b). Sections 3–14 have designed views of their own in `ProfileSectionViews`, and an unknown
+ * key — a server newer than this client — falls through to a renderer that shows what it cannot lay out
+ * rather than reporting absence.
+ */
 function SectionContent({ section, beneficiaryId }: { section: ProfileSection; beneficiaryId: string }) {
   if (section.key === "header") return <HeaderView data={section.data as ProfileHeader} />;
   if (section.key === "alerts") return <AlertsView data={section.data as ProfileAlerts} />;
   if (section.key === "callHistory") {
     return <CallHistoryView data={section.data as CallHistorySection} beneficiaryId={beneficiaryId} />;
   }
-  return <GenericView data={section.data} />;
+  return <SectionView section={section} beneficiaryId={beneficiaryId} />;
 }
 
 function HeaderView({ data }: { data: ProfileHeader }) {
@@ -536,46 +545,6 @@ function AlertsView({ data }: { data: ProfileAlerts }) {
 }
 
 /** A readable dump of a section payload the profile does not yet render bespoke. Never a JSON blob. */
-function GenericView({ data }: { data: unknown }) {
-  const t = useLoc();
-  if (data === null || data === undefined) return <p className="profile-empty">{t(STR.empty)}</p>;
-
-  const rows = Array.isArray((data as { items?: unknown }).items)
-    ? ((data as { items: Record<string, unknown>[] }).items)
-    : null;
-
-  if (rows) {
-    if (rows.length === 0) return <p className="profile-empty">{t(STR.empty)}</p>;
-    return (
-      <ul className="profile-rows">
-        {rows.map((row, i) => (
-          <li key={String(row.orderRef ?? row.rxRef ?? row.authNo ?? row.encounterRef ?? i)}>
-            {Object.entries(row)
-              .filter(([, v]) => v !== null && v !== undefined && typeof v !== "object")
-              .map(([k, v]) => `${k}: ${String(v)}`)
-              .join(" · ")}
-          </li>
-        ))}
-      </ul>
-    );
-  }
-
-  const entries = Object.entries(data as Record<string, unknown>).filter(
-    ([, v]) => v !== null && v !== undefined && typeof v !== "object",
-  );
-  if (entries.length === 0) return <p className="profile-empty">{t(STR.empty)}</p>;
-  return (
-    <dl className="profile-facts">
-      {entries.map(([k, v]) => (
-        <div key={k}>
-          <dt>{k}</dt>
-          <dd>{String(v)}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
 // ---------------------------------------------------------------- call history (design 39 §5b)
 
 /**

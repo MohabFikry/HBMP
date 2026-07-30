@@ -1113,9 +1113,53 @@ nav.mrs-rail {
 .profile-meta { margin: 0; opacity: 0.8; font-size: 0.9em; }
 .profile-alerts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp2); }
 .profile-rows, .call-history-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp2); }
-.profile-facts { display: grid; gap: var(--sp2); margin: 0; }
+/* A fact grid that columnises when there is room. Coverage and financial lead with 4–6 short facts, and one
+   per line pushes their tables below the fold on a laptop for no reason. `auto-fit` + `minmax` rather than a
+   fixed column count: an Arabic label is routinely half again as long as its English twin, and a hard
+   `repeat(3, …)` that fits "Payer" clips "الجهة الممولة". */
+.profile-facts { display: grid; gap: var(--sp2) var(--sp4); margin: 0; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); }
 .profile-facts dt { font-weight: 600; font-size: 0.85em; opacity: 0.8; }
 .profile-facts dd { margin: 0; }
+
+/* ── 20.4 section views (design 39 §3 sections 3–14) ────────────────────────────────────────────────────
+   Every rule below is logical-property only (inline-start, not left) because these sections are dense with
+   tables and chips, and a physical `margin-left` in a table cell is the kind of thing that silently reverses
+   meaning in Arabic — a chip trailing its number in English leads it in Arabic. */
+
+.profile-stack { display: grid; gap: var(--sp4); }
+
+.profile-group { display: grid; gap: var(--sp2); }
+/* Sub-headings inside a card whose <h2> is the section title: smaller than the section head, still a real
+   heading so the jump nav and a screen reader's heading list stay coherent. */
+.profile-group-head { margin: 0; font-size: 0.95rem; font-weight: 600; opacity: 0.9; }
+
+.profile-prose { margin: 0; max-width: 68ch; line-height: 1.6; }
+
+.profile-row-title { font-weight: 600; }
+.profile-row-meta { opacity: 0.8; font-size: 0.9em; }
+.profile-rows > li { display: flex; flex-wrap: wrap; gap: var(--sp2); align-items: baseline; }
+
+/* Number-plus-chip cells. `baseline` so the chip sits on the number's line rather than floating above it,
+   and the gap is inline so it mirrors. */
+.profile-remaining, .profile-expiry, .profile-due, .profile-loop { display: inline-flex; flex-wrap: wrap; gap: var(--sp2); align-items: baseline; }
+.profile-amount { font-variant-numeric: tabular-nums; font-size: 1.05em; }
+
+/* A sensitivity-restricted result. Dashed, lock-led and italic — the same vocabulary as the section-level
+   .profile-restricted card, so a locked ROW reads as the same kind of thing as a locked SECTION rather than
+   as a new state the user has to learn. */
+.profile-locked { display: inline-flex; flex-wrap: wrap; gap: var(--sp1); align-items: baseline; padding: 2px var(--sp2); border: 1px dashed currentColor; border-radius: var(--r-md); font-style: italic; font-size: 0.9em; }
+
+.profile-notes { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp3); }
+.profile-note { display: grid; gap: var(--sp2); padding: var(--sp3); border: 1px solid currentColor; border-radius: var(--r-md); }
+/* A withheld note is dashed like every other withheld thing here, NOT merely faded: opacity alone reads as
+   "disabled" or "old", and this note is neither — it exists, it is current, and it is not for this reader. */
+.profile-note[data-withheld="true"] { border-style: dashed; }
+.profile-note-head { display: flex; flex-wrap: wrap; gap: var(--sp2); align-items: center; font-size: 0.9em; }
+.profile-note-withheld { margin: 0; font-style: italic; opacity: 0.85; }
+
+/* The unknown-section fallback's nested payload. Wraps rather than scrolls horizontally — a page that scrolls
+   sideways in RTL is worse than an ugly block of JSON. */
+.profile-raw { margin: 0; padding: var(--sp2); border-radius: var(--r-md); border: 1px solid currentColor; font-size: 0.85em; white-space: pre-wrap; word-break: break-word; max-height: 20rem; overflow-y: auto; }
 
 .call-history-toolbar { display: flex; flex-wrap: wrap; gap: var(--sp3); align-items: center; justify-content: space-between; margin-bottom: var(--sp3); }
 .call-row { display: grid; gap: var(--sp2); padding: var(--sp3); border: 1px solid currentColor; border-radius: var(--r-md); }

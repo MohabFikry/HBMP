@@ -1422,6 +1422,19 @@ export class DevApiClient implements ApiClient {
           ],
         },
       },
+      {
+        key: "pastMedicalHistory", state: "Visible" as const,
+        data: {
+          conditions: [
+            { system: "ICD-10", code: "E11.9", display: "Type 2 diabetes mellitus", clinicalStatus: "Active", onsetOn: "2021-03-14" },
+            { system: "ICD-10", code: "I10", display: "Essential hypertension", clinicalStatus: "Active", onsetOn: "2022-11-02" },
+          ],
+          narrative: "Managed on metformin since 2021. Reports good adherence; last HbA1c 7.1% at the Nasr City clinic.",
+          uploadedRecords: [
+            { linkId: "doc-hist-1", documentClass: "Clinical", title: "Discharge summary — Al-Salam Hospital", documentDate: "2024-08-19" },
+          ],
+        },
+      },
       // Restricted: the locked state, with the reason AND the way out.
       {
         key: "investigations", state: "Restricted" as const, reasonCode: "sensitive-requires-grant",
@@ -1429,8 +1442,83 @@ export class DevApiClient implements ApiClient {
       },
       // Unavailable: the owning service did not answer. NOT the same as empty — the user gets Retry.
       { key: "encounters", state: "Unavailable" as const, reasonCode: "timeout" },
+      {
+        key: "prescriptions", state: "Visible" as const,
+        data: {
+          items: [
+            { rxRef: "RX-2026-11204", drugDisplay: "Metformin 850mg tablet", status: "Dispensed", prescribedOn: "2026-07-02T09:10:00Z", dispensedOn: "2026-07-02T11:40:00Z", batchNo: "MTF-2291", expiryDate: "2027-04-30" },
+            // A substitution AND an already-passed expiry: the two cells that need a cue rather than a bare value.
+            { rxRef: "RX-2026-10877", drugDisplay: "Amlodipine 5mg tablet", status: "PartiallyDispensed", prescribedOn: "2026-06-18T08:05:00Z", dispensedOn: "2026-06-18T12:15:00Z", batchNo: "AML-1043", expiryDate: "2026-05-31", substitutedWith: "Amlodipine 5mg (generic, Tier 1)" },
+            { rxRef: "RX-2026-11390", drugDisplay: "Insulin glargine 100 IU/mL", status: "Pending", prescribedOn: "2026-07-26T14:20:00Z" },
+          ],
+        },
+      },
+      {
+        key: "authorizations", state: "Visible" as const,
+        data: {
+          items: [
+            { authNo: "AUTH-2026-00841", serviceCategory: "Imaging", status: "Approved", requestedAt: "2026-07-20T10:00:00Z", decidedAt: "2026-07-21T08:30:00Z", validUntil: "2026-08-30", rationale: "Persistent lumbar pain with red-flag features; MRI indicated per protocol.", approvedAmount: 3200 },
+            { authNo: "AUTH-2026-00902", serviceCategory: "Dental", status: "PendingInfo", requestedAt: "2026-07-27T09:15:00Z" },
+          ],
+        },
+      },
       // NotApplicable: nothing exists. A plain, calm "no records".
       { key: "referrals", state: "NotApplicable" as const },
+      {
+        key: "documents", state: "Visible" as const,
+        data: {
+          items: [
+            { linkId: "doc-1", documentClass: "Identity", visibilityClass: "Administrative", title: "UNHCR registration card", documentDate: "2025-01-12", uploadedAt: "2025-01-13T09:00:00Z", status: "Verified", mayDownload: true },
+            // Metadata visible, content gated — the row exists and offers no download control at all.
+            { linkId: "doc-2", documentClass: "Clinical", visibilityClass: "Clinical", title: "Radiology report — lumbar MRI", documentDate: "2026-07-22", uploadedAt: "2026-07-22T16:40:00Z", status: "Active", mayDownload: false },
+          ],
+        },
+      },
+      {
+        key: "notes", state: "Visible" as const,
+        data: {
+          items: [
+            { noteId: "note-1", noteType: "Coordination", visibilityClass: "Administrative", body: "Member prefers afternoon appointments; transport arranged through the Nasr City branch.", authorDisplay: "H. Mostafa", createdAt: "2026-07-15T10:05:00Z", withheld: false, pinned: true },
+            // Withheld: the note EXISTS and its content is not for this reader (19.3).
+            { noteId: "note-2", noteType: "Clinical", visibilityClass: "Clinical", authorDisplay: "Dr. S. Ibrahim", createdAt: "2026-07-22T13:20:00Z", withheld: true, pinned: false },
+          ],
+        },
+      },
+      {
+        key: "financial", state: "Visible" as const,
+        data: {
+          currency: "EGP", costShareOwed: 420, settlementStatus: "Pending",
+          claims: [
+            { claimNo: "CLM-2026-3391", serviceDate: "2026-07-02", billedAmount: 1800, approvedAmount: 1620, memberShare: 180, status: "Settled" },
+            { claimNo: "CLM-2026-3502", serviceDate: "2026-07-22", billedAmount: 3200, approvedAmount: 2960, memberShare: 240, status: "Adjudicating" },
+          ],
+        },
+      },
+      {
+        key: "caseManagement", state: "Visible" as const,
+        data: {
+          cases: [
+            { caseId: "case-1", caseNo: "CASE-2026-0217", status: "Open", category: "ChronicCare", openedAt: "2026-05-04T08:00:00Z" },
+          ],
+          tasks: [
+            { taskId: "task-1", title: "Confirm endocrinology follow-up booking", status: "Open", dueOn: "2026-07-10" },
+            { taskId: "task-2", title: "Collect renewed UNHCR card scan", status: "Completed", dueOn: "2026-06-30" },
+          ],
+          escalations: [
+            { escalationId: "esc-1", reason: "Insulin out of stock at branch pharmacy", status: "Escalated", raisedAt: "2026-07-26T15:00:00Z" },
+          ],
+        },
+      },
+      {
+        key: "timeline", state: "Visible" as const,
+        data: {
+          items: [
+            { at: "2026-07-02T11:40:00Z", eventType: "PrescriptionDispensed", visibilityClass: "Clinical", actorDisplay: "Pharmacy — Nasr City", summary: "RX-2026-11204 dispensed", sourceService: "pharmacy" },
+            { at: "2026-07-26T09:12:00Z", eventType: "ProfileOpened", visibilityClass: "Access", actorDisplay: "R. Adel (reception)", summary: "Sections served: header, alerts, coverage", sourceService: "profile" },
+            { at: "2026-07-21T08:30:00Z", eventType: "AuthorizationDecided", visibilityClass: "Clinical", actorDisplay: "Dr. S. Ibrahim", summary: "AUTH-2026-00841 approved", sourceService: "approvals" },
+          ],
+        },
+      },
       {
         key: "callHistory", state: "Visible" as const,
         data: {
