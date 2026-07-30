@@ -134,7 +134,23 @@ export function DataTable<Row>({
   const colCount = columns.length;
 
   return (
-    <div className="mrs-wl-scroll">
+    /*
+      FOCUSABLE, because it scrolls. A pane that overflows horizontally can be dragged with a mouse and,
+      without a tab stop, reached by nobody else: the columns past the fold are simply unavailable to a
+      keyboard-only user. That is WCAG 2.1.1, and axe has a rule for it (scrollable-region-focusable) which
+      our suite cannot fire — the a11y tests run in jsdom, which has no layout engine and therefore never
+      computes an overflow. So four locale x theme axe sweeps pass over tables no keyboard can scroll.
+
+      Always focusable rather than only-when-overflowing: whether a table overflows depends on the viewport
+      and the data, so it changes after render and on resize. Measuring it would mean a ResizeObserver per
+      table to decide a tab stop, and the failure mode of guessing wrong is unreachable clinical data. The
+      cost of the other choice is one extra tab stop on tables that happen to fit, which is the same trade
+      GOV.UK and Bootstrap make for responsive tables.
+
+      `group`, not `region`: a dozen section tables on the patient profile would otherwise add a dozen
+      landmarks to the page and drown the ones that mean something.
+    */
+    <div className="mrs-wl-scroll" tabIndex={0} role="group" aria-label={caption}>
       {/*
         18.D3 (U6) — an interactive worklist is a GRID, not a table.
         `aria-selected` on a <tr> inside an implicit role="table" is invalid ARIA: the attribute is simply

@@ -417,6 +417,13 @@ html[dir="rtl"] .mrs-search input {
   overflow-x: auto;
   overscroll-behavior-x: contain;
 }
+/* The pane is a tab stop (see DataTable.tsx) because it scrolls, so it needs to say where focus is — a
+   silent tab stop is worse than none, since the user cannot tell whether their arrow keys will scroll this
+   table or the page. `-3px` keeps the ring inside the pane rather than under the card's edge. */
+.mrs-wl-scroll:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
+}
 .mrs-wl {
   width: 100%;
   min-inline-size: max-content;
