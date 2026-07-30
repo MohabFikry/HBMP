@@ -265,6 +265,18 @@ jobs:
           --results-directory ./coverage
           --logger "trx;LogFileName=test.trx"
 
+      # 24.4 — a skipped test reports green having proven nothing. The suite ran for months with ~100
+      # DB-gated tests skipping because nothing exported their connection strings; 24.4 found the last
+      # one, skipping four months after 18.E1 fixed the rest, because nothing said the number should be
+      # zero. Reads the TRX the step above already writes.
+      - name: "gate: no silently skipped tests"
+        id: gate_skipped_tests
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 tools/ci/check-skipped-tests.py --selftest
+          python3 tools/ci/check-skipped-tests.py ./coverage
+
       # Publishes the per-module table to the job summary on EVERY run, pass or fail (Gate 0.3).
       - name: "gate: domain-coverage floor"
         id: gate_coverage
@@ -364,6 +376,7 @@ jobs:
             tenant-isolation=${{ steps.gate_tenant_isolation.outcome }}
             test-db-env=${{ steps.gate_test_db_env.outcome }}
             tests=${{ steps.gate_tests.outcome }}
+            skipped-tests=${{ steps.gate_skipped_tests.outcome }}
             coverage=${{ steps.gate_coverage.outcome }}
             openapi-generate=${{ steps.gate_openapi_generate.outcome }}
             openapi-drift=${{ steps.gate_openapi_drift.outcome }}

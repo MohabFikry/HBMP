@@ -30,3 +30,9 @@ for s in ADMIN APPROVALS CALLCENTRE CASE CLAIMS DOCUMENT ELIGIBILITY EMR FINANCE
 done
 # Shared events-lib outbox durability suite.
 echo "EVENTS_TEST_DB=${owner}"
+# 24.4 — the migration tool's sink. Its idempotency + rollback-by-batch proof was the ONLY skipped test in
+# the whole suite, and it skipped for the same reason identity's twelve did in 18.E1: nothing exported its
+# variable. A permanently skipped test is worse than a missing one, because it reports green. The sink
+# creates its own schema (EnsureSchemaAsync) and cleans up the rows it writes, so the shared CI database is
+# the right target.
+echo "MIGRATION_TEST_DB=${owner}"

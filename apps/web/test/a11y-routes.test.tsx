@@ -55,8 +55,25 @@ describe("U6 — axe over every route × locale × theme", () => {
           localStorage.clear();
           setPreferences(lang, theme);
           const { container, unmount } = renderApp(path, role);
-          // Let the screen settle: most render a heading, some an async section.
-          await waitFor(() => expect(container.querySelector("main")).toBeTruthy());
+
+          // 24.4 — WAIT FOR THE SCREEN, NOT FOR THE SHELL. This used to wait for `<main>` to EXIST, which
+          // the app shell satisfies immediately — before any lazily-loaded route component has resolved.
+          // Measured across the catalog, 55 of 112 routes were still empty at that moment, so axe was
+          // handed an empty element and reported no violations for half the platform. Nothing failed;
+          // the sweep just quietly checked nothing, which is the most expensive kind of green.
+          //
+          // Waiting for CONTENT resolves every one of them, so the emptiness was a race, not a broken
+          // route. The assertion below then makes the wait load-bearing: if a route ever genuinely renders
+          // nothing, this fails instead of passing with an empty audit.
+          await waitFor(() =>
+            expect(container.querySelector("main")?.textContent?.trim().length ?? 0).toBeGreaterThan(0),
+          );
+          const rendered = (container.querySelector("main")?.textContent ?? "").trim();
+          if (rendered.length === 0) {
+            failures.push(`${path} [${lang}/${theme}]: rendered an EMPTY <main> — axe audited nothing`);
+            unmount();
+            continue;
+          }
 
           const results = await axe(container, {
             rules: {
