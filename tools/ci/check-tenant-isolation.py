@@ -124,8 +124,29 @@ def check_table(db: Db, schema: str, table: str, failures: list[str]) -> None:
         failures.append(f"{schema}.{table}: could not be read as {db.app_user} — {e}")
         return
     if unbound != 0:
-        failures.append(f"{schema}.{table}: {unbound} row(s) visible with NO app.tenant_id bound — this is a "
-                        f"FAIL-OPEN policy. A background or maintenance connection sees everything.")
+        # 24.5 — NAME THE RIGHT CAUSE. This probe binds app.tenant_id to the EMPTY STRING, so rows come
+        # back for two very different reasons and the message used to assert only the first:
+        #
+        #   * a fail-open policy (`OR current_setting(...) IS NULL`), the shape 18.B2 removed; or
+        #   * rows whose tenant_id IS the empty string, which match `tenant_id = ''` under a perfectly
+        #     correct policy. Those rows belong to no tenant: invisible to every real tenant (so the
+        #     application has effectively lost them) and visible to anything that binds an empty one.
+        #
+        # Reporting the second as "FAIL-OPEN policy" sends the reader to inspect pg_policy, find it
+        # correct, and conclude the checker is broken — which is exactly what happened when this ran
+        # against the dev database and found 1,191 such rows across seven tables. The usual source is a
+        # C# entity declaring `public string TenantId { get; set; } = "";` and a write path that never
+        # sets it.
+        empty = int(db.owner(f"SELECT count(*) FROM \"{schema}\".\"{table}\" WHERE tenant_id = ''"))
+        if empty:
+            failures.append(
+                f"{schema}.{table}: {empty} row(s) have an EMPTY tenant_id — they belong to no tenant, so "
+                f"they are invisible to every real one and visible to any session binding an empty tenant. "
+                f"The policy is fine; the data is not. Fix the write path, backfill, and add "
+                f"CHECK (tenant_id <> '').")
+        else:
+            failures.append(f"{schema}.{table}: {unbound} row(s) visible with NO app.tenant_id bound — this is a "
+                            f"FAIL-OPEN policy. A background or maintenance connection sees everything.")
 
     # Cross-tenant leakage on whatever real data is present.
     leaked = int(db.app_bound(
