@@ -80,3 +80,4 @@ Thumbs.db
 # ignores only the checkouts a worktree-isolated session creates under `.claude/worktrees/`. Committing one
 # would put a second copy of the whole tree in history.
 /.claude/worktrees/
+.ci-state/

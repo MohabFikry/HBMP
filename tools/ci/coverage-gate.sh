@@ -30,9 +30,15 @@
 # executes is a tautology. Floors are untouched at 58/45 per the phase-24 sponsor decision.
 set -euo pipefail
 RESULTS="${1:-./coverage}"
-MIN="${COVERAGE_MIN_DOMAIN:-58}"
-MIN_OVERALL="${COVERAGE_MIN_OVERALL:-45}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
+
+# ONE source of truth for the floors (Gate 1.3 / Gate 7.3). They used to be shell defaults here, which
+# made lowering one a one-character edit that reads like a config tweak in review — the wrong shape for a
+# control whose whole job is to be hard to move. They now live in coverage-floors.json, guarded by
+# check-floor-monotonicity.py. The env vars still override, for a local experiment; CI passes neither.
+FLOORS="$HERE/coverage-floors.json"
+MIN="${COVERAGE_MIN_DOMAIN:-$(python3 -c "import json;print(json.load(open('$FLOORS'))['aggregates']['domain'])")}"
+MIN_OVERALL="${COVERAGE_MIN_OVERALL:-$(python3 -c "import json;print(json.load(open('$FLOORS'))['aggregates']['overall'])")}"
 
 python3 "$HERE/coverage-report.py" "$RESULTS" \
     --json "$RESULTS/coverage-report.json" \

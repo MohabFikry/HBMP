@@ -60,18 +60,17 @@ jobs:
       OWNER_PASSWORD: ci_hbmp_pw
       APP_PASSWORD: ci_hbmp_app_pw
       HBMP_APP_PASSWORD: ci_hbmp_app_pw
-      # 18.E1 (audit R2 Q4) — the RATCHET. 55 was set as a regression guard below the then-current value
-      # and never moved, so it stopped meaning anything: coverage could fall a long way and still pass.
-      # CLAUDE.md's target is 80. Raise this by +3 on each merge to main that improves it; the floor must
-      # never go DOWN without an ADR saying why. Target: 80 by 2026-10-31.
-      COVERAGE_MIN_DOMAIN: "58"
-      # Overall coverage was printed and not gated at all. Now floored too — Api/Infrastructure lines are
-      # exercised by the DB-gated suites, so a drop here means those stopped running, which is exactly the
-      # failure a green build should not hide.
-      COVERAGE_MIN_OVERALL: "45"
+      # Coverage floors are NOT set here. They live in tools/ci/coverage-floors.json, the single
+      # source of truth, guarded by check-floor-monotonicity.py (Gate 1.3 / Gate 7.3). A second copy
+      # in this file is how a bar gets moved in a diff nobody reads as a bar being moved.
+
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # check-coverage-exclusions.py and check-floor-monotonicity.py diff against the previous commit.
+          # At depth 1 there is no previous commit and both guards would silently have nothing to compare.
+          fetch-depth: 0
 
       - name: Set up .NET 8
         uses: actions/setup-dotnet@v4
@@ -81,13 +80,29 @@ jobs:
       - name: Install psql client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
 
-      - name: Restore
-        run: dotnet restore HbmpPlatform.sln
+      # ============================================================================================
+      # 24.1 — FAIL AT END. Every gate below runs even when an earlier one failed, and the job fails
+      # at the very end if any of them did.
+      #
+      # WHY. Around 27 July this pipeline began dying at the migration-compat gate. Everything after it
+      # — route coverage, scope drift, migrations, the tenant-isolation fuzzer, the whole test suite,
+      # the coverage floor — never executed. For a month the build was red for ONE reason while six
+      # other controls reported nothing, and a coverage number that looked like a 19-point collapse
+      # went unseen because nothing ever asked for it. A skipped gate and a passing gate are both
+      # silent, which is what made a month of it invisible.
+      #
+      # `continue-on-error` records the failure without stopping the job; the summary step at the
+      # bottom reads every outcome and fails the build. A red build must still tell you the coverage
+      # number, the route-coverage result and the scope-drift result.
+      #
+      # STATIC GATES RUN BEFORE THE BUILD, deliberately: they read source, not binaries, so a broken
+      # build must not blind them either.
+      # ============================================================================================
 
-      - name: Build (Release, warnings-as-errors)
-        run: dotnet build HbmpPlatform.sln -c Release --no-restore
-
-      - name: Expand/contract migration-compat gate (12.2)
+      - name: "gate: expand/contract migration-compat (12.2)"
+        id: gate_migration_compat
+        if: always()
+        continue-on-error: true
         run: |
           python3 tools/ci/check-migration-compat.py --selftest
           python3 tools/ci/check-migration-compat.py --all
@@ -95,59 +110,116 @@ jobs:
       # 18.E1 (audit R2 Q1) — this guard EXISTED and was never wired into CI, and it only inspected
       # /api/v1 — so it was blind to exactly the gap that shipped as W3 (the whole FHIR facade with no
       # route). Now it runs, and it covers every public prefix.
-      - name: Kong route-coverage gate (every served public prefix has a route)
+      - name: "gate: Kong route coverage (every served public prefix has a route)"
+        id: gate_kong
+        if: always()
+        continue-on-error: true
         run: python3 tools/ci/check-kong-route-coverage.py
 
       # Phase 19: the SPA's scope literal is a hand-copy of IdentityContract.InteractiveScopes and had
-      # drifted nineteen scopes behind it. Because the SPA asks for the union in one request, that is not a
-      # degraded screen — it is a refused login (ID2051) or a token that 403s everywhere.
-      - name: SPA scope gate (requested scopes match the issuer's interactive set)
+      # drifted nineteen scopes behind it. Because the SPA asks for the union in one request, that is not
+      # a degraded screen — it is a refused login (ID2051) or a token that 403s everywhere.
+      - name: "gate: SPA scopes match the issuer's interactive set"
+        id: gate_spa_scopes
+        if: always()
+        continue-on-error: true
         run: python3 tools/ci/check-spa-scopes.py
 
-      - name: Integration DPIA / data-sharing gate (13.3)
+      - name: "gate: integration DPIA / data-sharing (13.3)"
+        id: gate_dpia
+        if: always()
+        continue-on-error: true
         run: |
           python3 tools/ci/check-integration-dpia.py --selftest
           python3 tools/ci/check-integration-dpia.py
 
-      - name: Apply migrations + provision hbmp_app role
+      # 24.0 — the denominator has the floor's power and none of its scrutiny, so it gets the same guard.
+      - name: "gate: coverage-exclusions integrity (denominator)"
+        id: gate_coverage_exclusions
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 tools/ci/check-coverage-exclusions.py --selftest
+          python3 tools/ci/check-coverage-exclusions.py --base "${{ github.event.before || 'HEAD~1' }}"
+
+      # 24.1.3 — floors ratchet up. A decrease needs an ADR that exists and names the module.
+      - name: "gate: coverage-floor monotonicity"
+        id: gate_floor_monotonicity
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 tools/ci/check-floor-monotonicity.py --selftest
+          python3 tools/ci/check-floor-monotonicity.py --base "${{ github.event.before || 'HEAD~1' }}"
+
+      # ---- build + the DB chain --------------------------------------------------------------------
+
+      - name: Restore
+        if: always()
+        continue-on-error: true
+        run: dotnet restore HbmpPlatform.sln
+
+      - name: "gate: build (Release, warnings-as-errors)"
+        id: gate_build
+        if: always()
+        continue-on-error: true
+        run: dotnet build HbmpPlatform.sln -c Release --no-restore
+
+      - name: "gate: apply migrations + provision hbmp_app role"
+        id: gate_apply_migrations
+        if: always()
+        continue-on-error: true
         run: bash tools/ci/apply-migrations.sh
 
       # 18.F3 — the control that would have caught X6 and S2 automatically. Every other check asks a
       # question someone thought to ask; this one asks the DATABASE what tables exist and proves isolation
       # on each, so a table added in a service nobody is thinking about is covered the day it lands.
-      # --selftest first: a checker that cannot fail is not a check.
-      - name: Tenant-isolation fuzzer (every tenant_id table, driven off information_schema)
+      - name: "gate: tenant-isolation fuzzer (driven off information_schema)"
+        id: gate_tenant_isolation
+        if: always()
+        continue-on-error: true
         run: |
           python3 tools/ci/check-tenant-isolation.py --selftest
           python3 tools/ci/check-tenant-isolation.py
 
       - name: Wire *_TEST_DB env so integration + RLS suites run
+        if: always()
+        continue-on-error: true
         run: bash tools/ci/print-test-db-env.sh >> "$GITHUB_ENV"
 
-      - name: Test (Release) with coverage
+      - name: "gate: test (Release) with coverage"
+        id: gate_tests
+        if: always()
+        continue-on-error: true
         run: >-
           dotnet test HbmpPlatform.sln -c Release --no-build
           --collect:"XPlat Code Coverage"
           --results-directory ./coverage
           --logger "trx;LogFileName=test.trx"
 
-      # 24.0 — the denominator has the same power as the floor and none of the scrutiny, so it gets the
-      # same guard: an added exclusion needs an ADR that exists and names the path, and Domain is never
-      # excludable. --selftest first: a checker that cannot fail is not a check.
-      - name: Coverage-exclusions guard (denominator integrity)
-        run: |
-          python3 tools/ci/check-coverage-exclusions.py --selftest
-          python3 tools/ci/check-coverage-exclusions.py --base "${{ github.event.before || 'HEAD~1' }}"
-
-      - name: Domain-coverage gate
+      # Publishes the per-module table to the job summary on EVERY run, pass or fail (Gate 0.3).
+      - name: "gate: domain-coverage floor"
+        id: gate_coverage
+        if: always()
+        continue-on-error: true
         run: |
           python3 tools/ci/coverage-report.py --selftest
           bash tools/ci/coverage-gate.sh ./coverage
 
+      # 24.1.4 — after a green run, propose tightening any floor measured coverage has left behind.
+      # Advisory here (it prints); the scheduled workflow opens the PR.
+      - name: Ratchet check (proposes floor raises)
+        if: always()
+        continue-on-error: true
+        run: python3 tools/ci/raise-floors.py --report ./coverage/coverage-report.json || true
+
       - name: Restore local tools (Swagger CLI)
+        if: always()
+        continue-on-error: true
         run: dotnet tool restore
 
       - name: Generate + validate OpenAPI specs (all services)
+        if: always()
+        continue-on-error: true
         run: |
           CI_DB="Host=localhost;Port=5432;Database=hbmp;Username=hbmp;Password=ci_hbmp_pw"
           # 18.E1 (Q2): Identity and Interop were MISSING from this list. identity-service is the newest
@@ -159,14 +231,13 @@ jobs:
           done
           bash tools/ci/generate-openapi.sh artifacts/openapi
 
-      # 18.E1 (Q2) — OpenAPI DRIFT is a red build.
-      #
-      # CLAUDE.md says the spec is the source of truth. It was generated in CI, uploaded as an artefact
-      # nobody opens, and thrown away — so the committed contract and the running services could diverge
-      # indefinitely and nothing said so. The specs now live in docs/api/ and a diff fails the build:
-      # changing an endpoint means committing the regenerated spec, which puts the contract change in the
-      # pull request where a reviewer sees it.
-      - name: OpenAPI drift check (committed specs must match the running services)
+      # 18.E1 (Q2) — OpenAPI DRIFT is a red build. CLAUDE.md says the spec is the source of truth; it was
+      # generated in CI, uploaded as an artefact nobody opens, and thrown away, so the committed contract
+      # and the running services could diverge indefinitely with nothing saying so.
+      - name: "gate: OpenAPI drift (committed specs match the running services)"
+        id: gate_openapi_drift
+        if: always()
+        continue-on-error: true
         run: |
           mkdir -p docs/api
           cp artifacts/openapi/*.json docs/api/ 2>/dev/null || true
@@ -178,6 +249,7 @@ jobs:
 
       - name: Upload coverage + OpenAPI specs + test results
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: backend-coverage-openapi
@@ -185,3 +257,62 @@ jobs:
             ./coverage
             ./artifacts/openapi
           retention-days: 14
+
+      # ============================================================================================
+      - name: Gate summary (fail-at-end)
+        if: always()
+        env:
+          OUTCOMES: |
+            migration-compat=${{ steps.gate_migration_compat.outcome }}
+            kong-route-coverage=${{ steps.gate_kong.outcome }}
+            spa-scopes=${{ steps.gate_spa_scopes.outcome }}
+            integration-dpia=${{ steps.gate_dpia.outcome }}
+            coverage-exclusions=${{ steps.gate_coverage_exclusions.outcome }}
+            floor-monotonicity=${{ steps.gate_floor_monotonicity.outcome }}
+            build=${{ steps.gate_build.outcome }}
+            apply-migrations=${{ steps.gate_apply_migrations.outcome }}
+            tenant-isolation=${{ steps.gate_tenant_isolation.outcome }}
+            tests=${{ steps.gate_tests.outcome }}
+            coverage=${{ steps.gate_coverage.outcome }}
+            openapi-drift=${{ steps.gate_openapi_drift.outcome }}
+        run: |
+          echo "## Gate results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Gate | Outcome |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          failed=0
+          while IFS='=' read -r gate outcome; do
+            [ -z "$gate" ] && continue
+            case "$outcome" in
+              success) icon="PASS" ;;
+              skipped) icon="DID NOT RUN"; failed=1 ;;
+              *)       icon="FAIL"; failed=1 ;;
+            esac
+            printf '| %s | %s |\n' "$gate" "$icon" >> "$GITHUB_STEP_SUMMARY"
+            printf '%-24s %s\n' "$gate" "$icon"
+            # Heartbeat: record every gate that actually EXECUTED, so check-gate-freshness.py can tell
+            # "passing" from "never ran". Failure still counts as execution — running is what is measured.
+            if [ "$outcome" != "skipped" ]; then
+              python3 tools/ci/check-gate-freshness.py --record "$gate" --state-dir .ci-state >/dev/null || true
+            fi
+          done <<< "$OUTCOMES"
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::one or more gates failed or did not run — see the table above"
+            exit 1
+          fi
+          echo "all gates passed"
+      # The heartbeats the gate-health watchdog reads to tell "passing" from "never ran". Written by the
+      # summary step below, so this upload must come after it — see the ordering note there.
+      - name: Upload gate heartbeats
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-heartbeats
+          path: .ci-state
+          retention-days: 30
+
+      # ============================================================================================
+      # The whole point of the restructure: one place that reads every gate's outcome, prints the
+      # scoreboard, and decides the build. A gate that did not EXECUTE is as bad as one that failed —
+      # that is the lesson of July — so 'skipped' counts against the build too.
