@@ -40,7 +40,7 @@ public class ProgramFeaturePropagationTests
         return (new ProgramAdminService(db, audit, TimeProvider.System, outbox), outbox);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Switching_a_feature_publishes_the_change_for_the_issuer_to_project()
     {
         Skip.If(Db is null, "ADMIN_TEST_DB not set — DB integration test skipped.");
@@ -76,7 +76,7 @@ public class ProgramFeaturePropagationTests
 
     /// <summary>Switching OFF propagates exactly as switching on does. Publishing only the enables would leave
     /// every token asserting a module the administrator has withdrawn.</summary>
-    [Fact]
+    [SkippableFact]
     public async Task Switching_a_feature_off_also_publishes()
     {
         Skip.If(Db is null, "ADMIN_TEST_DB not set — DB integration test skipped.");
@@ -102,7 +102,7 @@ public class ProgramFeaturePropagationTests
 
     /// <summary>The switch is still persisted and still audited — the event is an addition to that record, not a
     /// replacement for it. A consumer that never runs must not cost us the administrative history.</summary>
-    [Fact]
+    [SkippableFact]
     public async Task The_row_and_its_history_are_written_alongside_the_event()
     {
         Skip.If(Db is null, "ADMIN_TEST_DB not set — DB integration test skipped.");

@@ -51,7 +51,7 @@ public class ProgramCapTests
         await db.Database.ExecuteSqlRawAsync("DELETE FROM admin.tenant_limit WHERE tenant_id = {0}", [tenant]);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task A_grant_that_would_exceed_the_user_cap_is_refused_with_the_numbers()
     {
         Skip.If(Db is null, "ADMIN_TEST_DB not set — DB integration test skipped.");
@@ -94,7 +94,7 @@ public class ProgramCapTests
     /// its existing people another role — that consumes no slot. Enforcing per-binding would freeze role
     /// administration for every tenant at its limit, which is not what the cap means and would read as a bug.
     /// </summary>
-    [Fact]
+    [SkippableFact]
     public async Task A_second_role_for_an_existing_user_consumes_no_slot()
     {
         Skip.If(Db is null, "ADMIN_TEST_DB not set — DB integration test skipped.");
@@ -122,7 +122,7 @@ public class ProgramCapTests
     /// "is this user new" test between the two caps would let the provider cap be bypassed by granting a
     /// tenant-scoped role first.
     /// </summary>
-    [Fact]
+    [SkippableFact]
     public async Task An_existing_user_still_consumes_a_provider_slot_on_their_first_provider_binding()
     {
         Skip.If(Db is null, "ADMIN_TEST_DB not set — DB integration test skipped.");
@@ -148,7 +148,7 @@ public class ProgramCapTests
 
     /// <summary>No cap configured means UNLIMITED, not zero. Inventing a default would take every tenant offline
     /// the day admin.tenant_limit shipped empty — which is exactly the state it is in today.</summary>
-    [Fact]
+    [SkippableFact]
     public async Task With_no_cap_configured_grants_are_unlimited()
     {
         Skip.If(Db is null, "ADMIN_TEST_DB not set — DB integration test skipped.");
@@ -169,7 +169,7 @@ public class ProgramCapTests
 
     /// <summary>Revoking frees the slot immediately — true by construction because the cap counts live rows
     /// rather than maintaining a counter that drifts after the first failed transaction.</summary>
-    [Fact]
+    [SkippableFact]
     public async Task Revoking_a_binding_frees_the_slot_immediately()
     {
         Skip.If(Db is null, "ADMIN_TEST_DB not set — DB integration test skipped.");
