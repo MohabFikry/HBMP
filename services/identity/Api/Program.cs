@@ -111,6 +111,11 @@ builder.Services.AddCors(options => options.AddPolicy(SpaCorsPolicy, policy => p
     // gateway's own CORS stance in infra/compose/config/kong.yml.
     .WithHeaders("Authorization", "Content-Type")));
 
+// Readiness for the probe in infra/helm/rollout/rollout-template.yaml. Process-level only: this reports
+// "through startup and able to serve". A dependency check here would pull the pod out of rotation for a
+// condition the service already surfaces per-request, turning a partial degradation into a total outage.
+builder.Services.AddHealthChecks();
+
 var app = builder.Build();
 // 18.B3 (audit R2 S7) — FIRST middleware. identity-service was the only service without it, which is the
 // worst possible one to omit: it is where passwords, TOTP codes and bearer tokens are transmitted. Without
@@ -177,6 +182,9 @@ app.Use(async (context, next) =>
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "identity-service" })).AllowAnonymous();
+// Without this the readinessProbe 404s and the canary rollout waits forever on a healthy pod. Anonymous
+// because kubelet carries no bearer token.
+app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 app.MapConnect();  // 17.2 — /connect/{authorize,token,userinfo,login,logout}
 app.MapAccount();  // 17.3 — /connect/{2fa,enroll-2fa} login UI + TOTP 2FA + recovery codes

@@ -53,6 +53,7 @@ public class AdminEndpointAuthorizationTests : IClassFixture<AdminEndpointAuthor
     private static readonly Dictionary<string, string> Exempt = new(StringComparer.Ordinal)
     {
         ["/health/live"] = "liveness probe — no principal exists, and a gated probe cannot report a dead service",
+        ["/health/ready"] = "readiness probe — kubelet carries no bearer token, so a gated probe reports a healthy pod as broken forever",
         ["/metrics"] = "Prometheus scrape, in-cluster only; never routed through Kong",
     };
 

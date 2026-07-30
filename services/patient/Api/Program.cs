@@ -42,6 +42,11 @@ builder.Services.ConfigureHttpJsonOptions(o =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Readiness for the probe in infra/helm/rollout/rollout-template.yaml. Process-level only: this reports
+// "through startup and able to serve". A dependency check here would pull the pod out of rotation for a
+// condition the service already surfaces per-request, turning a partial degradation into a total outage.
+builder.Services.AddHealthChecks();
+
 var app = builder.Build();
 app.UseHbmpTransportSecurity(); // HSTS + HTTPS redirect outside Development (16.5, H8)
 app.UseExceptionHandler();
@@ -52,6 +57,9 @@ app.UseHbmpRls(); // bind app.tenant_id / app.provider_id GUCs from the principa
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "patient-service" })).AllowAnonymous();
+// Without this the readinessProbe 404s and the canary rollout waits forever on a healthy pod. Anonymous
+// because kubelet carries no bearer token.
+app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 // 18.B3 (audit R2 S6) — reads and writes are no longer the same permission.
 //

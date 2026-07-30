@@ -44,6 +44,11 @@ builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Readiness for the probe in infra/helm/rollout/rollout-template.yaml. Process-level only: this reports
+// "through startup and able to serve". A dependency check here would pull the pod out of rotation for a
+// condition the service already surfaces per-request, turning a partial degradation into a total outage.
+builder.Services.AddHealthChecks();
+
 var app = builder.Build();
 app.UseHbmpTransportSecurity(); // HSTS + HTTPS redirect outside Development (16.5, H8)
 app.UseExceptionHandler();
@@ -59,6 +64,9 @@ app.UseHbmpRls(); // 18.B2 — bind app.tenant_id / app.provider_id from the pri
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "claims-service" })).AllowAnonymous();
+// Without this the readinessProbe 404s and the canary rollout waits forever on a healthy pod. Anonymous
+// because kubelet carries no bearer token.
+app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 app.MapClaims();    // phase 10b.1 — auto-derived claims + min-necessary reads + intake seam
 app.MapBatches();   // phase 10b.2 — batching + batch lifecycle (single-open-batch DB guard)

@@ -58,6 +58,7 @@ public class MasterDataAuthzTests : IClassFixture<MasterDataAuthzTests.Host>
     private static readonly Dictionary<string, string> Anonymous = new(StringComparer.Ordinal)
     {
         ["/health/live"] = "liveness probe — a gated probe cannot report a dead service",
+        ["/health/ready"] = "readiness probe — kubelet carries no bearer token, so a gated probe never reports Ready",
         ["/metrics"] = "Prometheus scrape, in-cluster only",
     };
 
