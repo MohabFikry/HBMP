@@ -195,6 +195,8 @@ jobs:
 
       # ---- build + the DB chain --------------------------------------------------------------------
 
+      # ADVISORY: a failed restore cannot pass unnoticed — the very next step is the build gate, which is
+      # counted and cannot succeed without it.
       - name: Restore
         if: always()
         continue-on-error: true
@@ -223,10 +225,24 @@ jobs:
           python3 tools/ci/check-tenant-isolation.py --selftest
           python3 tools/ci/check-tenant-isolation.py
 
-      - name: Wire *_TEST_DB env so integration + RLS suites run
+      # 24.1 — the quietest gate in the file. Every DB-gated test answers Skip.If(<SERVICE>_TEST_DB is null),
+      # so if this step fails the ~100 concurrency, RLS-isolation and break-glass proofs SKIP and the suite
+      # still reports green — CLAUDE.md's "a green suite is only meaningful with this flag", inverted. It was
+      # continue-on-error with no id, so that failure was recorded nowhere and counted for nothing. Now it is
+      # a gate, and it checks its own effect rather than trusting the exit code.
+      - name: "gate: wire *_TEST_DB env so integration + RLS suites run"
+        id: gate_test_db_env
         if: always()
         continue-on-error: true
-        run: bash tools/ci/print-test-db-env.sh >> "$GITHUB_ENV"
+        run: |
+          bash tools/ci/print-test-db-env.sh >> "$GITHUB_ENV"
+          n=$(grep -c '_TEST_DB=' "$GITHUB_ENV" || true)
+          echo "exported $n *_TEST_DB variable(s)"
+          if [ "$n" -lt 20 ]; then
+            echo "::error::only $n *_TEST_DB variables exported — the DB-gated suites would skip and the run"
+            echo "would report green having proven none of the concurrency, RLS or break-glass invariants."
+            exit 1
+          fi
 
       - name: "gate: test (Release) with coverage"
         id: gate_tests
@@ -249,17 +265,25 @@ jobs:
 
       # 24.1.4 — after a green run, propose tightening any floor measured coverage has left behind.
       # Advisory here (it prints); the scheduled workflow opens the PR.
+      # ADVISORY: proposes a floor RAISE and prints it; the scheduled gate-health workflow opens the PR.
+      # Its failure cannot weaken anything — the floors it would tighten stay where they are.
       - name: Ratchet check (proposes floor raises)
         if: always()
         continue-on-error: true
         run: python3 tools/ci/raise-floors.py --report ./coverage/coverage-report.json || true
 
+      # ADVISORY: a failure here surfaces as the OpenAPI generate gate failing, which IS counted.
       - name: Restore local tools (Swagger CLI)
         if: always()
         continue-on-error: true
         run: dotnet tool restore
 
-      - name: Generate + validate OpenAPI specs (all services)
+      # 24.1 — this step had no `id`, so with `continue-on-error: true` its failure was recorded nowhere and
+      # counted for nothing: generation could fail for all 21 services and the job stayed green. Worse, the
+      # drift gate that follows then had nothing to compare and reported the contract verified. It is a gate
+      # now, and it is in the summary.
+      - name: "gate: generate + validate OpenAPI specs (all services)"
+        id: gate_openapi_generate
         if: always()
         continue-on-error: true
         run: |
@@ -282,13 +306,25 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p docs/api
-          cp artifacts/openapi/*.json docs/api/ 2>/dev/null || true
+          # 24.1 — REFUSE TO COMPARE NOTHING. This used to be `cp ... 2>/dev/null || true`, which turned a
+          # generation that produced zero specs into a clean `git diff` and a PASS: the louder the upstream
+          # failure, the greener this gate got. Nothing verified reads identically to nothing changed.
+          n=$(ls artifacts/openapi/*.json 2>/dev/null | wc -l)
+          if [ "$n" -eq 0 ]; then
+            echo "::error::no generated specs to compare — the generation step produced none, so this gate"
+            echo "cannot say anything about the committed contract. Failing rather than reporting it clean."
+            exit 1
+          fi
+          echo "comparing $n generated spec(s) against docs/api"
+          cp artifacts/openapi/*.json docs/api/
           if ! git diff --exit-code -- docs/api; then
             echo "::error::OpenAPI specs in docs/api are stale."
             echo "Run tools/ci/generate-openapi.sh locally and commit the result — the spec is the contract."
             exit 1
           fi
 
+      # ADVISORY: artefact upload. Losing the upload loses convenience, not a verdict — every number it
+      # carries was already asserted by a counted gate above.
       - name: Upload coverage + OpenAPI specs + test results
         if: always()
         continue-on-error: true
@@ -315,8 +351,10 @@ jobs:
             build=${{ steps.gate_build.outcome }}
             apply-migrations=${{ steps.gate_apply_migrations.outcome }}
             tenant-isolation=${{ steps.gate_tenant_isolation.outcome }}
+            test-db-env=${{ steps.gate_test_db_env.outcome }}
             tests=${{ steps.gate_tests.outcome }}
             coverage=${{ steps.gate_coverage.outcome }}
+            openapi-generate=${{ steps.gate_openapi_generate.outcome }}
             openapi-drift=${{ steps.gate_openapi_drift.outcome }}
         run: |
           echo "## Gate results" >> "$GITHUB_STEP_SUMMARY"
@@ -346,6 +384,8 @@ jobs:
           echo "all gates passed"
       # The heartbeats the gate-health watchdog reads to tell "passing" from "never ran". Written by the
       # summary step below, so this upload must come after it — see the ordering note there.
+      # ADVISORY: fail-safe by construction. A missed heartbeat makes check-gate-freshness.py alarm on the
+      # next run, so losing this step raises the alarm rather than silencing it.
       - name: Upload gate heartbeats
         if: always()
         continue-on-error: true

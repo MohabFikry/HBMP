@@ -83,6 +83,107 @@ public class CiGateTests
     }
 
     /// <summary>
+    /// The drift gate must refuse to compare NOTHING.
+    ///
+    /// <para>It copied <c>artifacts/openapi/*.json</c> over docs/api with <c>2&gt;/dev/null || true</c>. When
+    /// generation produced no specs at all the glob matched no files, the copy was swallowed, <c>git diff</c>
+    /// was clean, and the gate reported the contract verified — so the louder the upstream failure, the
+    /// greener this gate got. Nothing verified and nothing changed are not the same finding, and only one of
+    /// them is safe to report as a pass.</para>
+    /// </summary>
+    [Fact]
+    public void Openapi_drift_fails_rather_than_comparing_an_empty_spec_directory()
+    {
+        var workflow = Workflow();
+        var step = Regex.Match(workflow, @"(?s)gate: OpenAPI drift.*?\n(?=      - )").Value;
+        step.Should().NotBeEmpty("the drift gate step must be findable for this assertion to mean anything");
+
+        step.Should().NotContain("cp artifacts/openapi/*.json docs/api/ 2>/dev/null || true",
+            "that form turns 'the generator produced nothing' into a clean diff and a PASS");
+        step.Should().MatchRegex(@"ls artifacts/openapi/\*\.json[\s\S]*?wc -l",
+            "the gate must count what it is about to compare");
+        step.Should().MatchRegex(@"-eq 0[\s\S]*?exit 1",
+            "zero generated specs must fail the gate, not pass it silently");
+    }
+
+    /// <summary>
+    /// Fail-at-end only works if every deferred failure is actually counted.
+    ///
+    /// <para><c>continue-on-error: true</c> means "record this and keep going"; the summary step at the end
+    /// then reads each step's outcome and fails the job. A step that carries continue-on-error but has no
+    /// <c>id</c> in that summary is therefore a step that CANNOT fail the build — the strongest possible
+    /// green-washing, and invisible in review because the line reads exactly like its neighbours.</para>
+    ///
+    /// <para>Two were found this way. The OpenAPI generation step could fail for all 21 services with the job
+    /// staying green (and the drift gate downstream then had nothing to compare, so it passed too). Worse,
+    /// the step exporting <c>*_TEST_DB</c> — without which every DB-gated concurrency, RLS-isolation and
+    /// break-glass test answers Skip.If(...) — was equally uncounted, so the suite could report green having
+    /// proven none of them.</para>
+    ///
+    /// <para>Some steps are legitimately advisory. Those say so in a comment, in the file, next to the step,
+    /// with the reason their failure cannot weaken a verdict — which is reviewable, unlike an omission.</para>
+    /// </summary>
+    [Fact]
+    public void Every_deferred_failure_is_either_counted_or_declared_advisory()
+    {
+        var workflow = Workflow();
+        var outcomes = Regex.Match(workflow, @"(?s)OUTCOMES:\s*\|(.*?)\n        run:").Groups[1].Value;
+        outcomes.Should().NotBeEmpty("the summary's OUTCOMES map must be parseable");
+        var counted = Regex.Matches(outcomes, @"steps\.(\w+)\.outcome")
+            .Select(m => m.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
+
+        // Walk the steps line by line rather than splitting on a regex: a step's ADVISORY note sits ABOVE
+        // the `- name:` it excuses, so the comment lines immediately preceding a step have to be read as
+        // part of it — attach them to the previous step and the note excuses the wrong one.
+        var lines = workflow.Split('\n');
+        var uncounted = new List<string>();
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var head = Regex.Match(lines[i], @"^      - (?:name|uses): (.*)$");
+            if (!head.Success) continue;
+
+            var body = new List<string>();
+            for (var j = i - 1; j >= 0 && lines[j].StartsWith("      #", StringComparison.Ordinal); j--)
+                body.Add(lines[j]);                                   // the note above the step
+            for (var j = i + 1; j < lines.Length && !Regex.IsMatch(lines[j], @"^      - (?:name|uses):"); j++)
+            {
+                if (lines[j].StartsWith("      #", StringComparison.Ordinal)) break;  // next step's note
+                body.Add(lines[j]);
+            }
+            var block = string.Join('\n', body);
+            if (!block.Contains("continue-on-error: true", StringComparison.Ordinal)) continue;
+
+            var id = Regex.Match(block, @"(?m)^\s*id: (\w+)").Groups[1].Value;
+            if (id.Length > 0 && counted.Contains(id)) continue;
+            if (block.Contains("# ADVISORY:", StringComparison.Ordinal)) continue;
+            uncounted.Add(head.Groups[1].Value.Trim().Trim('"'));
+        }
+
+        uncounted.Should().BeEmpty(
+            "these steps defer their failure and nothing collects it, so they can never fail the build — " +
+            "give each an id listed in OUTCOMES, or a '# ADVISORY:' comment saying why its failure cannot " +
+            "weaken a verdict:{0}  {1}", Environment.NewLine, string.Join($"{Environment.NewLine}  ", uncounted));
+
+        // And the summary must actually fail the job on a non-success outcome, or counting is decoration.
+        workflow.Should().Contain("exit 1", "the gate summary must fail the job when any outcome is not success");
+    }
+
+    /// <summary>
+    /// A green suite is only meaningful with the DB-gated tests actually running (CLAUDE.md). The env that
+    /// decides that is exported by one step, so that step verifies its own EFFECT rather than trusting an
+    /// exit code — a script that succeeds while printing nothing would otherwise leave every
+    /// Skip.If(&lt;SERVICE&gt;_TEST_DB is null) answered "skip" with the run still reporting green.
+    /// </summary>
+    [Fact]
+    public void The_test_db_wiring_step_checks_that_the_variables_actually_landed()
+    {
+        var step = Regex.Match(Workflow(), @"(?s)gate: wire \*_TEST_DB.*?\n(?=      - )").Value;
+        step.Should().NotBeEmpty("the *_TEST_DB wiring must be a named gate, not an anonymous step");
+        step.Should().Contain("_TEST_DB=", "it must count the variables it exported");
+        step.Should().Contain("exit 1", "too few exported variables must fail, not pass quietly");
+    }
+
+    /// <summary>
     /// A gate's INPUTS are part of its trigger.
     ///
     /// <para>The workflow's <c>paths:</c> filter decides whether the job runs at all, so a path missing from

@@ -36,12 +36,31 @@ export Auth__RequireHttpsMetadata="false"
 export OTEL_SDK_DISABLED="true"
 export ASPNETCORE_ENVIRONMENT="Development"
 
+# 24.1 — COUNT WHAT WE EXPECT BEFORE WE PRODUCE IT. Discover the services that DECLARE a Swagger document
+# up front, so the run has a target to be measured against. Without one, "generated nothing" and "generated
+# everything" both look like success: the loop below simply has no iteration that fails, and the drift gate
+# downstream copies `artifacts/openapi/*.json`, matches no files, sees no diff and reports the contract
+# verified. A silent zero is the worst outcome this script can produce, so it is now an explicit failure.
+declare -a want=()
+for api in services/*/Api; do
+  [ -d "$api" ] || continue
+  grep -q AddSwaggerGen "$api"/*.cs 2>/dev/null || continue
+  want+=("$(basename "$(dirname "$api")")")
+done
+expected=${#want[@]}
+if [ "$expected" -eq 0 ]; then
+  echo "::error::no service under services/*/Api declares AddSwaggerGen — either the tree moved or this" \
+       "script is running from the wrong directory. Refusing to report success having generated nothing."
+  exit 1
+fi
+
 fail=0
 count=0
-for api in services/*/Api; do
-  svc=$(basename "$(dirname "$api")")
-  grep -q AddSwaggerGen "$api"/*.cs 2>/dev/null || continue
-  dll=$(ls "$api"/bin/Release/net8.0/Mersal.*.Api.dll 2>/dev/null | head -1)
+for svc in "${want[@]}"; do
+  api="services/$svc/Api"
+  # `|| true`: under `set -e` + `pipefail` a failing `ls` inside a command substitution kills the script
+  # outright, so the "dll not found" branch below could never actually be reached to explain itself.
+  dll=$(ls "$api"/bin/Release/net8.0/Mersal.*.Api.dll 2>/dev/null | head -1 || true)
   if [ -z "$dll" ]; then
     echo "::error::$svc — built Api dll not found (build the solution in Release first)"; fail=1; continue
   fi
@@ -50,7 +69,15 @@ for api in services/*/Api; do
     printf '  ok   %-14s %s path(s)\n' "$svc" "$paths"; count=$((count + 1)); rm -f "$OUT/$svc.err"
   else
     echo "::error::$svc — OpenAPI generation failed:"; tail -6 "$OUT/$svc.err"; fail=1
+    # A half-written document is worse than none: the drift gate would copy it over the committed contract
+    # and the diff would read as a deliberate API change.
+    rm -f "$OUT/$svc.json"
   fi
 done
-echo "==> Generated $count service OpenAPI spec(s) into $OUT."
+
+echo "==> Generated $count of $expected service OpenAPI spec(s) into $OUT."
+if [ "$count" -ne "$expected" ]; then
+  echo "::error::expected $expected spec(s), produced $count — the OpenAPI contract is NOT verified by this run."
+  fail=1
+fi
 exit $fail
