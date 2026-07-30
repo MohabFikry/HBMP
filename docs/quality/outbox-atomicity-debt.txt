@@ -1,39 +1,65 @@
 # Outbox atomicity debt register — INV-OUTBOX-SURVIVES-CRASH
 #
-# Each line is a file that enqueues a domain event in the same block as a SaveChangesAsync WITHOUT a
-# transaction around both, and the number of such call sites in it. Every one of these is a place where a
-# state change can outlive its event: EfOutbox.EnqueueRawAsync commits separately, so a process kill
-# between the business commit and the enqueue leaves the change durable and the event gone, with nothing
-# recording that it was owed. Enqueue-before-save is the mirror failure — an event for a change that never
-# committed, which cannot be un-sent.
+# Each line is a file containing domain-event enqueues that are NOT inside a transaction, and how many.
+# Every one is a place where a state change can outlive its event: EfOutbox.EnqueueRawAsync commits on its
+# own SaveChanges, so a process kill between the business commit and the enqueue leaves the change durable
+# and the event gone, with nothing recording that it was owed. Enqueue-before-save is the mirror failure —
+# an event for a change that never committed, which cannot be un-sent.
 #
-# This register EXISTS so the rule could be landed against a codebase that already breaks it in 73 places.
-# Recording the debt is not forgiving it. OutboxAtomicityTests ratchets these numbers ONE WAY:
+# THE RULE DOES NOT REQUIRE A VISIBLE WRITE, and that is deliberate. An earlier version only flagged an
+# enqueue that shared a handler with a SaveChangesAsync. In emr, pharmacy dispensing, orders consume and
+# every claims endpoint the state change happens inside a SERVICE that owns and commits its own transaction,
+# and the handler enqueues after it returns — the exact two-commit shape this rule forbids, with nothing in
+# the handler for that detector to find. It was blind to 40 sites, concentrated in the money paths, and the
+# register read as though they did not exist. An enqueue that genuinely announces nothing is rare enough to
+# earn a line here with a reason.
+#
+# This register EXISTS so the rule could be landed against a codebase that already breaks it. Recording the
+# debt is not forgiving it. OutboxAtomicityTests ratchets these numbers ONE WAY:
 #   * a file not listed here may have ZERO such sites
 #   * a listed file may shrink or disappear, never grow
 #   * a stale entry (a file already fixed) is itself a failure — it would re-permit a regression
 #
-# To clear an entry: wrap the handler's state change and its enqueue(s) in one
+# To clear an entry where the handler does the write: wrap the state change and its enqueue(s) in one
 # `await using var tx = await db.Database.BeginTransactionAsync(ct); ... await tx.CommitAsync(ct);`
-# then delete the line. An early return before the commit rolls both back, which is the correct outcome.
+# An early return before the commit rolls both back, which is the correct outcome.
+#
+# To clear one where a SERVICE does the write: the enqueue has to move inside that service's transaction —
+# wrapping the handler would nest a second transaction inside the service's own and throw. Where a service
+# already takes an ambient transaction (see MembershipCommands), the handler may open one and the service
+# joins it.
 #
 # Format: <repo-relative-path> <count>
 
-services/admin/Api/BranchAssignmentService.cs 2
+services/admin/Api/BranchAssignmentService.cs 3
 services/admin/Api/PayerAssignmentService.cs 2
+services/admin/Api/ProgramEndpoints.cs 1
 services/callcentre/Api/CallAppointments.cs 1
 services/callcentre/Api/Interactions.cs 3
+services/case/Api/Beneficiary360Endpoint.cs 1
 services/case/Api/Cases.cs 5
+services/claims/Api/AppealEndpoints.cs 1
+services/claims/Api/BatchEndpoints.cs 2
+services/claims/Api/ClaimsEndpoints.cs 3
+services/claims/Api/DecisionEndpoints.cs 2
+services/claims/Api/ReconciliationEndpoints.cs 1
+services/claims/Api/ReimbursementEndpoints.cs 3
+services/claims/Api/SettlementEndpoints.cs 1
+services/claims/Api/SubmissionEndpoints.cs 1
 services/document/Api/Program.cs 1
-services/emr/Api/Appointments.cs 6
+services/emr/Api/Appointments.cs 7
 services/emr/Api/Program.cs 2
 services/emr/Api/Queue.cs 1
+services/emr/Api/Reminders.cs 1
 services/interop/Infrastructure/Integration/InboundIngestion.cs 1
-services/orders/Api/ReportAccess.cs 3
+services/orders/Api/Consume.cs 2
 services/patient/Api/BeneficiaryContacts.cs 1
 services/patient/Api/BeneficiaryIntake.cs 1
 services/patient/Api/Program.cs 5
+services/pharmacy/Api/Dispensing.cs 4
 services/policy/Api/EnrollmentEndpoints.cs 3
 services/policy/Api/NoteEndpoints.cs 2
 services/policy/Api/PlanEndpoints.cs 3
 services/policy/Api/PolicyDocumentEndpoints.cs 3
+services/policy/Infrastructure/BulkJobEngine.cs 1
+services/policy/Infrastructure/MembershipCommands.cs 1

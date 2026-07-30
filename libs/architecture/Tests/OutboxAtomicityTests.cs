@@ -92,19 +92,25 @@ public class OutboxAtomicityTests
 
             foreach (Match m in Regex.Matches(src, @"EnqueueAsync\("))
             {
-                foreach (var block in EnclosingBlocks(src, m.Index))
-                {
-                    // The block that owns BOTH writes is the one the transaction has to cover. Stop at the
-                    // innermost such block.
-                    if (!Mutates(block)) continue;
-                    if (!block.Contains("BeginTransactionAsync", StringComparison.Ordinal))
-                    {
-                        var line = src.Take(m.Index).Count(c => c == '\n') + 1;
-                        if (!results.TryGetValue(rel, out var lines)) results[rel] = lines = [];
-                        lines.Add(line);
-                    }
-                    break;
-                }
+                // Every block from the enqueue out to its handler. The transaction may legitimately be
+                // declared further out than the block that saves — `await using var tx = ...` before a
+                // `switch` covers every case arm inside it — so the question is whether ANY block in the
+                // handler opens one.
+                //
+                // The rule does NOT require a visible write. It used to, and that was a hole: in emr,
+                // pharmacy dispensing, orders consume and every claims endpoint, the state change happens
+                // inside a service that owns and commits its OWN transaction, and the handler enqueues after
+                // it returns — the exact two-commit shape this rule exists to forbid, with no
+                // SaveChangesAsync in the handler for a detector to find. Requiring a visible write made the
+                // rule blind to 40 sites, concentrated in the money paths. So the question is simply: is
+                // this enqueue inside a transaction? An enqueue that genuinely announces nothing (a pure
+                // notification with no state behind it) is rare enough to earn a register entry.
+                var scope = EnclosingBlocks(src, m.Index).ToList();
+                if (scope.Any(b => b.Contains("BeginTransactionAsync", StringComparison.Ordinal))) continue;
+
+                var line = src.Take(m.Index).Count(c => c == '\n') + 1;
+                if (!results.TryGetValue(rel, out var lines)) results[rel] = lines = [];
+                lines.Add(line);
             }
         }
         return results;
@@ -121,27 +127,44 @@ public class OutboxAtomicityTests
         || block.Contains("ExecuteDeleteAsync", StringComparison.Ordinal);
 
     /// <summary>
-    /// The brace-delimited blocks enclosing <paramref name="index"/>, innermost first.
+    /// The brace-delimited blocks enclosing <paramref name="index"/>, innermost first, stopping at the
+    /// HANDLER that owns it.
     ///
-    /// <para>The walk STOPS at a type or namespace body. Without that stop the detector reads a class whose
-    /// enqueue is in one method and whose save is in another as a single shared block — and then a
-    /// <c>BeginTransactionAsync</c> anywhere in the class would clear every site in it. That is a false
-    /// negative in the direction that matters: the rule would go quiet exactly where the file is big enough
-    /// for the two writes to drift apart.</para>
+    /// <para>Where the walk stops decides what the rule can see, in both directions. Stop too early — at the
+    /// innermost block that saves — and a transaction declared before a <c>switch</c> is invisible, so a
+    /// correctly-wrapped handler reads as an offender. Walk too far — into the method holding a dozen
+    /// minimal-API lambdas, or into the class — and one lambda's <c>BeginTransactionAsync</c> clears every
+    /// other lambda beside it, which is a false negative exactly where a file is big enough for two writes to
+    /// drift apart.</para>
+    ///
+    /// <para>So the walk ends after the first LAMBDA body (a block whose head ends in <c>=&gt;</c>) or method
+    /// body, and never crosses a type or namespace declaration. That is the handler: the unit a transaction
+    /// belongs to.</para>
     /// </summary>
     private static IEnumerable<string> EnclosingBlocks(string src, int index)
     {
         var pos = index;
-        for (var level = 0; level < 6; level++)
+        for (var level = 0; level < 8; level++)
         {
             var start = OpenBraceBefore(src, pos);
             if (start < 0) yield break;
-            var head = src[Math.Max(0, start - 300)..start];
+            var head = src[Math.Max(0, start - 400)..start];
             if (Regex.IsMatch(head, @"\b(class|record|struct|interface|enum|namespace)\s+\w+[^;{]*$", RegexOptions.Singleline))
                 yield break;
+
             var end = MatchingClose(src, start);
             if (end < 0) yield break;
             yield return src[start..(end + 1)];
+
+            // A LAMBDA body ends the handler: minimal-API files put a dozen of them in one method, and
+            // walking past it would let one lambda's transaction clear every sibling beside it.
+            //
+            // Nothing else stops the walk. A `\)$` test for "method signature" looks right and is wrong —
+            // `switch (...)`, `if (...)`, `foreach (...)` all end in `)`, so it stopped at the first control
+            // block and reported four correctly-wrapped ReportAccess handlers as offenders because their
+            // `await using var tx` sits before the `switch` rather than inside it. For a real method body
+            // the type-declaration check above is the boundary, which is the right one.
+            if (Regex.IsMatch(head, @"=>\s*$")) yield break;
             pos = start;
         }
     }
