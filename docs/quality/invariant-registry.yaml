@@ -1,0 +1,284 @@
+# Mersal HBMP — invariant registry (phase 24, Gate 2)
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# Coverage is a proxy. A percentage can be satisfied by testing the easy parts while the money and the PHI
+# paths stay untested, and phase 24 opened with exactly that lesson learned the other way round: the
+# platform's domain coverage was 82.5% the whole time and a broken measurement said 46.9%. A number moved,
+# nobody could say which guarantee it corresponded to, and a sprint of test-writing was nearly aimed at a
+# regression that never happened.
+#
+# What must never regress is not a number. It is the set of promises the design documents make. Those
+# promises live in prose, across a dozen files, with nothing connecting a sentence in doc 37 to the test
+# that proves it. This file is that connection, and tools/ci/check-invariant-registry.py keeps it honest:
+#
+#   * a named test that no longer exists fails the build (rename it here too)
+#   * a named test that is permanently skipped fails the build — green while proving nothing is worse
+#     than missing, because nobody investigates a passing suite
+#   * an entry with tests: [] is reported as UNPROVEN, loudly, on every run
+#
+# DO NOT delete an entry to make the check pass. An invariant with no test is precisely what this file
+# exists to surface; deleting it is the one edit that defeats the whole mechanism.
+#
+# severity: Critical — a breach means wrong money, disclosed PHI, or a clinical decision made on false data.
+#           High     — a breach means a control is absent or unenforceable.
+
+invariants:
+
+  # ---------------------------------------------------------------- CLAUDE.md, the five platform rules
+
+  - id: INV-CONSUME-ATOMIC
+    statement: >-
+      Consuming an order line or dispensing a prescription line is atomic and idempotent: replaying the
+      same Idempotency-Key applies the effect exactly once, and concurrent callers cannot double-apply.
+    source: CLAUDE.md § Definition of Done; 23-state-machines.md
+    severity: Critical
+    tests:
+      - Mersal.Orders.Tests.OrderConsumeConcurrencyTests.Parallel_consume_of_one_line_lets_exactly_one_win
+      - Mersal.Orders.Tests.OrderConsumeConcurrencyTests.Replaying_the_same_key_adds_no_row_and_returns_the_original
+      - Mersal.Orders.Tests.OrderConsumeConcurrencyTests.A_used_line_cannot_be_consumed_again
+      - Mersal.Pharmacy.Tests.DispenseConcurrencyTests.Parallel_dispense_of_one_line_lets_exactly_one_win
+      - Mersal.Pharmacy.Tests.DispenseConcurrencyTests.Replaying_the_same_key_adds_no_row_and_returns_the_original
+      - Mersal.Pharmacy.Tests.DispenseConcurrencyTests.A_used_line_cannot_be_dispensed_again
+
+  - id: INV-MIN-NECESSARY
+    statement: >-
+      Every response carries only the fields the caller's role may see. Reception and the call centre
+      receive no clinical field; finance receives no diagnosis; a lab sees only its own orders; a pharmacy
+      only its own prescriptions. Enforced as a field-level projection, not a comment.
+    source: CLAUDE.md § Security; 11-permission-matrix.md; 18-security-model.md
+    severity: Critical
+    tests:
+      - Mersal.Authz.Tests.FieldProjectorTests.Reception_projection_strips_diagnosis_and_clinical_and_audits
+      - Mersal.Authz.Tests.FieldProjectorTests.Operational_roles_never_receive_clinical_content
+      - Mersal.Authz.Tests.FieldProjectorTests.Finance_never_receives_diagnosis
+      - Mersal.Authz.Tests.FieldProjectorTests.Lab_does_not_receive_prescription_class
+      - Mersal.Profile.Tests.SerializedPayloadTests.Reception_receives_no_clinical_field_anywhere_in_the_payload
+      - Mersal.Profile.Tests.SerializedPayloadTests.Finance_receives_no_diagnosis_no_result_and_no_photo
+      - Mersal.Profile.Tests.SerializedPayloadTests.A_lab_receives_only_identity_allergies_and_its_own_orders
+      - Mersal.Profile.Tests.SerializedPayloadTests.A_pharmacy_receives_its_own_prescriptions_and_never_a_result
+
+  - id: INV-AUDIT-CHAIN
+    statement: >-
+      The audit log is append-only and hash-chained: deleting or forging a record breaks the chain and is
+      detectable. Clinical and benefit data is never hard-deleted.
+    source: CLAUDE.md § Audit; 19-audit-strategy.md
+    severity: Critical
+    tests:
+      - Mersal.Audit.Client.Tests.HashChainTests.Chain_sets_prev_and_record_hash
+      - Mersal.Audit.Client.Tests.HashChainTests.Deleting_a_record_breaks_the_chain
+      - Mersal.Audit.Client.Tests.HashChainTests.Inserting_a_forged_record_breaks_the_chain
+      - Mersal.Audit.Client.Tests.HashChainTests.Intact_chain_verifies_ok
+      - Mersal.Architecture.Tests.NoCredentialMaterialInAuditTests.No_production_code_puts_credential_material_into_an_audit_event_or_a_log
+
+  - id: INV-A11Y-BILINGUAL
+    statement: >-
+      Every screen meets WCAG 2.2 AA and renders in Arabic RTL as well as English, on a POPULATED state —
+      not only on an error or empty state.
+    source: CLAUDE.md § Accessibility; 21-accessibility-checklist.md; 0B-DESIGN-SYSTEM-UI.md
+    severity: High
+    tests:
+      - apps/web/test/a11y-routes.test.tsx::U6 — axe over every route × locale × theme
+      - apps/web/test/patient-profile-sections.test.tsx::is axe clean in Arabic RTL
+    notes: >-
+      PARTIALLY PROVEN. Gate 4.1 found the nine policy-family screens and CallCentre have no fixture path,
+      so the axe sweep exercises only their ERROR state — a pass that measures nothing. Gate 4.2: contrast
+      is disabled under jsdom and needs the Playwright job. Gate 4.3: HttpApiClient sets the Arabic label
+      to the English string at ~45 sites, so live-mode Arabic is untested English.
+
+  - id: INV-TENANT-ISOLATION
+    statement: >-
+      A query bound to tenant A can never see tenant B's rows, and a connection with no tenant GUC bound
+      sees nothing at all. Proven against a real database, with rows that demonstrably exist.
+    source: CLAUDE.md § Security (RLS); 18-security-model.md; ADR-0011
+    severity: Critical
+    tests:
+      - Mersal.Policy.Tests.RlsIsolationTests.Raw_query_under_tenant_A_guc_cannot_see_tenant_B_or_unscoped
+      - Mersal.Claims.Tests.RlsIsolationTests.Claims_are_visible_only_under_their_own_tenant_guc
+      - Mersal.Admin.Tests.RlsIsolationTests.Rows_are_visible_only_under_their_own_tenant_guc
+      - Mersal.CallCentre.Tests.RlsIsolationTests.Rows_are_visible_only_under_their_own_tenant_guc
+      - Mersal.Claims.Tests.RlsIsolationTests.A_write_stamped_with_another_tenant_is_rejected_by_the_policy
+      - Mersal.Emr.Tests.RlsIsolationTests.Raw_query_under_tenant_A_guc_cannot_see_tenant_B_or_unscoped
+      - Mersal.Patient.Tests.RlsIsolationTests.Raw_query_under_tenant_A_guc_cannot_see_tenant_B_or_unscoped
+    notes: >-
+      The negation the phase prompt asks for is satisfied structurally: the same test asserts tenant A sees
+      exactly ["RLS-A"] and tenant B exactly ["RLS-B"] before asserting the unscoped connection sees
+      nothing, so the zero-rows assertion cannot pass vacuously on an empty database. identity, masterdata
+      and audit are exempt by design — identity authenticates BEFORE a tenant context exists, masterdata is
+      a tenant-free public code catalogue, audit uses its own hbmp_audit role.
+
+  - id: INV-PROVIDER-ISOLATION
+    statement: >-
+      A provider sees only its own queue, its own fulfilments and its own prescriptions; another
+      provider's rows are unreachable even with a valid token.
+    source: CLAUDE.md § Security (ABAC provider-ownership); 11-permission-matrix.md
+    severity: Critical
+    tests:
+      - Mersal.Orders.Tests.FulfillmentAuthzTests.Lab_tech_cannot_read_another_facilitys_queue
+      - Mersal.Pharmacy.Tests.DispensingAuthzTests.Pharmacist_cannot_read_another_pharmacys_queue
+
+  # ---------------------------------------------------------------- AUDIT-R2 §2, findings X1–X8
+  #
+  # All ten are recorded ✅ fixed in docs/AUDIT-R2-E2E.md as of 2026-07-27. The registry's job here is to
+  # make sure the tests that closed them cannot quietly disappear — a fixed finding with a deleted test is
+  # an open finding nobody has noticed yet.
+
+  - id: X1-LIMITS-ARE-LIVE
+    statement: >-
+      Coverage limits actually accrue: consuming an order line or dispensing a prescription increments
+      coverage_limit.consumed_value exactly once, so remaining falls and LIMIT_EXCEEDED can fire.
+    source: AUDIT-R2-E2E.md §2 X1
+    severity: Critical
+    tests:
+      - Mersal.Policy.Tests.BenefitConsumptionTests.Consuming_a_line_increments_coverage_limit_consumed_value_exactly_once
+      - Mersal.Policy.Tests.BenefitConsumptionTranslateTests.An_order_consume_event_becomes_one_instruction_per_line
+      - Mersal.Policy.Tests.EnrollmentDomainTests.Consumption_carries_forward_so_a_plan_change_is_not_a_fresh_ceiling
+
+  - id: X2-ROLLUP-PRESERVES-ADJUSTMENTS
+    statement: >-
+      Applied adjustments survive the batch rollup at the Decided → SettlementIssued freeze; deductions
+      and recoveries never vanish from the settled net_payable.
+    source: AUDIT-R2-E2E.md §2 X2
+    severity: Critical
+    tests:
+      - Mersal.Claims.Tests.ClaimsRollupSurvivalTests.An_adjustment_never_rewrites_the_decided_allowed_amount
+
+  - id: X3-ALLOWED-CAPPED-AT-TARIFF
+    statement: >-
+      The allowed amount never exceeds the contract tariff — on Approve AND on Adjust, which originally had
+      no cap at all.
+    source: AUDIT-R2-E2E.md §2 X3; 36-claims-management.md §5
+    severity: Critical
+    tests:
+      - Mersal.Claims.Tests.ClaimsMoneyLayerCapTests.An_Approve_above_the_contract_tariff_is_rejected
+      - Mersal.Claims.Tests.ClaimsMoneyLayerCapTests.An_Adjust_decision_above_the_cap_is_rejected
+      - Mersal.Claims.Tests.AdjudicationTests.A_line_failing_two_caps_reports_both_and_takes_the_lower
+
+  - id: X4-NO-COMMITTED-CREDENTIALS
+    statement: >-
+      No credential literal is committed to the repository, and none reaches an audit event or a log.
+    source: AUDIT-R2-E2E.md §2 X4
+    severity: Critical
+    tests:
+      - Mersal.Identity.Tests.ClientSeedingTests.No_credential_literal_remains_in_the_seeders
+      - Mersal.Architecture.Tests.NoCredentialMaterialInAuditTests.No_production_code_puts_credential_material_into_an_audit_event_or_a_log
+      - Mersal.Architecture.Tests.NoCredentialMaterialInAuditTests.The_scanner_actually_detects_the_thing_it_looks_for
+
+  - id: X5-M2M-SECRET-ROTATABLE
+    statement: >-
+      The machine-to-machine client secret is never a public literal, does not hold every scope, and a
+      rotated secret is actually applied rather than skipped because the client already exists.
+    source: AUDIT-R2-E2E.md §2 X5
+    severity: Critical
+    tests:
+      - Mersal.Identity.Tests.ClientSeedingTests.No_credential_literal_remains_in_the_seeders
+
+  - id: X6-NO-DENY-ALL-TRAP
+    statement: >-
+      A service that ships RLS DDL also binds the tenant GUC and owns an isolation suite, so flipping its
+      connection string to the NOBYPASSRLS role cannot silently return zero rows everywhere.
+    source: AUDIT-R2-E2E.md §2 X6
+    severity: Critical
+    tests:
+      - Mersal.Claims.Tests.RlsIsolationTests.Claims_are_visible_only_under_their_own_tenant_guc
+      - Mersal.CallCentre.Tests.RlsIsolationTests.Rows_are_visible_only_under_their_own_tenant_guc
+      - Mersal.Admin.Tests.RlsIsolationTests.Rows_are_visible_only_under_their_own_tenant_guc
+    notes: >-
+      Gate 5.5 adds the architecture guard that makes this structural: a migration touching ENABLE/FORCE
+      ROW LEVEL SECURITY, ALTER ROLE or GRANT will fail the build without a matching isolation suite. Until
+      that lands, this entry protects the three suites but not the next service to ship RLS DDL.
+
+  - id: X7-NO-LOST-UPDATE
+    statement: >-
+      Concurrent consume or dispense of DIFFERENT lines on one order does not lose an update; the
+      aggregate still reaches Completed and the completion event still fires.
+    source: AUDIT-R2-E2E.md §2 X7
+    severity: Critical
+    tests:
+      - Mersal.Orders.Tests.OrderConsumeConcurrencyTests.Parallel_consume_of_different_lines_completes_the_order
+      - Mersal.Orders.Tests.OrderConsumeConcurrencyTests.A_partially_consumed_order_still_settles_on_PartiallyUsed_under_concurrency
+      - Mersal.Pharmacy.Tests.DispenseConcurrencyTests.Parallel_dispense_of_different_lines_completes_the_prescription
+
+  - id: X8-PRICE-TIMES-QUANTITY
+    statement: >-
+      Contract price accounts for line quantity, so a multi-unit line is not priced as one unit and does
+      not surface as a false price variance in reconciliation.
+    source: AUDIT-R2-E2E.md §2 X8
+    severity: Critical
+    tests:
+      - Mersal.Claims.Tests.ClaimsMoneyLayerCapTests.A_multi_unit_line_priced_at_the_tariff_is_not_a_price_variance
+      - Mersal.Claims.Tests.ClaimsMoneyLayerCapTests.A_missing_tariff_is_still_never_guessed
+
+  # ---------------------------------------------------------------- design docs 37 / 39 / 40
+
+  - id: DOC37-SENSITIVE-EXISTENCE-ONLY
+    statement: >-
+      A sensitivity-restricted result stays existence-only until a grant exists — including for the
+      approval team, who are otherwise permitted the clinical record.
+    source: 37-branch-scoping-and-clinical-sensitivity.md §6
+    severity: Critical
+    tests:
+      - Mersal.Profile.Tests.SerializedPayloadTests.A_restricted_result_reaches_the_approval_team_as_existence_only
+
+  - id: DOC39-CALLER-TOKEN-ONLY
+    statement: >-
+      The patient profile is composed under the CALLER's token and never a privileged service account, and
+      the serialized payload never contains a field the caller's projection withheld.
+    source: 39-patient-profile.md §7.1, §7.2
+    severity: Critical
+    tests:
+      - Mersal.Profile.Tests.NoServiceAccountArchitectureTests.The_profile_service_has_no_client_credentials_path
+      - Mersal.Profile.Tests.NoServiceAccountArchitectureTests.No_outgoing_request_sets_an_Authorization_header_from_anywhere_but_the_caller
+      - Mersal.Profile.Tests.NoServiceAccountArchitectureTests.The_caller_bearer_is_what_actually_reaches_the_owning_service
+      - Mersal.Profile.Tests.NoServiceAccountArchitectureTests.The_profile_service_owns_no_data
+      - Mersal.Profile.Tests.SerializedPayloadTests.Reception_gets_no_key_at_all_for_the_sections_it_may_never_see
+
+  - id: DOC40-A1-PLATFORM-ADMIN
+    statement: >-
+      The platform-admin flag administers access and never bypasses projection, ABAC, RLS or branch scope;
+      a platform admin with no membership reaches no clinical or benefit key.
+    source: 40-user-access-model.md §7 (A1); ADR-0021 (user-access-model)
+    severity: Critical
+    tests:
+      - Mersal.Authz.Tests.EffectiveSetEvaluatorTests.A1_platform_admin_with_no_membership_reaches_no_clinical_or_benefit_key
+      - Mersal.Identity.Tests.EffectiveSetParityTests.Both_modes_compute_identical_sets
+
+  - id: INV-BREAK-GLASS-LOUD
+    statement: >-
+      Emergency elevation works but is loud: dual-controlled, step-up authenticated, scoped, time-boxed,
+      auto-expiring, and every access writes a HIGH-severity audit event.
+    source: 18-security-model.md §11; CLAUDE.md § Security
+    severity: Critical
+    tests:
+      - Mersal.Admin.Tests.BreakGlassIntegrationTests.Full_lifecycle_request_dual_approve_step_up_scoped_access_auto_expire
+      - Mersal.Admin.Tests.BreakGlassPolicyTests.The_requester_cannot_approve_their_own_grant
+
+  # ---------------------------------------------------------------- known-unproven (Gate 3 work items)
+  #
+  # These are here BECAUSE they have no test. Do not delete them to make the checker quiet — run it with
+  # --allow-unproven while Gate 3 is in flight, and remove the flag when this section is empty.
+
+  - id: INV-OUTBOX-SURVIVES-CRASH
+    statement: >-
+      A domain event survives a process kill between the business commit and the enqueue: the outbox row
+      is written in the same transaction as the state change, so the event cannot be lost.
+    source: CLAUDE.md § Events and consistency
+    severity: Critical
+    tests: []
+
+  - id: INV-DEDUPE-SURVIVES-RESTART
+    statement: >-
+      Consumer idempotency survives a restart — a redelivered event is not applied twice after the process
+      that first saw it has died.
+    source: CLAUDE.md § Events and consistency; phase 22 Gate 3.4 (durable IProcessedEventStore)
+    severity: Critical
+    tests: []
+
+  - id: INV-ELIGIBILITY-MATRIX
+    statement: >-
+      The eligibility decision matrix is exhaustive over member status, including suspended, closed and
+      within-waiting-period, and a cached decision is never served for a different service code or
+      pre-auth requirement.
+    source: AUDIT-R2-E2E.md §2 X9; policy-eligibility-engine skill
+    severity: Critical
+    tests: []

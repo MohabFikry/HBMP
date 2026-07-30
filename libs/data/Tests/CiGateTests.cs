@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 
@@ -89,17 +90,65 @@ public class CiGateTests
             "identity-service's DB-gated tests skipped in CI because nothing exported IDENTITY_TEST_DB");
     }
 
+    /// <summary>
+    /// The floors are real, and there is exactly ONE copy of them.
+    ///
+    /// <para>24.1.3 moved the floors out of the workflow env — where this test used to read them — into
+    /// tools/ci/coverage-floors.json. The assertion has followed its subject rather than been relaxed: it
+    /// still proves the domain floor sits above the abandoned 55 and no higher than the documented target,
+    /// and it now additionally proves what the old arrangement could not — that no second copy survives in
+    /// either pipeline. Three files once claimed three different bars (80 in .gitlab-ci.yml, 58 in the
+    /// workflow env, a third default inside coverage-gate.sh) and only one of them was enforced, so
+    /// "what is the coverage bar?" had three answers depending on which file you opened.</para>
+    /// </summary>
     [Fact]
-    public void The_coverage_floor_has_moved_off_its_original_value_and_gates_overall_too()
+    public void The_coverage_floors_live_in_exactly_one_place_and_gate_overall_too()
     {
-        var workflow = Workflow();
-        var domain = int.Parse(Regex.Match(workflow, @"COVERAGE_MIN_DOMAIN:\s*""(\d+)""").Groups[1].Value);
+        var floorsPath = Path.Combine(RepoRoot(), "tools", "ci", "coverage-floors.json");
+        File.Exists(floorsPath).Should().BeTrue("coverage-floors.json is the single source of truth");
+
+        using var floors = JsonDocument.Parse(File.ReadAllText(floorsPath));
+        var aggregates = floors.RootElement.GetProperty("aggregates");
+
+        var domain = aggregates.GetProperty("domain").GetInt32();
         domain.Should().BeGreaterThan(55, "the floor was set at 55 as a temporary regression guard and never raised");
         domain.Should().BeLessThanOrEqualTo(80, "80 is the documented target (CLAUDE.md); overshooting it here would be a lie of a different kind");
 
-        workflow.Should().Contain("COVERAGE_MIN_OVERALL",
+        aggregates.TryGetProperty("overall", out _).Should().BeTrue(
             "overall coverage was printed and not gated — it is the number that falls when the DB-gated " +
             "suites stop running, which is exactly the failure a green build must not hide");
+
+        // The gate must READ the file rather than carry its own default, or the file is decoration.
+        var gate = File.ReadAllText(Path.Combine(RepoRoot(), "tools", "ci", "coverage-gate.sh"));
+        gate.Should().Contain("coverage-floors.json", "the gate must read the floors from the one file");
+
+        // And no competing copy anywhere else. Matched as a real YAML ASSIGNMENT at the start of a line,
+        // not as a substring: both files carry comments explaining which value used to live there and why it
+        // was removed, and a test that forbids naming the thing you deleted forces the history out of the
+        // file — which is how the reason for a change gets lost.
+        Regex.IsMatch(Workflow(), @"(?m)^\s*COVERAGE_MIN_DOMAIN\s*:").Should().BeFalse(
+            "a floor in the workflow env is a second source of truth; lowering it there reads like a config tweak");
+        Regex.IsMatch(File.ReadAllText(Path.Combine(RepoRoot(), ".gitlab-ci.yml")), @"(?m)^\s*COVERAGE_MIN\s*:")
+            .Should().BeFalse("GitLab carried an unused COVERAGE_MIN of 80 that contradicted the enforced floor");
+    }
+
+    /// <summary>
+    /// A floor that only moves when somebody remembers is a floor that never moves — CLAUDE.md has asked
+    /// for 80% domain since the beginning and the enforced value sat at 58. The ratchet has to be wired,
+    /// not merely written, so this asserts both guards exist and that CI actually runs the monotonicity one.
+    /// </summary>
+    [Fact]
+    public void The_floor_ratchet_is_wired_in_both_directions()
+    {
+        var tools = Path.Combine(RepoRoot(), "tools", "ci");
+        File.Exists(Path.Combine(tools, "check-floor-monotonicity.py")).Should().BeTrue(
+            "a floor that can be lowered in a quiet diff is not a floor");
+        File.Exists(Path.Combine(tools, "raise-floors.py")).Should().BeTrue(
+            "without the auto-raise the ratchet only ever protects the value someone set months ago");
+
+        Workflow().Should().Contain("check-floor-monotonicity.py",
+            "the monotonicity guard must run in CI, not merely exist in the repo — that was the whole " +
+            "lesson of the month the coverage gate never executed");
     }
 
     [Fact]
