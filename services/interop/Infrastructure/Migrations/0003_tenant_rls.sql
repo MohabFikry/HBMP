@@ -26,7 +26,7 @@ END $$;
 -- legacy unstamped ledger row would become permanently invisible and its Idempotency-Key would replay as a
 -- fresh create — a duplicated native command downstream. Backfill to the sole tenant, then pin NOT NULL.
 UPDATE interop.fhir_create SET tenant_id = '11111111-1111-1111-1111-111111111111' WHERE tenant_id IS NULL;
-ALTER TABLE interop.fhir_create ALTER COLUMN tenant_id SET NOT NULL;
+ALTER TABLE interop.fhir_create ALTER COLUMN tenant_id SET NOT NULL;  -- migrate-compat: contract-ok (the UPDATE on the line above backfills every NULL first, and the platform is single-tenant per ADR-0011 so there is one possible value; leaving it nullable is the actual hazard — a fail-closed RLS policy makes an unstamped row permanently invisible and replays its Idempotency-Key as a fresh create)
 
 -- The partner registry is tenant configuration, and staging is tenant data. Single-tenant today (ADR-0011),
 -- so the default backfills the sole Mersal tenant; partner_id stays the PK because a second tenant is a

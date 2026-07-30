@@ -30,11 +30,14 @@ BEGIN
       AND con.conname <> 'ck_pdoc_document_class';
 
     IF existing IS NOT NULL THEN
+        -- migrate-compat: contract-ok (the CHECK is WIDENED, never narrowed — a CHECK cannot be added to,
+        -- so the only way to permit more values is to drop and re-add. Old code keeps working; this is an
+        -- expand.)
         EXECUTE format('ALTER TABLE policy.policy_document DROP CONSTRAINT %I', existing);
     END IF;
 END $$;
 
-ALTER TABLE policy.policy_document DROP CONSTRAINT IF EXISTS ck_pdoc_document_class;
+ALTER TABLE policy.policy_document DROP CONSTRAINT IF EXISTS ck_pdoc_document_class;  -- migrate-compat: contract-ok (dropped only to be re-added WIDER on the next statement)
 
 ALTER TABLE policy.policy_document
     ADD CONSTRAINT ck_pdoc_document_class CHECK (document_class IN (

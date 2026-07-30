@@ -71,7 +71,13 @@ export const OIDC = {
     "document:write eligibility:check emr:read emr:write encounter:write finance:approve finance:export " +
     "finance:read finance:write note:read note:write notification:read orders:consume orders:read " +
     "orders:write patient:read patient:write pharmacy:dispense pharmacy:read policy:admin policy:read " +
-    "policy:supervise policy:write profile:export profile:read provider:admin provider:finance " +
+    "policy:supervise policy:write " +
+    // 14.5 sized this scope to the need rather than granting reception the whole provider directory: the
+    // booking screen reads specialty and doctor from provider-service under the CALLER's token. It was
+    // added to the issuer and not here, so the token signed in fine and 403'd on the one read the feature
+    // exists to make.
+    "practitioner:read " +
+    "profile:export profile:read provider:admin provider:finance " +
     "provider:read provider:write " +
     "reception:read reception:search referral:write reporting:export reporting:read reporting:read-financial " +
     "rx:read rx:write",

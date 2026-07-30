@@ -45,10 +45,19 @@ def csharp_list(source: str, name: str) -> list[str]:
 def spa_scopes(source: str) -> set[str]:
     # Trailing `,` on the final line as well as ` +` on the continuations — anchoring on only one of the
     # two silently reads a short list and reports a drift that is not there.
-    match = re.search(r'  scope:\n((?:    "[^"]*"(?: \+|,)?\n)+)', source)
+    #
+    # `//` lines are part of the run too. The literal is sixty-odd scopes long and the ones that need
+    # explaining are commented in place; a pattern that only matched consecutive STRING lines stopped dead
+    # at the first such comment, read one line of a nine-line literal, and reported sixty-eight scopes
+    # missing that were sitting right there. A checker whose failure mode is a confident false positive
+    # teaches people to distrust it, which costs more than the drift it was written to catch.
+    match = re.search(r'  scope:\n((?:    (?://[^\n]*|"[^"]*"(?: \+|,)?)\n)+)', source)
     if not match:
         sys.exit(f"check-spa-scopes: could not find the `scope:` literal in {CONFIG.relative_to(ROOT)}")
-    return set(" ".join(re.findall(r'"([^"]*)"', match.group(1))).split())
+    # Drop the comment lines before harvesting strings, so a quoted word inside a comment cannot be read
+    # as a requested scope.
+    body = "\n".join(ln for ln in match.group(1).splitlines() if not ln.lstrip().startswith("//"))
+    return set(" ".join(re.findall(r'"([^"]*)"', body)).split())
 
 
 def main() -> int:
