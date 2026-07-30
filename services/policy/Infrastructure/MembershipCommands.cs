@@ -256,7 +256,71 @@ public sealed class MembershipCommands(
             categories = coverages.Count,
         }, ct);
 
+        // ...and one ROW-LEVEL event per generated coverage. CoverageGenerated above announces that
+        // generation happened and carries a COUNT; eligibility-service builds its coverage projection from
+        // CoverageChanged and from nothing else, so a count told it nothing it could store. Enrolling through
+        // this path — the path the product uses — therefore left the member with no coverage rows in front of
+        // the eligibility engine, and every check came back Ineligible "no active coverage for <category>":
+        // an entitlement the plan grants, refused at the counter, with no error anywhere to explain it.
+        //
+        // Reusing CoverageChanged rather than teaching consumers a new event is deliberate: the manual
+        // POST /policies/{id}/coverages endpoint already publishes exactly this shape, the consumer is
+        // already idempotent on it, and one event per coverage means the enrolment path and the manual path
+        // cannot drift into two different projections of the same fact.
+        await PublishGeneratedCoveragesAsync(coverages, version, policy, enrollment, ct);
+
         return MembershipResults.Success(new EnrollOutcome(enrollment, coverages.Count, WasReplay: false));
+    }
+
+    /// <summary>
+    /// Announce each generated coverage in the shape the read models consume.
+    ///
+    /// <para>The payload is the one <c>POST /policies/{id}/coverages</c> already publishes, plus the waiting
+    /// period. Two fields are easy to leave out and expensive to miss:</para>
+    /// <list type="bullet">
+    /// <item><c>policyNo</c> — the key <c>PolicyChanged</c> cascades on. A coverage published without it is
+    /// invisible to suspend/reactivate, so the member would keep their benefit through a suspended
+    /// policy.</item>
+    /// <item><c>waitingPeriodEndsOn</c> — PER CATEGORY, from this category's own benefit rule, not the
+    /// enrolment-level summary date. The enrolment stores the LONGEST wait across categories because that is
+    /// the single date the member is told; publishing it here would delay every benefit to the slowest one.
+    /// policy-service owns this boundary because it is a function of the plan rule and the enrolment date,
+    /// neither of which eligibility-service holds.</item>
+    /// </list>
+    /// </summary>
+    private async Task PublishGeneratedCoveragesAsync(
+        IReadOnlyList<Coverage> coverages, PlanVersion version, Domain.Policy policy, Enrollment enrollment,
+        CancellationToken ct)
+    {
+        if (coverages.Count == 0) return;
+
+        // The consumer keys on the category CODE ("LAB"), not the id — its projection has no category table
+        // to resolve a Guid against.
+        var categoryIds = coverages.Select(c => c.BenefitCategoryId).Distinct().ToList();
+        var codes = await db.BenefitCategories.AsNoTracking()
+            .Where(c => categoryIds.Contains(c.BenefitCategoryId))
+            .ToDictionaryAsync(c => c.BenefitCategoryId, c => c.Code, ct);
+
+        foreach (var coverage in coverages)
+        {
+            var rule = version.Rules.FirstOrDefault(r => r.BenefitCategoryId == coverage.BenefitCategoryId);
+            await outbox.EnqueueAsync("CoverageChanged", "policy.events", new
+            {
+                tenantId = coverage.TenantId,
+                coverageId = coverage.CoverageId,
+                beneficiaryId = coverage.BeneficiaryId,
+                category = codes.GetValueOrDefault(coverage.BenefitCategoryId),
+                status = coverage.Status.ToString(),
+                policyNo = policy.PolicyNo,
+                effectiveFrom = coverage.EffectiveFrom,
+                effectiveTo = coverage.EffectiveTo,
+                waitingPeriodEndsOn = rule is null ? null : WaitingPeriod.EndsOnFor(rule, enrollment.EffectiveFrom),
+                limits = coverage.Limits.Select(l => new
+                {
+                    limitType = l.LimitType.ToString(), l.LimitValue, l.ConsumedValue,
+                }),
+            }, ct);
+        }
     }
 
     // ---- Terminate ---------------------------------------------------------------------------------------

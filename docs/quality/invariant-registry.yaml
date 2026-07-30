@@ -296,4 +296,22 @@ invariants:
       pre-auth requirement.
     source: AUDIT-R2-E2E.md §2 X9; policy-eligibility-engine skill
     severity: Critical
-    tests: []
+    # The cache-key arm (X9) was already guarded. The MATRIX arm was not, and two of its rows were
+    # unreachable in the running system while every test around them passed:
+    #   * an enrolled member had NO coverage at eligibility-service — the enrolment path published
+    #     CoverageGenerated (a count), and the projection is written only by CoverageChanged, so every
+    #     check returned Ineligible "no active coverage".
+    #   * the waiting-period row was dead code — coverage_projection had nowhere to carry the boundary,
+    #     so EligibilityChecker built its CoverageView without one and a member inside their waiting
+    #     period was told Eligible.
+    # Both are proven end-to-end below, producer side and consumer side, red before green.
+    tests:
+      - Mersal.Eligibility.Tests.EligibilityCacheTests.A_cached_non_gated_answer_is_never_served_for_a_gated_service
+      - Mersal.Eligibility.Tests.EligibilityCacheTests.Two_different_services_in_one_category_do_not_share_an_answer
+      - Mersal.Eligibility.Tests.EligibilityCacheTests.Every_decision_input_participates_in_the_key
+      - Mersal.Eligibility.Tests.EnrolledMemberEligibilityTests.An_enrolled_member_is_eligible_for_a_category_their_plan_covers
+      - Mersal.Eligibility.Tests.EnrolledMemberEligibilityTests.A_member_inside_their_waiting_period_is_ineligible_not_eligible
+      - Mersal.Eligibility.Tests.EnrolledMemberEligibilityTests.The_day_after_the_waiting_period_ends_is_payable
+      - Mersal.Policy.Tests.EnrollmentPublishesCoverageTests.Enrolling_publishes_one_coverage_event_per_generated_coverage
+      - Mersal.Policy.Tests.EnrollmentPublishesCoverageTests.The_published_coverage_carries_every_field_the_projection_reads
+      - Mersal.Policy.Tests.EnrollmentPublishesCoverageTests.The_published_coverage_carries_the_waiting_period_boundary

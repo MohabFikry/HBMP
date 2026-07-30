@@ -33,6 +33,14 @@ public sealed class CoverageProjection
     public string Status { get; set; } = "Active";
     public DateOnly EffectiveFrom { get; set; }
     public DateOnly? EffectiveTo { get; set; }
+
+    /// <summary>19.2 — the LAST day still inside the member's waiting period for this category, or null when
+    /// none applies. Sourced from policy-service, which owns the boundary, rather than recomputed here: the
+    /// waiting period is a function of the plan's benefit rule and the enrolment date, neither of which this
+    /// service holds. Without it the engine's waiting-period branch cannot fire and a member inside their
+    /// waiting period is told Eligible.</summary>
+    public DateOnly? WaitingPeriodEndsOn { get; set; }
+
     public string LimitsJson { get; set; } = "[]";         // List<LimitStateDto>
     public DateTimeOffset UpdatedAt { get; set; }
 }

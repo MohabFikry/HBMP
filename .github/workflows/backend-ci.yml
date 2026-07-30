@@ -235,12 +235,23 @@ jobs:
         if: always()
         continue-on-error: true
         run: |
-          bash tools/ci/print-test-db-env.sh >> "$GITHUB_ENV"
-          n=$(grep -c '_TEST_DB=' "$GITHUB_ENV" || true)
-          echo "exported $n *_TEST_DB variable(s)"
-          if [ "$n" -lt 20 ]; then
-            echo "::error::only $n *_TEST_DB variables exported — the DB-gated suites would skip and the run"
-            echo "would report green having proven none of the concurrency, RLS or break-glass invariants."
+          # No magic number. The script is the authority on how many variables there should be, so this
+          # compares what it EMITTED against what actually LANDED, and requires all three families to be
+          # present — single-conn integration, _TEST_DB_OWNER and _TEST_DB_APP. A hardcoded threshold would
+          # be a second source of truth that silently rots the moment a service is added.
+          tmp="$(mktemp)"
+          bash tools/ci/print-test-db-env.sh > "$tmp"
+          plain=$(grep -c '_TEST_DB=' "$tmp" || true)
+          owner=$(grep -c '_TEST_DB_OWNER=' "$tmp" || true)
+          app=$(grep -c '_TEST_DB_APP=' "$tmp" || true)
+          emitted=$(grep -c '_TEST_DB' "$tmp" || true)
+          cat "$tmp" >> "$GITHUB_ENV"
+          landed=$(grep -c '_TEST_DB' "$GITHUB_ENV" || true)
+          echo "exported $emitted variable(s): $plain single-conn, $owner owner, $app app"
+          if [ "$plain" -eq 0 ] || [ "$owner" -eq 0 ] || [ "$app" -eq 0 ] || [ "$landed" -lt "$emitted" ]; then
+            echo "::error::the *_TEST_DB export is incomplete ($plain/$owner/$app emitted, $landed landed)."
+            echo "The DB-gated suites would skip and the run would report green having proven none of the"
+            echo "concurrency, RLS or break-glass invariants."
             exit 1
           fi
 

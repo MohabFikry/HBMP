@@ -93,7 +93,11 @@ public sealed class EligibilityChecker(EligibilityDbContext db, IEligibilityCach
             c.EffectiveFrom, c.EffectiveTo,
             (JsonSerializer.Deserialize<List<LimitStateDto>>(c.LimitsJson, Json) ?? [])
                 .Select(l => new LimitState(Enum.Parse<LimitType>(l.LimitType), l.LimitValue, l.ConsumedValue))
-                .ToList())).ToList();
+                .ToList(),
+            // 19.2 — WITHOUT THIS THE WAITING-PERIOD BRANCH IS DEAD CODE. CoverageView defaults the boundary
+            // to null so existing callers compile unchanged, which is exactly why its absence here was silent:
+            // the engine's own tests pass the date, and the only production caller did not.
+            c.WaitingPeriodEndsOn)).ToList();
 
         var onDate = calendar.Today();   // 18.A3 — coverage validity is a Cairo date
         return EligibilityEngine.Evaluate(new EligibilityRequest(
