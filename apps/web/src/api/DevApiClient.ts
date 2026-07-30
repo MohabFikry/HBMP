@@ -19,6 +19,7 @@ import {
   zCopySummariesResult,
   zProfileExportSummary,
   type ProfileSectionKey,
+  type ProfileSection,
   zCaseListItem,
   zCoordinationTask,
   zEscalation,
@@ -127,6 +128,15 @@ const NOTIFICATION_FIXTURE = [
   },
 ];
 const NOW = "2026-07-22T08:30:00Z";
+
+/**
+ * The dev beneficiary whose profile answers with the three withheld states (Restricted / Unavailable /
+ * NotApplicable) instead of populated clinical sections. Every other id gets all fifteen sections.
+ *
+ * Open `/patients/BEN-3` to review how the three states look side by side; open any other beneficiary to
+ * review the twelve designed section views. See `patientProfile` below.
+ */
+export const WITHHELD_STATE_DEMO_ID = "BEN-3";
 
 /** Validate every fixture through its schema on the way out — a fixture that drifts from the contract fails loudly. */
 /** Shared status chips for the mutable practitioner fixture, so a status change swaps one reference. */
@@ -1392,7 +1402,7 @@ export class DevApiClient implements ApiClient {
   // wrong, and a fixture that only shows happy-path sections is a fixture in which "restricted" and "broken"
   // and "empty" never get looked at side by side.
   patientProfile(beneficiaryId: string, sections?: ProfileSectionKey[]) {
-    const all = [
+    const all: ProfileSection[] = [
       {
         key: "header", state: "Visible" as const,
         data: {
@@ -1435,13 +1445,28 @@ export class DevApiClient implements ApiClient {
           ],
         },
       },
-      // Restricted: the locked state, with the reason AND the way out.
       {
-        key: "investigations", state: "Restricted" as const, reasonCode: "sensitive-requires-grant",
-        requestAccessAction: { kind: "report-access-request", href: `/api/v1/report-access-requests?beneficiaryId=${beneficiaryId}`, label: "Request access" },
+        key: "encounters", state: "Visible" as const,
+        data: {
+          items: [
+            { encounterRef: "ENC-2026-04412", occurredAt: "2026-07-02T09:00:00Z", branchName: "Nasr City", clinicianName: "Dr. S. Ibrahim", specialty: "Internal medicine", reason: "Diabetes follow-up", status: "Completed" },
+            { encounterRef: "ENC-2026-04188", occurredAt: "2026-06-18T08:00:00Z", branchName: "Nasr City", clinicianName: "Dr. S. Ibrahim", specialty: "Internal medicine", reason: "Hypertension review", status: "Completed" },
+            { encounterRef: "ENC-2026-04530", occurredAt: "2026-07-30T10:30:00Z", branchName: "Nasr City", clinicianName: "Dr. L. Aziz", specialty: "Endocrinology", reason: "Referral consultation", status: "Booked" },
+          ],
+        },
       },
-      // Unavailable: the owning service did not answer. NOT the same as empty — the user gets Retry.
-      { key: "encounters", state: "Unavailable" as const, reasonCode: "timeout" },
+      {
+        key: "investigations", state: "Visible" as const,
+        data: {
+          items: [
+            { orderRef: "ORD-2026-7741", lineId: "line-1", category: "Haematology", orderedOn: "2026-07-02T09:20:00Z", status: "Resulted", providerName: "Central Lab", resultSummary: "Hb 11.2 g/dL — mild anaemia", restricted: false },
+            // Existence-only: the owning service never sent a value, and the row says why rather than looking
+            // like a result that has not come back yet (design 37 §6).
+            { orderRef: "ORD-2026-7802", lineId: "line-2", category: "Serology", orderedOn: "2026-07-22T11:00:00Z", status: "Resulted", providerName: "Central Lab", restricted: true, sensitivityLevel: "High" },
+            { orderRef: "ORD-2026-7855", lineId: "line-3", category: "Chemistry", orderedOn: "2026-07-28T08:45:00Z", status: "Ordered", providerName: "Central Lab", restricted: false },
+          ],
+        },
+      },
       {
         key: "prescriptions", state: "Visible" as const,
         data: {
@@ -1462,8 +1487,15 @@ export class DevApiClient implements ApiClient {
           ],
         },
       },
-      // NotApplicable: nothing exists. A plain, calm "no records".
-      { key: "referrals", state: "NotApplicable" as const },
+      {
+        key: "referrals", state: "Visible" as const,
+        data: {
+          items: [
+            { referralRef: "REF-2026-0912", status: "Active", requestedSpecialty: "Endocrinology", createdAt: "2026-07-22T12:00:00Z" },
+            { referralRef: "REF-2026-0744", status: "Completed", requestedSpecialty: "Ophthalmology", createdAt: "2026-05-11T09:30:00Z", loopClosedAt: "2026-06-04T14:10:00Z" },
+          ],
+        },
+      },
       {
         key: "documents", state: "Visible" as const,
         data: {
@@ -1546,12 +1578,37 @@ export class DevApiClient implements ApiClient {
       },
     ];
 
+    /**
+     * The three withheld states, on ONE beneficiary rather than permanently occupying three sections of
+     * everyone's profile.
+     *
+     * They used to sit on investigations / encounters / referrals for every id, which demonstrated the states
+     * beautifully and meant those three views could not be seen in the browser at all. Both things matter: the
+     * states are a correctness requirement (design 39 §6) and eyeballing them is how a regression in their
+     * treatment gets caught, but a view nobody can look at is a view nobody reviews. So `BEN-3` — Amina Yusuf,
+     * the Suspended record in the search fixtures — answers with the withheld trio, and every other id answers
+     * with all fifteen sections populated.
+     */
+    const withheld: Record<string, ProfileSection> = beneficiaryId !== WITHHELD_STATE_DEMO_ID ? {} : {
+      // Restricted: the locked state, with the reason AND the way out.
+      investigations: {
+        key: "investigations", state: "Restricted", reasonCode: "sensitive-requires-grant",
+        requestAccessAction: { kind: "report-access-request", href: `/api/v1/report-access-requests?beneficiaryId=${beneficiaryId}`, label: "Request access" },
+      },
+      // Unavailable: the owning service did not answer. NOT the same as empty — the user gets Retry.
+      encounters: { key: "encounters", state: "Unavailable", reasonCode: "timeout" },
+      // NotApplicable: nothing exists. A plain, calm "no records".
+      referrals: { key: "referrals", state: "NotApplicable" },
+    };
+
     const wanted = sections?.length ? new Set<string>(sections) : null;
     return this.gate(() =>
       ok(zPatientProfile, {
         beneficiaryId,
         servedAt: new Date().toISOString(),
-        sections: all.filter((s) => !wanted || wanted.has(s.key)),
+        sections: all
+          .map((s) => withheld[s.key] ?? s)
+          .filter((s) => !wanted || wanted.has(s.key)),
       }),
     );
   }

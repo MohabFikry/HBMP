@@ -102,6 +102,10 @@ export type RegisterBeneficiaryInput = z.infer<typeof zRegisterBeneficiaryInput>
 export function ageInYears(birthDate: string | undefined, today: Date): number | undefined {
   if (!birthDate || !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) return undefined;
   const [y, m, d] = birthDate.split("-").map(Number);
+  // The regex above already guarantees three numeric parts, so this guard is unreachable — but it is what
+  // convinces `noUncheckedIndexedAccess` of that, and a guard is preferable to the `as [number, number, number]`
+  // the alternative needs: a cast here would also silence a real mistake if the pattern above ever loosened.
+  if (y === undefined || m === undefined || d === undefined) return undefined;
   let age = today.getUTCFullYear() - y;
   // Not yet had this year's birthday — month is 0-based on the Date side, 1-based in the ISO string.
   if (today.getUTCMonth() + 1 < m || (today.getUTCMonth() + 1 === m && today.getUTCDate() < d)) age -= 1;
