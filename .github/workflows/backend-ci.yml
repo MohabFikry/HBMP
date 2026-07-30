@@ -131,8 +131,18 @@ jobs:
           --results-directory ./coverage
           --logger "trx;LogFileName=test.trx"
 
+      # 24.0 — the denominator has the same power as the floor and none of the scrutiny, so it gets the
+      # same guard: an added exclusion needs an ADR that exists and names the path, and Domain is never
+      # excludable. --selftest first: a checker that cannot fail is not a check.
+      - name: Coverage-exclusions guard (denominator integrity)
+        run: |
+          python3 tools/ci/check-coverage-exclusions.py --selftest
+          python3 tools/ci/check-coverage-exclusions.py --base "${{ github.event.before || 'HEAD~1' }}"
+
       - name: Domain-coverage gate
-        run: bash tools/ci/coverage-gate.sh ./coverage
+        run: |
+          python3 tools/ci/coverage-report.py --selftest
+          bash tools/ci/coverage-gate.sh ./coverage
 
       - name: Restore local tools (Swagger CLI)
         run: dotnet tool restore
