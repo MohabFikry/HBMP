@@ -202,6 +202,19 @@ public sealed class MembershipCommands(
             return MembershipResults.Fail<EnrollOutcome>(MembershipFailureKind.Conflict,
                 "PLAN_VERSION_MISSING", "The plan's version could not be loaded.");
 
+        // 24.3 — everything from here to the commit is ONE transaction: the enrolment row, the generated
+        // coverages, the append-only enrollment_event, and every domain event announcing them. EfOutbox
+        // commits each enqueue on its own SaveChanges, so without this a process kill after the business
+        // save leaves a member enrolled whose MemberEnrolled and CoverageChanged events are gone — and
+        // nothing records that they were owed, which is precisely how an enrolled member ends up invisible
+        // to eligibility-service. Any early return below rolls the whole thing back.
+        // Join the caller's transaction when there is one. The bulk engine already wraps each row in
+        // one (BulkJobEngine), and opening a second inside it throws — while the invariant is
+        // already satisfied there, because that outer transaction covers this write and its events
+        // together. Owning one only when nobody else does keeps both callers atomic.
+        await using var tx = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(ct)
+            : null;
         var now = clock.GetUtcNow();
         var enrollment = new Enrollment
         {
@@ -269,6 +282,7 @@ public sealed class MembershipCommands(
         // cannot drift into two different projections of the same fact.
         await PublishGeneratedCoveragesAsync(coverages, version, policy, enrollment, ct);
 
+        if (tx is not null) await tx.CommitAsync(ct);
         return MembershipResults.Success(new EnrollOutcome(enrollment, coverages.Count, WasReplay: false));
     }
 
@@ -353,6 +367,13 @@ public sealed class MembershipCommands(
             return MembershipResults.Fail<Enrollment>(MembershipFailureKind.Forbidden, "SUPERVISION_REQUIRED",
                 "Back-dating a termination requires supervisory scope.");
 
+        // Join the caller's transaction when there is one. The bulk engine already wraps each row in
+        // one (BulkJobEngine), and opening a second inside it throws — while the invariant is
+        // already satisfied there, because that outer transaction covers this write and its events
+        // together. Owning one only when nobody else does keeps both callers atomic.
+        await using var tx = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(ct)
+            : null;
         var now = clock.GetUtcNow();
         e.Status = EnrollmentStatus.Terminated;
         e.EffectiveTo = effectiveDate;      // INCLUSIVE: the member IS covered on this day
@@ -375,6 +396,7 @@ public sealed class MembershipCommands(
             termDims.PayerId, termDims.PolicyId, termDims.PolicyPlanId, termDims.GroupId, termDims.BranchId,
             termDims.Relationship, termDims.Status,
         }, ct);
+        if (tx is not null) await tx.CommitAsync(ct);
         return MembershipResults.Success(e);
     }
 
@@ -390,6 +412,13 @@ public sealed class MembershipCommands(
             return MembershipResults.Fail<Enrollment>(MembershipFailureKind.Conflict,
                 "NOT_REINSTATABLE", $"A {e.Status} membership cannot be reinstated.");
 
+        // Join the caller's transaction when there is one. The bulk engine already wraps each row in
+        // one (BulkJobEngine), and opening a second inside it throws — while the invariant is
+        // already satisfied there, because that outer transaction covers this write and its events
+        // together. Owning one only when nobody else does keeps both callers atomic.
+        await using var tx = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(ct)
+            : null;
         var now = clock.GetUtcNow();
         e.Status = EnrollmentStatus.Active;
         e.EffectiveTo = null;
@@ -410,6 +439,7 @@ public sealed class MembershipCommands(
             reinDims.PayerId, reinDims.PolicyId, reinDims.PolicyPlanId, reinDims.GroupId, reinDims.BranchId,
             reinDims.Relationship, reinDims.Status,
         }, ct);
+        if (tx is not null) await tx.CommitAsync(ct);
         return MembershipResults.Success(e);
     }
 
@@ -561,6 +591,13 @@ public sealed class MembershipCommands(
 
         var (e, plan, version, existing, policyChoice, carried, _, _, droppedCategories) = resolved.Value!;
 
+        // Join the caller's transaction when there is one. The bulk engine already wraps each row in
+        // one (BulkJobEngine), and opening a second inside it throws — while the invariant is
+        // already satisfied there, because that outer transaction covers this write and its events
+        // together. Owning one only when nobody else does keeps both callers atomic.
+        await using var tx = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(ct)
+            : null;
         var now = clock.GetUtcNow();
         var previousPlanId = e.PolicyPlanId;
         foreach (var coverage in existing)
@@ -605,6 +642,7 @@ public sealed class MembershipCommands(
             planDims.Relationship, planDims.Status,
         }, ct);
 
+        if (tx is not null) await tx.CommitAsync(ct);
         return MembershipResults.Success(new PlanChangeOutcome(
             e, plan, previousPlanId, version.PlanVersionId, policyChoice.ToString(), carried, droppedCategories));
     }
@@ -626,6 +664,13 @@ public sealed class MembershipCommands(
         var e = await db.Enrollments.FirstOrDefaultAsync(x => x.EnrollmentId == enrollmentId && !x.IsDeleted, ct);
         if (e is null) return MembershipResults.Fail<Enrollment>(MembershipFailureKind.NotFound, "NOT_FOUND", "No such membership.");
 
+        // Join the caller's transaction when there is one. The bulk engine already wraps each row in
+        // one (BulkJobEngine), and opening a second inside it throws — while the invariant is
+        // already satisfied there, because that outer transaction covers this write and its events
+        // together. Owning one only when nobody else does keeps both callers atomic.
+        await using var tx = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(ct)
+            : null;
         var now = clock.GetUtcNow();
         e.Status = EnrollmentStatus.Cancelled;
         e.TerminationReason = reason;
@@ -646,6 +691,7 @@ public sealed class MembershipCommands(
             cancelDims.PayerId, cancelDims.PolicyId, cancelDims.PolicyPlanId, cancelDims.GroupId,
             cancelDims.BranchId, cancelDims.Relationship, cancelDims.Status,
         }, ct);
+        if (tx is not null) await tx.CommitAsync(ct);
         return MembershipResults.Success(e);
     }
 

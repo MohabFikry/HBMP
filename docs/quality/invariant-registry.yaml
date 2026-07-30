@@ -279,7 +279,19 @@ invariants:
       is written in the same transaction as the state change, so the event cannot be lost.
     source: CLAUDE.md § Events and consistency
     severity: Critical
-    tests: []
+    # Proven in two halves, because the guarantee lives in two places. The library tests show the mechanism:
+    # inside one transaction a rollback takes the event with it and a commit keeps both — and, by
+    # demonstration rather than description, that committing the state change BEFORE enqueueing loses the
+    # event on a crash with nothing recording it was owed. The architecture test shows the platform actually
+    # uses it: EfOutbox.EnqueueRawAsync commits on its own SaveChanges, so atomicity is a property of the
+    # CALL SITE, and 73 call sites did not have it. They are ratcheted down in
+    # docs/quality/outbox-atomicity-debt.txt — see that file; the count is debt, not permission.
+    tests:
+      - Mersal.Events.Tests.EfOutboxDurabilityTests.A_state_change_and_its_event_commit_or_roll_back_together
+      - Mersal.Events.Tests.EfOutboxDurabilityTests.Committing_the_state_change_before_enqueueing_loses_the_event_on_a_crash
+      - Mersal.Events.Tests.EfOutboxDurabilityTests.Enqueued_row_is_durable_and_claimed_by_a_fresh_context_then_drains
+      - Mersal.Architecture.Tests.OutboxAtomicityTests.A_state_change_and_its_event_share_one_transaction
+      - Mersal.Architecture.Tests.OutboxAtomicityTests.The_debt_register_has_no_stale_entries
 
   - id: INV-DEDUPE-SURVIVES-RESTART
     statement: >-

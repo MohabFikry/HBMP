@@ -157,6 +157,10 @@ public static class OrdersEndpoints
                 return Results.Problem(statusCode: 409, title: "transition-denied", type: "urn:hbmp:transition-denied",
                     detail: $"An order in status {order.Status} cannot be cancelled.");
 
+            // 24.3 — the cancellation and the event announcing it commit together. Without the transaction
+            // a crash between the two commits leaves an order cancelled that pharmacy, approvals and billing
+            // still believe is live, and no retry produces the event because nothing records it was owed.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             order.Status = OrderStatus.Cancelled;
             foreach (var l in order.Lines.Where(l => l.Status == OrderLineStatus.Active)) l.Status = OrderLineStatus.Cancelled;
             await db.SaveChangesAsync(ct);
@@ -166,6 +170,7 @@ public static class OrdersEndpoints
                 EntityType = "investigation_order", EntityId = order.OrderId.ToString(), Action = AuditAction.StateChange,
                 ActorUserId = me.Principal?.Subject, DecisionOutcome = "Cancelled", DecisionReasonCode = req.Reason,
             }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(OrderResponse.From(order));
         }).RequireAuthorization(HbmpPolicies.Scope("orders:write"));
     }

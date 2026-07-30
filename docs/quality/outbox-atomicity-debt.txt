@@ -1,0 +1,44 @@
+# Outbox atomicity debt register — INV-OUTBOX-SURVIVES-CRASH
+#
+# Each line is a file that enqueues a domain event in the same block as a SaveChangesAsync WITHOUT a
+# transaction around both, and the number of such call sites in it. Every one of these is a place where a
+# state change can outlive its event: EfOutbox.EnqueueRawAsync commits separately, so a process kill
+# between the business commit and the enqueue leaves the change durable and the event gone, with nothing
+# recording that it was owed. Enqueue-before-save is the mirror failure — an event for a change that never
+# committed, which cannot be un-sent.
+#
+# This register EXISTS so the rule could be landed against a codebase that already breaks it in 73 places.
+# Recording the debt is not forgiving it. OutboxAtomicityTests ratchets these numbers ONE WAY:
+#   * a file not listed here may have ZERO such sites
+#   * a listed file may shrink or disappear, never grow
+#   * a stale entry (a file already fixed) is itself a failure — it would re-permit a regression
+#
+# To clear an entry: wrap the handler's state change and its enqueue(s) in one
+# `await using var tx = await db.Database.BeginTransactionAsync(ct); ... await tx.CommitAsync(ct);`
+# then delete the line. An early return before the commit rolls both back, which is the correct outcome.
+#
+# Format: <repo-relative-path> <count>
+
+services/admin/Api/BranchAssignmentService.cs 2
+services/admin/Api/PayerAssignmentService.cs 2
+services/callcentre/Api/CallAppointments.cs 1
+services/callcentre/Api/Interactions.cs 3
+services/case/Api/Cases.cs 5
+services/document/Api/Program.cs 1
+services/emr/Api/Appointments.cs 6
+services/emr/Api/Program.cs 2
+services/emr/Api/Queue.cs 1
+services/interop/Infrastructure/Integration/InboundIngestion.cs 1
+services/orders/Api/ReportAccess.cs 3
+services/patient/Api/BeneficiaryContacts.cs 1
+services/patient/Api/BeneficiaryIntake.cs 1
+services/patient/Api/Program.cs 5
+services/policy/Api/EnrollmentEndpoints.cs 3
+services/policy/Api/NoteEndpoints.cs 2
+services/policy/Api/PlanEndpoints.cs 3
+services/policy/Api/PolicyDocumentEndpoints.cs 3
+services/provider/Api/Branches.cs 3
+services/provider/Api/NetworkTiers.cs 5
+services/provider/Api/Onboarding.cs 7
+services/provider/Api/Practitioners.cs 1
+services/provider/Api/Program.cs 2

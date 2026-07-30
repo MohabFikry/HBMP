@@ -181,6 +181,11 @@ v1.MapPost("/policies/{policyId:guid}/coverages", async (Guid policyId, CreateCo
                 Enum.Parse<ResetPeriod>(l.ResetPeriod ?? "None"), Enum.Parse<LimitType>(l.LimitType), req.EffectiveFrom),
         }).ToList(),
     };
+    // 24.3 — the coverage and the events announcing it commit together or not at all. EfOutbox commits on
+    // its own SaveChanges, so without this the row could be created and the process die before the enqueue:
+    // a coverage that exists and that eligibility-service is never told about, with nothing recording that
+    // the event was owed. An early return below rolls both back, which is the right outcome.
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
     db.Coverages.Add(cov);
     await db.SaveChangesAsync(ct);
 
@@ -196,6 +201,7 @@ v1.MapPost("/policies/{policyId:guid}/coverages", async (Guid policyId, CreateCo
     foreach (var l in cov.Limits)
         await outbox.EnqueueAsync("CoverageLimitChanged", "policy.events", new { tenantId = cov.TenantId, coverageLimitId = l.CoverageLimitId, cov.CoverageId, l.LimitType, l.LimitValue, remaining = l.Remaining }, ct);
 
+    await tx.CommitAsync(ct);
     return Results.Created($"/api/v1/coverages/{cov.CoverageId}", new { cov.CoverageId, remaining = cov.Limits.Select(l => new { l.LimitType, l.Remaining }) });
 });
 
@@ -217,6 +223,10 @@ v1.MapPost("/coverage-limits/reset-run", async (PolicyDbContext db, IAuditClient
     var today = calendar.Today();   // 18.A3 — reset boundaries are Cairo days
     var limits = await db.CoverageLimits.Where(l => l.ResetPeriod != ResetPeriod.None && l.LimitType != LimitType.Lifetime).ToListAsync(ct);
     var reset = 0;
+    // 24.3 — this one enqueued BEFORE its SaveChanges, which is the mirror failure: EfOutbox commits the
+    // event immediately, so a crash before the save below would publish "your limit was reset" for limits
+    // that were never reset, and a phantom event cannot be un-sent. One transaction covers both directions.
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
     foreach (var l in limits)
     {
         if (LimitReset.ApplyIfDue(l, today))
@@ -227,6 +237,7 @@ v1.MapPost("/coverage-limits/reset-run", async (PolicyDbContext db, IAuditClient
         }
     }
     await db.SaveChangesAsync(ct);
+    await tx.CommitAsync(ct);
     return Results.Ok(new { evaluated = limits.Count, reset });
 });
 

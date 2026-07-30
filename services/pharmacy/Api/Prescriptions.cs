@@ -139,6 +139,9 @@ public static class PrescriptionEndpoints
                 return Results.Problem(statusCode: 409, title: "transition-denied", type: "urn:hbmp:transition-denied",
                     detail: $"A prescription in status {rx.Status} cannot be cancelled.");
 
+            // 24.3 — a cancelled prescription whose RxCancelled event was lost is one a pharmacy can still
+            // dispense against. State change and event share one transaction.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             rx.Status = RxStatus.Cancelled;
             foreach (var l in rx.Lines.Where(l => l.Status == RxLineStatus.Active)) l.Status = RxLineStatus.Cancelled;
             await db.SaveChangesAsync(ct);
@@ -148,6 +151,7 @@ public static class PrescriptionEndpoints
                 EntityType = "prescription", EntityId = rx.PrescriptionId.ToString(), Action = AuditAction.StateChange,
                 ActorUserId = me.Principal?.Subject, DecisionOutcome = "Cancelled", DecisionReasonCode = req.Reason,
             }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(PrescriptionResponse.From(rx));
         }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
     }

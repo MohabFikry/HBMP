@@ -77,11 +77,16 @@ public static class ReportAccessEndpoints
                 PurposeCode = purpose, Justification = req.Justification, RequestedTtlHours = req.RequestedTtlHours,
                 Status = ReportAccessStatus.Requested, CreatedAt = clock.GetUtcNow(),
             };
+            // 24.3 — the request and its event commit together. A request recorded whose
+            // ReportAccessRequested event was lost is one no approver is ever told about: it sits
+            // Requested forever while a clinician waits for a decision nobody knows is owed.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             db.ReportAccessRequests.Add(r);
             await db.SaveChangesAsync(ct);
             await audit.EmitAsync(Draft(r.RequestId, AuditAction.Create, me, order.BeneficiaryId, "ReportAccessRequested", purpose.ToString(), AuditSeverity.Notice), ct);
             await outbox.EnqueueAsync("ReportAccessRequested", "orders.events",
                 new { tenantId = r.TenantId, r.RequestId, r.OrderLineId, orderingProviderId = order.OrderingProviderId, purposeCode = purpose.ToString() }, ct);
+            await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/report-access-requests/{r.RequestId}", new { r.RequestId, status = r.Status.ToString() });
         });
 
@@ -114,6 +119,12 @@ public static class ReportAccessEndpoints
             r.DecidedAt = clock.GetUtcNow();
             var severity = isMedicalDirector ? AuditSeverity.High : AuditSeverity.Notice;   // MD decisions extra-audited
 
+            // 24.3 — one transaction over every branch. This decision GRANTS ACCESS TO A SENSITIVE
+            // RESULT: an approval whose ReportAccessApproved event is lost leaves a live grant that
+            // notification, audit streaming and the expiry sweep's downstream consumers never hear about,
+            // and a denial whose event is lost leaves the requester waiting on a decision already made.
+            // The `default` branch commits nothing, which is correct — it changed nothing.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             switch (dec.Decision?.ToLowerInvariant())
             {
                 case "approve":
@@ -129,6 +140,7 @@ public static class ReportAccessEndpoints
                     await db.SaveChangesAsync(ct);
                     await audit.EmitAsync(Draft(r.RequestId, AuditAction.Decision, me, r.BeneficiaryId, "ReportAccessApproved", r.DecidedByRole, severity), ct);
                     await outbox.EnqueueAsync("ReportAccessApproved", "orders.events", new { tenantId = r.TenantId, r.RequestId, grant.GrantId, grant.GranteeUserId, grant.OrderLineId, grant.ExpiresAt, decidedByRole = r.DecidedByRole }, ct);
+                    await tx.CommitAsync(ct);
                     return Results.Ok(new { r.RequestId, status = r.Status.ToString(), grant.GrantId, grant.ExpiresAt });
 
                 case "deny":
@@ -137,12 +149,14 @@ public static class ReportAccessEndpoints
                     await db.SaveChangesAsync(ct);
                     await audit.EmitAsync(Draft(r.RequestId, AuditAction.Decision, me, r.BeneficiaryId, "ReportAccessDenied", r.DecidedByRole, severity), ct);
                     await outbox.EnqueueAsync("ReportAccessDenied", "orders.events", new { tenantId = r.TenantId, r.RequestId, reason = dec.Reason, decidedByRole = r.DecidedByRole }, ct);
+                    await tx.CommitAsync(ct);
                     return Results.Ok(new { r.RequestId, status = r.Status.ToString() });
 
                 case "requestinfo":
                     r.Status = ReportAccessStatus.InfoRequested; r.DecisionReason = dec.Reason;
                     await db.SaveChangesAsync(ct);
                     await outbox.EnqueueAsync("ReportAccessInfoRequested", "orders.events", new { tenantId = r.TenantId, r.RequestId, note = dec.Reason }, ct);
+                    await tx.CommitAsync(ct);
                     return Results.Ok(new { r.RequestId, status = r.Status.ToString() });
 
                 default:
@@ -197,10 +211,12 @@ public static class ReportAccessEndpoints
             }
 
             r.Justification = $"{r.Justification}\n---\n{body.Supplement}";   // appended, never overwritten
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             r.Status = ReportAccessStatus.UnderReview;
             await db.SaveChangesAsync(ct);
             await audit.EmitAsync(Draft(r.RequestId, AuditAction.Update, me, r.BeneficiaryId, "ReportAccessInfoSupplied", null, AuditSeverity.Notice), ct);
             await outbox.EnqueueAsync("ReportAccessInfoSupplied", "orders.events", new { tenantId = r.TenantId, r.RequestId }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(new { r.RequestId, status = r.Status.ToString() });
         });
 
@@ -209,6 +225,7 @@ public static class ReportAccessEndpoints
         {
             var g = await db.ReportAccessGrants.FirstOrDefaultAsync(x => x.GrantId == id && x.RevokedAt == null, ct);
             if (g is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             g.RevokedAt = clock.GetUtcNow(); g.RevokedBy = me.Principal?.Subject;
             // 18.A4: the request follows its grant to Revoked, so the two tables can never disagree about
             // whether access is still live (23 §11: Approved → Revoked).
@@ -216,6 +233,7 @@ public static class ReportAccessEndpoints
             await db.SaveChangesAsync(ct);
             await audit.EmitAsync(Draft(g.GrantId, AuditAction.StateChange, me, Guid.Empty, "ReportAccessGrantRevoked", null, AuditSeverity.High), ct);
             await outbox.EnqueueAsync("ReportAccessGrantRevoked", "orders.events", new { tenantId = g.TenantId, g.GrantId, g.OrderLineId, revokedBy = g.RevokedBy }, ct);
+            await tx.CommitAsync(ct);
             return Results.NoContent();
         });
 
@@ -224,6 +242,9 @@ public static class ReportAccessEndpoints
         {
             var now = clock.GetUtcNow();
             var due = await db.ReportAccessGrants.Where(g => g.RevokedAt == null && g.ExpiresAt <= now).ToListAsync(ct);
+            // 24.3 — this enqueues BEFORE its save: without the transaction a crash here would announce
+            // grants expired that are still live, and a revocation event cannot be un-sent.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             foreach (var g in due)
             {
                 g.RevokedAt = now; g.RevokedBy = "system:expiry";
@@ -231,6 +252,7 @@ public static class ReportAccessEndpoints
                 await outbox.EnqueueAsync("ReportAccessGrantExpired", "orders.events", new { tenantId = g.TenantId, g.GrantId, g.OrderLineId }, ct);
             }
             await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(new { expired = due.Count });
         }).RequireAuthorization(HbmpPolicies.Scope("orders:write"));
     }
