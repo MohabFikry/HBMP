@@ -61,6 +61,28 @@ public sealed class DecisionService(ClaimsDbContext db, BatchRollupService rollu
             .AnyAsync(d => d.ClaimLineId == line.ClaimLineId && d.DecidedBy == actor && !d.PendingSecondApproval, ct))
             return Fail(DecisionOutcome.SoDSameDecider);
 
+        // A DECIDED LINE IS CLOSED. Until now the only thing stopping a second officer from deciding the same
+        // line was an optimistic-concurrency collision on claim_line.xmin — which fires when the two
+        // transactions OVERLAP and does nothing at all when they merely follow one another. So the guard held
+        // for a genuine race and vanished for the ordinary case: two officers working the same worklist a
+        // second apart, or one retrying after a timeout on a request that had actually succeeded.
+        //
+        // The cost is money, not tidiness. The second decision appends another append-only claim_decision row
+        // and overwrites claim_line.allowed_amount, so the settled figure becomes whichever officer happened
+        // to go last while the first decision sits in the ledger looking authoritative.
+        //
+        // `Status != Pending` is the precise test for "already decided", not an approximation:
+        //   * Approve / PartiallyApprove / Deny / Adjust move the line off Pending (DecisionRules.Apply)
+        //   * RequestInfo / RouteToClinical return null and LEAVE it Pending, so they correctly do not close
+        //     the line — the claim goes to PendingInfo and must still be decided later
+        //   * an appeal reopens by setting the line back to Pending (AppealService.RaiseAsync), which is the
+        //     door a re-decision is supposed to come through
+        //
+        // Placed after the SoD check on purpose: the same actor deciding twice is still reported as
+        // SoDSameDecider, which names their mistake more usefully than a bare conflict.
+        if (line.Status != ClaimLineStatus.Pending)
+            return Fail(DecisionOutcome.Conflict);
+
         var err = DecisionRules.Validate(req.Kind, req.AllowedAmount, req.ReasonCodes, req.Rationale,
             line.BilledAmount, line.ContractPrice, req.IsOverride);
         if (err is not null) return new DecisionResult(DecisionOutcome.Validation, null, claim, line, err);

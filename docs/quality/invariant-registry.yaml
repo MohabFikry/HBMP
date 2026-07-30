@@ -188,6 +188,21 @@ invariants:
       ROW LEVEL SECURITY, ALTER ROLE or GRANT will fail the build without a matching isolation suite. Until
       that lands, this entry protects the three suites but not the next service to ship RLS DDL.
 
+  - id: INV-DECIDED-LINE-CLOSED
+    statement: >-
+      A claim line that already carries a terminal decision is closed: a second officer cannot decide it
+      again. Re-opening one goes through the appeal flow, which resets the line to Pending first.
+    source: 36-claims-management.md §4; AUDIT-R2-E2E.md §2 X7 (same class, decision path)
+    severity: Critical
+    tests:
+      - Mersal.Claims.Tests.DecisionIntegrationTests.A_second_officer_cannot_decide_a_line_that_is_already_decided
+      - Mersal.Claims.Tests.DecisionIntegrationTests.Two_officers_deciding_the_same_line_yield_one_winner
+    notes: >-
+      Found by phase 24's fail-at-end restructure: the concurrency test failed on CI's faster runner while
+      passing locally, because the only guard was an xmin collision that fires when two transactions OVERLAP
+      and does nothing when they merely follow one another. The sequential test is the one that matters — two
+      officers a second apart, or one retrying after a timeout, was the ordinary case that went unguarded.
+
   - id: X7-NO-LOST-UPDATE
     statement: >-
       Concurrent consume or dispense of DIFFERENT lines on one order does not lose an update; the
