@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Card, DataTable, Icon, KpiCard, StatusChip } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, KpiCard, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { AppointmentCounts, AppointmentRow, Localized, Practitioner, Specialty } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -15,6 +15,11 @@ const S = {
   cardTotal: { en: "Appointments today", ar: "مواعيد اليوم" },
   cardCheckedIn: { en: "Checked in", ar: "تم الوصول" },
   cardNoShow: { en: "No-shows", ar: "لم يحضروا" },
+  countsFailed: {
+    en: "Couldn't load today's figures — the cards below are not current.",
+    ar: "تعذّر تحميل أرقام اليوم — البطاقات أدناه ليست محدّثة.",
+  },
+  retry: { en: "Retry", ar: "إعادة المحاولة" },
 
   visitsHeading: { en: "Today's visits", ar: "زيارات اليوم" },
   visitsEmpty: { en: "No one has checked in yet today.", ar: "لم يسجّل أحد وصوله اليوم بعد." },
@@ -74,6 +79,13 @@ export function ReceptionDashboard() {
 
   const visits = useMemo(() => (board.data ?? []).filter((r) => r.checkedIn), [board.data]);
 
+  /**
+   * What a card shows. Zero is a NUMBER, not a dash — "0 appointments today" is a real and useful answer,
+   * and rendering it as "—" would tell the desk the figure is unknown when it is in fact known and quiet.
+   */
+  const cardValue = (n?: number) =>
+    counts.status === "loading" ? "…" : counts.status === "error" ? "—" : String(n ?? 0);
+
   const visitCols: Column<AppointmentRow>[] = [
     {
       key: "patient", header: t(S.patient), sortable: true,
@@ -130,10 +142,27 @@ export function ReceptionDashboard() {
           Counted server-side. Tallying the board here would be capped at its 200-row page and would
           undercount a busy day, in the direction nobody checks. */}
       <div className="dash-kpis">
-        <KpiCard label={t(S.cardTotal)} value={String(counts.data?.total ?? "—")} />
-        <KpiCard label={t(S.cardCheckedIn)} value={String(counts.data?.checkedIn ?? "—")} />
-        <KpiCard label={t(S.cardNoShow)} value={String(counts.data?.noShow ?? "—")} />
+        <KpiCard label={t(S.cardTotal)} value={cardValue(counts.data?.total)} />
+        <KpiCard label={t(S.cardCheckedIn)} value={cardValue(counts.data?.checkedIn)} />
+        <KpiCard label={t(S.cardNoShow)} value={cardValue(counts.data?.noShow)} />
       </div>
+      {/*
+        A failed count is SAID, not implied by a dash.
+
+        These three cards previously rendered `?? "—"`, which collapsed three different situations into one
+        glyph: still loading, failed to load, and a genuinely quiet morning with zero appointments. A desk
+        reading "—" cannot tell "we don't know" from "there are none", and the second reading is the
+        dangerous one — it invites someone to conclude the day is empty when the figure simply never arrived.
+        Zero now renders as 0, loading renders as an ellipsis, and a failure says so and offers a retry.
+      */}
+      {counts.status === "error" && (
+        <div role="alert" style={{ marginTop: "var(--sp2)" }}>
+          <InlineAlert tone="bad">
+            <span>{t(S.countsFailed)}</span>{" "}
+            <Button variant="secondary" size="sm" onClick={counts.reload}>{t(S.retry)}</Button>
+          </InlineAlert>
+        </div>
+      )}
 
       {/* ── Today's visits ─────────────────────────────────────────── */}
       <Card as="section" style={{ padding: "var(--sp3)", marginTop: "var(--sp4)" }}>

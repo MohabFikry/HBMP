@@ -443,6 +443,30 @@ html[dir="rtl"] .mrs-search input {
   gap: var(--sp3);
   margin-block-end: var(--sp3);
 }
+/*
+  ONE label treatment for everything in the bar.
+
+  The toolbar mixes three kinds of labelled control — the search box, the filter groups' <legend>s, and
+  whatever a caller passes as `children` (the appointments board passes two date InputFields). Each brought
+  its own label styling: legends were the 11.5px uppercase micro-label, while `.mrs-label` was the 15px
+  subhead. With `align-items: flex-end` the CONTROLS bottom-aligned correctly and the LABELS above them then
+  sat at three different heights, so the bar read as ragged even though nothing was misaligned by accident.
+
+  Every label in here is now the micro-label, with the same 6px below it, so the labels share a baseline and
+  the controls share theirs. The specificity is `.mrs-toolbar .mrs-field .mrs-label` deliberately — it has to
+  outrank `.mrs-field .mrs-label`, and relying on source order for that is a trap for whoever reorders this
+  file next.
+*/
+.mrs-toolbar .mrs-label,
+.mrs-toolbar .mrs-field .mrs-label {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  font-weight: 600;
+  display: block;
+  margin-block-end: 0;   /* the 6px comes from the grid gap / control margin, not from here */
+}
 .mrs-toolbar-search {
   display: grid;
   gap: 6px;
@@ -515,7 +539,19 @@ html[dir="rtl"] .mrs-search input {
   display: flex;
   align-items: flex-end;
   flex-wrap: wrap;
-  gap: var(--sp2);
+  gap: var(--sp3);
+}
+/*
+  Caller-supplied fields are sized, not left to sprawl. `.mrs-field` is display:block with a 100%-wide
+  control, so inside the flex row a pair of date inputs stretched to fill whatever space was left and pushed
+  themselves against the card's right edge. A date input needs about this much and no more.
+*/
+.mrs-toolbar-extra .mrs-field {
+  inline-size: 168px;
+  flex: 0 0 auto;
+}
+.mrs-toolbar-extra .mrs-field .mrs-control {
+  margin-top: 6px;
 }
 .mrs-wl td {
   padding: 14px 16px;
