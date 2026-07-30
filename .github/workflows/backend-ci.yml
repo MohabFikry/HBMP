@@ -125,6 +125,23 @@ jobs:
       # build must not blind them either.
       # ============================================================================================
 
+      # 24.6 — a 61 MB PDF sat in this history from the first commit; deleting the file changed nothing,
+      # because a blob leaves git only when history is rewritten. The purge is done. This is the part that
+      # matters: nothing that size gets back in. `--range` checks only what the push ADDS.
+      - name: "gate: no large blobs added"
+        id: gate_large_blobs
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 tools/ci/check-large-blobs.py --selftest
+          base="${{ github.event.before }}"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "no usable base commit (first push or force-push) — auditing the whole history instead"
+            python3 tools/ci/check-large-blobs.py --all-history
+          else
+            python3 tools/ci/check-large-blobs.py --range "$base..${{ github.sha }}"
+          fi
+
       - name: "gate: expand/contract migration-compat (12.2)"
         id: gate_migration_compat
         if: always()
@@ -364,6 +381,7 @@ jobs:
         if: always()
         env:
           OUTCOMES: |
+            large-blobs=${{ steps.gate_large_blobs.outcome }}
             migration-compat=${{ steps.gate_migration_compat.outcome }}
             kong-route-coverage=${{ steps.gate_kong.outcome }}
             spa-scopes=${{ steps.gate_spa_scopes.outcome }}
