@@ -82,6 +82,63 @@ public class CiGateTests
             "generating a spec and discarding it lets the committed contract drift from the running service");
     }
 
+    /// <summary>
+    /// A gate's INPUTS are part of its trigger.
+    ///
+    /// <para>The workflow's <c>paths:</c> filter decides whether the job runs at all, so a path missing from
+    /// it is a path no gate in this pipeline can ever see — and the commit still shows a clean tick, because
+    /// no check was ever required. It is the failure mode of 24.1 (a gate that cannot go blind) hiding one
+    /// level above the gates.</para>
+    ///
+    /// <para>It happened: <c>docs/api</c> holds the committed OpenAPI contracts and the drift gate exists to
+    /// compare them with the running services, but no <c>docs/**</c> entry was listed. The one commit whose
+    /// entire content was a contract change — 9f817a1, restoring 14 endpoints that had gone missing from the
+    /// spec — triggered no workflow run at all. The gate guarding the contract could not see commits that
+    /// change the contract, which is the only kind of commit it exists to inspect.</para>
+    ///
+    /// <para>So this does not hold a hand-written list. It reads the scripts the workflow actually invokes,
+    /// collects the <c>docs/</c> trees they mention, and requires each one in the filter — a gate added
+    /// tomorrow that reads a new docs tree cannot quietly fail to trigger on it.</para>
+    /// </summary>
+    [Fact]
+    public void The_workflow_triggers_on_every_file_a_gate_reads()
+    {
+        var workflow = Workflow();
+
+        var trees = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (Match m in Regex.Matches(workflow, @"tools/ci/[A-Za-z0-9._-]+"))
+        {
+            var script = Path.Combine(RepoRoot(), m.Value.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(script)) continue;
+            foreach (Match d in Regex.Matches(File.ReadAllText(script), @"\bdocs/([a-z][a-z0-9_-]*)/"))
+                trees.Add(d.Groups[1].Value);
+        }
+        // ...plus the trees the workflow's own inline steps touch (docs/api, via the drift gate).
+        foreach (Match d in Regex.Matches(workflow, @"\bdocs/([a-z][a-z0-9_-]*)\b"))
+            trees.Add(d.Groups[1].Value);
+
+        trees.Should().Contain("api", "the OpenAPI drift gate compares docs/api — this test is worthless if " +
+            "it cannot even see that reference, so a failure here means the discovery regex stopped matching");
+
+        var missing = trees.Where(t => !workflow.Contains($"\"docs/{t}/**\"", StringComparison.Ordinal)).ToList();
+        missing.Should().BeEmpty(
+            "a gate in this workflow reads docs/{0} but the paths filter does not list it, so a commit that " +
+            "changes only those files starts no run and is merged with every check unrun and none reported red",
+            string.Join(", docs/", missing));
+
+        // Both triggers, not just push: a pull_request filter that omits the tree lets the change arrive
+        // through the door where review is supposed to be strongest with the gate not running.
+        var push = Regex.Match(workflow, @"(?s)\bpush:\s*\n\s*paths:\n(.*?)\n\s*pull_request:").Groups[1].Value;
+        var pr = Regex.Match(workflow, @"(?s)\bpull_request:\s*\n\s*paths:\n(.*?)\n\s*\n").Groups[1].Value;
+        push.Should().NotBeEmpty("the push paths filter must be parseable for this assertion to mean anything");
+        pr.Should().NotBeEmpty("the pull_request paths filter must be parseable");
+        foreach (var tree in trees)
+        {
+            push.Should().Contain($"\"docs/{tree}/**\"", "push must trigger on docs/{0}", tree);
+            pr.Should().Contain($"\"docs/{tree}/**\"", "pull_request must trigger on docs/{0}", tree);
+        }
+    }
+
     [Fact]
     public void Identity_tests_get_a_database_in_ci()
     {

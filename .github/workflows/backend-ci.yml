@@ -4,6 +4,24 @@ name: backend-ci
 # (the repo enforces this — a warning fails the build), then runs the FULL suite against a real Postgres so
 # the env-gated integration + RLS isolation tests actually execute instead of skipping. A domain-coverage
 # floor guards against regression. Runs on backend-affecting changes.
+#
+# 24.1 — A GATE'S INPUTS ARE PART OF ITS TRIGGER. The paths filter below decides whether this workflow runs
+# at all, so anything it omits is a file no gate here can ever see. That is not a slow gate or a weak gate;
+# it is a gate that does not exist for those files, while the commit still shows a clean tick because no
+# check was ever required. It bit us for real: docs/api holds the committed OpenAPI contracts and the drift
+# gate exists to compare them against the running services, but "docs/**" was not listed — so the one commit
+# whose entire content was a contract change (9f817a1, restoring 14 endpoints that had gone missing from the
+# spec) triggered no run whatsoever. The gate guarding the contract was blind to commits that change the
+# contract, which is the only kind of commit it exists to inspect.
+#
+# So every path a gate READS belongs here, not merely the code the build compiles:
+#   docs/api/**        -> the OpenAPI drift gate's subject
+#   docs/adr/**        -> check-coverage-exclusions.py and check-floor-monotonicity.py require a naming ADR
+#   docs/quality/**    -> check-invariant-registry.py reads invariant-registry.yaml
+#   docs/compliance/** -> check-integration-dpia.py reads the integration register
+# The list is not maintained by hand: CiGateTests.The_workflow_triggers_on_every_file_a_gate_reads reads the
+# scripts this workflow invokes, collects the docs/ trees they mention, and fails if one is missing here — so
+# a gate added tomorrow that reads a new docs tree cannot quietly fail to trigger on it.
 on:
   push:
     paths:
@@ -13,6 +31,10 @@ on:
       - "Directory.Build.props"
       - "HbmpPlatform.sln"
       - "tools/ci/**"
+      - "docs/api/**"
+      - "docs/adr/**"
+      - "docs/quality/**"
+      - "docs/compliance/**"
       - ".github/workflows/backend-ci.yml"
   pull_request:
     paths:
@@ -21,6 +43,10 @@ on:
       - "Directory.Packages.props"
       - "HbmpPlatform.sln"
       - "tools/ci/**"
+      - "docs/api/**"
+      - "docs/adr/**"
+      - "docs/quality/**"
+      - "docs/compliance/**"
 
 permissions:
   contents: read
