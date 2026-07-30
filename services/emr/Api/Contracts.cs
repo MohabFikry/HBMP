@@ -71,7 +71,11 @@ public sealed record AppointmentResponse(
     string? BeneficiaryName = null,
     // 14.5 — the assigned practitioner stopped serving this branch, so this appointment needs a human
     // decision (reassign, rebook or cancel). Nothing was done to it automatically; see migration 0012.
-    bool NeedsReassignment = false)
+    bool NeedsReassignment = false,
+    // 14.5 (0014) — who wrote the note and when. Shown where the note is READ, because a clinician acting on
+    // "the sister will interpret" needs to know whether that was agreed this morning or at a booking made six
+    // weeks ago, and who to ask.
+    string? NoteBy = null, DateTimeOffset? NoteAt = null)
 {
     /// <summary>Project an appointment. <paramref name="now"/> is required to answer
     /// <see cref="NoShowEligible"/>: the 15-minute grace period after the scheduled end is a SERVER rule, and a
@@ -83,7 +87,7 @@ public sealed record AppointmentResponse(
         a.AppointmentType.ToString(), a.Status.ToString(), a.ScheduledStart, a.ScheduledEnd,
         a.ReferralRef, a.OriginEncounterId, a.RowVersion, a.BranchId, a.DoctorId,
         now is { } t && AppointmentWorkflow.CanNoShow(a, t, AppointmentWorkflow.NoShowGrace),
-        a.Note, name, a.ReassignmentNeededAt is not null);
+        a.Note, name, a.ReassignmentNeededAt is not null, a.NoteBy, a.NoteAt);
 }
 
 public sealed record SlotResponse(

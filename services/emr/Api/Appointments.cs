@@ -377,6 +377,10 @@ public static class AppointmentsModule
                 // Trimmed to null when blank: an empty string here would make the board render an empty name
                 // cell for a patient who does have one, which reads as data loss rather than as absence.
                 BeneficiaryName = string.IsNullOrWhiteSpace(req.BeneficiaryName) ? null : req.BeneficiaryName.Trim(),
+                // Attribution rides WITH the note: stamped only when there is one, so an appointment with no
+                // note does not claim an author for it.
+                NoteBy = note is null ? null : actor,
+                NoteAt = note is null ? null : now,
                 IdempotencyKey = idem, CreatedBy = actor, CreatedAt = now, UpdatedAt = now,
             };
 
@@ -628,8 +632,13 @@ public static class AppointmentsModule
             if (appt is null) return Results.Problem(statusCode: 404, title: "Not Found",
                 type: "https://mersal.foundation/problems/not-found");
 
+            var editedAt = clock.GetUtcNow();
             appt.Note = note;
-            appt.UpdatedAt = clock.GetUtcNow();
+            // Cleared along with the note: attribution for a note that no longer exists would be a claim
+            // about text nobody can read.
+            appt.NoteBy = note is null ? null : me.Principal?.Subject;
+            appt.NoteAt = note is null ? null : editedAt;
+            appt.UpdatedAt = editedAt;
             appt.UpdatedBy = me.Principal?.Subject;
             await db.SaveChangesAsync(ct);
 

@@ -241,6 +241,8 @@ export class DevApiClient implements ApiClient {
           branchName: "Dokki",
           rowVersion: 1,
           note: r.note ?? null,
+          noteBy: r.note ? "Nada Reception" : null,
+          noteAt: r.note ? "2026-07-22T08:05:00Z" : null,
           // Only the CHECKED-IN row carries a name, exactly as the server behaves: the name is captured at
           // check-in, so a booked-but-not-arrived appointment genuinely has none.
           beneficiaryName: r.st === "CheckedIn" ? r.name ?? null : null,

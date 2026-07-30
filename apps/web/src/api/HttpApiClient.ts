@@ -486,6 +486,8 @@ export class HttpApiClient implements ApiClient {
         rowVersion: typeof a.rowVersion === "number" ? a.rowVersion : undefined,
         // Null, not "", when absent — the board renders a note affordance only when there is a note to open.
         note: a.note ?? null,
+        noteBy: a.noteBy ?? null,
+        noteAt: a.noteAt ?? null,
         beneficiaryName: a.beneficiaryName ?? null,
         doctorId: a.doctorId ?? null,
         needsReassignment: a.needsReassignment === true,

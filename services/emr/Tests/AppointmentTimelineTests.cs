@@ -27,7 +27,8 @@ public class AppointmentTimelineTests
             new HistoryProjection("Completed", T(40), "doctor-c", "reception-a"),
         });
 
-        steps.Select(s => s.Status).Should().Equal("Booked", "CheckedIn", "Completed");
+        // Newest first — the timeline answers "what just happened to this?" before "how did it start?".
+        steps.Select(s => s.Status).Should().Equal("Completed", "CheckedIn", "Booked");
     }
 
     [Fact]
@@ -48,8 +49,9 @@ public class AppointmentTimelineTests
             new HistoryProjection("Booked", T(0), null, "reception-a"),
             new HistoryProjection("CheckedIn", T(10), "reception-b", "reception-a"),
         });
-        // Not the booker: the point of the timeline is who did each step.
-        steps[1].By.Should().Be("reception-b");
+        // Not the booker: the point of the timeline is who did each step. Index 0 is the LATEST step now
+        // that the list reads newest-first.
+        steps[0].By.Should().Be("reception-b");
     }
 
     [Fact]
@@ -62,7 +64,7 @@ public class AppointmentTimelineTests
             new HistoryProjection("Booked", T(0), null, "reception-a"),
             new HistoryProjection("NoShow", T(30), null, "reception-a"),
         });
-        steps[1].By.Should().BeNull();
+        steps[0].By.Should().BeNull();   // index 0 is the latest step (newest-first)
     }
 
     [Fact]
@@ -74,7 +76,7 @@ public class AppointmentTimelineTests
             new HistoryProjection("CheckedIn", T(10), "b", "a"),
             new HistoryProjection("Completed", T(40), "c", "a"),
         });
-        steps.Select(s => s.At).Should().BeInAscendingOrder().And.Equal(T(0), T(10), T(40));
+        steps.Select(s => s.At).Should().BeInDescendingOrder().And.Equal(T(40), T(10), T(0));
     }
 
     [Fact]
@@ -107,6 +109,6 @@ public class AppointmentTimelineTests
             new HistoryProjection("NoShow", T(30), "b", "a"),
             new HistoryProjection("Booked", T(60), "c", "a"),
         });
-        steps.Select(s => s.Status).Should().Equal("Booked", "NoShow", "Booked");
+        steps.Select(s => s.Status).Should().Equal("Booked", "NoShow", "Booked");   // symmetric under reversal
     }
 }

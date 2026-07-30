@@ -52,6 +52,17 @@ export const zAppointmentRow = z.object({
    */
   note: z.string().nullish(),
   /**
+   * Who last wrote the note, and when.
+   *
+   * The note crosses a team boundary — reception and the call centre write it, the treating doctor reads it —
+   * and an unattributed instruction is one nobody can follow up or date. A clinician reading "the sister will
+   * interpret" needs to know whether that was agreed this morning or at a booking made six weeks ago.
+   * Display attribution, not the audit trail: that lives in audit-service behind `audit:read`, which none of
+   * the three readers holds.
+   */
+  noteBy: z.string().nullish(),
+  noteAt: z.string().nullish(),
+  /**
    * The patient's display name, where the server has one — it is captured at CHECK-IN, so an arrived patient
    * has a name and a merely-booked appointment does not.
    *

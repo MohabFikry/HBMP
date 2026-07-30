@@ -790,6 +790,8 @@ nav.mrs-rail {
   white-space: nowrap;
 }
 @media (max-width: 560px) {
+  .vt-step { grid-template-columns: minmax(0, 1fr); }
+
   .app-userbtn-text {
     display: none;
   }
@@ -1472,7 +1474,16 @@ nav.mrs-rail {
 }
 .vt-step {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  /*
+    Three FIXED columns, not `auto 1fr auto`.
+
+    The chips vary in width — "Booked" against "Note edited" — so an auto first column started every row's
+    date at a different x, and the actor column ended at a different one. A timeline is read down the
+    columns ("when did this happen, and who did it?"), and ragged columns make that a scan instead of a
+    glance. The chip column is wide enough for the longest label; the date column is fixed so the actors
+    line up too.
+  */
+  grid-template-columns: 132px 168px minmax(0, 1fr);
   align-items: center;
   gap: var(--sp3);
   padding: var(--sp2) var(--sp3);
@@ -1492,12 +1503,23 @@ nav.mrs-rail {
   block-size: var(--sp2);
   border-inline-start: 2px solid var(--border-strong);
 }
+/* One type size across the row. The date and the actor were at different sizes, so the eye read them as
+   different kinds of information when they are both just metadata about the same step. */
 .vt-when {
   color: var(--text-2);
+  font-size: var(--fs-caption);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .vt-who {
   color: var(--text-2);
+  font-size: var(--fs-caption);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Left-aligned, so every actor starts at the same x. Right-aligning them put a short name and a long one
+     at different distances from the date they belong to. */
+  text-align: start;
 }
 @media (max-width: 560px) {
   .vt-step {

@@ -125,7 +125,11 @@ export function timeAndStatusColumns({ t, fmt }: Pick<ColumnDeps, "t" | "fmt">):
 }
 
 export function noteColumn({ t }: Pick<ColumnDeps, "t">): Column<AppointmentRow> {
-  return { key: "note", header: t(S.note), cell: (r) => <AppointmentNoteButton note={r.note} /> };
+  return {
+    key: "note",
+    header: t(S.note),
+    cell: (r) => <AppointmentNoteButton note={r.note} by={r.noteBy} at={r.noteAt} />,
+  };
 }
 
 /**

@@ -55,6 +55,9 @@ public static class AppointmentTimeline
     /// <para>Consecutive identical snapshots are still suppressed — the history trigger fires on every update,
     /// including ones that touch nothing the timeline cares about, and "Booked, Booked, Booked" buries the
     /// steps that matter.</para>
+    ///
+    /// <para><b>Returns newest-first.</b> The walk is oldest-first because change-detection requires it; the
+    /// result is reversed because whoever opens a timeline is asking what just happened, not how it began.</para>
     /// </summary>
     public static List<TimelineRow> Collapse(IReadOnlyList<HistoryProjection> snapshots)
     {
@@ -87,6 +90,12 @@ public static class AppointmentTimeline
 
             previous = snap;
         }
+
+        // NEWEST FIRST for the reader; the WALK above stays oldest-first because that is the only order in
+        // which "did this differ from the one before it?" means anything. Reversing at the end keeps the
+        // change-detection honest and still puts the most recent event where someone opening a timeline
+        // looks first — they are almost always asking "what just happened to this?", not "how did it start?".
+        steps.Reverse();
         return steps;
     }
 

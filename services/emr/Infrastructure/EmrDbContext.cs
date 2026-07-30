@@ -46,6 +46,8 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             e.Property(x => x.Note).HasColumnName("note").HasMaxLength(AppointmentNote.MaxLength);
             e.Property(x => x.ReassignmentNeededAt).HasColumnName("reassignment_needed_at");   // 14.5
             e.Property(x => x.BeneficiaryName).HasColumnName("beneficiary_name");               // 14.5 (0013)
+            e.Property(x => x.NoteBy).HasColumnName("note_by");                                 // 14.5 (0014)
+            e.Property(x => x.NoteAt).HasColumnName("note_at");
             e.HasIndex(x => new { x.BranchId, x.ScheduledStart });
             e.HasIndex(x => new { x.DoctorId, x.ScheduledStart });
         });

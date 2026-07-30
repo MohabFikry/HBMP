@@ -51,6 +51,13 @@ public sealed class Appointment
     /// schema, because the API is not the only writer a table outlives.</para></summary>
     public string? Note { get; set; }
 
+    /// <summary>Who last wrote <see cref="Note"/>, and when (0014). Display attribution, not an audit trail:
+    /// the note crosses a team boundary — reception and the call centre write it, the treating doctor reads
+    /// it — and an unattributed instruction is one nobody can follow up or date. audit-service holds the
+    /// compliance record, but it needs <c>audit:read</c>, which none of the three readers has.</summary>
+    public string? NoteBy { get; set; }
+    public DateTimeOffset? NoteAt { get; set; }
+
     /// <summary>The patient's display name, captured at BOOKING from the request (0013).
     /// <para>Minimum-necessary and a SNAPSHOT: a display name only, and deliberately not kept in sync with
     /// patient-service — it is what the appointment was booked under, and a name that silently changed
