@@ -60,6 +60,13 @@ builder.Services.AddHttpClient<IBranchDirectory, HttpBranchDirectory>(c =>
 builder.Services.AddHttpClient<IPractitionerBranchDirectory, HttpPractitionerBranchDirectory>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Provider:BaseUrl"] ?? "http://provider-service:8080"));
 
+// 14.5 — flag appointments orphaned when a practitioner stops serving a branch. provider-service publishes
+// PractitionerBranchRevoked and nothing consumed it, so bookings already made with that doctor at that branch
+// survived unnoticed until the patient turned up.
+builder.Services.Configure<PractitionerBranchRevokedOptions>(
+    builder.Configuration.GetSection(PractitionerBranchRevokedOptions.SectionName));
+builder.Services.AddHostedService<PractitionerBranchRevokedConsumer>();
+
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("emr-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
     .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());

@@ -18,7 +18,7 @@ import { useAsync } from "../api/useAsync";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
-  usersTitle: { en: "Users & roles", ar: "المستخدمون والأدوار" },
+  usersTitle: { en: "Users & Roles", ar: "المستخدمون والأدوار" },
   usersEmpty: { en: "No role bindings in this tenant.", ar: "لا توجد أدوار مُسندة في هذا المستأجر." },
   subject: { en: "Subject", ar: "المستخدم" },
   role: { en: "Role", ar: "الدور" },
@@ -28,7 +28,7 @@ const S = {
   granted: { en: "Granted", ar: "مُنح" },
   reviewDue: { en: "Review due", ar: "موعد المراجعة" },
 
-  policiesTitle: { en: "Segregation of duties", ar: "الفصل بين المهام" },
+  policiesTitle: { en: "Segregation of Duties", ar: "الفصل بين المهام" },
   policiesEmpty: { en: "No SoD conflict rules defined.", ar: "لا توجد قواعد تعارض." },
   roleA: { en: "Role", ar: "الدور" },
   roleB: { en: "Conflicts with", ar: "يتعارض مع" },
@@ -39,7 +39,7 @@ const S = {
   tenant: { en: "Tenant", ar: "المستأجر" },
   created: { en: "Created", ar: "أُنشئ" },
 
-  govTitle: { en: "Audit & access reviews", ar: "التدقيق والمراجعات" },
+  govTitle: { en: "Audit & Access Reviews", ar: "التدقيق والمراجعات" },
   campaigns: { en: "Access-review campaigns", ar: "حملات مراجعة الوصول" },
   campaignsEmpty: { en: "No access-review campaigns.", ar: "لا توجد حملات مراجعة." },
   campaign: { en: "Campaign", ar: "الحملة" },
@@ -52,14 +52,14 @@ const S = {
   requested: { en: "Requested", ar: "وقت الطلب" },
   expires: { en: "Expires", ar: "ينتهي" },
 
-  mdTitle: { en: "Master data", ar: "البيانات المرجعية" },
+  mdTitle: { en: "Master Data", ar: "البيانات المرجعية" },
   mdEmpty: { en: "No master-data versions in force.", ar: "لا توجد إصدارات بيانات مرجعية فعّالة." },
   system: { en: "System", ar: "النظام" },
   code: { en: "Code", ar: "الرمز" },
   version: { en: "Version", ar: "الإصدار" },
   effective: { en: "Effective from", ar: "ساري من" },
   retired: { en: "Retired", ar: "متقاعد" },
-  cfgTitle: { en: "System config", ar: "إعدادات النظام" },
+  cfgTitle: { en: "System Config", ar: "إعدادات النظام" },
   cfgEmpty: { en: "No configuration entries.", ar: "لا توجد إعدادات." },
   scope2: { en: "Scope", ar: "النطاق" },
   key: { en: "Key", ar: "المفتاح" },

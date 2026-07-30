@@ -10,9 +10,8 @@ const ReceptionEligibility = lazy(() =>
   import("./ReceptionEligibility").then((m) => ({ default: m.ReceptionEligibility })),
 );
 // Reception desk (Phase 3) — day board, visits, and check-in share one chunk.
-const ReceptionVisits = lazy(() => import("./ReceptionDesk").then((m) => ({ default: m.ReceptionVisits })));
+const ReceptionDashboard = lazy(() => import("./ReceptionDashboard").then((m) => ({ default: m.ReceptionDashboard })));
 const ReceptionAppointments = lazy(() => import("./ReceptionDesk").then((m) => ({ default: m.ReceptionAppointments })));
-const ReceptionCheckIn = lazy(() => import("./ReceptionDesk").then((m) => ({ default: m.ReceptionCheckIn })));
 const ReceptionBooking = lazy(() => import("./ReceptionBooking").then((m) => ({ default: m.ReceptionBooking })));
 const DoctorVisits = lazy(() => import("./DoctorVisits").then((m) => ({ default: m.DoctorVisits })));
 // Beneficiary-management portal (Phase 1) — register / manage / status share one chunk.
@@ -52,6 +51,9 @@ const NetworkPerformance = lazy(() => import("./NetworkPortal").then((m) => ({ d
 const NetworkContracts = lazy(() => import("./NetworkPortal").then((m) => ({ default: m.NetworkContracts })));
 const NetworkLocations = lazy(() => import("./NetworkPortal").then((m) => ({ default: m.NetworkLocations })));
 const NetworkOnboarding = lazy(() => import("./NetworkPortal").then((m) => ({ default: m.NetworkOnboarding })));
+// 14.5 — practitioners. Its own chunk rather than folding into NetworkPortal: it pulls the identity account
+// list and the specialty/branch reference data, none of which the other five network screens need.
+const NetworkPractitioners = lazy(() => import("./PractitionerAdmin").then((m) => ({ default: m.PractitionerAdmin })));
 // Case-manager portal (Phase 10.3) — one chunk for the two case screens.
 const MyCases = lazy(() => import("./CaseManager").then((m) => ({ default: m.MyCases })));
 const Escalations = lazy(() => import("./CaseManager").then((m) => ({ default: m.Escalations })));
@@ -110,9 +112,8 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/beneficiaries/approvals": () => <RegistrationApprovals />,
   "/beneficiaries/manage": () => <BeneficiaryManage />,
   "/beneficiaries/status": () => <BeneficiaryStatus />,
-  "/reception/queue": () => <ReceptionVisits />,
+  "/reception/dashboard": () => <ReceptionDashboard />,
   "/reception/appointments": () => <ReceptionAppointments />,
-  "/reception/check-in": () => <ReceptionCheckIn />,
   "/reception/book": () => <ReceptionBooking />,
   // 2. Doctor — consultation / EMR + cross-encounter worklists.
   "/clinician/visits": () => <DoctorVisits />,
@@ -169,6 +170,7 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/network/onboarding": () => <NetworkOnboarding />,
   "/network/contracts": () => <NetworkContracts />,
   "/network/locations": () => <NetworkLocations />,
+  "/network/practitioners": () => <NetworkPractitioners />,
   "/network/performance": () => <NetworkPerformance />,
   // 10. Call Centre (Phase 15) — the call-shaped workspace + call history. No clinical route exists.
   "/call-centre/workspace": () => <CallCentreWorkspace />,

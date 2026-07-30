@@ -128,16 +128,6 @@ nav.mrs-rail {
   scrollbar-gutter: stable;
   padding: var(--sp6);
 }
-.app-crumb {
-  color: var(--text-2);
-  font-size: var(--fs-subhead);
-  margin-bottom: var(--sp4);
-}
-.app-crumb [aria-current="page"] {
-  color: var(--text-1);
-  font-weight: 600;
-}
-
 /* Page header (v1.1 brand-tick eyebrow). */
 .pagehead {
   display: flex;
@@ -193,6 +183,13 @@ nav.mrs-rail {
 .stack {
   display: grid;
   gap: var(--sp4);
+}
+/* Tighter sibling of `.stack` for a short outcome group — a status chip, its one line of detail, and the
+   action that follows. It was already being used (the booking confirmation) without ever being defined, so
+   that panel rendered with no gap at all and the three elements ran together. */
+.stack-3 {
+  display: grid;
+  gap: var(--sp3);
 }
 .section-h {
   font-size: 11.5px;
@@ -1056,6 +1053,29 @@ nav.mrs-rail {
 .pol-dialog { display: grid; gap: var(--sp3); border: 2px solid var(--accent); }
 .pol-dialog-actions { display: flex; gap: var(--sp2); flex-wrap: wrap; }
 
+/* ── Paired actions + reference-table modal (0B §11) ─────────────────────────────────────────────────
+   Two actions answering the same question get MATCHED treatment, never one button and one bare link —
+   an underlined link beside a button reads as secondary information, and "what must this file contain?"
+   is not secondary. On narrow viewports they stack full-width rather than shrinking below the 44px
+   target. */
+.bulk-actions { display: grid; gap: var(--sp2); }
+.bulk-actions-row { display: flex; gap: var(--sp3); flex-wrap: wrap; align-items: center; }
+@media (max-width: 30rem) {
+  .bulk-actions-row { display: grid; }
+  .bulk-actions-row > * { width: 100%; }
+}
+/* Reference table inside a modal: the header stays put while the body scrolls, because a column
+   contract is read by scanning down the COLUMN column and losing the header defeats that. */
+.bulk-columns { max-height: min(60vh, 32rem); overflow: auto; }
+.bulk-columns thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-1);
+}
+.bulk-columns code { font-size: var(--fs-caption); overflow-wrap: anywhere; }
+.bulk-req { display: inline-flex; gap: var(--sp1); align-items: center; white-space: nowrap; }
+
 /* ── Phase 20: the unified patient profile ─────────────────────────────────────────────────────────────
    The three withheld states must be visually distinct, not three shades of grey — a user has to be able
    to tell "you may not see this" from "it broke" from "there is nothing" at a glance, in both themes and
@@ -1250,8 +1270,6 @@ nav.mrs-rail {
   list-style: none;
   margin: 0;
   padding: 0;
-}
-.book-hits {
   display: grid;
   gap: var(--sp2);
 }
@@ -1322,6 +1340,66 @@ nav.mrs-rail {
 }
 .book-actions {
   margin-block-start: var(--sp4);
+}
+
+/* ── Booking time picker (14.5) ──────────────────────────────────────────────
+   A day strip beside the chosen day's times. Two columns on a desk, stacked on a narrow screen — the day
+   strip scrolls rather than wrapping, so the times keep a stable position while the operator scans days. */
+.bk-time-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: var(--sp4);
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .bk-time-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.bk-days {
+  display: grid;
+  gap: var(--sp2);
+  max-block-size: 320px;
+  overflow-y: auto;
+}
+.bk-day {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp2);
+  min-block-size: 44px;
+  padding: 0 var(--sp3);
+  border: 1px solid var(--border-input, var(--border));
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  cursor: pointer;
+}
+.bk-day:hover:not(:disabled) { border-color: var(--accent); }
+.bk-day:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+/* Selected carries fill + weight, never hue alone (WCAG 1.4.1), matching .book-slot beside it. */
+.bk-day[aria-checked="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.bk-day:disabled { cursor: not-allowed; opacity: 0.5; }
+.bk-day-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+  font-size: 0.9em;
+}
+.bk-times-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp3);
+  flex-wrap: wrap;
+}
+.bk-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp2);
 }
 
 /* ── Visit timeline (23 §1) ──────────────────────────────────────────────────
@@ -1408,3 +1486,266 @@ nav.mrs-rail {
 /* Wider than the identifier fields: a note is prose, and a 420px box hides the start of what was typed. */
 .cc-notes-field { max-inline-size: 100%; }
 .cc-notes-field > textarea { inline-size: 100%; resize: vertical; }
+
+/* ============================================================================================================
+   BENEFICIARY REGISTRATION — sectioned form, documents, batch intake
+   ============================================================================================================ */
+
+/* The form reads as a sequence of decisions, not one wall of twenty inputs. Each section is a real
+   <fieldset>, so the grouping is in the accessibility tree and not only in the paint.
+   ────────────────────────────────────────────────────────────────────────────────────────────────────────
+   SEPARATION IS A HAIRLINE PLUS AIR, NOT AIR ALONE.
+   Whitespace on its own is ambiguous once there are seven sections: a 32px gap between groups and a 20px gap
+   between the rows INSIDE one group are only 12px apart, and the eye cannot reliably tell "new section" from
+   "next row" at that margin — especially where a section holds a single row. Boxing each section would be
+   unambiguous and wrong here: the form already sits inside a Card, so seven nested boxes read as clutter and
+   would flatten the one section that IS a box (Notes, which is collapsible and needs to look different).
+   A hairline is the design system's own answer — 0B §10b uses exactly this for nav groups. */
+.ben-form { display: grid; gap: var(--sp6); }
+.ben-section { border: 0; margin: 0; padding: 0; display: grid; gap: var(--sp4); }
+/* The submit row is the one plain divider left: it has no heading of its own to carry a rule. */
+.ben-form > .ben-actions {
+  border-block-start: 1px solid var(--border);
+  padding-block-start: var(--sp5);
+}
+/* The section heading IS the divider: micro-label (0B §10b), then a hairline running to the edge, centred on
+   the label rather than floating above it. One row instead of three stacked things — a separate rule above
+   the heading left the label orphaned between two boundaries, which is what made the spacing read as noise. */
+.ben-section > legend {
+  display: flex;
+  align-items: center;                 /* this is what centres the rule on the text */
+  gap: var(--sp3);
+  inline-size: 100%;
+  font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-3); font-weight: 600;
+  padding: 0;
+  margin-block-end: var(--sp4);        /* the air between a heading and the fields it introduces */
+}
+.ben-section > legend::after {
+  content: "";
+  flex: 1 1 auto;
+  block-size: 1px;
+  background: var(--border);
+}
+.ben-section-hint { margin: 0; color: var(--text-2); font-size: 0.88rem; }
+.ben-grid {
+  display: grid; gap: var(--sp3);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+/* Notes are prose; a 220px column hides the beginning of what was typed. */
+.ben-grid--notes { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.ben-span-2 { grid-column: span 2; }
+@media (max-width: 640px) { .ben-span-2 { grid-column: auto; } }
+
+/* A phone is one value entered as two fields; the pair reads and tabs as one control. */
+.ben-phone { display: grid; grid-template-columns: minmax(96px, 140px) 1fr; gap: var(--sp2); align-items: end; }
+
+/* Every cell in the grid has the same anatomy — label, control, then help/error — so the controls sit on one
+   baseline whether they are typed or chosen. Without this the label wraps on one field and not its neighbour
+   and the whole row steps down by a line. */
+.ben-grid > .mrs-field {
+  display: grid;
+  grid-template-rows: auto auto 1fr;   /* label · control · message, message takes the slack */
+  align-content: start;
+  min-inline-size: 0;
+}
+.ben-grid .mrs-label {
+  display: block;
+  min-block-size: 2.4em;               /* two lines' worth: a wrapped label no longer shifts its row */
+}
+.ben-grid .mrs-control { inline-size: 100%; }
+.ben-grid .mrs-help,
+.ben-grid .mrs-error { margin-block-start: var(--sp1); }
+
+/* ---- Documents ---- */
+.ben-docs { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--sp2); }
+.ben-doc {
+  display: flex; gap: var(--sp3); align-items: flex-start; justify-content: space-between;
+  flex-wrap: wrap; padding: var(--sp3);
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-1);
+}
+.ben-doc-body { display: grid; gap: var(--sp1); min-inline-size: 0; }
+.ben-doc-head { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; }
+.ben-doc-name { overflow-wrap: anywhere; }
+/* The upload date sits UNDER the file name — the order an officer reads them in. */
+.ben-doc-sub {
+  display: flex; gap: var(--sp1); align-items: center; flex-wrap: wrap;
+  color: var(--text-2); font-size: 0.85rem;
+}
+.ben-doc-actions { display: flex; gap: var(--sp1); align-items: center; }
+/* ≥44px targets even though the glyph is 20px (21-accessibility-checklist). */
+.ben-doc-actions .mrs-btn { min-inline-size: 44px; min-block-size: 44px; padding-inline: var(--sp2); }
+.ben-doc-actions svg { inline-size: 20px; block-size: 20px; }
+
+.ben-doc-upload {
+  display: grid; gap: var(--sp3);
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  align-items: end;
+  padding: var(--sp3); border: 1px solid var(--border);
+  border-radius: var(--r-md); background: var(--surface-2);
+}
+.ben-doc-upload-wide { grid-column: 1 / -1; }
+
+.ben-doc-preview {
+  inline-size: 100%; max-block-size: min(70vh, 640px);
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--surface-2); object-fit: contain;
+}
+iframe.ben-doc-preview { block-size: min(70vh, 640px); }
+
+/* ---- Batch intake ---- */
+.ben-batch { display: grid; gap: var(--sp4); }
+.ben-batch-defaults {
+  display: grid; gap: var(--sp3);
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  padding: var(--sp3); border: 1px solid var(--border);
+  border-radius: var(--r-md); background: var(--surface-2);
+}
+.ben-mode { margin-block-end: var(--sp4); }
+
+/* ---- Collapsible section (native <details>) ---- */
+.ben-disclosure {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  padding: 0;
+}
+.ben-disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp3);
+  min-block-size: 44px;                 /* the a11y target size, on the whole row */
+  padding: var(--sp2) var(--sp3);
+  cursor: pointer;
+  list-style: none;                     /* the default marker is replaced by our own chevron below */
+  border-radius: var(--r-md);
+}
+.ben-disclosure > summary::-webkit-details-marker { display: none; }
+.ben-disclosure > summary:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+/* A chevron that rotates — the same affordance the comboboxes use, so "this opens" reads the same everywhere.
+   Drawn with a border rather than an icon because a summary cannot hold arbitrary markup in every engine. */
+.ben-disclosure > summary::before {
+  content: "";
+  inline-size: 8px;
+  block-size: 8px;
+  flex: none;
+  border-right: 2px solid var(--text-2);
+  border-bottom: 2px solid var(--text-2);
+  transform: rotate(-45deg);
+  transition: transform 120ms ease;
+}
+.ben-disclosure[open] > summary::before { transform: rotate(45deg); }
+@media (prefers-reduced-motion: reduce) {
+  .ben-disclosure > summary::before { transition: none; }
+}
+[dir="rtl"] .ben-disclosure > summary::before { transform: rotate(135deg); }
+[dir="rtl"] .ben-disclosure[open] > summary::before { transform: rotate(45deg); }
+
+.ben-disclosure-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp3);
+  flex: 1 1 auto;                      /* grows, so its rule reaches the count */
+  font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-3); font-weight: 600;
+}
+/* The same hairline the <legend> sections carry, so a collapsed section and an open one read alike. */
+.ben-disclosure-title::after {
+  content: "";
+  flex: 1 1 auto;
+  block-size: 1px;
+  background: var(--border);
+}
+/* What is inside, while it is shut. A collapsed section that cannot say whether it holds anything is a
+   section people stop opening. */
+.ben-disclosure-count {
+  flex: none;
+  font-size: 0.85rem;
+  color: var(--text-2);
+}
+.ben-disclosure-body {
+  padding: 0 var(--sp3) var(--sp3);
+  display: grid;
+  gap: var(--sp3);
+}
+
+/* A vendored 4:3 flag. Fixed box so a row's height never depends on which country is selected, and a hairline
+   because several flags are white at the edge and would otherwise bleed into the surface. */
+.mrs-flag {
+  inline-size: 20px;
+  block-size: 15px;
+  flex: none;
+  border-radius: 2px;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+/* The approximate-date checkbox occupies a normal grid cell: empty label on the label row, control on the
+   control row. It therefore starts at the same inline edge as every input beside it and sits on the same
+   baseline — the earlier `justify-content: end` shoved it to the far right of its column, and with no label
+   box reserved it rode up level with the LABELS rather than the fields. */
+.ben-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp2);
+  min-block-size: 40px;              /* the control height, so the row's baseline is unbroken */
+}
+.ben-checkbox input {
+  inline-size: 18px;
+  block-size: 18px;
+  margin: 0;
+  flex: none;
+}
+/* The whole row is the target, not just the 18px box (21-accessibility-checklist: ≥44px). */
+.ben-checkbox { cursor: pointer; padding-inline-end: var(--sp2); }
+
+/* ── Reception dashboard (14.5) ──────────────────────────────────────────────
+   Three cards, then the arrivals table, then the day laid out in hour bands. */
+.dash-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sp3);
+}
+.dash-day {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.dash-hour {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: var(--sp3);
+  align-items: start;
+  padding-block: var(--sp2);
+  border-block-start: 1px solid var(--border);
+}
+.dash-hour:first-child { border-block-start: 0; }
+.dash-hour-label {
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  font-weight: 600;
+  padding-block-start: 6px;
+}
+.dash-hour-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp2);
+  /* An empty hour keeps its height, so a gap in the day is VISIBLE — that gap is the answer to "can we fit
+     a walk-in in?", which is most of why the desk looks at a schedule at all. */
+  min-block-size: 32px;
+}
+.dash-appt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp2);
+  padding: 4px var(--sp3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+}

@@ -39,6 +39,10 @@ builder.Services.AddHttpClient<INetworkTierCatalog, HttpNetworkTierCatalog>(c =>
 // someone is Active is not a reason to enrol them) and issues the member number.
 builder.Services.AddHttpClient<IBeneficiaryStatusProbe, HttpBeneficiaryStatusProbe>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Patient:BaseUrl"] ?? "http://patient-service:8080"));
+// The intake upsert — register-or-update by card number, which is what makes a corrected import file safe to
+// re-upload. patient-service owns beneficiaries and therefore owns what "the same person" means.
+builder.Services.AddHttpClient<IBeneficiaryIntake, HttpBeneficiaryIntake>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Patient:BaseUrl"] ?? "http://patient-service:8080"));
 builder.Services.AddScoped<IMemberNoIssuer, SequentialMemberNoIssuer>();
 // 19.3b — documents. The bytes, the ClamAV scan and MinIO stay in document-service; policy-service adds only
 // the linkage and the classification. OCR is a WIRED SEAM, disabled: extraction becomes authoritative-looking
@@ -113,6 +117,11 @@ builder.Services.Configure<MembershipOptions>(builder.Configuration.GetSection(M
 // accumulator never advances and every member is eligible forever.
 builder.Services.Configure<ConsumptionConsumerOptions>(builder.Configuration.GetSection(ConsumptionConsumerOptions.SectionName));
 builder.Services.AddHostedService<BenefitConsumptionConsumer>();
+// An approved registration becomes a MEMBERSHIP. Until this consumed the event, `coverage_bound` claimed a
+// policy was bound and nothing had bound one: the member number was issued, every screen showed the person
+// Active, and every eligibility check answered "not covered".
+builder.Services.Configure<RegistrationEnrolmentOptions>(builder.Configuration.GetSection(RegistrationEnrolmentOptions.SectionName));
+builder.Services.AddHostedService<RegistrationEnrolmentConsumer>();
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("policy-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
     .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());

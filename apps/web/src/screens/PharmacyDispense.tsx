@@ -11,7 +11,7 @@ import { PatientContextBar } from "./PatientProfile";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
-  title: { en: "Prescription queue", ar: "قائمة الوصفات" },
+  title: { en: "Prescription Queue", ar: "قائمة الوصفات" },
   empty: { en: "No prescriptions awaiting dispense.", ar: "لا توجد وصفات بانتظار الصرف." },
   patient: { en: "Patient", ar: "المريض" },
   prescriber: { en: "Prescriber", ar: "الواصف" },

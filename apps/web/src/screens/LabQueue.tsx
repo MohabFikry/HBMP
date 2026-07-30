@@ -9,8 +9,8 @@ import { PatientContextBar } from "./PatientProfile";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
-  labTitle: { en: "Lab order queue", ar: "قائمة طلبات المختبر" },
-  imagingTitle: { en: "Imaging order queue", ar: "قائمة طلبات الأشعة" },
+  labTitle: { en: "Lab Order Queue", ar: "قائمة طلبات المختبر" },
+  imagingTitle: { en: "Imaging Order Queue", ar: "قائمة طلبات الأشعة" },
   empty: { en: "No orders in the queue.", ar: "لا توجد طلبات في الطابور." },
   test: { en: "Test", ar: "الفحص" },
   patient: { en: "Patient", ar: "المريض" },

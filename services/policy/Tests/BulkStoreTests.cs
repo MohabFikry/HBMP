@@ -86,12 +86,16 @@ public class BulkStoreTests
         {
             await using var db = Ctx();
             var harness = new Harness(db, f);
-            // Row 2 names a policy that does not exist. Aborting the file on it would leave the job
+            // Row 2 names a plan that does not exist. Aborting the file on it would leave the job
             // half-applied with no record of where it stopped — not atomic, and not accounted for either.
-            var csv = new StringBuilder("beneficiary_id,policy_no,relationship,effective_from\n");
-            csv.Append(CultureInfo.InvariantCulture, $"{f.Beneficiaries[0]},{f.PolicyNo},Principal,2026-02-01\n");
-            csv.Append(CultureInfo.InvariantCulture, $"{f.Beneficiaries[1]},NO-SUCH-POLICY,Principal,2026-02-01\n");
-            csv.Append(CultureInfo.InvariantCulture, $"{f.Beneficiaries[2]},{f.PolicyNo},Principal,2026-02-01\n");
+            var csv = new StringBuilder(
+                "card_number,first_name,last_name,gender,nationality,phone_no,birthdate,plan,network_tier,contribution\n");
+            var rows = new[] { $"{f.Prefix}-Standard", "NO-SUCH-PLAN", $"{f.Prefix}-Standard" };
+            for (var i = 0; i < 3; i++)
+            {
+                csv.Append(CultureInfo.InvariantCulture,
+                    $"{CardFor(f.Beneficiaries[i])},Amina{i},Yusuf,Female,SY,+201234567890,1990-01-01,{rows[i]},MERSAL,20\n");
+            }
 
             var job = await harness.UploadAsync(BulkJobType.MemberEnrolment, Encoding.UTF8.GetBytes(csv.ToString()));
             var validation = await harness.Engine.ValidateAsync(job.JobId, harness.Scope, null);
@@ -125,7 +129,7 @@ public class BulkStoreTests
 
             validation.Preview.Should().ContainSingle();
             validation.Preview[0].SummaryAr.Should().NotBeNullOrWhiteSpace();
-            validation.Preview[0].Changes.Should().ContainKey("policyNo");
+            validation.Preview[0].Changes.Should().ContainKey("cardNumber");
             (await db.Enrollments.CountAsync(e => e.BeneficiaryId == f.Beneficiaries[0])).Should().Be(0);
         }
         finally { await Cleanup(f); }
@@ -421,9 +425,14 @@ public class BulkStoreTests
                 db, new ActiveBeneficiaries(), new SequentialMemberNos(), Audit, new NullOutbox(),
                 calendar, Options.Create(new MembershipOptions()), clock);
 
+            // The intake seam is the thing under test in the upsert cases, so it is a real fake rather than a
+            // stub: it remembers which cards it has seen, so a second upload of the same file reports the
+            // person as unchanged exactly as patient-service would.
+            Intake = new RecordingIntake(f.Beneficiaries.ToDictionary(CardFor, id => id));
+
             IBulkRowApplier[] appliers =
             [
-                new MemberEnrolmentApplier(db, Membership, new ActiveBeneficiaries()),
+                new MemberEnrolmentApplier(db, Membership, Intake, new SeededTiers(), calendar, clock),
                 new MemberTerminationApplier(db, Membership, calendar),
                 new PlanChangeApplier(db, Membership, calendar),
                 new GroupAssignmentApplier(db, Membership, calendar),
@@ -445,6 +454,7 @@ public class BulkStoreTests
         private readonly Fixture _fixture;
 
         public RecordingAudit Audit { get; }
+        public RecordingIntake Intake { get; }
         public IOperationalDocumentStore Documents { get; }
         public MembershipCommands Membership { get; }
         public BulkJobEngine Engine { get; }
@@ -479,6 +489,45 @@ public class BulkStoreTests
     {
         public Task<string?> GetStatusAsync(Guid beneficiaryId, string? bearerToken, CancellationToken ct = default)
             => Task.FromResult<string?>("Active");
+    }
+
+    /// <summary>
+    /// Stands in for patient-service's register-or-update-by-card endpoint.
+    ///
+    /// <para>Deliberately stateful. The whole point of keying on the card is that the SECOND upload of a file
+    /// finds the person already there and reports them unchanged; a stub that always answered "created" would
+    /// let a broken upsert pass every test.</para>
+    /// </summary>
+    internal sealed class RecordingIntake(Dictionary<string, Guid> known) : IBeneficiaryIntake
+    {
+        private readonly Dictionary<string, BeneficiaryIntake> _seen = new(StringComparer.Ordinal);
+
+        public List<string> Cards { get; } = [];
+
+        public Task<BeneficiaryIntakeResult?> UpsertAsync(
+            BeneficiaryIntake intake, string? bearerToken, CancellationToken ct = default)
+        {
+            Cards.Add(intake.CardNumber);
+            // An unknown card would be a genuinely new person; the fixtures only ever use seeded ones, so an
+            // unseeded card means the CSV and the fixture have drifted apart and the test should say so.
+            if (!known.TryGetValue(intake.CardNumber, out var id))
+                return Task.FromResult<BeneficiaryIntakeResult?>(null);
+
+            var created = !_seen.ContainsKey(intake.CardNumber);
+            var changed = created || _seen[intake.CardNumber] != intake;
+            _seen[intake.CardNumber] = intake;
+            return Task.FromResult<BeneficiaryIntakeResult?>(
+                new BeneficiaryIntakeResult(id, "Active", null, created, changed));
+        }
+    }
+
+    /// <summary>The tier catalogue provider-service would return. MERSAL is the one the fixtures enrol onto.</summary>
+    private sealed class SeededTiers : INetworkTierCatalog
+    {
+        private static readonly Guid MersalTier = Guid.Parse("11111111-2222-3333-4444-555555555555");
+
+        public Task<IReadOnlyList<NetworkTierRef>> ActiveTiersAsync(string? bearerToken, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<NetworkTierRef>>([new NetworkTierRef(MersalTier, "MERSAL")]);
     }
 
     private sealed class SequentialMemberNos : IMemberNoIssuer
@@ -521,12 +570,24 @@ public class BulkStoreTests
         IReadOnlyList<Guid> PlanIds, IReadOnlyList<Guid> PlanVersionIds,
         Guid PolicyPlanId, Guid SecondPolicyPlanId, Guid CategoryId, IReadOnlyList<Guid> Beneficiaries);
 
-    private static byte[] EnrolmentCsv(Fixture f, IReadOnlyList<Guid> beneficiaries, DateOnly? from = null)
+    /// <summary>The card number a seeded beneficiary is reachable by. Derived from the id so the fake intake
+    /// and the CSV agree without either having to be told the mapping.</summary>
+    private static string CardFor(Guid beneficiaryId) => $"C{beneficiaryId:N}"[..11].ToUpperInvariant();
+
+    private static byte[] EnrolmentCsv(Fixture f, IReadOnlyList<Guid> beneficiaries, DateOnly? from = null,
+        decimal contribution = 20m)
     {
         var effective = from ?? new DateOnly(2026, 2, 1);
-        var csv = new StringBuilder("beneficiary_id,policy_no,plan_label,relationship,effective_from\n");
+        var csv = new StringBuilder(
+            "card_number,first_name,last_name,gender,nationality,phone_no,birthdate,plan,network_tier,contribution,effective_from\n");
+        var n = 0;
         foreach (var id in beneficiaries)
-            csv.Append(CultureInfo.InvariantCulture, $"{id},{f.PolicyNo},Standard,Principal,{effective:yyyy-MM-dd}\n");
+        {
+            n++;
+            csv.Append(CultureInfo.InvariantCulture,
+                $"{CardFor(id)},Amina{n},Yusuf,Female,SY,+201234567890,1990-01-01," +
+                $"{f.Prefix}-Standard,MERSAL,{contribution},{effective:yyyy-MM-dd}\n");
+        }
         return Encoding.UTF8.GetBytes(csv.ToString());
     }
 
@@ -591,14 +652,14 @@ public class BulkStoreTests
         var standard = new PolicyPlan
         {
             PolicyPlanId = Guid.NewGuid(), TenantId = Tenant, PolicyId = policy.PolicyId,
-            PlanVersionId = version.PlanVersionId, PlanLabel = "Standard",
+            PlanVersionId = version.PlanVersionId, PlanLabel = $"{prefix}-Standard",
             EffectiveFrom = new DateOnly(2026, 1, 1), IsDefault = true,
             CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
         };
         var enhanced = new PolicyPlan
         {
             PolicyPlanId = Guid.NewGuid(), TenantId = Tenant, PolicyId = policy.PolicyId,
-            PlanVersionId = enhancedVersion.PlanVersionId, PlanLabel = "Enhanced",
+            PlanVersionId = enhancedVersion.PlanVersionId, PlanLabel = $"{prefix}-Enhanced",
             EffectiveFrom = new DateOnly(2026, 1, 1), IsDefault = false,
             CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
         };

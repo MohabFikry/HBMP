@@ -6,7 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Mersal.Patient.Infrastructure;
 
-/// <summary>EF-backed duplicate lookup (active identifiers only).</summary>
+/// <summary>EF-backed duplicate lookup (active identifiers and card numbers only).</summary>
 public sealed class IdentifierLookup(PatientDbContext db) : IIdentifierLookup
 {
     public async Task<Guid?> FindActiveOwnerAsync(IdentifierType type, string normalizedValue, CancellationToken ct = default)
@@ -17,6 +17,12 @@ public sealed class IdentifierLookup(PatientDbContext db) : IIdentifierLookup
             .FirstOrDefaultAsync(ct);
         return row;
     }
+
+    public async Task<Guid?> FindActiveCardHolderAsync(string normalizedCardNumber, CancellationToken ct = default) =>
+        await db.Beneficiaries.AsNoTracking()
+            .Where(x => x.CardNumber == normalizedCardNumber && !x.IsDeleted)
+            .Select(x => (Guid?)x.BeneficiaryId)
+            .FirstOrDefaultAsync(ct);
 }
 
 /// <summary>Issues the next monotonic Member No for a year (atomic upsert on member_no_seq).</summary>

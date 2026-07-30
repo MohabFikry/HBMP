@@ -62,7 +62,7 @@ async function verifyPass(user: ReturnType<typeof userEvent.setup>) {
 }
 
 /**
- * Phase 20.4 — the standalone "Book appointment" journey. The thing worth proving is not that a booking can be
+ * Phase 20.4 — the standalone "Book Appointment" journey. The thing worth proving is not that a booking can be
  * made (the workspace already could) but that MAKING IT A SEPARATE SCREEN DID NOT MOVE THE VERIFICATION GATE:
  * the screen opens its own call record and records a PASS before anything about the member is shown or any
  * reservation is attempted. A standalone screen that booked straight through emr would have produced an
@@ -120,13 +120,20 @@ describe("20.4 — standalone Book appointment (call centre)", () => {
     await findAndSelect(user);
     await verifyPass(user);
 
-    await choose(user, /^branch$/i, /^Nasr City$/);
-    await choose(user, /^clinic$/i, /Nasr Clinic/);
-    await user.click((await screen.findAllByRole("radio"))[0]);
+    // 14.5 — branch → specialty → doctor → time, the same fields reception fills. The clinic step is gone:
+    // it is resolved from the doctor rather than named separately.
+    await choose(user, /^branch$/i, /Nasr City/);
+    await choose(user, /^specialty$/i, /Cardiology/);
+    await choose(user, /^doctor$/i, /Youssef Adel/);
+    await user.click((await screen.findAllByRole("radio", { name: /:/ }))[0]);
     await user.click(screen.getByRole("button", { name: /^book$/i }));
 
-    // The interaction id is the one this screen opened, and the branch travels with the clinic.
-    expect(api.book).toHaveBeenCalledWith("i9", BEN, "slot-7", "br-nasr");
+    // The interaction id is the one this screen opened, the branch is the one the agent named, and the
+    // doctor now rides along with it.
+    await waitFor(() => expect(api.book).toHaveBeenCalled());
+    const [iid, ben, , branch, extra] = (api.book as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect([iid, ben, branch]).toEqual(["i9", BEN, "BR-NSR"]);
+    expect(extra).toMatchObject({ doctorId: "PRC-2" });
     await waitFor(() => expect(screen.getByTestId("cc-live")).toHaveTextContent(/booked/i));
   });
 
@@ -159,15 +166,16 @@ describe("20.4 — standalone Book appointment (call centre)", () => {
     renderNode(<CallCentreBooking api={api} />);
     await findAndSelect(user);
     await verifyPass(user);
-    await choose(user, /^branch$/i, /^Dokki$/);
-    await choose(user, /^clinic$/i, /Dokki Clinic/);
-    await user.click((await screen.findAllByRole("radio"))[0]);
+    await choose(user, /^branch$/i, /Dokki/);
+    await choose(user, /^specialty$/i, /Pediatrics/);
+    await choose(user, /^doctor$/i, /Hana Mansour/);
+    await user.click((await screen.findAllByRole("radio", { name: /:/ }))[0]);
 
-    const before = (api.slots as ReturnType<typeof vi.fn>).mock.calls.length;
     await user.click(screen.getByRole("button", { name: /^book$/i }));
     await waitFor(() => expect(screen.getByTestId("cc-live")).toHaveTextContent(/just taken/i));
-    // A 409 proves the loaded list is stale — leaving the dead choice selected invites a second failure.
-    expect((api.slots as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(before);
+    // The agent is still on the screen with their branch, specialty and doctor intact — a 409 is someone
+    // else's race, and making the agent re-enter the caller's request mid-call is a cost they should not pay.
+    expect(screen.getByRole("combobox", { name: /^doctor$/i })).toHaveValue("Hana Mansour");
   });
 
   it("surfaces a failure to open the call record instead of presenting a form that cannot save", async () => {

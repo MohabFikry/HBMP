@@ -58,7 +58,10 @@ public sealed record InteractionListResponse(IReadOnlyList<InteractionView> Item
 /// convert a referral/follow-up in one step (15.4).</summary>
 public sealed record BookFromCallRequest(
     Guid InteractionId, Guid BeneficiaryId, Guid SlotId, string AppointmentType,
-    Guid? BranchId, string? ReferralRef, Guid? OriginEncounterId);
+    Guid? BranchId, string? ReferralRef, Guid? OriginEncounterId,
+    // 14.5 — the agent picks a DOCTOR (not just a clinic) and may record a general/administrative note.
+    // Both are forwarded verbatim; emr owns their validation, exactly as it owns the no-double-book rule.
+    Guid? DoctorId = null, string? Note = null);
 
 /// <summary>Reschedule an appointment from the call (delegates to emr; carries If-Match from the prior read).</summary>
 public sealed record RescheduleFromCallRequest(Guid InteractionId, Guid NewSlotId);

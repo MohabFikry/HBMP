@@ -25,7 +25,7 @@ import { AsyncSection, PageHeader, useLoc } from "./_shared";
  */
 
 const S = {
-  title: { en: "Programme enablement", ar: "تفعيل البرامج" },
+  title: { en: "Programme Enablement", ar: "تفعيل البرامج" },
   intro: {
     en: "Which programmes this organisation has been onboarded onto, and the capacity agreed with it. Enabling a programme never grants anyone a permission — roles still decide that.",
     ar: "البرامج التي انضمّت إليها هذه المؤسسة، والسعة المتفق عليها معها. تفعيل برنامج لا يمنح أي شخص صلاحية — الأدوار وحدها تقرّر ذلك.",

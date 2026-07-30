@@ -65,7 +65,7 @@ describe("Executive dashboard — chart data-table alternative (US-073)", () => 
 
   it("MIN-NECESSARY: the finance summaries screen has a data-table toggle (US-073) and no diagnosis dimension", async () => {
     renderApp("/finance/summaries", "finance");
-    await screen.findByRole("heading", { name: "Financial summaries" });
+    await screen.findByRole("heading", { name: "Financial Summaries" });
     // Toggle reveals the accessible table; its dimensions are billing (service line / category / provider).
     await userEvent.click(screen.getByRole("button", { name: "Show data table" }));
     expect(await screen.findByRole("columnheader", { name: "Share" })).toBeInTheDocument();
@@ -124,7 +124,7 @@ describe("Async states", () => {
 describe("Lab queue — min-necessary", () => {
   it("shows a masked patient token and no prescription data", async () => {
     renderApp("/lab/queue", "lab");
-    const table = await screen.findByRole("table", { name: "Lab order queue" });
+    const table = await screen.findByRole("table", { name: "Lab Order Queue" });
     expect(within(table).getByText(/•••4821/)).toBeInTheDocument();
     // No prescription/drug column leaks into the lab zone.
     expect(within(table).queryByText(/prescription/i)).not.toBeInTheDocument();

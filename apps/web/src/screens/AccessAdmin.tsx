@@ -42,7 +42,7 @@ import { EffectiveAccessPreview } from "./EffectiveAccessPreview";
  */
 
 const S = {
-  rosterTitle: { en: "Users & access", ar: "المستخدمون والصلاحيات" },
+  rosterTitle: { en: "Users & Access", ar: "المستخدمون والصلاحيات" },
   rosterEmpty: { en: "No memberships in this tenant.", ar: "لا توجد عضويات في هذا المستأجر." },
   search: { en: "Search by name or username", ar: "ابحث بالاسم أو اسم المستخدم" },
   person: { en: "Person", ar: "الشخص" },

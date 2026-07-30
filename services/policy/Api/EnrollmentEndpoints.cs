@@ -252,7 +252,7 @@ public static class EnrollmentEndpoints
             MembershipResult<EnrollOutcome> result;
             try
             {
-                result = await membership.EnrollAsync(command, idempotencyKey, Bearer(http), Actor(gate), ct);
+                result = await membership.EnrollAsync(command, idempotencyKey, Bearer(http), Actor(gate), ct: ct);
             }
             catch (BeneficiaryProbeRefusedException ex)
             {

@@ -15,6 +15,7 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
     public DbSet<AppointmentSlot> AppointmentSlots => Set<AppointmentSlot>();
     public DbSet<ProviderAvailability> ProviderAvailabilities => Set<ProviderAvailability>();
     public DbSet<WaitlistEntry> WaitlistEntries => Set<WaitlistEntry>();
+    public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
     public DbSet<EmrNote> Notes => Set<EmrNote>();
     public DbSet<Diagnosis> Diagnoses => Set<Diagnosis>();
     public DbSet<Vital> Vitals => Set<Vital>();
@@ -40,6 +41,10 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             e.Property(x => x.BranchId).HasColumnName("branch_id");   // phase 14
             e.Property(x => x.DoctorId).HasColumnName("doctor_id");   // phase 23 — the doctor's own worklist
             e.Property(x => x.UpdatedBy).HasColumnName("updated_by"); // phase 23 — timeline attribution
+            // 14.5 — the general/administrative booking note. Capped here as well as in migration 0011: the
+            // model and the schema must not be able to disagree about what fits.
+            e.Property(x => x.Note).HasColumnName("note").HasMaxLength(AppointmentNote.MaxLength);
+            e.Property(x => x.ReassignmentNeededAt).HasColumnName("reassignment_needed_at");   // 14.5
             e.HasIndex(x => new { x.BranchId, x.ScheduledStart });
             e.HasIndex(x => new { x.DoctorId, x.ScheduledStart });
         });
@@ -70,6 +75,12 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
             e.Property(x => x.BranchId).HasColumnName("branch_id");   // phase 14
             e.HasIndex(x => new { x.ProviderId, x.LocationId, x.Status });
+        });
+
+        b.Entity<ProcessedEvent>(e =>
+        {
+            e.ToTable("processed_event");
+            e.HasKey(x => x.EventId);
         });
 
         b.Entity<ProcessedRequest>(e =>

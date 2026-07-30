@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useFormat, type Formatters } from "../i18n/useFormat";
-import { Button, Card, DataTable, StatusChip } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, InputField, StatusChip, TableToolbar } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { AppointmentRow, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -9,9 +9,10 @@ import { useAsync } from "../api/useAsync";
 import { ApiError } from "../api/http";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 import { VisitTimelineButton } from "./VisitTimeline";
+import { AppointmentNoteButton } from "./AppointmentNote";
 
 const S = {
-  visitsTitle: { en: "Today's visits", ar: "زيارات اليوم" },
+  visitsTitle: { en: "Today's Visits", ar: "زيارات اليوم" },
   visitsEmpty: { en: "No one is checked in yet.", ar: "لا يوجد أحد قد سجّل وصوله بعد." },
   apptTitle: { en: "Appointments", ar: "المواعيد" },
   apptEmpty: { en: "No appointments booked for today.", ar: "لا توجد مواعيد محجوزة اليوم." },
@@ -31,6 +32,29 @@ const S = {
     ar: "يتاح بعد انقضاء وقت الموعد.",
   },
   actions: { en: "Actions", ar: "الإجراءات" },
+  needsReassign: { en: "Doctor unavailable", ar: "الطبيب غير متاح" },
+  needsReassignWhy: {
+    en: "The assigned doctor no longer works at this clinic — call the patient to reassign or rebook.",
+    ar: "الطبيب المعيَّن لم يعد يعمل في هذه العيادة — اتصل بالمريض لإعادة التعيين أو الحجز.",
+  },
+  search: { en: "Search", ar: "بحث" },
+  searchHint: { en: "Patient token or type", ar: "رمز المريض أو النوع" },
+  when: { en: "When", ar: "المدة" },
+  today: { en: "Today", ar: "اليوم" },
+  customRange: { en: "Custom range", ar: "مدة مخصصة" },
+  from: { en: "From", ar: "من" },
+  to: { en: "To", ar: "إلى" },
+  rangeIncomplete: {
+    en: "Pick both dates to apply the custom range — showing today until then.",
+    ar: "اختر التاريخين لتطبيق المدة المخصصة — يتم عرض اليوم حتى ذلك الحين.",
+  },
+  fBooked: { en: "Booked", ar: "محجوز" },
+  fCheckedIn: { en: "Checked in", ar: "تم الوصول" },
+  fNoShow: { en: "No-show", ar: "لم يحضر" },
+  noneMatch: {
+    en: "No appointments match these filters. Clear a filter to see more.",
+    ar: "لا توجد مواعيد مطابقة لعوامل التصفية. أزل أحد العوامل لعرض المزيد.",
+  },
   stale: {
     en: "This appointment changed since the board loaded — refreshing.",
     ar: "تغيّر هذا الموعد منذ تحميل اللوحة — يجري التحديث.",
@@ -49,10 +73,28 @@ const S = {
  */
 function boardColumns(t: (l: Localized) => string, fmt: Formatters): Column<AppointmentRow>[] {
   return [
-    { key: "beneficiary", header: t(S.beneficiary), cell: (r) => <span className="tnum">{r.beneficiary.token}</span> },
-    { key: "type", header: t(S.type), cell: (r) => r.appointmentType },
-    { key: "time", header: t(S.time), cell: (r) => <span className="tnum">{fmt.time(r.scheduledStart)}</span> },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    // `sortValue` is separate from `cell` on every one of these, and has to be: the cell renders a chip or a
+    // Cairo-formatted time, and sorting the rendered output would order status by its label text and times
+    // by the string "09:00" — which happens to work until a 12-hour locale or an Arabic label arrives.
+    {
+      key: "beneficiary", header: t(S.beneficiary), sortable: true,
+      cell: (r) => <span className="tnum">{r.beneficiary.token}</span>,
+      sortValue: (r) => r.beneficiary.token,
+    },
+    { key: "type", header: t(S.type), cell: (r) => r.appointmentType, sortable: true, sortValue: (r) => r.appointmentType },
+    {
+      key: "time", header: t(S.time), sortable: true,
+      cell: (r) => <span className="tnum">{fmt.time(r.scheduledStart)}</span>,
+      // The ISO instant, not the rendered time — the only value that orders correctly across midnight.
+      sortValue: (r) => r.scheduledStart,
+    },
+    {
+      key: "status", header: t(S.status), sortable: true,
+      cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />,
+      // Sorted by the LOCALISED label, so an Arabic user gets Arabic alphabetical order rather than an
+      // ordering derived from English text they cannot see.
+      sortValue: (r) => t(r.status.label),
+    },
   ];
 }
 
@@ -68,32 +110,19 @@ function patientFileColumn(t: (l: Localized) => string, go: (to: string) => void
     // A real header, not "": an empty <th> has no accessible name (axe empty-table-header). The fixture routes
     // render no rows, which is why the route-level sweep never surfaced this.
     header: t(S.openFile),
+    // Icon + a stronger variant: this is the action reception reaches for most on the board, and as a plain
+    // secondary button among several it read as the least important thing in the row.
     cell: (r) => (
-      <Button variant="secondary" size="sm" onClick={() => go(`/patients/${encodeURIComponent(r.beneficiary.id)}`)}>
+      <Button
+        variant="primary"
+        size="sm"
+        leadingIcon={<Icon name="user" />}
+        onClick={() => go(`/patients/${encodeURIComponent(r.beneficiary.id)}`)}
+      >
         {t(S.openFile)}
       </Button>
     ),
   };
-}
-
-/** Today's visits — everyone who has arrived and is waiting (CheckedIn). */
-export function ReceptionVisits() {
-  const api = useApi();
-  const t = useLoc();
-  const fmt = useFormat();   // 18.D2 (U7) — Cairo appointment times, app locale
-  const navigate = useNavigate();
-  const state = useAsync<AppointmentRow[]>(() => api.appointments("checked-in"), []);
-  const cols = [...boardColumns(t, fmt), patientFileColumn(t, navigate)];
-  return (
-    <>
-      <PageHeader title={t(S.visitsTitle)} />
-      <Card as="section" style={{ padding: "var(--sp3)" }}>
-        <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.visitsEmpty}>
-          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.visitsTitle)} />}
-        </AsyncSection>
-      </Card>
-    </>
-  );
 }
 
 /**
@@ -110,8 +139,39 @@ export function ReceptionAppointments() {
   const t = useLoc();
   const fmt = useFormat();   // 18.D2 (U7) — Cairo appointment times, app locale
   const navigate = useNavigate();
-  const state = useAsync<AppointmentRow[]>(() => api.appointments("all"), []);
+
+  // ---- filters (14.5) --------------------------------------------------------------------------------
+  // `when` and the custom range are SERVER-side, because they change which rows exist; `status` and the
+  // search are client-side over what came back, because they narrow rows already in hand. Mixing the two
+  // freely would mean a status filter that silently missed appointments outside today.
+  const [when, setWhen] = useState<string | null>("today");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+
+  const customActive = when === "custom" && from !== "" && to !== "";
+  const range = customActive ? { from, to } : undefined;
+  const state = useAsync<AppointmentRow[]>(
+    () => api.appointments("all", false, range),
+    // Re-fetch only when the SERVER-side inputs change. Typing in the search box must not re-hit the API on
+    // every keystroke — that is the whole reason the two kinds of filter are split.
+    [range?.from, range?.to],
+  );
   const desk = useDeskTransitions(state.reload);
+
+  const visible = (rows: AppointmentRow[]) => {
+    const q = query.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (status === "booked" && !r.checkInEligible) return false;
+      if (status === "checked-in" && !r.checkedIn) return false;
+      if (status === "no-show" && r.status.label.en !== "No-show") return false;
+      if (!q) return true;
+      // Searching the masked token and the type is all reception has on this board; the token is what they
+      // read off the queue ticket in their hand.
+      return `${r.beneficiary.token} ${r.appointmentType}`.toLowerCase().includes(q);
+    });
+  };
 
   const cols: Column<AppointmentRow>[] = [
     ...boardColumns(t, fmt),
@@ -121,20 +181,39 @@ export function ReceptionAppointments() {
       header: t(S.actions),
       cell: (r) => (
         <span className="row-actions">
+          {/* 14.5 — the doctor stopped serving this branch after the booking was made. Nothing was changed
+              automatically, so this row is asking the desk for a decision rather than reporting one. The
+              reason is spelled out because "Doctor unavailable" alone does not tell anyone what to do. */}
+          {r.needsReassignment && (
+            <>
+              <StatusChip kind="warn" label={t(S.needsReassign)} />
+              <span className="muted">{t(S.needsReassignWhy)}</span>
+            </>
+          )}
+          {/* 14.5 — the booking note, when there is one. Renders nothing at all otherwise. */}
+          <AppointmentNoteButton note={r.note} />
           <VisitTimelineButton row={r} />
+          {/* Check-in lives HERE now, and the separate Check-in screen is gone. It was always the same
+              server call against a filtered view of this same board, so the second screen only added a
+              place for the two to disagree — and a decision about where to click before doing the work. */}
           {r.checkInEligible && (
-            <Button variant="primary" size="sm" loading={desk.busy === `in:${r.id}`}
+            <Button variant="primary" size="sm" leadingIcon={<Icon name="ok" />}
+                    loading={desk.busy === `in:${r.id}`}
                     onClick={() => void desk.run(`in:${r.id}`, () => api.checkIn(r.id, r.rowVersion))}>
               {t(S.checkIn)}
             </Button>
           )}
           {/* Shown only while the server says it is allowed — the desk is never offered a refusal. */}
           {r.noShowEligible && (
-            <Button variant="secondary" size="sm" loading={desk.busy === `ns:${r.id}`}
+            <Button variant="secondary" size="sm" leadingIcon={<Icon name="cross" />}
+                    loading={desk.busy === `ns:${r.id}`}
                     onClick={() => void desk.run(`ns:${r.id}`, () => api.noShow(r.id, r.rowVersion))}>
               {t(S.noShow)}
             </Button>
           )}
+          {/* A row already checked in states so, rather than showing an empty action cell that reads as a
+              screen that failed to load its buttons. Derived from the server's status, never a local flag. */}
+          {r.checkedIn && <StatusChip kind="ok" label={t(S.checkedIn)} />}
           {/* A Booked row whose window has not passed: say WHY there is no no-show button rather than
               leaving an empty cell the receptionist reads as a broken screen. */}
           {r.checkInEligible && !r.noShowEligible && <span className="muted">{t(S.noShowHint)}</span>}
@@ -147,13 +226,54 @@ export function ReceptionAppointments() {
     <>
       <PageHeader title={t(S.apptTitle)} />
       <Card as="section" style={{ padding: "var(--sp3)" }}>
-        <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.apptEmpty}>
-          {(rows) => (
-            <div aria-live="polite">
-              {desk.stale && <StatusChip kind="warn" label={t(S.stale)} />}
-              <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.apptTitle)} />
-            </div>
+        <TableToolbar
+          search={{ label: t(S.search), value: query, onChange: setQuery, placeholder: t(S.searchHint) }}
+          filters={[
+            {
+              key: "when", label: t(S.when), value: when, onChange: setWhen,
+              options: [{ value: "today", label: t(S.today) }, { value: "custom", label: t(S.customRange) }],
+            },
+            {
+              key: "status", label: t(S.status), value: status, onChange: setStatus,
+              options: [
+                { value: "booked", label: t(S.fBooked) },
+                { value: "checked-in", label: t(S.fCheckedIn) },
+                { value: "no-show", label: t(S.fNoShow) },
+              ],
+            },
+          ]}
+        >
+          {/* The date inputs appear only once "Custom" is chosen: two empty date boxes sitting permanently
+              beside a "Today" chip invite the desk to wonder which of the two is actually in force. */}
+          {when === "custom" && (
+            <>
+              <InputField label={t(S.from)} type="date" value={from} onChange={(e) => setFrom(e.currentTarget.value)} />
+              <InputField label={t(S.to)} type="date" value={to} onChange={(e) => setTo(e.currentTarget.value)} />
+            </>
           )}
+        </TableToolbar>
+
+        {/* Chosen "Custom" but not yet finished filling it in — say what is still showing rather than
+            leaving the board looking filtered when it is not. */}
+        {when === "custom" && !customActive && <InlineAlert tone="info">{t(S.rangeIncomplete)}</InlineAlert>}
+
+        <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.apptEmpty}>
+          {(rows) => {
+            const shown = visible(rows);
+            return (
+              <div aria-live="polite">
+                {desk.stale && <StatusChip kind="warn" label={t(S.stale)} />}
+                {shown.length === 0 ? (
+                  // Distinct from the empty board above: rows EXIST, the filters hid them. Telling the desk
+                  // "no appointments today" when they have simply filtered to a status with none is how
+                  // someone concludes the system lost their bookings.
+                  <InlineAlert tone="info">{t(S.noneMatch)}</InlineAlert>
+                ) : (
+                  <DataTable columns={cols} rows={shown} rowKey={(r) => r.id} caption={t(S.apptTitle)} />
+                )}
+              </div>
+            );
+          }}
         </AsyncSection>
       </Card>
     </>
@@ -189,79 +309,4 @@ function useDeskTransitions(reload: () => void) {
   }
 
   return { busy, stale, run };
-}
-
-/** Arrivals desk — Booked appointments with a check-in action (Booked → CheckedIn, enqueues a walk-in ticket). */
-export function ReceptionCheckIn() {
-  const api = useApi();
-  const t = useLoc();
-  const fmt = useFormat();   // 18.D2 (U7) — Cairo appointment times, app locale
-  const navigate = useNavigate();
-  const state = useAsync<AppointmentRow[]>(() => api.appointments("booked"), []);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [stale, setStale] = useState(false);
-
-  /**
-   * 18.D1 (audit R2 E3) — check-in renders SERVER-CONFIRMED state only.
-   *
-   * The rule: a read may be optimistic; a server-invariant operation (book, consume, dispense, decide,
-   * check-in, cancel) may not. This screen kept a local `done` set and painted a green "Checked in" chip from
-   * it. The chip was therefore a record of the request having been SENT, not of the patient having been
-   * checked in — and after a partial failure, a reload, or a concurrent transition elsewhere, the board and
-   * the truth disagreed with no way for the receptionist to tell. Now the call is followed by a reload and
-   * the chip is derived from the row's own status.
-   */
-  async function doCheckIn(row: AppointmentRow) {
-    setBusy(row.id);
-    setStale(false);
-    try {
-      // Echo the version we read (opt-in If-Match): a concurrent transition invalidates our board → 412.
-      await api.checkIn(row.id, row.rowVersion);
-      state.reload();
-    } catch (e) {
-      // 412 = the row moved under us (already checked in / rescheduled elsewhere). Re-load the board rather
-      // than double-acting; any other failure re-throws for the generic handler.
-      if (e instanceof ApiError && e.status === 412) {
-        setStale(true);
-        state.reload();
-      } else {
-        throw e;
-      }
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  const cols: Column<AppointmentRow>[] = [
-    ...boardColumns(t, fmt),
-    patientFileColumn(t, navigate),
-    {
-      key: "action",
-      header: t(S.action),
-      cell: (r) =>
-        // Derived from the row the SERVER returned, never from a local "we sent it" flag.
-        r.checkedIn ? (
-          <StatusChip kind="ok" label={t(S.checkedIn)} />
-        ) : (
-          <Button variant="primary" size="sm" loading={busy === r.id} disabled={!r.checkInEligible} onClick={() => void doCheckIn(r)}>
-            {t(S.checkIn)}
-          </Button>
-        ),
-    },
-  ];
-  return (
-    <>
-      <PageHeader title={t(S.checkinTitle)} />
-      <Card as="section" style={{ padding: "var(--sp3)" }}>
-        <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.checkinEmpty}>
-          {(rows) => (
-            <div aria-live="polite">
-              {stale && <StatusChip kind="warn" label={t(S.stale)} />}
-              <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.checkinTitle)} />
-            </div>
-          )}
-        </AsyncSection>
-      </Card>
-    </>
-  );
 }

@@ -10,13 +10,13 @@ import { AsyncSection, PageHeader, useLoc } from "./_shared";
 import { RestrictedResultCard, RequestAccessDialog } from "./RestrictedResultCard";
 
 const S = {
-  patientsTitle: { en: "My patients", ar: "مرضاي" },
+  patientsTitle: { en: "My Patients", ar: "مرضاي" },
   patientsEmpty: { en: "No patients on your worklist.", ar: "لا يوجد مرضى في قائمتك." },
   ordersTitle: { en: "Orders", ar: "الطلبات" },
   ordersEmpty: { en: "You haven't placed any orders.", ar: "لم تقم بطلب أي فحوصات." },
   rxTitle: { en: "Prescriptions", ar: "الوصفات" },
   rxEmpty: { en: "You haven't written any prescriptions.", ar: "لم تكتب أي وصفات." },
-  resultsTitle: { en: "Results inbox", ar: "صندوق النتائج" },
+  resultsTitle: { en: "Results Inbox", ar: "صندوق النتائج" },
   resultsEmpty: { en: "No completed results yet.", ar: "لا توجد نتائج مكتملة بعد." },
   openFile: { en: "Patient file", ar: "ملف المريض" },
   patient: { en: "Patient", ar: "المريض" },

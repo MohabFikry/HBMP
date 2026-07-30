@@ -42,7 +42,7 @@ import { useFormat } from "../i18n/useFormat";
 
 const S = {
   payers: { en: "Payers", ar: "الجهات الممولة" },
-  plans: { en: "Plans & versions", ar: "الخطط والإصدارات" },
+  plans: { en: "Plans & Versions", ar: "الخطط والإصدارات" },
   payerCode: { en: "Code", ar: "الرمز" },
   name: { en: "Name", ar: "الاسم" },
   type: { en: "Type", ar: "النوع" },

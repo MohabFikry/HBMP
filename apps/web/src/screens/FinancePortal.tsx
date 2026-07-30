@@ -30,7 +30,7 @@ const S = {
   spend: { en: "Spend", ar: "الإنفاق" },
   totals: { en: "Totals", ar: "الإجماليات" },
 
-  setTitle: { en: "Provider settlements", ar: "تسويات مقدّمي الخدمة" },
+  setTitle: { en: "Provider Settlements", ar: "تسويات مقدّمي الخدمة" },
   setEmpty: { en: "No settlements yet.", ar: "لا توجد تسويات بعد." },
   settlement: { en: "Settlement", ar: "التسوية" },
   period: { en: "Period", ar: "الفترة" },
@@ -41,7 +41,7 @@ const S = {
   agreedPrice: { en: "Agreed price", ar: "السعر المتفق" },
   lineTotal: { en: "Line total", ar: "إجمالي البند" },
 
-  sumTitle: { en: "Financial summaries", ar: "الملخصات المالية" },
+  sumTitle: { en: "Financial Summaries", ar: "الملخصات المالية" },
   sumEmpty: { en: "No summary data.", ar: "لا توجد بيانات ملخص." },
   dimension: { en: "Group by", ar: "التجميع حسب" },
   byLine: { en: "Service line", ar: "بند الخدمة" },

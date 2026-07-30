@@ -20,7 +20,7 @@ import { AsyncSection, PageHeader, useLoc } from "./_shared";
  * would disclose the exact thing being gated to everyone who can open the inbox.
  */
 const S = {
-  title: { en: "Result access requests", ar: "طلبات الوصول إلى النتائج" },
+  title: { en: "Result Access Requests", ar: "طلبات الوصول إلى النتائج" },
   empty: { en: "No requests awaiting a decision.", ar: "لا توجد طلبات بانتظار القرار." },
   requester: { en: "Requested by", ar: "مقدّم الطلب" },
   member: { en: "Member", ar: "المستفيد" },

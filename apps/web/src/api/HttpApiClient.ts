@@ -86,10 +86,17 @@ import {
   zBranchScopeGrant,
   zAccessSession,
   zProgramEnablement,
+  zSpecialty,
+  zBranchSummary,
+  zPractitioner,
+  zPractitionerCreated,
+  zDoctorAvailability,
+  zAppointmentDay,
+  zAppointmentCounts,
 } from "@mersal/contracts";
-import type { BookingRequest } from "@mersal/contracts";
+import type { BookingRequest, CreatePractitionerInput, PractitionerAttachFailure } from "@mersal/contracts";
 import type { ApiClient } from "./client";
-import { getRaw, postRaw, putRaw, patchRaw, postForm, parseOr, getAbsolute, postAbsolute, deleteAbsolute } from "./http";
+import { ApiError, getRaw, postRaw, putRaw, patchRaw, postForm, parseOr, getAbsolute, postAbsolute, deleteAbsolute } from "./http";
 import { GATEWAY_BASE } from "../config";
 
 /* This client is a deliberate adapter between loosely-typed service JSON and the strict portal contracts;
@@ -159,9 +166,55 @@ const providerStatusChip = (s: unknown): { kind: "ok" | "warn" | "neu" | "info";
     Terminated: { kind: "neu", label: { en: "Terminated", ar: "منتهٍ" } },
     Draft: { kind: "warn", label: { en: "Draft", ar: "مسودة" } },
     Expired: { kind: "neu", label: { en: "Expired", ar: "منتهٍ" } },
+    // Practitioner vocabulary (14.5) shares Active/Suspended with providers and adds this third state.
+    Inactive: { kind: "neu", label: { en: "Inactive", ar: "غير نشط" } },
   };
   return map[k] ?? { kind: "info", label: { en: k || "—", ar: k || "—" } };
 };
+
+/**
+ * Today's CIVIL date in Cairo, as `YYYY-MM-DD`, for a `DateOnly` the server compares against ITS today.
+ *
+ * `new Date().toISOString().slice(0,10)` is the UTC date, which between midnight and 02:00/03:00 Cairo is
+ * still YESTERDAY. For a branch assignment's `validFrom` that direction happens to be harmless — the server
+ * tests `valid_from <= today` — but relying on which way an off-by-one-day error falls is not a rule anyone
+ * can maintain, and the same expression copied to a field that must not be backdated would be a live bug.
+ */
+function cairoToday(): string {
+  // en-CA gives ISO-ordered YYYY-MM-DD, which is the format the wire wants.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+}
+
+/** One practitioner row → the contract shape. Shared by the list and the create path. */
+function toPractitioner(p: any) {
+  return parseOr(zPractitioner, {
+    id: p?.practitionerId ?? "",
+    practitionerType: String(p?.practitionerType ?? ""),
+    name: { en: String(p?.fullNameEn ?? ""), ar: String(p?.fullNameAr ?? p?.fullNameEn ?? "") },
+    primarySpecialty: p?.primarySpecialty ?? undefined,
+    specialties: Array.isArray(p?.specialties) ? p.specialties.map(String) : [],
+    branches: Array.isArray(p?.branches) ? p.branches.map(String) : [],
+    status: providerStatusChip(p?.status),
+    // Absent, not blank, for a caller without provider:write — the server omits it entirely.
+    licenseNo: p?.licenseNo ?? undefined,
+  });
+}
+
+/**
+ * The server's own reason for a failed attachment, kept as a STRING rather than run through
+ * `writeErrorMessage`.
+ *
+ * That classifier answers "what should the operator do about this whole submission?" — retry, reload, stop —
+ * and the answer here is none of those: the submission partly succeeded and the remedy is to finish the one
+ * assignment that did not land. What the operator needs is which specialty or clinic failed and what the
+ * service said about it ("specialty already assigned or a primary specialty already exists"), which is
+ * exactly `ApiError.reason`.
+ */
+function attachReason(e: unknown): string {
+  return e instanceof ApiError ? e.reason : String(e);
+}
 /** Map a claim lifecycle status (36 §3) → a non-color StatusKind chip. */
 const claimStatusChip = (s: unknown): { kind: "ok" | "info" | "part" | "warn" | "bad" | "neu"; label: { en: string; ar: string } } => {
   const k = String(s ?? "");
@@ -330,13 +383,23 @@ export class HttpApiClient implements ApiClient {
     const cards: any[] = r?.results ?? [];
     receptionCards.clear();
     for (const c of cards) receptionCards.set(String(c.identity?.beneficiaryId), c);
-    return cards.map((c: any) =>
-      parseOr(zEligibilityHit, {
+    return cards.map((c: any) => {
+      // The card has always carried this; the mapping used to drop it, so a search result could not tell a
+      // suspended member from an active one and the desk discovered it only when the booking was refused.
+      const raw = c.identity?.status;
+      return parseOr(zEligibilityHit, {
         id: c.identity?.beneficiaryId,
         name: loc(c.identity?.displayName),
         cardNumber: c.identity?.memberNo ?? "",
-      }),
-    );
+        // The server's own resolved semantics where present (label + non-colour tone), so the chip here says
+        // exactly what the eligibility card says rather than a second opinion derived from the raw string.
+        status: raw
+          ? { kind: toneToKind(c.identity?.statusSemantics?.tone), label: loc(c.identity?.statusSemantics?.label ?? raw) }
+          : undefined,
+        // Default-DENY on an absent or unrecognised status: "not stated" must not render as bookable.
+        bookable: String(raw ?? "") === "Active",
+      });
+    });
   }
   async checkEligibility(beneficiaryId: string) {
     const c = receptionCards.get(String(beneficiaryId));
@@ -370,10 +433,17 @@ export class HttpApiClient implements ApiClient {
   // Reception day board (Phase 3, US-020) — the emr appointments list is date/status scoped (no clinic params
   // required, unlike the clinical walk-in queue). Reception sees a masked beneficiary token + type/time/status
   // only. `checkIn` posts a minimal body (normal priority); member details on the queue ticket are optional.
-  async appointments(filter: "all" | "booked" | "checked-in" = "all", mine = false) {
+  async appointments(
+    filter: "all" | "booked" | "checked-in" = "all",
+    mine = false,
+    range?: { from: string; to: string },
+  ) {
     const status = filter === "booked" ? "Booked" : filter === "checked-in" ? "CheckedIn" : "";
     const qs = new URLSearchParams();
     if (status) qs.set("status", status);
+    // Sent as from/to rather than a single date: the server expands each end to its own Cairo civil day, so
+    // the last day of the range includes its evening clinic.
+    if (range) { qs.set("from", range.from); qs.set("to", range.to); }
     // ?mine is resolved from the TOKEN's subject server-side — the caller cannot ask for another doctor's list.
     if (mine) qs.set("mine", "true");
     const r = (await getRaw(`/appointments${qs.toString() ? `?${qs}` : ""}`)) as any[];
@@ -410,6 +480,11 @@ export class HttpApiClient implements ApiClient {
         branchId: a.branchId ?? null,
         branchName: a.branchId ? branchNames.get(String(a.branchId)) ?? null : null,
         rowVersion: typeof a.rowVersion === "number" ? a.rowVersion : undefined,
+        // Null, not "", when absent — the board renders a note affordance only when there is a note to open.
+        note: a.note ?? null,
+        beneficiaryName: a.beneficiaryName ?? null,
+        doctorId: a.doctorId ?? null,
+        needsReassignment: a.needsReassignment === true,
       }),
     );
   }
@@ -513,10 +588,14 @@ export class HttpApiClient implements ApiClient {
   // Booking (Phase 3.1, US-020). Slot availability is the SERVER's answer — it holds the no-double-book
   // invariant and can see slots held by bookings this desk is not allowed to read, so `open` is never
   // re-derived here from times.
-  async openSlots(providerId: string, locationId: string, from?: string, to?: string) {
+  async openSlots(providerId: string, locationId: string, from?: string, to?: string, doctorId?: string) {
     const qs = new URLSearchParams({ providerId, locationId, onlyOpen: "true" });
     if (from) qs.set("from", from);
     if (to) qs.set("to", to);
+    // Narrowed server-side once the booking screen has picked a doctor — shipping the whole clinic's
+    // fortnight and hiding most of it would be slower and would put one clinician's calendar in front of a
+    // client that asked about another.
+    if (doctorId) qs.set("doctorId", doctorId);
     const r = (await getRaw(`/appointment-slots?${qs.toString()}`)) as any[];
     return (r ?? []).map((s: any) =>
       parseOr(zBookableSlot, {
@@ -541,6 +620,10 @@ export class HttpApiClient implements ApiClient {
         appointmentType: input.appointmentType,
         // Omitted by a branch-scoped desk — the server stamps its active branch and refuses a mismatch.
         ...(input.branchId ? { branchId: input.branchId } : {}),
+        // Both omitted rather than sent as null when unset: the slot is authoritative for the doctor when
+        // there is one, and an explicit null would overwrite that with "no doctor".
+        ...(input.doctorId ? { doctorId: input.doctorId } : {}),
+        ...(input.note ? { note: input.note } : {}),
         joinWaitlistIfFull: false,
       },
       crypto.randomUUID(),
@@ -1534,6 +1617,159 @@ export class HttpApiClient implements ApiClient {
     });
   }
 
+  // ---- Practitioners (Phase 14.5, design 37 §4) -----------------------------------------------------------
+  async specialties() {
+    const r = (await getRaw(`/specialties`)) as any[];
+    return (Array.isArray(r) ? r : []).map((s: any) =>
+      parseOr(zSpecialty, {
+        code: String(s?.specialtyCode ?? ""),
+        // Both sides are authored in the master data; falling back to the English name is better than an
+        // empty Arabic label, which would render as a blank option in an Arabic session.
+        name: { en: String(s?.nameEn ?? s?.specialtyCode ?? ""), ar: String(s?.nameAr ?? s?.nameEn ?? "") },
+        parentCode: s?.parentCode ?? undefined,
+      }),
+    );
+  }
+
+  async branches() {
+    const r = (await getRaw(`/branches`)) as any[];
+    return (Array.isArray(r) ? r : []).map((b: any) =>
+      parseOr(zBranchSummary, {
+        id: b?.branchId ?? "",
+        code: String(b?.branchCode ?? ""),
+        name: { en: String(b?.nameEn ?? b?.branchCode ?? ""), ar: String(b?.nameAr ?? b?.nameEn ?? "") },
+        city: b?.city ?? undefined,
+        status: providerStatusChip(b?.status),
+      }),
+    );
+  }
+
+  async practitioners(filter?: { branchId?: string; specialtyCode?: string; type?: string }) {
+    const qs = new URLSearchParams();
+    if (filter?.branchId) qs.set("branchId", filter.branchId);
+    if (filter?.specialtyCode) qs.set("specialtyCode", filter.specialtyCode);
+    if (filter?.type) qs.set("type", filter.type);
+    const r = (await getRaw(`/practitioners${qs.toString() ? `?${qs}` : ""}`)) as any[];
+    return (Array.isArray(r) ? r : []).map(toPractitioner);
+  }
+
+  /**
+   * Create a doctor across the THREE endpoints 14.5 exposes — practitioner, specialty, one call per clinic.
+   *
+   * These are not one transaction and there is no endpoint that makes them one. So the failure modes are
+   * split deliberately:
+   *
+   *   • the practitioner POST failing REJECTS — nothing was created, the form keeps its contents, and the
+   *     idempotency key makes the operator's retry safe.
+   *   • an attachment failing RESOLVES, with the failure named in `incomplete`. The practitioner exists at
+   *     that point; rejecting would tell the operator nothing was saved and invite a retry that 409s on the
+   *     unique user_id index, and swallowing it would report a bookable doctor who has no specialty and
+   *     therefore appears in no booking picker.
+   *
+   * The attachments run SEQUENTIALLY rather than in parallel: they are audited writes against one aggregate,
+   * and a partial result is far easier to act on when the order it was attempted in is the order it is
+   * reported in.
+   */
+  async createPractitioner(input: CreatePractitionerInput, idempotencyKey?: string) {
+    const created = (await postRaw(`/practitioners`, {
+      userId: input.userId,
+      practitionerType: input.practitionerType,
+      fullNameEn: input.fullNameEn,
+      fullNameAr: input.fullNameAr,
+      licenseNo: input.licenseNo ?? null,
+      licenseExpiry: input.licenseExpiry ?? null,
+    }, idempotencyKey)) as any;
+
+    const id = String(created?.practitionerId ?? "");
+    const incomplete: PractitionerAttachFailure[] = [];
+    const attachedSpecialties: string[] = [];
+    const attachedBranches: string[] = [];
+
+    try {
+      await postRaw(`/practitioners/${encodeURIComponent(id)}/specialties`,
+        { specialtyCode: input.primarySpecialtyCode, isPrimary: true });
+      attachedSpecialties.push(input.primarySpecialtyCode);
+    } catch (e) {
+      incomplete.push({ step: "specialty", ref: input.primarySpecialtyCode, reason: attachReason(e) });
+    }
+
+    const validFrom = cairoToday();
+    for (const branchId of input.branchIds) {
+      try {
+        await postRaw(`/practitioners/${encodeURIComponent(id)}/branches`,
+          { branchId, validFrom, validTo: null });
+        attachedBranches.push(branchId);
+      } catch (e) {
+        incomplete.push({ step: "branch", ref: branchId, reason: attachReason(e) });
+      }
+    }
+
+    // Built from what ACTUALLY attached, not from the request. The create response was written before any of
+    // the calls above ran, so it reports empty specialty/branch lists for every practitioner; echoing the
+    // input instead would draw a complete record on screen for one that is missing half its assignments.
+    return parseOr(zPractitionerCreated, {
+      practitioner: {
+        ...toPractitioner(created),
+        specialties: attachedSpecialties,
+        primarySpecialty: attachedSpecialties[0],
+        branches: attachedBranches,
+      },
+      incomplete,
+    });
+  }
+
+  async assignSpecialty(practitionerId: string, specialtyCode: string) {
+    await postRaw(`/practitioners/${encodeURIComponent(practitionerId)}/specialties`, { specialtyCode, isPrimary: false });
+  }
+  async setPrimarySpecialty(practitionerId: string, specialtyCode: string) {
+    await postRaw(`/practitioners/${encodeURIComponent(practitionerId)}/specialties/primary`, { specialtyCode, isPrimary: true });
+  }
+  async revokeSpecialty(practitionerId: string, specialtyCode: string) {
+    await postRaw(`/practitioners/${encodeURIComponent(practitionerId)}/specialties/revoke`, { specialtyCode });
+  }
+  async assignPractitionerBranch(practitionerId: string, branchId: string) {
+    await postRaw(`/practitioners/${encodeURIComponent(practitionerId)}/branches`,
+      { branchId, validFrom: cairoToday(), validTo: null });
+  }
+  async revokePractitionerBranch(practitionerId: string, branchId: string) {
+    await postRaw(`/practitioners/${encodeURIComponent(practitionerId)}/branches/revoke`, { branchId });
+  }
+  async setPractitionerStatus(practitionerId: string, status: string, reason: string) {
+    await postRaw(`/practitioners/${encodeURIComponent(practitionerId)}/status`, { status, reason });
+  }
+
+  async appointmentDays(providerId: string, locationId: string, from: string, to: string, doctorId?: string) {
+    const qs = new URLSearchParams({ providerId, locationId, from, to });
+    if (doctorId) qs.set("doctorId", doctorId);
+    const r = (await getRaw(`/appointment-days?${qs}`)) as any[];
+    return (Array.isArray(r) ? r : []).map((d: any) =>
+      parseOr(zAppointmentDay, { day: String(d?.day ?? ""), openSlots: Number(d?.openSlots ?? 0) }),
+    );
+  }
+
+  async appointmentCounts(date?: string) {
+    const qs = date ? `?date=${encodeURIComponent(date)}` : "";
+    const r = (await getRaw(`/appointments/summary${qs}`)) as any;
+    return parseOr(zAppointmentCounts, {
+      total: Number(r?.total ?? 0),
+      checkedIn: Number(r?.checkedIn ?? 0),
+      noShow: Number(r?.noShow ?? 0),
+    });
+  }
+
+  async doctorAvailability(branchId?: string) {
+    const qs = branchId ? `?branchId=${encodeURIComponent(branchId)}` : "";
+    const r = (await getRaw(`/booking/doctor-availability${qs}`)) as any[];
+    return (Array.isArray(r) ? r : []).map((d: any) =>
+      parseOr(zDoctorAvailability, {
+        doctorId: d?.doctorId ?? "",
+        branchId: d?.branchId ?? undefined,
+        openSlots: Number(d?.openSlots ?? 0),
+        nextSlotStart: String(d?.nextSlotStart ?? ""),
+      }),
+    );
+  }
+
   // Beneficiary management (Phase 1, US-001..005) — the registry: register, search/manage, status/reactivation.
   // Min-necessary identity projection (name + member no + identifiers + status), never clinical data.
   // Patient profile (Phase 20, design 39). NOTE what this method does NOT do: it applies no filtering, maps no
@@ -1580,15 +1816,33 @@ export class HttpApiClient implements ApiClient {
   }
   async registerBeneficiary(input: RegisterBeneficiaryInput, idempotencyKey?: string) {
     // 18.D1: the form's per-instance key wins. The content-derived fallback stays for callers that do not
-    // supply one — registering the same identifier twice IS a duplicate and should replay.
-    const idem = idempotencyKey ?? `reg:${input.identifierType}:${input.identifierValue}`;
+    // supply one — the CARD is what makes two submissions the same registration, and it is mandatory, so it
+    // is a better fallback key than the identifier the old form keyed on.
+    const idem = idempotencyKey ?? `reg:card:${input.cardNumber}`;
+    // Flat and form-shaped, matching patient-service's RegisterRequest. The domain's collection shape
+    // (identifiers[], contacts[]) is deliberately NOT exposed here: the form has one of each, and offering
+    // the client a list only invites it to send two.
     const body = {
+      cardNumber: input.cardNumber,
       givenName: input.givenName,
+      middleName: input.middleName || null,
       familyName: input.familyName,
       birthDate: input.birthDate || null,
-      sex: input.sex ?? null,
-      identifiers: [{ type: input.identifierType, value: input.identifierValue, isPrimary: true }],
-      contacts: input.phone ? [{ type: "Phone", value: input.phone, isPrimary: true }] : [],
+      birthDateIsApproximate: input.approximateBirthDate ?? false,
+      sex: input.sex,
+      nationalityCode: input.nationalityCode,
+      identifierType: input.identifierType,
+      identifierValue: input.identifierValue,
+      phone: input.phone,
+      individualNo: input.individualNo || null,
+      caseNo: input.caseNo || null,
+      enrolment: {
+        planId: input.enrolment.planId,
+        networkTierId: input.enrolment.networkTierId,
+        contributionPercent: input.enrolment.contributionPercent,
+        defaultBranchId: input.enrolment.defaultBranchId || null,
+      },
+      notes: (input.notes ?? []).map((n) => ({ slot: n.slot, value: n.value })),
     };
     const r = (await postRaw(`/beneficiaries`, body, idem)) as any;
     return parseOr(zRegisterResult, {

@@ -16,6 +16,17 @@ public enum DocumentClass
     /// <summary>Phase 20.3 — the beneficiary's identification photograph (design 39 §5). Administrative by
     /// visibility, but with its OWN, much narrower role allow-list: see <see cref="DocumentAccess"/>.</summary>
     IdentityPhoto,
+
+    /// <summary>A scan of the physical card the member carries. Administrative: it evidences the card
+    /// number on the record, which is exactly what a desk queries when a card is disputed or re-issued.
+    /// Filed as its own class rather than as <see cref="Other"/> so "show me the card copies" is a query
+    /// and so retention has something to key on.</summary>
+    CardCopy,
+
+    /// <summary>Paperwork belonging to the beneficiary's CASE — the assessments and correspondence a case
+    /// worker files. Administrative by default; anything clinical inside it belongs under
+    /// <see cref="MedicalReport"/> or <see cref="PastMedicalHistory"/>, which carry the clinical floor.</summary>
+    CaseDocument,
 }
 
 /// <summary>

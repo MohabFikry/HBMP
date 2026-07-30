@@ -15,11 +15,11 @@ import { createHttpPolicyApi } from "../api/policyApi";
  *  and screens key their load effects on the api instance — a fresh instance per render turned the
  *  first failing (or even succeeding) fetch into an unbounded request loop (QA P0-1: ~400 req/s).*/
 const httpPolicyApi = createHttpPolicyApi();
-import { API_BASE } from "../config";
 import { writeErrorMessage } from "../api/writeError";
 import { PageHeader, useLoc, readErrorMessage } from "./_shared";
 import { useIdempotencyKey } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
+import { BulkTemplateActions } from "./BulkTemplateActions";
 
 /**
  * Phase 19.6 — the operator's side of the 19.5b bulk engine.
@@ -35,7 +35,7 @@ import { useFormat } from "../i18n/useFormat";
  */
 
 const S = {
-  title: { en: "Bulk & imports", ar: "الرفع الجماعي" },
+  title: { en: "Bulk & Imports", ar: "الرفع الجماعي" },
   jobType: { en: "What are you uploading?", ar: "ما الذي ترفعه؟" },
   template: { en: "Download the template", ar: "تنزيل القالب" },
   templateHint: {
@@ -128,6 +128,10 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const [error, setError] = useState<Localized | null>(null);
   const [busy, setBusy] = useState(false);
   const [announce, setAnnounce] = useState("");
+  // Controlled open for the column-contract modal. `BulkTemplateActions` manages its own open state by
+  // default; the parent holds it too so a validation failure ("unknown column: xyz") can reopen the contract
+  // straight from the alert rather than making the operator find the trigger again.
+  const [columnsOpen, setColumnsOpen] = useState(false);
   const [uploadKey, rotateUploadKey] = useIdempotencyKey();
   const [commitKey, rotateCommitKey] = useIdempotencyKey();
 
@@ -221,34 +225,14 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
           </select>
         </div>
 
+        {/* Hint stays inline; the column TABLE lives in the modal behind the paired trigger (0B §11). */}
         <InlineAlert tone="info">{t(S.templateHint)}</InlineAlert>
-        <div>
-          <a className="mrs-btn secondary" href={`${API_BASE}/bulk-templates/${jobType}`} download>
-            {t(S.template)}
-          </a>
-        </div>
-
-        {template && (
-          <table className="pol-costshare">
-            <caption>{t(S.columns)}</caption>
-            <thead>
-              <tr>
-                <th scope="col">{t(S.column)}</th>
-                <th scope="col">{t(S.required)}</th>
-                <th scope="col">{t(S.meaning)}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {template.columns.map((c) => (
-                <tr key={c.name}>
-                  <th scope="row">{c.name}</th>
-                  <td>{c.required ? "✓" : "—"}</td>
-                  <td>{lang === "ar" ? c.descriptionAr : c.descriptionEn}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        <BulkTemplateActions
+          jobType={jobType}
+          template={template ?? null}
+          open={columnsOpen}
+          onOpenChange={setColumnsOpen}
+        />
 
         <div className="mrs-field" style={{ maxWidth: 480 }}>
           <label className="mrs-label" htmlFor="bulk-file">{t(S.file)}</label>

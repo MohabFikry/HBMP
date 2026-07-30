@@ -102,8 +102,12 @@ public sealed class MembershipCommands(
 {
     // ---- Enrol -------------------------------------------------------------------------------------------
 
+    /// <param name="establishedStatus">The beneficiary's status when the caller already holds it from an
+    /// action it just performed, so the probe would be asking a question it has the answer to. Only the
+    /// registration-approval consumer supplies it; everything else passes null and is probed.</param>
     public async Task<MembershipResult<EnrollOutcome>> EnrollAsync(
-        EnrollCommand cmd, string idempotencyKey, string? bearerToken, ActorRef actor, CancellationToken ct = default)
+        EnrollCommand cmd, string idempotencyKey, string? bearerToken, ActorRef actor,
+        string? establishedStatus = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(cmd);
         ArgumentNullException.ThrowIfNull(actor);
@@ -138,7 +142,15 @@ public sealed class MembershipCommands(
         // The beneficiary must be a real, Active person. Enrolling a Pending or Blocked member would generate
         // coverage that eligibility then refuses on every visit — a membership that looks live in every report
         // and works nowhere.
-        var status = await beneficiaries.GetStatusAsync(cmd.BeneficiaryId, bearerToken, ct);
+        //
+        // `establishedStatus` is the ONE case where the caller already holds the answer: the registration
+        // approval writes the activation and the enrolment event in a single transaction, so the status is
+        // not merely known, it was just SET. A background consumer has no user token to probe with, and the
+        // alternative — giving policy-service a credential of its own — is the pattern this platform
+        // deliberately forbids (see profile-service's NoServiceAccountArchitectureTests). Narrow on purpose:
+        // it substitutes for the probe, it does not skip the Active check below.
+        var status = establishedStatus
+                     ?? await beneficiaries.GetStatusAsync(cmd.BeneficiaryId, bearerToken, ct);
         if (status is null)
             return MembershipResults.Fail<EnrollOutcome>(MembershipFailureKind.Invalid,
                 "UNKNOWN_BENEFICIARY", $"Beneficiary {cmd.BeneficiaryId} was not found.");

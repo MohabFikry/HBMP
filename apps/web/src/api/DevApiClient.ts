@@ -49,6 +49,14 @@ import {
   zProviderLocation,
   zProviderContract,
   type CreateProviderInput,
+  zSpecialty,
+  zBranchSummary,
+  zPractitioner,
+  zPractitionerCreated,
+  zDoctorAvailability,
+  zAppointmentDay,
+  zAppointmentCounts,
+  type CreatePractitionerInput,
   zBeneficiaryRow,
   zRegisterResult,
   zStatusChangeResult,
@@ -121,6 +129,14 @@ const NOTIFICATION_FIXTURE = [
 const NOW = "2026-07-22T08:30:00Z";
 
 /** Validate every fixture through its schema on the way out — a fixture that drifts from the contract fails loudly. */
+/** Shared status chips for the mutable practitioner fixture, so a status change swaps one reference. */
+const DEV_ACTIVE = { kind: "ok" as const, label: loc("Active", "نشط") };
+const DEV_SUSPENDED = { kind: "warn" as const, label: loc("Suspended", "موقوف") };
+const DEV_INACTIVE = { kind: "neu" as const, label: loc("Inactive", "غير نشط") };
+/** Widened deliberately: the row literals below only mention two of the three, so without this TS narrows
+ *  the field to those two and a status change to Inactive stops compiling. */
+type DevStatusChip = typeof DEV_ACTIVE | typeof DEV_SUSPENDED | typeof DEV_INACTIVE;
+
 function ok<T>(schema: z.ZodType<T>, data: unknown): T {
   const r = schema.safeParse(data);
   if (!r.success) throw new ApiError("schema", `Dev fixture violates contract: ${r.error.issues[0]?.message}`);
@@ -154,9 +170,18 @@ export class DevApiClient implements ApiClient {
     return this.gate<ReturnType<typeof this.buildHits>>(() => this.buildHits(query), []);
   }
   private buildHits(query: string) {
+    // One ACTIVE and one SUSPENDED member, on purpose. The eligibility gate's whole job is to stop the second
+    // one from being booked, and a fixture of nothing but active members is one where that path is never
+    // exercised — which is how it shipped unenforced in the first place.
     const all = [
-      { id: "MRS-M-10231", name: loc("Amal Hassan", "أمل حسن"), cardNumber: "•••• 4821" },
-      { id: "MRS-M-10555", name: loc("Yusuf Haddad", "يوسف حداد"), cardNumber: "•••• 7702" },
+      {
+        id: "MRS-M-10231", name: loc("Amal Hassan", "أمل حسن"), cardNumber: "•••• 4821",
+        status: { kind: "ok" as const, label: loc("Active", "نشط") }, bookable: true,
+      },
+      {
+        id: "MRS-M-10555", name: loc("Yusuf Haddad", "يوسف حداد"), cardNumber: "•••• 7702",
+        status: { kind: "warn" as const, label: loc("Suspended", "موقوف") }, bookable: false,
+      },
     ];
     const q = query.toLowerCase();
     return ok(
@@ -189,13 +214,15 @@ export class DevApiClient implements ApiClient {
   }
 
   // ---- Reception day board -----------------------------------------------
-  appointments(filter: "all" | "booked" | "checked-in" = "all", _mine = false) {
-    void _mine;
+  appointments(filter: "all" | "booked" | "checked-in" = "all", _mine = false, _range?: { from: string; to: string }) {
+    void _mine; void _range;
     const rows = [
-      { id: "appt-1", token: "•••4821", type: "Consultation", ar: "كشف", st: "Booked", chip: { kind: "info" as const, label: loc("Booked", "محجوز") }, at: "2026-07-22T09:00:00Z", eligible: true },
-      { id: "appt-2", token: "•••7710", type: "FollowUp", ar: "متابعة", st: "CheckedIn", chip: { kind: "ok" as const, label: loc("Checked in", "تم الوصول") }, at: "2026-07-22T09:30:00Z", eligible: false },
+      // A note on the FIRST row only: the board must show the note affordance on rows that have one and
+      // nothing at all on rows that do not, and a fixture where every row has a note never proves the second half.
+      { id: "appt-1", token: "•••4821", type: "Consultation", ar: "كشف", st: "Booked", chip: { kind: "info" as const, label: loc("Booked", "محجوز") }, at: "2026-07-22T09:00:00Z", eligible: true, note: "Wheelchair access — ground-floor room. Sister attending as interpreter." },
+      { id: "appt-2", token: "•••7710", type: "FollowUp", ar: "متابعة", st: "CheckedIn", chip: { kind: "ok" as const, label: loc("Checked in", "تم الوصول") }, at: "2026-07-22T09:30:00Z", eligible: false, name: "Amal Hassan", doctorId: "PRC-1" },
             // Its window has passed by more than the grace period, so the SERVER would allow a no-show here.
-      { id: "appt-3", token: "•••2093", type: "Consultation", ar: "كشف", st: "Booked", chip: { kind: "info" as const, label: loc("Booked", "محجوز") }, at: "2026-07-22T10:00:00Z", eligible: true, noShowEligible: true },
+      { id: "appt-3", token: "•••2093", type: "Consultation", ar: "كشف", st: "Booked", chip: { kind: "info" as const, label: loc("Booked", "محجوز") }, at: "2026-07-22T10:00:00Z", eligible: true, noShowEligible: true, needsReassignment: true },
       { id: "appt-4", token: "•••5540", type: "Procedure", ar: "إجراء", st: "NoShow", chip: { kind: "warn" as const, label: loc("No-show", "لم يحضر") }, at: "2026-07-22T08:30:00Z", eligible: false },
     ].filter((r) => (filter === "booked" ? r.st === "Booked" : filter === "checked-in" ? r.st === "CheckedIn" : true));
     return this.gate(
@@ -213,9 +240,19 @@ export class DevApiClient implements ApiClient {
           branchId: "br-dokki",
           branchName: "Dokki",
           rowVersion: 1,
+          note: r.note ?? null,
+          // Only the CHECKED-IN row carries a name, exactly as the server behaves: the name is captured at
+          // check-in, so a booked-but-not-arrived appointment genuinely has none.
+          beneficiaryName: r.st === "CheckedIn" ? r.name ?? null : null,
+          doctorId: r.doctorId ?? null,
+          needsReassignment: r.needsReassignment ?? false,
         }))),
       [],
     );
+  }
+  appointmentCounts(_date?: string) {
+    void _date;
+    return this.gate(() => ok(zAppointmentCounts, { total: 4, checkedIn: 1, noShow: 1 }));
   }
   appointmentTimeline(_appointmentId: string) {
     void _appointmentId;
@@ -257,15 +294,34 @@ export class DevApiClient implements ApiClient {
   }
   // One slot is deliberately CLOSED: the desk must render availability from the server's answer, and a
   // fixture where everything is bookable would never exercise that.
-  openSlots(_providerId: string, _locationId: string, _from?: string, _to?: string) {
-    void _providerId; void _locationId; void _from; void _to;
+  openSlots(_providerId: string, _locationId: string, _from?: string, _to?: string, _doctorId?: string) {
+    void _providerId; void _locationId; void _from; void _to; void _doctorId;
     return this.gate(
       () =>
+        // Spanning three DAYS, not one hour: the time picker groups by day and paginates, and a fixture that
+        // fits in a single row never exercises either.
         ok(z.array(zBookableSlot), [
           { id: "slot-1", start: "2026-07-22T11:00:00Z", end: "2026-07-22T11:15:00Z", open: true },
           { id: "slot-2", start: "2026-07-22T11:15:00Z", end: "2026-07-22T11:30:00Z", open: false },
           { id: "slot-3", start: "2026-07-22T11:30:00Z", end: "2026-07-22T11:45:00Z", open: true },
+          { id: "slot-4", start: "2026-07-23T08:00:00Z", end: "2026-07-23T08:15:00Z", open: true },
+          { id: "slot-5", start: "2026-07-23T08:15:00Z", end: "2026-07-23T08:30:00Z", open: true },
+          { id: "slot-6", start: "2026-07-26T09:00:00Z", end: "2026-07-26T09:15:00Z", open: true },
         ]),
+      [],
+    );
+  }
+
+  appointmentDays(_providerId: string, _locationId: string, _from: string, _to: string, _doctorId?: string) {
+    void _providerId; void _locationId; void _from; void _to; void _doctorId;
+    // Matches the slot fixture above — a calendar whose counts disagreed with the times beside it would look
+    // broken in exactly the way this feature exists to avoid.
+    return this.gate(
+      () => ok(z.array(zAppointmentDay), [
+        { day: "2026-07-22", openSlots: 2 },
+        { day: "2026-07-23", openSlots: 2 },
+        { day: "2026-07-26", openSlots: 1 },
+      ]),
       [],
     );
   }
@@ -1163,6 +1219,158 @@ export class DevApiClient implements ApiClient {
   }
   createProvider(input: CreateProviderInput) {
     return this.gate(() => ok(zProviderSummary, { id: "PRV-NEW", code: input.code, legalName: input.legalName, providerType: input.providerType, status: { kind: "warn", label: loc("Suspended", "موقوف") }, onboardingState: "Draft" }));
+  }
+
+  // ---- Practitioners (Phase 14.5) -------------------------------------------------------------------------
+  /**
+   * A subset of the specialty seed in provider migration 0006, with the codes and names copied EXACTLY.
+   *
+   * Fixtures that invent their own codes are worse than no fixtures: the first draft here used "OBG" and
+   * "ORTH", which do not exist — the seed has OBGYN and ORTHO — so every screen built against it would have
+   * looked right in dev and filtered to nothing in production, and the specialty filter is the one thing the
+   * booking screen depends on. PSYCH and CPSY are present because they drive the 14.6 sensitivity defaults.
+   */
+  specialties() {
+    return this.gate(
+      () => ok(z.array(zSpecialty), [
+        { code: "GP", name: loc("General Practice", "الممارسة العامة") },
+        { code: "IM", name: loc("Internal Medicine", "الباطنة") },
+        { code: "PED", name: loc("Pediatrics", "طب الأطفال") },
+        { code: "OBGYN", name: loc("Obstetrics & Gynaecology", "النساء والتوليد") },
+        { code: "CARD", name: loc("Cardiology", "أمراض القلب") },
+        { code: "DERM", name: loc("Dermatology", "الجلدية") },
+        { code: "PSYCH", name: loc("Psychiatry", "الطب النفسي") },
+        { code: "CPSY", name: loc("Clinical Psychology", "علم النفس الإكلينيكي") },
+        { code: "ORTHO", name: loc("Orthopaedics", "العظام") },
+        { code: "ENT", name: loc("ENT", "الأنف والأذن والحنجرة") },
+      ]),
+      [],
+    );
+  }
+
+  /** The six internal clinics. These are the real branch list the booking screen filters on. */
+  branches() {
+    const active = { kind: "ok" as const, label: loc("Active", "نشط") };
+    return this.gate(
+      () => ok(z.array(zBranchSummary), [
+        { id: "BR-OCT", code: "OCT", name: loc("October", "أكتوبر"), city: "6th of October", status: active },
+        { id: "BR-DOK", code: "DOK", name: loc("Dokki", "الدقي"), city: "Giza", status: active },
+        { id: "BR-MAA", code: "MAA", name: loc("Maadi", "المعادي"), city: "Cairo", status: active },
+        { id: "BR-ASW", code: "ASW", name: loc("Aswan", "أسوان"), city: "Aswan", status: active },
+        { id: "BR-ALX", code: "ALX", name: loc("Alexandria", "الإسكندرية"), city: "Alexandria", status: active },
+        { id: "BR-NSR", code: "NSR", name: loc("Nasr City", "مدينة نصر"), city: "Cairo", status: active },
+      ]),
+      [],
+    );
+  }
+
+  /**
+   * The fixture deliberately includes a doctor with NO specialty and no branch (`PRC-4`). That is the state
+   * the admin screen exists to make visible and fixable: such a record is invisible to the booking picker,
+   * which filters on exactly those two fields, and a fixture of nothing but well-formed doctors is one where
+   * the "incomplete" affordance never gets looked at.
+   */
+  /**
+   * MUTABLE, unlike most fixtures here, because this screen's whole point is amending a record: a roster
+   * that reset on every reload would make "promote to primary" look like it silently did nothing, which is
+   * the exact failure the panel exists to rule out.
+   */
+  private practitionerRows = [
+    { id: "PRC-1", practitionerType: "Doctor", name: loc("Hana Mansour", "هناء منصور"), primarySpecialty: "PED" as string | undefined, specialties: ["PED"], branches: ["BR-DOK", "BR-MAA"], status: DEV_ACTIVE as DevStatusChip },
+    { id: "PRC-2", practitionerType: "Doctor", name: loc("Youssef Adel", "يوسف عادل"), primarySpecialty: "CARD" as string | undefined, specialties: ["CARD", "GP"], branches: ["BR-NSR"], status: DEV_ACTIVE as DevStatusChip },
+    { id: "PRC-3", practitionerType: "Doctor", name: loc("Mona Saleh", "منى صالح"), primarySpecialty: "OBGYN" as string | undefined, specialties: ["OBGYN"], branches: ["BR-ALX", "BR-ASW"], status: DEV_ACTIVE as DevStatusChip },
+    // No specialty, no clinic — the unbookable case the roster's "Bookable" column exists to surface, and
+    // the record the edit panel exists to repair.
+    { id: "PRC-4", practitionerType: "Doctor", name: loc("Karim Fouad", "كريم فؤاد"), primarySpecialty: undefined as string | undefined, specialties: [] as string[], branches: [] as string[], status: DEV_SUSPENDED as DevStatusChip },
+    { id: "PRC-5", practitionerType: "Nurse", name: loc("Salma Nabil", "سلمى نبيل"), primarySpecialty: "GP" as string | undefined, specialties: ["GP"], branches: ["BR-OCT"], status: DEV_ACTIVE as DevStatusChip },
+  ];
+
+  private findPractitioner(id: string) {
+    const row = this.practitionerRows.find((p) => p.id === id);
+    if (!row) throw new ApiError("http", "Not Found", 404);
+    return row;
+  }
+
+  practitioners(filter?: { branchId?: string; specialtyCode?: string; type?: string }) {
+    // Filtered the same way the server filters, so a screen developed against fixtures behaves the same live.
+    const rows = this.practitionerRows.filter((p) =>
+      (!filter?.branchId || p.branches.includes(filter.branchId)) &&
+      (!filter?.specialtyCode || p.specialties.includes(filter.specialtyCode)) &&
+      (!filter?.type || p.practitionerType === filter.type));
+    return this.gate(() => ok(z.array(zPractitioner), rows), []);
+  }
+
+  createPractitioner(input: CreatePractitionerInput) {
+    return this.gate(() => {
+      const row = {
+        id: `PRC-${this.practitionerRows.length + 1}`,
+        practitionerType: input.practitionerType,
+        name: { en: input.fullNameEn, ar: input.fullNameAr },
+        primarySpecialty: input.primarySpecialtyCode as string | undefined,
+        specialties: [input.primarySpecialtyCode],
+        branches: [...input.branchIds],
+        status: DEV_ACTIVE as DevStatusChip,
+      };
+      this.practitionerRows.push(row);
+      return ok(zPractitionerCreated, { practitioner: { ...row, licenseNo: input.licenseNo }, incomplete: [] });
+    });
+  }
+
+  async assignSpecialty(practitionerId: string, specialtyCode: string) {
+    const p = this.findPractitioner(practitionerId);
+    if (!p.specialties.includes(specialtyCode)) p.specialties.push(specialtyCode);
+  }
+
+  async setPrimarySpecialty(practitionerId: string, specialtyCode: string) {
+    const p = this.findPractitioner(practitionerId);
+    if (!p.specialties.includes(specialtyCode)) p.specialties.push(specialtyCode);
+    p.primarySpecialty = specialtyCode;
+  }
+
+  async revokeSpecialty(practitionerId: string, specialtyCode: string) {
+    const p = this.findPractitioner(practitionerId);
+    // Mirrors the server's 409: the primary cannot be removed, only replaced. A fixture that allowed it
+    // would let the screen be built against a rule the real service does not have.
+    if (p.primarySpecialty === specialtyCode) {
+      throw new ApiError("http", "primary-specialty-cannot-be-revoked", 409, {
+        title: "primary-specialty-cannot-be-revoked",
+        type: "urn:hbmp:primary-specialty-required",
+        detail: "Promote another specialty to primary first — a practitioner without one cannot be booked.",
+      });
+    }
+    p.specialties = p.specialties.filter((s) => s !== specialtyCode);
+  }
+
+  async assignPractitionerBranch(practitionerId: string, branchId: string) {
+    const p = this.findPractitioner(practitionerId);
+    if (!p.branches.includes(branchId)) p.branches.push(branchId);
+  }
+
+  async revokePractitionerBranch(practitionerId: string, branchId: string) {
+    const p = this.findPractitioner(practitionerId);
+    p.branches = p.branches.filter((b) => b !== branchId);
+  }
+
+  async setPractitionerStatus(practitionerId: string, status: string, reason: string) {
+    void reason;
+    const p = this.findPractitioner(practitionerId);
+    p.status = status === "Active" ? DEV_ACTIVE : status === "Suspended" ? DEV_SUSPENDED : DEV_INACTIVE;
+  }
+
+  /**
+   * Availability is deliberately NOT given for every practitioner in the roster. PRC-3 (Mona Saleh) is a
+   * fully-formed doctor with no open slot, so the join in `bookableDoctors` has a case where provider-service
+   * says yes and emr says no — the case that decides whether the picker offers a dead end.
+   */
+  doctorAvailability(branchId?: string) {
+    const all = [
+      { doctorId: "PRC-1", branchId: "BR-DOK", openSlots: 6, nextSlotStart: "2026-07-30T09:00:00Z" },
+      { doctorId: "PRC-1", branchId: "BR-MAA", openSlots: 3, nextSlotStart: "2026-07-31T11:30:00Z" },
+      { doctorId: "PRC-2", branchId: "BR-NSR", openSlots: 2, nextSlotStart: "2026-07-30T13:15:00Z" },
+      { doctorId: "PRC-5", branchId: "BR-OCT", openSlots: 4, nextSlotStart: "2026-07-30T08:30:00Z" },
+    ];
+    const rows = branchId ? all.filter((d) => d.branchId === branchId) : all;
+    return this.gate(() => ok(z.array(zDoctorAvailability), rows), []);
   }
 
   // ---- Patient profile (Phase 20, design 39) --------------------------------------------------------------

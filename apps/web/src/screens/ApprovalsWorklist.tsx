@@ -25,7 +25,7 @@ import { PatientContextBar } from "./PatientProfile";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
-  title: { en: "Approval worklist", ar: "قائمة الموافقات" },
+  title: { en: "Approval Worklist", ar: "قائمة الموافقات" },
   empty: { en: "No authorizations awaiting your review.", ar: "لا توجد تفويضات بانتظار مراجعتك." },
   patient: { en: "Patient", ar: "المريض" },
   service: { en: "Service", ar: "الخدمة" },

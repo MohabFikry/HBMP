@@ -82,7 +82,7 @@ ROUTING + AUTH
 - Route guards from the user's effective permissions (../11): the router only mounts routes the user can use. A forbidden deep link → 403 page with a "request access" affordance, and the attempt is audited (US-071).
 
 PERMISSION-DRIVEN MENUS (../14)
-- The nav rail is GENERATED from effective permissions — a user never sees a route/menu item they cannot use. Max 7±2 primary items, overflow into "More". Breadcrumb `Portal ▸ Section ▸ Record`. Landmark roles (banner/navigation/main/contentinfo). Keyboard map per ../14 §4 (e.g., `g` then `q` → primary queue).
+- The nav rail is GENERATED from effective permissions — a user never sees a route/menu item they cannot use. Max 7±2 primary items, overflow into "More". Browser-tab title `Section | Mersal HBMP` (no on-screen breadcrumb — ../14 §3); section names in Title Case (../09 §8). Landmark roles (banner/navigation/main/contentinfo). Keyboard map per ../14 §4 (e.g., `g` then `q` → primary queue).
 - Min-necessary UI per zone: Finance portal exposes NO diagnosis/clinical routes; Reception exposes no EMR; Pharmacy no results; Lab no prescriptions (../11 hard rules).
 
 ACCEPTANCE (US-070/071)

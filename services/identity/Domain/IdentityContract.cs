@@ -41,6 +41,11 @@ public static class IdentityContract
         // tiers), split out of provider:write because a tier reassignment reprices every plan referencing that
         // tier while ordinary provider metadata edits do not.
         "provider:read", "provider:write", "provider:finance", "provider:admin",
+        // 14.5 — the clinician PICKER, and nothing else. Booking filters on specialty then doctor, both of
+        // which live in provider-service; granting the desk `provider:read` to reach them would hand it the
+        // whole network directory (contracts, tariffs, tiers), and having emr fetch them under a service
+        // account is forbidden platform-wide. Same split `patient:read` records: size the scope to the need.
+        "practitioner:read",
         // 19.1 — the PAS split. policy:write already existed for MEMBER administration (enrol/terminate);
         // authoring the benefit product that members are enrolled onto is a separate, far heavier authority
         // (policy:admin), and policy:supervise is the supervisory increment (cancel another user's note,

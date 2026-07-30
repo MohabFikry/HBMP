@@ -7,7 +7,7 @@ import { ApiError } from "../api/http";
 import { PageHeader, useLoc } from "./_shared";
 
 const S = {
-  title: { en: "Eligibility search", ar: "التحقق من الأهلية" },
+  title: { en: "Eligibility Search", ar: "التحقق من الأهلية" },
   field: { en: "Card number, national ID, or name", ar: "رقم البطاقة أو الهوية أو الاسم" },
   help: { en: "Minimum-necessary — reception sees coverage only, never clinical data.", ar: "الحد الأدنى — يرى الاستقبال التغطية فقط دون بيانات سريرية." },
   check: { en: "Check eligibility", ar: "تحقق من الأهلية" },

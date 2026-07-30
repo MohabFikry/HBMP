@@ -11,7 +11,7 @@ import { AsyncSection, PageHeader, useLoc } from "./_shared";
 import { VisitTimelineButton } from "./VisitTimeline";
 
 const S = {
-  title: { en: "My visits", ar: "زياراتي" },
+  title: { en: "My Visits", ar: "زياراتي" },
   empty: {
     en: "No patients of yours have checked in yet today.",
     ar: "لم يسجّل أي من مرضاك وصوله اليوم بعد.",

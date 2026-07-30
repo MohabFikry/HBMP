@@ -9,7 +9,7 @@ import { useAsync } from "../api/useAsync";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
-  slaTitle: { en: "SLA / TAT board", ar: "لوحة الاستجابة" },
+  slaTitle: { en: "SLA / TAT Board", ar: "لوحة الاستجابة" },
   slaEmpty: { en: "No decided authorizations to report on yet.", ar: "لا توجد موافقات مُقرّرة بعد." },
   total: { en: "Decided", ar: "تم البت فيها" },
   avg: { en: "Avg TAT (min)", ar: "متوسط الاستجابة (د)" },
@@ -18,7 +18,7 @@ const S = {
   status: { en: "Status", ar: "الحالة" },
   count: { en: "Count", ar: "العدد" },
 
-  manualTitle: { en: "Manual authorization", ar: "تفويض يدوي" },
+  manualTitle: { en: "Manual Authorization", ar: "تفويض يدوي" },
   beneficiary: { en: "Beneficiary ID", ar: "معرّف المستفيد" },
   codes: { en: "Service codes (comma-separated)", ar: "رموز الخدمات (مفصولة بفواصل)" },
   justification: { en: "Justification", ar: "المبرر" },
@@ -26,7 +26,7 @@ const S = {
   created: { en: "Manual authorization created — flagged for retrospective review.", ar: "تم إنشاء التفويض — مُعلّم للمراجعة اللاحقة." },
   needFields: { en: "Beneficiary, at least one code, and a justification are required.", ar: "المستفيد ورمز واحد على الأقل والمبرر مطلوبة." },
 
-  emgTitle: { en: "Emergency / override", ar: "طارئ / تجاوز" },
+  emgTitle: { en: "Emergency / Override", ar: "طارئ / تجاوز" },
   emgEmpty: { en: "No pending authorizations.", ar: "لا توجد موافقات معلّقة." },
   patient: { en: "Patient", ar: "المريض" },
   service: { en: "Service", ar: "الخدمة" },

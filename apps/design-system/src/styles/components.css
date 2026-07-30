@@ -136,6 +136,13 @@ html[data-theme="dark"] .mrs-btn.mrs-primary {
 .mrs-field {
   display: block;
 }
+/* The label style is a LABEL style, not a descendant-of-.mrs-field style. It was only ever scoped to the
+   Field wrapper, so every caller that labels a control the wrapper does not own — a bare Select or Combobox
+   with its own <span className="mrs-label">, as the reception booking form has for Clinic and Appointment
+   type — rendered plain body text beside fields that carried the 500-weight subhead. Same class, two
+   different-looking labels in one form. The scoped rule below is kept (identical declarations, higher
+   specificity) so nothing inside a Field changes. */
+.mrs-label,
 .mrs-field .mrs-label {
   font-weight: 500;
   font-size: var(--fs-subhead);
@@ -415,6 +422,100 @@ html[dir="rtl"] .mrs-search input {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+/* `all: unset` above strips the focus ring too, so a keyboard user tabbing across the header had no idea
+   where they were. Put it back explicitly. */
+.mrs-wl th button.mrs-sort:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+/* The chevron points the way the column is actually sorted, so direction is legible without reading
+   aria-sort — and turns rather than vanishing, so the control never looks disabled. */
+.mrs-wl th[aria-sort="none"] button.mrs-sort svg { opacity: 0.35; }
+.mrs-wl th[aria-sort="descending"] button.mrs-sort svg { transform: rotate(180deg); }
+
+/* ---------- Table toolbar (search + filter chips) ---------- */
+.mrs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp3);
+  margin-block-end: var(--sp3);
+}
+.mrs-toolbar-search {
+  display: grid;
+  gap: 6px;
+  flex: 1 1 220px;
+  min-inline-size: 0;
+}
+.mrs-toolbar-searchbox {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.mrs-toolbar-searchbox svg {
+  position: absolute;
+  /* Logical inset so the icon sits on the leading edge in both LTR and RTL rather than always on the left. */
+  inset-inline-start: 10px;
+  opacity: 0.6;
+  pointer-events: none;
+}
+.mrs-toolbar-searchbox .mrs-control {
+  padding-inline-start: 34px;
+  margin-top: 0;
+}
+.mrs-toolbar-group {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-inline-size: 0;
+}
+.mrs-toolbar-group legend {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  font-weight: 600;
+  padding: 0;
+  margin-block-end: 6px;
+}
+.mrs-chipset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp2);
+}
+.mrs-filterchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-block-size: 44px;          /* the project's own target-size bar (21-accessibility) */
+  padding: 0 var(--sp3);
+  border: 1px solid var(--border-input, var(--border));
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  cursor: pointer;
+}
+.mrs-filterchip:hover { border-color: var(--accent); }
+.mrs-filterchip:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+/* Active state carries THREE cues — fill, weight and a check glyph — so it is never colour alone. */
+.mrs-filterchip.mrs-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.mrs-chipcount { opacity: 0.75; font-variant-numeric: tabular-nums; }
+.mrs-toolbar-extra {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--sp2);
 }
 .mrs-wl td {
   padding: 14px 16px;
@@ -824,4 +925,99 @@ nav.mrs-rail {
 .mrs-select-option-label {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ── Combobox (editable, filters as you type) ──────────────────────────────────────────────────────────────
+   Deliberately identical in silhouette to `Select`: the two sit side by side in the same form, and a control
+   that is a text box only because its list is long should not also LOOK like a different kind of field. */
+.mrs-combo {
+  position: relative;
+  inline-size: 100%;
+}
+.mrs-combo-control {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+  position: relative;
+}
+.mrs-combo-input {
+  inline-size: 100%;
+  padding-inline-end: calc(var(--sp3) + 16px);   /* room for the chevron */
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+/* The selection's flag sits inside the control, so the pair reads as one object. Absolutely positioned so it
+   overlays the input's own padding rather than shrinking the typing area. */
+.mrs-combo-leading {
+  flex: none;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+.mrs-combo-control > .mrs-combo-leading {
+  position: absolute;
+  inset-inline-start: var(--sp3);
+  pointer-events: none;
+}
+.mrs-combo-control:has(> .mrs-combo-leading) .mrs-combo-input {
+  padding-inline-start: calc(var(--sp3) + 1.5rem);
+}
+.mrs-combo-chevron {
+  position: absolute;
+  inset-inline-end: var(--sp3);
+  inline-size: 16px;
+  block-size: 16px;
+  color: var(--text-2);
+  pointer-events: none;
+  transition: transform 120ms ease;
+}
+.mrs-combo-input[aria-expanded="true"] ~ .mrs-combo-chevron { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .mrs-combo-chevron { transition: none; } }
+
+.mrs-combo-list {
+  position: absolute;
+  z-index: 40;
+  inset-block-start: calc(100% + var(--sp1));
+  inset-inline-start: 0;
+  min-inline-size: 100%;
+  max-block-size: 288px;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--sp1);
+  list-style: none;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--elev-2);
+}
+.mrs-combo-option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+  min-block-size: 40px;
+  padding-inline: var(--sp2);
+  border-radius: var(--r-sm);
+  color: var(--text-1);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mrs-combo-option.is-active { background: var(--accent-tint); }
+.mrs-combo-option[aria-selected="true"] { font-weight: 600; }
+/* Selection is carried by a check, not by colour alone — the active tint is the same hue. */
+.mrs-combo-check {
+  inline-size: 16px;
+  block-size: 16px;
+  flex: none;
+  color: var(--accent);
+  visibility: hidden;
+}
+.mrs-combo-option[aria-selected="true"] .mrs-combo-check { visibility: visible; }
+.mrs-combo-label { overflow: hidden; text-overflow: ellipsis; }
+.mrs-combo-hint { color: var(--text-2); font-weight: 400; }
+/* "No match" is a statement, not an option — never selectable, never focusable. */
+.mrs-combo-empty {
+  min-block-size: 40px;
+  display: flex;
+  align-items: center;
+  padding-inline: var(--sp2);
+  color: var(--text-2);
 }

@@ -6,8 +6,8 @@ import { useAsync } from "../api/useAsync";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
-  vitalsTitle: { en: "Vitals & triage", ar: "العلامات والفرز" },
-  resultsTitle: { en: "Results inbox", ar: "صندوق النتائج" },
+  vitalsTitle: { en: "Vitals & Triage", ar: "العلامات والفرز" },
+  resultsTitle: { en: "Results Inbox", ar: "صندوق النتائج" },
   pickPatient: { en: "Select a patient to record vitals.", ar: "اختر مريضاً لتسجيل العلامات." },
   pickPatientRead: { en: "Select a patient to view their recorded vitals.", ar: "اختر مريضاً لعرض علاماته المسجلة." },
   empty: { en: "No patients on your worklist.", ar: "لا يوجد مرضى في قائمتك." },

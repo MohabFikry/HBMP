@@ -37,7 +37,7 @@ const STR = {
     en: "Open a patient from a worklist or from Search / manage to see their file.",
     ar: "افتح مريضًا من قائمة عمل أو من «بحث / إدارة» لعرض ملفّه.",
   },
-  title: { en: "Patient profile", ar: "ملف المريض" },
+  title: { en: "Patient Profile", ar: "ملف المريض" },
   jumpTo: { en: "Jump to section", ar: "الانتقال إلى قسم" },
   restricted: { en: "Restricted", ar: "مقيّد" },
   unavailable: { en: "Temporarily unavailable", ar: "غير متاح مؤقتًا" },

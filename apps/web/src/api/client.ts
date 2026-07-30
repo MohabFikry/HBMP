@@ -8,6 +8,9 @@ import type {
   ProgramEnablement,
   AppointmentRow,
   BookableClinic,
+  DoctorAvailability,
+  AppointmentDay,
+  AppointmentCounts,
   TimelineStep,
   BookableSlot,
   BookingRequest,
@@ -32,6 +35,11 @@ import type {
   ProviderLocation,
   ProviderContract,
   CreateProviderInput,
+  Specialty,
+  BranchSummary,
+  Practitioner,
+  CreatePractitionerInput,
+  PractitionerCreated,
   ReportView,
   SystemConfigEntry,
   TatSummary,
@@ -102,7 +110,15 @@ export interface ApiClient {
 
   // Reception — day board (Phase 3). `filter` scopes the board: all / booked (arrivals to process) /
   // checked-in (waiting). checkIn transitions Booked → CheckedIn and enqueues a walk-in ticket.
-  appointments(filter?: "all" | "booked" | "checked-in", mine?: boolean): Promise<AppointmentRow[]>;
+  /**
+   * The day board. `range` narrows to an inclusive span of Cairo civil days (the desk's custom date filter);
+   * omitted, the server answers for today, which is what every existing caller wants.
+   */
+  appointments(
+    filter?: "all" | "booked" | "checked-in",
+    mine?: boolean,
+    range?: { from: string; to: string },
+  ): Promise<AppointmentRow[]>;
   /** `rowVersion` (opt-in): the value read on the board, echoed as `If-Match` so a stale check-in loses to a
    * concurrent transition with 412 instead of double-acting. Omit to check in without the guard. */
   checkIn(appointmentId: string, rowVersion?: number): Promise<CheckInResult>;
@@ -122,7 +138,12 @@ export interface ApiClient {
   bookableClinics(branchId?: string): Promise<BookableClinic[]>;
   /** Open slots for a clinic session, for the desk's booking screen. The SERVER marks `open` — it holds the
    * no-double-book invariant and knows about slots held by bookings the desk cannot see. */
-  openSlots(providerId: string, locationId: string, from?: string, to?: string): Promise<BookableSlot[]>;
+  openSlots(providerId: string, locationId: string, from?: string, to?: string, doctorId?: string): Promise<BookableSlot[]>;
+  /**
+   * Per-day open-slot counts for the booking calendar. Counted server-side: painting thirty cells must not
+   * cost thousands of slot rows, and the Cairo day boundary is the server's to decide (see `zAppointmentDay`).
+   */
+  appointmentDays(providerId: string, locationId: string, from: string, to: string, doctorId?: string): Promise<AppointmentDay[]>;
   /** Book a slot. A branch-scoped desk omits `branchId` — the server stamps its active branch and refuses a
    * request naming a different one. Returns 409 (surfaced as ApiError) when the slot was taken concurrently. */
   bookAppointment(input: BookingRequest): Promise<BookingResult>;
@@ -258,6 +279,46 @@ export interface ApiClient {
   providerLocations(providerId: string): Promise<ProviderLocation[]>;
   providerContracts(providerId: string): Promise<ProviderContract[]>;
   createProvider(input: CreateProviderInput, idempotencyKey?: string): Promise<ProviderSummary>;
+
+  // Practitioners (Phase 14.5, design 37 §4) — the clinical profile behind a user, with the specialty and
+  // the clinics that the booking screen filters on.
+  /** Reference specialties (org data). */
+  specialties(): Promise<Specialty[]>;
+  /** The Mersal internal branches. Org reference data — readable by any authenticated caller. */
+  branches(): Promise<BranchSummary[]>;
+  /** The practitioner list, optionally narrowed the same way the booking picker narrows it. */
+  practitioners(filter?: { branchId?: string; specialtyCode?: string; type?: string }): Promise<Practitioner[]>;
+  /**
+   * Create a doctor: the practitioner row, its primary specialty and one assignment per clinic.
+   *
+   * Resolves with `incomplete` NON-EMPTY when the practitioner was created but an attachment failed — see
+   * `zPractitionerCreated`. It rejects only when the practitioner row itself could not be created, because
+   * that is the only failure after which nothing exists and a retry is safe.
+   */
+  createPractitioner(input: CreatePractitionerInput, idempotencyKey?: string): Promise<PractitionerCreated>;
+
+  // Amending an existing clinician. Each is one server call, so each can fail on its own and the panel
+  // reports them one at a time — unlike creation, there is no multi-step partial state to reconcile.
+  /** Add a specialty the practitioner does not yet hold (never primary — use `setPrimarySpecialty`). */
+  assignSpecialty(practitionerId: string, specialtyCode: string): Promise<void>;
+  /** Promote a specialty to primary, clearing the previous one. Assigns it first if not already held. */
+  setPrimarySpecialty(practitionerId: string, specialtyCode: string): Promise<void>;
+  /** Remove a non-primary specialty. The server refuses (409) if it is the primary one. */
+  revokeSpecialty(practitionerId: string, specialtyCode: string): Promise<void>;
+  assignPractitionerBranch(practitionerId: string, branchId: string): Promise<void>;
+  /** End an assignment (status → Revoked). Makes `serves-branch` false, so new bookings there are refused. */
+  revokePractitionerBranch(practitionerId: string, branchId: string): Promise<void>;
+  setPractitionerStatus(practitionerId: string, status: string, reason: string): Promise<void>;
+
+  /**
+   * Which DOCTORS have open time, from emr — ids and counts only, no names (that is provider-service's to
+   * disclose, and this app reads it there under `practitioner:read`). Join the two with `bookableDoctors`.
+   * A branch-scoped desk omits `branchId`; the server uses its active branch and refuses another.
+   */
+  doctorAvailability(branchId?: string): Promise<DoctorAvailability[]>;
+
+  /** Total / checked-in / no-show for one Cairo day, counted server-side and branch-scoped like the board. */
+  appointmentCounts(date?: string): Promise<AppointmentCounts>;
 
   // Patient profile (Phase 20, design 39) — ONE endpoint, projected server-side to the caller's role.
   /**

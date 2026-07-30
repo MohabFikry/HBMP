@@ -11,7 +11,7 @@ Navigation model for the multi-portal platform. Each role gets a **distinct port
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
-│ [≡] Mersal HBMP  ▸ breadcrumb  🏢 Maadi ▾       🔎 search  🔔  ⚙ ▾ │  ← top bar
+│ [≡] Mersal HBMP                🏢 Maadi ▾       🔎 search  🔔  ⚙ ▾ │  ← top bar
 ├──────────┬────────────────────────────────────────────────────┤
 │ PRIMARY  │  CONTENT AREA                                       │
 │ NAV      │  (page header + contextual action bar)              │
@@ -20,7 +20,7 @@ Navigation model for the multi-portal platform. Each role gets a **distinct port
 └──────────┴────────────────────────────────────────────────────┘
 ```
 
-Shared shell elements: skip-to-content link, global search (scoped to what the role may find), **branch switcher / branch-context indicator**, notifications bell, user menu (profile, language EN/AR toggle, theme, sign-out), environment badge (non-prod). Primary nav collapses to a hamburger drawer on tablet/mobile. **⟵RTL:** the entire shell mirrors — primary nav moves to the right, breadcrumb reverses.
+Shared shell elements: skip-to-content link, global search (scoped to what the role may find), **branch switcher / branch-context indicator**, notifications bell, user menu (profile, language EN/AR toggle, theme, sign-out), environment badge (non-prod). Primary nav collapses to a hamburger drawer on tablet/mobile. **⟵RTL:** the entire shell mirrors — primary nav moves to the right; the tab title (§3) is bilingual too.
 
 ### 1.1 Branch switcher (app bar) — [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md)
 
@@ -214,8 +214,15 @@ flowchart TD
 
 ---
 
-## 3. Breadcrumbs & deep links
-- Breadcrumb pattern: `Portal ▸ Section ▸ Record` (e.g., `Approvals ▸ Worklist ▸ AUTH-2026-4F7K`).
+## 3. Section title & deep links
+- **The section name lives in the browser tab, not on the page:** `Section | Mersal HBMP` — e.g.
+  `Register New | Mersal HBMP`. Section first, because tabs truncate from the end. The name comes from the
+  portal catalog, so the tab is bilingual with the rest of the shell and always matches the nav-rail item and
+  the page `<h1>` exactly (one string, three renderings). Title Case per [09 §8](09-information-architecture.md).
+  - *Superseded:* an on-screen breadcrumb bar under the app bar. It restated what the nav rail's own
+    current-item highlight and the page `<h1>` already say, on every screen of every portal. The tab strip is
+    the one place that context is genuinely absent — a user with several portals open has nothing else to tell
+    the tabs apart. Record-level context stays on the page, in the `<h1>` and the patient context bar (§3b).
 - Every record has a stable deep link (`/approvals/authorizations/{id}`); opening a deep link the role cannot access returns a 403 page with a "request access / contact admin" affordance — never a blank screen.
 - Contextual "back to list" preserves filters/scroll (state retained in URL query params).
 - **Branch-scoped deep links** carry the record's branch: opening one for a branch outside the user's permitted set returns the **403 page** (with "request access / contact admin"), and opening one for a *permitted but not active* branch prompts to **switch the active branch** rather than silently showing an empty record.
@@ -251,7 +258,7 @@ strip would be worse than none, since confirming which record is open is its ent
 | `g` then `b` | Open the **branch switcher** (BranchScoped roles); arrows move, `Enter` switches, `Esc` cancels |
 | `Enter` | Activate focused row/primary action |
 | `Esc` | Close dialog/menu, return focus to trigger |
-| `Alt+←` | Back (respects breadcrumb) |
+| `Alt+←` | Back (browser history) |
 | Arrow keys | Move within lists, calendars, menus |
 
 Focus is trapped inside modals and returned to the invoking control on close (WCAG 2.4.3). Roving tabindex for grids/queues.

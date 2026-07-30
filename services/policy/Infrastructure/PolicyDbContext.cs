@@ -309,6 +309,9 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.TerminationReason).HasColumnName("termination_reason");
             e.Property(x => x.SourcePlanVersionId).HasColumnName("source_plan_version_id");
             e.Property(x => x.BranchId).HasColumnName("branch_id");   // 19.5 — the ENROLLING branch
+            // Member-level cost-share overrides. Null = take the plan version's matrix (0017).
+            e.Property(x => x.NetworkTierId).HasColumnName("network_tier_id");
+            e.Property(x => x.ContributionPercent).HasColumnName("contribution_percent").HasPrecision(5, 2);
             e.Property(x => x.IdempotencyKey).HasColumnName("idempotency_key");
             e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
             e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();
@@ -454,6 +457,10 @@ public sealed class PolicyDbContext(DbContextOptions<PolicyDbContext> options) :
             e.Property(x => x.AppliedRows).HasColumnName("applied_rows");
             e.Property(x => x.FailedRows).HasColumnName("failed_rows");
             e.Property(x => x.SkippedRows).HasColumnName("skipped_rows");
+            // Batch-level coverage defaults (0018) — they fill a blank cell, never override a stated one.
+            e.Property(x => x.DefaultPlanId).HasColumnName("default_plan_id");
+            e.Property(x => x.DefaultNetworkTierId).HasColumnName("default_network_tier_id");
+            e.Property(x => x.DefaultBranchId).HasColumnName("default_branch_id");
             e.Property(x => x.BatchId).HasColumnName("batch_id");
             e.Property(x => x.SubmittedByUserId).HasColumnName("submitted_by_user_id");
             e.Property(x => x.SubmittedByUsername).HasColumnName("submitted_by_username");

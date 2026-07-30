@@ -9,6 +9,28 @@ public sealed class UploadValidator(IReadOnlySet<string>? allowedMimeTypes = nul
     public static readonly IReadOnlySet<string> DefaultAllowed =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "application/pdf", "image/jpeg", "image/png" };
 
+    /// <summary>
+    /// What an OPERATIONAL document may be: a bulk intake file, its error report, an extract.
+    ///
+    /// <para>These are spreadsheets, and they were being validated against the beneficiary-document list —
+    /// pdf/jpeg/png — so every bulk upload was rejected before it was ever scanned. The engine could not tell
+    /// that refusal from an outage and reported it as <c>SCAN_UNAVAILABLE</c>, which is why the cause was a
+    /// content-type rule and the symptom looked like a broken scanner.</para>
+    ///
+    /// <para>Deliberately still an ALLOW-LIST, and deliberately without <c>application/octet-stream</c>: a
+    /// wildcard here would let anything through the one gate that decides what reaches the scanner. The
+    /// spellings below are the ones browsers and Excel actually send for CSV and XLSX.</para>
+    /// </summary>
+    public static readonly IReadOnlySet<string> OperationalAllowed =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "text/csv",
+            "application/csv",
+            "text/plain",                                                            // some clients send CSV as this
+            "application/vnd.ms-excel",                                              // .xls, and Excel's CSV
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",      // .xlsx
+        };
+
     private readonly IReadOnlySet<string> _allowed = allowedMimeTypes ?? DefaultAllowed;
 
     public long MaxSizeBytes { get; } = maxSizeBytes;

@@ -1,11 +1,13 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button, Card, Icon, InputField, Select, StatusChip, useTheme } from "@mersal/design-system";
 import { L } from "../i18n/strings";
 import { PageHeader } from "./_shared";
 import { identifierTypeLabel, memberStatus } from "./statusLabels";
-import { ReservationPicker, useReservation } from "./ReservationPicker";
+import { BookingForm, type BookingSelection } from "./booking/BookingForm";
 import { CallNotes } from "./CallNotes";
 import { createHttpCcApi, type CcApi, type CcMatch } from "./CallCentre";
+import { useApi } from "../api/ApiProvider";
+import type { BranchSummary } from "@mersal/contracts";
 
 /**
  * Phase 20.4 — the standalone "Book appointment" journey for the call centre.
@@ -63,7 +65,22 @@ export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
   const [closed, setClosed] = useState(false);
 
   const isVerified = !!selected && verifiedFor === selected.beneficiaryId;
-  const r = useReservation(api, isVerified);
+
+  // 14.5 — the SAME form reception uses, with the branch as a picker rather than the caller's own. Nothing
+  // about the verification gate below changes: this form renders only after a PASS, and callcentre-service
+  // still refuses every reserve without a recorded verification regardless of what is on screen.
+  const [sel, setSel] = useState<BookingSelection>({
+    branchId: null, doctorId: null, slotId: null, note: "", providerId: null, locationId: null,
+  });
+  const [branches, setBranches] = useState<BranchSummary[]>([]);
+  const [reloadToken, setReloadToken] = useState(0);
+  const webApi = useApi();
+
+  useEffect(() => {
+    let live = true;
+    void webApi.branches().then((b) => live && setBranches(b)).catch(() => live && setBranches([]));
+    return () => { live = false; };
+  }, [webApi]);
 
   const chosen = SEARCH_BY.find((s) => s.key === searchBy) ?? null;
 
@@ -111,14 +128,17 @@ export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
   }, [api, interactionId, selected, ticks, t]);
 
   const book = useCallback(async () => {
-    if (!interactionId || !verifiedFor || !r.slotId || !r.chosenClinic) return;
-    // The branch travels with the CLINIC, never from a second control that could disagree with it — two
-    // pickers that can drift is how someone is told to come to Maadi for a Dokki appointment.
-    const outcome = await api.book(interactionId, verifiedFor, r.slotId, r.chosenClinic.branchId ?? null);
+    if (!interactionId || !verifiedFor || !sel.slotId) return;
+    const outcome = await api.book(interactionId, verifiedFor, sel.slotId, sel.branchId, {
+      doctorId: sel.doctorId,
+      note: sel.note || undefined,
+    });
     setAnnounce(outcome === "ok" ? t(L.ccBooked) : outcome === "conflict" ? t(L.ccSlotTaken) : t(L.ccBookFailed));
-    // Both a success and a 409 invalidate the list: one consumed the slot, the other proves someone else did.
-    if (outcome !== "error") r.refresh();
-  }, [api, interactionId, verifiedFor, r, t]);
+    // Both a success and a 409 invalidate the times: one consumed the slot, the other proves someone else
+    // did. Re-read them WITHOUT resetting the agent's branch/specialty/doctor — they are still what the
+    // caller asked for, and making the agent re-enter them mid-call is a cost paid for someone else's race.
+    if (outcome !== "error") setReloadToken((k) => k + 1);
+  }, [api, interactionId, verifiedFor, sel, t]);
 
   const finish = useCallback(async () => {
     if (!interactionId) return;
@@ -240,7 +260,20 @@ export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
               {t(L.ccOpenProfile)}
             </a>
           </div>
-          <ReservationPicker r={r} onBook={book} bookLabel={t(L.ccBook)} />
+          {/* Kept here rather than inside the shared form: "no arrivals" is a CALL CENTRE truth, not a
+              property of the booking fields. The server enforces it with `appointment:reserve` instead of
+              `appointment:write`, so the absent check-in and no-show buttons are presentation of a boundary
+              that holds without them. */}
+          <p className="cc-muted">{t(L.ccReserveOnly)}</p>
+          <BookingForm
+            branchMode="choose"
+            branches={branches}
+            onChange={setSel}
+            reloadToken={reloadToken}
+          />
+          <div className="book-actions">
+            <Button variant="primary" disabled={!sel.slotId} onClick={book}>{t(L.ccBook)}</Button>
+          </div>
         </Card>
       )}
 

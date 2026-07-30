@@ -64,13 +64,14 @@ var read = app.MapGroup("/api/v1/beneficiaries").RequireAuthorization(HbmpPolici
 
 // POST /beneficiaries — register (Idempotency-Key required); 201 + ETag, or 409 duplicate, or 400.
 v1.MapPost("", async (
-    RegisterBeneficiaryRequest req, HttpRequest http,
+    RegisterRequest body, HttpRequest http,
     BeneficiaryRegistrar registrar, PatientDbContext db, IAuditClient audit, IOutbox outbox,
     IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(http.Headers["Idempotency-Key"]))
         return Results.Problem(statusCode: 400, title: "Idempotency-Key header is required", type: "urn:hbmp:idempotency-required");
 
+    var req = body.ToDomain();
     var actor = me.Principal?.Subject;
     var result = await registrar.RegisterAsync(req, actor, ct);
 
@@ -85,18 +86,58 @@ v1.MapPost("", async (
                 type: "urn:hbmp:duplicate-identifier",
                 extensions: new Dictionary<string, object?> { ["existingBeneficiaryId"] = dup.ExistingBeneficiaryId });
 
+        // Its own problem type, because its remedy is its own. A duplicate IDENTIFIER means this is the same
+        // person and the operator should open them; a duplicate CARD usually means the card was mis-read, or
+        // re-issued without the old one being retired — and telling the operator to "open the existing
+        // record" would be wrong advice for a genuinely different person holding a recycled card.
+        case RegistrationResult.DuplicateCardNumber card:
+            return Results.Problem(statusCode: 409, title: "duplicate-card-number",
+                detail: $"card number '{card.CardNumber}' is already held by beneficiary {card.ExistingBeneficiaryId}",
+                type: "urn:hbmp:duplicate-card-number",
+                extensions: new Dictionary<string, object?> { ["existingBeneficiaryId"] = card.ExistingBeneficiaryId });
+
         case RegistrationResult.Created created:
             db.Beneficiaries.Add(created.Beneficiary);
             // The registration APPLICATION opens with the person, in the same transaction. Until now nothing
             // created these rows — the approval endpoints existed but the worklist behind US-003 was empty
             // unless someone hand-called POST /registrations, which no screen did. A beneficiary without an
             // open application is a person nobody is going to review.
+            var registrationId = Guid.NewGuid();
             db.Registrations.Add(new Registration
             {
-                RegistrationId = Guid.NewGuid(), BeneficiaryId = created.Beneficiary.BeneficiaryId,
+                RegistrationId = registrationId, BeneficiaryId = created.Beneficiary.BeneficiaryId,
                 TenantId = created.Beneficiary.TenantId, Status = RegistrationStatus.Pending,
+                // The elected coverage IS the coverage binding US-003 asks the approver to confirm. Recording
+                // it as bound here is not skipping the guard: the guard asks whether a policy has been chosen,
+                // and one now has been, in a row the approver can read. What remains a supervisor's is the
+                // DECISION, which is unchanged.
+                CoverageBound = created.Intent is not null,
                 CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow(),
             });
+
+            if (created.Intent is { } intent)
+            {
+                db.EnrolmentIntents.Add(new EnrolmentIntent
+                {
+                    RegistrationId = registrationId, TenantId = created.Beneficiary.TenantId,
+                    PlanId = intent.PlanId, NetworkTierId = intent.NetworkTierId,
+                    ContributionPercent = intent.ContributionPercent, DefaultBranchId = intent.DefaultBranchId,
+                    CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow(),
+                });
+            }
+
+            foreach (var note in created.Notes)
+            {
+                db.RegistrationNotes.Add(new RegistrationNote
+                {
+                    RegistrationId = registrationId, TenantId = created.Beneficiary.TenantId,
+                    Slot = note.Slot, Value = note.Value,
+                    // Taken from the SLOT, never from the request. A client that could name the visibility
+                    // could file a diagnosis as administrative and route it around the clinical rule.
+                    Visibility = RegistrationNoteSlots.VisibilityOf(note.Slot),
+                    CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow(),
+                });
+            }
             await db.SaveChangesAsync(ct);
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -111,7 +152,9 @@ v1.MapPost("", async (
                     tenantId = created.Beneficiary.TenantId,
                     beneficiaryId = created.Beneficiary.BeneficiaryId,
                     status = "Pending",
+                    cardNumber = created.Beneficiary.CardNumber,
                     givenName = created.Beneficiary.GivenName,
+                    middleName = created.Beneficiary.MiddleName,
                     familyName = created.Beneficiary.FamilyName,
                     primaryPhone = created.Beneficiary.Contacts.FirstOrDefault(c => c.IsPrimary)?.Value
                                    ?? created.Beneficiary.Contacts.FirstOrDefault()?.Value,
@@ -192,7 +235,8 @@ var regRead = app.MapGroup("/api/v1/registrations").RequireAuthorization(HbmpPol
 // person the queue cannot show is a person nobody reviews. Reads take patient:read; every disclosed row is
 // engine-authorized and PHI-read-audited individually, exactly as the directory search is, and rows the
 // caller may not read are dropped rather than 403ing the page.
-regRead.MapGet("", async (int? page, int? pageSize, PatientDbContext db, BeneficiaryReadGuard guard, CancellationToken ct) =>
+regRead.MapGet("", async (int? page, int? pageSize, PatientDbContext db, BeneficiaryReadGuard guard,
+    IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
     var (p, ps) = (Math.Max(page ?? 1, 1), Math.Clamp(pageSize ?? 25, 1, 100));
 
@@ -211,6 +255,20 @@ regRead.MapGet("", async (int? page, int? pageSize, PatientDbContext db, Benefic
         .GroupBy(r => r.BeneficiaryId)
         .ToDictionary(gr => gr.Key, gr => gr.OrderByDescending(r => r.CreatedAt).First());
 
+    // The elected coverage and the standing notes, fetched once for the page rather than per row.
+    var regIds = latest.Values.Select(r => r.RegistrationId).ToList();
+    var intents = await db.EnrolmentIntents.AsNoTracking()
+        .Where(x => regIds.Contains(x.RegistrationId)).ToDictionaryAsync(x => x.RegistrationId, ct);
+    var noteRows = (await db.RegistrationNotes.AsNoTracking()
+            .Where(x => regIds.Contains(x.RegistrationId)).ToListAsync(ct))
+        .GroupBy(x => x.RegistrationId)
+        .ToDictionary(gr => gr.Key, gr => gr.OrderBy(n => n.Slot).ToList());
+
+    // Whether THIS caller may read the clinical slots. The approver is an administrative role, so by default
+    // they may not — slot 1 is a diagnosis and slot 3 a treatment, and 18-security-model.md does not make an
+    // exception for the fact that an administrator typed them in. Capture is not disclosure.
+    var mayReadClinical = NoteProjection.MayReadClinical(me.Principal?.Roles);
+
     var items = new List<object>();
     foreach (var b in pending)
     {
@@ -228,6 +286,17 @@ regRead.MapGet("", async (int? page, int? pageSize, PatientDbContext db, Benefic
                 r.CoverageBound,
                 r.Notes,
                 r.UpdatedAt,
+                // What the supervisor is actually approving. Deciding on a registration without being shown
+                // the plan, the tier and the member's share is deciding on a name and a checkbox.
+                enrolment = intents.TryGetValue(r.RegistrationId, out var intent)
+                    ? new
+                    {
+                        intent.PlanId, intent.NetworkTierId,
+                        intent.ContributionPercent, intent.DefaultBranchId,
+                    }
+                    : null,
+                standingNotes = NoteProjection.Project(
+                    noteRows.GetValueOrDefault(r.RegistrationId, []), mayReadClinical),
             },
         });
     }
@@ -319,6 +388,41 @@ reg.MapPost("/{id:guid}/decision", async (Guid id, DecisionRequest req, PatientD
         await db.SaveChangesAsync(ct);
         await audit.EmitAsync(new AuditEventDraft { EntityType = "beneficiary", EntityId = beneficiary.BeneficiaryId.ToString(), Action = AuditAction.StateChange, ActorUserId = actor, DecisionOutcome = "Activated", AfterState = $"{{\"memberNo\":\"{memberNo}\"}}" }, ct);
         await outbox.EnqueueAsync("BeneficiaryActivated", "patient.events", new { tenantId = beneficiary.TenantId, beneficiaryId = beneficiary.BeneficiaryId, memberNo, givenName = beneficiary.GivenName, familyName = beneficiary.FamilyName }, ct);
+
+        // THE INTENT BECOMES A MEMBERSHIP. Approval is the moment the coverage elected at the desk stops
+        // being a plan and starts being one — which is what `coverage_bound` has always claimed and never
+        // did. Published through the same outbox, in the same transaction as the activation, so a broker
+        // that is down delays the enrolment rather than losing it; policy-service's consumer is idempotent
+        // on the event id, so a redelivery does not enrol the person twice.
+        //
+        // Absent for a legacy registration opened before intents existed. That is not an error — those are
+        // enrolled by hand on the Members screen, exactly as they are today.
+        var enrolment = await db.EnrolmentIntents.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.RegistrationId == r.RegistrationId, ct);
+        if (enrolment is not null)
+        {
+            // A DEDICATED destination, not the shared `patient.events` stream. The transport publishes
+            // point-to-point (default exchange, routing key = queue name), so every consumer attached to one
+            // queue COMPETES for its messages: adding policy-service to patient.events would have had
+            // RabbitMQ round-robin each event between it and eligibility-service, and eligibility acks event
+            // types it does not handle. The result would be an enrolment that happens for roughly half the
+            // approvals and silently vanishes for the rest — the worst possible failure here, because the
+            // member number is issued either way and nothing looks wrong.
+            await outbox.EnqueueAsync("RegistrationEnrolmentRequested", "policy.registration-enrolments", new
+            {
+                tenantId = beneficiary.TenantId,
+                registrationId = r.RegistrationId,
+                beneficiaryId = beneficiary.BeneficiaryId,
+                memberNo,
+                planId = enrolment.PlanId,
+                networkTierId = enrolment.NetworkTierId,
+                contributionPercent = enrolment.ContributionPercent,
+                branchId = enrolment.DefaultBranchId,
+                // Cover starts the day the supervisor approved, not the day the form was filled in. A
+                // back-dated start would grant benefit for the review window, which nobody decided to grant.
+                effectiveFrom = calendar.Today().ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            }, ct);
+        }
         return Results.Ok(new { r.RegistrationId, status = r.Status.ToString(), beneficiary.BeneficiaryId, memberNo });
     }
 
@@ -386,6 +490,9 @@ v1.MapPost("/{id:guid}/status", async (Guid id, StatusChange req, PatientDbConte
 
 app.MapBeneficiarySummaries();   // 19.5 — name-only batch for one page of policy-service's member query
 app.MapBeneficiaryContacts();    // 19.5b — read/upsert contacts; the owner of the field owns the write path
+
+// Register-or-update by card number — what makes a corrected intake file safe to re-upload.
+app.MapBeneficiaryIntake();
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

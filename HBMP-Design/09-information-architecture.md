@@ -280,13 +280,14 @@ flowchart TD
 | Status labels match taxonomy | "Eligible", "Pending approval", "Partially used" (0A §5.2). |
 | Avoid ambiguous abbreviations | Prefer "Turnaround Time (TAT)" on first use. |
 | Business keys shown human-readable | `MRS-M-…`, `ORD-…`, `RX-…`, `AUTH-…`, `REF-…`. |
-| Sentence case for UI labels | "Book appointment" not "Book Appointment". |
+| **Title Case for section names** | Nav-rail items, page `<h1>`, portal titles/eyebrows and browser-tab titles: "Register New", "Book Appointment", "Vitals & Triage" — *not* "Register new". Short function words stay lowercase mid-title ("Book an Appointment"); acronyms keep their case ("SLA / TAT Board"); a hyphenated compound capitalises only its head ("Check-in"). Enforced by `apps/web/test/portal-access.test.tsx`. |
+| Sentence case for everything else | Buttons, field labels, helper text, toasts, dialog body copy: "Request access", "Given name". Only *names of sections* are Title Cased. |
 
 ---
 
 ## 9. Bilingual / RTL IA considerations
 
-- **Directional layout:** In Arabic (RTL), the entire IA mirrors — primary nav moves to the right, breadcrumbs read right-to-left, progress wizards flow right-to-left. This is layout mirroring, not just text (NFR-061).
+- **Directional layout:** In Arabic (RTL), the entire IA mirrors — primary nav moves to the right, progress wizards flow right-to-left. This is layout mirroring, not just text (NFR-061).
 - **Icon mirroring:** Directional icons (back/forward, next-step chevrons) flip; non-directional icons (status glyphs) do not.
 - **Label parity:** No screen ships with an untranslated string; language toggle persists per user (0A §5.3).
 - **Numerals & dates:** Configurable Arabic-Indic vs. Western numerals; dates in `Africa/Cairo`.
@@ -303,7 +304,7 @@ Every portal shares a consistent shell, differing only in the **content** of pri
 +------------------------------------------------------------------+
 | [Mersal logo]  Portal name        [Search]   [AR/EN] [🔔] [User▾] |
 +----------------+-------------------------------------------------+
-| PRIMARY NAV    |  Breadcrumb ▸ ▸                                  |
+| PRIMARY NAV    |  Page header (section h1)                        |
 | (role-aware)   |                                                 |
 |  • Home        |  <Content area — task/entity views>             |
 |  • Queue/Work  |                                                 |

@@ -37,6 +37,24 @@ public sealed class BulkJobEngine(
         appliers.FirstOrDefault(a => a.JobType == type)
         ?? throw new InvalidOperationException($"No applier is registered for {type}.");
 
+    /// <summary>Bind the job's stored batch defaults onto the caller's scope. The scope carries who and where;
+    /// the job carries what the batch is for, and only the job can, because upload is where it was stated.</summary>
+    private static BulkScope WithJobDefaults(BulkScope scope, BulkJob job)
+    {
+        var defaults = new BulkJobDefaults(job.DefaultPlanId, job.DefaultNetworkTierId, job.DefaultBranchId);
+        if (!defaults.Any) return scope;
+        return new BulkScope
+        {
+            Actor = scope.Actor,
+            BearerToken = scope.BearerToken,
+            Payers = scope.Payers,
+            PermittedBranchIds = scope.PermittedBranchIds,
+            ActiveBranchId = scope.ActiveBranchId,
+            MaySupervise = scope.MaySupervise,
+            Defaults = defaults,
+        };
+    }
+
     // ---- 1. Upload: scan first, then parse ---------------------------------------------------------------
 
     /// <summary>
@@ -45,7 +63,8 @@ public sealed class BulkJobEngine(
     /// </summary>
     public async Task<BulkJob> UploadAsync(
         BulkJobType jobType, string fileName, string contentType, byte[] content,
-        ActorRef actor, string? actorUsername, string? bearerToken, CancellationToken ct = default)
+        ActorRef actor, string? actorUsername, string? bearerToken,
+        BulkJobDefaults? defaults = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(actor);
         var now = clock.GetUtcNow();
@@ -54,6 +73,10 @@ public sealed class BulkJobEngine(
             JobId = Guid.NewGuid(), JobType = jobType, FileName = fileName,
             BatchId = Guid.NewGuid(), Status = BulkJobStatus.Scanning,
             SubmittedByUserId = actor.UserId, SubmittedByUsername = actorUsername, SubmittedAt = now,
+            // Captured at UPLOAD, so the dry run and the commit apply the same ones.
+            DefaultPlanId = defaults?.PlanId,
+            DefaultNetworkTierId = defaults?.NetworkTierId,
+            DefaultBranchId = defaults?.BranchId,
             CreatedAt = now, UpdatedAt = now, CreatedBy = actor.UserId, UpdatedBy = actor.UserId,
         };
         db.BulkJobs.Add(job);
@@ -141,6 +164,9 @@ public sealed class BulkJobEngine(
         if (!BulkJobTransitions.MayValidate(job.Status))
             return BulkValidationReport.Refused(job, $"A {job.Status} job cannot be validated.");
 
+        // The batch defaults come off the JOB, not off this request — so the dry run models what the commit
+        // will do rather than whatever the client happened to send this time.
+        scope = WithJobDefaults(scope, job);
         var applier = ApplierFor(job.JobType);
         var rows = await db.BulkJobRows.Where(r => r.JobId == jobId).OrderBy(r => r.RowNumber).ToListAsync(ct);
 
@@ -224,6 +250,7 @@ public sealed class BulkJobEngine(
                     ? "This job has already been committed. Re-committing is safe (rows are idempotent by job and row number) but must be started from a validated job."
                     : $"A {job.Status} job cannot be committed — validate it first.");
 
+        scope = WithJobDefaults(scope, job);
         var applier = ApplierFor(job.JobType);
         var rowIds = await db.BulkJobRows
             .Where(r => r.JobId == jobId && (r.Status == BulkRowStatus.Valid || r.Status == BulkRowStatus.Failed))

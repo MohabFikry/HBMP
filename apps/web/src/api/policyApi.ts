@@ -797,7 +797,14 @@ export interface PolicyApi {
 
   // Documents (19.3b)
   documents(scope: "policies" | "enrollments", id: string): Promise<PolicyDocumentView[]>;
-  documentDownloadUrl(linkId: string): Promise<{ url: string; expiresAt?: string }>;
+  documentDownloadUrl(linkId: string, purpose?: string): Promise<{ url: string; expiresAt?: string }>;
+  attachDocument(
+    scope: "policies" | "enrollments",
+    id: string,
+    file: File,
+    meta: { documentClass: string; title: string; documentDate?: string; description?: string },
+    key?: string,
+  ): Promise<PolicyDocumentView>;
 
   // Timeline (19.3c)
   timeline(scope: "policies" | "enrollments", id: string, cursor?: string): Promise<TimelinePage>;
@@ -817,7 +824,14 @@ export interface PolicyApi {
 
   // Bulk (19.5b)
   bulkTemplates(): Promise<BulkTemplateView[]>;
-  uploadBulk(jobType: string, file: File, idempotencyKey: string): Promise<BulkJobView>;
+  uploadBulk(
+    jobType: string,
+    file: File,
+    idempotencyKey: string,
+    /** Coverage stated once for the whole batch; fills any cell the file leaves blank. No contribution — that
+     *  varies member by member, and one batch-wide figure is the mistake this must not make easy. */
+    defaults?: { planId?: string | null; networkTierId?: string | null; branchId?: string | null },
+  ): Promise<BulkJobView>;
   validateBulk(jobId: string): Promise<BulkValidationView>;
   commitBulk(jobId: string, idempotencyKey: string): Promise<BulkCommitView>;
   bulkRows(jobId: string, status?: string): Promise<BulkRowView[]>;
@@ -887,8 +901,22 @@ export function createHttpPolicyApi(): PolicyApi {
     pinNote: (noteId, pinned) => postRaw(`/notes/${noteId}/${pinned ? "pin" : "unpin"}`, {}) as Promise<NoteView>,
 
     documents: (scope, id) => getRaw(`/${scope}/${id}/documents`) as Promise<PolicyDocumentView[]>,
-    documentDownloadUrl: (linkId) =>
-      getRaw(`/documents/${linkId}/download`) as Promise<{ url: string; expiresAt?: string }>,
+    // `purpose` reaches the server's audit record verbatim, which is how a LOOK (the eye) is distinguishable
+    // from a TAKE (the download) a year later. Both are disclosures; they are not the same disclosure.
+    documentDownloadUrl: (linkId, purpose) =>
+      getRaw(`/documents/${linkId}/download${q({ purpose })}`) as Promise<{ url: string; expiresAt?: string }>,
+    attachDocument: (scope, id, file, meta, key) =>
+      postForm(
+        `/${scope}/${id}/documents`,
+        {
+          file,
+          documentClass: meta.documentClass,
+          title: meta.title,
+          ...(meta.documentDate ? { documentDate: meta.documentDate } : {}),
+          ...(meta.description ? { description: meta.description } : {}),
+        },
+        key,
+      ) as Promise<PolicyDocumentView>,
 
     timeline: (scope, id, cursor) => getRaw(`/${scope}/${id}/timeline${q({ cursor })}`) as Promise<TimelinePage>,
 
@@ -910,9 +938,19 @@ export function createHttpPolicyApi(): PolicyApi {
 
     bulkTemplates: () => getRaw("/bulk-templates") as Promise<BulkTemplateView[]>,
     // `jobType` is a query parameter on the service (the body is the multipart file), so it travels in the
-    // URL rather than as a form field.
-    uploadBulk: (jobType, file, key) =>
-      postForm(`/bulk-jobs${q({ jobType })}`, { file }, key) as Promise<BulkJobView>,
+    // URL rather than as a form field. The batch defaults ride alongside it: they are recorded on the JOB, so
+    // stating them at upload is what makes the dry run and the commit agree about them.
+    uploadBulk: (jobType, file, key, defaults) =>
+      postForm(
+        `/bulk-jobs${q({
+          jobType,
+          defaultPlanId: defaults?.planId ?? undefined,
+          defaultNetworkTierId: defaults?.networkTierId ?? undefined,
+          defaultBranchId: defaults?.branchId ?? undefined,
+        })}`,
+        { file },
+        key,
+      ) as Promise<BulkJobView>,
     validateBulk: (jobId) => postRaw(`/bulk-jobs/${jobId}/validate`, {}) as Promise<BulkValidationView>,
     commitBulk: (jobId, key) => postRaw(`/bulk-jobs/${jobId}/commit`, {}, key) as Promise<BulkCommitView>,
     bulkRows: (jobId, status) => getRaw(`/bulk-jobs/${jobId}/rows${q({ status })}`) as Promise<BulkRowView[]>,

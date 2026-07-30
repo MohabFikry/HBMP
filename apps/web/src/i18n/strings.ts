@@ -134,7 +134,6 @@ export const L = {
   accountClose: { en: "Close account menu", ar: "إغلاق قائمة الحساب" },
   settings: { en: "Settings", ar: "الإعدادات" },
   appearance: { en: "Appearance", ar: "المظهر" },
-  breadcrumb: { en: "Breadcrumb", ar: "مسار التنقل" },
   staySignedIn: { en: "Stay signed in", ar: "البقاء مسجلاً" },
   timeoutTitle: { en: "Session about to expire", ar: "الجلسة على وشك الانتهاء" },
   timeoutBody: {

@@ -76,7 +76,40 @@ public static partial class PersonFieldValidation
         _ => !string.IsNullOrWhiteSpace(value) && value.Trim().Length <= 300,
     };
 
+    /// <summary>
+    /// The card number as printed. A leading '#' is conventional rather than structural, so it is accepted
+    /// and stripped by <see cref="NormalizeCardNumber"/> rather than demanded — an operator who types the
+    /// number without it has not made a mistake, and one who types it has not either. Beyond that the rule
+    /// is only that it is short, non-empty and free of separators that would let two spellings of one card
+    /// slip past the uniqueness index.
+    /// </summary>
+    public static bool IsValidCardNumber(string value) =>
+        CardNumber().IsMatch(NormalizeCardNumber(value));
+
+    /// <summary>Strip the decorative '#', case and internal spacing so that "#A-1234", "a-1234" and "A 1234"
+    /// cannot become three rows for one card. Normalized before both validation and the uniqueness check, for
+    /// the same reason identifiers are.</summary>
+    public static string NormalizeCardNumber(string? value) =>
+        (value ?? "").Trim().TrimStart('#').Replace(" ", "", StringComparison.Ordinal).ToUpperInvariant();
+
+    /// <summary>ISO 3166-1 alpha-2. Two letters, and the SHAPE only — this service is not the registry of
+    /// which countries exist, and rejecting a code masterdata accepts would be a second opinion nobody asked
+    /// for.</summary>
+    public static bool IsValidNationalityCode(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && NationalityCode().IsMatch(value.Trim());
+
+    public static bool IsValidSex(string? value) =>
+        value is "Male" or "Female" or "Other" or "Unknown";
+
+    /// <summary>A programme reference (individual / case number). Free-form across partners, so bounded and
+    /// separator-tolerant rather than patterned.</summary>
+    public static bool IsValidReference(string? value) =>
+        string.IsNullOrWhiteSpace(value) || (value.Trim().Length <= 60 && Reference().IsMatch(value.Trim()));
+
     [GeneratedRegex(@"^[\p{L}\p{M}][\p{L}\p{M}'\-\. ]*$")] private static partial Regex Name();
     [GeneratedRegex(@"^\+?\d{8,15}$")] private static partial Regex Phone();
     [GeneratedRegex(@"^[^@\s]+@[^@\s]+\.[^@\s]+$")] private static partial Regex Email();
+    [GeneratedRegex(@"^[A-Z0-9\-/]{1,40}$")] private static partial Regex CardNumber();
+    [GeneratedRegex(@"^[A-Za-z]{2}$")] private static partial Regex NationalityCode();
+    [GeneratedRegex(@"^[A-Za-z0-9\-/ ]+$")] private static partial Regex Reference();
 }

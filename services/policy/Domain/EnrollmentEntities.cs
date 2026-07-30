@@ -113,6 +113,20 @@ public sealed class Enrollment
     /// before 0013.</summary>
     public Guid? BranchId { get; set; }
 
+    /// <summary>
+    /// The network tier THIS member sits on, overriding nothing when null.
+    ///
+    /// <para>Cost share is otherwise a property of the plan version — one row per benefit category per tier —
+    /// which answers "what does this plan pay at this tier" and cannot answer "what does this member pay".
+    /// Two members on one plan routinely sit on different tiers, and a plan-level matrix has no way to say so.
+    /// Null means take the plan's answer, which is what every row written before 0017 means.</para>
+    /// </summary>
+    public Guid? NetworkTierId { get; set; }
+
+    /// <summary>The member's share of the service price, 0..100, or null to take the plan's cost share. The
+    /// one value that routinely varies between members enrolled together in a single batch.</summary>
+    public decimal? ContributionPercent { get; set; }
+
     /// <summary>Replay guard. The overlap exclusion makes a double enrolment structurally impossible; this
     /// makes a RETRY return the row the caller already created rather than a 409.</summary>
     public string? IdempotencyKey { get; set; }

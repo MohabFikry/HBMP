@@ -39,6 +39,90 @@ live on `waitlist_entry`. Types: `WalkIn | Scheduled | Referral | FollowUp`.
   require an `originEncounterId`. Returns `201` with the appointment; emits `ApptBooked` + audit.
 - `GET /api/v1/appointments/{id}` (`appointment:read`).
 
+### The booking pickers, and why they are two reads (14.5)
+
+The booking screen filters on **specialty**, then **doctor**. Both of those facts live in provider-service;
+whether a doctor has any free time lives here. Reception holds no `provider:read` — correctly, since that is
+the whole network directory — so there were two tempting ways to close the gap, and both are wrong:
+
+- have emr fetch practitioner metadata under a service account and return one rich list — the aggregation
+  shape the platform forbids outright (`NoServiceAccountArchitectureTests` in profile-service);
+- grant the front desk `provider:read` — contracts, tariffs and tiers along with it.
+
+Instead the scope was sized to the need (`practitioner:read`, identity migration 0018), and the answer is
+assembled from **two authorized reads, each from the service that owns the data**:
+
+- `GET /api/v1/booking/doctor-availability?branchId=` (`appointment:read`) — **this** service, from the slot
+  table alone, exactly as `/branch-clinics` is: `{ doctorId, branchId, openSlots, nextSlotStart }`. No name,
+  no specialty; `DoctorAvailabilityBoundaryTests` pins that shape so the convenience of adding them cannot
+  arrive unnoticed.
+- `GET /api/v1/practitioners?branchId=&specialtyCode=` (provider-service, `practitioner:read`) — who they are.
+
+The client joins them (`bookableDoctors`) and keeps the intersection, so a doctor with a full calendar and a
+doctor who does not work at that branch are both simply not offered.
+
+### The reception dashboard's reads (14.5)
+
+- `GET /api/v1/appointments/summary?date=` (`appointment:read`) — `{ total, checkedIn, noShow }` for one
+  Cairo day, branch-scoped exactly like the board. Counted in the database rather than tallied from
+  `GET /appointments`, which is capped at 200 rows: on a busy branch a client-side tally would undercount,
+  and undercounting is the direction nobody notices.
+- `GET /api/v1/appointments?from=&to=` — an INCLUSIVE range of Cairo civil days, each end expanded to its own
+  day, so "Sunday to Thursday" includes Thursday's evening clinic (`AppointmentDay.CairoRange`).
+- `GET /api/v1/appointment-days` — per-day open-slot counts for the booking calendar.
+- `GET /api/v1/appointment-slots?doctorId=` — the chosen doctor's slots only.
+
+**`AppointmentResponse.beneficiaryName`** is populated from the QUEUE TICKET, which captured it at check-in.
+So an arrived patient has a name here and a merely-booked one does not — and that asymmetry is the honest
+one: emr holds no beneficiary demographics and must not fetch them from a sibling to fill the gap. The
+dashboard shows names for today's *visits*, i.e. people who have arrived, which is exactly the set this
+covers. Reception seeing the name is a signed-off decision; the masked token remains on the boards that do
+not need it. Doctor name and specialty are NOT here — the client joins those from provider-service under
+`practitioner:read`.
+
+### Eligibility at booking (14.5)
+
+`POST /appointments` refuses a member who is not **Active** — 422 `urn:hbmp:member-not-active`, with
+`BookingGate`'s per-status guidance. The harm being prevented is concrete: a suspended member told they have
+an appointment travels to a clinic, often a long way and at their own cost, and is turned away.
+
+`BookingGate` shares its DECISION with `VisitGate` (Active-only) and deliberately differs on WORDING — one
+speaks to a desk with the patient present, the other to someone arranging a date weeks out.
+`BookingGateTests` asserts both halves, so collapsing them into one call fails the build rather than quietly
+telling a call-centre agent to "complete activation before starting a visit".
+
+**Unknown is allowed through**, on the same reasoning as the practitioner probe beside it: `GetStatusAsync`
+answers null when eligibility-service is unreachable, and refusing every booking on the platform because one
+sibling is briefly down does more harm than an occasional booking for a lapsed member — which check-in and
+the visit gate still catch before any care is given. Fail-open is safe *because* the rule is enforced again
+at the door.
+
+The booking screen checks too, at the moment of search, and that is a courtesy rather than the control: the
+call centre reaches this endpoint through its own façade, and any client skipping the search step would
+otherwise book freely.
+
+### The booking note (14.5) — administrative, and deliberately not clinical
+
+`appointment.note` (migration 0011) is a short GENERAL note captured at booking: access needs, an interpreter,
+an arrangement. Written by reception or the call centre; read by both plus the treating doctor.
+
+**Why the boundary is enforced rather than documented.** This field is readable across a line the platform
+otherwise holds hard — the call centre writes it and a clinician reads it, and the call centre is given no
+clinical surface anywhere else (11-permission-matrix; callcentre-service holds no emr scope). A free-text box
+spanning that line is exactly where clinical detail accumulates unless something stops it. So:
+
+- `AppointmentNote` caps it at 500 and **refuses** rather than truncating (400 `urn:hbmp:note-too-long`) —
+  silently cutting a note loses a tail the operator believes they wrote;
+- migration 0011 caps it again as `varchar(500)`, because the API is not the only writer a schema outlives;
+- it lives on the **appointment**, not the encounter, so it is not part of the clinical record, does not
+  reach the profile seam's encounter projection, and cannot be read with `emr:read` alone
+  (`AppointmentNoteTests` pins that);
+- the audit event records **`hasNote`, never the text** — copying free text into the hash-chained store would
+  make whatever an operator typed permanent and uncorrectable.
+
+No new scope: a caller who may read the appointment may read its note, which is exactly the sharing the three
+teams asked for.
+
 **No double-book (critical).** A slot holds at most one **active** (`Booked`/`CheckedIn`) appointment,
 enforced in depth: (1) the booking transaction locks the slot row `FOR UPDATE` so concurrent bookers
 serialize and an existing hold is detected; (2) the `ux_appointment_active_slot` **partial-unique index**

@@ -27,6 +27,13 @@ public sealed class BulkScope
     public Guid? ActiveBranchId { get; init; }
     public bool MaySupervise { get; init; }
 
+    /// <summary>
+    /// The batch-level coverage the operator stated once at upload, read off the JOB so validate and commit
+    /// agree. Fills a cell the file left blank; never overrides one the file states — a default that could
+    /// override would silently move members off the plan their row names.
+    /// </summary>
+    public BulkJobDefaults Defaults { get; init; } = BulkJobDefaults.None;
+
     /// <summary>Per-job memo of beneficiary statuses. A 10 000-row file would otherwise make 10 000 calls to
     /// patient-service to ask the same question about the same few hundred people.</summary>
     public Dictionary<Guid, string?> BeneficiaryStatuses { get; } = [];
@@ -174,36 +181,144 @@ internal static class BulkResolve
 // MemberEnrolment
 // ============================================================================================================
 
+/// <summary>
+/// Register-and-enrol from an intake file, keyed on the CARD NUMBER.
+///
+/// <para><b>The upsert is the point.</b> A ten-thousand-row file is corrected and re-uploaded — that is the
+/// normal case. The idempotency key is therefore derived from the CARD and the coverage, not from
+/// <c>(job, row)</c>: a per-job key mints a fresh value on every upload, so the second attempt at a row would
+/// hit the overlap exclusion and fail as a duplicate enrolment. Keyed on the business facts, an unchanged row
+/// replays as <see cref="RowOutcome.Skipped"/> and only what actually changed is written.</para>
+///
+/// <para>The person is upserted through patient-service, which owns beneficiaries and therefore owns the
+/// decision about what "the same person" means. It refuses to move a card between people; that failure
+/// surfaces as an ordinary row error naming whose card it is.</para>
+/// </summary>
 public sealed class MemberEnrolmentApplier(
-    PolicyDbContext db, MembershipCommands membership, IBeneficiaryStatusProbe beneficiaries) : IBulkRowApplier
+    PolicyDbContext db, MembershipCommands membership, IBeneficiaryIntake intake,
+    INetworkTierCatalog tiers, IBusinessCalendar calendar, TimeProvider clock) : IBulkRowApplier
 {
     public BulkJobType JobType => BulkJobType.MemberEnrolment;
     public bool IsReversible => true;
 
+    /// <summary>
+    /// The dry run resolves everything EXCEPT the person: validating must not create anybody.
+    ///
+    /// <para>That is the one asymmetry between validate and apply, and it is deliberate. "Validation is a dry
+    /// run — commit is what writes" is the guarantee the whole screen is built on, and a validate pass that
+    /// registered ten thousand people while reporting that nothing had been applied would destroy it.</para>
+    /// </summary>
     public async Task<RowOutcome> ValidateAsync(ParsedRow row, BulkScope scope, CancellationToken ct = default)
     {
-        var (command, preview, error) = await ResolveAsync(row, scope, ct);
-        return error is not null ? new RowOutcome.Invalid(error) : new RowOutcome.Valid(command!, preview!);
+        var (plan, error) = await ResolveAsync(row, scope, ct);
+        if (error is not null) return new RowOutcome.Invalid(error);
+        return new RowOutcome.Valid(plan!, Preview(plan!));
     }
 
     public async Task<RowOutcome> ApplyAsync(
         ParsedRow row, BulkScope scope, Guid jobId, int rowNumber, CancellationToken ct = default)
     {
-        var (command, preview, error) = await ResolveAsync(row, scope, ct);
+        var (resolved, error) = await ResolveAsync(row, scope, ct);
         if (error is not null) return new RowOutcome.Invalid(error);
+        var plan = resolved!;
 
-        var key = BulkIdempotency.KeyFor(jobId, rowNumber);
-        var result = await membership.EnrollAsync(command!, key, scope.BearerToken, scope.Actor, ct);
+        // 1) The person. Created on a first upload, updated on a re-upload, refused if the card belongs to
+        //    somebody else.
+        BeneficiaryIntakeResult? person;
+        try
+        {
+            person = await intake.UpsertAsync(plan.Intake, scope.BearerToken, ct);
+        }
+        catch (BeneficiaryProbeRefusedException)
+        {
+            return new RowOutcome.Invalid(RowError.Rule("BENEFICIARY_WRITE_DENIED",
+                "You are not permitted to register beneficiaries; no row was applied.",
+                "غير مصرح لك بتسجيل المستفيدين؛ لم يُطبَّق أي صف."));
+        }
+        catch (HttpRequestException ex)
+        {
+            // Named rather than swallowed. An unreachable patient-service is an outage, and reporting it as a
+            // bad row would send the operator to edit a spreadsheet that has nothing wrong with it.
+            return new RowOutcome.Invalid(RowError.Rule("BENEFICIARY_SERVICE_UNAVAILABLE",
+                $"The beneficiary registry could not be reached ({ex.StatusCode}); this row was not applied.",
+                "تعذّر الوصول إلى سجل المستفيدين؛ لم يُطبَّق هذا الصف."));
+        }
+        if (person is null)
+            return new RowOutcome.Invalid(RowError.Unknown("Beneficiary", plan.Intake.CardNumber));
+
+        // 1a) A row that does not claim the member is already Active leaves them PENDING, exactly as the
+        //     registration form does — approval is a supervisor's decision and an import is not a way around
+        //     it. Their coverage is created when they are approved, by the same consumer that handles the
+        //     form path, so there is one route from "approved" to "covered" rather than two.
+        //
+        //     Reported as APPLIED, not failed. The person WAS created; calling that a failure would send the
+        //     operator to re-upload a file that had already done its job, and the second run would then be
+        //     the thing that looked wrong.
+        if (!string.Equals(person.Status, "Active", StringComparison.OrdinalIgnoreCase))
+        {
+            // A row the re-upload did not change is reported as such, not as work done. An operator who
+            // corrects three rows in a thousand-row file and is told a thousand were applied has been given
+            // a number that tells them nothing about what they just did.
+            if (!person.Changed) return new RowOutcome.Skipped("unchanged — already registered, awaiting approval");
+
+            var registered = Preview(plan);
+            return new RowOutcome.Applied(null, null, registered with
+            {
+                SummaryEn = $"{registered.SummaryEn} → registered, awaiting approval; coverage starts when approved",
+                SummaryAr = $"{registered.SummaryAr} ← تم التسجيل بانتظار الاعتماد؛ تبدأ التغطية عند الاعتماد",
+            });
+        }
+
+        // 2) The membership. The key is the BUSINESS one, so re-uploading the same file replays instead of
+        //    colliding with the overlap exclusion.
+        var command = new EnrollCommand(
+            person.BeneficiaryId, plan.PolicyId, plan.PolicyPlanId, GroupId: null, "Principal",
+            PrincipalEnrollmentId: null, plan.EffectiveFrom, EffectiveTo: null, plan.BranchId, AgeYears: null);
+
+        var key = BulkIdempotency.KeyFor(
+            $"card:{plan.Intake.CardNumber}:plan:{plan.PolicyPlanId}:from:{plan.EffectiveFrom:yyyy-MM-dd}");
+        var result = await membership.EnrollAsync(command, key, scope.BearerToken, scope.Actor, ct: ct);
         if (!result.Ok) return new RowOutcome.Invalid(BulkResolve.FromMembership(result.Error!));
 
         var outcome = result.Value!;
-        return outcome.WasReplay
-            ? new RowOutcome.Skipped($"already applied as {outcome.Enrollment.MemberNo}")
-            : new RowOutcome.Applied(outcome.Enrollment.EnrollmentId, null, preview! with
+
+        // 3) The member-level cost share. Written on both paths: a re-upload whose ONLY change is the
+        //    contribution is the single most common correction an operator makes, and treating the row as a
+        //    pure replay would silently discard exactly the edit they came back to make.
+        var enrollment = await db.Enrollments.FirstOrDefaultAsync(e => e.EnrollmentId == outcome.Enrollment.EnrollmentId, ct);
+        var costShareChanged = false;
+        if (enrollment is not null)
+        {
+            costShareChanged = enrollment.NetworkTierId != plan.NetworkTierId
+                               || enrollment.ContributionPercent != plan.ContributionPercent;
+            if (costShareChanged)
             {
-                SummaryEn = $"{preview!.SummaryEn} → {outcome.Enrollment.MemberNo}",
-            });
+                enrollment.NetworkTierId = plan.NetworkTierId;
+                enrollment.ContributionPercent = plan.ContributionPercent;
+                enrollment.UpdatedAt = clock.GetUtcNow();
+                await db.SaveChangesAsync(ct);
+            }
+        }
+
+        var preview = Preview(plan);
+        if (outcome.WasReplay && !person.Changed && !costShareChanged)
+            return new RowOutcome.Skipped($"unchanged — already applied as {outcome.Enrollment.MemberNo}");
+
+        return new RowOutcome.Applied(outcome.Enrollment.EnrollmentId, null, preview with
+        {
+            SummaryEn = $"{preview.SummaryEn} → {outcome.Enrollment.MemberNo}"
+                        + (person.Created ? " (registered)" : outcome.WasReplay ? " (updated)" : ""),
+        });
     }
+
+    private static RowPreview Preview(ResolvedIntake plan) => RowPreview.Of(
+        $"{(plan.Intake.Status is null ? "Register" : plan.Intake.Status)} {plan.Intake.FirstName} {plan.Intake.LastName} "
+        + $"on {plan.PlanLabel} ({plan.TierCode}), {plan.ContributionPercent}% share, from {plan.EffectiveFrom:yyyy-MM-dd}",
+        $"تسجيل {plan.Intake.FirstName} {plan.Intake.LastName} على {plan.PlanLabel} ({plan.TierCode}) "
+        + $"بمشاركة {plan.ContributionPercent}% اعتبارًا من {plan.EffectiveFrom:yyyy-MM-dd}",
+        ("cardNumber", plan.Intake.CardNumber), ("plan", plan.PlanLabel), ("networkTier", plan.TierCode),
+        ("contribution", plan.ContributionPercent), ("branchId", plan.BranchId),
+        ("effectiveFrom", plan.EffectiveFrom.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
 
     public async Task<RowOutcome> ReverseAsync(BulkJobRow row, BulkScope scope, CancellationToken ct = default)
     {
@@ -232,86 +347,216 @@ public sealed class MemberEnrolmentApplier(
             : new RowOutcome.Invalid(BulkResolve.FromMembership(result.Error!));
     }
 
-    private async Task<(EnrollCommand? Command, RowPreview? Preview, RowError? Error)> ResolveAsync(
+    /// <summary>Everything a row resolves to, before anything is written.</summary>
+    internal sealed record ResolvedIntake(
+        BeneficiaryIntake Intake, Guid PolicyId, Guid PolicyPlanId, string PlanLabel,
+        Guid NetworkTierId, string TierCode, decimal ContributionPercent,
+        Guid? BranchId, DateOnly EffectiveFrom);
+
+    private async Task<(ResolvedIntake? Plan, RowError? Error)> ResolveAsync(
         ParsedRow row, BulkScope scope, CancellationToken ct)
     {
-        if (BulkResolve.Guid(row, "beneficiary_id", true, out var beneficiaryId) is { } e1) return (null, null, e1);
-        if (BulkResolve.Required(row, "policy_no", out var policyNo) is { } e2) return (null, null, e2);
-        if (BulkResolve.Required(row, "relationship", out var relationship) is { } e3) return (null, null, e3);
-        if (BulkResolve.Date(row, "effective_from", true, out var effectiveFrom) is { } e4) return (null, null, e4);
-        if (BulkResolve.Date(row, "effective_to", false, out var effectiveTo) is { } e5) return (null, null, e5);
-        if (BulkResolve.Guid(row, "branch_id", false, out var branchId) is { } e6) return (null, null, e6);
+        // ── The person ──────────────────────────────────────────────────────────────────────────────────
+        if (BulkResolve.Required(row, "card_number", out var rawCard) is { } e1) return (null, e1);
+        if (BulkResolve.Required(row, "first_name", out var firstName) is { } e2) return (null, e2);
+        if (BulkResolve.Required(row, "last_name", out var lastName) is { } e3) return (null, e3);
+        if (BulkResolve.Required(row, "gender", out var gender) is { } e4) return (null, e4);
+        if (BulkResolve.Required(row, "nationality", out var nationality) is { } e5) return (null, e5);
+        if (BulkResolve.Required(row, "phone_no", out var phone) is { } e6) return (null, e6);
+        if (BulkResolve.Date(row, "birthdate", true, out var birthDate) is { } e7) return (null, e7);
 
-        if (!Enum.TryParse<Relationship>(relationship, ignoreCase: true, out _))
-            return (null, null, RowError.BadFormat("relationship", "relationship (Principal, Spouse, Child, Dependent)"));
+        // The same normalization patient-service applies, so the key this file matches on is the key that
+        // service stores. Two normalizations would mean a re-upload silently creating a second person.
+        var card = NormalizeCard(rawCard);
+        if (card.Length == 0) return (null, RowError.MissingColumn("card_number"));
 
-        int? age = null;
-        if (row.Text("age_years") is { } rawAge)
+        var sex = gender.Trim().ToLowerInvariant() switch
         {
-            if (!BulkCells.TryInt(rawAge, out var parsedAge)) return (null, null, RowError.BadFormat("age_years", "whole number"));
-            age = parsedAge;
+            "male" or "m" or "ذكر" => "Male",
+            "female" or "f" or "أنثى" => "Female",
+            "other" or "آخر" => "Other",
+            "unknown" or "غير معروف" => "Unknown",
+            _ => null,
+        };
+        if (sex is null) return (null, RowError.BadFormat("gender", "Male, Female, Other or Unknown"));
+
+        if (nationality.Trim().Length != 2)
+            return (null, RowError.BadFormat("nationality", "ISO 3166-1 alpha-2 country code, e.g. SY"));
+
+        // Age is deliberately absent from the template — it is derived from the birthdate everywhere. A file
+        // that supplied both would eventually supply two different answers with no rule to choose between them.
+        if (birthDate > calendar.Today())
+            return (null, RowError.Rule("BIRTHDATE_IN_FUTURE",
+                "The birth date is in the future.", "تاريخ الميلاد في المستقبل."));
+
+        // ── The coverage ────────────────────────────────────────────────────────────────────────────────
+        //
+        // The batch defaults fill a BLANK cell and never override a stated one. That asymmetry is the whole
+        // safety property: an operator who states the plan once for five hundred rows is spared five hundred
+        // chances to mistype it, while the row that genuinely differs still says so and is still believed.
+        var rawContribution = row.Text("contribution");
+        if (string.IsNullOrWhiteSpace(rawContribution))
+            return (null, RowError.MissingColumn("contribution"));
+
+        if (!BulkCells.TryDecimal(rawContribution.TrimEnd('%', ' '), out var contribution))
+            return (null, RowError.BadFormat("contribution", "percentage, e.g. 20"));
+        if (contribution is < 0 or > 100)
+            return (null, RowError.Rule("CONTRIBUTION_OUT_OF_RANGE",
+                "The contribution must be a percentage between 0 and 100.",
+                "يجب أن تكون المشاركة نسبة بين ٠ و ١٠٠."));
+
+        PolicyPlan? plan;
+        var planLabel = row.Text("plan");
+        if (!string.IsNullOrWhiteSpace(planLabel))
+        {
+            var (resolvedPlan, planError) = await PlanByLabelInScopeAsync(planLabel, scope, ct);
+            if (planError is not null) return (null, planError);
+            plan = resolvedPlan;
+        }
+        else if (scope.Defaults.PlanId is { } defaultPlanId)
+        {
+            // Resolved the same way and subject to the same payer scope: a default is a convenience, never a
+            // way past a check the per-row path would have applied.
+            var (resolvedPlan, planError) = await PlanByIdInScopeAsync(defaultPlanId, scope, ct);
+            if (planError is not null) return (null, planError);
+            plan = resolvedPlan;
+        }
+        else return (null, RowError.MissingColumn("plan"));
+
+        // A dependency that refuses or is down is NOT a bad row, and it must not take the whole job down as a
+        // 500 either — the operator would be sent to correct a spreadsheet that has nothing wrong with it.
+        // Reported per row, with the reason, so the file can be re-submitted once the cause is fixed.
+        IReadOnlyList<NetworkTierRef> activeTiers;
+        try
+        {
+            activeTiers = await tiers.ActiveTiersAsync(scope.BearerToken, ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            return (null, RowError.Rule("NETWORK_TIERS_UNAVAILABLE",
+                $"The network-tier catalogue could not be read ({ex.StatusCode}); this row was not evaluated.",
+                "تعذّرت قراءة قائمة شرائح الشبكة؛ لم يتم تقييم هذا الصف."));
         }
 
-        var (policy, policyError) = await BulkResolve.PolicyByNoAsync(db, policyNo, scope, ct);
-        if (policyError is not null) return (null, null, policyError);
-
-        Guid? planId = null;
-        if (row.Text("plan_label") is { } label)
+        NetworkTierRef? tier;
+        var tierCode = row.Text("network_tier");
+        if (!string.IsNullOrWhiteSpace(tierCode))
         {
-            var (plan, planError) = await BulkResolve.PlanByLabelAsync(db, policy!.PolicyId, label, ct);
-            if (planError is not null) return (null, null, planError);
-            planId = plan!.PolicyPlanId;
+            tier = activeTiers.FirstOrDefault(x => string.Equals(x.TierCode, tierCode.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (tier is null) return (null, RowError.Unknown("NetworkTier", tierCode));
         }
-
-        Guid? groupId = null;
-        if (row.Text("group_code") is { } groupCode)
+        else if (scope.Defaults.NetworkTierId is { } defaultTierId)
         {
-            var (group, groupError) = await BulkResolve.GroupByCodeAsync(db, policy!.PolicyId, groupCode, ct);
-            if (groupError is not null) return (null, null, groupError);
-            groupId = group!.GroupId;
+            tier = activeTiers.FirstOrDefault(x => x.NetworkTierId == defaultTierId);
+            // A default naming a tier that is no longer Active fails the ROW rather than being ignored:
+            // silently dropping it would enrol the batch onto whatever the plan happens to default to.
+            if (tier is null) return (null, RowError.Unknown("NetworkTier", defaultTierId.ToString()));
         }
+        else return (null, RowError.MissingColumn("network_tier"));
 
-        Guid? principalEnrollmentId = null;
-        if (row.Text("principal_member_no") is { } principalNo)
-        {
-            var (principal, principalError) = await BulkResolve.MemberByNoAsync(db, principalNo, scope, ct);
-            if (principalError is not null) return (null, null, principalError);
-            principalEnrollmentId = principal!.EnrollmentId;
-        }
-
-        // Branch scope. A branch-restricted caller cannot enrol into a branch they are not permitted; and if
-        // they name none, the row inherits their ACTIVE branch rather than landing as NULL — a bulk file must
-        // not be the way rows arrive with no branch at all once branch scoping is in force for the submitter.
+        // The branch column takes an id, because there is no branch NAME catalogue this service can resolve
+        // against without inventing one. The screen supplies it as a batch default chosen by name, which is
+        // how the common case avoids ever putting an identifier in a spreadsheet.
+        if (BulkResolve.Guid(row, "default_branch", false, out var branchId) is { } e11) return (null, e11);
+        branchId ??= scope.Defaults.BranchId;
         if (scope.PermittedBranchIds is not null)
         {
             branchId ??= scope.ActiveBranchId;
             if (!scope.BranchAllows(branchId))
-                return (null, null, RowError.OutOfScope($"branch {branchId?.ToString() ?? "(none)"}"));
+                return (null, RowError.OutOfScope($"branch {branchId?.ToString() ?? "(none)"}"));
         }
 
-        // A beneficiary who is not Active fails HERE, in the dry run, rather than at commit. This is the single
-        // most common reason a real enrolment file has invalid rows, and finding it in the preview is the
-        // difference between fixing 37 rows and re-running a 10 000-row job.
-        var status = await BulkResolve.BeneficiaryStatusAsync(beneficiaries, beneficiaryId!.Value, scope, ct);
-        if (status is null)
-            return (null, null, RowError.Unknown("Beneficiary", beneficiaryId.Value.ToString()));
-        if (!string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase))
-            return (null, null, RowError.Rule("BENEFICIARY_NOT_ACTIVE",
-                $"The beneficiary is {status}; only an Active beneficiary can be enrolled.",
-                $"حالة المستفيد {status}؛ لا يمكن تسجيل سوى مستفيد نشط."));
+        if (BulkResolve.Date(row, "effective_from", false, out var effectiveFrom) is { } e12) return (null, e12);
 
-        var command = new EnrollCommand(
-            beneficiaryId.Value, policy!.PolicyId, planId, groupId, relationship,
-            principalEnrollmentId, effectiveFrom!.Value, effectiveTo, branchId, age);
+        var notes = new List<(short, string)>();
+        for (short slot = 1; slot <= 6; slot++)
+        {
+            if (row.Text($"note_{slot}") is { } value && !string.IsNullOrWhiteSpace(value))
+                notes.Add((slot, value.Trim()));
+        }
 
-        var preview = RowPreview.Of(
-            $"Enrol {beneficiaryId} on policy {policyNo} from {effectiveFrom:yyyy-MM-dd}",
-            $"تسجيل {beneficiaryId} في الوثيقة {policyNo} اعتبارًا من {effectiveFrom:yyyy-MM-dd}",
-            ("policyNo", policyNo), ("planLabel", row.Text("plan_label")), ("groupCode", row.Text("group_code")),
-            ("relationship", relationship), ("effectiveFrom", effectiveFrom?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
-            ("branchId", branchId));
+        // policy_plan names a plan VERSION; the intent records the PLAN behind it, because that is what the
+        // registration form records and what approval resolves against.
+        var planId = await db.PlanVersions.AsNoTracking()
+            .Where(v => v.PlanVersionId == plan!.PlanVersionId)
+            .Select(v => v.PlanId).FirstOrDefaultAsync(ct);
 
-        return (command, preview, null);
+        var intake = new BeneficiaryIntake(
+            card, firstName.Trim(), row.Text("middle_name")?.Trim(), lastName.Trim(),
+            sex, nationality.Trim().ToUpperInvariant(), phone.Trim(), birthDate,
+            row.Text("individual_no")?.Trim(), row.Text("case_no")?.Trim(),
+            row.Text("status")?.Trim(), notes,
+            // The intent travels WITH the person, so an imported member who is approved later is enrolled by
+            // the same consumer that handles the form path rather than by a second mechanism. The intent
+            // records the PLAN (the product), which is what the form records and what approval resolves
+            // against — so both paths store the same thing and approval cannot behave differently for one.
+            planId, tier.NetworkTierId, contribution, branchId);
+
+        return (new ResolvedIntake(
+            intake, plan!.PolicyId, plan.PolicyPlanId, plan.PlanLabel,
+            tier.NetworkTierId, tier.TierCode, contribution,
+            branchId, effectiveFrom ?? calendar.Today()), null);
+    }
+
+    /// <summary>Mirrors <c>PersonFieldValidation.NormalizeCardNumber</c> in patient-service: the '#' is a
+    /// convention, not data, and case and spacing must not be able to split one card across two records.</summary>
+    private static string NormalizeCard(string? value) =>
+        (value ?? "").Trim().TrimStart('#').Replace(" ", "", StringComparison.Ordinal).ToUpperInvariant();
+
+    /// <summary>
+    /// Find the plan by its label across the policies this caller may write to.
+    ///
+    /// <para>The intake sheet names plans the way the organisation does — "Mersal", "UNCR Direct Billing" —
+    /// and does not carry a policy number, because the operator filling it in does not think in policies. An
+    /// ambiguous label is refused rather than resolved: picking one of two matching plans is a coin toss over
+    /// somebody's entitlement.</para>
+    /// </summary>
+    private async Task<(PolicyPlan? Plan, RowError? Error)> PlanByLabelInScopeAsync(
+        string label, BulkScope scope, CancellationToken ct)
+    {
+        var matches = await db.PolicyPlans.AsNoTracking()
+            .Join(db.Policies.AsNoTracking().Where(p => !p.IsDeleted),
+                pp => pp.PolicyId, p => p.PolicyId, (pp, p) => new { Plan = pp, p.PayerId })
+            .Where(x => !x.Plan.IsDeleted && EF.Functions.ILike(x.Plan.PlanLabel, label.Trim()))
+            .ToListAsync(ct);
+
+        // Payer scope, per row — a bulk file is exactly the shape a reach outside one's own book of business
+        // would take: one line among ten thousand, invisible in any summary.
+        var permitted = matches
+            .Where(x => PayerScopeRules.Check(scope.Payers, x.PayerId) != PayerScopeOutcome.Denied)
+            .Select(x => x.Plan).ToList();
+
+        if (permitted.Count == 0)
+        {
+            return matches.Count > 0
+                ? (null, RowError.OutOfScope($"plan {label}"))
+                : (null, RowError.Unknown("Plan", label));
+        }
+        if (permitted.Count > 1)
+        {
+            return (null, RowError.Rule("AMBIGUOUS_PLAN",
+                $"'{label}' matches {permitted.Count} plans you may write to; name the plan more precisely.",
+                $"الاسم '{label}' يطابق {permitted.Count} خطط ضمن صلاحيتك؛ يُرجى التحديد بدقة."));
+        }
+        return (permitted[0], null);
+    }
+
+    /// <summary>The batch default, resolved through the SAME payer-scope check the per-row path applies. A
+    /// default that skipped it would be a way to write outside one's own book of business by stating the plan
+    /// once at upload instead of in every row.</summary>
+    private async Task<(PolicyPlan? Plan, RowError? Error)> PlanByIdInScopeAsync(
+        Guid planId, BulkScope scope, CancellationToken ct)
+    {
+        var match = await db.PolicyPlans.AsNoTracking()
+            .Join(db.Policies.AsNoTracking().Where(p => !p.IsDeleted),
+                pp => pp.PolicyId, p => p.PolicyId, (pp, p) => new { Plan = pp, p.PayerId })
+            .Where(x => !x.Plan.IsDeleted && x.Plan.PolicyPlanId == planId)
+            .FirstOrDefaultAsync(ct);
+
+        if (match is null) return (null, RowError.Unknown("Plan", planId.ToString()));
+        if (PayerScopeRules.Check(scope.Payers, match.PayerId) == PayerScopeOutcome.Denied)
+            return (null, RowError.OutOfScope($"plan {planId}"));
+        return (match.Plan, null);
     }
 }
 

@@ -81,8 +81,25 @@ public sealed class BeneficiaryReadGuard(
     {
         ["beneficiaryId"] = (b.BeneficiaryId, DefaultPolicies.Classes.Identity),
         ["memberNo"] = (b.MemberNo, DefaultPolicies.Classes.Identity),
+        // The card number identifies WHICH person is in front of you — the same job as the member number,
+        // and the number a receptionist is actually holding. Identity, not pii: it is printed on a card the
+        // beneficiary hands over, and withholding it would leave every desk unable to match the card to the
+        // record while still showing them the name.
+        ["cardNumber"] = (b.CardNumber, DefaultPolicies.Classes.Identity),
         ["givenName"] = (b.GivenName, DefaultPolicies.Classes.Identity),
+        ["middleName"] = (b.MiddleName, DefaultPolicies.Classes.Identity),
         ["familyName"] = (b.FamilyName, DefaultPolicies.Classes.Identity),
+        ["birthDate"] = (b.BirthDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            DefaultPolicies.Classes.Identity),
+        // Travels WITH the date, always. A consumer that receives the date without the flag has no way to
+        // know it is an estimate, which is precisely how an estimated date becomes a hard eligibility cutoff.
+        ["birthDateIsApproximate"] = (b.BirthDateIsApproximate, DefaultPolicies.Classes.Identity),
+        ["sex"] = (b.Sex, DefaultPolicies.Classes.Identity),
+        ["nationalityCode"] = (b.NationalityCode, DefaultPolicies.Classes.Identity),
+        // Programme references, not identity documents: they say which case file a person belongs to, which
+        // is operational rather than a disclosure of legal status.
+        ["individualNo"] = (b.IndividualNo, DefaultPolicies.Classes.Identity),
+        ["caseNo"] = (b.CaseNo, DefaultPolicies.Classes.Identity),
         ["status"] = (b.Status.ToString(), DefaultPolicies.Classes.Identity),
         ["identifierTypes"] = (b.Identifiers.Where(i => !i.IsDeleted)
             .Select(i => i.IdentifierType.ToString()).ToArray(), DefaultPolicies.Classes.Identity),

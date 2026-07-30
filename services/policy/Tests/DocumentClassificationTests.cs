@@ -176,6 +176,46 @@ public class DocumentClassificationTests
         DocumentAccess.MayUpload(DocumentClass.LabResult, ["reception"]).Should().BeFalse();
     }
 
+    // ---- The registration classes ------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(DocumentClass.CardCopy)]
+    [InlineData(DocumentClass.CaseDocument)]
+    public void The_registration_classes_are_administrative(DocumentClass documentClass)
+    {
+        // A card scan and a case file are records ABOUT the administration of a membership, not clinical
+        // material — so they sit where finance, claims and the call centre can read them, and anything
+        // clinical inside a case belongs under MedicalReport, which carries the clinical floor.
+        DocumentClassification.DefaultFor(documentClass).Should().Be(NoteVisibility.Administrative);
+    }
+
+    [Theory]
+    [InlineData(DocumentClass.CardCopy)]
+    [InlineData(DocumentClass.CaseDocument)]
+    public void Beneficiary_management_may_file_the_registration_classes(DocumentClass documentClass)
+    {
+        DocumentAccess.MayUpload(documentClass, ["beneficiary_mgmt"]).Should().BeTrue();
+        DocumentAccess.MayDownload(documentClass, NoteVisibility.Administrative, ["beneficiary_mgmt"]).Should().BeTrue();
+    }
+
+    [Fact]
+    public void A_declared_sensitive_category_still_forces_restricted_on_a_case_document()
+    {
+        // The floor is per CLASS, but a declared 37 §5 category overrides it — otherwise GBV material could be
+        // filed as a case document and read by everyone administrative.
+        DocumentClassification.DefaultFor(DocumentClass.CaseDocument, SensitiveCategory.Gbv)
+            .Should().Be(NoteVisibility.Restricted);
+    }
+
+    [Fact]
+    public void The_photo_keeps_its_own_narrower_list_next_to_the_new_classes()
+    {
+        // Both are Administrative by visibility, but only one of them is a person's face. Finance may read a
+        // card copy and must not read the photograph.
+        DocumentAccess.MayDownload(DocumentClass.CardCopy, NoteVisibility.Administrative, ["finance"]).Should().BeTrue();
+        DocumentAccess.MayDownload(DocumentClass.IdentityPhoto, NoteVisibility.Administrative, ["finance"]).Should().BeFalse();
+    }
+
     // ---- The view: metadata only, and it says whether you may fetch --------------------------------------
 
     private static PolicyDocument Doc(

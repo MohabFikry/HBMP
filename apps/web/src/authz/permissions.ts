@@ -90,6 +90,10 @@ export type Permission =
   | "provider.contracts"
   | "provider.locations"
   | "provider.performance"
+  // 14.5 — the clinical profile behind a user: specialty + the clinics they work at. Its own grant rather
+  // than folding into `provider.locations`, because this administers PEOPLE who can be booked, and it is the
+  // upstream of every specialty/doctor filter on the booking screen.
+  | "provider.practitioners"
   // Network tiers (19.1b). Held by BOTH the Network Team and policy administration — but only the Network
   // Team may write, which is a capability (see `mayAdministerTiers`), not a second permission. Two
   // permissions would have let the two lists drift until a tier had two owners.
@@ -199,6 +203,10 @@ export const rolePermissions: Record<Role, Permission[]> = {
     "provider.contracts",
     "provider.locations",
     "provider.performance",
+    // The Network Team already owns provider onboarding and provider-scoped users; the practitioner record
+    // is the same administration for Mersal's OWN clinicians, and the writes need provider:write — which
+    // org_admin does not hold, so the section belongs here rather than in the admin console.
+    "provider.practitioners",
     "network.tiers",
   ],
   // Policy administration — the benefit product (payers, plans, plan versions) and the policies written

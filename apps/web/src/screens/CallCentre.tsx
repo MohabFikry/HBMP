@@ -6,7 +6,9 @@ import { L } from "../i18n/strings";
 import { API_BASE } from "../config";
 import { getToken } from "../auth/tokenStore";
 import { PageHeader } from "./_shared";
-import { ReservationPicker, useReservation } from "./ReservationPicker";
+import { BookingForm, type BookingSelection } from "./booking/BookingForm";
+import { useApi } from "../api/ApiProvider";
+import type { BranchSummary } from "@mersal/contracts";
 import { CallNotes } from "./CallNotes";
 
 // ── Types (mirror the callcentre-service DTOs; CLINICAL-FREE by construction) ───────────────────────────
@@ -46,7 +48,14 @@ export interface CcApi {
   clinics(): Promise<CcClinic[]>;
   slots(providerId: string, locationId: string): Promise<CcSlot[]>;
   /** A REAL slot id and the branch it belongs to. Both used to be invented client-side. */
-  book(interactionId: string, beneficiaryId: string, slotId: string, branchId?: string | null): Promise<"ok" | "conflict" | "error">;
+  /** 14.5 — the agent now picks a DOCTOR and may record a general note; both ride the same verified path. */
+  book(
+    interactionId: string,
+    beneficiaryId: string,
+    slotId: string,
+    branchId?: string | null,
+    extra?: { doctorId?: string | null; note?: string },
+  ): Promise<"ok" | "conflict" | "error">;
   reschedule(interactionId: string, appointmentId: string, newSlotId: string): Promise<"ok" | "conflict" | "error">;
   cancel(interactionId: string, appointmentId: string, reasonCode: string): Promise<"ok" | "error">;
   close(interactionId: string, outcome: string, notes: string): Promise<void>;
@@ -153,11 +162,15 @@ export function createHttpCcApi(): CcApi {
       const r = await req<any[]>("GET", `/appointment-slots?providerId=${providerId}&locationId=${locationId}&onlyOpen=true`);
       return (r.data ?? []).map((x) => ({ slotId: String(x.slotId), start: String(x.slotStart) }));
     },
-    async book(interactionId, beneficiaryId, slotId, branchId) {
+    async book(interactionId, beneficiaryId, slotId, branchId, extra) {
       // slotId used to be crypto.randomUUID(): a slot that cannot exist, so emr answered 404 and no reservation
       // the call centre made could ever hold a real time.
       const r = await req("POST", "/call-centre/appointments", {
         interactionId, beneficiaryId, slotId, branchId, appointmentType: "Scheduled",
+        // Omitted rather than sent as null when unset — the slot is authoritative for the doctor when it
+        // names one, and an explicit null would overwrite that with "no doctor".
+        ...(extra?.doctorId ? { doctorId: extra.doctorId } : {}),
+        ...(extra?.note ? { note: extra.note } : {}),
       }, bookingKey(interactionId, beneficiaryId, slotId));
       if (r.status === 409) return "conflict";
       return r.status >= 200 && r.status < 300 ? "ok" : "error";
@@ -268,19 +281,34 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
     }
   }, [api, interactionId, selected, ticks, t]);
 
-  const r = useReservation(api, verifiedFor !== null && showReserve);
+  // 14.5 — the SAME form the standalone Book-appointment journey and reception use. The workspace was the
+  // last caller of the old branch → clinic → time picker, so converting it retires that second copy of the
+  // dependency chain rather than leaving the call centre with two booking UIs that can drift apart.
+  const [sel, setSel] = useState<BookingSelection>({
+    branchId: null, doctorId: null, slotId: null, note: "", providerId: null, locationId: null,
+  });
+  const [branches, setBranches] = useState<BranchSummary[]>([]);
+  const [reloadToken, setReloadToken] = useState(0);
+  const webApi = useApi();
+
+  useEffect(() => {
+    let live = true;
+    void webApi.branches().then((b) => live && setBranches(b)).catch(() => live && setBranches([]));
+    return () => { live = false; };
+  }, [webApi]);
 
   const book = useCallback(async () => {
-    if (!interactionId || !verifiedFor || !r.slotId || !r.chosenClinic) return;
-    // The branch comes from the CLINIC, not a separate control: the call centre is cross-branch, and two
-    // controls that can disagree about where the patient is expected is how someone gets sent to Maadi for a
-    // Dokki appointment.
-    const outcome = await api.book(interactionId, verifiedFor, r.slotId, r.chosenClinic.branchId ?? null);
+    if (!interactionId || !verifiedFor || !sel.slotId) return;
+    const outcome = await api.book(interactionId, verifiedFor, sel.slotId, sel.branchId, {
+      doctorId: sel.doctorId,
+      note: sel.note || undefined,
+    });
     setAnnounce(outcome === "ok" ? t(L.ccBooked) : outcome === "conflict" ? t(L.ccSlotTaken) : t(L.ccBookFailed));
-    // A 409 invalidates the list exactly as a success does: one consumed the slot, the other proves someone
-    // else did. Only a transport error leaves the loaded times still true.
-    if (outcome !== "error") r.refresh();
-  }, [api, interactionId, verifiedFor, r, t]);
+    // A 409 invalidates the times exactly as a success does: one consumed the slot, the other proves someone
+    // else did. Only a transport error leaves the loaded times still true. The agent's branch, specialty and
+    // doctor survive either way — re-entering the caller's request mid-call is a cost they should not pay.
+    if (outcome !== "error") setReloadToken((k) => k + 1);
+  }, [api, interactionId, verifiedFor, sel, t]);
 
   const copyNotes = useCallback(async () => {
     // Guard the METHOD, not just the object: a non-secure context exposes `navigator.clipboard` as undefined
@@ -305,11 +333,11 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
   const reschedule = useCallback(async (appointmentId: string) => {
     // Rescheduling needs a NEW time, which lives in the reservation panel — so opening the panel is part of
     // the instruction, not a separate thing the agent has to work out.
-    if (!interactionId || !r.slotId) { setShowReserve(true); setAnnounce(t(L.ccPickTime)); return; }
-    const outcome = await api.reschedule(interactionId, appointmentId, r.slotId);
+    if (!interactionId || !sel.slotId) { setShowReserve(true); setAnnounce(t(L.ccPickTime)); return; }
+    const outcome = await api.reschedule(interactionId, appointmentId, sel.slotId);
     setAnnounce(outcome === "ok" ? t(L.ccRescheduled) : outcome === "conflict" ? t(L.ccSlotTaken) : t(L.ccBookFailed));
-    if (outcome !== "error") r.refresh();
-  }, [api, interactionId, r, t]);
+    if (outcome !== "error") setReloadToken((k) => k + 1);
+  }, [api, interactionId, sel.slotId, t]);
 
   const isVerified = !!selected && verifiedFor === selected.beneficiaryId;
 
@@ -467,7 +495,18 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
                       no no-show, no start-visit — and the server enforces that with appointment:reserve rather
                       than appointment:write, so the missing buttons are presentation, not the boundary. */}
                   {showReserve ? (
-                    <ReservationPicker r={r} onBook={book} bookLabel={t(L.ccBook)} />
+                    <>
+                      <p className="cc-muted">{t(L.ccReserveOnly)}</p>
+                      <BookingForm
+                        branchMode="choose"
+                        branches={branches}
+                        onChange={setSel}
+                        reloadToken={reloadToken}
+                      />
+                      <div className="book-actions">
+                        <Button variant="primary" disabled={!sel.slotId} onClick={book}>{t(L.ccBook)}</Button>
+                      </div>
+                    </>
                   ) : (
                     <Button variant="secondary" onClick={() => setShowReserve(true)}>
                       <Icon name="plus" /> {t(L.ccNewAppointment)}

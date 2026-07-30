@@ -51,6 +51,17 @@ public sealed record AssignSpecialty(string SpecialtyCode, bool IsPrimary);
 
 public sealed record AssignPractitionerBranch(Guid BranchId, DateOnly ValidFrom, DateOnly? ValidTo);
 
+/// <summary>Remove a NON-primary specialty. Revoking the primary is refused (409) — promote another first,
+/// because a practitioner without a primary specialty is invisible to every booking picker.</summary>
+public sealed record RevokeSpecialty(string SpecialtyCode);
+
+/// <summary>End a practitioner's assignment to a branch: the active rows become <c>Revoked</c> rather than
+/// being deleted, so the history that explains an earlier booking there survives.</summary>
+public sealed record RevokePractitionerBranch(Guid BranchId);
+
+/// <summary>Active | Suspended | Inactive, with a reason (audited).</summary>
+public sealed record ChangePractitionerStatus(string Status, string Reason);
+
 /// <summary>Picker/min-necessary practitioner view. <c>LicenseNo</c> is null unless the caller is an admin
 /// (provider:write) — no licence numbers to booking clinicians (design 37 §4).</summary>
 public sealed record PractitionerView(

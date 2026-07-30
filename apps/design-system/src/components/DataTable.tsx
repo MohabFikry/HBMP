@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { cx } from "../lib/cx";
 import { useTheme } from "../theme/ThemeProvider";
@@ -9,6 +9,15 @@ export interface Column<Row> {
   /** Cell renderer. */
   cell: (row: Row) => ReactNode;
   sortable?: boolean;
+  /**
+   * The value to sort this column BY, for the built-in (uncontrolled) sort.
+   *
+   * Required for a `sortable` column in uncontrolled mode, because `cell` returns a ReactNode and there is no
+   * honest way to order rendered JSX — a status chip sorts by its status, not by the markup around it, and a
+   * date cell must sort chronologically rather than by the string "26 Jul 2026". Strings compare with
+   * `localeCompare` so Arabic labels order correctly rather than by code point.
+   */
+  sortValue?: (row: Row) => string | number | null | undefined;
 }
 
 export type SortDir = "ascending" | "descending" | "none";
@@ -24,6 +33,14 @@ export interface DataTableProps<Row> {
   /** Roving-tabindex keyboard nav across rows when true (worklist mode). */
   interactive?: boolean;
   density?: "comfortable" | "compact";
+  /**
+   * CONTROLLED sort. Supply all three and the caller owns ordering — needed when the server sorts, or when
+   * sort state is shared with something outside the table.
+   *
+   * Omit `onSort` and the table sorts ITSELF from `column.sortValue`. That default exists because every
+   * caller was otherwise reimplementing the same comparator, useState and click handler, and "sortable
+   * columns" as a house standard cannot rest on each screen remembering to do it. See `sortValue`.
+   */
   sortKey?: string;
   sortDir?: SortDir;
   onSort?: (key: string) => void;
@@ -55,6 +72,43 @@ export function DataTable<Row>({
   emptyLabel,
 }: DataTableProps<Row>) {
   const rowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
+
+  // ---- sort: controlled when the caller supplies onSort, otherwise the table's own ------------------------
+  const [ownSort, setOwnSort] = useState<{ key: string; dir: Exclude<SortDir, "none"> } | null>(null);
+  const controlled = onSort !== undefined;
+
+  const activeKey = controlled ? sortKey : ownSort?.key;
+  const activeDir: SortDir = controlled ? sortDir : (ownSort?.dir ?? "none");
+
+  const handleSort = (key: string) => {
+    if (controlled) { onSort(key); return; }
+    // Toggle asc → desc → asc on the same column; a fresh column always starts ascending, because landing on
+    // a descending sort you did not ask for reads as the table having reordered itself.
+    setOwnSort((prev) =>
+      prev?.key === key
+        ? { key, dir: prev.dir === "ascending" ? "descending" : "ascending" }
+        : { key, dir: "ascending" });
+  };
+
+  const sortedRows = useMemo(() => {
+    if (controlled || !ownSort) return rows;
+    const col = columns.find((c) => c.key === ownSort.key);
+    if (!col?.sortValue) return rows;
+    const pick = col.sortValue;
+    const sign = ownSort.dir === "ascending" ? 1 : -1;
+    // Copied before sorting: `rows` belongs to the caller and mutating it in place would reorder their state.
+    return [...rows].sort((a, b) => {
+      const x = pick(a);
+      const y = pick(b);
+      // Absent values sink to the bottom in BOTH directions. Reversing them with the sort would put "no
+      // value" at the top of a descending list, which reads as data rather than as its absence.
+      if (x === null || x === undefined) return y === null || y === undefined ? 0 : 1;
+      if (y === null || y === undefined) return -1;
+      if (typeof x === "number" && typeof y === "number") return (x - y) * sign;
+      return String(x).localeCompare(String(y)) * sign;
+    });
+  }, [controlled, ownSort, rows, columns]);
+
   // 18.D3 (U6) — the DS shipped hardcoded English "Loading…" / "No results". An Arabic user saw English
   // inside an otherwise Arabic table, and the strings were unreachable from the app's own i18n because they
   // live in the component. They follow the app language now; a caller may still override emptyLabel with
@@ -70,10 +124,10 @@ export function DataTable<Row>({
       onSelect?.(row);
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      rowRefs.current[(index + 1) % rows.length]?.focus();
+      rowRefs.current[(index + 1) % sortedRows.length]?.focus();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      rowRefs.current[(index - 1 + rows.length) % rows.length]?.focus();
+      rowRefs.current[(index - 1 + sortedRows.length) % sortedRows.length]?.focus();
     }
   }
 
@@ -97,11 +151,14 @@ export function DataTable<Row>({
       <thead>
         <tr>
           {columns.map((c) => {
-            const isSorted = sortKey === c.key;
+            const isSorted = activeKey === c.key;
             return (
-              <th key={c.key} aria-sort={c.sortable ? (isSorted ? sortDir : "none") : undefined} scope="col">
-                {c.sortable && onSort ? (
-                  <button type="button" className="mrs-sort" onClick={() => onSort(c.key)}>
+              <th key={c.key} aria-sort={c.sortable ? (isSorted ? activeDir : "none") : undefined} scope="col">
+                {/* Sortable now needs only `sortable` — not `sortable && onSort`. Requiring a handler meant a
+                    column marked sortable rendered as inert text whenever the caller had not wired one, so
+                    the header said "you can sort by this" and nothing happened. */}
+                {c.sortable ? (
+                  <button type="button" className="mrs-sort" onClick={() => handleSort(c.key)}>
                     {c.header}
                     <Icon name="chevron" width={12} height={12} />
                   </button>
@@ -128,7 +185,7 @@ export function DataTable<Row>({
             </td>
           </tr>
         )}
-        {!loading && !error && rows.length === 0 && (
+        {!loading && !error && sortedRows.length === 0 && (
           <tr>
             <td colSpan={colCount} className="mrs-tablestate">
               {emptyText}
@@ -137,7 +194,7 @@ export function DataTable<Row>({
         )}
         {!loading &&
           !error &&
-          rows.map((row, i) => {
+          sortedRows.map((row, i) => {
             const key = rowKey(row);
             const selected = key === selectedKey;
             return (

@@ -30,7 +30,8 @@ import { createHttpPolicyApi } from "../api/policyApi";
 const httpPolicyApi = createHttpPolicyApi();
 import { writeErrorMessage } from "../api/writeError";
 import { PageHeader, useLoc, readErrorMessage } from "./_shared";
-import { ChangeTimeline, DocumentsPanel, LimitMeters, NotesPanel, useIdempotencyKey } from "./PolicyPanels";
+import { ChangeTimeline, LimitMeters, NotesPanel, useIdempotencyKey } from "./PolicyPanels";
+import { BeneficiaryDocuments } from "./BeneficiaryDocuments";
 import { useFormat } from "../i18n/useFormat";
 
 /**
@@ -383,7 +384,10 @@ export function MemberDetail({
           { value: "coverage", label: t(S.tabCoverage), content: <CoverageTab coverage={coverage} /> },
           { value: "utilization", label: t(S.tabUtilization), content: tab === "utilization" ? <MemberUtilizationTab api={api} beneficiaryId={row.beneficiaryId} /> : null },
           { value: "notes", label: t(S.tabNotes), content: tab === "notes" ? <NotesPanel api={api} scope="enrollments" scopeRef={row.enrollmentId} /> : null },
-          { value: "documents", label: t(S.tabDocuments), content: tab === "documents" ? <DocumentsPanel api={api} scope="enrollments" scopeRef={row.enrollmentId} /> : null },
+          // The member's documents get the richer panel: a typed upload, and the two affordances an officer
+          // actually needs on a filed document — see it in place, or take a copy. The generic DocumentsPanel
+          // stays for the POLICY scope, where nothing is uploaded from the screen and there is no photo.
+          { value: "documents", label: t(S.tabDocuments), content: tab === "documents" ? <BeneficiaryDocuments api={api} enrollmentId={row.enrollmentId} /> : null },
           { value: "timeline", label: t(S.tabTimeline), content: tab === "timeline" ? <ChangeTimeline api={api} scope="enrollments" scopeRef={row.enrollmentId} lang={lang} /> : null },
         ]}
       />

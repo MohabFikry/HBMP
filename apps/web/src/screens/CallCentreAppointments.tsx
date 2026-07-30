@@ -6,6 +6,7 @@ import { useAsync } from "../api/useAsync";
 import { useFormat } from "../i18n/useFormat";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 import { VisitTimelineButton } from "./VisitTimeline";
+import { AppointmentNoteButton } from "./AppointmentNote";
 
 const S = {
   title: { en: "Appointments", ar: "المواعيد" },
@@ -32,6 +33,7 @@ const S = {
   type: { en: "Type", ar: "النوع" },
   time: { en: "Time", ar: "الوقت" },
   status: { en: "Status", ar: "الحالة" },
+  note: { en: "Note", ar: "ملاحظة" },
   branch: { en: "Branch", ar: "الفرع" },
   noBranch: { en: "External", ar: "خارجي" },
 } satisfies Record<string, Localized>;
@@ -62,6 +64,12 @@ export function CallCentreAppointments() {
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
     // The timeline IS legitimate here: it answers "who moved this and when", which is most of what a member
     // rings to ask, and it needs no verified interaction because it discloses no identity.
+    // 14.5 — the booking note. The call centre WRITES these, so it must be able to read back what it told
+    // the clinic; the same note the doctor sees, from the same field.
+    {
+      key: "note", header: t(S.note),
+      cell: (r) => <AppointmentNoteButton note={r.note} />,
+    },
     { key: "timeline", header: "", cell: (r) => <VisitTimelineButton row={r} /> },
   ];
 

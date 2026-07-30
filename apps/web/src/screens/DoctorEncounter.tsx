@@ -18,8 +18,8 @@ import { PatientContextBar } from "./PatientProfile";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
-  title: { en: "Encounter workspace", ar: "مساحة اللقاء" },
-  myPatients: { en: "My patients", ar: "مرضاي" },
+  title: { en: "Encounter Workspace", ar: "مساحة اللقاء" },
+  myPatients: { en: "My Patients", ar: "مرضاي" },
   emptyPatients: { en: "No patients under a treating relationship right now.", ar: "لا يوجد مرضى ضمن علاقة علاجية حالياً." },
   name: { en: "Patient", ar: "المريض" },
   mrn: { en: "MRN", ar: "الرقم الطبي" },

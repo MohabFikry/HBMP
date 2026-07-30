@@ -61,5 +61,8 @@ public class PersonFieldValidationTests
     {
         public Task<Guid?> FindActiveOwnerAsync(IdentifierType type, string norm, CancellationToken ct = default) =>
             Task.FromResult<Guid?>(null);
+
+        public Task<Guid?> FindActiveCardHolderAsync(string card, CancellationToken ct = default) =>
+            Task.FromResult<Guid?>(null);
     }
 }

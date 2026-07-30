@@ -6,7 +6,7 @@
 Low-fidelity, **annotated wireframes** for the highest-value screens across portals. Rendered as ASCII/box-drawing layouts (no image tools). Each screen documents: **layout**, **key components**, **states** (loading / empty / error / success), **accessibility annotations**, and **responsive notes**.
 
 **Reading the wireframes**
-- Boxes are containers; `[ Button ]` interactive; `▾` menu; `🔔` notifications; `▸` breadcrumb separator.
+- Boxes are containers; `[ Button ]` interactive; `▾` menu; `🔔` notifications; `▸` path separator.
 - Status chips show the **redundant encoding** from [0A §5.2](0A-DESIGN-FOUNDATIONS.md#52-status-color-tokens--never-color-only): `{color + icon + shape + text}`, e.g. `[✓ Eligible]` (Success pill), `[⧗ Pending]` (Info dashed), `[◐ Partial]`, `[△ Expiring]`, `[✕ Rejected]` (Danger square), `[○ Inactive]` (Neutral ghost).
 - `⟵RTL` notes mark where layout mirrors for Arabic.
 - All targets ≥ 44×44px; focus ring 3px `#007A7A` (`--mersal-teal-700`), never removed.
@@ -19,7 +19,7 @@ Low-fidelity, **annotated wireframes** for the highest-value screens across port
 +--------------------------------------------------------------------------+
 | [≡] Mersal ● {Portal Name}        [ 🔍 Search…        ]  [AR|EN] 🔔³ [User▾]|
 +------------------+-------------------------------------------------------+
-|  PRIMARY NAV     |  Home ▸ {Section} ▸ {Entity}                          |
+|  PRIMARY NAV     |  << page header: {Section} h1 + contextual actions >> |
 |  (role-aware)    | .....................................................|
 |  ▸ Home          |                                                       |
 |  ▸ Queue/Work    |   << CONTENT AREA >>                                  |
@@ -30,7 +30,9 @@ Low-fidelity, **annotated wireframes** for the highest-value screens across port
 ```
 - **a11y:** landmark regions `banner` (top bar), `navigation` (primary nav), `main` (content), `contentinfo` (footer). Skip-link "Skip to main content" first in tab order. `🔔³` announces "3 unread notifications".
 - **Responsive:** ≥1024px sidebar persistent; 768–1023px sidebar collapses to `[≡]` drawer; <768px bottom tab bar + hamburger (see [14](14-navigation-structure.md) §mobile).
-- **⟵RTL:** nav docks right, search/user cluster docks left, breadcrumb reads right-to-left.
+- **⟵RTL:** nav docks right, search/user cluster docks left.
+- **Tab title:** the browser tab reads `{Section} | Mersal HBMP` — there is no on-screen breadcrumb
+  ([14 §3](14-navigation-structure.md)). Section names are Title Cased ([09 §8](09-information-architecture.md)).
 
 ---
 

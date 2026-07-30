@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
 import { renderNode } from "./helpers";
@@ -61,13 +61,23 @@ async function optionsOf(user: ReturnType<typeof userEvent.setup>, name: RegExp)
   return names;
 }
 
+/** The times for the chosen day — scoped, because the day strip is radios too. */
+function timeButtons() {
+  return within(screen.getByRole("radiogroup", { name: /available times/i })).getAllByRole("radio");
+}
+
+/**
+ * 14.5 — branch → specialty → doctor → time, the shared form. The clinic step is gone: it is resolved from
+ * the chosen doctor rather than named separately, so the two controls can no longer disagree about where the
+ * patient is expected.
+ */
 async function pickClinicAndTime(user: ReturnType<typeof userEvent.setup>) {
   await openReservePanel(user);
-  // Branch FIRST: the agent names the branch the appointment is for, then the clinic within it.
-  await choose(user, /^branch$/i, /^Dokki$/);
-  await choose(user, /^clinic$/i, /Dokki Clinic/);
-  const times = await screen.findAllByRole("radio");
-  await user.click(times[times.length - 1]);
+  await choose(user, /^branch$/i, /Dokki/);
+  await choose(user, /^specialty$/i, /Pediatrics/);
+  await choose(user, /^doctor$/i, /Hana Mansour/);
+  await waitFor(() => expect(timeButtons().length).toBeGreaterThan(0));
+  await user.click(timeButtons()[0]);
 }
 
 function fakeApi(over: Partial<CcApi> = {}): CcApi {
@@ -248,8 +258,10 @@ describe("15.5 — Call history: load failure is distinct from empty", () => {
     await pickClinicAndTime(user);
     expect(screen.getByRole("button", { name: /^book$/i })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: /^book$/i }));
-    // The branch travels with the clinic — the agent never states it separately.
-    expect(api.book).toHaveBeenCalledWith("i1", BEN, "slot-1", "br-dokki");
+    // The agent named the branch, and the doctor they picked rides along with it.
+    await waitFor(() => expect(api.book).toHaveBeenCalled());
+    const [iid, ben, , branch] = (api.book as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect([iid, ben, branch]).toEqual(["i1", BEN, "BR-DOK"]);
   });
 
   it("renders an error + retry (not 'no calls') when history fails to load", async () => {
@@ -281,58 +293,77 @@ describe("15.5 — Call Centre workspace: a11y", () => {
  * they make it — and then to be offered only clinics in that branch.
  */
 describe("15.3 — the call centre names the branch it is booking into", () => {
-  it("offers every branch that has availability, and no clinic until one is chosen", async () => {
+  it("offers every branch, and no specialty until one is chosen", async () => {
     const user = userEvent.setup();
     renderNode(<CallCentreWorkspace api={fakeApi()} />);
     await verifyAndOpen(user);
 
-    expect(await optionsOf(user, /^branch$/i)).toEqual(expect.arrayContaining(["Dokki", "Nasr City"]));
+    // The specialty picker is inert until a branch is named — a specialty list spanning branches is how
+    // someone books Maadi for a caller expecting Dokki.
+    expect(screen.getByRole("combobox", { name: /^specialty$/i })).toBeDisabled();
 
-    // The clinic picker is inert until a branch is named — a clinic list spanning branches is how someone books
-    // Maadi for a caller expecting Dokki.
-    expect(screen.getByRole("combobox", { name: /^clinic$/i })).toBeDisabled();
-    await choose(user, /^branch$/i, /^Nasr City$/);
-    expect(screen.getByRole("combobox", { name: /^clinic$/i })).toBeEnabled();
+    // Opened ONCE and chosen from the same list: the combobox filters on typed text, so opening, escaping
+    // and reopening is a different interaction from the one the agent performs.
+    await user.click(await screen.findByRole("combobox", { name: /^branch$/i }));
+    const branchNames = screen.getAllByRole("option").map((o) => o.textContent ?? "");
+    expect(branchNames.some((n) => /Dokki/.test(n))).toBe(true);
+    expect(branchNames.some((n) => /Nasr City/.test(n))).toBe(true);
+    await user.click(screen.getByRole("option", { name: /Nasr City/ }));
+
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /^specialty$/i })).toBeEnabled());
   });
 
-  it("shows only the chosen branch's clinics", async () => {
+  it("offers only the chosen branch's doctors", async () => {
     const user = userEvent.setup();
     renderNode(<CallCentreWorkspace api={fakeApi()} />);
     await verifyAndOpen(user);
 
-    await choose(user, /^branch$/i, /^Nasr City$/);
-    const clinicNames = await optionsOf(user, /^clinic$/i);
-    expect(clinicNames.some((n) => /Nasr Clinic/.test(n))).toBe(true);
-    expect(clinicNames.some((n) => /Dokki Clinic/.test(n))).toBe(false);
+    await choose(user, /^branch$/i, /Nasr City/);
+    await choose(user, /^specialty$/i, /Cardiology/);
+    const doctors = await optionsOf(user, /^doctor$/i);
+
+    // Youssef works at Nasr City; Hana does not.
+    expect(doctors.some((n) => /Youssef Adel/.test(n))).toBe(true);
+    expect(doctors.some((n) => /Hana Mansour/.test(n))).toBe(false);
   });
 
-  it("changing the branch clears the clinic and the times under it", async () => {
+  it("changing the branch clears the specialty, the doctor and the times under them", async () => {
     const user = userEvent.setup();
     renderNode(<CallCentreWorkspace api={fakeApi()} />);
     await verifyAndOpen(user);
 
-    await choose(user, /^branch$/i, /^Dokki$/);
-    await choose(user, /^clinic$/i, /Dokki Clinic/);
-    await user.click((await screen.findAllByRole("radio"))[0]);
+    await choose(user, /^branch$/i, /Dokki/);
+    await choose(user, /^specialty$/i, /Pediatrics/);
+    await choose(user, /^doctor$/i, /Hana Mansour/);
+    await waitFor(() => expect(timeButtons().length).toBeGreaterThan(0));
+    await user.click(timeButtons()[0]);
     expect(screen.getByRole("button", { name: /^book$/i })).toBeEnabled();
 
-    await choose(user, /^branch$/i, /^Nasr City$/);
-    // Nothing carried over: the clinic falls back to its placeholder, so nothing is bookable.
-    expect(screen.getByRole("combobox", { name: /^clinic$/i })).toHaveTextContent(/choose a clinic/i);
+    await choose(user, /^branch$/i, /Nasr City/);
+
+    // Nothing carried over — the whole chain below the branch is dropped in one update, so there is no
+    // render where the agent sees a Dokki doctor under a Nasr City heading.
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /^specialty$/i })).toHaveValue(""));
+    expect(screen.getByRole("combobox", { name: /^doctor$/i })).toHaveValue("");
     expect(screen.getByRole("button", { name: /^book$/i })).toBeDisabled();
   });
 
-  it("books into the branch the agent named", async () => {
+  it("books into the branch the agent named, carrying the doctor", async () => {
     const user = userEvent.setup();
     const api = fakeApi();
     renderNode(<CallCentreWorkspace api={api} />);
     await verifyAndOpen(user);
 
-    await choose(user, /^branch$/i, /^Nasr City$/);
-    await choose(user, /^clinic$/i, /Nasr Clinic/);
-    await user.click((await screen.findAllByRole("radio"))[0]);
+    await choose(user, /^branch$/i, /Nasr City/);
+    await choose(user, /^specialty$/i, /Cardiology/);
+    await choose(user, /^doctor$/i, /Youssef Adel/);
+    await waitFor(() => expect(timeButtons().length).toBeGreaterThan(0));
+    await user.click(timeButtons()[0]);
     await user.click(screen.getByRole("button", { name: /^book$/i }));
 
-    expect(api.book).toHaveBeenCalledWith("i1", BEN, "slot-1", "br-nasr");
+    await waitFor(() => expect(api.book).toHaveBeenCalled());
+    const [iid, ben, , branch, extra] = (api.book as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect([iid, ben, branch]).toEqual(["i1", BEN, "BR-NSR"]);
+    expect(extra).toMatchObject({ doctorId: "PRC-2" });
   });
 });

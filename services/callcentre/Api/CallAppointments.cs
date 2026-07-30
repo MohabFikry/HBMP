@@ -41,6 +41,10 @@ public static class CallAppointments
             {
                 beneficiaryId = req.BeneficiaryId, slotId = req.SlotId, appointmentType = apptType,
                 branchId = req.BranchId, referralRef = req.ReferralRef, originEncounterId = req.OriginEncounterId,
+                // Passed through untouched. The note is capped and refused by emr (AppointmentNote), and the
+                // doctor is checked against the branch there too — re-validating here would be a second copy
+                // of a rule that must not be able to disagree with the first.
+                doctorId = req.DoctorId, note = req.Note,
             };
             var result = await emr.BookAsync(body, http.Headers.Authorization, IdemKey(http), ct);
             if (result.IsSuccess && result.AppointmentId is { } apptId)

@@ -7,7 +7,7 @@ import { useAsync } from "../api/useAsync";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
-  title: { en: "Upload result", ar: "رفع النتيجة" },
+  title: { en: "Upload Result", ar: "رفع النتيجة" },
   empty: { en: "No consumed lines are awaiting a result.", ar: "لا توجد بنود مُنفّذة بانتظار نتيجة." },
   patient: { en: "Patient", ar: "المريض" },
   order: { en: "Order", ar: "الطلب" },

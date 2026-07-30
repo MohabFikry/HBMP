@@ -10,7 +10,7 @@ import { AsyncSection, PageHeader, useLoc } from "./_shared";
 // The Claims portal is minimum-necessary: claim CODES + AMOUNTS + lifecycle status only. Like Finance, there is
 // deliberately no screen, column, or control here that reaches a diagnosis or clinical note (claims ≠ diagnosis).
 const S = {
-  wlTitle: { en: "Claims worklist", ar: "قائمة المطالبات" },
+  wlTitle: { en: "Claims Worklist", ar: "قائمة المطالبات" },
   wlEmpty: { en: "No claims match this filter.", ar: "لا توجد مطالبات مطابقة." },
   claimNo: { en: "Claim", ar: "المطالبة" },
   origin: { en: "Origin", ar: "المصدر" },
@@ -36,7 +36,7 @@ const S = {
   bVariance: { en: "Price variance", ar: "فرق سعر" },
   bBilledNot: { en: "Billed, not delivered", ar: "فوترة بلا تنفيذ" },
 
-  insTitle: { en: "Claims insights", ar: "مؤشرات المطالبات" },
+  insTitle: { en: "Claims Insights", ar: "مؤشرات المطالبات" },
   insEmpty: { en: "No KPI data for this period.", ar: "لا توجد بيانات مؤشرات لهذه الفترة." },
   tat: { en: "Avg TAT (hrs)", ar: "متوسط زمن المعالجة (س)" },
   approval: { en: "Approval rate", ar: "معدل الاعتماد" },

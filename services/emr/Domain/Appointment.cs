@@ -42,6 +42,21 @@ public sealed class Appointment
     /// <summary>Originating encounter for a <see cref="AppointmentType.FollowUp"/> booking.</summary>
     public Guid? OriginEncounterId { get; set; }
 
+    /// <summary>A short GENERAL/administrative note captured at booking — access needs, an interpreter, a
+    /// preferred arrangement. Read by reception, the call centre and the treating doctor.
+    /// <para><b>Never clinical.</b> No symptom, diagnosis, medication or result belongs here. The call centre
+    /// writes this field and holds no clinical surface anywhere else on the platform, so a free-text box
+    /// readable by a doctor is exactly where clinical detail would accumulate unless the boundary is stated
+    /// and enforced. <see cref="AppointmentNote"/> caps and normalizes it; migration 0011 caps it again in the
+    /// schema, because the API is not the only writer a table outlives.</para></summary>
+    public string? Note { get; set; }
+
+    /// <summary>Set when the assigned practitioner stopped serving this appointment's branch (14.5,
+    /// <c>PractitionerBranchRevoked</c>). The appointment is NOT cancelled and NOT reassigned — both are
+    /// decisions a background consumer must not make on a patient's behalf — it is marked so reception can
+    /// ring them and rebook. Cleared implicitly when the appointment is rescheduled or cancelled.</summary>
+    public DateTimeOffset? ReassignmentNeededAt { get; set; }
+
     public string? CancelReason { get; set; }
     /// <summary>Reporting flag (US-022): set when a Booked appointment is marked no-show. Populated in 3.2.</summary>
     public bool NoShow { get; set; }
@@ -107,4 +122,12 @@ public sealed class WaitlistEntry
     public Guid? OriginEncounterId { get; set; }
     public string? CreatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>At-least-once ledger for this service's event consumers: a redelivered event id short-circuits,
+/// so a broker retry cannot re-apply work a human has already dealt with. Same shape as policy-service's.</summary>
+public sealed class ProcessedEvent
+{
+    public Guid EventId { get; set; }
+    public DateTimeOffset ProcessedAt { get; set; }
 }

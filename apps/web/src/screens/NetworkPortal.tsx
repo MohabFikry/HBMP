@@ -9,7 +9,7 @@ import { useAsync } from "../api/useAsync";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
-  dirTitle: { en: "Providers directory", ar: "دليل مقدمي الخدمة" },
+  dirTitle: { en: "Providers Directory", ar: "دليل مقدمي الخدمة" },
   dirEmpty: { en: "No providers in this network.", ar: "لا يوجد مقدمو خدمة في هذه الشبكة." },
   perfTitle: { en: "Performance", ar: "الأداء" },
   contractsTitle: { en: "Contracts & coverage", ar: "العقود والتغطية" },
