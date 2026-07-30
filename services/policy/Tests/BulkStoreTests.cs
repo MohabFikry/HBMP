@@ -77,6 +77,97 @@ public class BulkStoreTests
         finally { await Cleanup(f); }
     }
 
+    /// <summary>
+    /// The other half of the replay contract, and the reason the bug above went unseen for so long.
+    ///
+    /// <para>A replay is skipped only when NOTHING changed. Correcting the contribution and re-uploading is
+    /// the single most common fix an operator makes, and it must be APPLIED — a file whose only edit is the
+    /// member's share would otherwise be swallowed as "already done" and the correction silently lost.</para>
+    ///
+    /// <para>This pins the COST-SHARE branch specifically: it stays green even if person-level change
+    /// detection is broken, because a changed share alone is enough to make the row an update. The person
+    /// branch is pinned separately below — the two failed independently and a single test covering both
+    /// would have hidden exactly the defect that got here.</para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_re_upload_that_only_corrects_the_contribution_is_applied_not_skipped()
+    {
+        Skip.If(Db is null, "POLICY_TEST_DB not set — DB integration test skipped.");
+        var f = await Seed();
+        try
+        {
+            await using var db = Ctx();
+            var harness = new Harness(db, f);
+
+            var first = await harness.UploadAsync(BulkJobType.MemberEnrolment, EnrolmentCsv(f, f.Beneficiaries));
+            await harness.Engine.ValidateAsync(first.JobId, harness.Scope, null);
+            (await harness.Engine.CommitAsync(first.JobId, harness.Scope, null)).Job.AppliedRows.Should().Be(3);
+
+            // Same people, same plan, same effective date — so the membership replays on its idempotency key.
+            // Only the share differs.
+            var corrected = await harness.UploadAsync(
+                BulkJobType.MemberEnrolment, EnrolmentCsv(f, f.Beneficiaries, contribution: 35m));
+            await harness.Engine.ValidateAsync(corrected.JobId, harness.Scope, null);
+            var second = await harness.Engine.CommitAsync(corrected.JobId, harness.Scope, null);
+
+            second.Job.AppliedRows.Should().Be(3, "a replay whose cost share changed is an update, not a no-op");
+            second.Job.SkippedRows.Should().Be(0);
+
+            db.ChangeTracker.Clear();
+            var shares = await db.Enrollments.AsNoTracking()
+                .Where(e => f.Beneficiaries.Contains(e.BeneficiaryId) && !e.IsDeleted)
+                .Select(e => e.ContributionPercent).ToListAsync();
+            shares.Should().OnlyContain(s => s == 35m, "the correction is the whole point of the re-upload");
+
+            (await db.Enrollments.CountAsync(e => f.Beneficiaries.Contains(e.BeneficiaryId) && !e.IsDeleted))
+                .Should().Be(3, "correcting a share must not create a second membership");
+        }
+        finally { await Cleanup(f); }
+    }
+
+    /// <summary>
+    /// Person-level change detection, pinned on its own.
+    ///
+    /// <para>The share is identical here, so <c>costShareChanged</c> is false and the row can only be applied
+    /// if the PERSON is seen to have changed. That makes this the test that actually fails when the intake
+    /// seam stops noticing edits — the failure mode that shipped: <see cref="BeneficiaryIntake"/> is a record
+    /// with an <c>IReadOnlyList</c> member, so <c>==</c> compares that member by reference and every
+    /// re-parse looked different. It reported the reverse of the truth on every row, and nothing caught it
+    /// because no test asked the question with the share held constant.</para>
+    ///
+    /// <para>A corrected spelling is not a cosmetic edit for a refugee record — it is how a member whose name
+    /// was mis-keyed at intake stops failing identity checks at the desk.</para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_re_upload_that_only_corrects_a_name_is_applied_not_skipped()
+    {
+        Skip.If(Db is null, "POLICY_TEST_DB not set — DB integration test skipped.");
+        var f = await Seed();
+        try
+        {
+            await using var db = Ctx();
+            var harness = new Harness(db, f);
+
+            var first = await harness.UploadAsync(BulkJobType.MemberEnrolment, EnrolmentCsv(f, f.Beneficiaries));
+            await harness.Engine.ValidateAsync(first.JobId, harness.Scope, null);
+            (await harness.Engine.CommitAsync(first.JobId, harness.Scope, null)).Job.AppliedRows.Should().Be(3);
+
+            // Same plan, same date, SAME SHARE — only the spelling differs, so nothing but person-level
+            // change detection can make this an update.
+            var corrected = await harness.UploadAsync(
+                BulkJobType.MemberEnrolment, EnrolmentCsv(f, f.Beneficiaries, firstName: "Aminah"));
+            await harness.Engine.ValidateAsync(corrected.JobId, harness.Scope, null);
+            var second = await harness.Engine.CommitAsync(corrected.JobId, harness.Scope, null);
+
+            second.Job.AppliedRows.Should().Be(3, "a corrected name is a real edit the operator came back to make");
+            second.Job.SkippedRows.Should().Be(0);
+
+            (await db.Enrollments.CountAsync(e => f.Beneficiaries.Contains(e.BeneficiaryId) && !e.IsDeleted))
+                .Should().Be(3, "correcting a name must not create a second membership");
+        }
+        finally { await Cleanup(f); }
+    }
+
     [SkippableFact]
     public async Task A_row_that_breaches_a_rule_fails_alone_and_the_rest_still_apply()
     {
@@ -514,11 +605,30 @@ public class BulkStoreTests
                 return Task.FromResult<BeneficiaryIntakeResult?>(null);
 
             var created = !_seen.ContainsKey(intake.CardNumber);
-            var changed = created || _seen[intake.CardNumber] != intake;
+            var changed = created || !SameContent(_seen[intake.CardNumber], intake);
             _seen[intake.CardNumber] = intake;
             return Task.FromResult<BeneficiaryIntakeResult?>(
                 new BeneficiaryIntakeResult(id, "Active", null, created, changed));
         }
+
+        /// <summary>
+        /// Compare two intakes by VALUE, which `!=` does not do here.
+        ///
+        /// <para><see cref="BeneficiaryIntake"/> is a record, so `==` compares its members with
+        /// <c>EqualityComparer&lt;T&gt;.Default</c> — and one member, <c>Notes</c>, is an
+        /// <c>IReadOnlyList</c>. Lists do not override equality, so that member is compared by REFERENCE and
+        /// two separately-parsed copies of the same CSV row are never equal. The fake therefore reported
+        /// `Changed: true` for a byte-identical re-upload, which is the opposite of what it exists to
+        /// simulate, and the applier duly classified an idempotent replay as Applied rather than Skipped.</para>
+        ///
+        /// <para>The real seam is patient-service comparing PERSISTED values, so unchanged means unchanged.
+        /// Both sides are rebased onto one shared empty list so the reference check on that member passes,
+        /// then the notes are compared as a sequence.</para>
+        /// </summary>
+        private static bool SameContent(BeneficiaryIntake a, BeneficiaryIntake b) =>
+            (a with { Notes = NoNotes }) == (b with { Notes = NoNotes }) && a.Notes.SequenceEqual(b.Notes);
+
+        private static readonly IReadOnlyList<(short Slot, string Value)> NoNotes = [];
     }
 
     /// <summary>The tier catalogue provider-service would return. MERSAL is the one the fixtures enrol onto.</summary>
@@ -575,7 +685,7 @@ public class BulkStoreTests
     private static string CardFor(Guid beneficiaryId) => $"C{beneficiaryId:N}"[..11].ToUpperInvariant();
 
     private static byte[] EnrolmentCsv(Fixture f, IReadOnlyList<Guid> beneficiaries, DateOnly? from = null,
-        decimal contribution = 20m)
+        decimal contribution = 20m, string firstName = "Amina")
     {
         var effective = from ?? new DateOnly(2026, 2, 1);
         var csv = new StringBuilder(
@@ -585,7 +695,7 @@ public class BulkStoreTests
         {
             n++;
             csv.Append(CultureInfo.InvariantCulture,
-                $"{CardFor(id)},Amina{n},Yusuf,Female,SY,+201234567890,1990-01-01," +
+                $"{CardFor(id)},{firstName}{n},Yusuf,Female,SY,+201234567890,1990-01-01," +
                 $"{f.Prefix}-Standard,MERSAL,{contribution},{effective:yyyy-MM-dd}\n");
         }
         return Encoding.UTF8.GetBytes(csv.ToString());
