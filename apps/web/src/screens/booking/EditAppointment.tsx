@@ -138,7 +138,7 @@ export function EditAppointmentButton({
         // "Edit appointment" buttons is unusable with a screen reader.
         aria-label={`${t(S.edit)} — ${row.beneficiaryName ?? row.beneficiary.token}`}
         title={t(S.edit)}
-        leadingIcon={<Icon name="doc" />}
+        leadingIcon={<Icon name="pen" />}
         onClick={() => { setNote(row.note ?? ""); setSlotId(null); setError(null); setOpen(true); }}
       />
       <Modal

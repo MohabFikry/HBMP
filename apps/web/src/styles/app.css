@@ -1862,3 +1862,31 @@ button.dash-daynav-label svg { width: 14px; height: 14px; opacity: 0.7; }
 .bk-cal-sm .bk-cal-num { font-size: 12px; }
 .bk-cal-sm .bk-cal-month { font-size: var(--fs-caption); }
 .bk-cal-sm .bk-cal-weekdays span { font-size: 10px; }
+
+/* The day picker, anchored under the date. */
+.dash-daynav-anchor { position: relative; }
+.dash-daypop {
+  position: absolute;
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
+  inset-block-start: calc(100% + 6px);
+  z-index: 30;
+  inline-size: 268px;
+  padding: var(--sp2);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--elev-2);
+}
+/* RTL mirrors the translate, or the panel hangs off the wrong edge. */
+html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
+.dash-daypop .bk-cal { border: 0; padding: 0; }
+.dash-daypop-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-block-start: var(--sp2);
+}
+/* Compact cells. The booking calendar is the primary control on its screen and earns its size; this one is a
+   navigation aid and at full scale it dwarfed the header it drops out of. */
+.dash-daypop .bk-cal-day { min-block-size: 0; }
+.dash-daypop .bk-cal-num { font-size: 11.5px; }

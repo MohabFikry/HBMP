@@ -30,6 +30,9 @@ export const iconPaths = {
    *  trail draws: looking at a record and taking a copy of it are different disclosures. */
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
   download: '<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>',
+  /** Edit — a pen over its underline. `doc` was standing in for this and reads as "open a document", which is
+   *  what the note affordance beside it actually does; two different actions must not share a glyph. */
+  pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
 } as const;
 
 export type IconName = keyof typeof iconPaths;

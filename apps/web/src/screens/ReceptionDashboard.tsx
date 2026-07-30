@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Card, DataTable, Icon, InlineAlert, KpiCard, Modal, StatusChip } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, KpiCard, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { AppointmentCounts, AppointmentRow, Localized, Practitioner, Specialty } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -200,16 +200,33 @@ export function ReceptionDashboard() {
             place you are already looking.
             aria-live: the arrows replace every figure on the page, and a keyboard user would otherwise hear
             nothing about which day they had moved to. */}
+        <div className="dash-daynav-anchor">
         <button
           type="button"
           className="dash-daynav-label"
           aria-haspopup="dialog"
+          aria-expanded={pickerOpen}
           aria-label={`${isToday ? t(S.today) : fmt.date(dayInstant(day))} — ${t(S.jumpToDay)}`}
           onClick={() => { setPickerMonth(day.slice(0, 7)); setPickerOpen(true); }}
         >
           <span aria-live="polite">{isToday ? t(S.today) : fmt.date(dayInstant(day))}</span>
           <Icon name="chevron" aria-hidden="true" />
         </button>
+        {/* Anchored to the DATE, not centred over the page. Choosing a day is a small adjustment to what is
+            already on screen; a full modal dims everything the operator is comparing against and makes a
+            two-second decision feel like leaving the page. */}
+        {pickerOpen && (
+          <DayPickerPopover
+            month={pickerMonth}
+            selected={day}
+            t={t}
+            fmt={fmt}
+            onMonth={setPickerMonth}
+            onPick={(picked) => { setDay(picked); setPickerOpen(false); }}
+            onClose={() => setPickerOpen(false)}
+          />
+        )}
+        </div>
         <Button
           variant="ghost" aria-label={t(S.nextDay)} title={t(S.nextDay)}
           leadingIcon={<Icon name="chevron" style={{ transform: "rotate(-90deg)" }} />}
@@ -217,16 +234,6 @@ export function ReceptionDashboard() {
         />
       </div>
 
-      <DayPickerModal
-        open={pickerOpen}
-        month={pickerMonth}
-        selected={day}
-        t={t}
-        fmt={fmt}
-        onMonth={setPickerMonth}
-        onPick={(picked) => { setDay(picked); setPickerOpen(false); }}
-        onClose={() => setPickerOpen(false)}
-      />
 
       {/* ── Cards ──────────────────────────────────────────────────────
           Counted server-side. Tallying the board here would be capped at its 200-row page and would
@@ -336,17 +343,18 @@ function DaySchedule({ rows }: { rows: AppointmentRow[] }) {
 }
 
 /**
- * The month picker behind the day label.
+ * The month picker behind the day label — a popover anchored to the date, not a modal.
  *
- * A modal rather than a popover: it is focus-trapped, dismissible with Escape and returns focus on close for
- * free, and this is a deliberate jump rather than a hover-weight affordance. "Today" sits inside it, which is
- * where someone looking for it will already be — the old standalone button only existed once you had
- * navigated away, so it was unfamiliar at exactly the moment you wanted it.
+ * Choosing a day is a small adjustment to what is already on screen. A centred modal dims the very cards and
+ * table the operator is comparing against, and turns a two-second decision into something that feels like
+ * leaving the page. It also has to be dismissible the way a popover is: Escape, a click outside, or picking a
+ * day — all three, because an operator who opens it by accident should not have to find a Close button.
+ *
+ * Focus returns to the trigger on close, which a bare `position: absolute` panel does not give you for free.
  */
-function DayPickerModal({
-  open, month, selected, t, fmt, onMonth, onPick, onClose,
+function DayPickerPopover({
+  month, selected, t, fmt, onMonth, onPick, onClose,
 }: {
-  open: boolean;
   month: string;
   selected: string;
   t: (l: Localized) => string;
@@ -355,6 +363,23 @@ function DayPickerModal({
   onPick: (day: string) => void;
   onClose: () => void;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Escape closes, and a pointer down anywhere outside closes — the two gestures people already use on a
+    // popover. Bound on `pointerdown` rather than `click` so a drag that starts outside also dismisses.
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onDown = (e: PointerEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onDown);
+    };
+  }, [onClose]);
+
   const [y, m] = month.split("-").map(Number);
   const monthIndex = m - 1;
 
@@ -373,17 +398,7 @@ function DayPickerModal({
   const step = (delta: number) => onMonth(cairoDayKey(at(y, monthIndex + delta, 1)).slice(0, 7));
 
   return (
-    <Modal
-      open={open}
-      onOpenChange={(o: boolean) => { if (!o) onClose(); }}
-      title={t(S.jumpToDay)}
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>{t(S.close)}</Button>
-          <Button variant="primary" onClick={() => onPick(cairoToday())}>{t(S.goToday)}</Button>
-        </>
-      }
-    >
+    <div ref={ref} className="dash-daypop" role="dialog" aria-label={t(S.jumpToDay)}>
       <div className="bk-cal bk-cal-sm">
         <div className="bk-cal-head">
           <Button
@@ -398,6 +413,7 @@ function DayPickerModal({
             onClick={() => step(1)}
           />
         </div>
+
         {/* Weekday headings, from the same locale as the month name — a Latin header row over Arabic dates
             would be worse than none. 1 Aug 2026 is a Saturday, which is where Egypt's week starts. */}
         <div className="bk-cal-weekdays" aria-hidden="true">
@@ -408,6 +424,7 @@ function DayPickerModal({
             </span>
           ))}
         </div>
+
         <div className="bk-cal-grid" role="radiogroup" aria-label={t(S.jumpToDay)}>
           {Array.from({ length: lead }, (_, i) => <span key={`pad-${i}`} className="bk-cal-pad" aria-hidden="true" />)}
           {days.map((d) => {
@@ -428,6 +445,10 @@ function DayPickerModal({
           })}
         </div>
       </div>
-    </Modal>
+
+      <div className="dash-daypop-foot">
+        <Button variant="secondary" size="sm" onClick={() => onPick(cairoToday())}>{t(S.goToday)}</Button>
+      </div>
+    </div>
   );
 }

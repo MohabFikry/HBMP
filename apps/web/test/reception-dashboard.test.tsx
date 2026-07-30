@@ -145,4 +145,43 @@ describe("Reception dashboard", () => {
     expect(askedForByBoard.from).toBe(askedForByCards);
     expect(askedForByBoard.to).toBe(askedForByCards);
   });
+
+  /**
+   * The picker is a POPOVER anchored to the date, not a modal. Choosing a day is a small adjustment to what
+   * is already on screen, and a centred modal dims the very cards and table being compared against.
+   */
+  it("dismisses on Escape and on a click outside, without changing the day", async () => {
+    const user = userEvent.setup();
+    renderNode(<ReceptionDashboard />);
+    await screen.findByText(/^today$/i);
+
+    await user.click(screen.getByRole("button", { name: /choose a day/i }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    // Dismissing is not choosing: the day is untouched.
+    expect(screen.getByText(/^today$/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /choose a day/i }));
+    await screen.findByRole("dialog");
+    await user.click(document.body);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByText(/^today$/i)).toBeInTheDocument();
+  });
+
+  it("picking a day from the popover closes it and moves the dashboard", async () => {
+    const user = userEvent.setup();
+    renderNode(<ReceptionDashboard />);
+    await screen.findByText(/^today$/i);
+
+    await user.click(screen.getByRole("button", { name: /choose a day/i }));
+    const pop = await screen.findByRole("dialog");
+    // The 1st of the shown month — a day that is (almost always) not today, so the label must change.
+    const first = within(pop).getAllByRole("radio")[0];
+    await user.click(first);
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.queryByText(/^today$/i)).not.toBeInTheDocument();
+  });
 });
