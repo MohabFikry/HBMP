@@ -1,4 +1,9 @@
-# ADR-0021 — Document classification drives visibility; a class may be raised, never lowered (Phase 19.3b)
+# ADR-0028 — Document classification drives visibility; a class may be raised, never lowered (Phase 19.3b)
+
+> Renumbered from ADR-0021 on 2026-07-30 (phase 24 Gate 7). Two unrelated decisions were both
+> written as ADR-0021 — this one (phase 19.3b) and the user & access model (phase 21) — so
+> "see ADR-0021" resolved to whichever file the reader happened to open. The user & access
+> model keeps 0021: it is referenced from the frozen token contract and throughout phase 21.
 
 - Status: Accepted
 - Date: 2026-07-28

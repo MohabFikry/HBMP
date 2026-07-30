@@ -85,7 +85,11 @@ Each service: `Api/ Domain/ Infrastructure/ Tests/` + `README.md` (template in `
 - **Authorization tests** proving min-necessary (e.g., finance cannot read diagnosis; lab cannot read prescriptions).
 - **Concurrency tests** proving order-consume atomicity/no-reuse under parallel requests.
 - Accessibility: axe in CI (fail on serious/critical) + keyboard/screen-reader checks per UI story.
-- Coverage target ≥ 80% on domain logic. Test data synthetic/masked; never real PHI in lower envs.
+- Coverage: the numbers live in `tools/ci/coverage-floors.json` and nowhere else — target, enforced
+  floors and per-module floors together. Three files once claimed three different bars and only one was
+  enforced, so "what is the coverage bar?" had three answers depending on which you opened. The domain
+  TARGET is 80%; the enforced floor is lower and ratchets upward only (`check-floor-monotonicity.py`).
+  Test data synthetic/masked; never real PHI in lower envs.
 
 ## Definition of Done (every prompt/PR)
 - [ ] Meets the acceptance criteria / user story (`32-user-stories.md`).
