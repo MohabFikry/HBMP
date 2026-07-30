@@ -105,6 +105,7 @@ v1.MapPost("", async (
                 extensions: new Dictionary<string, object?> { ["existingBeneficiaryId"] = card.ExistingBeneficiaryId });
 
         case RegistrationResult.Created created:
+        {
             db.Beneficiaries.Add(created.Beneficiary);
             // The registration APPLICATION opens with the person, in the same transaction. Until now nothing
             // created these rows — the approval endpoints existed but the worklist behind US-003 was empty
@@ -123,6 +124,10 @@ v1.MapPost("", async (
                 CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow(),
             });
 
+            // 24.3 — the registration and BeneficiaryRegistered commit together. A registration whose
+            // event is lost never reaches eligibility's member projection: the person exists here and is
+            // unknown at every desk that checks them.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             if (created.Intent is { } intent)
             {
                 db.EnrolmentIntents.Add(new EnrolmentIntent
@@ -169,8 +174,10 @@ v1.MapPost("", async (
                     identifiers = created.Beneficiary.Identifiers.Select(i => new { type = i.IdentifierType.ToString(), value = i.IdentifierValue }),
                 }, ct);
 
+            await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/beneficiaries/{created.Beneficiary.BeneficiaryId}",
                 BeneficiaryDto.From(created.Beneficiary));
+        }
 
         default:
             return Results.Problem(statusCode: 500, title: "unexpected");
@@ -373,6 +380,12 @@ reg.MapPost("/{id:guid}/decision", async (Guid id, DecisionRequest req, PatientD
     var error = RegistrationRules.ValidateDecision(r, decision, req.Notes);
     if (error is not null) return Results.Problem(statusCode: 422, title: "decision-rejected", detail: error);
 
+    // 24.3 — the comment below has always said this activation and its enrolment request publish "in the
+    // same transaction as the activation". They did not: EfOutbox commits each enqueue on its own
+    // SaveChanges, so a crash after the activation left a member number issued, the beneficiary Active,
+    // and RegistrationEnrolmentRequested gone — which is exactly the failure the comment warns about,
+    // arriving by a route it did not consider. Now the claim is true.
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
     var beneficiary = await db.Beneficiaries.FirstAsync(x => x.BeneficiaryId == r.BeneficiaryId, ct);
     var actor = me.Principal?.Subject;
     r.Status = RegistrationRules.ResultOf(decision);
@@ -431,11 +444,13 @@ reg.MapPost("/{id:guid}/decision", async (Guid id, DecisionRequest req, PatientD
                 effectiveFrom = calendar.Today().ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
             }, ct);
         }
+        await tx.CommitAsync(ct);
         return Results.Ok(new { r.RegistrationId, status = r.Status.ToString(), beneficiary.BeneficiaryId, memberNo });
     }
 
     await db.SaveChangesAsync(ct);
     await audit.EmitAsync(new AuditEventDraft { EntityType = "registration", EntityId = r.RegistrationId.ToString(), Action = AuditAction.Decision, ActorUserId = actor, DecisionOutcome = r.Status.ToString(), DecisionReasonCode = req.Notes }, ct);
+    await tx.CommitAsync(ct);
     return Results.Ok(new { r.RegistrationId, status = r.Status.ToString(), r.Notes });
 });
 
@@ -475,6 +490,9 @@ v1.MapPost("/{id:guid}/status", async (Guid id, StatusChange req, PatientDbConte
     // downstream could reference them, and no BeneficiaryActivated event ever told eligibility they exist.
     // Renewal/unblock of an already-carded member keeps its existing number: the number is an identity fact,
     // not a status fact.
+    // 24.3 — a status change whose event is lost leaves every downstream projection on the old status:
+    // a suspended beneficiary still reads Active where eligibility is decided.
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
     string? issuedMemberNo = null;
     if (to == BeneficiaryStatus.Active && string.IsNullOrEmpty(b.MemberNo))
     {
@@ -493,6 +511,7 @@ v1.MapPost("/{id:guid}/status", async (Guid id, StatusChange req, PatientDbConte
     if (issuedMemberNo is not null)
         await outbox.EnqueueAsync("BeneficiaryActivated", "patient.events", new { tenantId = b.TenantId, beneficiaryId = b.BeneficiaryId, memberNo = issuedMemberNo, givenName = b.GivenName, familyName = b.FamilyName }, ct);
 
+    await tx.CommitAsync(ct);
     return Results.Ok(new { beneficiaryId = id, from = from.ToString(), to = to.ToString(), status = to.ToString(), memberNo = b.MemberNo });
 }).RequireAuthorization(HbmpPolicies.Scope("patient:write"));
 

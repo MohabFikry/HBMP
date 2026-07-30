@@ -109,6 +109,9 @@ public static class BeneficiaryIntakeEndpoints
 
                     var person = created.Beneficiary;
                     ApplyStatus(person, req.Status);
+                    // 24.3 — intake creates the person, their registration and the event that tells the
+                    // rest of the platform they exist. All of it, or none of it.
+                    await using var tx = await db.Database.BeginTransactionAsync(ct);
                     db.Beneficiaries.Add(person);
 
                     var registrationId = Guid.NewGuid();
@@ -138,6 +141,7 @@ public static class BeneficiaryIntakeEndpoints
                         identifiers = Array.Empty<object>(),
                     }, ct);
 
+                    await tx.CommitAsync(ct);
                     return Results.Ok(new IntakeResult(
                         person.BeneficiaryId, person.Status.ToString(), person.MemberNo, Created: true, Changed: true));
                 }

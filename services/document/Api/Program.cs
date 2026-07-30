@@ -87,13 +87,19 @@ writes.MapPost("/beneficiaries/{beneficiaryId:guid}/documents", async (
             return Results.Problem(statusCode: 422, title: "malware-detected", detail: $"quarantined: {q.Signature}", type: "urn:hbmp:malware-quarantined");
 
         case UploadOutcome.Stored s:
+        {
+            // 24.3 — a stored document whose DocumentAttached event is lost is a file in MinIO that no
+            // record anywhere points at.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             db.Documents.Add(s.Document);
             await db.SaveChangesAsync(ct);
             await audit.EmitAsync(Draft(beneficiaryId, AuditAction.Create, actor, "stored", s.Version.ChecksumSha256, AuditSeverity.Info, s.Document.DocumentId), ct);
             await outbox.EnqueueAsync("DocumentAttached", "document.events",
                 new { documentId = s.Document.DocumentId, beneficiaryId, docType = type.ToString(), version = s.Version.VersionNo }, ct);
+            await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/beneficiaries/{beneficiaryId}/documents/{s.Document.DocumentId}",
                 new { s.Document.DocumentId, docType = type.ToString(), version = s.Version.VersionNo, s.Version.ChecksumSha256, s.Version.SizeBytes });
+        }
 
         default:
             return Results.Problem(statusCode: 500, title: "unexpected");
