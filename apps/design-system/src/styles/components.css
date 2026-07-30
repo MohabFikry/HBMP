@@ -149,9 +149,19 @@ html[data-theme="dark"] .mrs-btn.mrs-primary {
   display: block;
   color: var(--text-1);
 }
-.mrs-field .mrs-control {
+/*
+  A CONTROL is a control wherever it lives — same reasoning as `.mrs-label` above, and the same defect.
+
+  These declarations were scoped to `.mrs-field .mrs-control`, so any control the Field wrapper does not own
+  received none of them. `Combobox` is exactly that case: its input carries `.mrs-control` but sits inside
+  `.mrs-combo`, so it rendered with no border, no 44px height, no background and no padding — a flat grey bar
+  next to correctly-drawn InputFields on the same form. The booking screen showed both side by side.
+
+  Only `margin-top` stays field-scoped: the 6px gap belongs to the label-above-control arrangement the Field
+  makes, and controls elsewhere (the toolbar's search box, a combobox in a grid) space themselves.
+*/
+.mrs-control {
   width: 100%;
-  margin-top: 6px;
   min-height: 44px;
   border-radius: var(--r-md);
   /* --border is a decorative hairline and sat at ~2:1 against the dark card — an empty input was
@@ -163,12 +173,24 @@ html[data-theme="dark"] .mrs-btn.mrs-primary {
   padding: 10px 12px;
   font: inherit;
 }
-.mrs-field textarea.mrs-control {
+.mrs-field .mrs-control {
+  margin-top: 6px;
+}
+textarea.mrs-control {
   min-height: 80px;
   resize: vertical;
 }
-.mrs-field .mrs-control[aria-invalid="true"] {
+.mrs-control[aria-invalid="true"] {
   border-color: var(--st-bad-fg);
+}
+/* A disabled control must READ as disabled rather than merely refusing clicks: the booking form disables
+   Specialty until the branch's list arrives and Doctor until a specialty is chosen, and without this they
+   looked identical to enabled ones — so the operator clicked, nothing happened, and the screen looked
+   broken rather than sequenced. */
+.mrs-control:disabled {
+  background: var(--surface-2, var(--surface-1));
+  color: var(--text-3);
+  cursor: not-allowed;
 }
 .mrs-field .mrs-help {
   font-size: var(--fs-caption);

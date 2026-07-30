@@ -1265,6 +1265,14 @@ nav.mrs-rail {
 }
 .book-search .mrs-field {
   flex: 1 1 260px;
+  min-inline-size: 0;
+}
+/* The submit sits on the CONTROL's baseline, not the field's. `.mrs-field` is label + 6px + control, so a
+   button aligned to the flex end of the row lined up with the bottom of the whole field — which looked right
+   only because the label happened to be one line. It is pinned to the control height instead. */
+.book-search > .mrs-btn {
+  flex: 0 0 auto;
+  min-block-size: 44px;
 }
 .book-hits {
   list-style: none;
@@ -1293,10 +1301,16 @@ nav.mrs-rail {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: var(--sp3);
   margin-block-end: var(--sp3);
+  align-items: start;
 }
 .book-field {
   display: grid;
   gap: 6px;
+  /* align-content:start stops a field in a taller grid row from stretching its control to fill the row —
+     which is what made the Specialty and Doctor comboboxes different heights from each other whenever one
+     carried a help line and the other did not. */
+  align-content: start;
+  min-inline-size: 0;
 }
 .book-field .mrs-select {
   inline-size: 100%;
@@ -1343,52 +1357,97 @@ nav.mrs-rail {
 }
 
 /* ── Booking time picker (14.5) ──────────────────────────────────────────────
-   A day strip beside the chosen day's times. Two columns on a desk, stacked on a narrow screen — the day
-   strip scrolls rather than wrapping, so the times keep a stable position while the operator scans days. */
+   A month calendar beside the chosen day's times. Two columns on a desk, stacked on a narrow screen. */
 .bk-time-grid {
   display: grid;
-  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   gap: var(--sp4);
   align-items: start;
 }
-@media (max-width: 720px) {
+@media (max-width: 780px) {
   .bk-time-grid { grid-template-columns: minmax(0, 1fr); }
 }
-.bk-days {
-  display: grid;
-  gap: var(--sp2);
-  max-block-size: 320px;
-  overflow-y: auto;
+
+.bk-cal {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp3);
+  background: var(--surface-1);
 }
-.bk-day {
+.bk-cal-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp2);
-  min-block-size: 44px;
-  padding: 0 var(--sp3);
-  border: 1px solid var(--border-input, var(--border));
+  margin-block-end: var(--sp2);
+}
+.bk-cal-month {
+  font-size: var(--fs-subhead);
+  text-align: center;
+  flex: 1 1 auto;
+}
+/* Seven equal columns, shared by the weekday row and the grid so the headings sit over their own days. */
+.bk-cal-weekdays,
+.bk-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.bk-cal-weekdays {
+  margin-block-end: 4px;
+}
+.bk-cal-weekdays span {
+  text-align: center;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+  font-weight: 600;
+}
+.bk-cal-day {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  /* Square-ish cells: a month grid whose rows differ in height reads as broken, and aspect-ratio keeps them
+     square at every column width without hard-coding one. */
+  aspect-ratio: 1;
+  min-block-size: 38px;
+  border: 1px solid transparent;
   border-radius: var(--r-sm);
-  background: var(--surface-1);
+  background: transparent;
   color: var(--text-1);
   font: inherit;
   cursor: pointer;
 }
-.bk-day:hover:not(:disabled) { border-color: var(--accent); }
-.bk-day:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-/* Selected carries fill + weight, never hue alone (WCAG 1.4.1), matching .book-slot beside it. */
-.bk-day[aria-checked="true"] {
+.bk-cal-day:hover:not(:disabled) { border-color: var(--accent); }
+.bk-cal-day:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+/* A bookable day is marked by a tinted fill AND its count, never by hue alone (WCAG 1.4.1). */
+.bk-cal-day:not(:disabled) {
+  background: var(--accent-tint, var(--surface-2));
+  font-weight: 600;
+}
+.bk-cal-day[aria-checked="true"] {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--on-accent);
-  font-weight: 600;
 }
-.bk-day:disabled { cursor: not-allowed; opacity: 0.5; }
-.bk-day-count {
-  font-variant-numeric: tabular-nums;
-  opacity: 0.8;
-  font-size: 0.9em;
+.bk-cal-day:disabled {
+  cursor: not-allowed;
+  color: var(--text-3);
+  opacity: 0.55;
 }
+.bk-cal-num { font-size: 13px; line-height: 1; }
+.bk-cal-count {
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.85;
+}
+.bk-cal-pad { aspect-ratio: 1; }
+.bk-cal-empty { margin-block-start: var(--sp2); }
+
 .bk-times-head {
   display: flex;
   align-items: baseline;

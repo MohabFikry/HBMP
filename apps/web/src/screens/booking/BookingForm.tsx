@@ -5,7 +5,7 @@ import type {
 } from "@mersal/contracts";
 import { useApi } from "../../api/ApiProvider";
 import { useLoc } from "../_shared";
-import { BookingTimePicker } from "./BookingTimePicker";
+import { BookingTimePicker, monthKey } from "./BookingTimePicker";
 import { availableSpecialties, bookableDoctors, type BookableDoctor } from "./bookableDoctors";
 
 const S = {
@@ -107,6 +107,9 @@ export function BookingForm({
   const [slots, setSlots] = useState<BookableSlot[]>([]);
   const [days, setDays] = useState<AppointmentDay[]>([]);
   const [slotsBusy, setSlotsBusy] = useState(false);
+  // The month the calendar is showing. Availability is fetched FOR THIS MONTH — a calendar that navigates
+  // without re-fetching draws every day of the new month as empty and says there is nothing there.
+  const [month, setMonth] = useState(() => monthKey(new Date()));
 
   // The specialty reference set is org data and does not change with the branch — loaded once.
   useEffect(() => {
@@ -166,8 +169,11 @@ export function BookingForm({
     setSlots([]); setDays([]); setSlotId(null);
     if (!chosenDoctor || !clinic) return;
     setSlotsBusy(true);
-    const from = new Date().toISOString();
-    const to = new Date(Date.now() + 28 * 24 * 3600 * 1000).toISOString();
+    // The whole visible month, anchored at noon UTC so the first and last days cannot slip a day under
+    // Cairo's offset. The server still hides past slots, so a month already begun simply returns fewer.
+    const [y, m] = month.split("-").map(Number);
+    const from = new Date(Date.UTC(y, m - 1, 1, 12)).toISOString();
+    const to = new Date(Date.UTC(y, m, 0, 12)).toISOString();
     void Promise.all([
       api.openSlots(clinic.providerId, clinic.locationId, from, to, chosenDoctor.id).catch(() => [] as BookableSlot[]),
       api.appointmentDays(clinic.providerId, clinic.locationId, from, to, chosenDoctor.id).catch(() => [] as AppointmentDay[]),
@@ -175,7 +181,7 @@ export function BookingForm({
       if (gen.current !== mine) return;
       setSlots(sl); setDays(dd);
     }).finally(() => { if (gen.current === mine) setSlotsBusy(false); });
-  }, [api, chosenDoctor, clinic, reloadToken]);
+  }, [api, chosenDoctor, clinic, reloadToken, month]);
 
   // One place the selection leaves this component, so a caller can never see a half-updated chain.
   useEffect(() => {
@@ -258,6 +264,13 @@ export function BookingForm({
         selectedSlotId={slotId}
         onSelectSlot={setSlotId}
         busy={slotsBusy}
+        month={month}
+        onMonthChange={(next) => {
+          // The time chosen in the old month is dropped in the SAME update as the month change: keeping it
+          // would leave a booking pointing at a slot the calendar is no longer showing.
+          setMonth(next);
+          setSlotId(null);
+        }}
       />
 
       <TextareaField

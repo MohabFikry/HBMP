@@ -31,6 +31,13 @@ export interface Formatters {
   money: (value: number | null | undefined) => string;
   /** Plain number with locale digit grouping. */
   number: (value: number | null | undefined, opts?: Intl.NumberFormatOptions) => string;
+  /**
+   * The resolved BCP-47 locale ("en-GB" / "ar-EG"), for the rare caller that must build its own `Intl`
+   * formatter — a month calendar needs `{month:'long'}` and weekday headings, which no fixed formatter here
+   * can supply. Exposed so those callers derive the locale from the same place every other string does,
+   * rather than re-deriving it from `lang` and drifting (ar vs ar-EG changes the month names).
+   */
+  locale: string;
 }
 
 /** Arabic uses ar-EG specifically: it carries Egyptian month names and the right week start. */
@@ -66,6 +73,7 @@ export function useFormat(): Formatters {
       money: (v) => (typeof v === "number" && Number.isFinite(v) ? moneyFmt.format(v) : dash),
       number: (v, opts) =>
         typeof v === "number" && Number.isFinite(v) ? new Intl.NumberFormat(locale, opts).format(v) : dash,
+      locale,
     };
   }, [lang]);
 }
