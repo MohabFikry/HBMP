@@ -672,6 +672,15 @@
             "type": "string",
             "format": "uuid",
             "nullable": true
+          },
+          "doctorId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false

@@ -93,6 +93,28 @@
         }
       }
     },
+    "/api/v1/beneficiaries/by-card": {
+      "put": {
+        "tags": [
+          "Mersal.Patient.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/beneficiaries": {
       "post": {
         "tags": [
@@ -102,7 +124,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RegisterBeneficiaryRequest"
+                "$ref": "#/components/schemas/RegisterRequest"
               }
             }
           },
@@ -346,16 +368,6 @@
   },
   "components": {
     "schemas": {
-      "ContactType": {
-        "enum": [
-          0,
-          1,
-          2,
-          3
-        ],
-        "type": "integer",
-        "format": "int32"
-      },
       "CreateRegistration": {
         "type": "object",
         "properties": {
@@ -380,53 +392,86 @@
         },
         "additionalProperties": false
       },
-      "IdentifierType": {
-        "enum": [
-          0,
-          1,
-          2,
-          3,
-          4
-        ],
-        "type": "integer",
-        "format": "int32"
-      },
-      "NewContact": {
+      "EnrolmentIntentDto": {
         "type": "object",
         "properties": {
-          "type": {
-            "$ref": "#/components/schemas/ContactType"
-          },
-          "value": {
+          "planId": {
             "type": "string",
-            "nullable": true
+            "format": "uuid"
           },
-          "preferredChannel": {
+          "networkTierId": {
             "type": "string",
-            "nullable": true
+            "format": "uuid"
           },
-          "isPrimary": {
-            "type": "boolean"
+          "contributionPercent": {
+            "type": "number",
+            "format": "double"
+          },
+          "defaultBranchId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           }
         },
         "additionalProperties": false
       },
-      "NewIdentifier": {
+      "IntakeRequest": {
         "type": "object",
         "properties": {
-          "type": {
-            "$ref": "#/components/schemas/IdentifierType"
-          },
-          "value": {
+          "cardNumber": {
             "type": "string",
             "nullable": true
           },
-          "issuingCountry": {
+          "givenName": {
             "type": "string",
             "nullable": true
           },
-          "isPrimary": {
-            "type": "boolean"
+          "middleName": {
+            "type": "string",
+            "nullable": true
+          },
+          "familyName": {
+            "type": "string",
+            "nullable": true
+          },
+          "sex": {
+            "type": "string",
+            "nullable": true
+          },
+          "nationalityCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "birthDate": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "individualNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "caseNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RegistrationNoteDto"
+            },
+            "nullable": true
+          },
+          "enrolment": {
+            "$ref": "#/components/schemas/EnrolmentIntentDto"
           }
         },
         "additionalProperties": false
@@ -449,10 +494,18 @@
         },
         "additionalProperties": false
       },
-      "RegisterBeneficiaryRequest": {
+      "RegisterRequest": {
         "type": "object",
         "properties": {
+          "cardNumber": {
+            "type": "string",
+            "nullable": true
+          },
           "givenName": {
+            "type": "string",
+            "nullable": true
+          },
+          "middleName": {
             "type": "string",
             "nullable": true
           },
@@ -465,6 +518,9 @@
             "format": "date",
             "nullable": true
           },
+          "birthDateIsApproximate": {
+            "type": "boolean"
+          },
           "sex": {
             "type": "string",
             "nullable": true
@@ -473,18 +529,48 @@
             "type": "string",
             "nullable": true
           },
-          "identifiers": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NewIdentifier"
-            },
+          "identifierType": {
+            "type": "string",
             "nullable": true
           },
-          "contacts": {
+          "identifierValue": {
+            "type": "string",
+            "nullable": true
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "individualNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "caseNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "enrolment": {
+            "$ref": "#/components/schemas/EnrolmentIntentDto"
+          },
+          "notes": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/NewContact"
+              "$ref": "#/components/schemas/RegistrationNoteDto"
             },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "RegistrationNoteDto": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "value": {
+            "type": "string",
             "nullable": true
           }
         },

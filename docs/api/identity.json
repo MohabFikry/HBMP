@@ -256,6 +256,16 @@
       }
     },
     "/connect/logout": {
+      "get": {
+        "tags": [
+          "Mersal.Identity.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
       "post": {
         "tags": [
           "Mersal.Identity.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
@@ -950,6 +960,27 @@
       "get": {
         "tags": [
           "Mersal.Identity.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/identity/user-labels": {
+      "get": {
+        "tags": [
+          "Mersal.Identity.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "subjectIds",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
