@@ -40,7 +40,7 @@ services/case/Api/Beneficiary360Endpoint.cs 1
 services/case/Api/Cases.cs 5
 services/claims/Api/AppealEndpoints.cs 1
 services/claims/Api/BatchEndpoints.cs 2
-services/claims/Api/ClaimsEndpoints.cs 3
+services/claims/Api/ClaimsEndpoints.cs 1
 services/claims/Api/DecisionEndpoints.cs 2
 services/claims/Api/ReconciliationEndpoints.cs 1
 services/claims/Api/ReimbursementEndpoints.cs 3
@@ -52,11 +52,10 @@ services/emr/Api/Program.cs 2
 services/emr/Api/Queue.cs 1
 services/emr/Api/Reminders.cs 1
 services/interop/Infrastructure/Integration/InboundIngestion.cs 1
-services/orders/Api/Consume.cs 2
 services/patient/Api/BeneficiaryContacts.cs 1
 services/patient/Api/BeneficiaryIntake.cs 1
 services/patient/Api/Program.cs 5
-services/pharmacy/Api/Dispensing.cs 4
+services/pharmacy/Api/Dispensing.cs 2
 services/policy/Api/EnrollmentEndpoints.cs 3
 services/policy/Api/NoteEndpoints.cs 2
 services/policy/Api/PlanEndpoints.cs 3

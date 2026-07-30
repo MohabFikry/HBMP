@@ -15,12 +15,23 @@ namespace Mersal.Architecture.Tests;
 /// <c>EfOutboxDurabilityTests</c> demonstrates both halves against a real database.</para>
 ///
 /// <para>The library cannot enforce this on its own — whether the two writes share a transaction is a
-/// property of the CALL SITE. So this reads the source: for every <c>EnqueueAsync</c>, it walks outward to
-/// the nearest enclosing block that also performs a <c>SaveChangesAsync</c>, and requires a
-/// <c>BeginTransactionAsync</c> in that block. An omission cannot fail a unit test, because the test that
-/// would catch it is the test nobody wrote either — the same reasoning that created this project.</para>
+/// property of the CALL SITE. So this reads the source: for every <c>EnqueueAsync</c>, it asks whether any
+/// block between that call and its handler opens a transaction. An omission cannot fail a unit test,
+/// because the test that would catch it is the test nobody wrote either — the same reasoning that created
+/// this project.</para>
 ///
-/// <para><b>The debt register.</b> 85 call sites across 30 files predate this rule. They are listed in
+/// <para>It does NOT require a visible write, and that cost a correction. An earlier version only flagged an
+/// enqueue sharing a handler with a <c>SaveChangesAsync</c> — and in emr, orders consume and every claims
+/// endpoint the write happens inside a service that owns and commits its own transaction, leaving nothing in
+/// the handler to find. The rule was blind to 40 sites, concentrated in the money paths, while the register
+/// read as though they did not exist.</para>
+///
+/// <para>Two shapes are legitimately exempt and both are recognised: a transaction anywhere in the handler
+/// scope, and pharmacy's <c>insideTransaction:</c> callback, which the service invokes after its write and
+/// before its commit — the correct fix for the service-owned case, since wrapping the handler would nest a
+/// second transaction and throw.</para>
+///
+/// <para><b>The debt register.</b> The sites that predate this rule are listed in
 /// <c>docs/quality/outbox-atomicity-debt.txt</c> with their counts, and the rule is a RATCHET: a file may
 /// shrink or disappear, never grow, and a file not on the list may have none at all. Recording them is not
 /// forgiving them — it is the difference between debt somebody can see and a rule nobody can land. Every
@@ -107,6 +118,7 @@ public class OutboxAtomicityTests
                 // notification with no state behind it) is rare enough to earn a register entry.
                 var scope = EnclosingBlocks(src, m.Index).ToList();
                 if (scope.Any(b => b.Contains("BeginTransactionAsync", StringComparison.Ordinal))) continue;
+                if (InsideTransactionCallback(src, m.Index)) continue;
 
                 var line = src.Take(m.Index).Count(c => c == '\n') + 1;
                 if (!results.TryGetValue(rel, out var lines)) results[rel] = lines = [];
@@ -114,6 +126,25 @@ public class OutboxAtomicityTests
             }
         }
         return results;
+    }
+
+    /// <summary>
+    /// The house pattern for the service-owned case, and the reason it is not a violation.
+    ///
+    /// <para>Where the write lives inside a service that owns its transaction, the handler cannot wrap it —
+    /// a second transaction would nest inside the service's own and throw. pharmacy's DispenseExecutor
+    /// solves this by taking an <c>insideTransaction:</c> callback and invoking it after the write and
+    /// BEFORE its commit, so the enqueue joins that same transaction while the payload is still built at the
+    /// handler, where the vocabulary belongs. An enqueue inside such a callback is atomic by construction,
+    /// and flagging it would push people away from the one pattern that actually fixes this shape.</para>
+    /// </summary>
+    private static bool InsideTransactionCallback(string src, int index)
+    {
+        var marker = src.LastIndexOf("insideTransaction:", index, StringComparison.Ordinal);
+        if (marker < 0) return false;
+        var open = src.IndexOf('{', marker);
+        if (open < 0 || open > index) return false;
+        return MatchingClose(src, open) > index;
     }
 
     /// <summary>A block writes state if it saves directly OR through the house helpers that save. Keying
