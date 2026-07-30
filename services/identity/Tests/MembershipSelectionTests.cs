@@ -17,7 +17,7 @@ namespace Mersal.Identity.Tests;
 /// Env-gated on IDENTITY_TEST_DB against a migrated database. DB-less CI skips.
 /// </summary>
 [Collection("identity-db")]
-public class MembershipSelectionTests
+public class MembershipSelectionTests(IdentityHostFixture host) : IClassFixture<IdentityHostFixture>
 {
     private const string Password = "Passw0rd!Mersal";
     private const string TenantB = "22222222-2222-2222-2222-222222222222";
@@ -31,7 +31,7 @@ public class MembershipSelectionTests
     public async Task Two_memberships_of_one_identity_mint_two_different_principals()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — issuer integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var uname = $"ms-{Guid.NewGuid():N}";
         var (id, _) = await TestFlow.SeedUser(factory, uname, Password, ["finance"]);
 
@@ -71,7 +71,7 @@ public class MembershipSelectionTests
     public async Task A_single_membership_auto_selects_and_still_stamps_the_claim()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — issuer integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var uname = $"ms1-{Guid.NewGuid():N}";
         var (id, _) = await TestFlow.SeedUser(factory, uname, Password, ["finance"]);
 
@@ -95,7 +95,7 @@ public class MembershipSelectionTests
     public async Task Several_memberships_send_the_browser_to_the_chooser_rather_than_picking_one()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — issuer integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var uname = $"msc-{Guid.NewGuid():N}";
         var (id, _) = await TestFlow.SeedUser(factory, uname, Password, ["finance"]);
 
@@ -121,7 +121,7 @@ public class MembershipSelectionTests
     public async Task An_identity_with_no_selectable_membership_is_refused_a_token()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — issuer integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var uname = $"msn-{Guid.NewGuid():N}";
         var (id, _) = await TestFlow.SeedUser(factory, uname, Password, ["finance"]);
 
@@ -149,7 +149,7 @@ public class MembershipSelectionTests
     public async Task A_membership_belonging_to_someone_else_cannot_be_selected()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — issuer integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var mine = $"msx-{Guid.NewGuid():N}";
         var theirs = $"msy-{Guid.NewGuid():N}";
         var (myId, _) = await TestFlow.SeedUser(factory, mine, Password, ["finance"]);
@@ -186,7 +186,7 @@ public class MembershipSelectionTests
     public async Task Ending_a_membership_stops_its_refresh_token_at_the_next_exchange()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — issuer integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var uname = $"msr-{Guid.NewGuid():N}";
         var (id, _) = await TestFlow.SeedUser(factory, uname, Password, ["finance"]);
 
@@ -219,7 +219,7 @@ public class MembershipSelectionTests
     public async Task Revoking_a_role_removes_it_from_the_membership_not_just_the_identity()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — issuer integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var uname = $"msm-{Guid.NewGuid():N}";
         var (id, _) = await TestFlow.SeedUser(factory, uname, Password, ["finance", "doctor"]);
 
@@ -246,6 +246,9 @@ public class MembershipSelectionTests
     public async Task A_stale_selection_with_one_membership_left_reaches_the_chooser_instead_of_looping()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — issuer integration test skipped.");
+        // OWN HOST, deliberately. This asserts on state the host itself holds, so it needs one nobody
+        // else has touched — sharing the class fixture lets an earlier test in this file leave the
+        // very state under test already warm, and the assertion then proves nothing.
         using var factory = new IdentityAppFactory();
         var uname = $"msl-{Guid.NewGuid():N}";
         var (id, _) = await TestFlow.SeedUser(factory, uname, Password, ["finance"]);

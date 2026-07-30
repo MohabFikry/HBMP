@@ -18,7 +18,7 @@ namespace Mersal.Identity.Tests;
 /// Env-gated on IDENTITY_TEST_DB. DB-less CI skips.
 /// </summary>
 [Collection("identity-db")]
-public class OverrideAdminApiTests
+public class OverrideAdminApiTests(IdentityHostFixture host) : IClassFixture<IdentityHostFixture>
 {
     private const string Password = "Passw0rd!Mersal";
     private const string AdminScopes = "openid admin:read admin:write offline_access";
@@ -27,7 +27,7 @@ public class OverrideAdminApiTests
     public async Task An_allow_override_reaches_the_effective_set_and_the_next_token()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — admin integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var admin = $"ovadm-{Guid.NewGuid():N}";
         var subject = $"ovsub-{Guid.NewGuid():N}";
         var (adminId, key) = await TestFlow.SeedUser(factory, admin, Password, ["super_admin"], twoFactor: true);
@@ -64,7 +64,7 @@ public class OverrideAdminApiTests
     public async Task An_override_that_would_breach_segregation_of_duties_is_refused_with_the_conflict()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — admin integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var admin = $"ovadm2-{Guid.NewGuid():N}";
         var subject = $"ovsub2-{Guid.NewGuid():N}";
         var (adminId, key) = await TestFlow.SeedUser(factory, admin, Password, ["super_admin"], twoFactor: true);
@@ -107,7 +107,7 @@ public class OverrideAdminApiTests
     public async Task A_deny_override_is_never_blocked_by_segregation_of_duties()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — admin integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var admin = $"ovadm3-{Guid.NewGuid():N}";
         var subject = $"ovsub3-{Guid.NewGuid():N}";
         var (adminId, key) = await TestFlow.SeedUser(factory, admin, Password, ["super_admin"], twoFactor: true);
@@ -142,6 +142,9 @@ public class OverrideAdminApiTests
     public async Task Revoking_an_override_invalidates_the_out_of_session_cache_immediately()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — admin integration test skipped.");
+        // OWN HOST, deliberately. This asserts on state the host itself holds, so it needs one nobody
+        // else has touched — sharing the class fixture lets an earlier test in this file leave the
+        // very state under test already warm, and the assertion then proves nothing.
         using var factory = new IdentityAppFactory();
         var admin = $"ovadm4-{Guid.NewGuid():N}";
         var subject = $"ovsub4-{Guid.NewGuid():N}";
@@ -182,7 +185,7 @@ public class OverrideAdminApiTests
     public async Task An_override_without_a_reason_is_refused()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — admin integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var admin = $"ovadm5-{Guid.NewGuid():N}";
         var subject = $"ovsub5-{Guid.NewGuid():N}";
         var (adminId, key) = await TestFlow.SeedUser(factory, admin, Password, ["super_admin"], twoFactor: true);

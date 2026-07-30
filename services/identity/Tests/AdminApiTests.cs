@@ -10,13 +10,13 @@ namespace Mersal.Identity.Tests;
 /// <summary>17.4 — the in-app admin surface (C3). Proves user/role administration requires a bearer token
 /// with the admin scope AND an MFA session, and that a create is applied + role-assigned. Env-gated.</summary>
 [Collection("identity-db")]
-public class AdminApiTests
+public class AdminApiTests(IdentityHostFixture host) : IClassFixture<IdentityHostFixture>
 {
     [SkippableFact]
     public async Task Mfa_admin_can_create_a_user_and_assign_roles()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — admin integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var admin = $"admin-{Guid.NewGuid():N}";
         var (adminId, key) = await TestFlow.SeedUser(factory, admin, "Passw0rd!Mersal", ["super_admin"], twoFactor: true);
         Guid? createdId = null;
@@ -53,7 +53,7 @@ public class AdminApiTests
     public async Task Non_mfa_admin_token_is_rejected()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — admin integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var admin = $"admin2-{Guid.NewGuid():N}";
         // org_admin grants admin:write but this account has NO second factor → amr=pwd only.
         var (adminId, _) = await TestFlow.SeedUser(factory, admin, "Passw0rd!Mersal", ["org_admin"], twoFactor: false);
@@ -76,7 +76,7 @@ public class AdminApiTests
     public async Task Token_without_admin_scope_is_rejected()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — admin integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var user = $"fin-{Guid.NewGuid():N}";
         var (id, key) = await TestFlow.SeedUser(factory, user, "Passw0rd!Mersal", ["finance"], twoFactor: true);
         try

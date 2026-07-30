@@ -9,13 +9,13 @@ namespace Mersal.Identity.Tests;
 /// second factor evidencing MFA. Env-gated on IDENTITY_TEST_DB. DB-less CI skips.
 /// </summary>
 [Collection("identity-db")]
-public class IssuerConformanceTests
+public class IssuerConformanceTests(IdentityHostFixture host) : IClassFixture<IdentityHostFixture>
 {
     [SkippableFact]
     public async Task Client_credentials_token_validates_through_libs_auth()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — issuer integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var client = factory.CreateClient();
 
         var token = await TestFlow.ClientCredentialsToken(
@@ -37,7 +37,7 @@ public class IssuerConformanceTests
     public async Task Authorization_code_pkce_token_carries_the_frozen_user_claims()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — issuer integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var provider = Guid.NewGuid();
         var uname = $"conf-{Guid.NewGuid():N}";
         var (id, _) = await TestFlow.SeedUser(factory, uname, "Passw0rd!Mersal", ["finance"], providerId: provider);
@@ -64,7 +64,7 @@ public class IssuerConformanceTests
     public async Task Totp_two_factor_session_satisfies_MFA_on_the_token()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — issuer integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var uname = $"mfa-{Guid.NewGuid():N}";
         var (id, key) = await TestFlow.SeedUser(factory, uname, "Passw0rd!Mersal", ["medical_approval"], twoFactor: true);
 

@@ -18,7 +18,7 @@ namespace Mersal.Identity.Tests;
 /// Env-gated on IDENTITY_TEST_DB. DB-less CI skips.
 /// </summary>
 [Collection("identity-db")]
-public class AccessReviewTests
+public class AccessReviewTests(IdentityHostFixture host) : IClassFixture<IdentityHostFixture>
 {
     private const string Password = "Passw0rd!Mersal";
 
@@ -26,7 +26,7 @@ public class AccessReviewTests
     public async Task THE_acceptance_case_the_review_contains_overrides_WITH_their_reasons_and_grantors()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var uname = $"rev-{Guid.NewGuid():N}";
         var (userId, _) = await TestFlow.SeedUser(factory, uname, Password, ["finance"]);
 
@@ -71,7 +71,7 @@ public class AccessReviewTests
     public async Task The_review_reports_the_most_privileged_tier_and_flags_platform_admins()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var uname = $"revp-{Guid.NewGuid():N}";
         var (userId, _) = await TestFlow.SeedUser(factory, uname, Password, ["reception", "doctor"]);
 
@@ -108,7 +108,7 @@ public class AccessReviewTests
     public async Task Holder_counts_answer_who_else_has_this_key()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var a = $"revh1-{Guid.NewGuid():N}";
         var b = $"revh2-{Guid.NewGuid():N}";
         var (aId, _) = await TestFlow.SeedUser(factory, a, Password, ["finance"]);
@@ -160,7 +160,7 @@ public class AccessReviewTests
     public async Task Generating_a_review_is_audited_as_an_EXPORT()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var admin = $"revadm-{Guid.NewGuid():N}";
         var (adminId, key) = await TestFlow.SeedUser(factory, admin, Password, ["super_admin"], twoFactor: true);
 
@@ -185,7 +185,7 @@ public class AccessReviewTests
     public async Task An_unauthenticated_caller_cannot_read_a_tenants_access_posture()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var client = factory.CreateClient();
 
         // The report is a complete map of who can do what in a tenant — the single most useful document to

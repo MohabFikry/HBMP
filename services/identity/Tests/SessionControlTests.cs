@@ -13,7 +13,7 @@ namespace Mersal.Identity.Tests;
 /// Env-gated on IDENTITY_TEST_DB. DB-less CI skips.
 /// </summary>
 [Collection("identity-db")]
-public class SessionControlTests
+public class SessionControlTests(IdentityHostFixture host) : IClassFixture<IdentityHostFixture>
 {
     private const string Password = "Passw0rd!Mersal";
 
@@ -27,7 +27,7 @@ public class SessionControlTests
     public async Task The_concurrent_cap_revokes_the_OLDEST_rather_than_refusing_the_newest()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var uname = $"sess-{Guid.NewGuid():N}";
         var (userId, _) = await TestFlow.SeedUser(factory, uname, Password, ["reception"]);
 
@@ -62,7 +62,7 @@ public class SessionControlTests
     public async Task A_revoked_session_is_kept_with_its_attribution_never_deleted()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var uname = $"sessr-{Guid.NewGuid():N}";
         var (userId, _) = await TestFlow.SeedUser(factory, uname, Password, ["reception"]);
 
@@ -92,7 +92,7 @@ public class SessionControlTests
     public async Task Revoking_all_ends_every_live_session_for_that_identity_only()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var mine = $"sessa-{Guid.NewGuid():N}";
         var theirs = $"sessb-{Guid.NewGuid():N}";
         var (myId, _) = await TestFlow.SeedUser(factory, mine, Password, ["reception"]);
@@ -126,7 +126,7 @@ public class SessionControlTests
     public async Task A6_an_explicit_revoke_that_cannot_be_persisted_raises_rather_than_reporting_success()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var svc = Service(factory, out var scope);
 
         using (scope)
@@ -144,7 +144,7 @@ public class SessionControlTests
     public async Task A6_the_refresh_path_fails_OPEN_when_the_store_cannot_answer()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var svc = Service(factory, out var scope);
 
         using (scope)
@@ -163,7 +163,7 @@ public class SessionControlTests
     public async Task Failed_attempts_are_recorded_not_only_successful_ones()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var uname = $"hist-{Guid.NewGuid():N}";
         var (userId, _) = await TestFlow.SeedUser(factory, uname, Password, ["reception"]);
 
@@ -190,7 +190,7 @@ public class SessionControlTests
     public async Task No_password_material_is_stored_anywhere_in_the_attempt_record()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var uname = $"histp-{Guid.NewGuid():N}";
         var (userId, _) = await TestFlow.SeedUser(factory, uname, Password, ["reception"]);
 
@@ -217,7 +217,7 @@ public class SessionControlTests
     public async Task The_failure_reason_does_not_distinguish_a_missing_user_from_a_wrong_password()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var svc = Service(factory, out var scope);
 
         using (scope)

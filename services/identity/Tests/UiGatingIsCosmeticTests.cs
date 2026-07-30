@@ -21,7 +21,7 @@ namespace Mersal.Identity.Tests;
 /// Env-gated on IDENTITY_TEST_DB. DB-less CI skips.
 /// </summary>
 [Collection("identity-db")]
-public class UiGatingIsCosmeticTests
+public class UiGatingIsCosmeticTests(IdentityHostFixture host) : IClassFixture<IdentityHostFixture>
 {
     private const string Password = "Passw0rd!Mersal";
 
@@ -39,7 +39,7 @@ public class UiGatingIsCosmeticTests
     public async Task A_hand_crafted_request_to_every_hidden_admin_action_is_refused()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var uname = $"cos-{Guid.NewGuid():N}";
         var victim = $"cosv-{Guid.NewGuid():N}";
         var (userId, _) = await TestFlow.SeedUser(factory, uname, Password, ["reception"]);
@@ -117,7 +117,7 @@ public class UiGatingIsCosmeticTests
     public async Task A_user_cannot_reach_another_users_self_service_surfaces()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var mine = $"cosm-{Guid.NewGuid():N}";
         var theirs = $"cost-{Guid.NewGuid():N}";
         var (myId, _) = await TestFlow.SeedUser(factory, mine, Password, ["reception"]);
