@@ -527,3 +527,49 @@ invariants:
       - Mersal.Emr.Tests.RosterImpactPreviewTests.GIVEN_a_closure_over_EIGHT_booked_appointments_THEN_the_preview_reports_eight
       - Mersal.Emr.Tests.RosterImpactPreviewTests.AND_THE_APPLY_flags_the_same_eight_and_cancels_NONE
       - Mersal.Emr.Tests.RosterImpactPreviewTests.A_PAST_appointment_inside_the_closure_range_is_not_impacted
+
+  - id: INV-STOCK-ON-HAND-IS-DERIVED
+    statement: >-
+      Clinic stock on-hand is SUM(quantity) over an append-only movement ledger. There is no quantity_on_hand
+      column anywhere; the ledger refuses UPDATE and DELETE; transfers are paired movements summing to zero;
+      and two parallel issues of the last unit produce exactly one success.
+    source: 42-branch-management.md §5/§7 rule 7; ADR-0029
+    severity: Critical
+    # A balance you can recompute is a balance you can reconcile. The concurrency proof is the one that found
+    # a real bug: the first implementation locked movement ROWS with SELECT ... FOR UPDATE, which does nothing
+    # about a concurrent INSERT — two callers each computed on-hand = 1 against a pre-insert snapshot and both
+    # were allowed, leaving -1 on the shelf. On a derived balance there is no balance row to lock, so the fix
+    # is a transaction-scoped advisory lock on the stock LINE. Kept as a permanent invariant because the
+    # tempting "optimisation" — cache the balance in a column — reintroduces exactly what this forbids.
+    tests:
+      - Mersal.Inventory.Tests.StockLedgerTests.THE_LEDGER_CANNOT_BE_EDITED_update_and_delete_are_both_refused
+      - Mersal.Inventory.Tests.StockLedgerTests.PARALLEL_ISSUE_OF_THE_LAST_UNIT_YIELDS_EXACTLY_ONE_SUCCESS
+      - Mersal.Inventory.Tests.StockLedgerTests.ON_HAND_ALWAYS_EQUALS_THE_LEDGER_SUM
+      - Mersal.Inventory.Tests.StockLedgerTests.A_STOCK_TAKE_records_a_VARIANCE_and_never_overwrites_history
+      - Mersal.Inventory.Tests.StockLedgerTests.A_REPLAYED_MOVEMENT_APPLIES_ONCE
+      - Mersal.Inventory.Tests.StockLedgerTests.THERE_IS_NO_QUANTITY_ON_HAND_COLUMN_ANYWHERE_IN_THE_SCHEMA
+      - Mersal.Inventory.Tests.StockLedgerTests.AN_EXPIRED_BATCH_CANNOT_BE_ISSUED
+      - Mersal.Inventory.Tests.StockLedgerTests.BUT_AN_EXPIRED_BATCH_CAN_BE_WRITTEN_OFF_WITH_A_REASON
+      - Mersal.Inventory.Tests.StockLedgerTests.CONTROLLED_SUBSTANCES_ARE_BLOCKED_BY_CONSTRAINT_NOT_BY_CONVENTION
+      - Mersal.Inventory.Tests.TransferPairingTests.THE_PAIR_SUMS_TO_ZERO
+      - Mersal.Inventory.Tests.TransferPairingTests.A_TRANSFER_LEAVES_THE_NETWORK_TOTAL_UNCHANGED
+      - Mersal.Inventory.Tests.TransferPairingTests.A_TRANSFER_CANNOT_MOVE_STOCK_A_BRANCH_DOES_NOT_HAVE
+
+  - id: INV-INVENTORY-CARRIES-NO-PHI
+    statement: >-
+      Clinic inventory never dispenses to a patient and carries no beneficiary identifier — not in a route, a
+      request contract, a domain entity or a database column.
+    source: 42-branch-management.md §5/§7 rules 8 and 9; ADR-0029 (D2)
+    severity: Critical
+    # The erosion never arrives as "let's make inventory a dispensing path". It arrives as "just an optional
+    # encounter id, so we can cost per patient" — small, reasonable-sounding, and nobody blocks it in review.
+    # What it actually opens is a route around eligibility, coverage limits, formulary and the dispense audit
+    # trail, and it drags RLS, min-necessary and retention into a storekeeping system a storekeeper is meant
+    # to use without a clinical role. Asserted over four surfaces, and the guard itself is tested against the
+    # exact addition it exists to stop.
+    tests:
+      - Mersal.Inventory.Tests.NoPhiInInventoryTests.NO_INVENTORY_COLUMN_IN_THE_MIGRATION_CARRIES_A_BENEFICIARY_IDENTIFIER
+      - Mersal.Inventory.Tests.NoPhiInInventoryTests.AND_NO_COLUMN_IN_THE_LIVE_SCHEMA_DOES_EITHER
+      - Mersal.Inventory.Tests.NoPhiInInventoryTests.NO_INVENTORY_ENDPOINT_ACCEPTS_A_BENEFICIARY_IDENTIFIER
+      - Mersal.Inventory.Tests.NoPhiInInventoryTests.NO_DOMAIN_ENTITY_CARRIES_ONE_EITHER
+      - Mersal.Inventory.Tests.NoPhiInInventoryTests.The_scan_would_actually_catch_one

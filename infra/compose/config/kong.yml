@@ -78,6 +78,18 @@ services:
           - /api/v1/treating-relationship
         strip_path: false
 
+  # --- inventory-service: clinic stock (25.5/25.6) ---
+  # Medical and non-medical consumables on an append-only movement ledger. NOT a dispensing path: no route
+  # here accepts a beneficiary identifier, and NoPhiInInventoryTests fails the build if one appears.
+  - name: inventory-service
+    url: http://inventory-service:8080
+    plugins: *edge_jwt
+    routes:
+      - name: inventory-routes
+        paths:
+          - /api/v1/inventory
+        strip_path: false
+
   # --- eligibility-service: reception search + eligibility check + coverage-summary card ---
   - name: eligibility-service
     url: http://eligibility-service:8080

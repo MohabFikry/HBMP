@@ -23,7 +23,7 @@ dummy="Host=localhost;Port=5432;Database=placeholder;Username=placeholder;Passwo
 # ConnectionStrings key at all (phase 20, design 39 §7.4). Adding a dummy for it would imply a database it does
 # not have.
 for k in Admin Approvals Audit CallCentre Case Claims Document Eligibility Emr Finance \
-         Identity Interop MasterData Notification Orders Patient Pharmacy Policy Provider Reporting; do
+         Identity Interop Inventory MasterData Notification Orders Patient Pharmacy Policy Provider Reporting; do
   var="ConnectionStrings__${k}"
   [ -n "${!var:-}" ] || export "${var}=${dummy}"
 done

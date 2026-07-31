@@ -24,13 +24,17 @@ app="Host=${PGHOST};Port=${PGPORT};Database=${PGDATABASE};Username=${APP_USER};P
 # 24.3 (Gate 3): PATIENT added too. It had the two-role RLS pair below but no single-conn variable, so its
 # endpoint suite — the 18.B3 read/write split, which is enforced in the Api layer and nowhere else — could
 # not run anywhere.
-for s in ADMIN APPROVALS CALLCENTRE CASE CLAIMS ELIGIBILITY EMR FINANCE IDENTITY INTEROP MASTERDATA NOTIFICATION ORDERS PATIENT PHARMACY POLICY REPORTING; do
+# 25.5: INVENTORY added WITH the service, not after it. Every service on this list was added late, each
+# time because a DB-gated suite had been silently skipping — identity's twelve in 18.E1, masterdata's and
+# patient's in 24.3. The inventory suite includes the concurrency proof that two parallel issues of the last
+# unit produce exactly one success, and a concurrency proof that never runs is worse than none.
+for s in ADMIN APPROVALS CALLCENTRE CASE CLAIMS ELIGIBILITY EMR FINANCE IDENTITY INTEROP INVENTORY MASTERDATA NOTIFICATION ORDERS PATIENT PHARMACY POLICY REPORTING; do
   echo "${s}_TEST_DB=${owner}"
 done
 # Two-role RLS isolation suites (owner seeds/cleans; hbmp_app is the role under test).
 # 18.B2 added ADMIN, CALLCENTRE, CLAIMS and INTEROP — the four services that gained a binder + a
 # fail-closed policy set in the same commit their connection string left the superuser.
-for s in ADMIN APPROVALS CALLCENTRE CASE CLAIMS DOCUMENT ELIGIBILITY EMR FINANCE INTEROP NOTIFICATION ORDERS PATIENT PHARMACY POLICY PROVIDER REPORTING; do
+for s in ADMIN APPROVALS CALLCENTRE CASE CLAIMS DOCUMENT ELIGIBILITY EMR FINANCE INTEROP INVENTORY NOTIFICATION ORDERS PATIENT PHARMACY POLICY PROVIDER REPORTING; do
   echo "${s}_TEST_DB_OWNER=${owner}"
   echo "${s}_TEST_DB_APP=${app}"
 done
