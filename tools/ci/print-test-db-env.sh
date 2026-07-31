@@ -21,7 +21,10 @@ app="Host=${PGHOST};Port=${PGPORT};Database=${PGDATABASE};Username=${APP_USER};P
 # 24.3 (Gate 3): MASTERDATA added. It serves the fail-closed validation contracts orders, emr and pharmacy
 # refuse on — /icd-codes/{code}/exists, /drug-interactions/check-by-ids, /examination-types/{id} — and had no
 # DB-gated test at all, because nothing exported its variable and so nobody wrote one.
-for s in ADMIN APPROVALS CALLCENTRE CASE CLAIMS ELIGIBILITY EMR FINANCE IDENTITY INTEROP MASTERDATA NOTIFICATION ORDERS PHARMACY POLICY REPORTING; do
+# 24.3 (Gate 3): PATIENT added too. It had the two-role RLS pair below but no single-conn variable, so its
+# endpoint suite — the 18.B3 read/write split, which is enforced in the Api layer and nowhere else — could
+# not run anywhere.
+for s in ADMIN APPROVALS CALLCENTRE CASE CLAIMS ELIGIBILITY EMR FINANCE IDENTITY INTEROP MASTERDATA NOTIFICATION ORDERS PATIENT PHARMACY POLICY REPORTING; do
   echo "${s}_TEST_DB=${owner}"
 done
 # Two-role RLS isolation suites (owner seeds/cleans; hbmp_app is the role under test).

@@ -10,10 +10,15 @@
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <!-- 24.3 — the endpoint suite reads back what it wrote, against the env-gated Postgres. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Npgsql" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Patient.Domain.csproj" />
     <ProjectReference Include="../Api/Mersal.Patient.Api.csproj" />
+    <ProjectReference Include="../Infrastructure/Mersal.Patient.Infrastructure.csproj" />
+    <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
   </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
 </Project>
