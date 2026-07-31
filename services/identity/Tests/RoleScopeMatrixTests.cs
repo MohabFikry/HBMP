@@ -12,10 +12,11 @@ namespace Mersal.Identity.Tests;
 public class RoleScopeMatrixTests
 {
     [Fact]
-    public void Frozen_role_vocabulary_is_19_distinct_roles()
+    public void Frozen_role_vocabulary_is_21_distinct_roles()
     {
-        IdentityContract.Roles.Should().HaveCount(19);
-        IdentityContract.Roles.Distinct().Should().HaveCount(19);
+        // 25.1 added branch_coordinator + clinics_manager (design 42 §1).
+        IdentityContract.Roles.Should().HaveCount(21);
+        IdentityContract.Roles.Distinct().Should().HaveCount(21);
         IdentityContract.Roles.Should().OnlyContain(r => !r.Any(char.IsUpper));
     }
 

@@ -71,6 +71,34 @@ public sealed record RowScope
     /// </summary>
     public RowScope WithBranchScope(ScopeMode mode, IBranchContext branch)
     {
+        ArgumentNullException.ThrowIfNull(branch);
+
+        // 25.1 (design 42 §1) — the SET form: `branch_id IN (…)` rather than `= active`. The permitted set IS
+        // the reach; an active branch NARROWS it (the manager filtered their view to one clinic) and never
+        // defines it, which is why clearing the filter restores all six rather than resolving to nothing.
+        if (mode == ScopeMode.BranchSetScoped)
+        {
+            var permitted = branch.PermittedBranchIds;
+
+            // Same fail-closed rule as below, and for the same reason: an EMPTY branch predicate does not mean
+            // "nothing", it means "every branch in the tenant". A manager whose grants failed to resolve must
+            // see zero rows, not the whole platform.
+            if (permitted.Count == 0)
+                return this with { BranchIds = new HashSet<Guid> { NoBranchSentinel }, BranchUnrestricted = false };
+
+            // A filter outside the permitted set is NOT silently widened back to the set — the resolver
+            // already refuses such a header, and honouring it here would turn a rejected assertion into a
+            // quiet grant of everything the caller can reach.
+            if (branch.ActiveBranchId is { } filter)
+                return this with
+                {
+                    BranchIds = new HashSet<Guid> { permitted.Contains(filter) ? filter : NoBranchSentinel },
+                    BranchUnrestricted = false,
+                };
+
+            return this with { BranchIds = new HashSet<Guid>(permitted), BranchUnrestricted = false };
+        }
+
         if (mode != ScopeMode.BranchScoped) return this with { BranchUnrestricted = true };
 
         var active = branch.ActiveBranchId ?? NoBranchSentinel;

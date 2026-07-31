@@ -25,6 +25,12 @@ public static class RoleCatalog
             // 19.7 — benefit administration. T2: entitlement and money, never a diagnosis.
             ["policy_admin"] = SensitivityTier.T2,
             ["beneficiary_mgmt_supervisor"] = SensitivityTier.T2,
+            // 25.1 — branch management (design 42 §1). ONE permission set, two reaches: the coordinator runs
+            // one clinic, the manager supervises all six, and both hold the same sixteen scopes. T2 because
+            // they administer staff licence data and clinic stock, never a diagnosis — their clinical reach is
+            // reception's and no wider.
+            ["branch_coordinator"] = SensitivityTier.T2,
+            ["clinics_manager"] = SensitivityTier.T2,
             ["provider_admin"] = SensitivityTier.T4,
             ["org_admin"] = SensitivityTier.T4,
             ["super_admin"] = SensitivityTier.T4,

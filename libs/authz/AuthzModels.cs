@@ -46,6 +46,22 @@ public sealed record ResourceRef
 
     /// <summary>The caller's active branch (from X-Active-Branch, validated). Null ⇒ member-scoped / no context.</summary>
     public Guid? ActiveBranchId { get; init; }
+
+    /// <summary>
+    /// 25.1 (design 42 §1) — HOW the caller's branch reach is expressed, which decides what
+    /// <see cref="ActiveBranchId"/> means to <see cref="AbacConditions.InBranchScope"/>:
+    ///
+    ///   • <see cref="ScopeMode.BranchScoped"/> (the default) — the active branch RESTRICTS. A coordinator
+    ///     acts in the one clinic they are working in.
+    ///   • <see cref="ScopeMode.BranchSetScoped"/> — the active branch FILTERS a view and does not restrict an
+    ///     ACT. A clinics manager who has narrowed their screen to Maadi is still the supervisor of Dokki;
+    ///     refusing their Dokki write because of a UI filter would make the filter a permission boundary,
+    ///     which is precisely the collapse of authority into reach this phase exists to prevent.
+    ///
+    /// Defaulted to <see cref="ScopeMode.BranchScoped"/> so every pre-25.1 call site keeps its exact
+    /// behaviour without being touched.
+    /// </summary>
+    public ScopeMode BranchReach { get; init; } = ScopeMode.BranchScoped;
 }
 
 public enum AuthzEffect { Deny, Allow }

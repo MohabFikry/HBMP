@@ -37,11 +37,28 @@ public static class BranchScopeResolver
         ArgumentNullException.ThrowIfNull(principal);
         ArgumentNullException.ThrowIfNull(directory);
 
-        if (BranchScopeModes.ModeFor(principal) != ScopeMode.BranchScoped)
+        var mode = BranchScopeModes.ModeFor(principal);
+        if (!BranchScopeModes.IsBranchRestricted(mode))
             return new BranchScopeState { Context = BranchContext.Unrestricted };
 
         var pb = await directory.GetAsync(principal, ct);
         Guid? requested = Guid.TryParse(activeBranchHeader, out var h) ? h : null;
+
+        // 25.1 — SET reach (design 42 §1). The context carries the whole permitted set and, if the caller sent
+        // one, a filter. Falling back to Home here would be wrong: a manager who sends no header is asking for
+        // all six clinics, not for their home one, and defaulting them to a single branch is how a supervisory
+        // worklist silently shows a sixth of its rows.
+        //
+        // The header is still an ASSERTION even though it only filters, so an out-of-reach value is DENIED
+        // rather than ignored (doc 40 §0 A2: nothing security-relevant is silent). A caller asking for a
+        // branch they cannot reach has a bug or is probing; serving them a different dataset hides both.
+        if (mode == ScopeMode.BranchSetScoped)
+        {
+            if (requested is { } filter && !pb.Permitted.Contains(filter))
+                return new BranchScopeState { Denied = true };
+            return new BranchScopeState { Context = new BranchContext(requested, pb.Permitted, IsBranchUnrestricted: false) };
+        }
+
         var active = requested ?? pb.Home;
 
         // A requested (or defaulted) branch outside the permitted set is denied — never silently widened.

@@ -63,7 +63,12 @@ export const OIDC = {
     // appointment:reserve is the call centre's booking power WITHOUT check-in/no-show. Requested here for
     // everyone; the token only ever carries what the caller's ROLE grants, so asking is not receiving.
     "appointment:reserve appointment:write " +
-    "audit:read auth:decide auth:emergency auth:manual auth:override auth:read auth:review callcentre:act " +
+    "audit:read auth:decide auth:emergency auth:manual auth:override auth:read auth:review " +
+    // 25.1 — the branch-management authorities (design 42 §1). Requested for everyone, granted only to
+    // branch_coordinator / clinics_manager: asking is not receiving. Sized to a clinic precisely so that a
+    // coordinator never needs provider:write, which is network-wide and also unmasks licence numbers.
+    "branch:inventory:read branch:inventory:write branch:practitioner:write branch:roster:write " +
+    "callcentre:act " +
     "callcentre:history:read callcentre:interaction callcentre:read callcentre:verify case:manage " +
     "case:read case:write " +
     "claims:adjudicate claims:adjust claims:appeal claims:batch claims:decide claims:export claims:ingest " +

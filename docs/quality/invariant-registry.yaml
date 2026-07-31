@@ -387,3 +387,55 @@ invariants:
       - Mersal.Policy.Tests.EnrollmentPublishesCoverageTests.Enrolling_publishes_one_coverage_event_per_generated_coverage
       - Mersal.Policy.Tests.EnrollmentPublishesCoverageTests.The_published_coverage_carries_every_field_the_projection_reads
       - Mersal.Policy.Tests.EnrollmentPublishesCoverageTests.The_published_coverage_carries_the_waiting_period_boundary
+
+  # ---------------------------------------------------------------- 42-branch-management.md §7 (phase 25)
+
+  - id: INV-BRANCH-ROLES-ONE-PERMISSION-SET
+    statement: >-
+      branch_coordinator and clinics_manager hold an IDENTICAL scope set and differ only in reach. Any
+      capability granted to one is held by the other; neither holds provider:write.
+    source: 42-branch-management.md §1/§7 rule 1+3; docs/adr/0029-branch-management.md
+    severity: High
+    # The failure this guards is drift, and drift here is SILENT: add "revoke specialty" to the coordinator,
+    # forget the manager, and the person supervising six clinics can do less than the person running one of
+    # them. Nothing breaks — the manager's remedy is to ask a coordinator, and asking works — so the gap
+    # survives until somebody happens to audit it. Proven twice over, deliberately not sharing a code path:
+    # once against the migration TEXT (runs everywhere) and once against the RESOLVED store (what tokens are
+    # minted from). A migration that parses and fails to apply passes the first and fails the second.
+    tests:
+      - Mersal.Authz.Tests.BranchRoleScopeParityTests.THE_INVARIANT_the_two_branch_roles_hold_exactly_the_same_scopes
+      - Mersal.Authz.Tests.BranchRoleScopeParityTests.The_set_is_receptions_twelve_plus_the_four_branch_scopes
+      - Mersal.Authz.Tests.BranchRoleScopeParityTests.NEITHER_branch_role_holds_provider_write
+      - Mersal.Authz.Tests.BranchRoleScopeParityTests.The_reception_baseline_is_still_what_this_test_claims_it_is
+      - Mersal.Identity.Tests.BranchRoleSeedTests.THE_INVARIANT_the_two_branch_roles_resolve_to_identical_scope_sets
+      - Mersal.Identity.Tests.BranchRoleSeedTests.Neither_branch_role_resolves_provider_write
+      - Mersal.Identity.Tests.BranchRoleSeedTests.The_branch_roles_resolve_receptions_twelve_plus_the_four
+      - Mersal.Provider.Tests.BranchRoleCannotWriteTheNetworkTests.A_branch_role_cannot_satisfy_provider_write
+      - Mersal.Provider.Tests.BranchRoleCannotWriteTheNetworkTests.The_branch_registry_write_group_really_is_behind_provider_write
+      - Mersal.Provider.Tests.BranchRoleCannotWriteTheNetworkTests.The_external_provider_write_surface_really_is_behind_provider_write
+
+  - id: INV-BRANCH-SET-REACH-FAILS-CLOSED
+    statement: >-
+      Reach over a set of branches is grant-derived, never role-derived: a clinics manager reads every branch
+      they are assigned to in one request, an active branch FILTERS that set rather than defining it, and an
+      unresolvable set matches ZERO rows via the sentinel — never the whole tenant.
+    source: 42-branch-management.md §1/§7 rule 2; 40-user-access-model.md §3; ADR-0021 (sentinel)
+    severity: Critical
+    # An EMPTY branch predicate does not mean "no branches", it means "every branch in the tenant" — so the
+    # zero-row assertions are each paired with a NEGATION proving the rows were there to be leaked. Without
+    # that pairing an empty dataset also "returns zero rows" and the suite goes on passing after the sentinel
+    # is removed. The MemberScoped fall-through is asserted separately because it is the failure that looks
+    # like nothing: the manager would see more, not less, and every screen would still work.
+    tests:
+      - Mersal.Authz.Tests.BranchSetScopeTests.THE_fail_closed_test_an_unresolvable_SET_returns_zero_rows
+      - Mersal.Authz.Tests.BranchSetScopeTests.AND_THE_NEGATION_an_empty_set_predicate_would_have_exposed_every_clinic
+      - Mersal.Authz.Tests.BranchSetScopeTests.THE_ONE_THAT_MATTERS_the_clinics_manager_never_falls_through_to_MemberScoped
+      - Mersal.Authz.Tests.BranchSetScopeTests.A_manager_reads_all_six_branches_in_one_request
+      - Mersal.Authz.Tests.BranchSetScopeTests.A_coordinator_reads_exactly_one_branch
+      - Mersal.Authz.Tests.BranchSetScopeTests.A_managers_active_branch_FILTERS_rather_than_defining_the_reach
+      - Mersal.Authz.Tests.BranchSetScopeTests.A_manager_whose_reach_is_partial_sees_only_that_part
+      - Mersal.Authz.Tests.BranchSetScopeTests.A_filter_outside_the_permitted_set_is_not_silently_widened_back_to_the_set
+      - Mersal.Authz.Tests.BranchSetScopeTests.A_manager_sending_an_out_of_reach_header_is_DENIED_not_ignored
+      - Mersal.Authz.Tests.BranchSetScopeTests.A_manager_with_no_assignments_at_all_resolves_to_an_empty_set_and_then_to_the_sentinel
+      - Mersal.Authz.Tests.BranchSetScopeTests.Set_reach_never_relaxes_the_permitted_set_itself
+      - Mersal.Authz.Tests.BranchSetScopeTests.A_coordinators_write_outside_their_active_branch_is_still_refused

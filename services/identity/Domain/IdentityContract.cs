@@ -17,6 +17,16 @@ public static class IdentityContract
         // `beneficiary_mgmt_supervisor` is the supervisory increment over member administration (cancelling
         // another user's note, approving a retro-effective change). Both T2: neither reads clinical data.
         "policy_admin", "beneficiary_mgmt_supervisor",
+        // 25.1 — the people who RUN a Mersal clinic (design 42 §1). `branch_coordinator` covers one clinic,
+        // `clinics_manager` covers all six, and they hold an IDENTICAL scope set: they differ only in reach.
+        // Two roles with two capability lists was the rejected alternative (ADR-0029) — the lists drift, and
+        // the drift is invisible because the manager's remedy is to ask a coordinator, and asking works.
+        // `BranchScopeSetEqualityTests` fails the build if a future phase grants one of them a scope the
+        // other lacks. Both are T2: they administer staff licence data and clinic stock, never a diagnosis.
+        //
+        // These names also RETIRE the phantoms `branch_manager` / `clinic_manager`, which libs/authz and the
+        // SPA both named and nothing ever seeded.
+        "branch_coordinator", "clinics_manager",
     ];
 
     /// <summary>The frozen OAuth scope vocabulary (docs/security/token-contract.md §2). Kept here so the
@@ -78,6 +88,14 @@ public static class IdentityContract
         "reporting:read", "reporting:project", "reporting:export",
         "notification:read", "notification:ingest",
         "audit:read",
+        // 25.1 (design 42 §1) — the BRANCH-SCOPED authorities, sized to a clinic. Each exists because the
+        // network-wide scope that would otherwise be needed is far too wide: `provider:write` lets its holder
+        // create branches and edit external labs, pharmacies and tariffs, and it is also the scope that
+        // unmasks `license_no`. A clinic coordinator needs to maintain a doctor's licence at their own branch
+        // and must never be able to re-price the external network to get it. Neither branch role holds
+        // `provider:write`, and a test proves it.
+        "branch:practitioner:write", "branch:roster:write",
+        "branch:inventory:read", "branch:inventory:write",
     ];
 
     /// <summary>

@@ -159,6 +159,23 @@ public class ScopeIntegrityTests
             foreach (Match m in Regex.Matches(body, @"SELECT '([a-z_]+)',\s*scope\s*FROM \(VALUES(.*?)\) AS \w+\(scope\)", RegexOptions.Singleline))
                 foreach (Match sc in Regex.Matches(m.Groups[2].Value, @"\('([a-z:_\-]+)'\)"))
                     Grant(m.Groups[1].Value, sc.Groups[1].Value);
+
+            // (d) 25.1 — `… (VALUES ('r1'),('r2')) AS r(role) CROSS JOIN (VALUES ('s1'),…) AS s(scope)`:
+            // MANY roles × MANY scopes from ONE list. Design 42 §1 requires branch_coordinator and
+            // clinics_manager to hold an identical set, and the cheapest way to guarantee that in the seed is
+            // one scope list that cannot disagree with itself.
+            //
+            // The shape had to be taught to this parser rather than avoided in the seed. An unrecognised
+            // grant shape does not fail here — it reads as zero grants, so the reachability check above would
+            // pass VACUOUSLY for every role granted that way. A parser that silently under-reads the seed is
+            // the same class of defect as the gates 24.1 found looking green while reading nothing.
+            foreach (Match m in Regex.Matches(
+                body,
+                @"\(VALUES(?<roles>.*?)\) AS \w+\(role\)\s*CROSS JOIN \(VALUES(?<scopes>.*?)\) AS \w+\(scope\)",
+                RegexOptions.Singleline))
+                foreach (Match r in Regex.Matches(m.Groups["roles"].Value, @"\('([a-z_]+)'\)"))
+                    foreach (Match sc in Regex.Matches(m.Groups["scopes"].Value, @"\('([a-z:_\-]+)'\)"))
+                        Grant(r.Groups[1].Value, sc.Groups[1].Value);
         }
         return map;
     }
