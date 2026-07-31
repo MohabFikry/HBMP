@@ -40,6 +40,12 @@ invariants:
       - Mersal.Pharmacy.Tests.DispenseConcurrencyTests.Parallel_dispense_of_one_line_lets_exactly_one_win
       - Mersal.Pharmacy.Tests.DispenseConcurrencyTests.Replaying_the_same_key_adds_no_row_and_returns_the_original
       - Mersal.Pharmacy.Tests.DispenseConcurrencyTests.A_used_line_cannot_be_dispensed_again
+      # 24.3 — the same invariant at the ENDPOINT. The three above prove ConsumeExecutor; these prove the
+      # HTTP surface a fulfilling provider actually calls, where the Idempotency-Key requirement and the
+      # outcome-to-status mapping live. An over-consume answered 200 failed none of the executor tests.
+      - Mersal.Orders.Tests.OrdersEndpointTests.Replaying_a_consume_key_applies_the_effect_once_and_says_so
+      - Mersal.Orders.Tests.OrdersEndpointTests.Consuming_more_than_remains_is_refused_and_changes_nothing
+      - Mersal.Orders.Tests.OrdersEndpointTests.A_consume_without_an_idempotency_key_is_refused
 
   - id: INV-MIN-NECESSARY
     statement: >-
@@ -57,6 +63,9 @@ invariants:
       - Mersal.Profile.Tests.SerializedPayloadTests.Finance_receives_no_diagnosis_no_result_and_no_photo
       - Mersal.Profile.Tests.SerializedPayloadTests.A_lab_receives_only_identity_allergies_and_its_own_orders
       - Mersal.Profile.Tests.SerializedPayloadTests.A_pharmacy_receives_its_own_prescriptions_and_never_a_result
+      # 24.3 — claims ≠ diagnosis, asserted on what the claims endpoint SERIALIZES rather than on a DTO,
+      # which can only be missing a field the test also knew to look for.
+      - Mersal.Claims.Tests.ClaimsEndpointTests.A_claim_read_carries_codes_and_amounts_and_no_clinical_field
 
   - id: INV-AUDIT-CHAIN
     statement: >-
@@ -120,6 +129,10 @@ invariants:
     tests:
       - Mersal.Orders.Tests.FulfillmentAuthzTests.Lab_tech_cannot_read_another_facilitys_queue
       - Mersal.Pharmacy.Tests.DispensingAuthzTests.Pharmacist_cannot_read_another_pharmacys_queue
+      # 24.3 — at the claims endpoint, where the filter that forces a provider caller onto its own provider
+      # id lives. It is checked on the single read AND on the list, including when the caller ASKS for
+      # another provider: a request parameter must not be able to widen a provider's own scope.
+      - Mersal.Claims.Tests.ClaimsEndpointTests.A_provider_user_cannot_read_another_providers_claim_and_never_lists_one
 
   # ---------------------------------------------------------------- AUDIT-R2 §2, findings X1–X8
   #
@@ -157,6 +170,9 @@ invariants:
       - Mersal.Claims.Tests.ClaimsMoneyLayerCapTests.An_Approve_above_the_contract_tariff_is_rejected
       - Mersal.Claims.Tests.ClaimsMoneyLayerCapTests.An_Adjust_decision_above_the_cap_is_rejected
       - Mersal.Claims.Tests.AdjudicationTests.A_line_failing_two_caps_reports_both_and_takes_the_lower
+      # 24.3 — the cap refused at the ENDPOINT, so a caller learns their decision was rejected rather than
+      # having it silently clamped on the way in.
+      - Mersal.Claims.Tests.ClaimsEndpointTests.An_allowed_amount_above_the_contract_tariff_is_refused
 
   - id: X4-NO-COMMITTED-CREDENTIALS
     statement: >-
@@ -201,6 +217,9 @@ invariants:
     tests:
       - Mersal.Claims.Tests.DecisionIntegrationTests.A_second_officer_cannot_decide_a_line_that_is_already_decided
       - Mersal.Claims.Tests.DecisionIntegrationTests.Two_officers_deciding_the_same_line_yield_one_winner
+      # 24.3 — over HTTP, and asserting the REASON: the same reviewer returning to a line they closed is
+      # refused as SOD_SAME_DECIDER, which names their mistake, rather than as a bare conflict.
+      - Mersal.Claims.Tests.ClaimsEndpointTests.A_decided_line_cannot_be_decided_again_by_the_same_reviewer
     notes: >-
       Found by phase 24's fail-at-end restructure: the concurrency test failed on CI's faster runner while
       passing locally, because the only guard was an xmin collision that fires when two transactions OVERLAP
