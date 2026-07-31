@@ -81,8 +81,15 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
         return new TransitionResult(TransitionOutcome.Ok, appt);
     }
 
+    /// <param name="insideTransaction">24.x — run INSIDE this transaction, immediately before it commits, so
+    /// the domain event and the state change it announces are one fact or neither. The endpoint used to
+    /// enqueue after this returned, which is a second commit: a crash in between leaves a slot freed or a
+    /// booking moved with nothing downstream told. A callback rather than an outer transaction because this
+    /// runs under an execution strategy that may RETRY the delegate — a retry re-enqueues inside the new
+    /// transaction, which is right, where an outer transaction would have committed the first attempt's.</param>
     public async Task<TransitionResult> RescheduleAsync(
-        Guid appointmentId, Guid newSlotId, uint? ifMatch, DateTimeOffset now, string? actor = null, CancellationToken ct = default)
+        Guid appointmentId, Guid newSlotId, uint? ifMatch, DateTimeOffset now, string? actor = null,
+        Func<Appointment, CancellationToken, Task>? insideTransaction = null, CancellationToken ct = default)
     {
         var appt = await db.Appointments.FirstOrDefaultAsync(a => a.AppointmentId == appointmentId, ct);
         if (appt is null) return TransitionResult.Fail(TransitionOutcome.NotFound);
@@ -121,7 +128,9 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
             try
             {
                 await db.SaveChangesAsync(ct);
-                await tx.CommitAsync(ct);
+                if (insideTransaction is not null) await insideTransaction(appt, ct);
+                if (insideTransaction is not null) await insideTransaction(appt, ct);
+            await tx.CommitAsync(ct);
                 return new TransitionResult(TransitionOutcome.Ok, appt);
             }
             catch (DbUpdateConcurrencyException) { await tx.RollbackAsync(ct); return TransitionResult.Fail(TransitionOutcome.PreconditionFailed); }
@@ -135,8 +144,15 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
     /// tickets, waitlist promotion), so a failure between them left an appointment cancelled with a
     /// live queue ticket, or a waitlist entry promoted against a cancel that never landed.
     /// </summary>
+    /// <param name="insideTransaction">24.x — run INSIDE this transaction, immediately before it commits, so
+    /// the domain event and the state change it announces are one fact or neither. The endpoint used to
+    /// enqueue after this returned, which is a second commit: a crash in between leaves a slot freed or a
+    /// booking moved with nothing downstream told. A callback rather than an outer transaction because this
+    /// runs under an execution strategy that may RETRY the delegate — a retry re-enqueues inside the new
+    /// transaction, which is right, where an outer transaction would have committed the first attempt's.</param>
     public async Task<TransitionResult> CancelAsync(
-        Guid appointmentId, string? reason, uint? ifMatch, DateTimeOffset now, string? actor = null, CancellationToken ct = default)
+        Guid appointmentId, string? reason, uint? ifMatch, DateTimeOffset now, string? actor = null,
+        Func<Appointment, WaitlistEntry?, CancellationToken, Task>? insideTransaction = null, CancellationToken ct = default)
     {
         return await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
@@ -161,14 +177,22 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
             }
 
             var promoted = freedSlot ? await PromoteWaitlistAsync(appt, ct) : null;
+            if (insideTransaction is not null) await insideTransaction(appt, promoted, ct);
             await tx.CommitAsync(ct);
             return new TransitionResult(TransitionOutcome.Ok, appt, promoted);
         });
     }
 
     /// <summary>18.A3: no-show is ONE transaction, for the same reason as <see cref="CancelAsync"/>.</summary>
+    /// <param name="insideTransaction">24.x — run INSIDE this transaction, immediately before it commits, so
+    /// the domain event and the state change it announces are one fact or neither. The endpoint used to
+    /// enqueue after this returned, which is a second commit: a crash in between leaves a slot freed or a
+    /// booking moved with nothing downstream told. A callback rather than an outer transaction because this
+    /// runs under an execution strategy that may RETRY the delegate — a retry re-enqueues inside the new
+    /// transaction, which is right, where an outer transaction would have committed the first attempt's.</param>
     public async Task<TransitionResult> NoShowAsync(
-        Guid appointmentId, uint? ifMatch, DateTimeOffset now, TimeSpan grace, string? actor = null, CancellationToken ct = default)
+        Guid appointmentId, uint? ifMatch, DateTimeOffset now, TimeSpan grace, string? actor = null,
+        Func<Appointment, int, WaitlistEntry?, CancellationToken, Task>? insideTransaction = null, CancellationToken ct = default)
     {
         return await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
@@ -194,6 +218,9 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
             var promoted = await PromoteWaitlistAsync(appt, ct);   // free the slot for backfill
             var noShowCount = await db.Appointments.CountAsync(
                 a => a.BeneficiaryId == appt.BeneficiaryId && a.Status == AppointmentStatus.NoShow, ct);
+            // The tally is passed in because the repeat-no-show event depends on it, and it is only
+            // knowable here — inside the transaction, after the status write that changes it.
+            if (insideTransaction is not null) await insideTransaction(appt, noShowCount, promoted, ct);
             await tx.CommitAsync(ct);
             return new TransitionResult(TransitionOutcome.Ok, appt, promoted, noShowCount);
         });

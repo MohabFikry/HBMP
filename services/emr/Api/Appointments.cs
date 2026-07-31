@@ -384,7 +384,26 @@ public static class AppointmentsModule
                 IdempotencyKey = idem, CreatedBy = actor, CreatedAt = now, UpdatedAt = now,
             };
 
-            var result = await booking.BookAsync(appt, ct);
+            // 24.x — the appointment and the events announcing it commit together. Enqueued after the
+            // fact, a crash held the slot with nothing downstream told: a patient booked into a slot
+            // no board shows, and a referral marked scheduled that the referring clinician never sees.
+            // The idempotent REPLAY path must not re-enqueue, which is why the guard is inside.
+            var result = await booking.BookAsync(appt,
+                insideTransaction: async (b, c) =>
+                {
+                    if (b.AppointmentId != appt.AppointmentId) return;   // replay: no new side-effects
+                    await outbox.EnqueueAsync("ApptBooked", "emr.events", new
+                    {
+                        appointmentId = b.AppointmentId, beneficiaryId = b.BeneficiaryId,
+                        providerId = b.ProviderId, locationId = b.LocationId,
+                        slotId = b.SlotId, appointmentType = type.ToString(),
+                        scheduledStart = b.ScheduledStart, scheduledEnd = b.ScheduledEnd,
+                    }, c);
+                    if (type == AppointmentType.Referral && b.ReferralRef is { Length: > 0 } r)
+                        await outbox.EnqueueAsync("ReferralScheduled", "emr.events",
+                            new { referralRef = r, appointmentId = b.AppointmentId }, c);
+                },
+                ct);
             switch (result.Outcome)
             {
                 case BookOutcome.SlotNotFound:
@@ -411,16 +430,7 @@ public static class AppointmentsModule
                     // record that is deliberately immutable and cannot be corrected.
                     AfterState = $"{{\"type\":\"{type}\",\"slotId\":\"{booked.SlotId}\",\"hasNote\":{(booked.Note is null ? "false" : "true")}}}",
                 }, ct);
-                await outbox.EnqueueAsync("ApptBooked", "emr.events", new
-                {
-                    appointmentId = booked.AppointmentId, beneficiaryId = booked.BeneficiaryId,
-                    providerId = booked.ProviderId, locationId = booked.LocationId,
-                    slotId = booked.SlotId, appointmentType = type.ToString(),
-                    scheduledStart = booked.ScheduledStart, scheduledEnd = booked.ScheduledEnd,
-                }, ct);
-                if (type == AppointmentType.Referral && booked.ReferralRef is { Length: > 0 } refRef)
-                    await outbox.EnqueueAsync("ReferralScheduled", "emr.events",
-                        new { referralRef = refRef, appointmentId = booked.AppointmentId }, ct);
+                // ApptBooked + ReferralScheduled committed with the booking above.
 
                 // Fire a booking reminder now (in-app live; SMS/WhatsApp are stubs). Honors preferred channel.
                 var preferred = Enum.TryParse<ReminderChannel>(req.PreferredChannel, out var pc) ? pc : ReminderChannel.InApp;
@@ -561,7 +571,15 @@ public static class AppointmentsModule
             var (replay, key) = await CheckIdempotency(http, idem, db, ct);
             if (replay is not null) return replay;
 
-            var result = await transitions.RescheduleAsync(id, req.NewSlotId, IfMatch(http), clock.GetUtcNow(), me.Principal?.Subject, ct);
+            // 24.x — the move and the event announcing it commit together. Split, a crash leaves the new
+            // slot held with every downstream board still showing the old time.
+            var result = await transitions.RescheduleAsync(id, req.NewSlotId, IfMatch(http), clock.GetUtcNow(), me.Principal?.Subject,
+                insideTransaction: async (appt, c) =>
+                {
+                    await outbox.EnqueueAsync("ApptRescheduled", "emr.events",
+                        new { appointmentId = id, newSlotId = appt.SlotId, scheduledStart = appt.ScheduledStart }, c);
+                },
+                ct);
             var problem = MapFailure(result.Outcome);
             if (problem is not null) return await AuditAndReturn(problem, audit, me, "ApptRescheduleDenied", id, result.Outcome, ct);
 
@@ -572,9 +590,7 @@ public static class AppointmentsModule
                 ActorUserId = me.Principal?.Subject, DecisionOutcome = "ApptRescheduled",
                 AfterState = $"{{\"slotId\":\"{appt.SlotId}\"}}",
             }, ct);
-            await outbox.EnqueueAsync("ApptRescheduled", "emr.events",
-                new { appointmentId = id, newSlotId = appt.SlotId, scheduledStart = appt.ScheduledStart }, ct);
-            await Record(idem, key, "reschedule", id, 200, db, ct);
+            await Record(idem, key, "reschedule", id, 200, db, ct);   // the event committed with the move
             return Results.Ok(AppointmentResponse.From(appt));
         });
 
@@ -592,7 +608,20 @@ public static class AppointmentsModule
             var (replay, key) = await CheckIdempotency(http, idem, db, ct);
             if (replay is not null) return replay;
 
-            var result = await transitions.CancelAsync(id, req.Reason, IfMatch(http), clock.GetUtcNow(), me.Principal?.Subject, ct);
+            // 24.x — cancelling FREES A SLOT. If the event is lost the slot is bookable here and still
+            // held everywhere that listens, which is how one slot ends up with two patients.
+            var result = await transitions.CancelAsync(id, req.Reason, IfMatch(http), clock.GetUtcNow(), me.Principal?.Subject,
+                insideTransaction: async (_, promoted, c) =>
+                {
+                    await outbox.EnqueueAsync("ApptCancelled", "emr.events",
+                        new { appointmentId = id, reason = req.Reason }, c);
+                    // The waitlist promotion happened inside this same transaction, so its event belongs
+                    // here too — a promoted patient nobody was told about keeps waiting.
+                    if (promoted is { } w)
+                        await outbox.EnqueueAsync("ApptWaitlistPromoted", "emr.events",
+                            new { waitlistId = w.WaitlistId, beneficiaryId = w.BeneficiaryId, providerId = w.ProviderId }, c);
+                },
+                ct);
             var problem = MapFailure(result.Outcome);
             if (problem is not null) return await AuditAndReturn(problem, audit, me, "ApptCancelDenied", id, result.Outcome, ct);
 
@@ -601,8 +630,6 @@ public static class AppointmentsModule
                 EntityType = "appointment", EntityId = id.ToString(), Action = AuditAction.StateChange,
                 ActorUserId = me.Principal?.Subject, DecisionOutcome = "ApptCancelled", DecisionReasonCode = req.Reason,
             }, ct);
-            await outbox.EnqueueAsync("ApptCancelled", "emr.events", new { appointmentId = id, reason = req.Reason }, ct);
-            await PromotionSideEffects(result, outbox, ct);
             await Record(idem, key, "cancel", id, 200, db, ct);
             return Results.Ok(AppointmentResponse.From(result.Appointment!));
         });
@@ -668,7 +695,23 @@ public static class AppointmentsModule
             var (replay, key) = await CheckIdempotency(http, idem, db, ct);
             if (replay is not null) return replay;
 
-            var result = await transitions.NoShowAsync(id, IfMatch(http), clock.GetUtcNow(), NoShowGrace, me.Principal?.Subject, ct);
+            // 24.x — a no-show frees the slot AND may cross the repeat threshold that hands the
+            // beneficiary to a case manager. Both events belong to the same commit as the transition.
+            var result = await transitions.NoShowAsync(id, IfMatch(http), clock.GetUtcNow(), NoShowGrace, me.Principal?.Subject,
+                insideTransaction: async (a, noShowCount, promoted, c) =>
+                {
+                    await outbox.EnqueueAsync("ApptNoShow", "emr.events",
+                        new { appointmentId = id, beneficiaryId = a.BeneficiaryId, noShowCount }, c);
+                    // Repeat no-shows → Case Manager follow-up (05 X3). Same commit: a beneficiary who
+                    // crossed the threshold and whose event was lost is one nobody follows up.
+                    if (noShowCount >= RepeatNoShowThreshold)
+                        await outbox.EnqueueAsync("BeneficiaryNoShowThresholdReached", "emr.events",
+                            new { beneficiaryId = a.BeneficiaryId, noShowCount }, c);
+                    if (promoted is { } w)
+                        await outbox.EnqueueAsync("ApptWaitlistPromoted", "emr.events",
+                            new { waitlistId = w.WaitlistId, beneficiaryId = w.BeneficiaryId, providerId = w.ProviderId }, c);
+                },
+                ct);
             var problem = MapFailure(result.Outcome);
             if (problem is not null) return await AuditAndReturn(problem, audit, me, "ApptNoShowDenied", id, result.Outcome, ct);
 
@@ -678,13 +721,6 @@ public static class AppointmentsModule
                 EntityType = "appointment", EntityId = id.ToString(), Action = AuditAction.StateChange,
                 ActorUserId = me.Principal?.Subject, DecisionOutcome = "ApptNoShow",
             }, ct);
-            await outbox.EnqueueAsync("ApptNoShow", "emr.events",
-                new { appointmentId = id, beneficiaryId = appt.BeneficiaryId, noShowCount = result.NoShowCount }, ct);
-            await PromotionSideEffects(result, outbox, ct);
-            // Repeat no-shows → Case Manager follow-up (05 X3).
-            if (result.NoShowCount >= RepeatNoShowThreshold)
-                await outbox.EnqueueAsync("BeneficiaryNoShowThresholdReached", "emr.events",
-                    new { beneficiaryId = appt.BeneficiaryId, noShowCount = result.NoShowCount }, ct);
             await Record(idem, key, "no-show", id, 200, db, ct);
             return Results.Ok(AppointmentResponse.From(appt));
         });
@@ -716,13 +752,6 @@ public static class AppointmentsModule
     private static async Task Record(IdempotencyStore idem, string? key, string op, Guid id, int status, EmrDbContext db, CancellationToken ct)
     {
         if (!string.IsNullOrWhiteSpace(key)) await idem.RecordAsync(key, op, id, status, ct);
-    }
-
-    private static async Task PromotionSideEffects(TransitionResult result, IOutbox outbox, CancellationToken ct)
-    {
-        if (result.Promoted is { } w)
-            await outbox.EnqueueAsync("ApptWaitlistPromoted", "emr.events",
-                new { waitlistId = w.WaitlistId, beneficiaryId = w.BeneficiaryId, providerId = w.ProviderId }, ct);
     }
 
     private static IResult? MapFailure(TransitionOutcome outcome) => AppointmentEndpointsShared.MapFailure(outcome);

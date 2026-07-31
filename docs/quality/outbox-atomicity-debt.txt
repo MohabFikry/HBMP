@@ -38,7 +38,6 @@ services/callcentre/Api/CallAppointments.cs 1
 services/callcentre/Api/Interactions.cs 3
 services/case/Api/Beneficiary360Endpoint.cs 1
 services/case/Api/Cases.cs 5
-services/emr/Api/Appointments.cs 7
 services/emr/Api/Program.cs 2
 services/emr/Api/Queue.cs 1
 services/emr/Api/Reminders.cs 1

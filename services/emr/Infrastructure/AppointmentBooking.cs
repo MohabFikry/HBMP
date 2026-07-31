@@ -22,7 +22,14 @@ public readonly record struct BookResult(BookOutcome Outcome, Appointment? Appoi
 /// raises <c>23505</c>, surfaced as <see cref="BookOutcome.SlotTaken"/> (HTTP 409). Never a double-book.</summary>
 public sealed class AppointmentBookingService(EmrDbContext db)
 {
-    public async Task<BookResult> BookAsync(Appointment appt, CancellationToken ct = default)
+    /// <param name="insideTransaction">24.x — run INSIDE the booking transaction, immediately before it
+    /// commits, so the appointment and the event announcing it are one fact or neither. The endpoint
+    /// used to enqueue after this returned: a crash in between held the slot with nothing downstream
+    /// told, which is a patient booked into a slot no board shows. A callback rather than an outer
+    /// transaction because this runs under an execution strategy that may RETRY — a retry re-enqueues
+    /// inside the new transaction, where an outer one would have kept the abandoned attempt's event.</param>
+    public async Task<BookResult> BookAsync(Appointment appt,
+        Func<Appointment, CancellationToken, Task>? insideTransaction = null, CancellationToken ct = default)
     {
         // Idempotent replay → return the prior appointment, do not create a second.
         if (appt.IdempotencyKey is { Length: > 0 } idem)
@@ -74,6 +81,7 @@ public sealed class AppointmentBookingService(EmrDbContext db)
             {
                 db.Appointments.Add(appt);
                 await db.SaveChangesAsync(ct);
+                if (insideTransaction is not null) await insideTransaction(appt, ct);
                 await tx.CommitAsync(ct);
                 return BookResult.Ok(appt);
             }
