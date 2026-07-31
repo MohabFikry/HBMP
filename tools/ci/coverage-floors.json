@@ -37,7 +37,7 @@
     "services/callcentre:Api": 48,
     "services/callcentre:Domain": 79,
     "services/callcentre:Infrastructure": 89,
-    "services/case:Api": 0,
+    "services/case:Api": 50,
     "services/case:Domain": 41,
     "services/case:Infrastructure": 74,
     "services/claims:Api": 39,
