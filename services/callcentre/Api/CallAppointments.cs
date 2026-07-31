@@ -114,12 +114,17 @@ public static class CallAppointments
             Action = action, CancelReason = reason, BranchId = branchId, CreatedBy = deps.Subject,
             CreatedAt = deps.Clock.GetUtcNow(),
         };
+        // The link is the call-centre's record that this appointment was touched on this call, and the
+        // confirmation is what the member actually receives. A link with no confirmation is an agent who
+        // believes the member was told; a confirmation with no link is a message no one can trace to a call.
+        await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
         deps.Db.AppointmentLinks.Add(link);
         await deps.Db.SaveChangesAsync(ct);
 
         // Confirmation to the member's preferred channel (notification-service resolves channel; clinical-free).
         await deps.Outbox.EnqueueAsync("AppointmentConfirmationRequested", "notification.events",
             new { beneficiaryId, appointmentId, action = action.ToString(), callRef = link.CallRef, tenantId = link.TenantId }, ct);
+        await tx.CommitAsync(ct);
         await deps.AuditAsync("call_centre_appointment", appointmentId.ToString(), AuditAction.StateChange,
             $"Appointment{action}", link.CallRef, severity: AuditSeverity.Notice, after: reason?.ToString());
     }

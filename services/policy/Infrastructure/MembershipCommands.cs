@@ -280,61 +280,54 @@ public sealed class MembershipCommands(
         // POST /policies/{id}/coverages endpoint already publishes exactly this shape, the consumer is
         // already idempotent on it, and one event per coverage means the enrolment path and the manual path
         // cannot drift into two different projections of the same fact.
-        await PublishGeneratedCoveragesAsync(coverages, version, policy, enrollment, ct);
+        //
+        // INLINE, not a helper. These enqueues have to be provably inside the transaction opened at the top of
+        // this method, and OutboxAtomicityTests proves that by reading the code, not by following calls: a
+        // helper would put them in a method body with no transaction in it, indistinguishable from the
+        // enqueue-after-commit shape this rule exists to forbid. The check cannot be taught to trust a call
+        // graph without also being taught to trust the ones that are genuinely wrong.
+        //
+        // The consumer keys on the category CODE ("LAB"), not the id — its projection has no category table to
+        // resolve a Guid against.
+        if (coverages.Count > 0)
+        {
+            var categoryIds = coverages.Select(c => c.BenefitCategoryId).Distinct().ToList();
+            var codes = await db.BenefitCategories.AsNoTracking()
+                .Where(c => categoryIds.Contains(c.BenefitCategoryId))
+                .ToDictionaryAsync(c => c.BenefitCategoryId, c => c.Code, ct);
+
+            foreach (var coverage in coverages)
+            {
+                // waitingPeriodEndsOn is PER CATEGORY, from this category's own benefit rule, not the
+                // enrolment-level summary date. The enrolment stores the LONGEST wait across categories because
+                // that is the single date the member is told; publishing it here would delay every benefit to
+                // the slowest one. policy-service owns this boundary because it is a function of the plan rule
+                // and the enrolment date, neither of which eligibility-service holds.
+                //
+                // policyNo is the key PolicyChanged cascades on. A coverage published without it is invisible
+                // to suspend/reactivate, so the member would keep their benefit through a suspended policy.
+                var rule = version.Rules.FirstOrDefault(r => r.BenefitCategoryId == coverage.BenefitCategoryId);
+                await outbox.EnqueueAsync("CoverageChanged", "policy.events", new
+                {
+                    tenantId = coverage.TenantId,
+                    coverageId = coverage.CoverageId,
+                    beneficiaryId = coverage.BeneficiaryId,
+                    category = codes.GetValueOrDefault(coverage.BenefitCategoryId),
+                    status = coverage.Status.ToString(),
+                    policyNo = policy.PolicyNo,
+                    effectiveFrom = coverage.EffectiveFrom,
+                    effectiveTo = coverage.EffectiveTo,
+                    waitingPeriodEndsOn = rule is null ? null : WaitingPeriod.EndsOnFor(rule, enrollment.EffectiveFrom),
+                    limits = coverage.Limits.Select(l => new
+                    {
+                        limitType = l.LimitType.ToString(), l.LimitValue, l.ConsumedValue,
+                    }),
+                }, ct);
+            }
+        }
 
         if (tx is not null) await tx.CommitAsync(ct);
         return MembershipResults.Success(new EnrollOutcome(enrollment, coverages.Count, WasReplay: false));
-    }
-
-    /// <summary>
-    /// Announce each generated coverage in the shape the read models consume.
-    ///
-    /// <para>The payload is the one <c>POST /policies/{id}/coverages</c> already publishes, plus the waiting
-    /// period. Two fields are easy to leave out and expensive to miss:</para>
-    /// <list type="bullet">
-    /// <item><c>policyNo</c> — the key <c>PolicyChanged</c> cascades on. A coverage published without it is
-    /// invisible to suspend/reactivate, so the member would keep their benefit through a suspended
-    /// policy.</item>
-    /// <item><c>waitingPeriodEndsOn</c> — PER CATEGORY, from this category's own benefit rule, not the
-    /// enrolment-level summary date. The enrolment stores the LONGEST wait across categories because that is
-    /// the single date the member is told; publishing it here would delay every benefit to the slowest one.
-    /// policy-service owns this boundary because it is a function of the plan rule and the enrolment date,
-    /// neither of which eligibility-service holds.</item>
-    /// </list>
-    /// </summary>
-    private async Task PublishGeneratedCoveragesAsync(
-        IReadOnlyList<Coverage> coverages, PlanVersion version, Domain.Policy policy, Enrollment enrollment,
-        CancellationToken ct)
-    {
-        if (coverages.Count == 0) return;
-
-        // The consumer keys on the category CODE ("LAB"), not the id — its projection has no category table
-        // to resolve a Guid against.
-        var categoryIds = coverages.Select(c => c.BenefitCategoryId).Distinct().ToList();
-        var codes = await db.BenefitCategories.AsNoTracking()
-            .Where(c => categoryIds.Contains(c.BenefitCategoryId))
-            .ToDictionaryAsync(c => c.BenefitCategoryId, c => c.Code, ct);
-
-        foreach (var coverage in coverages)
-        {
-            var rule = version.Rules.FirstOrDefault(r => r.BenefitCategoryId == coverage.BenefitCategoryId);
-            await outbox.EnqueueAsync("CoverageChanged", "policy.events", new
-            {
-                tenantId = coverage.TenantId,
-                coverageId = coverage.CoverageId,
-                beneficiaryId = coverage.BeneficiaryId,
-                category = codes.GetValueOrDefault(coverage.BenefitCategoryId),
-                status = coverage.Status.ToString(),
-                policyNo = policy.PolicyNo,
-                effectiveFrom = coverage.EffectiveFrom,
-                effectiveTo = coverage.EffectiveTo,
-                waitingPeriodEndsOn = rule is null ? null : WaitingPeriod.EndsOnFor(rule, enrollment.EffectiveFrom),
-                limits = coverage.Limits.Select(l => new
-                {
-                    limitType = l.LimitType.ToString(), l.LimitValue, l.ConsumedValue,
-                }),
-            }, ct);
-        }
     }
 
     // ---- Terminate ---------------------------------------------------------------------------------------

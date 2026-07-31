@@ -29,6 +29,9 @@ public sealed class BranchAssignmentService(AdminDbContext db, IAuditClient audi
             AssignmentType = type, ValidFrom = validFrom, ValidTo = validTo, Status = BranchAssignmentStatus.Active,
             CreatedBy = actor.UserId, CreatedAt = now,
         };
+        // An assignment is what a caller's branch scope is computed from, so a row that commits without its
+        // event leaves every consumer resolving scope from a set it never heard change.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
         db.UserBranchAssignments.Add(row);
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateException) // ux_user_home_branch → a second active Home
@@ -41,6 +44,7 @@ public sealed class BranchAssignmentService(AdminDbContext db, IAuditClient audi
         await audit.EmitAsync(Draft(row, AuditAction.Create, actor, tenant, "assigned", type.ToString()), ct);
         await outbox.EnqueueAsync("UserBranchAssigned", "admin.events",
             new { row.AssignmentId, tenantId = tenant, subject, branchId, assignmentType = type.ToString() }, ct);
+        await tx.CommitAsync(ct);
         return new AssignResult(true, null, row);
     }
 
@@ -53,11 +57,15 @@ public sealed class BranchAssignmentService(AdminDbContext db, IAuditClient audi
         row.Status = BranchAssignmentStatus.Revoked;
         row.RevokedBy = actor.UserId;
         row.RevokedAt = clock.GetUtcNow();
+        // A revocation that commits without UserBranchRevoked is access removed here and still granted
+        // everywhere downstream — the failure mode this rule exists for, in its least visible form.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
         await db.SaveChangesAsync(ct);
 
         await audit.EmitAsync(Draft(row, AuditAction.Update, actor, tenant, "revoked"), ct);
         await outbox.EnqueueAsync("UserBranchRevoked", "admin.events",
             new { row.AssignmentId, tenantId = tenant, subject = row.SubjectUserId, branchId = row.BranchId }, ct);
+        await tx.CommitAsync(ct);
         return true;
     }
 

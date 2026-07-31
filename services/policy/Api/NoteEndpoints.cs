@@ -73,6 +73,7 @@ public static class NoteEndpoints
                 Status = NoteStatus.Active, Pinned = req.Pinned, SupersedesNoteId = req.SupersedesNoteId,
                 CreatedAt = now, UpdatedAt = now,
             };
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             db.Notes.Add(note);
             if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
 
@@ -87,6 +88,7 @@ public static class NoteEndpoints
                 tenantId = note.TenantId, noteId = note.NoteId, scope = scope.ToString(), scopeRef = id,
                 noteType = noteType.ToString(), visibilityClass = visibility.ToString(),
             }, ct);
+            await tx.CommitAsync(ct);
 
             _ = gate;   // authorization is the scope on the group; notes carry no further ABAC resource
             return Results.Created($"/api/v1/notes/{note.NoteId}",
@@ -178,6 +180,7 @@ public static class NoteEndpoints
             note.CancelledAt = now;
             note.CancellationReason = req.Reason.Trim();
             note.UpdatedAt = now;
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
 
             await audit.EmitAsync(new AuditEventDraft
@@ -192,6 +195,7 @@ public static class NoteEndpoints
                 tenantId = note.TenantId, noteId = id, scope = note.Scope.ToString(), scopeRef = note.ScopeRef,
                 cancelledBy = principal.Subject, reason = req.Reason,
             }, ct);
+            await tx.CommitAsync(ct);
 
             // The cancelled note is RETURNED, body and all — it stays visible, struck through.
             return Results.Ok(NoteView.For(note, principal.Roles, userId, supervises));

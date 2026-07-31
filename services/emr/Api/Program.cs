@@ -224,6 +224,10 @@ v1.MapPost("", async (
         QueueEntryId = Guid.NewGuid(), EncounterId = encounter.EncounterId,
         BeneficiaryId = req.BeneficiaryId, ProviderId = req.ProviderId, State = QueueState.Waiting, EnqueuedAt = now,
     };
+    // "(transactional)" above was a claim, not a fact: the two rows shared one SaveChanges but the two
+    // enqueues below each committed separately, so a crash could open a visit that emr announced to nobody —
+    // no check-in for the appointment, no EncounterStarted for the queue boards. Now it is one transaction.
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
     db.Encounters.Add(encounter);
     db.QueueEntries.Add(queueEntry);
     await db.SaveChangesAsync(ct);
@@ -238,6 +242,7 @@ v1.MapPost("", async (
         await outbox.EnqueueAsync("ApptCheckedIn", "emr.events", new { appointmentId = apptId, encounterId = encounter.EncounterId }, ct);
     await outbox.EnqueueAsync("EncounterStarted", "emr.events",
         new { encounterId = encounter.EncounterId, encounter.EncounterNo, beneficiaryId = req.BeneficiaryId }, ct);
+    await tx.CommitAsync(ct);
 
     return Results.Created($"/api/v1/encounters/{encounter.EncounterId}", EncounterResponse.From(encounter));
 });

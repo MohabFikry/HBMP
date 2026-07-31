@@ -235,6 +235,12 @@ public sealed class ProgramAdminService(AdminDbContext db, IAuditClient audit, T
         ActorContext actor, string tenantId, string featureKey, bool enabled, string reason, CancellationToken ct = default)
     {
         var now = clock.GetUtcNow();
+        // The comment below said these three writes shared one transaction. They did not: each
+        // ExecuteSqlRawAsync commits on its own and so does the outbox enqueue, so a crash could leave the
+        // switch flipped, its history row missing, or the propagation event never written — the last of which
+        // is a tenant whose screen says "enabled" while every token issued still says otherwise, with nothing
+        // recording that the event was owed. Now the claim is true.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
         await db.Database.ExecuteSqlRawAsync(
             """
             INSERT INTO admin.tenant_feature (tenant_id, feature_key, enabled, changed_by, changed_at, row_version)
@@ -274,6 +280,7 @@ public sealed class ProgramAdminService(AdminDbContext db, IAuditClient audit, T
         await outbox.EnqueueAsync(
             "TenantFeatureChanged", "admin.events",
             new { tenantId, featureKey, enabled, changedAt = now, changedBy = actor.UserId }, ct);
+        await tx.CommitAsync(ct);
     }
 
     public async Task SetLimitAsync(

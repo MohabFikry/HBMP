@@ -39,10 +39,12 @@ public static class Interactions
                 CreatedAt = now,
                 UpdatedAt = now,
             };
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             deps.Db.Interactions.Add(i);
             await deps.Db.SaveChangesAsync(ct);
             await deps.Outbox.EnqueueAsync("CallInteractionOpened", "callcentre.events",
                 new { interactionId = i.InteractionId, i.CallRef, tenantId = i.TenantId, direction = i.Direction.ToString() }, ct);
+            await tx.CommitAsync(ct);
             await deps.AuditAsync("call_interaction", i.InteractionId.ToString(), AuditAction.Create,
                 "CallInteractionOpened", i.CallRef, after: i.Status.ToString());
             return Results.Created($"/api/v1/call-interactions/{i.InteractionId}", InteractionView.From(i, false));
@@ -92,10 +94,14 @@ public static class Interactions
                 i.BeneficiaryId = req.BeneficiaryId;
                 i.UpdatedAt = now;
             }
+            // A Pass binds the interaction to a beneficiary — it is what the disclosure gate consults. The
+            // binding and the event recording it commit together.
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             await deps.Db.SaveChangesAsync(ct);
 
             await deps.Outbox.EnqueueAsync("CallerVerificationRecorded", "callcentre.events",
                 new { interactionId = id, i.CallRef, beneficiaryId = req.BeneficiaryId, result = effectiveResult.ToString(), typeCount = types.Count }, ct);
+            await tx.CommitAsync(ct);
             // Both passes and failures are audited. A failure is a Notice (a disclosure was withheld / attempted).
             await deps.AuditAsync("caller_verification", v.VerificationId.ToString(), AuditAction.Decision,
                 effectiveResult == VerificationResult.Passed ? "CallerVerificationPassed" : "CallerVerificationFailed",
@@ -150,9 +156,11 @@ public static class Interactions
             i.Status = InteractionStatus.Closed;
             i.EndedAt = now;
             i.UpdatedAt = now;
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             await deps.Db.SaveChangesAsync(ct);
             await deps.Outbox.EnqueueAsync("CallInteractionClosed", "callcentre.events",
                 new { interactionId = id, i.CallRef, outcome = i.Outcome?.ToString() }, ct);
+            await tx.CommitAsync(ct);
             await deps.AuditAsync("call_interaction", id.ToString(), AuditAction.StateChange, "CallInteractionClosed",
                 i.CallRef, after: i.Outcome?.ToString());
             // Once closed the verification gate returns false → member detail is no longer disclosable on this call.

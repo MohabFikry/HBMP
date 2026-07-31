@@ -1,4 +1,4 @@
-# Outbox atomicity debt register — INV-OUTBOX-SURVIVES-CRASH
+# Outbox atomicity register — INV-OUTBOX-SURVIVES-CRASH
 #
 # Each line is a file containing domain-event enqueues that are NOT inside a transaction, and how many.
 # Every one is a place where a state change can outlive its event: EfOutbox.EnqueueRawAsync commits on its
@@ -6,46 +6,50 @@
 # and the event gone, with nothing recording that it was owed. Enqueue-before-save is the mirror failure —
 # an event for a change that never committed, which cannot be un-sent.
 #
+# THE DEBT IS ZERO. This file opened at 73 sites across 30 files and every one of them has been closed by
+# putting the write and its event in one transaction. What is listed below is NOT debt: each remaining entry
+# is an enqueue with NO LOCAL STATE CHANGE BEHIND IT — the event is the entire write, so there is no second
+# commit for a crash to fall between and nothing a transaction would make more atomic. They are listed
+# because the rule is deliberately write-agnostic (see below), so the detector cannot tell them apart from
+# the real thing, and an unexplained exemption is how an allow-list turns back into debt. Each one carries
+# its reason. Adding a line here needs the same argument, in writing.
+#
 # THE RULE DOES NOT REQUIRE A VISIBLE WRITE, and that is deliberate. An earlier version only flagged an
 # enqueue that shared a handler with a SaveChangesAsync. In emr, pharmacy dispensing, orders consume and
 # every claims endpoint the state change happens inside a SERVICE that owns and commits its own transaction,
 # and the handler enqueues after it returns — the exact two-commit shape this rule forbids, with nothing in
 # the handler for that detector to find. It was blind to 40 sites, concentrated in the money paths, and the
-# register read as though they did not exist. An enqueue that genuinely announces nothing is rare enough to
-# earn a line here with a reason.
+# register read as though they did not exist.
 #
-# This register EXISTS so the rule could be landed against a codebase that already breaks it. Recording the
-# debt is not forgiving it. OutboxAtomicityTests ratchets these numbers ONE WAY:
+# OutboxAtomicityTests ratchets these numbers ONE WAY:
 #   * a file not listed here may have ZERO such sites
 #   * a listed file may shrink or disappear, never grow
 #   * a stale entry (a file already fixed) is itself a failure — it would re-permit a regression
 #
-# To clear an entry where the handler does the write: wrap the state change and its enqueue(s) in one
+# Where the handler does the write: wrap the state change and its enqueue(s) in one
 # `await using var tx = await db.Database.BeginTransactionAsync(ct); ... await tx.CommitAsync(ct);`
 # An early return before the commit rolls both back, which is the correct outcome.
 #
-# To clear one where a SERVICE does the write: the enqueue has to move inside that service's transaction —
-# wrapping the handler would nest a second transaction inside the service's own and throw. Where a service
-# already takes an ambient transaction (see MembershipCommands), the handler may open one and the service
-# joins it.
+# Where a SERVICE does the write: the enqueue has to move inside that service's transaction — wrapping the
+# handler would nest a second transaction inside the service's own and throw. Where a service takes an
+# ambient transaction (MembershipCommands) or an `insideTransaction:` callback (pharmacy's DispenseExecutor,
+# emr's AppointmentTransitions), the handler joins that one instead of opening a second.
 #
 # Format: <repo-relative-path> <count>
 
-services/admin/Api/BranchAssignmentService.cs 3
-services/admin/Api/PayerAssignmentService.cs 2
-services/admin/Api/ProgramEndpoints.cs 1
-services/callcentre/Api/CallAppointments.cs 1
-services/callcentre/Api/Interactions.cs 3
+# SwitchAsync resolves the active branch from assignment rows and writes NOTHING — there is no "current
+# branch" column; it is derived per request from the permitted set. ActiveBranchSwitched is the whole write.
+services/admin/Api/BranchAssignmentService.cs 1
+
+# POST /cases/{id}/eligibility-override records INTENT. eligibility-service owns the override and applies it;
+# case-service persists nothing, by design (FR-ELG-007, the delegation seam). The event is the whole write.
 services/case/Api/Beneficiary360Endpoint.cs 1
-services/case/Api/Cases.cs 5
-services/emr/Api/Program.cs 2
-services/emr/Api/Queue.cs 1
+
+# InAppReminderChannel holds an IOutbox and no DbContext. A reminder is a message, not a state change; emr
+# keeps no "reminder sent" row for it to be atomic with.
 services/emr/Api/Reminders.cs 1
-services/interop/Infrastructure/Integration/InboundIngestion.cs 1
+
+# Both sites deliberately change nothing. A substitution outside the approved-alternatives list is REFUSED
+# (409) and routed to approvals — nothing is dispensed and no accumulator moves. Out-of-stock flags the line
+# WITHOUT consuming it, so the unfilled quantity stays available for a backorder or a later visit.
 services/pharmacy/Api/Dispensing.cs 2
-services/policy/Api/EnrollmentEndpoints.cs 3
-services/policy/Api/NoteEndpoints.cs 2
-services/policy/Api/PlanEndpoints.cs 3
-services/policy/Api/PolicyDocumentEndpoints.cs 3
-services/policy/Infrastructure/BulkJobEngine.cs 1
-services/policy/Infrastructure/MembershipCommands.cs 1

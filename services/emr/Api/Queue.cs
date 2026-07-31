@@ -37,6 +37,11 @@ public static class QueueModule
                 return outOfScope;
             }
 
+            // CheckInAsync flips the appointment AND issues the queue ticket, but owns no transaction of its
+            // own — unlike Book/Reschedule/Cancel/NoShow, which take an insideTransaction callback because
+            // they do. So the handler opens one and the check-in joins it: the state change and ApptCheckedIn
+            // commit together, and a failure leaves the person neither checked in nor announced as checked in.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             var result = await transitions.CheckInAsync(id, req.MemberNo, req.DisplayName, req.Priority,
                 AppointmentEndpointsShared.IfMatch(http), clock.GetUtcNow(), me.Principal?.Subject, ct);
             var problem = AppointmentEndpointsShared.MapFailure(result.Outcome);
@@ -49,6 +54,7 @@ public static class QueueModule
             }, ct);
             await outbox.EnqueueAsync("ApptCheckedIn", "emr.events",
                 new { appointmentId = id, beneficiaryId = result.Appointment!.BeneficiaryId }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(AppointmentResponse.From(result.Appointment!));
         });
 

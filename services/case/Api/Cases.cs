@@ -41,10 +41,12 @@ public static class Cases
                 CreatedAt = now,
                 UpdatedAt = now,
             };
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             deps.Db.Cases.Add(c);
             await deps.Db.SaveChangesAsync(ct);
             await deps.Outbox.EnqueueAsync("CaseOpened", "case.events",
                 new { caseId = c.CaseId, c.CaseNo, tenantId = c.TenantId, beneficiaryId = c.BeneficiaryId, category = c.Category.ToString() }, ct);
+            await tx.CommitAsync(ct);
 
             await Audit(deps, AuditAction.Create, c, "CaseOpened", null, c.Status.ToString());
             return Results.Created($"/api/v1/cases/{c.CaseId}", CaseView.From(c));
@@ -122,10 +124,15 @@ public static class Cases
                 AssignmentId = Guid.NewGuid(), CaseId = id, CaseManagerId = req.CaseManagerId,
                 AssignedAt = now, Active = true, AssignedBy = deps.Subject,
             };
+            // An assignment IS the ABAC anchor — it is what grants this manager access to the case. The grant
+            // and the event announcing it commit together, so no watcher is told about access that was rolled
+            // back, and no grant lands silently.
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             deps.Db.Assignments.Add(a);
             await deps.Db.SaveChangesAsync(ct);
             await deps.Outbox.EnqueueAsync("CaseAssigned", "case.events",
                 new { caseId = id, c.CaseNo, caseManagerId = req.CaseManagerId }, ct);
+            await tx.CommitAsync(ct);
             await Audit(deps, AuditAction.Grant, c, "CaseAssigned", null, req.CaseManagerId.ToString(), AuditSeverity.Notice);
             return Results.Ok(AssignmentView.From(a));
         }).RequireAuthorization(HbmpPolicies.Scope("case:manage"));
@@ -144,9 +151,13 @@ public static class Cases
             a.Active = false;
             a.UnassignedAt = now;
             a.UnassignedBy = deps.Subject;
+            // Unassignment REVOKES access. A revocation that commits without its event leaves every downstream
+            // read model still showing this manager on the case.
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             await deps.Db.SaveChangesAsync(ct);
             await deps.Outbox.EnqueueAsync("CaseUnassigned", "case.events",
                 new { caseId = id, caseManagerId = req.CaseManagerId }, ct);
+            await tx.CommitAsync(ct);
             await deps.Audit.EmitAsync(new AuditEventDraft
             {
                 EntityType = "case", EntityId = id.ToString(), Action = AuditAction.Update,
@@ -208,11 +219,13 @@ public static class Cases
             if (req.DueAt is not null) t.DueAt = req.DueAt;
             if (req.AssigneeId is not null) t.AssigneeId = req.AssigneeId;
             t.UpdatedAt = deps.Clock.GetUtcNow();
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             await deps.Db.SaveChangesAsync(ct);
 
             if (req.Status == TaskState.Done)
                 await deps.Outbox.EnqueueAsync("TaskCompleted", "case.events",
                     new { caseId = id, taskId = t.TaskId, title = t.Title }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(TaskView.From(t));
         }).RequireAuthorization(HbmpPolicies.Scope("case:write"));
     }
@@ -270,6 +283,9 @@ public static class Cases
                 RaisedToRole = req.RaisedToRole.Trim(), Reason = req.Reason.Trim(),
                 Status = EscalationStatus.Raised, RaisedAt = now,
             };
+            // The escalation row and the case's move out of OnHold are one change, and CaseEscalated is how the
+            // target role finds out it is owed a look. All three commit together.
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             deps.Db.Escalations.Add(e);
             // An escalation moves the case to the Escalation lane if it isn't terminal.
             if (CaseWorkflow.CanTransition(c.Status, CaseStatus.Active) && c.Status == CaseStatus.OnHold)
@@ -277,6 +293,7 @@ public static class Cases
             await deps.Db.SaveChangesAsync(ct);
             await deps.Outbox.EnqueueAsync("CaseEscalated", "case.events",
                 new { caseId = id, escalationId = e.EscalationId, raisedToRole = e.RaisedToRole, reason = e.Reason }, ct);
+            await tx.CommitAsync(ct);
             await deps.Audit.EmitAsync(new AuditEventDraft
             {
                 EntityType = "case", EntityId = id.ToString(), Action = AuditAction.Create,

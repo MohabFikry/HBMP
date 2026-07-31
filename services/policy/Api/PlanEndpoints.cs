@@ -73,6 +73,7 @@ public static class PlanEndpoints
                 Contact = req.Contact ?? "{}",
                 CreatedAt = now, UpdatedAt = now, CreatedBy = gate.SubjectId, UpdatedBy = gate.SubjectId,
             };
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             db.Payers.Add(payer);
             if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
 
@@ -83,6 +84,7 @@ public static class PlanEndpoints
             }, ct);
             await outbox.EnqueueAsync("PayerCreated", "policy.events",
                 new { tenantId = payer.TenantId, payerId = payer.PayerId, payer.PayerCode, payerType = type.ToString() }, ct);
+            await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/payers/{payer.PayerId}", PayerView.From(payer));
         });
 
@@ -421,6 +423,10 @@ public static class PlanEndpoints
                     "This version cannot be activated.", new Dictionary<string, object?> { ["problems"] = problems });
 
             var now = clock.GetUtcNow();
+            // Activation supersedes one version and activates another, and each announces itself. All four
+            // facts are one change of what members are entitled to: opened here, before the outgoing version
+            // is even read, so a concurrent activation cannot slip between the read and the supersede.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             // Close the outgoing version at the incoming one's start date. Because the window is half-open the
             // two abut exactly: [.., from) then [from, ..) — no gap for a service date to fall through, and no
             // day covered twice (which the 0005 exclusion constraint would reject anyway).
@@ -468,6 +474,7 @@ public static class PlanEndpoints
                     supersededBy = version.PlanVersionId, effectiveTo = outgoing.EffectiveTo,
                 }, ct);
             }
+            await tx.CommitAsync(ct);
 
             var saved = await db.PlanVersions.AsNoTracking().Include(v => v.Rules).ThenInclude(r => r.Tiers)
                 .FirstAsync(v => v.PlanVersionId == id, ct);

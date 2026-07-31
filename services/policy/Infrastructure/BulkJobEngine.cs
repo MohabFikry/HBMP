@@ -345,6 +345,11 @@ public sealed class BulkJobEngine(
             }
         }
 
+        // The rows above each committed in their own transaction — that is deliberate, so one bad row does not
+        // undo 49 999 good ones. What follows is a single fact, "this job is finished and here is its tally",
+        // and it commits with the event that announces it. Marking the job Completed without emitting
+        // BulkJobCompleted would leave every downstream watcher waiting on a job that already ended.
+        await using var finishTx = await db.Database.BeginTransactionAsync(ct);
         job = await db.BulkJobs.FirstAsync(j => j.JobId == jobId, ct);
         job.AppliedRows = applied;
         job.FailedRows = failed;
@@ -368,6 +373,7 @@ public sealed class BulkJobEngine(
             batchId = job.BatchId, total = job.TotalRows, valid = job.ValidRows,
             applied, failed, skipped,
         }, ct);
+        await finishTx.CommitAsync(ct);
 
         return new BulkCommitReport(job, [.. errors.Take(InlineErrorLimit)], errors.Count, null);
     }

@@ -32,6 +32,8 @@ public sealed class PayerAssignmentService(AdminDbContext db, IAuditClient audit
             ValidFrom = validFrom, ValidTo = validTo, Status = PayerAssignmentStatus.Active,
             CreatedBy = actor.UserId, CreatedAt = clock.GetUtcNow(),
         };
+        // The restriction row and the event announcing it are one access change.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
         db.UserPayerAssignments.Add(row);
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateException)   // ux_user_payer_active → a duplicate live restriction
@@ -45,6 +47,7 @@ public sealed class PayerAssignmentService(AdminDbContext db, IAuditClient audit
         await audit.EmitAsync(Draft(row, AuditAction.Create, actor, tenant, "restricted", payerId.ToString()), ct);
         await outbox.EnqueueAsync("UserPayerRestricted", "admin.events",
             new { row.AssignmentId, tenantId = tenant, subject, payerId }, ct);
+        await tx.CommitAsync(ct);
         return new PayerAssignResult(true, null, row);
     }
 
@@ -57,6 +60,10 @@ public sealed class PayerAssignmentService(AdminDbContext db, IAuditClient audit
         row.Status = PayerAssignmentStatus.Revoked;
         row.RevokedBy = actor.UserId;
         row.RevokedAt = clock.GetUtcNow();
+        // Revoking a restriction WIDENS access, and `remaining` is read after the write because the answer
+        // depends on it. Both, and the event carrying that count, commit together — a consumer told
+        // "remaining: 0" for a revocation that rolled back would treat the user as payer-unrestricted.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
         await db.SaveChangesAsync(ct);
 
         // High: removing a restriction is a widening of access. If it was the user's LAST one they become
@@ -69,6 +76,7 @@ public sealed class PayerAssignmentService(AdminDbContext db, IAuditClient audit
             $"remaining:{remaining}", AuditSeverity.High), ct);
         await outbox.EnqueueAsync("UserPayerRestrictionRevoked", "admin.events",
             new { row.AssignmentId, tenantId = tenant, subject = row.SubjectUserId, payerId = row.PayerId, remaining }, ct);
+        await tx.CommitAsync(ct);
         return true;
     }
 

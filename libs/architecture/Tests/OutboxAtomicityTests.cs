@@ -83,6 +83,39 @@ public class OutboxAtomicityTests
             DebtFile, Environment.NewLine, string.Join($"{Environment.NewLine}  ", stale));
     }
 
+    /// <summary>
+    /// The detector must read CODE. Each case below is a way prose or a string literal could have steered it,
+    /// and the middle one is not hypothetical: BulkJobEngine's doc comment contains "no record of where it
+    /// stopped", which read as a type declaration, ended the block walk early and hid the transaction the
+    /// method actually opens. The third is the dangerous direction — a comment that merely MENTIONS
+    /// BeginTransactionAsync clearing a genuine offender.
+    /// </summary>
+    [Fact]
+    public void The_detector_reads_code_not_prose()
+    {
+        const string src = """
+            var url = "https://example/a"; var brace = "}"; var json = $"{{\"x\":1}}";
+            // this comment mentions EnqueueAsync( and would be a site if comments were code
+            /* and this one says record BulkCommitReport, which is not a type declaration */
+            // BeginTransactionAsync appears here in prose only
+            """;
+
+        var code = CodeOnly(src);
+
+        code.Should().HaveLength(src.Length, "offsets and line numbers must survive blanking");
+        code.Count(c => c == '\n').Should().Be(src.Count(c => c == '\n'));
+        code.Should().NotContain("EnqueueAsync", "a comment is not a call site");
+        code.Should().NotContain("record BulkCommitReport", "a comment is not a declaration");
+        code.Should().NotContain("BeginTransactionAsync",
+            "otherwise a comment mentioning it would clear a real offender — the failure direction that " +
+            "makes a ratchet look tightened while it is not");
+        code.Should().NotContain("https", "a // inside a string literal must not eat the rest of the line");
+        code.Should().Contain("var url =", "code outside the literals is untouched");
+        code.Should().Contain("var json =");
+        code.Count(c => c == '{').Should().Be(0, "braces inside string literals must not reach the brace walk");
+        code.Count(c => c == '}').Should().Be(0);
+    }
+
     // ---- the detector ------------------------------------------------------------------------------------
 
     /// <summary>Repo-relative file → line numbers of enqueue sites that share a block with a SaveChanges
@@ -98,7 +131,15 @@ public class OutboxAtomicityTests
             if (rel.Contains("/bin/", StringComparison.Ordinal) || rel.Contains("/obj/", StringComparison.Ordinal)
                 || rel.Contains("/Tests/", StringComparison.Ordinal)) continue;
 
-            var src = File.ReadAllText(path);
+            // Comments and string literals are blanked FIRST. Reading them as code broke this rule in both
+            // directions: BulkJobEngine's doc comment says "...with no record of where it stopped", and
+            // `record of where it stopped` satisfied the "did we just walk into a type declaration?" test, so
+            // the walk stopped one level early, the method's own transaction became invisible, and a
+            // correctly-wrapped enqueue was reported as debt. The same reading would have counted an
+            // `EnqueueAsync(` written inside a comment as a real site, and — the dangerous direction — let a
+            // `BeginTransactionAsync` mentioned only in a comment CLEAR a genuine offender. A rule this one
+            // is load-bearing cannot be steerable by prose.
+            var src = CodeOnly(File.ReadAllText(path));
             if (!src.Contains("EnqueueAsync", StringComparison.Ordinal)) continue;
 
             foreach (Match m in Regex.Matches(src, @"EnqueueAsync\("))
@@ -198,6 +239,97 @@ public class OutboxAtomicityTests
             if (Regex.IsMatch(head, @"=>\s*$")) yield break;
             pos = start;
         }
+    }
+
+    /// <summary>
+    /// The same source with every comment, string literal and char literal blanked to spaces — newlines
+    /// preserved, so every offset and line number is unchanged and the detector can still report where.
+    ///
+    /// <para>Blanking is not cosmetic. The brace walk and the keyword tests below both read raw text, so a
+    /// brace inside a JSON string (<c>AfterState = $"{{\"enabled\":true}}"</c>), a <c>//</c> inside a URL, or
+    /// an English sentence containing the word <c>record</c> all steer a rule that is supposed to be reading
+    /// code. Delimiters go too: nothing downstream needs them, and leaving them invites the next reader to
+    /// assume the string is still there.</para>
+    /// </summary>
+    private static string CodeOnly(string src)
+    {
+        var buf = src.ToCharArray();
+        void Erase(int from, int to)
+        {
+            for (var k = from; k < to && k < buf.Length; k++)
+                if (buf[k] is not ('\n' or '\r')) buf[k] = ' ';
+        }
+
+        for (var i = 0; i < src.Length; i++)
+        {
+            if (src[i] == '/' && i + 1 < src.Length && src[i + 1] == '/')
+            {
+                var end = src.IndexOf('\n', i);
+                if (end < 0) end = src.Length;
+                Erase(i, end);
+                i = end;
+                continue;
+            }
+            if (src[i] == '/' && i + 1 < src.Length && src[i + 1] == '*')
+            {
+                var close = src.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                var end = close < 0 ? src.Length : close + 2;
+                Erase(i, end);
+                i = end - 1;
+                continue;
+            }
+            if (src[i] == '\'')
+            {
+                var k = i + 1;
+                while (k < src.Length && src[k] != '\'') k += src[k] == '\\' ? 2 : 1;
+                Erase(i, Math.Min(k + 1, src.Length));
+                i = k;
+                continue;
+            }
+
+            // A string literal may carry any run of $ and @ prefixes: "", @"", $"", $@"", @$"", """ raw """.
+            var p = i;
+            while (p < src.Length && (src[p] == '$' || src[p] == '@')) p++;
+            if (p >= src.Length || src[p] != '"') continue;
+
+            var verbatim = src.AsSpan(i, p - i).Contains('@');
+            var q = p;
+            while (q < src.Length && src[q] == '"') q++;
+            var quotes = q - p;
+
+            int stop;
+            if (quotes >= 3)
+            {
+                // Raw string: the terminator is a quote run of the same length.
+                var close = src.IndexOf(new string('"', quotes), q, StringComparison.Ordinal);
+                stop = close < 0 ? src.Length : close + quotes;
+            }
+            else if (quotes == 2)
+            {
+                stop = q;   // the empty string
+            }
+            else if (verbatim)
+            {
+                var k = p + 1;
+                while (k < src.Length)
+                {
+                    if (src[k] != '"') { k++; continue; }
+                    if (k + 1 < src.Length && src[k + 1] == '"') { k += 2; continue; }   // "" is one quote
+                    break;
+                }
+                stop = Math.Min(k + 1, src.Length);
+            }
+            else
+            {
+                var k = p + 1;
+                while (k < src.Length && src[k] != '"' && src[k] != '\n') k += src[k] == '\\' ? 2 : 1;
+                stop = Math.Min(k + 1, src.Length);
+            }
+
+            Erase(i, stop);
+            i = stop - 1;
+        }
+        return new string(buf);
     }
 
     private static int OpenBraceBefore(string src, int from)
