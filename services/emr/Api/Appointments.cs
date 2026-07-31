@@ -26,6 +26,32 @@ public static class AppointmentsModule
         catch (InvalidTimeZoneException) { return TimeSpan.FromHours(2); }
     }
 
+    /// <summary>
+    /// 25.3 — the CLINIC's calendar date for an instant, in Africa/Cairo.
+    ///
+    /// Licence expiry is a DATE and appointments are instants, so something has to bridge them, and doing it
+    /// in UTC would be wrong for exactly the appointments nearest a boundary: Cairo runs two to three hours
+    /// ahead, so an early-morning slot on 1 October is still 30 September in UTC. Judging a licence that
+    /// expired on 30 September against that would let the first appointments of October through — a
+    /// once-a-lapse, hard-to-reproduce hole, which is the worst kind.
+    /// </summary>
+    private static DateOnly ClinicDateOf(DateTimeOffset instant)
+    {
+        var utcDate = DateOnly.FromDateTime(instant.UtcDateTime);
+        return DateOnly.FromDateTime(instant.ToOffset(CairoOffset(utcDate)).DateTime);
+    }
+
+    /// <summary>
+    /// 25.1 — the caller's branch REACH MODE, which decides what the branch predicate means.
+    ///
+    /// Reads used to ask <c>ActiveBranchId is { } active</c> directly. That is correct for the two modes that
+    /// existed when it was written and silently wrong for a set-scoped clinics manager, who has no single
+    /// active branch until they filter — so the condition was false, no predicate was applied, and a manager
+    /// holding three grants would have read all six branches. See <see cref="BranchQueryScope"/>.
+    /// </summary>
+    private static ScopeMode BranchModeOf(IHbmpPrincipalAccessor me) =>
+        me.Principal is null ? ScopeMode.MemberScoped : BranchScopeModes.ModeFor(me.Principal);
+
     public static void MapAppointments(this WebApplication app)
     {
         // Desk writes: booking's own slot administration, plus the arrival decisions (check-in, no-show) that
@@ -58,12 +84,27 @@ public static class AppointmentsModule
             // here means the bad slots are never materialized, so no patient can be booked into them. Catching
             // it only at booking time would leave a doctor's calendar full of appointments at a branch they
             // do not work at, each needing to be cancelled and the patient rung back.
+            //
+            // 25.3 — asked AS AT `fromDate`, and asked about the LICENCE too. Both facts are date-dependent
+            // and this request spans a range, so `licenceExpiry` is carried into generation below rather than
+            // being resolved to a single yes/no here: a licence expiring on 30 September must yield September
+            // slots and no October ones, not an all-or-nothing refusal for the whole request.
+            DateOnly? licenceExpiry = null;
             if (req.DoctorId is { } doctorId && slotBranch is { } branchId)
             {
-                var serves = await practitioners.ServesBranchAsync(doctorId, branchId, ct);
-                if (PractitionerBranchRules.Refuse(serves, doctorId, branchId) is { } reason)
+                var bookability = await practitioners.BookabilityAsync(doctorId, branchId, req.FromDate, ct);
+                if (PractitionerBranchRules.Refuse(bookability.ServesBranch, doctorId, branchId) is { } reason)
                     return Results.Problem(statusCode: 422, title: "practitioner-not-at-branch",
                         type: PractitionerBranchRules.ProblemType, detail: reason);
+
+                licenceExpiry = bookability.LicenceExpiry;
+
+                // Already lapsed before the range even opens: refuse outright rather than answering
+                // "created: 0", which reads as a quiet success and tells nobody why the calendar stayed empty.
+                if (PractitionerBranchRules.RefuseExpiredLicence(
+                        bookability.LicenceValid, bookability.LicenceExpiry, doctorId, req.FromDate) is { } licenceReason)
+                    return Results.Problem(statusCode: 422, title: "practitioner-licence-expired",
+                        type: PractitionerBranchRules.LicenceExpiredProblemType, detail: licenceReason);
             }
 
             var availability = new ProviderAvailability
@@ -77,7 +118,11 @@ public static class AppointmentsModule
             };
             db.ProviderAvailabilities.Add(availability);
 
-            var generated = SlotGeneration.Generate(availability, req.FromDate, req.ToDate, CairoOffset(req.FromDate));
+            // 25.3 — the licence is a bound on the generation WINDOW, not a filter applied afterwards.
+            // Availability is computed in exactly one place (design 42 §7 rule 5), and that place has to know
+            // the last date this practitioner may lawfully be booked.
+            var generated = SlotGeneration.Generate(
+                availability, req.FromDate, req.ToDate, CairoOffset(req.FromDate), licenceExpiry);
 
             // Idempotent materialization: skip slot definitions that already exist for this provider/location/doctor.
             var starts = generated.Select(s => s.SlotStart).ToList();
@@ -169,14 +214,14 @@ public static class AppointmentsModule
         // provider list also means a clinic with no availability never appears, so the desk cannot pick a
         // clinic and then find it empty.
         read.MapGet("/branch-clinics", async (
-            Guid? branchId, BranchScopeState branch, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
+            Guid? branchId, BranchScopeState branch, IHbmpPrincipalAccessor me, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var now = clock.GetUtcNow();
             var q = db.AppointmentSlots.AsNoTracking().Where(s => s.SlotStart > now);
-            // A branch-scoped caller sees only its active branch; an unrestricted caller (call centre) may
-            // narrow to one explicitly, and otherwise sees every branch it can reach.
-            if (branch.Context.ActiveBranchId is { } active) q = q.Where(s => s.BranchId == active);
-            else if (branchId is { } bid) q = q.Where(s => s.BranchId == bid);
+            // A branch-scoped caller sees only its active branch; a SET-scoped clinics manager sees every
+            // branch they hold a grant to, narrowed if they have filtered; an unrestricted caller (call
+            // centre) may narrow to one explicitly and otherwise sees every branch it can reach.
+            q = q.ApplyBranchScope(s => s.BranchId, BranchModeOf(me), branch.Context, branchId);
 
             var taken = await ActiveHeldSlotIds(db, ct);
             var rows = await q
@@ -207,14 +252,12 @@ public static class AppointmentsModule
         // specialties, then keeps only the doctors this endpoint says are bookable. Two authorized reads,
         // each from the service that owns the data, joined by the client that is entitled to both.
         read.MapGet("/booking/doctor-availability", async (
-            Guid? branchId, BranchScopeState branch, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
+            Guid? branchId, BranchScopeState branch, IHbmpPrincipalAccessor me, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var now = clock.GetUtcNow();
             var q = db.AppointmentSlots.AsNoTracking().Where(s => s.SlotStart > now && s.DoctorId != null);
-            // Same branch rule as /branch-clinics: a branch-scoped desk sees its own branch and may not name
-            // another; an unrestricted caller (call centre) may narrow to one explicitly.
-            if (branch.Context.ActiveBranchId is { } active) q = q.Where(s => s.BranchId == active);
-            else if (branchId is { } bid) q = q.Where(s => s.BranchId == bid);
+            // Same branch rule as /branch-clinics — one implementation, three reach modes.
+            q = q.ApplyBranchScope(s => s.BranchId, BranchModeOf(me), branch.Context, branchId);
 
             var taken = await ActiveHeldSlotIds(db, ct);
             var rows = await q.Select(s => new { s.SlotId, s.DoctorId, s.BranchId, s.SlotStart })
@@ -295,10 +338,26 @@ public static class AppointmentsModule
             // actually booking into.
             if (req.DoctorId is { } bookDoctorId && bookingBranch is { } bookBranchId)
             {
-                var serves = await practitioners.ServesBranchAsync(bookDoctorId, bookBranchId, ct);
-                if (PractitionerBranchRules.Refuse(serves, bookDoctorId, bookBranchId) is { } reason)
+                // 25.3 — asked as at the date THIS appointment is for, not as at today. A booking made in July
+                // for an October slot is judged against October: that is the whole difference between a gate
+                // and a formality, and it is why the probe grew an `asOf`.
+                var when = req.ScheduledStart
+                    ?? (req.SlotId is { } probeSlotId
+                        ? await db.AppointmentSlots.AsNoTracking()
+                            .Where(x => x.SlotId == probeSlotId)
+                            .Select(x => (DateTimeOffset?)x.SlotStart).FirstOrDefaultAsync(ct)
+                        : null);
+                var on = ClinicDateOf(when ?? clock.GetUtcNow());
+                var bookability = await practitioners.BookabilityAsync(bookDoctorId, bookBranchId, on, ct);
+
+                if (PractitionerBranchRules.Refuse(bookability.ServesBranch, bookDoctorId, bookBranchId) is { } reason)
                     return Results.Problem(statusCode: 422, title: "practitioner-not-at-branch",
                         type: PractitionerBranchRules.ProblemType, detail: reason);
+
+                if (PractitionerBranchRules.RefuseExpiredLicence(
+                        bookability.LicenceValid, bookability.LicenceExpiry, bookDoctorId, on) is { } licenceReason)
+                    return Results.Problem(statusCode: 422, title: "practitioner-licence-expired",
+                        type: PractitionerBranchRules.LicenceExpiredProblemType, detail: licenceReason);
             }
 
             // 14.5 — ELIGIBILITY. A suspended, expired or blocked member must not leave this call with an
@@ -434,7 +493,7 @@ public static class AppointmentsModule
 
                 // Fire a booking reminder now (in-app live; SMS/WhatsApp are stubs). Honors preferred channel.
                 var preferred = Enum.TryParse<ReminderChannel>(req.PreferredChannel, out var pc) ? pc : ReminderChannel.InApp;
-                await reminders.DispatchAsync(booked.AppointmentId, booked.BeneficiaryId, booked.ProviderId,
+                await reminders.DispatchAsync(booked.TenantId, booked.AppointmentId, booked.BeneficiaryId, booked.ProviderId,
                     booked.ScheduledStart, ReminderKind.Booked, preferred, ct);
             }
 
@@ -476,9 +535,9 @@ public static class AppointmentsModule
             var q = db.Appointments.AsNoTracking().Where(a => a.ScheduledStart >= lo && a.ScheduledStart < hi);
             if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<AppointmentStatus>(status, ignoreCase: true, out var st))
                 q = q.Where(a => a.Status == st);
-            // 14.4 — BranchScoped callers see ONLY their active branch; member-scoped may optionally filter.
-            if (branch.Context.ActiveBranchId is { } active) q = q.Where(a => a.BranchId == active);
-            else if (branchId is { } bid) q = q.Where(a => a.BranchId == bid);
+            // 14.4 — BranchScoped callers see ONLY their active branch; 25.1 — a SET-scoped clinics manager
+            // sees every branch they hold a grant to; member-scoped may optionally filter.
+            q = q.ApplyBranchScope(a => a.BranchId, BranchModeOf(me), branch.Context, branchId);
 
             // ?mine=true — the doctor's OWN list. Narrows to appointments assigned to the caller, and does so
             // from the TOKEN's subject, never from a client-supplied id: a doctor asking for "my visits" must
@@ -514,6 +573,51 @@ public static class AppointmentsModule
                 AppointmentResponse.From(a, asOf, a.BeneficiaryName ?? nameByAppt.GetValueOrDefault(a.AppointmentId))));
         });
 
+        // GET /appointments/reassignment-needed — the OTHER half of the licence worklist (25.3).
+        //
+        // Design 42 §3: existing future appointments are FLAGGED, never cancelled, and a person decides who
+        // covers the clinic. This is where that person looks. Without it, `reassignment_needed_at` is a column
+        // that gets written and never read — which is the same as not flagging at all, except that it looks
+        // like a control.
+        //
+        // Carries the patient's CONTACT affordances (name + the appointment reference) because the action is
+        // to ring them. It carries no clinical content: this is a scheduling problem, and emr's other
+        // min-necessary projections are not relaxed for a worklist.
+        read.MapGet("/appointments/reassignment-needed", async (
+            Guid? branchId, Guid? doctorId, BranchScopeState branch, IHbmpPrincipalAccessor me,
+            EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
+        {
+            var now = clock.GetUtcNow();
+            var q = db.Appointments.AsNoTracking()
+                .Where(a => a.ReassignmentNeededAt != null
+                            // FUTURE only. A past appointment already happened; asking reception to reassign
+                            // it buries the ones they can still do something about.
+                            && a.ScheduledStart > now
+                            && (a.Status == AppointmentStatus.Booked || a.Status == AppointmentStatus.CheckedIn));
+
+            if (doctorId is { } d) q = q.Where(a => a.DoctorId == d);
+            q = q.ApplyBranchScope(a => a.BranchId, BranchModeOf(me), branch.Context, branchId);
+
+            var rows = await q.OrderBy(a => a.ScheduledStart).Take(500).ToListAsync(ct);
+            return Results.Ok(new
+            {
+                asOf = now,
+                count = rows.Count,
+                appointments = rows.Select(a => new
+                {
+                    a.AppointmentId,
+                    a.BeneficiaryId,
+                    a.BranchId,
+                    a.DoctorId,
+                    a.ScheduledStart,
+                    a.ScheduledEnd,
+                    Status = a.Status.ToString(),
+                    a.ReassignmentNeededAt,
+                    a.BeneficiaryName,
+                }),
+            });
+        });
+
         // GET /appointments/summary — the three counts the reception dashboard's cards show.
         //
         // Counted HERE rather than by tallying the board client-side. The board is capped at 200 rows, so a
@@ -521,7 +625,7 @@ public static class AppointmentsModule
         // direction of "fewer than there are", which is the direction nobody notices. It is also three
         // integers instead of two hundred rows for a number.
         read.MapGet("/appointments/summary", async (
-            DateTimeOffset? date, Guid? branchId, BranchScopeState branch,
+            DateTimeOffset? date, Guid? branchId, BranchScopeState branch, IHbmpPrincipalAccessor me,
             EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var window = AppointmentDay.CairoWindow(date ?? clock.GetUtcNow(), CairoOffset);
@@ -531,8 +635,7 @@ public static class AppointmentsModule
             var q = db.Appointments.AsNoTracking().Where(a => a.ScheduledStart >= lo && a.ScheduledStart < hi);
             // Same branch rule as the board it summarises — a card that counted other branches' appointments
             // would be a scoping hole dressed as a statistic.
-            if (branch.Context.ActiveBranchId is { } active) q = q.Where(a => a.BranchId == active);
-            else if (branchId is { } bid) q = q.Where(a => a.BranchId == bid);
+            q = q.ApplyBranchScope(a => a.BranchId, BranchModeOf(me), branch.Context, branchId);
 
             // One round trip, grouped in the database.
             var byStatus = await q.GroupBy(a => a.Status)
@@ -701,7 +804,9 @@ public static class AppointmentsModule
                 insideTransaction: async (a, noShowCount, promoted, c) =>
                 {
                     await outbox.EnqueueAsync("ApptNoShow", "emr.events",
-                        new { appointmentId = id, beneficiaryId = a.BeneficiaryId, noShowCount }, c);
+                        // `locationId` — the clinic the slot belonged to, for the read model's no-show rate
+                        // per clinic. A no-show count with no clinic cannot answer the question it exists for.
+                        new { appointmentId = id, beneficiaryId = a.BeneficiaryId, noShowCount, locationId = a.LocationId }, c);
                     // Repeat no-shows → Case Manager follow-up (05 X3). Same commit: a beneficiary who
                     // crossed the threshold and whose event was lost is one nobody follows up.
                     if (noShowCount >= RepeatNoShowThreshold)

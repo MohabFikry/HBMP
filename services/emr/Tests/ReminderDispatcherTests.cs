@@ -19,7 +19,7 @@ public class ReminderDispatcherTests
         var inApp = new RecordingChannel(ReminderChannel.InApp);
         var dispatcher = new ReminderDispatcher([inApp]);
 
-        var used = await dispatcher.DispatchAsync(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+        var used = await dispatcher.DispatchAsync("t0", Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
             DateTimeOffset.UtcNow, ReminderKind.Booked, ReminderChannel.InApp);
 
         used.Should().Be(ReminderChannel.InApp);
@@ -34,7 +34,7 @@ public class ReminderDispatcherTests
         var whatsApp = new RecordingChannel(ReminderChannel.WhatsApp);
         var dispatcher = new ReminderDispatcher([inApp, sms, whatsApp]);
 
-        var used = await dispatcher.DispatchAsync(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+        var used = await dispatcher.DispatchAsync("t0", Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
             DateTimeOffset.UtcNow, ReminderKind.Upcoming, ReminderChannel.WhatsApp);
 
         used.Should().Be(ReminderChannel.WhatsApp);
@@ -50,7 +50,7 @@ public class ReminderDispatcherTests
         var inApp = new RecordingChannel(ReminderChannel.InApp);
         var dispatcher = new ReminderDispatcher([inApp]);
 
-        var used = await dispatcher.DispatchAsync(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+        var used = await dispatcher.DispatchAsync("t0", Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
             DateTimeOffset.UtcNow, ReminderKind.Booked, ReminderChannel.Sms);
 
         used.Should().Be(ReminderChannel.InApp);
@@ -61,7 +61,7 @@ public class ReminderDispatcherTests
     public async Task Throws_when_no_channel_at_all_is_registered()
     {
         var dispatcher = new ReminderDispatcher([]);
-        var act = async () => await dispatcher.DispatchAsync(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+        var act = async () => await dispatcher.DispatchAsync("t0", Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
             DateTimeOffset.UtcNow, ReminderKind.Booked, ReminderChannel.InApp);
         await act.Should().ThrowAsync<InvalidOperationException>();
     }

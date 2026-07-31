@@ -9,8 +9,19 @@ public static class SlotGeneration
     /// inclusive date range [<paramref name="fromDate"/>, <paramref name="toDate"/>]. A slot is emitted only
     /// if it fits WHOLLY inside the daily window; a trailing partial remainder is dropped. Times are
     /// interpreted in <paramref name="offset"/> (Africa/Cairo at the call site).</summary>
+    /// <param name="licenceExpiry">
+    /// 25.3 (design 42 §3) — the last date this practitioner may lawfully be booked, or null when there is no
+    /// enforceable expiry. Applied PER DATE inside the loop, not as a precondition on the whole call: a
+    /// licence expiring on 30 September must yield September slots and no October ones. Refusing the whole
+    /// request would make a coordinator generate two ranges by hand and guess the boundary; generating past
+    /// it would put patients in front of an unlicensed doctor.
+    ///
+    /// Inclusive, matching <c>PractitionerLicence.IsValidAt</c> — a doctor is not unlicensed on the last day
+    /// printed on their own certificate. The two are asserted to agree on both boundary days.
+    /// </param>
     public static IReadOnlyList<AppointmentSlot> Generate(
-        ProviderAvailability availability, DateOnly fromDate, DateOnly toDate, TimeSpan offset)
+        ProviderAvailability availability, DateOnly fromDate, DateOnly toDate, TimeSpan offset,
+        DateOnly? licenceExpiry = null)
     {
         if (availability.SlotMinutes <= 0) throw new ArgumentOutOfRangeException(nameof(availability), "SlotMinutes must be positive.");
         if (availability.EndTime <= availability.StartTime) throw new ArgumentException("EndTime must be after StartTime.", nameof(availability));
@@ -21,6 +32,11 @@ public static class SlotGeneration
         for (var date = fromDate; date <= toDate; date = date.AddDays(1))
         {
             if (date.DayOfWeek != availability.DayOfWeek) continue;
+
+            // The licence bound is a CLINIC-CALENDAR comparison, which is why it lives here rather than
+            // against the UTC instants below: `date` is the day the clinic is open, and that is the day the
+            // regulator's certificate is about.
+            if (licenceExpiry is { } expiry && date > expiry) continue;
 
             var windowStart = new DateTimeOffset(date.ToDateTime(availability.StartTime), offset);
             var windowEnd = new DateTimeOffset(date.ToDateTime(availability.EndTime), offset);

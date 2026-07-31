@@ -53,6 +53,10 @@ public static class ConsumeEndpoints
                         new
                         {
                             orderId,
+                            // `orderType` — the read model splits utilization into Lab and Radiology by it, and
+                            // uses the benefit category as the code. Neither was on the wire, so every
+                            // consumed line would have landed in the Lab bucket under "unknown".
+                            orderType = order.OrderType.ToString(),
                             tenantId = order.TenantId,
                             beneficiaryId = order.BeneficiaryId,
                             benefitCategory = BenefitCategoryMap.ForOrderType(order.OrderType),

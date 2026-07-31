@@ -42,6 +42,11 @@ public sealed class EmrApiFactory : WebApplicationFactory<Program>
     /// reached", which PractitionerBranchRules treats on its own terms.</summary>
     public bool? DoctorServesBranch { get; set; } = true;
 
+    /// <summary>25.3 — the doctor's licence expiry the fake probe reports. Null ⇒ UNKNOWN licence validity,
+    /// which is deliberately the pre-25.3 behaviour so every existing booking test is unaffected by the new
+    /// gate; a licence suite sets it to move the boundary around the date under test.</summary>
+    public DateOnly? DoctorLicenceExpiry { get; set; }
+
     public InMemoryOutbox Outbox { get; private set; } = default!;
 
     public string Tenant { get; } = "t-api-" + Guid.NewGuid().ToString("N")[..10];
@@ -131,8 +136,15 @@ internal sealed class FakeMemberStatus(EmrApiFactory f) : IMemberStatusProvider
 
 internal sealed class FakePractitionerBranches(EmrApiFactory f) : IPractitionerBranchDirectory
 {
-    public Task<bool?> ServesBranchAsync(Guid practitionerId, Guid branchId, CancellationToken ct = default)
-        => Task.FromResult(f.DoctorServesBranch);
+    public Task<PractitionerBookability> BookabilityAsync(
+        Guid practitionerId, Guid branchId, DateOnly asOf, CancellationToken ct = default)
+        => Task.FromResult(new PractitionerBookability(
+            f.DoctorServesBranch,
+            // 25.3 — the fake decides licence validity FROM the date under test, so a suite can move the
+            // expiry rather than the answer. Null expiry ⇒ unknown, which is the pre-25.3 behaviour every
+            // existing booking test relies on.
+            f.DoctorLicenceExpiry is { } e ? e >= asOf : null,
+            f.DoctorLicenceExpiry));
 }
 
 internal sealed class NoBranchRestriction : IBranchDirectory

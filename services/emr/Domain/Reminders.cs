@@ -9,8 +9,14 @@ public enum ReminderChannel { InApp, Sms, WhatsApp }
 public enum ReminderKind { Booked, Upcoming }
 
 /// <summary>A reminder to deliver — scheduling/identity only, never clinical data.</summary>
+/// <param name="TenantId">
+/// The RLS scope of the appointment. Carried because the in-app channel publishes to notification-service,
+/// whose consumer has no HTTP principal to read a tenant from and dead-letters a message it cannot attribute
+/// — "an in-app notice written under a guessed tenant is a cross-tenant disclosure, which is worse than a
+/// lost doorbell."
+/// </param>
 public sealed record ReminderMessage(
-    Guid AppointmentId, Guid BeneficiaryId, Guid ProviderId,
+    string TenantId, Guid AppointmentId, Guid BeneficiaryId, Guid ProviderId,
     DateTimeOffset ScheduledStart, ReminderKind Kind, ReminderChannel Channel);
 
 /// <summary>One delivery channel. Implementations register per <see cref="Channel"/>; the dispatcher selects

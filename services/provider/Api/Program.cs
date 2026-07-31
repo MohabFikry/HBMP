@@ -45,6 +45,11 @@ builder.Services.AddScoped<BranchReachGuard>();
 builder.Services.AddHttpClient<IBranchDirectory, HttpBranchDirectory>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Admin:BaseUrl"] ?? "http://admin-service:8080"));
 
+// 25.3 (design 42 §3) — warn 90/60/30 days before a licence lapses and announce it on the day. Nothing
+// happens when a licence expires — no request, no button, the date simply passes — so the only way a lapse
+// becomes visible is if something goes looking. Mirrors orders' ReportAccessExpirySweeper.
+builder.Services.AddHostedService<PractitionerLicenceExpirySweeper>();
+
 // masterdata-backed code validation for CPT/LOINC service-line codes.
 builder.Services.AddHttpClient<ICodeValidator, HttpCodeValidator>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Masterdata:BaseUrl"] ?? "http://masterdata-service:8080"));

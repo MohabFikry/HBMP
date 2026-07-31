@@ -439,3 +439,56 @@ invariants:
       - Mersal.Authz.Tests.BranchSetScopeTests.A_manager_with_no_assignments_at_all_resolves_to_an_empty_set_and_then_to_the_sentinel
       - Mersal.Authz.Tests.BranchSetScopeTests.Set_reach_never_relaxes_the_permitted_set_itself
       - Mersal.Authz.Tests.BranchSetScopeTests.A_coordinators_write_outside_their_active_branch_is_still_refused
+
+  - id: INV-LICENCE-GATES-FUTURE-SCHEDULING
+    statement: >-
+      An expired practitioner licence blocks slot generation and booking AS AT THE SLOT DATE, flags existing
+      future appointments for human reassignment without cancelling any, and never invalidates the past.
+    source: 42-branch-management.md §3/§7 rule 6; docs/adr/0029-branch-management.md
+    severity: Critical
+    # license_no and license_expiry existed since provider migration 0006 and NOTHING read them — bookability
+    # checked status and branch assignment only, so a doctor whose licence expired last year was bookable.
+    # Three separate things have to hold and each fails differently:
+    #   * AS AT THE SLOT DATE, not as at today — otherwise booking three months out against a licence
+    #     expiring next month surprises a patient on the day.
+    #   * FLAG, never cancel. An automated cancellation lands on someone who may have no reliable phone
+    #     number and has lost a day's pay to travel; they cannot tell it from being dropped.
+    #   * NEVER RETROACTIVE. Care already given was given under a valid licence.
+    # The boundary is INCLUSIVE and asserted on both boundary days at BOTH layers (the rule and the
+    # generator), because a disagreement between them is a silent off-by-one that empties a clinic's day.
+    tests:
+      - Mersal.Provider.Tests.LicenceValidityTests.THE_BOUNDARY_a_licence_is_valid_THROUGH_its_expiry_date
+      - Mersal.Provider.Tests.LicenceValidityTests.A_NULL_expiry_is_not_expired
+      - Mersal.Provider.Tests.LicenceValidityTests.The_warning_thresholds_fire_on_exactly_their_day
+      - Mersal.Provider.Tests.LicenceValidityTests.And_on_no_other_day
+      - Mersal.Emr.Tests.LicenceGateTests.GIVEN_a_licence_expiring_30_Sep_WHEN_slots_are_generated_for_October_THEN_there_are_none
+      - Mersal.Emr.Tests.LicenceGateTests.AND_THE_NEGATION_the_same_October_range_is_full_when_the_licence_runs_on
+      - Mersal.Emr.Tests.LicenceGateTests.A_range_STRADDLING_the_expiry_generates_up_to_it_and_stops
+      - Mersal.Emr.Tests.LicenceGateTests.The_expiry_date_itself_still_generates_slots
+      - Mersal.Emr.Tests.LicenceGateTests.A_booking_after_expiry_is_refused_and_the_refusal_names_the_date
+      - Mersal.Emr.Tests.LicenceGateTests.UNKNOWN_licence_validity_proceeds_rather_than_failing_six_clinics
+      - Mersal.Emr.Tests.LicenceFlagNotCancelTests.TWELVE_future_appointments_are_all_flagged_and_NONE_cancelled
+      - Mersal.Emr.Tests.LicenceFlagNotCancelTests.NEVER_RETROACTIVE_a_past_appointment_is_untouched
+      - Mersal.Emr.Tests.LicenceFlagNotCancelTests.An_appointment_ON_the_expiry_date_is_left_alone
+      - Mersal.Emr.Tests.LicenceFlagNotCancelTests.A_REDELIVERY_does_not_refresh_a_flag_a_receptionist_has_already_seen
+
+  - id: INV-ONE-PRACTITIONER-IDENTITY
+    statement: >-
+      One practitioner identity, many branch assignments — enforced by a unique licence number at the
+      DATABASE, partial on not-deleted and not-null, and never merged by a migration.
+    source: 42-branch-management.md §2/§7 rule 4; ADR-0029 (D3)
+    severity: High
+    # D3 lets six clinics each create a practitioner, in good faith, none able to see the others' roster —
+    # which makes this the defence rather than a nicety. Enforced in the DB because "the endpoint returns
+    # 409" is not an invariant a repair script or a psql session respects, and the migration ABORTS over
+    # existing duplicates rather than choosing which clinical identity survives.
+    tests:
+      - Mersal.Provider.Tests.PractitionerLicenceUniquenessTests.A_second_practitioner_cannot_take_a_licence_number_already_in_use
+      - Mersal.Provider.Tests.PractitionerLicenceUniquenessTests.The_uniqueness_rule_crosses_tenants_because_a_licence_does
+      - Mersal.Provider.Tests.PractitionerLicenceUniquenessTests.A_SOFT_DELETED_practitioner_does_not_block_re_registering_their_licence
+      - Mersal.Provider.Tests.PractitionerLicenceUniquenessTests.Practitioners_with_NO_licence_number_are_not_duplicates_of_one_another
+      - Mersal.Provider.Tests.PractitionerLicenceUniquenessTests.The_migration_refuses_to_apply_over_existing_duplicates
+      - Mersal.Provider.Tests.BranchReachGuardTests.THE_CASE_a_coordinator_at_Maadi_cannot_assign_a_practitioner_to_Dokki
+      - Mersal.Provider.Tests.BranchReachGuardTests.AND_THE_NEGATION_the_same_coordinator_may_assign_at_their_own_branch
+      - Mersal.Provider.Tests.BranchReachGuardTests.A_branch_caller_whose_reach_did_not_resolve_can_administer_NOTHING
+      - Mersal.Provider.Tests.SpecialtyCatalogueIsClosedTests.No_endpoint_creates_renames_or_deletes_a_specialty

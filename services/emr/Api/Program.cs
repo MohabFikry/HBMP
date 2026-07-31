@@ -67,6 +67,13 @@ builder.Services.Configure<PractitionerBranchRevokedOptions>(
     builder.Configuration.GetSection(PractitionerBranchRevokedOptions.SectionName));
 builder.Services.AddHostedService<PractitionerBranchRevokedConsumer>();
 
+// 25.3 — the same shape for a lapsed LICENCE (design 42 §3). The two gates below refuse new slots and new
+// bookings past the expiry; this flags the appointments that were already booked. It FLAGS — a refugee's
+// appointment is never cancelled by a background service.
+builder.Services.Configure<PractitionerLicenceExpiredOptions>(
+    builder.Configuration.GetSection(PractitionerLicenceExpiredOptions.SectionName));
+builder.Services.AddHostedService<PractitionerLicenceExpiredConsumer>();
+
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("emr-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
     .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
@@ -239,7 +246,15 @@ v1.MapPost("", async (
     }, ct);
 
     if (req.AppointmentId is { } apptId)
-        await outbox.EnqueueAsync("ApptCheckedIn", "emr.events", new { appointmentId = apptId, encounterId = encounter.EncounterId }, ct);
+    {
+        // The clinic, for the read model's per-clinic encounter counts — read off the appointment, which is
+        // the only thing here that knows where the visit was booked. `EncounterFact.ClinicId` falls back to
+        // "unknown" without it, and a per-clinic chart where every row says unknown is a chart of nothing.
+        var locationId = await db.Appointments.AsNoTracking()
+            .Where(a => a.AppointmentId == apptId).Select(a => (Guid?)a.LocationId).FirstOrDefaultAsync(ct);
+        await outbox.EnqueueAsync("ApptCheckedIn", "emr.events",
+            new { appointmentId = apptId, encounterId = encounter.EncounterId, locationId }, ct);
+    }
     await outbox.EnqueueAsync("EncounterStarted", "emr.events",
         new { encounterId = encounter.EncounterId, encounter.EncounterNo, beneficiaryId = req.BeneficiaryId }, ct);
     await tx.CommitAsync(ct);

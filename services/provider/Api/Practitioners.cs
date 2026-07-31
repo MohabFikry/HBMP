@@ -1,6 +1,7 @@
 using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Auth.Authorization;
+using Mersal.Authz;
 using Mersal.Events;
 using Mersal.Provider.Domain;
 using Mersal.Provider.Infrastructure;
@@ -106,7 +107,7 @@ public static class PractitionerEndpoints
         //
         // Reach-checked through the practitioner's own branches — a coordinator maintains the licence of a
         // doctor who works at their clinic, and has no business editing one who does not.
-        write.MapPost("/practitioners/{id:guid}/licence", async (Guid id, UpdatePractitionerLicence req, ProviderDbContext db, IAuditClient audit, BranchReachGuard reach, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        write.MapPost("/practitioners/{id:guid}/licence", async (Guid id, UpdatePractitionerLicence req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, BranchReachGuard reach, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
             var tenant = me.Principal?.TenantId;
             var p = await db.Practitioners.Include(x => x.BranchAssignments)
@@ -129,13 +130,45 @@ public static class PractitionerEndpoints
             if (clash is not null) return LicenceConflict(clash);
 
             var before = $"{p.LicenseNo}|{p.LicenseExpiry:yyyy-MM-dd}";
+            var previousExpiry = p.LicenseExpiry;
             p.LicenseNo = req.LicenseNo;
             p.LicenseExpiry = req.LicenseExpiry;
             p.UpdatedAt = clock.GetUtcNow();
+
+            // 25.3 — a licence that moves EARLIER strands appointments beyond the new date, and the sweeper
+            // will not catch it: the sweeper matches thresholds on exact days, so a correction back-dating an
+            // expiry to last month crosses none of them and would announce nothing, ever.
+            //
+            // Emitted for any shortening, not only for a date already in the past. Bringing an expiry forward
+            // from December to September invalidates October and November just as surely, and "it is still in
+            // the future" is not a reason to leave those appointments unflagged.
+            var shortened = req.LicenseExpiry is { } newExpiry
+                && (previousExpiry is null || newExpiry < previousExpiry);
+
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return LicenceConflict(clash ?? p); }
 
+            if (shortened)
+            {
+                var branches = ActiveBranches(p);
+                var payload = new
+                {
+                    tenantId = tenant,
+                    practitionerId = p.PractitionerId,
+                    fullNameEn = p.FullNameEn,
+                    fullNameAr = p.FullNameAr,
+                    licenceExpiry = p.LicenseExpiry,
+                    branchIds = branches,
+                };
+                // Both copies, for the same reason the branch revocation needs two: the transport is
+                // point-to-point, so emr cannot bind `provider.events` without competing for it.
+                await outbox.EnqueueAsync("PractitionerLicenceExpired", "provider.events", payload, ct);
+                await outbox.EnqueueAsync("PractitionerLicenceExpired", "emr.practitioner-licence-expired", payload, ct);
+            }
+
             await audit.EmitAsync(Draft(p, AuditAction.Update, me, tenant, "licence-updated", before), ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(new { p.PractitionerId, p.LicenseNo, p.LicenseExpiry });
         });
 
@@ -321,27 +354,121 @@ public static class PractitionerEndpoints
         });
 
         // --- Doctor picker: filter by branch + specialty + type; min-necessary projection --------
-        read.MapGet("/practitioners", async (Guid? branchId, string? specialtyCode, string? type, ProviderDbContext db, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        read.MapGet("/practitioners", async (Guid? branchId, string? specialtyCode, string? type, DateOnly? asOf, bool? includeUnlicensed, ProviderDbContext db, IHbmpPrincipalAccessor me, IBusinessCalendar calendar, CancellationToken ct) =>
         {
             var tenant = me.Principal?.TenantId;
             var canSeeLicense = CanSeeLicence(me.Principal);
+            var on = asOf ?? calendar.Today();
             var q = db.Practitioners.AsNoTracking().Include(x => x.Specialties).Include(x => x.BranchAssignments)
                 .Where(x => x.TenantId == tenant && !x.IsDeleted && x.Status == PractitionerStatus.Active);
             if (Enum.TryParse<PractitionerType>(type, out var t)) q = q.Where(x => x.PractitionerType == t);
             if (branchId is { } b) q = q.Where(x => x.BranchAssignments.Any(a => a.BranchId == b && a.Status == "Active"));
             if (!string.IsNullOrWhiteSpace(specialtyCode)) q = q.Where(x => x.Specialties.Any(s => s.SpecialtyCode == specialtyCode));
             var rows = await q.OrderBy(x => x.FullNameEn).Take(200).ToListAsync(ct);
-            return Results.Ok(rows.Select(p => ToView(p, canSeeLicense)));
+
+            // 25.3 — the PICKER excludes practitioners who hold no valid licence AS AT the date being booked.
+            // This is the gate at its earliest and kindest point: an operator never sees, and so never offers,
+            // a doctor who cannot lawfully take that appointment. It is NOT the enforcement — emr's slot and
+            // booking gates are, because a UI filter is a courtesy and any client that skips this call would
+            // otherwise book freely.
+            //
+            // `includeUnlicensed=true` is for the coordinator's own admin screen, which must show exactly the
+            // people a picker hides — a licence worklist that cannot list expired licences is no worklist.
+            if (includeUnlicensed != true)
+                rows = [.. rows.Where(p => PractitionerLicence.IsValidAt(p.LicenseExpiry, on))];
+
+            return Results.Ok(rows.Select(p => ToView(p, canSeeLicense, on)));
+        });
+
+        // --- Licence alerts worklist (the coordinator's screen) ----------------------------------
+        //
+        // 25.3 (design 42 §6) — expiring and expired licences at the branches the caller runs. This is the
+        // worklist the sweeper's warnings point AT: an alert that tells someone a licence lapses in 30 days
+        // and gives them nowhere to go is a notification, not a control.
+        //
+        // Reach-scoped, not tenant-scoped: a coordinator sees their own clinic's practitioners, a clinics
+        // manager sees all six in ONE response (BranchSetScoped, 25.1) — same endpoint, no separate
+        // "manager" route.
+        read.MapGet("/practitioners/licence-alerts", async (int? withinDays, BranchScopeState branch, BranchReachGuard reach, ProviderDbContext db, IHbmpPrincipalAccessor me, IBusinessCalendar calendar, CancellationToken ct) =>
+        {
+            var tenant = me.Principal?.TenantId;
+            var today = calendar.Today();
+            var horizon = today.AddDays(Math.Clamp(withinDays ?? 90, 1, 365));
+
+            var rows = await db.Practitioners.AsNoTracking()
+                .Include(x => x.BranchAssignments)
+                .Where(x => x.TenantId == tenant && !x.IsDeleted
+                            && x.Status == PractitionerStatus.Active
+                            && x.LicenseExpiry != null && x.LicenseExpiry <= horizon)
+                .OrderBy(x => x.LicenseExpiry)
+                .Take(500)
+                .ToListAsync(ct);
+
+            // Narrowed to the caller's reach in memory rather than in SQL because the reach rule lives in ONE
+            // place (BranchReachGuard → AbacConditions) and re-expressing it as a predicate here is how the
+            // coordinator's rule and the manager's rule drift apart. The row cap above bounds the cost.
+            var visible = rows
+                .Where(p => reach.IsNetworkWide || ActiveBranches(p).Any(reach.CanReach))
+                .Select(p => new
+                {
+                    p.PractitionerId,
+                    p.FullNameEn,
+                    p.FullNameAr,
+                    PractitionerType = p.PractitionerType.ToString(),
+                    // The licence NUMBER obeys the same field-mask as everywhere else; the DATE does not,
+                    // because the date is what the four-cue status chip renders (design 42 §6).
+                    LicenseNo = CanSeeLicence(me.Principal) ? p.LicenseNo : null,
+                    p.LicenseExpiry,
+                    DaysUntilExpiry = PractitionerLicence.DaysUntilExpiry(p.LicenseExpiry, today),
+                    // Three states, named, so the UI never has to derive "expired" from a negative number —
+                    // deriving a safety status client-side is how a grey chip ends up meaning "may not
+                    // legally practise".
+                    Status = PractitionerLicence.IsValidAt(p.LicenseExpiry, today) ? "Expiring" : "Expired",
+                    Branches = ActiveBranches(p).Where(b => reach.IsNetworkWide || reach.CanReach(b)).ToList(),
+                })
+                .ToList();
+
+            return Results.Ok(new { asOf = today, withinDays = (horizon.DayNumber - today.DayNumber), alerts = visible });
         });
 
         // --- serves-branch probe: emr calls this to enforce booking/availability (422 if not) -----
-        read.MapGet("/practitioners/{id:guid}/serves-branch", async (Guid id, Guid branchId, ProviderDbContext db, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
+        //
+        // 25.3 — now answers AS AT A DATE, and answers about the LICENCE as well as the assignment.
+        //
+        // `asOf` exists because emr asks this question about a slot in October, not about today. Booking three
+        // months ahead against a licence expiring next month has to fail at GENERATION — surprising a patient
+        // on the day is the failure this phase exists to prevent — and that is unanswerable from a probe that
+        // only knows about today. It defaults to today, so every pre-25.3 caller keeps its exact behaviour.
+        //
+        // The assignment window is evaluated at the same date for the same reason: an assignment that ends in
+        // September does not make a doctor bookable in October.
+        read.MapGet("/practitioners/{id:guid}/serves-branch", async (Guid id, Guid branchId, DateOnly? asOf, ProviderDbContext db, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
         {
-            var today = calendar.Today();   // 18.A3
+            var on = asOf ?? calendar.Today();   // 18.A3
             var serves = await db.PractitionerBranchAssignments.AsNoTracking().AnyAsync(a =>
                 a.PractitionerId == id && a.BranchId == branchId && a.Status == "Active"
-                && a.ValidFrom <= today && (a.ValidTo == null || a.ValidTo >= today), ct);
-            return Results.Ok(new { practitionerId = id, branchId, servesBranch = serves });
+                && a.ValidFrom <= on && (a.ValidTo == null || a.ValidTo >= on), ct);
+
+            var p = await db.Practitioners.AsNoTracking()
+                .Where(x => x.PractitionerId == id && !x.IsDeleted)
+                .Select(x => new { x.LicenseNo, x.LicenseExpiry, x.Status })
+                .FirstOrDefaultAsync(ct);
+
+            return Results.Ok(new
+            {
+                practitionerId = id,
+                branchId,
+                asOf = on,
+                servesBranch = serves,
+                // Absent practitioner ⇒ licence UNKNOWN rather than valid. emr's null-object seam decides what
+                // unknown means for its own operation; answering "valid" here would make the gate vacuous for
+                // exactly the ids that do not resolve.
+                licenceValid = p is null ? (bool?)null : PractitionerLicence.IsValidAt(p.LicenseExpiry, on),
+                licenceExpiry = p?.LicenseExpiry,
+                // The NUMBER is never returned by this probe — emr has no business holding staff licence
+                // numbers, and the field-mask on the picker exists for the same reason.
+                licenceEnforceable = p is not null && PractitionerLicence.IsEnforceable(p.LicenseNo, p.LicenseExpiry),
+            });
         });
     }
 
@@ -386,12 +513,19 @@ public static class PractitionerEndpoints
     private static IReadOnlyCollection<Guid> ActiveBranches(Practitioner p) =>
         [.. p.BranchAssignments.Where(a => a.Status == "Active").Select(a => a.BranchId)];
 
-    private static PractitionerView ToView(Practitioner p, bool canSeeLicense) => new(
+    private static PractitionerView ToView(Practitioner p, bool canSeeLicense, DateOnly? asOf = null) => new(
         p.PractitionerId, p.PractitionerType.ToString(), p.FullNameEn, p.FullNameAr,
         p.Specialties.FirstOrDefault(s => s.IsPrimary)?.SpecialtyCode,
         p.Specialties.Select(s => s.SpecialtyCode).ToList(),
         p.BranchAssignments.Where(a => a.Status == "Active").Select(a => a.BranchId).ToList(),
-        p.Status.ToString(), canSeeLicense ? p.LicenseNo : null);
+        p.Status.ToString(), canSeeLicense ? p.LicenseNo : null,
+        // 25.3 — the EXPIRY travels even to callers who may not see the NUMBER. They are different
+        // disclosures: the number identifies a person to a regulator, the date is what makes a chip on a
+        // roster say "expires in 12 days". Withholding the date from the coordinator's screen would leave the
+        // four-cue licence status with nothing to render.
+        p.LicenseExpiry,
+        asOf is { } on ? PractitionerLicence.IsValidAt(p.LicenseExpiry, on) : null,
+        asOf is { } d ? PractitionerLicence.DaysUntilExpiry(p.LicenseExpiry, d) : null);
 
     private static async Task<PractitionerView> ViewAsync(ProviderDbContext db, Guid id, bool canSeeLicense, CancellationToken ct)
     {

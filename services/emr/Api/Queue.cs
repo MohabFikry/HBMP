@@ -15,6 +15,11 @@ namespace Mersal.Emr.Api;
 /// with SMS/WhatsApp stubs behind the same <see cref="IReminderChannel"/> interface.</summary>
 public static class QueueModule
 {
+    /// <summary>25.1 — the caller's branch reach mode. See <see cref="BranchQueryScope"/>: asking about
+    /// ActiveBranchId directly is correct for two modes and silently unrestricted for the third.</summary>
+    private static ScopeMode BranchModeOf(IHbmpPrincipalAccessor me) =>
+        me.Principal is null ? ScopeMode.MemberScoped : BranchScopeModes.ModeFor(me.Principal);
+
     public static void MapQueue(this WebApplication app)
     {
         var write = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("appointment:write"));
@@ -53,22 +58,28 @@ public static class QueueModule
                 ActorUserId = me.Principal?.Subject, DecisionOutcome = "ApptCheckedIn",
             }, ct);
             await outbox.EnqueueAsync("ApptCheckedIn", "emr.events",
-                new { appointmentId = id, beneficiaryId = result.Appointment!.BeneficiaryId }, ct);
+                new
+                {
+                    appointmentId = id, beneficiaryId = result.Appointment!.BeneficiaryId,
+                    // The clinic, for the read model's per-clinic encounter counts.
+                    locationId = result.Appointment!.LocationId,
+                }, ct);
             await tx.CommitAsync(ct);
             return Results.Ok(AppointmentResponse.From(result.Appointment!));
         });
 
         // GET /queues — ordered, minimum-necessary queue for a clinic/doctor.
         read.MapGet("/queues", async (
-            Guid locationId, Guid providerId, Guid? doctorId, BranchScopeState branch, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
+            Guid locationId, Guid providerId, Guid? doctorId, BranchScopeState branch, IHbmpPrincipalAccessor me, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var now = clock.GetUtcNow();
             var q = db.Set<QueueTicket>().AsNoTracking()
                 .Where(t => t.LocationId == locationId && t.ProviderId == providerId
                             && (doctorId == null || t.DoctorId == doctorId)
                             && t.State == QueueTicketState.Waiting);
-            // 14.4 — BranchScoped callers see only their active branch's queue.
-            if (branch.Context.ActiveBranchId is { } active) q = q.Where(t => t.BranchId == active);
+            // 14.4 — BranchScoped callers see only their active branch's queue; 25.1 — a set-scoped clinics
+            // manager sees every branch they hold a grant to.
+            q = q.ApplyBranchScope(t => t.BranchId, BranchModeOf(me), branch.Context);
             var tickets = await q.ToListAsync(ct);
             var ordered = QueueRules.Ordered(tickets).ToList();
             return Results.Ok(ordered.Select((t, i) => QueueItemView.From(t, i + 1, now)));
@@ -122,7 +133,7 @@ public static class QueueModule
                             && a.ScheduledStart >= now && a.ScheduledStart <= horizon)
                 .ToListAsync(ct);
             foreach (var a in due)
-                await reminders.DispatchAsync(a.AppointmentId, a.BeneficiaryId, a.ProviderId, a.ScheduledStart,
+                await reminders.DispatchAsync(a.TenantId, a.AppointmentId, a.BeneficiaryId, a.ProviderId, a.ScheduledStart,
                     ReminderKind.Upcoming, ReminderChannel.InApp, ct);
             return Results.Ok(new { fired = due.Count });
         });

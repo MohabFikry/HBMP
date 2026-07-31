@@ -72,5 +72,10 @@ public sealed record ChangePractitionerStatus(string Status, string Reason);
 public sealed record PractitionerView(
     Guid PractitionerId, string PractitionerType, string FullNameEn, string FullNameAr,
     string? PrimarySpecialty, IReadOnlyList<string> Specialties, IReadOnlyList<Guid> Branches,
-    string Status, string? LicenseNo);
+    string Status, string? LicenseNo,
+    // 25.3 — licence STATUS, distinct from the licence NUMBER. The number is masked to the maintaining
+    // scopes; the expiry and its derived validity are what a roster chip renders, and are returned to every
+    // caller that may see the practitioner at all. `LicenceValid`/`DaysUntilExpiry` are null when the caller
+    // asked no `asOf` date — "not asked" rather than a guessed answer about today.
+    DateOnly? LicenseExpiry, bool? LicenceValid, int? DaysUntilExpiry);
 

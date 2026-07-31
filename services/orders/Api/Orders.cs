@@ -99,8 +99,16 @@ public static class OrdersEndpoints
             await outbox.EnqueueAsync("OrderCreated", "orders.events",
                 new { tenantId = order.TenantId, orderId = order.OrderId, order.OrderNo, beneficiaryId = order.BeneficiaryId, orderType = order.OrderType.ToString() }, ct);
             if (route.RouteToApproval)
+                // `orderedByUserId` carries the ordering clinician to whoever ingests this into approvals
+                // (§11.3). The authorization's `CreatedBy` is what a decision notice is addressed to, and on
+                // the ingest seam the caller is a machine principal — so without this the answer to "was my
+                // order approved?" has no human to reach, and the clinician has to go and look.
                 await outbox.EnqueueAsync("OrderPendingApproval", "orders.events",
-                    new { tenantId = order.TenantId, orderId = order.OrderId, order.OrderNo, reason = route.Reason }, ct);
+                    new
+                    {
+                        tenantId = order.TenantId, orderId = order.OrderId, order.OrderNo, reason = route.Reason,
+                        orderedByUserId = order.CreatedBy,
+                    }, ct);
             else
                 await outbox.EnqueueAsync("OrderActivated", "orders.events",
                     new { tenantId = order.TenantId, orderId = order.OrderId, order.OrderNo }, ct);
@@ -137,8 +145,9 @@ public static class OrdersEndpoints
             var q = db.Orders.AsNoTracking().Include(o => o.Lines).Where(o => o.CreatedBy == sub);
             if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<OrderStatus>(status, ignoreCase: true, out var st))
                 q = q.Where(o => o.Status == st);
-            // 14.4 — a BranchScoped clinician sees only orders raised in the active branch.
-            if (branch.Context.ActiveBranchId is { } active) q = q.Where(o => o.OrderingBranchId == active);
+            // 14.4 — a BranchScoped clinician sees only orders raised in the active branch; 25.1 — a
+            // set-scoped caller sees every branch they hold a grant to, and never more.
+            q = q.ApplyBranchScope(o => o.OrderingBranchId, (me.Principal is null ? ScopeMode.MemberScoped : BranchScopeModes.ModeFor(me.Principal)), branch.Context);
             var rows = await q.OrderByDescending(o => o.RequestedAt).Take(100).ToListAsync(ct);
             return Results.Ok(rows.Select(OrderResponse.From));
         }).RequireAuthorization(HbmpPolicies.Scope("orders:read"));
