@@ -82,7 +82,7 @@
     "services/profile:Infrastructure": 52,
     "services/provider:Domain": 73,
     "services/provider:Infrastructure": 87,
-    "services/reporting:Api": 0,
+    "services/reporting:Api": 43,
     "services/reporting:Domain": 66,
     "services/reporting:Infrastructure": 56,
     "tools/masterdata-loader:other": 19,
