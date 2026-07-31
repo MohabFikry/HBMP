@@ -10,10 +10,15 @@
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <!-- 24.3 — the first DB-gated masterdata tests: the fail-closed contracts other services refuse on. -->
+    <PackageReference Include="Xunit.SkippableFact" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Npgsql" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Api/Mersal.MasterData.Api.csproj" />
     <ProjectReference Include="../Domain/Mersal.MasterData.Domain.csproj" />
+    <ProjectReference Include="../Infrastructure/Mersal.MasterData.Infrastructure.csproj" />
     <ProjectReference Include="../../../tools/masterdata-loader/Mersal.MasterData.Loader.csproj" />
   </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>

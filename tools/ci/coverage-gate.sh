@@ -56,9 +56,9 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" && -f "$RESULTS/coverage-report.md" ]]; then
   } >> "$GITHUB_STEP_SUMMARY"
 fi
 
-python3 - "$RESULTS" "$MIN" "$MIN_OVERALL" <<'PY'
+python3 - "$RESULTS" "$MIN" "$MIN_OVERALL" "$FLOORS" <<'PY'
 import json, sys
-results, minpct, minoverall = sys.argv[1], float(sys.argv[2]), float(sys.argv[3])
+results, minpct, minoverall, floors_path = sys.argv[1], float(sys.argv[2]), float(sys.argv[3]), sys.argv[4]
 report = json.load(open(f"{results}/coverage-report.json"))
 t = report["totals"]
 domain, overall = t["domain"], t["overall"]
@@ -76,6 +76,47 @@ if domain["pct"] + 1e-9 < minpct:
 if overall["pct"] + 1e-9 < minoverall:
     print(f"::error::overall coverage {overall['pct']}% is below the {minoverall:.0f}% floor — "
           "check that the DB-gated integration suites ran (./dotnet.sh test --with-db)"); failed = True
+
+# 24.3 — THE PER-MODULE FLOORS ARE NOW ENFORCED, and until this loop existed they were not.
+#
+# coverage-floors.json says of them, in its own header: "seeded 3 points below measured, so ordinary
+# run-to-run variance does not fail a build while a real regression does". Nothing failed a build. Two
+# scripts read that table — check-floor-monotonicity.py, which stops it being LOWERED, and raise-floors.py,
+# which proposes RAISES — and between them they kept a number moving upward that no gate ever compared
+# anything against. A module could fall from 90% to 3% and the aggregate would absorb it: overall is 35,654
+# lines, so a whole service's Api layer going dark moves it by a couple of points.
+#
+# That is the same shape as every other finding in this phase: a control that reads as enforcement, is
+# described as enforcement, and is not enforcement. It is enforced now, against the same table, with the
+# same one-way ratchet — a floor still only moves down through check-floor-monotonicity.py and an ADR.
+floors = json.load(open(floors_path)).get("modules") or {}
+measured = {f"{m['module']}:{m['layer']}": m for m in report["modules"] if m["layer"] != "Tests"}
+
+below = []
+vanished = []
+for key, floor in sorted(floors.items()):
+    m = measured.get(key)
+    if m is None:
+        # A floor whose module produced no coverage at all. Usually the module was renamed or deleted —
+        # but it is also exactly what a test project silently dropping out of the run looks like, so it is
+        # reported rather than skipped.
+        vanished.append(key)
+        continue
+    if m["pct"] + 1e-9 < floor:
+        below.append(f"{key}: {m['pct']}% ({m['covered']}/{m['total']}) is below its {floor}% floor")
+
+for line in below:
+    print(f"::error::{line}")
+for key in vanished:
+    print(f"::error::{key} has a coverage floor but produced no measured lines — the module was renamed or "
+          f"deleted (update tools/ci/coverage-floors.json), or its test project stopped running")
+if below or vanished:
+    print("per-module floors move DOWN only through tools/ci/check-floor-monotonicity.py, which requires an "
+          "ADR that names the module. Write the test instead.")
+    failed = True
+else:
+    print(f"per-module floors — {len(floors)} modules, all at or above their floor")
+
 if failed:
     sys.exit(1)
 PY

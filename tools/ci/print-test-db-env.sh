@@ -18,7 +18,10 @@ app="Host=${PGHOST};Port=${PGPORT};Database=${PGDATABASE};Username=${APP_USER};P
 # Single-conn integration suites (need the schema owner / superuser).
 # 18.E1 (audit R2 Q2): IDENTITY added. The newest and most security-critical service — it mints every
 # token on the platform — had 12 DB-gated tests that SKIPPED in CI because nothing exported its variable.
-for s in ADMIN APPROVALS CALLCENTRE CASE CLAIMS ELIGIBILITY EMR FINANCE IDENTITY INTEROP NOTIFICATION ORDERS PHARMACY POLICY REPORTING; do
+# 24.3 (Gate 3): MASTERDATA added. It serves the fail-closed validation contracts orders, emr and pharmacy
+# refuse on — /icd-codes/{code}/exists, /drug-interactions/check-by-ids, /examination-types/{id} — and had no
+# DB-gated test at all, because nothing exported its variable and so nobody wrote one.
+for s in ADMIN APPROVALS CALLCENTRE CASE CLAIMS ELIGIBILITY EMR FINANCE IDENTITY INTEROP MASTERDATA NOTIFICATION ORDERS PHARMACY POLICY REPORTING; do
   echo "${s}_TEST_DB=${owner}"
 done
 # Two-role RLS isolation suites (owner seeds/cleans; hbmp_app is the role under test).
