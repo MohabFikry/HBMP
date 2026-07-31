@@ -46,6 +46,23 @@ public sealed class ClaimsGate(IHbmpPrincipalAccessor me, IAuthorizationEngine e
         return EvaluateAsync(p, action, row is null ? p.ProviderId : row.ProviderId?.ToString(), ct);
     }
 
+    /// <summary>
+    /// The settlement-advice EXPORT gate. A provider downloads its own advice under <c>claims:export:own</c>;
+    /// Mersal exports — and releases — under <c>claims:export</c>. The row check is left to
+    /// <c>SettlementService.ExportAsync</c>, which already compares the caller to the batch's payee and audits
+    /// the refusal as EXPORT_CROSS_PROVIDER at High severity — a stronger record than a generic engine deny.
+    /// </summary>
+    public Task<IResult?> CheckAdviceExportAsync(CancellationToken ct)
+    {
+        var p = me.Principal;
+        if (p is null) return Task.FromResult<IResult?>(GateResults.Unauthenticated());
+
+        var action = BranchScopeModes.ModeFor(p) == ScopeMode.ProviderScoped
+            ? ClaimsPolicies.ExportOwnAdvice
+            : ClaimsPolicies.Export;
+        return EvaluateAsync(p, action, p.ProviderId, ct);
+    }
+
     private async Task<IResult?> EvaluateAsync(HbmpPrincipal p, string action, string? resourceProviderId, CancellationToken ct)
     {
         var resource = new ResourceRef

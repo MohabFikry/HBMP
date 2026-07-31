@@ -22,8 +22,9 @@ public static class ClaimsPolicies
     public const string ReadClaim = "claims:read";
 
     /// <summary>
-    /// Read the caller's OWN provider's claims, lines, submissions and batches (11-permission-matrix §3.4,
-    /// Provider Admin row: <c>claim R🟠PO</c> … <c>claim_batch R🔒🟠PO (own batches only)</c>).
+    /// Read the caller's OWN provider's claims, lines, submissions, adjustments, batches and settlement
+    /// advice (11-permission-matrix §3.4, the whole Provider Admin row: <c>claim R🟠PO</c> …
+    /// <c>settlement_advice R🔒🟠PO (own advice)</c>).
     ///
     /// <para>A separate ACTION rather than a provider role added to <see cref="ReadClaim"/>, because the two
     /// reads differ in the condition they are granted under, and <see cref="PolicyRule.RequiredConditions"/>
@@ -55,8 +56,21 @@ public static class ClaimsPolicies
     public const string ReimburseSubmit = "claims:reimburse:submit";
     /// <summary>Appeal a decided claim (10b.9).</summary>
     public const string Appeal = "claims:appeal";
-    /// <summary>Export a settlement advice / batch — distinct elevated, audited action (10b.8).</summary>
+    /// <summary>Export a settlement advice / batch, and RELEASE one — distinct elevated, audited action
+    /// (10b.8). Mersal only: generating an advice is the last human control before money moves.</summary>
     public const string Export = "claims:export";
+
+    /// <summary>
+    /// Download the caller's OWN settlement advice (§3.4, Provider Admin: <c>settlement_advice E🔒🟠PO</c>) —
+    /// the remittance the payee is entitled to a copy of.
+    ///
+    /// <para>Split from <see cref="Export"/> because that action ALSO gates generating an advice, which is
+    /// the release step: Mersal's act, never the payee's (18.A4, 36 §9). One action covering both would let
+    /// a provider issue its own payment instruction. The endpoint scope is the same <c>claims:export</c> —
+    /// a provider genuinely holds an export authority — so this rule is the only thing standing between the
+    /// two, which is why a test asserts the release refuses a provider that holds the scope.</para>
+    /// </summary>
+    public const string ExportOwnAdvice = "claims:export:own";
     /// <summary>Record an EXTERNAL settlement / payment reference (SoD-split from decide) (10b.8).</summary>
     public const string Settle = "claims:settle";
     /// <summary>System intake seam — an auto-derive event creates a claim line (not a human action).</summary>
@@ -143,6 +157,14 @@ public static class ClaimsPolicies
             Action = Export, ResourceType = Resource,
             Roles = Set("claims_reviewer", "finance", "manager"), Scopes = Set("claims:export"),
             RequiredConditions = [AbacConditions.TenantMatch], Sensitive = true,
+        },
+        new PolicyRule
+        {
+            Action = ExportOwnAdvice, ResourceType = Resource,
+            Roles = Set("provider_admin"), Scopes = Set("claims:export"),
+            // Same shape as ReadOwnClaim: ownership against the batch's PAYEE, so "my advice" is a condition
+            // the engine checks rather than a filter the handler remembers to apply.
+            RequiredConditions = [AbacConditions.TenantMatch, AbacConditions.ProviderOwnership], Sensitive = true,
         },
         new PolicyRule
         {

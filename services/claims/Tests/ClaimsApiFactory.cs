@@ -97,10 +97,12 @@ public sealed class ClaimsApiFactory : WebApplicationFactory<Program>
     }
 
     /// <summary>A genuine provider portal user: provider_admin, isolated by ABAC provider-ownership to the
-    /// claims, submissions and batches of its own provider (11-permission-matrix §3.4).</summary>
+    /// claims, submissions, adjustments, batches and settlement advice of its own provider
+    /// (11-permission-matrix §3.4). Holds claims:export because a provider downloads its own remittance
+    /// advice — and is still refused the RELEASE that issues one.</summary>
     public HttpClient ProviderAdminClient(Guid providerId)
     {
-        var c = As(ClaimsTestAuth.ProviderSub, "provider_admin", "claims:read claims:submit claims:appeal");
+        var c = As(ClaimsTestAuth.ProviderSub, "provider_admin", "claims:read claims:submit claims:appeal claims:export");
         c.DefaultRequestHeaders.Add("X-Test-Provider", providerId.ToString());
         return c;
     }
@@ -131,6 +133,8 @@ public sealed class ClaimsApiFactory : WebApplicationFactory<Program>
         await db.Database.ExecuteSqlRawAsync(
             "SET session_replication_role = replica; " +
             "DELETE FROM claims.claim_decision WHERE tenant_id = {0}; " +
+            "DELETE FROM claims.claim_adjustment WHERE tenant_id = {0}; " +
+            "DELETE FROM claims.settlement_advice WHERE tenant_id = {0}; " +
             "DELETE FROM claims.claim_submission_line WHERE submission_id IN " +
             "  (SELECT submission_id FROM claims.claim_submission WHERE tenant_id = {0}); " +
             "DELETE FROM claims.claim_submission WHERE tenant_id = {0}; " +

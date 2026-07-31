@@ -40,7 +40,7 @@
     "services/case:Api": 50,
     "services/case:Domain": 41,
     "services/case:Infrastructure": 74,
-    "services/claims:Api": 57,
+    "services/claims:Api": 62,
     "services/claims:Domain": 91,
     "services/claims:Infrastructure": 77,
     "services/document:Domain": 79,

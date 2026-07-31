@@ -66,6 +66,17 @@ invariants:
       # 24.3 — claims ≠ diagnosis, asserted on what the claims endpoint SERIALIZES rather than on a DTO,
       # which can only be missing a field the test also knew to look for.
       - Mersal.Claims.Tests.ClaimsEndpointTests.A_claim_read_carries_codes_and_amounts_and_no_clinical_field
+      # 24.4 — the same discipline applied to the party OUTSIDE Mersal. A provider reading its own adjustment
+      # or its own settlement advice does not receive the Mersal user who signed it or the internal rationale
+      # behind it; both tests read the same row as staff, so "the field is absent" cannot be satisfied by a
+      # projection that quietly stopped carrying it for everyone. The release step's actor is also the SoD
+      # record (18.A4), and naming them to the counterparty invites the pressure that control exists to stop.
+      - Mersal.Claims.Tests.ProviderPortalEndpointTests.A_provider_reads_the_adjustments_on_its_own_claim_masked_and_never_another_providers
+      - Mersal.Claims.Tests.ProviderPortalEndpointTests.A_provider_reads_its_own_settlement_advice_masked_and_never_another_providers
+      # The release itself: a provider now holds claims:export, so the endpoint's scope check admits it and
+      # only the policy rule refuses. That is the one test standing between an export authority and a payee
+      # issuing its own payment instruction.
+      - Mersal.Claims.Tests.ProviderPortalEndpointTests.A_provider_cannot_generate_a_settlement_advice_even_holding_the_export_scope
 
   - id: INV-AUDIT-CHAIN
     statement: >-
@@ -144,6 +155,11 @@ invariants:
       # …and where the widening stops: a member's own reimbursement receipts are ❌ for every provider-side
       # role, on the same claims:read scope that opens a provider's own claims.
       - Mersal.Claims.Tests.ClaimsEndpointTests.The_provider_read_does_not_reach_a_beneficiarys_reimbursement_request
+      # …and the rest of the §3.4 provider row, where the isolation was written and the authority was not:
+      # the adjustments on its own claim, and its own settlement advice — read and exported.
+      - Mersal.Claims.Tests.ProviderPortalEndpointTests.A_provider_reads_the_adjustments_on_its_own_claim_masked_and_never_another_providers
+      - Mersal.Claims.Tests.ProviderPortalEndpointTests.A_provider_reads_its_own_settlement_advice_masked_and_never_another_providers
+      - Mersal.Claims.Tests.ProviderPortalEndpointTests.A_provider_exports_its_own_batch_and_is_refused_another_providers
 
   # ---------------------------------------------------------------- AUDIT-R2 §2, findings X1–X8
   #
