@@ -5,6 +5,8 @@
     <PackageReference Include="xunit.runner.visualstudio" /><PackageReference Include="coverlet.collector" />
     <PackageReference Include="FluentAssertions" /><PackageReference Include="Npgsql" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <!-- 24.3 — hosts the real policy endpoints (PolicyApiFactory); Api was 5.8% covered without it. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Policy.Domain.csproj" />
@@ -13,6 +15,8 @@
     <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
     <!-- 24.x: the tenant stamper, so fixtures write rows shaped like production. -->
     <ProjectReference Include="../../../libs/data/Mersal.Data.csproj" />
+    <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
+    <ProjectReference Include="../../../libs/benefit-pricing/Mersal.BenefitPricing.csproj" />
     <!-- 19.2 guardrail: generated coverage is fed to the REAL EligibilityEngine, not a stand-in. -->
     <ProjectReference Include="../../eligibility/Domain/Mersal.Eligibility.Domain.csproj" />
   </ItemGroup>

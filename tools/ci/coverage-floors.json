@@ -74,7 +74,7 @@
     "services/patient:Infrastructure": 0,
     "services/pharmacy:Domain": 81,
     "services/pharmacy:Infrastructure": 64,
-    "services/policy:Api": 1,
+    "services/policy:Api": 37,
     "services/policy:Domain": 82,
     "services/policy:Infrastructure": 55,
     "services/profile:Api": 0,
