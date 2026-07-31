@@ -51,7 +51,7 @@
     "services/emr:Api": 42,
     "services/emr:Domain": 79,
     "services/emr:Infrastructure": 77,
-    "services/finance:Api": 0,
+    "services/finance:Api": 61,
     "services/finance:Domain": 65,
     "services/finance:Infrastructure": 73,
     "services/identity:Api": 69,
