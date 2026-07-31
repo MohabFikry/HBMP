@@ -6,6 +6,8 @@
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Npgsql" />
+    <!-- 24.3 — hosts the real claims endpoints (ClaimsApiFactory); the Api layer was 0.0% covered without it. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Claims.Domain.csproj" />
