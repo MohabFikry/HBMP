@@ -84,7 +84,9 @@ public static class BatchEndpoints
         // --- reads -----------------------------------------------------------------------------------------
         v1.MapGet("", async (ClaimsDeps deps, CancellationToken ct, string? status) =>
         {
-            var denied = await deps.Gate.CheckAsync(ClaimsPolicies.ReadClaim, ct);
+            // §3.4: claim_batch R🔒🟠PO — a payee reads its OWN batches. The payee predicate below is what
+            // makes that true; before the provider read existed it could not be reached at all.
+            var denied = await deps.Gate.CheckClaimReadAsync(ct);
             if (denied is not null) return denied;
             var q = deps.Db.ClaimBatches.AsNoTracking().Include(b => b.Items).Where(b => b.TenantId == deps.Tenant);
             if (deps.ProviderId is { } pid && Guid.TryParse(pid, out var pg)) q = q.Where(b => b.PayeeProviderId == pg);
@@ -95,11 +97,15 @@ public static class BatchEndpoints
 
         v1.MapGet("/{id:guid}", async (Guid id, ClaimsDeps deps, CancellationToken ct) =>
         {
-            var denied = await deps.Gate.CheckAsync(ClaimsPolicies.ReadClaim, ct);
+            var denied = await deps.Gate.CheckClaimReadAsync(ct);
             if (denied is not null) return denied;
             var b = await deps.Db.ClaimBatches.AsNoTracking().Include(x => x.Items)
                 .FirstOrDefaultAsync(x => x.BatchId == id && x.TenantId == deps.Tenant, ct);
             if (b is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            // Ownership re-evaluated against the PAYEE now that the row is in hand — a reimbursement batch has
+            // no payee provider, and no provider is a party to one.
+            var crossProvider = await deps.Gate.CheckClaimReadAsync(ct, new ClaimRow(b.PayeeProviderId));
+            if (crossProvider is not null) return crossProvider;
             if (deps.ProviderId is { } pid && Guid.TryParse(pid, out var pg) && b.PayeeProviderId != pg)
                 return Results.Problem(statusCode: 403, title: "access-denied", type: "urn:hbmp:claims-access-denied");
             return Results.Ok(BatchView.From(b));

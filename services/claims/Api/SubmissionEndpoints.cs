@@ -112,7 +112,9 @@ public static class SubmissionEndpoints
         // --- read (provider-isolated) ----------------------------------------------------------------------
         v1.MapGet("/{id:guid}", async (Guid id, ClaimsDeps deps, CancellationToken ct) =>
         {
-            var denied = await deps.Gate.CheckAsync(ClaimsPolicies.ReadClaim, ct);
+            // The provider that FILED this invoice may read it back (§3.4, claim_document R🟠PO own
+            // submissions); the isolation below then decides which one that is.
+            var denied = await deps.Gate.CheckClaimReadAsync(ct);
             if (denied is not null) return denied;
 
             var s = await deps.Db.ClaimSubmissions.AsNoTracking().Include(x => x.Lines)

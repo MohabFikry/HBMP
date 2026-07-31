@@ -102,6 +102,10 @@ public static class ReimbursementEndpoints
         // --- read ------------------------------------------------------------------------------------------
         v1.MapGet("/{id:guid}", async (Guid id, ClaimsDeps deps, CancellationToken ct) =>
         {
+            // Deliberately the TENANT-WIDE read, not the provider-aware one: §3.4 marks
+            // reimbursement_request ❌ for every provider-side role. This is the member's own out-of-pocket
+            // claim with their receipts on it, and no provider is a party to it — so a provider_admin holding
+            // claims:read is refused here, and that refusal is a tested rule, not an oversight.
             var denied = await deps.Gate.CheckAsync(ClaimsPolicies.ReadClaim, ct);
             if (denied is not null) return denied;
 

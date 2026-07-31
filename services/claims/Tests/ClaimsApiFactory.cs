@@ -84,13 +84,10 @@ public sealed class ClaimsApiFactory : WebApplicationFactory<Program>
         "claims:read claims:review claims:decide claims:export claims:settle claims:reconcile");
 
     /// <summary>
-    /// A caller carrying a provider id — the ABAC provider-ownership subject the read filter keys on.
-    ///
-    /// <para>The role is claims_officer rather than provider_admin, and that is not a convenience. The
-    /// <c>claims:read</c> rule grants claims_officer / claims_reviewer / manager / finance and NO provider
-    /// role, so a provider_admin is refused before the isolation filter is ever reached — see
-    /// <c>A_provider_admin_is_currently_denied_claims_read</c>, which pins that and explains why it is left
-    /// alone here.</para>
+    /// MERSAL STAFF carrying a provider id — a claims officer affiliated with one provider. Deliberately not
+    /// a provider portal user: this caller is authorized by the tenant-wide <c>claim:read</c> rule, so it is
+    /// the endpoint's own isolation check that has to hold them to their provider, not the ABAC condition.
+    /// The two paths refuse a cross-provider read for different reasons and both are tested.
     /// </summary>
     public HttpClient ProviderScopedClient(Guid providerId)
     {
@@ -99,7 +96,8 @@ public sealed class ClaimsApiFactory : WebApplicationFactory<Program>
         return c;
     }
 
-    /// <summary>A genuine provider portal user: provider_admin, holding submit/appeal and asking for read.</summary>
+    /// <summary>A genuine provider portal user: provider_admin, isolated by ABAC provider-ownership to the
+    /// claims, submissions and batches of its own provider (11-permission-matrix §3.4).</summary>
     public HttpClient ProviderAdminClient(Guid providerId)
     {
         var c = As(ClaimsTestAuth.ProviderSub, "provider_admin", "claims:read claims:submit claims:appeal");
@@ -123,7 +121,9 @@ public sealed class ClaimsApiFactory : WebApplicationFactory<Program>
     }
 
     /// <summary>Remove everything this factory's tenant wrote. claim_decision is append-only by trigger, so
-    /// the session lifts user triggers for the delete — the same shape DecisionIntegrationTests uses.</summary>
+    /// the session lifts user triggers for the delete — the same shape DecisionIntegrationTests uses.
+    /// Submissions and batches are deleted too: a provider submission creates its own rows and a batch is not
+    /// reachable from claim, so deleting claims alone would leave both behind for every run.</summary>
     public async Task CleanupAsync()
     {
         if (Db is null) return;
@@ -131,6 +131,12 @@ public sealed class ClaimsApiFactory : WebApplicationFactory<Program>
         await db.Database.ExecuteSqlRawAsync(
             "SET session_replication_role = replica; " +
             "DELETE FROM claims.claim_decision WHERE tenant_id = {0}; " +
+            "DELETE FROM claims.claim_submission_line WHERE submission_id IN " +
+            "  (SELECT submission_id FROM claims.claim_submission WHERE tenant_id = {0}); " +
+            "DELETE FROM claims.claim_submission WHERE tenant_id = {0}; " +
+            "DELETE FROM claims.claim_batch_item WHERE batch_id IN " +
+            "  (SELECT batch_id FROM claims.claim_batch WHERE tenant_id = {0}); " +
+            "DELETE FROM claims.claim_batch WHERE tenant_id = {0}; " +
             "DELETE FROM claims.claim_line WHERE claim_id IN (SELECT claim_id FROM claims.claim WHERE tenant_id = {0}); " +
             "DELETE FROM claims.claim WHERE tenant_id = {0}; " +
             "SET session_replication_role = origin;", Tenant);

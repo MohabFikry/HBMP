@@ -7,9 +7,11 @@ using Mersal.Claims.Infrastructure;
 namespace Mersal.Claims.Api;
 
 /// <summary>Phase 10b.1 — the auto-derived origination channel + min-necessary claim reads. Every read is a
-/// clinical-free <see cref="ClaimView"/> (codes + amounts only). Provider users are isolated to their own claims
-/// (their principal's provider id is forced onto the filter); Mersal staff read tenant-wide. The intake seam creates
-/// exactly one payable line per fulfillment reference — a second is denied DUPLICATE_CLAIM (409) at the database.</summary>
+/// clinical-free <see cref="ClaimView"/> (codes + amounts only). Mersal staff read tenant-wide under
+/// <c>claims:read</c>; a provider portal user reads under <c>claims:read:own</c>, whose ABAC provider-ownership
+/// condition is evaluated against the claim itself — so the isolation is the grant, not a filter applied after
+/// one (11-permission-matrix §3.4). The intake seam creates exactly one payable line per fulfillment reference —
+/// a second is denied DUPLICATE_CLAIM (409) at the database.</summary>
 public static class ClaimsEndpoints
 {
     public static void MapClaims(this IEndpointRouteBuilder app)
@@ -20,7 +22,10 @@ public static class ClaimsEndpoints
         v1.MapGet("", async (ClaimsDeps deps, CancellationToken ct,
             Guid? providerId, Guid? beneficiaryId, string? status, int? take) =>
         {
-            var denied = await deps.Gate.CheckAsync(ClaimsPolicies.ReadClaim, ct);
+            // A provider caller is authorized under provider-ownership against its own provider id — which is
+            // exactly what ProviderFilter then forces the query onto. A provider token without one is denied
+            // by the condition rather than listing the tenant.
+            var denied = await deps.Gate.CheckClaimReadAsync(ct);
             if (denied is not null) return denied;
 
             // Provider isolation: a provider-scoped caller can only ever see its own claims.
@@ -33,12 +38,18 @@ public static class ClaimsEndpoints
 
         v1.MapGet("/{id:guid}", async (Guid id, ClaimsDeps deps, CancellationToken ct) =>
         {
-            var denied = await deps.Gate.CheckAsync(ClaimsPolicies.ReadClaim, ct);
+            var denied = await deps.Gate.CheckClaimReadAsync(ct);
             if (denied is not null) return denied;
 
             var claim = await deps.Queries.GetAsync(deps.Tenant, id, ct);
             if (claim is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
-            // Provider isolation defence-in-depth: a provider may not read another provider's claim.
+            // Provider isolation, layer 1: the ownership condition re-evaluated against the ROW now that we
+            // have it, so a cross-provider read is refused by the engine — and audited by it — rather than by
+            // an inline comparison nothing reports.
+            var crossProvider = await deps.Gate.CheckClaimReadAsync(ct, new ClaimRow(claim.ProviderId));
+            if (crossProvider is not null) return crossProvider;
+            // Layer 2, and not redundant: it catches the caller the rule above does not reach — MERSAL STAFF
+            // affiliated with a provider, authorized tenant-wide and still held to their own provider's rows.
             if (deps.ProviderId is { } pid && Guid.TryParse(pid, out var pg) && claim.ProviderId != pg)
                 return Results.Problem(statusCode: 403, title: "access-denied", type: "urn:hbmp:claims-access-denied",
                     detail: "You are not permitted to read this claim.");

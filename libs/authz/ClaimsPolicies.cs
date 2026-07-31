@@ -17,8 +17,26 @@ public static class ClaimsPolicies
 {
     public const string Version = "10b.0";
 
-    /// <summary>Read / list claims + lines (min-necessary projection — codes, amounts, no clinical fields).</summary>
+    /// <summary>Read / list claims + lines TENANT-WIDE (min-necessary projection — codes, amounts, no clinical
+    /// fields). Mersal staff only; a provider-affiliated caller reads through <see cref="ReadOwnClaim"/>.</summary>
     public const string ReadClaim = "claims:read";
+
+    /// <summary>
+    /// Read the caller's OWN provider's claims, lines, submissions and batches (11-permission-matrix §3.4,
+    /// Provider Admin row: <c>claim R🟠PO</c> … <c>claim_batch R🔒🟠PO (own batches only)</c>).
+    ///
+    /// <para>A separate ACTION rather than a provider role added to <see cref="ReadClaim"/>, because the two
+    /// reads differ in the condition they are granted under, and <see cref="PolicyRule.RequiredConditions"/>
+    /// applies to every caller of a rule. Adding provider_admin to the tenant-wide rule would either leave the
+    /// provider unisolated (conditions unchanged) or hold Mersal staff to a provider id they do not have
+    /// (conditions widened). Splitting the action keeps <c>provider-ownership</c> mandatory for the provider
+    /// and irrelevant to the staff read — and makes a provider token with no <c>provider_id</c> fail the
+    /// condition and be DENIED, rather than fall through to a tenant-wide read.</para>
+    ///
+    /// <para>Only provider_admin: the portal role that submits and appeals. A lab tech or a pharmacist reads
+    /// its own worklist in orders/pharmacy and has no business in the money.</para>
+    /// </summary>
+    public const string ReadOwnClaim = "claims:read:own";
     /// <summary>Claims-officer worklist read (financial + PHI-adjacent — audited on read).</summary>
     public const string Review = "claims:review";
     /// <summary>Record a line-level decision (append-only; SoD + dual-control enforced in the handler).</summary>
@@ -52,8 +70,18 @@ public static class ClaimsPolicies
         {
             Action = ReadClaim, ResourceType = Resource,
             Roles = Set("claims_officer", "claims_reviewer", "manager", "finance"), Scopes = Set("claims:read"),
-            // Provider users may read only their own claims (ABAC provider-ownership); Mersal staff read tenant-wide.
+            // Mersal staff read tenant-wide. A provider user reads through ReadOwnClaim below — this rule
+            // names no provider role, so a provider token cannot reach a claim through it at all.
             RequiredConditions = [AbacConditions.TenantMatch],
+        },
+        new PolicyRule
+        {
+            Action = ReadOwnClaim, ResourceType = Resource,
+            Roles = Set("provider_admin"), Scopes = Set("claims:read"),
+            // Provider-ownership is what this read is granted UNDER. It is evaluated against the ROW being
+            // read (the claim's / batch's provider), so it refuses a cross-provider read rather than
+            // describing one, and denies a provider token that carries no provider id at all.
+            RequiredConditions = [AbacConditions.TenantMatch, AbacConditions.ProviderOwnership],
         },
         new PolicyRule
         {

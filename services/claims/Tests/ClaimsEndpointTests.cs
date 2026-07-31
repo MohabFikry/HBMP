@@ -151,36 +151,158 @@ public class ClaimsEndpointTests
     }
 
     /// <summary>
-    /// A FINDING, pinned rather than fixed. Three places say a provider user reads its own claims — the
-    /// ClaimsEndpoints summary ("Provider users are isolated to their own claims"), the comment on the
-    /// <c>claims:read</c> rule itself ("Provider users may read only their own claims"), and the isolation
-    /// code in the handler — and the rule's role set is claims_officer / claims_reviewer / manager /
-    /// finance, with no provider role in it. So a provider_admin, holding claims:read and its own provider
-    /// id, is refused before that isolation code is ever reached: it can SUBMIT a claim and APPEAL a
-    /// decision but cannot look at either.
+    /// The provider portal read — 11-permission-matrix §3.4, the Provider Admin row: <c>claim R🟠PO</c>,
+    /// <c>claim_line R🟠PO</c>.
     ///
-    /// <para>Left as-is deliberately. The fix — adding a provider role to a read rule — WIDENS access to
-    /// claims data, and which provider role, under which ABAC condition, is a product decision, not a
-    /// tidy-up. This test records the behaviour that actually ships so the contradiction is visible and
-    /// cannot drift further; if the rule is widened, this test fails and names why.</para>
+    /// <para>This was a FINDING before it was a test. Three places said a provider user reads its own claims
+    /// — the ClaimsEndpoints summary, the comment on the <c>claims:read</c> rule, and the isolation code in
+    /// the handler — and the rule's role set was claims_officer / claims_reviewer / manager / finance with no
+    /// provider role in it. A provider_admin holding claims:read and its own provider id was refused before
+    /// that isolation code was ever reached: it could SUBMIT a claim and APPEAL a decision but could not look
+    /// at either. The seed said the same thing from the other side — provider_admin was granted claims:submit
+    /// and claims:appeal in migration 0005 and never claims:read.</para>
+    ///
+    /// <para>Both halves of the rule are asserted here. Granting the read without the second half would be a
+    /// worse bug than the one it replaced: a provider that can read ANY claim.</para>
     /// </summary>
     [SkippableFact]
-    public async Task A_provider_admin_is_currently_denied_claims_read()
+    public async Task A_provider_admin_reads_its_own_claim_and_is_refused_another_providers()
     {
         Skip.If(ClaimsApiFactory.Db is null, "test DB not configured — set CLAIMS_TEST_DB to run this DB integration test.");
         await using var app = new ClaimsApiFactory();
         try
         {
             using var officer = app.OfficerClient();
-            var providerId = Guid.NewGuid();
-            var claimId = await SeedClaimAsync(app, officer, providerId);
+            var mine = Guid.NewGuid();
+            var theirs = Guid.NewGuid();
+            var myClaim = await SeedClaimAsync(app, officer, mine);
+            var theirClaim = await SeedClaimAsync(app, officer, theirs);
 
-            using var providerAdmin = app.ProviderAdminClient(providerId);
-            (await providerAdmin.GetAsync(new Uri($"/api/v1/claims/{claimId}", UriKind.Relative)))
+            using var providerAdmin = app.ProviderAdminClient(mine);
+            (await providerAdmin.GetAsync(new Uri($"/api/v1/claims/{myClaim}", UriKind.Relative)))
+                .StatusCode.Should().Be(HttpStatusCode.OK,
+                    "a provider that may submit a claim and appeal its decision may look at it");
+            (await providerAdmin.GetAsync(new Uri($"/api/v1/claims/{theirClaim}", UriKind.Relative)))
                 .StatusCode.Should().Be(HttpStatusCode.Forbidden,
-                    "the claims:read rule grants no provider role, whatever the surrounding comments say");
+                    "provider-ownership is the condition the read is granted UNDER, not a filter applied after it");
+
+            // The list obeys it too, including when the caller asks for the other provider by name.
+            var listed = await providerAdmin.GetAsync(new Uri($"/api/v1/claims?providerId={theirs}", UriKind.Relative));
+            listed.StatusCode.Should().Be(HttpStatusCode.OK);
+            var rows = await listed.Content.ReadFromJsonAsync<List<JsonElement>>(Web);
+            rows.Should().NotBeNull();
+            rows!.Select(r => r.GetProperty("providerId").GetGuid()).Should().OnlyContain(p => p == mine);
         }
         finally { await app.CleanupAsync(); }
+    }
+
+    /// <summary>
+    /// Fail closed. A provider-scoped token with no provider_id claim reads NOTHING — it does not fall back to
+    /// the tenant-wide staff read. This is the failure mode that makes widening a read rule dangerous: the
+    /// isolation filter keys on a claim that may simply be absent, and "absent" must not mean "unfiltered".
+    /// </summary>
+    [SkippableFact]
+    public async Task A_provider_token_carrying_no_provider_id_reads_no_claim_at_all()
+    {
+        Skip.If(ClaimsApiFactory.Db is null, "test DB not configured — set CLAIMS_TEST_DB to run this DB integration test.");
+        await using var app = new ClaimsApiFactory();
+        try
+        {
+            using var officer = app.OfficerClient();
+            var claimId = await SeedClaimAsync(app, officer, Guid.NewGuid());
+
+            // Same role and scope as the client above — the ONLY difference is the missing X-Test-Provider.
+            using var unaffiliated = app.As(ClaimsTestAuth.ProviderSub, "provider_admin", "claims:read claims:submit");
+            (await unaffiliated.GetAsync(new Uri("/api/v1/claims", UriKind.Relative)))
+                .StatusCode.Should().Be(HttpStatusCode.Forbidden);
+            (await unaffiliated.GetAsync(new Uri($"/api/v1/claims/{claimId}", UriKind.Relative)))
+                .StatusCode.Should().Be(HttpStatusCode.Forbidden,
+                    "a provider token with nothing to be isolated to is denied, never widened");
+        }
+        finally { await app.CleanupAsync(); }
+    }
+
+    /// <summary>
+    /// §3.4 again: <c>claim_document C🟠PO R🟠PO (own submissions)</c>. A provider files an invoice and can
+    /// read back what the platform made of it — the matched lines and their outcomes. Filing a document into
+    /// a system that then refuses to show it back is the same contradiction as the claim read.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_provider_admin_reads_back_the_submission_it_filed_and_not_another_providers()
+    {
+        Skip.If(ClaimsApiFactory.Db is null, "test DB not configured — set CLAIMS_TEST_DB to run this DB integration test.");
+        await using var app = new ClaimsApiFactory();
+        try
+        {
+            var mine = Guid.NewGuid();
+            using var providerAdmin = app.ProviderAdminClient(mine);
+            var submissionId = await SubmitAsync(providerAdmin, mine);
+
+            var read = await providerAdmin.GetAsync(new Uri($"/api/v1/claims/submissions/{submissionId}", UriKind.Relative));
+            read.StatusCode.Should().Be(HttpStatusCode.OK, "{0}", await read.Content.ReadAsStringAsync());
+
+            using var otherProvider = app.ProviderAdminClient(Guid.NewGuid());
+            (await otherProvider.GetAsync(new Uri($"/api/v1/claims/submissions/{submissionId}", UriKind.Relative)))
+                .StatusCode.Should().Be(HttpStatusCode.NotFound,
+                    "another provider's submission is not merely forbidden, it is unreachable — 404 does not " +
+                    "confirm that the invoice exists");
+        }
+        finally { await app.CleanupAsync(); }
+    }
+
+    /// <summary>
+    /// §3.4: <c>claim_batch R🔒🟠PO (own batches only)</c> — a provider sees the settlement batch it is the
+    /// payee of, and no other. The batch endpoints already carried the payee filter; nothing could reach it.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_provider_admin_reads_the_batch_it_is_the_payee_of_and_no_other()
+    {
+        Skip.If(ClaimsApiFactory.Db is null, "test DB not configured — set CLAIMS_TEST_DB to run this DB integration test.");
+        await using var app = new ClaimsApiFactory();
+        try
+        {
+            using var officer = app.OfficerClient();
+            var mine = Guid.NewGuid();
+            var batchId = await CreateBatchAsync(officer, mine);
+
+            using var payee = app.ProviderAdminClient(mine);
+            (await payee.GetAsync(new Uri($"/api/v1/claim-batches/{batchId}", UriKind.Relative)))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+
+            using var otherProvider = app.ProviderAdminClient(Guid.NewGuid());
+            (await otherProvider.GetAsync(new Uri($"/api/v1/claim-batches/{batchId}", UriKind.Relative)))
+                .StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
+            var theirList = await otherProvider.GetAsync(new Uri("/api/v1/claim-batches", UriKind.Relative));
+            theirList.StatusCode.Should().Be(HttpStatusCode.OK);
+            (await theirList.Content.ReadFromJsonAsync<List<JsonElement>>(Web))
+                .Should().BeEmpty("the batch list is the payee's own, not the network's");
+        }
+        finally { await app.CleanupAsync(); }
+    }
+
+    /// <summary>
+    /// Where the widening STOPS. §3.4 marks reimbursement_request ❌ for every provider-side role: it is the
+    /// beneficiary's own out-of-pocket claim, with their receipts on it, and no provider is a party to it.
+    /// The same <c>claims:read</c> scope that now opens a provider's own claims must not open this.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_provider_read_does_not_reach_a_beneficiarys_reimbursement_request()
+    {
+        Skip.If(ClaimsApiFactory.Db is null, "test DB not configured — set CLAIMS_TEST_DB to run this DB integration test.");
+        await using var app = new ClaimsApiFactory();
+        using var providerAdmin = app.ProviderAdminClient(Guid.NewGuid());
+
+        // Any id: the gate refuses before the row is looked up, which is also why the 403 leaks nothing.
+        (await providerAdmin.GetAsync(new Uri($"/api/v1/reimbursement-requests/{Guid.NewGuid()}", UriKind.Relative)))
+            .StatusCode.Should().Be(HttpStatusCode.Forbidden,
+                "a provider holding claims:read reads ITS OWN claims — not a member's receipts");
+
+        // ...and the same request from a claims officer gets as far as the lookup, so the refusal above is
+        // the provider rule biting and not a route that denies everyone.
+        using var officer = app.OfficerClient();
+        (await officer.GetAsync(new Uri($"/api/v1/reimbursement-requests/{Guid.NewGuid()}", UriKind.Relative)))
+            .StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     // ---- the decision gate --------------------------------------------------------------------------------
@@ -359,6 +481,35 @@ public class ClaimsEndpointTests
         var r = await officer.PostAsJsonAsync("/api/v1/claims/intake", Intake(app.Tenant, Guid.NewGuid(), providerId, billed), Web);
         r.StatusCode.Should().Be(HttpStatusCode.OK, "the seed itself must succeed or the assertion below is vacuous");
         return (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("claimId").GetGuid();
+    }
+
+    /// <summary>File an invoice as the provider itself — the origination channel a provider portal uses.</summary>
+    private static async Task<Guid> SubmitAsync(HttpClient providerAdmin, Guid providerId)
+    {
+        // Awaited inside the using, as in DecideAsync above.
+        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri("/api/v1/claims/submissions", UriKind.Relative))
+        {
+            Content = JsonContent.Create(new SubmissionRequestBody(
+                providerId, Guid.NewGuid(), "INV-" + Guid.NewGuid().ToString("N")[..8], "EGP",
+                [new SubmissionLineBody("CPT", "80053", "Metabolic panel", new DateOnly(2026, 7, 1), 1, 200m, null)]),
+                options: Web),
+        };
+        req.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        var r = await providerAdmin.SendAsync(req);
+        r.StatusCode.Should().Be(HttpStatusCode.Created, "{0}", await r.Content.ReadAsStringAsync());
+        return (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("submissionId").GetGuid();
+    }
+
+    /// <summary>A settlement batch payable to one provider. Manual selection with no claims: the batch row is
+    /// what these tests read, and an empty one is created without seeding a decided claim first.</summary>
+    private static async Task<Guid> CreateBatchAsync(HttpClient officer, Guid payeeProviderId)
+    {
+        var period = new DateOnly(2026, 7, 1);
+        var r = await officer.PostAsJsonAsync("/api/v1/claim-batches", new CreateBatchRequest(
+            BatchType.Provider, BatchSelectionMode.Manual, payeeProviderId, null, null,
+            period, period.AddMonths(1), null, null, []), Web);
+        r.StatusCode.Should().Be(HttpStatusCode.Created, "{0}", await r.Content.ReadAsStringAsync());
+        return (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("batchId").GetGuid();
     }
 
     private static async Task<Guid> FirstLineAsync(Guid claimId)

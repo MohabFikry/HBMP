@@ -133,6 +133,17 @@ invariants:
       # id lives. It is checked on the single read AND on the list, including when the caller ASKS for
       # another provider: a request parameter must not be able to widen a provider's own scope.
       - Mersal.Claims.Tests.ClaimsEndpointTests.A_provider_user_cannot_read_another_providers_claim_and_never_lists_one
+      # 24.4 — the provider PORTAL read (11-permission-matrix §3.4). The one above covers Mersal staff who
+      # carry a provider id and are held to it by the endpoint; this one covers an external provider_admin,
+      # authorized under ABAC provider-ownership against the row. Different rule, different caller, and the
+      # platform claimed both for a long time while granting only the first.
+      - Mersal.Claims.Tests.ClaimsEndpointTests.A_provider_admin_reads_its_own_claim_and_is_refused_another_providers
+      # The failure mode that makes widening a read rule dangerous: a provider token with NO provider id must
+      # be denied, never fall through to the tenant-wide staff read.
+      - Mersal.Claims.Tests.ClaimsEndpointTests.A_provider_token_carrying_no_provider_id_reads_no_claim_at_all
+      # …and where the widening stops: a member's own reimbursement receipts are ❌ for every provider-side
+      # role, on the same claims:read scope that opens a provider's own claims.
+      - Mersal.Claims.Tests.ClaimsEndpointTests.The_provider_read_does_not_reach_a_beneficiarys_reimbursement_request
 
   # ---------------------------------------------------------------- AUDIT-R2 §2, findings X1–X8
   #
