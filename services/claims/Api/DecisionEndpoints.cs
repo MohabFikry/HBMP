@@ -70,8 +70,21 @@ public static class DecisionEndpoints
             var req = new DecisionRequest(kind, body.AllowedAmount, body.ReasonCodes ?? [], body.Rationale,
                 body.Override ?? false, body.ConfirmsDecisionId);
             var correlation = http.HttpContext?.TraceIdentifier ?? "";
+            // 24.x — the events are enqueued INSIDE the decision's transaction rather than after it
+            // returns. A claim line decided is money: a crash between the two commits left the line
+            // settled with nothing downstream ever told, so the batch rollup, the settlement advice and
+            // the notification all describe a claim that no longer exists in that state.
             var r = await decisions.DecideAsync(deps.Tenant, deps.Subject ?? "unknown", deps.ProviderId,
-                claimId, lineId, req, idem, opts.DualControlThreshold, correlation, ct);
+                claimId, lineId, req, idem, opts.DualControlThreshold, correlation,
+                insideTransaction: async (claim, line, decision, terminal, c) =>
+                {
+                    await deps.Outbox.EnqueueAsync("ClaimLineDecided.v1", "claims.events",
+                        new { claimId, line.ClaimLineId, decision = kind.ToString(), decision.AllowedAmount, tenantId = deps.Tenant }, c);
+                    if (terminal)
+                        await deps.Outbox.EnqueueAsync($"Claim{claim.Status}.v1", "claims.events",
+                            new { claimId, status = claim.Status.ToString(), claim.NetPayable, tenantId = deps.Tenant }, c);
+                },
+                ct);
 
             switch (r.Outcome)
             {
@@ -93,16 +106,11 @@ public static class DecisionEndpoints
                         outcome = "PendingSecondApproval", decisionId = r.Decision!.DecisionId,
                         message = "This decision exceeds the dual-control threshold and needs a second distinct approver.",
                     });
-                default: // Recorded / Confirmed
-                    await deps.Outbox.EnqueueAsync("ClaimLineDecided.v1", "claims.events",
-                        new { claimId, r.Line!.ClaimLineId, decision = kind.ToString(), r.Decision!.AllowedAmount, tenantId = deps.Tenant }, ct);
-                    if (r.ClaimTerminal)
-                        await deps.Outbox.EnqueueAsync($"Claim{r.Claim!.Status}.v1", "claims.events",
-                            new { claimId, status = r.Claim.Status.ToString(), netPayable = r.Claim.NetPayable, tenantId = deps.Tenant }, ct);
-                    await Audit(deps, claimId, r.Line.ClaimLineId, $"ClaimLineDecided:{kind}", AuditSeverity.Notice);
+                default: // Recorded / Confirmed — the events already committed with the decision above.
+                    await Audit(deps, claimId, r.Line!.ClaimLineId, $"ClaimLineDecided:{kind}", AuditSeverity.Notice);
                     return Results.Ok(new
                     {
-                        outcome = r.Outcome.ToString(), decisionId = r.Decision.DecisionId,
+                        outcome = r.Outcome.ToString(), decisionId = r.Decision!.DecisionId,
                         lineStatus = r.Line.Status.ToString(), claimStatus = r.Claim!.Status.ToString(),
                         allowedAmount = r.Line.AllowedAmount,
                     });

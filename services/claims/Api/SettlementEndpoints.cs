@@ -24,6 +24,9 @@ public static class SettlementEndpoints
             if (denied is not null) return denied;
 
             var bearer = BearerOf(http);
+            // 24.x — the settlement advice IS the payment instruction. Generated and unannounced, the
+            // provider is owed money the rest of the platform has no record of promising.
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             var r = await settlement.GenerateAsync(deps.Tenant, id, deps.Subject ?? "unknown", bearer, ct);
             switch (r.Outcome)
             {
@@ -55,6 +58,7 @@ public static class SettlementEndpoints
                         ActorUserId = deps.Subject, ActorRole = deps.Roles, TenantId = deps.Tenant, ProviderId = deps.ProviderId,
                         DecisionOutcome = r.Outcome.ToString(), Severity = AuditSeverity.High, FieldClasses = ["financials"],
                     }, ct);
+                    await tx.CommitAsync(ct);
                     return Results.Created($"/api/v1/claim-batches/{id}/settlement-advice", new
                     {
                         r.Advice.AdviceId, r.Advice.Version, supersedes = r.Advice.SupersedesAdviceId,

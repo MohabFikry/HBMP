@@ -53,6 +53,9 @@ public static class ClaimsEndpoints
             var denied = await deps.Gate.CheckAsync(ClaimsPolicies.Adjudicate, ct);
             if (denied is not null) return denied;
 
+            // 24.x — adjudication writes every line's recommendation. Lost event, and the claim reads
+            // adjudicated here while nothing downstream ever saw the result.
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             var results = await adjudicator.AdjudicateAsync(deps.Tenant, id, http.Headers.Authorization.ToString(), ct);
             if (results is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
@@ -65,6 +68,7 @@ public static class ClaimsEndpoints
                 DecisionOutcome = "ClaimAdjudicated", DecisionPolicyId = Domain.Adjudicator.RuleVersion,
                 AfterState = "UnderAdjudication", FieldClasses = ["financials"],
             }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(results.Select(r => new
             {
                 r.ClaimLineId,

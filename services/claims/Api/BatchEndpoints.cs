@@ -27,12 +27,16 @@ public static class BatchEndpoints
 
             var sel = new BatchSelector(req.BatchType, req.SelectionMode, req.PayeeProviderId, req.ProviderLocationId,
                 req.ProviderGroupId, req.PeriodFrom, req.PeriodTo, req.ServiceDateFrom, req.ServiceDateTo, req.ClaimIds);
+            // 24.x — a batch is the unit money is paid in. Created here and unannounced downstream, it is
+            // a payment run nothing else knows to expect.
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             var r = await batches.CreateAsync(deps.Tenant, deps.Subject, sel, ct);
             if (r.Outcome != BatchOutcome.Ok) return Map(r);
 
             await deps.Outbox.EnqueueAsync("BatchCreated.v1", "claims.events",
                 new { batchId = r.Batch!.BatchId, r.Batch.BatchNo, mode = r.Batch.SelectionMode.ToString(), tenantId = deps.Tenant }, ct);
             await Audit(deps, AuditAction.Create, r.Batch.BatchId.ToString(), "BatchCreated", null, r.Batch.Status.ToString());
+            await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/claim-batches/{r.Batch.BatchId}", BatchView.From(r.Batch));
         }).RequireAuthorization(HbmpPolicies.Scope("claims:batch"));
 
@@ -108,12 +112,15 @@ public static class BatchEndpoints
         var denied = await deps.Gate.CheckAsync(ClaimsPolicies.Batch, ct);
         if (denied is not null) return denied;
         var before = (await deps.Db.ClaimBatches.AsNoTracking().FirstOrDefaultAsync(b => b.BatchId == id && b.TenantId == deps.Tenant, ct))?.Status;
+        // 24.x — a batch transition and the event announcing it are one fact or neither.
+        await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
         var r = await batches.TransitionAsync(deps.Tenant, id, to, reason, ct);
         if (r.Outcome != BatchOutcome.Ok) return Map(r);
         if (eventType is not null)
             await deps.Outbox.EnqueueAsync(eventType, "claims.events",
                 new { batchId = id, status = to.ToString(), netPayable = r.Batch!.NetPayable, tenantId = deps.Tenant }, ct);
         await Audit(deps, AuditAction.StateChange, id.ToString(), outcome, before?.ToString(), to.ToString());
+        await tx.CommitAsync(ct);
         return Results.Ok(BatchView.From(r.Batch!));
     }
 

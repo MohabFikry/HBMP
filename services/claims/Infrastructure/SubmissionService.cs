@@ -66,7 +66,10 @@ public sealed class SubmissionService(
         var now = clock.GetUtcNow();
         var dates = req.Lines.Select(l => l.ServiceDate).ToList();
 
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        // 24.x — join the caller's transaction when there is one. The endpoint opens one so the claim
+        // and its ClaimSubmitted event commit together; opening a second here would nest and throw.
+        var ambient = db.Database.CurrentTransaction;
+        await using var tx = ambient is null ? await db.Database.BeginTransactionAsync(ct) : null;
         try
         {
             var claim = new Claim
@@ -116,19 +119,21 @@ public sealed class SubmissionService(
             db.ClaimSubmissions.Add(submission);
 
             await db.SaveChangesAsync(ct);
-            await tx.CommitAsync(ct);
+            if (tx is not null) await tx.CommitAsync(ct);
             return new SubmitResult(SubmitOutcome.Created, submission, claim);
         }
         catch (DbUpdateException ex) when (ConstraintOf(ex) == "ux_claim_line_fulfillment")
         {
             // A matched line pointed at a fulfillment that already has a live payable line → atomic reject, nothing created.
-            await tx.RollbackAsync(ct); db.ChangeTracker.Clear();
+            if (tx is not null) await tx.RollbackAsync(ct);   // ambient? the caller owns the rollback
+            db.ChangeTracker.Clear();
             return new SubmitResult(SubmitOutcome.Duplicate, null, null);
         }
         catch (DbUpdateException ex) when (ConstraintOf(ex) == "ux_submission_idempotency")
         {
             // Concurrent submit with the same key won the race → return theirs.
-            await tx.RollbackAsync(ct); db.ChangeTracker.Clear();
+            if (tx is not null) await tx.RollbackAsync(ct);   // ambient? the caller owns the rollback
+            db.ChangeTracker.Clear();
             var won = await db.ClaimSubmissions.AsNoTracking().Include(s => s.Lines)
                 .FirstAsync(s => s.IdempotencyKey == idempotencyKey, ct);
             return new SubmitResult(SubmitOutcome.Replayed, won, null);

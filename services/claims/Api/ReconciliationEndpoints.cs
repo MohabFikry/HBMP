@@ -58,6 +58,11 @@ public static class ReconciliationEndpoints
             var req = new AdjustmentRequest(type, body.AmountDelta, body.ReasonCode, body.Rationale,
                 body.RecoversClaimLineId, body.ConfirmsAdjustmentId);
             var correlation = http.HttpContext?.TraceIdentifier ?? "";
+            // 24.x — an adjustment MOVES MONEY on a settled claim. AdjustmentService.SaveAsync already
+            // joins an ambient transaction (18.A4 opens one around the dual-control decision), so the
+            // endpoint opens one here and the write plus its ClaimAdjusted/ClaimVoided event commit as
+            // one fact. Without it a reversal could land with nothing downstream told the money moved.
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             var r = await adjustments.RaiseAsync(deps.Tenant, deps.Subject ?? "unknown", claimId, lineId, req, idem, correlation, ct);
 
             switch (r.Outcome)
@@ -90,6 +95,7 @@ public static class ReconciliationEndpoints
                         type = type.ToString(), r.Adjustment.AmountDelta, tenantId = deps.Tenant,
                     }, ct);
                     await AuditAdjustment(deps, r.Adjustment, AuditSeverity.Notice);
+                    await tx.CommitAsync(ct);
                     return Results.Ok(new
                     {
                         outcome = r.Outcome.ToString(), adjustmentId = r.Adjustment.AdjustmentId,
