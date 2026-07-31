@@ -36,6 +36,15 @@ builder.Services.AddScoped<NetworkTierGate>();   // 19.1b — Network-Team-only 
 builder.Services.AddScoped<IAdjudicatedClaimProbe, UnwiredAdjudicatedClaimProbe>();
 builder.Services.AddSingleton(TimeProvider.System);
 
+// 25.2 (design 42 §2) — active-branch context. provider-service never needed it before: every write here was
+// network-wide (provider:write) and the branch dimension narrowed nobody. `branch:practitioner:write` changes
+// that — a coordinator's authority is sized to their clinic, so the service now has to KNOW which clinic that
+// is. The permitted set is resolved per request from admin-service and read by BranchReachGuard.
+builder.Services.AddScoped<BranchScopeState>();
+builder.Services.AddScoped<BranchReachGuard>();
+builder.Services.AddHttpClient<IBranchDirectory, HttpBranchDirectory>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Admin:BaseUrl"] ?? "http://admin-service:8080"));
+
 // masterdata-backed code validation for CPT/LOINC service-line codes.
 builder.Services.AddHttpClient<ICodeValidator, HttpCodeValidator>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Masterdata:BaseUrl"] ?? "http://masterdata-service:8080"));
@@ -82,6 +91,40 @@ app.Use(async (ctx, next) =>
 app.UseHbmpRls();
 
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
+
+// 25.2 — resolve the active-branch context per request (design 37 §3, 42 §1). Mirrors emr's middleware:
+// BranchScoped callers are narrowed to a validated active branch, BranchSetScoped callers carry their whole
+// permitted set with the header acting as a filter, and an X-Active-Branch outside the permitted set is
+// refused 403 + audited. THE INVARIANT: never trust the header — always resolve it against the grants.
+//
+// Member/provider-scoped callers (the Network Team on provider:write) are branch-unrestricted, so this adds
+// no narrowing to any pre-25.2 caller.
+app.Use(async (ctx, next) =>
+{
+    var principal = ctx.RequestServices.GetRequiredService<IHbmpPrincipalAccessor>().Principal;
+    if (principal is not null && ctx.Request.Path.StartsWithSegments("/api/v1"))
+    {
+        var header = ctx.Request.Headers[BranchHeaders.ActiveBranch].FirstOrDefault();
+        var directory = ctx.RequestServices.GetRequiredService<IBranchDirectory>();
+        var state = await BranchScopeResolver.ResolveAsync(principal, header, directory, ctx.RequestAborted);
+        if (state.Denied)
+        {
+            var branchAudit = ctx.RequestServices.GetRequiredService<IAuditClient>();
+            await branchAudit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "branch_scope", EntityId = header ?? "(none)", Action = AuditAction.Grant,
+                ActorUserId = principal.Subject, TenantId = principal.TenantId, ActorMfa = principal.MfaSatisfied,
+                DecisionOutcome = "BranchScopeDenied", DecisionReasonCode = "branch-not-permitted", Severity = AuditSeverity.High,
+            }, ctx.RequestAborted);
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await ctx.Response.WriteAsJsonAsync(new { title = "branch-not-permitted", detail = "the requested active branch is not in your permitted set" });
+            return;
+        }
+        ctx.RequestServices.GetRequiredService<BranchScopeState>().Context = state.Context;
+        if (state.Context.ActiveBranchId is { } activeBranch) ctx.Response.Headers["X-Active-Branch"] = activeBranch.ToString();
+    }
+    await next();
+});
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "provider-service" })).AllowAnonymous();
 // Without this the readinessProbe 404s and the canary rollout waits forever on a healthy pod. Anonymous

@@ -25,7 +25,19 @@ public static class PractitionerEndpoints
         // `provider:write`, so widening WHO may call this does not widen WHAT comes back.
         var read = app.MapGroup("/api/v1")
             .RequireAuthorization(HbmpPolicies.AnyScope("provider:read", "practitioner:read"));
-        var write = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("provider:write"));
+
+        // 25.2 (design 42 §2) — the write group admits the BRANCH authority alongside the network-wide one.
+        // A clinic coordinator has to be able to assign a locum and maintain a licence at their own branch;
+        // the only scope that previously did so was `provider:write`, which also creates branches and edits
+        // external labs, pharmacies and tariffs. Sizing the scope to the clinic is the point.
+        //
+        // The scope group is HALF the control. `BranchReachGuard` is the other half: a caller holding only
+        // the branch scope is enforced to the branches they actually run. Widening this line without that
+        // check would be strictly worse than leaving these endpoints on `provider:write` — it would hand
+        // every coordinator the whole network's roster while looking, in the route table, like a carefully
+        // sized permission.
+        var write = app.MapGroup("/api/v1")
+            .RequireAuthorization(HbmpPolicies.AnyScope("provider:write", "branch:practitioner:write"));
 
         // --- Reference specialties (org data) ----------------------------------------------------
         read.MapGet("/specialties", async (ProviderDbContext db, CancellationToken ct) =>
@@ -33,12 +45,31 @@ public static class PractitionerEndpoints
                 .Select(s => new { s.SpecialtyCode, s.NameEn, s.NameAr, s.ParentCode })));
 
         // --- Create a practitioner ---------------------------------------------------------------
+        // D3 (ADR-0029): a branch coordinator MAY create a practitioner. Central-only creation makes every new
+        // locum a ticket to head office. The guard is licence uniqueness, below — which matters MORE now that
+        // six clinics can each create in good faith without seeing one another's roster.
         write.MapPost("/practitioners", async (CreatePractitioner req, ProviderDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
         {
             var tenant = me.Principal?.TenantId;
             if (string.IsNullOrEmpty(tenant)) return Results.Problem(statusCode: 403, title: "no tenant scope on principal");
             if (!Enum.TryParse<PractitionerType>(req.PractitionerType, out var type))
                 return Results.Problem(statusCode: 400, title: $"unknown practitioner_type '{req.PractitionerType}'");
+
+            // 25.2 (design 42 §2) — ONE practitioner identity, many branch assignments.
+            //
+            // Checked here so the answer can be USEFUL. `ux_practitioner_license_no` would refuse this write
+            // anyway, and a bare 409 tells the coordinator "no" without telling them the one thing that
+            // resolves it: this doctor already exists, and what they want is an assignment, not a record. The
+            // id travels in the problem detail so the UI can offer "assign them to my clinic instead".
+            //
+            // The index remains the authority — this is a nicer message in front of it, not a replacement for
+            // it. A concurrent create still lands on the DbUpdateException path below.
+            if (!string.IsNullOrWhiteSpace(req.LicenseNo))
+            {
+                var existing = await db.Practitioners.AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.LicenseNo == req.LicenseNo && !x.IsDeleted, ct);
+                if (existing is not null) return LicenceConflict(existing);
+            }
 
             var now = clock.GetUtcNow();
             var p = new Practitioner
@@ -49,17 +80,76 @@ public static class PractitionerEndpoints
             };
             db.Practitioners.Add(p);
             try { await db.SaveChangesAsync(ct); }
-            catch (DbUpdateException) { return Results.Problem(statusCode: 409, title: "a practitioner already exists for this user"); }
+            catch (DbUpdateException)
+            {
+                // Two live uniqueness rules now, and they mean different things to the person on the screen:
+                // one user may hold one practitioner profile, and one licence belongs to one practitioner.
+                // Re-reading tells us which, and the licence case gets the assign-instead path.
+                db.ChangeTracker.Clear();
+                if (!string.IsNullOrWhiteSpace(req.LicenseNo))
+                {
+                    var clash = await db.Practitioners.AsNoTracking()
+                        .FirstOrDefaultAsync(x => x.LicenseNo == req.LicenseNo && !x.IsDeleted, ct);
+                    if (clash is not null) return LicenceConflict(clash);
+                }
+                return Results.Problem(statusCode: 409, title: "a practitioner already exists for this user");
+            }
             await audit.EmitAsync(Draft(p, AuditAction.Create, me, tenant, "created"), ct);
             return Results.Created($"/api/v1/practitioners/{p.PractitionerId}", await ViewAsync(db, p.PractitionerId, canSeeLicense: true, ct));
         });
 
-        // --- Assign a specialty (one primary enforced by partial-unique index → 409) --------------
-        write.MapPost("/practitioners/{id:guid}/specialties", async (Guid id, AssignSpecialty req, ProviderDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        // --- Maintain a practitioner's licence ---------------------------------------------------
+        //
+        // 25.2 — the field existed since 0006 and nothing could write it after creation, so a renewed licence
+        // could not be recorded at all. That is not a cosmetic gap once 25.3 makes expiry a booking gate: the
+        // renewal that keeps a doctor bookable had no way in.
+        //
+        // Reach-checked through the practitioner's own branches — a coordinator maintains the licence of a
+        // doctor who works at their clinic, and has no business editing one who does not.
+        write.MapPost("/practitioners/{id:guid}/licence", async (Guid id, UpdatePractitionerLicence req, ProviderDbContext db, IAuditClient audit, BranchReachGuard reach, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
             var tenant = me.Principal?.TenantId;
-            var p = await db.Practitioners.FirstOrDefaultAsync(x => x.PractitionerId == id && x.TenantId == tenant && !x.IsDeleted, ct);
+            var p = await db.Practitioners.Include(x => x.BranchAssignments)
+                .FirstOrDefaultAsync(x => x.PractitionerId == id && x.TenantId == tenant && !x.IsDeleted, ct);
             if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+            if (await reach.RefuseUnlessServesAReachableBranchAsync(id, ActiveBranches(p), ct) is { } denied) return denied;
+
+            if (string.IsNullOrWhiteSpace(req.LicenseNo))
+                return Results.Problem(statusCode: 400, title: "license_no is required");
+            if (req.LicenseExpiry is null)
+                return Results.Problem(statusCode: 400, title: "license_expiry is required",
+                    detail: "An expiry date is what makes the licence enforceable (25.3). A licence with no " +
+                            "expiry cannot be checked as at a slot date, so it is refused rather than stored.");
+
+            // Same uniqueness rule as create, and the same reason: a renewal must not become the second row
+            // holding a licence number.
+            var clash = await db.Practitioners.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.LicenseNo == req.LicenseNo && x.PractitionerId != id && !x.IsDeleted, ct);
+            if (clash is not null) return LicenceConflict(clash);
+
+            var before = $"{p.LicenseNo}|{p.LicenseExpiry:yyyy-MM-dd}";
+            p.LicenseNo = req.LicenseNo;
+            p.LicenseExpiry = req.LicenseExpiry;
+            p.UpdatedAt = clock.GetUtcNow();
+            try { await db.SaveChangesAsync(ct); }
+            catch (DbUpdateException) { return LicenceConflict(clash ?? p); }
+
+            await audit.EmitAsync(Draft(p, AuditAction.Update, me, tenant, "licence-updated", before), ct);
+            return Results.Ok(new { p.PractitionerId, p.LicenseNo, p.LicenseExpiry });
+        });
+
+        // --- Assign a specialty (one primary enforced by partial-unique index → 409) --------------
+        write.MapPost("/practitioners/{id:guid}/specialties", async (Guid id, AssignSpecialty req, ProviderDbContext db, IAuditClient audit, BranchReachGuard reach, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        {
+            var tenant = me.Principal?.TenantId;
+            var p = await db.Practitioners.Include(x => x.BranchAssignments)
+                .FirstOrDefaultAsync(x => x.PractitionerId == id && x.TenantId == tenant && !x.IsDeleted, ct);
+            if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            if (await reach.RefuseUnlessServesAReachableBranchAsync(id, ActiveBranches(p), ct) is { } denied) return denied;
+            // 25.2 — a coordinator ASSIGNS from the seeded 26. Creating or renaming a specialty is master
+            // data for the whole network and has no endpoint here at all; this validation is what keeps the
+            // catalogue closed, and SpecialtyCatalogueIsClosedTests fails the build if a write appears.
             if (!await db.Specialties.AnyAsync(s => s.SpecialtyCode == req.SpecialtyCode && !s.IsDeleted, ct))
                 return Results.Problem(statusCode: 400, title: $"unknown specialty '{req.SpecialtyCode}'");
 
@@ -77,11 +167,13 @@ public static class PractitionerEndpoints
         // nobody would connect to this action a week later when reception cannot find them. Promote a
         // different specialty first (the endpoint below), which makes the intent explicit and never leaves
         // the practitioner without one.
-        write.MapPost("/practitioners/{id:guid}/specialties/revoke", async (Guid id, RevokeSpecialty req, ProviderDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        write.MapPost("/practitioners/{id:guid}/specialties/revoke", async (Guid id, RevokeSpecialty req, ProviderDbContext db, IAuditClient audit, BranchReachGuard reach, IHbmpPrincipalAccessor me, CancellationToken ct) =>
         {
             var tenant = me.Principal?.TenantId;
-            var p = await db.Practitioners.Include(x => x.Specialties).FirstOrDefaultAsync(x => x.PractitionerId == id && x.TenantId == tenant && !x.IsDeleted, ct);
+            var p = await db.Practitioners.Include(x => x.Specialties).Include(x => x.BranchAssignments)
+                .FirstOrDefaultAsync(x => x.PractitionerId == id && x.TenantId == tenant && !x.IsDeleted, ct);
             if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            if (await reach.RefuseUnlessServesAReachableBranchAsync(id, ActiveBranches(p), ct) is { } denied) return denied;
 
             var row = p.Specialties.FirstOrDefault(s => s.SpecialtyCode == req.SpecialtyCode);
             if (row is null) return Results.Problem(statusCode: 404, title: $"'{req.SpecialtyCode}' is not assigned to this practitioner", type: "https://mersal.foundation/problems/not-found");
@@ -103,11 +195,13 @@ public static class PractitionerEndpoints
         // clearing the old one violates it mid-transaction. Assigning the specialty when it is not yet held
         // is deliberate — "make cardiology their primary" should not fail because a separate assign step was
         // skipped.
-        write.MapPost("/practitioners/{id:guid}/specialties/primary", async (Guid id, AssignSpecialty req, ProviderDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        write.MapPost("/practitioners/{id:guid}/specialties/primary", async (Guid id, AssignSpecialty req, ProviderDbContext db, IAuditClient audit, BranchReachGuard reach, IHbmpPrincipalAccessor me, CancellationToken ct) =>
         {
             var tenant = me.Principal?.TenantId;
-            var p = await db.Practitioners.Include(x => x.Specialties).FirstOrDefaultAsync(x => x.PractitionerId == id && x.TenantId == tenant && !x.IsDeleted, ct);
+            var p = await db.Practitioners.Include(x => x.Specialties).Include(x => x.BranchAssignments)
+                .FirstOrDefaultAsync(x => x.PractitionerId == id && x.TenantId == tenant && !x.IsDeleted, ct);
             if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            if (await reach.RefuseUnlessServesAReachableBranchAsync(id, ActiveBranches(p), ct) is { } denied) return denied;
             if (!await db.Specialties.AnyAsync(s => s.SpecialtyCode == req.SpecialtyCode && !s.IsDeleted, ct))
                 return Results.Problem(statusCode: 400, title: $"unknown specialty '{req.SpecialtyCode}'");
 
@@ -128,11 +222,15 @@ public static class PractitionerEndpoints
         });
 
         // --- Assign a branch (a doctor may serve one-or-many) ------------------------------------
-        write.MapPost("/practitioners/{id:guid}/branches", async (Guid id, AssignPractitionerBranch req, ProviderDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        write.MapPost("/practitioners/{id:guid}/branches", async (Guid id, AssignPractitionerBranch req, ProviderDbContext db, IAuditClient audit, BranchReachGuard reach, IHbmpPrincipalAccessor me, CancellationToken ct) =>
         {
             var tenant = me.Principal?.TenantId;
             var p = await db.Practitioners.FirstOrDefaultAsync(x => x.PractitionerId == id && x.TenantId == tenant && !x.IsDeleted, ct);
             if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            // 25.2 — the TARGET branch is what is checked, not the practitioner's existing ones. A coordinator
+            // at Maadi assigning a practitioner to Dokki is 403 + audit; this is the canonical case in
+            // design 42 §2, and it is an assignment INTO a clinic the caller does not run.
+            if (await reach.RefuseUnlessInReachAsync(req.BranchId, "practitioner", id.ToString(), ct) is { } denied) return denied;
 
             db.PractitionerBranchAssignments.Add(new PractitionerBranchAssignment
             {
@@ -155,11 +253,12 @@ public static class PractitionerEndpoints
         // slots and new bookings at that branch are refused from here on. It does NOT touch appointments
         // ALREADY booked there; emr owns those and provider-service cannot see them. The event below exists
         // so that reconciliation can be built where it belongs (nothing consumes it yet — see the README).
-        write.MapPost("/practitioners/{id:guid}/branches/revoke", async (Guid id, RevokePractitionerBranch req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        write.MapPost("/practitioners/{id:guid}/branches/revoke", async (Guid id, RevokePractitionerBranch req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, BranchReachGuard reach, IHbmpPrincipalAccessor me, CancellationToken ct) =>
         {
             var tenant = me.Principal?.TenantId;
             var p = await db.Practitioners.FirstOrDefaultAsync(x => x.PractitionerId == id && x.TenantId == tenant && !x.IsDeleted, ct);
             if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            if (await reach.RefuseUnlessInReachAsync(req.BranchId, "practitioner", id.ToString(), ct) is { } denied) return denied;
 
             var rows = await db.PractitionerBranchAssignments
                 .Where(a => a.PractitionerId == id && a.BranchId == req.BranchId && a.Status == "Active").ToListAsync(ct);
@@ -174,7 +273,26 @@ public static class PractitionerEndpoints
 
             await audit.EmitAsync(Draft(p, AuditAction.Update, me, tenant, "branch-revoked", req.BranchId.ToString()), ct);
             await outbox.EnqueueAsync("PractitionerBranchRevoked", "provider.events",
-                new { practitionerId = id, branchId = req.BranchId, revoked = rows.Count }, ct);
+                new { tenantId = tenant, practitionerId = id, branchId = req.BranchId, revoked = rows.Count }, ct);
+            /*
+             * THE COPY emr-service IS ACTUALLY LISTENING FOR (audit §11.3 item 5).
+             *
+             * The §11 sweep recorded this as "a consumer on a queue nothing publishes to". It is narrower and
+             * worse than that: this line HAS published `PractitionerBranchRevoked` all along — to
+             * `provider.events`, while `PractitionerBranchRevokedConsumer` binds `emr.practitioner-branch-revoked`.
+             * A publish to a queue with no matching consumer does not fail, so both halves looked wired.
+             *
+             * The transport is point-to-point, so emr cannot simply bind `provider.events`: it would COMPETE
+             * for those messages with whatever else consumes that stream. Hence the second copy, the same
+             * decision the auth decisions and the registration enrolments already made.
+             *
+             * The `tenantId` was missing too, and that would have dead-lettered every message even on the
+             * right queue — the consumer refuses to flag another organisation's appointments under a guessed
+             * tenant. It is on both copies now; `provider.events` had subscribers that never needed it, which
+             * is exactly how a field goes missing without anyone noticing.
+             */
+            await outbox.EnqueueAsync("PractitionerBranchRevoked", "emr.practitioner-branch-revoked",
+                new { tenantId = tenant, practitionerId = id, branchId = req.BranchId, revoked = rows.Count }, ct);
             await tx.CommitAsync(ct);
             return Results.Ok(new { p.PractitionerId, req.BranchId, Revoked = rows.Count });
         });
@@ -183,15 +301,17 @@ public static class PractitionerEndpoints
         //
         // The picker feed below returns Active practitioners only, so suspending one removes them from every
         // booking screen without deleting a record that appointments and encounters still reference.
-        write.MapPost("/practitioners/{id:guid}/status", async (Guid id, ChangePractitionerStatus req, ProviderDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        write.MapPost("/practitioners/{id:guid}/status", async (Guid id, ChangePractitionerStatus req, ProviderDbContext db, IAuditClient audit, BranchReachGuard reach, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(req.Reason)) return Results.Problem(statusCode: 400, title: "a reason is required");
             if (!Enum.TryParse<PractitionerStatus>(req.Status, out var status))
                 return Results.Problem(statusCode: 400, title: $"unknown status '{req.Status}'");
 
             var tenant = me.Principal?.TenantId;
-            var p = await db.Practitioners.FirstOrDefaultAsync(x => x.PractitionerId == id && x.TenantId == tenant && !x.IsDeleted, ct);
+            var p = await db.Practitioners.Include(x => x.BranchAssignments)
+                .FirstOrDefaultAsync(x => x.PractitionerId == id && x.TenantId == tenant && !x.IsDeleted, ct);
             if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            if (await reach.RefuseUnlessServesAReachableBranchAsync(id, ActiveBranches(p), ct) is { } denied) return denied;
 
             p.Status = status;
             p.UpdatedAt = clock.GetUtcNow();
@@ -204,7 +324,7 @@ public static class PractitionerEndpoints
         read.MapGet("/practitioners", async (Guid? branchId, string? specialtyCode, string? type, ProviderDbContext db, IHbmpPrincipalAccessor me, CancellationToken ct) =>
         {
             var tenant = me.Principal?.TenantId;
-            var canSeeLicense = me.Principal?.HasScope("provider:write") ?? false;
+            var canSeeLicense = CanSeeLicence(me.Principal);
             var q = db.Practitioners.AsNoTracking().Include(x => x.Specialties).Include(x => x.BranchAssignments)
                 .Where(x => x.TenantId == tenant && !x.IsDeleted && x.Status == PractitionerStatus.Active);
             if (Enum.TryParse<PractitionerType>(type, out var t)) q = q.Where(x => x.PractitionerType == t);
@@ -224,6 +344,47 @@ public static class PractitionerEndpoints
             return Results.Ok(new { practitionerId = id, branchId, servesBranch = serves });
         });
     }
+
+    /// <summary>
+    /// 25.2 — the licence field-mask, extended to the branch authority (design 42 §3).
+    ///
+    /// The mask itself is unchanged in spirit: a licence number is staff PII and is absent from the payload
+    /// for anyone who does not maintain licences. What changed is WHO maintains them. Before this, the only
+    /// way to see a licence number was `provider:write` — the network-wide scope — so a coordinator could
+    /// not do the job the design gives them without being handed the external provider directory as well.
+    ///
+    /// Deliberately NOT widened to `practitioner:read`. Reception and the call centre hold that scope for the
+    /// booking pickers, and a licence number is not something the front desk needs to book an appointment.
+    /// </summary>
+    private static bool CanSeeLicence(HbmpPrincipal? p) =>
+        (p?.HasScope("provider:write") ?? false) || (p?.HasScope("branch:practitioner:write") ?? false);
+
+    /// <summary>
+    /// 409 for a licence that already belongs to someone (design 42 §2). The existing id travels in the
+    /// problem detail deliberately: the coordinator's next action is "assign them to my clinic instead", and
+    /// a 409 that withholds the id leaves them re-typing the licence number into a search box to find the
+    /// record the server just looked at. The NAME goes too, because "practitioner 8f3a-…" is not something a
+    /// person can confirm is the right doctor.
+    ///
+    /// This is a deliberate, narrow disclosure to a caller who already holds practitioner-administration
+    /// authority — it says nothing about branches, patients or clinical data.
+    /// </summary>
+    private static IResult LicenceConflict(Practitioner existing) => Results.Problem(
+        statusCode: 409, title: "practitioner-exists", type: "urn:hbmp:practitioner-exists",
+        detail: $"Licence '{existing.LicenseNo}' already belongs to {existing.FullNameEn}. " +
+                "Assign them to your branch instead of creating a second record.",
+        extensions: new Dictionary<string, object?>
+        {
+            ["practitionerId"] = existing.PractitionerId,
+            ["fullNameEn"] = existing.FullNameEn,
+            ["fullNameAr"] = existing.FullNameAr,
+            ["licenseNo"] = existing.LicenseNo,
+        });
+
+    /// <summary>The branches a practitioner ACTIVELY serves — the set a branch-scoped caller's reach is tested
+    /// against for edits that do not name a branch of their own (licence, specialty, status).</summary>
+    private static IReadOnlyCollection<Guid> ActiveBranches(Practitioner p) =>
+        [.. p.BranchAssignments.Where(a => a.Status == "Active").Select(a => a.BranchId)];
 
     private static PractitionerView ToView(Practitioner p, bool canSeeLicense) => new(
         p.PractitionerId, p.PractitionerType.ToString(), p.FullNameEn, p.FullNameAr,

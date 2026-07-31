@@ -51,6 +51,11 @@ public sealed record AssignSpecialty(string SpecialtyCode, bool IsPrimary);
 
 public sealed record AssignPractitionerBranch(Guid BranchId, DateOnly ValidFrom, DateOnly? ValidTo);
 
+/// <summary>25.2 — record or renew a practitioner's licence. BOTH fields are required: an expiry date is what
+/// makes the licence enforceable as at a slot date (25.3), so a licence stored without one would be a field
+/// that looks maintained and gates nothing.</summary>
+public sealed record UpdatePractitionerLicence(string LicenseNo, DateOnly? LicenseExpiry);
+
 /// <summary>Remove a NON-primary specialty. Revoking the primary is refused (409) — promote another first,
 /// because a practitioner without a primary specialty is invisible to every booking picker.</summary>
 public sealed record RevokeSpecialty(string SpecialtyCode);
