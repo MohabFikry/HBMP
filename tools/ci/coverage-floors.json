@@ -66,7 +66,7 @@
     "services/notification:Api": 0,
     "services/notification:Domain": 82,
     "services/notification:Infrastructure": 78,
-    "services/orders:Api": 0,
+    "services/orders:Api": 39,
     "services/orders:Domain": 83,
     "services/orders:Infrastructure": 77,
     "services/patient:Api": 0,

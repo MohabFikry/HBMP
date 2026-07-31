@@ -6,6 +6,8 @@
     <PackageReference Include="FluentAssertions" /><PackageReference Include="CsCheck" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Npgsql" />
+    <!-- 24.3 — hosts the real orders endpoints (OrdersApiFactory); Api was 1.3% covered without it. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Api/Mersal.Orders.Api.csproj" />
