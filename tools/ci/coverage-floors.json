@@ -77,7 +77,7 @@
     "services/policy:Api": 37,
     "services/policy:Domain": 82,
     "services/policy:Infrastructure": 55,
-    "services/profile:Api": 0,
+    "services/profile:Api": 86,
     "services/profile:Domain": 89,
     "services/profile:Infrastructure": 52,
     "services/provider:Domain": 73,
