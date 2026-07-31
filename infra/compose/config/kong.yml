@@ -69,6 +69,10 @@ services:
           - /api/v1/booking
           # The clinics a scheduler may book into, derived from slots in their branch (appointment:read).
           - /api/v1/branch-clinics
+          # 25.4 — leave / public holiday / clinic closure / ad-hoc clinic, plus the impact preview the
+          # apply is gated on. Without a route the roster screen 404s at the gateway while working in
+          # fixture mode, which is exactly what happened to the two booking reads above.
+          - /api/v1/roster-exceptions
           - /api/v1/queue
           - /api/v1/queues
           - /api/v1/treating-relationship

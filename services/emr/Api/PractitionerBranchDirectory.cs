@@ -14,9 +14,13 @@ namespace Mersal.Emr.Api;
 /// <param name="LicenceExpiry">The expiry date, so a refusal can say WHEN — the one fact that tells the desk
 /// whether to wait for a renewal or find cover. The licence NUMBER is never returned: emr has no business
 /// holding staff licence numbers.</param>
-public sealed record PractitionerBookability(bool? ServesBranch, bool? LicenceValid, DateOnly? LicenceExpiry)
+/// <param name="AssignmentValidTo">25.4 — the last day of the branch assignment, or null when it is
+/// open-ended. Bounds slot generation alongside the licence: without it, three months of slots for a locum
+/// whose contract ends next week look entirely healthy until the patient arrives.</param>
+public sealed record PractitionerBookability(
+    bool? ServesBranch, bool? LicenceValid, DateOnly? LicenceExpiry, DateOnly? AssignmentValidTo = null)
 {
-    public static readonly PractitionerBookability Unknown = new(null, null, null);
+    public static readonly PractitionerBookability Unknown = new(null, null, null, null);
 }
 
 /// <summary>
@@ -96,7 +100,7 @@ public sealed class HttpPractitionerBranchDirectory(
             var dto = await resp.Content.ReadFromJsonAsync<ServesBranchDto>(Json, ct);
             if (dto is null) return PractitionerBookability.Unknown;
 
-            var result = new PractitionerBookability(dto.ServesBranch, dto.LicenceValid, dto.LicenceExpiry);
+            var result = new PractitionerBookability(dto.ServesBranch, dto.LicenceValid, dto.LicenceExpiry, dto.AssignmentValidTo);
             cache.Set(key, result, TimeSpan.FromMinutes(5));
             return result;
         }
@@ -106,5 +110,6 @@ public sealed class HttpPractitionerBranchDirectory(
 
     private sealed record ServesBranchDto(
         Guid PractitionerId, Guid BranchId, DateOnly AsOf,
-        bool ServesBranch, bool? LicenceValid, DateOnly? LicenceExpiry, bool LicenceEnforceable);
+        bool ServesBranch, bool? LicenceValid, DateOnly? LicenceExpiry, bool LicenceEnforceable,
+        DateOnly? AssignmentValidTo);
 }

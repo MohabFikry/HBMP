@@ -279,6 +279,7 @@ v1.MapGet("/queue", async (EmrDbContext db, CancellationToken ct) =>
 
 app.MapAppointments();
 app.MapQueue();
+app.MapRosterExceptions();   // 25.4 — leave/holiday/closure/ad-hoc + the impact preview
 app.MapClinical();
 app.MapProfileContext();   // 20.2 — the seam the patient profile's PMH + encounters sections read
 app.MapUtilizationFacts();   // 19.4 — encounter COUNTS for utilization; no clinical payload crosses the wire

@@ -22,6 +22,10 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
     public DbSet<Allergy> Allergies => Set<Allergy>();
     public DbSet<MedicationHistory> MedicationHistories => Set<MedicationHistory>();
 
+    /// <summary>25.4 — leave, holidays, closures and ad-hoc clinics (design 42 §4). The exception layer the
+    /// weekly recurring rule never had; without it the only way to stop slots was to delete the rule.</summary>
+    public DbSet<RosterException> RosterExceptions => Set<RosterException>();
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.AddOutbox("emr");
@@ -68,6 +72,22 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             e.Property(x => x.StartTime).HasColumnName("start_time");
             e.Property(x => x.EndTime).HasColumnName("end_time");
             e.Property(x => x.BranchId).HasColumnName("branch_id");   // phase 14
+        });
+
+        b.Entity<RosterException>(e =>
+        {
+            e.ToTable("roster_exception");
+            e.HasKey(x => x.ExceptionId);
+            e.Property(x => x.Kind).HasConversion<string>().HasColumnName("kind");
+            e.Property(x => x.BranchId).HasColumnName("branch_id");
+            e.Property(x => x.PractitionerId).HasColumnName("practitioner_id");
+            e.Property(x => x.DateFrom).HasColumnName("date_from");
+            e.Property(x => x.DateTo).HasColumnName("date_to");
+            e.Property(x => x.StartTime).HasColumnName("start_time");
+            e.Property(x => x.EndTime).HasColumnName("end_time");
+            e.Ignore(x => x.IsSubtractive);
+            e.Ignore(x => x.IsWholeDay);
+            e.HasQueryFilter(x => !x.IsDeleted);
         });
 
         b.Entity<WaitlistEntry>(e =>

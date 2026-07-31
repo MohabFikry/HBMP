@@ -89,7 +89,7 @@ public static class AppointmentsModule
             // and this request spans a range, so `licenceExpiry` is carried into generation below rather than
             // being resolved to a single yes/no here: a licence expiring on 30 September must yield September
             // slots and no October ones, not an all-or-nothing refusal for the whole request.
-            DateOnly? licenceExpiry = null;
+            DateOnly? bookableUntil = null;
             if (req.DoctorId is { } doctorId && slotBranch is { } branchId)
             {
                 var bookability = await practitioners.BookabilityAsync(doctorId, branchId, req.FromDate, ct);
@@ -97,7 +97,9 @@ public static class AppointmentsModule
                     return Results.Problem(statusCode: 422, title: "practitioner-not-at-branch",
                         type: PractitionerBranchRules.ProblemType, detail: reason);
 
-                licenceExpiry = bookability.LicenceExpiry;
+                // 25.4 — the licence AND the assignment both bound the run, at different points. Combined in
+                // one place so neither call site can forget one of them.
+                bookableUntil = SlotGeneration.BookableUntil(bookability.LicenceExpiry, bookability.AssignmentValidTo);
 
                 // Already lapsed before the range even opens: refuse outright rather than answering
                 // "created: 0", which reads as a quiet success and tells nobody why the calendar stayed empty.
@@ -106,6 +108,12 @@ public static class AppointmentsModule
                     return Results.Problem(statusCode: 422, title: "practitioner-licence-expired",
                         type: PractitionerBranchRules.LicenceExpiredProblemType, detail: licenceReason);
             }
+
+            // 25.4 (design 42 §4/§7 rule 5) — leave, holidays, closures and ad-hoc clinics, loaded ONCE and
+            // handed to the single availability computation. Every consumer resolves through that function;
+            // a second place deciding whether a slot exists is the bug.
+            var rosterExceptions = await RosterExceptionEndpoints.OverlappingAsync(
+                db, slotBranch, req.DoctorId, req.FromDate, req.ToDate, ct);
 
             var availability = new ProviderAvailability
             {
@@ -122,7 +130,7 @@ public static class AppointmentsModule
             // Availability is computed in exactly one place (design 42 §7 rule 5), and that place has to know
             // the last date this practitioner may lawfully be booked.
             var generated = SlotGeneration.Generate(
-                availability, req.FromDate, req.ToDate, CairoOffset(req.FromDate), licenceExpiry);
+                availability, req.FromDate, req.ToDate, CairoOffset(req.FromDate), bookableUntil, rosterExceptions);
 
             // Idempotent materialization: skip slot definitions that already exist for this provider/location/doctor.
             var starts = generated.Select(s => s.SlotStart).ToList();

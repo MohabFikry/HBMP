@@ -492,3 +492,38 @@ invariants:
       - Mersal.Provider.Tests.BranchReachGuardTests.AND_THE_NEGATION_the_same_coordinator_may_assign_at_their_own_branch
       - Mersal.Provider.Tests.BranchReachGuardTests.A_branch_caller_whose_reach_did_not_resolve_can_administer_NOTHING
       - Mersal.Provider.Tests.SpecialtyCatalogueIsClosedTests.No_endpoint_creates_renames_or_deletes_a_specialty
+
+  - id: INV-ONE-AVAILABILITY-COMPUTATION
+    statement: >-
+      Availability is computed in exactly one place — recurring rule − exceptions ∩ branch assignment ∩ valid
+      licence ∩ practitioner Active — and a roster change previews its impact before applying, then FLAGS the
+      affected appointments without cancelling any.
+    source: 42-branch-management.md §4/§7 rules 5 and 6
+    severity: Critical
+    # emr.provider_availability is a weekly recurring rule with no way to express leave, a holiday or a
+    # closure, so the only way to stop slots was to DELETE the rule — which erased the normal pattern too.
+    #
+    # The ONE-PLACE rule is asserted STRUCTURALLY as well as behaviourally, and that is the point: the
+    # behavioural tests all drive SlotGeneration, so they would keep passing if a second, divergent
+    # implementation appeared and a screen started using it. That is the failure the rule is about — the
+    # picker, the slot table and the booking validator disagreeing — and the way it presents is a patient
+    # given an appointment with a doctor who is on leave.
+    #
+    # Dry-run parity is structural too: preview and apply call the SAME method. A preview that does not match
+    # what apply does is worse than no preview — it is a number somebody signed off.
+    tests:
+      - Mersal.Emr.Tests.OneAvailabilityComputationTests.Nothing_outside_SlotGeneration_materializes_a_slot
+      - Mersal.Emr.Tests.OneAvailabilityComputationTests.The_scan_reads_a_plausible_tree
+      - Mersal.Emr.Tests.RosterExceptionTests.GIVEN_leave_next_Tuesday_THEN_no_slots_that_day_AND_the_weekly_pattern_survives
+      - Mersal.Emr.Tests.RosterExceptionTests.GIVEN_ClinicClosed_for_a_branch_THEN_no_practitioner_there_has_slots_that_day
+      - Mersal.Emr.Tests.RosterExceptionTests.GIVEN_an_AdHocClinic_on_a_Friday_THEN_slots_appear_for_that_date_ONLY
+      - Mersal.Emr.Tests.RosterExceptionTests.A_PART_DAY_leave_removes_only_the_slots_it_overlaps
+      - Mersal.Emr.Tests.RosterExceptionTests.A_slot_that_only_PARTLY_overlaps_the_absence_is_still_removed
+      - Mersal.Emr.Tests.RosterExceptionTests.OVERLAPPING_exceptions_both_apply_and_neither_cancels_the_other
+      - Mersal.Emr.Tests.RosterExceptionTests.A_WHOLE_DAY_closure_beats_an_ad_hoc_clinic_on_the_same_day
+      - Mersal.Emr.Tests.RosterExceptionTests.The_licence_bound_and_an_exception_compose
+      - Mersal.Emr.Tests.RosterExceptionTests.BookableUntil_takes_the_EARLIER_of_the_licence_and_the_assignment
+      - Mersal.Emr.Tests.RosterExceptionTests.A_branch_closure_does_NOT_match_a_branchless_availability_rule
+      - Mersal.Emr.Tests.RosterImpactPreviewTests.GIVEN_a_closure_over_EIGHT_booked_appointments_THEN_the_preview_reports_eight
+      - Mersal.Emr.Tests.RosterImpactPreviewTests.AND_THE_APPLY_flags_the_same_eight_and_cancels_NONE
+      - Mersal.Emr.Tests.RosterImpactPreviewTests.A_PAST_appointment_inside_the_closure_range_is_not_impacted

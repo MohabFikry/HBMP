@@ -45,7 +45,7 @@ public class LicenceGateTests
         // it would keep passing after someone broke generation for every practitioner.
         var slots = SlotGeneration.Generate(
             Weekly(DayOfWeek.Thursday), new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31), Cairo,
-            licenceExpiry: new DateOnly(2027, 1, 1));
+            bookableUntil: new DateOnly(2027, 1, 1));
 
         slots.Should().NotBeEmpty();
         slots.Should().HaveCount(5 * 6, "five Thursdays in October 2026, six 30-minute slots each");
@@ -87,7 +87,7 @@ public class LicenceGateTests
         // Nurses are recorded without a licence at all. Treating "not recorded" as "expired" would have
         // emptied every clinic's calendar on the day this shipped.
         var slots = SlotGeneration.Generate(
-            Weekly(DayOfWeek.Monday), new DateOnly(2030, 1, 1), new DateOnly(2030, 1, 31), Cairo, licenceExpiry: null);
+            Weekly(DayOfWeek.Monday), new DateOnly(2030, 1, 1), new DateOnly(2030, 1, 31), Cairo, bookableUntil: null);
 
         slots.Should().NotBeEmpty();
     }

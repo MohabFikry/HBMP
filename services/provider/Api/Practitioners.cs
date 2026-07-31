@@ -445,9 +445,21 @@ public static class PractitionerEndpoints
         read.MapGet("/practitioners/{id:guid}/serves-branch", async (Guid id, Guid branchId, DateOnly? asOf, ProviderDbContext db, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
         {
             var on = asOf ?? calendar.Today();   // 18.A3
-            var serves = await db.PractitionerBranchAssignments.AsNoTracking().AnyAsync(a =>
-                a.PractitionerId == id && a.BranchId == branchId && a.Status == "Active"
-                && a.ValidFrom <= on && (a.ValidTo == null || a.ValidTo >= on), ct);
+            var covering = await db.PractitionerBranchAssignments.AsNoTracking()
+                .Where(a => a.PractitionerId == id && a.BranchId == branchId && a.Status == "Active"
+                            && a.ValidFrom <= on && (a.ValidTo == null || a.ValidTo >= on))
+                .Select(a => a.ValidTo)
+                .ToListAsync(ct);
+            var serves = covering.Count > 0;
+
+            // 25.4 — the LAST DAY of the assignment, so emr can bound slot generation by it as well as by the
+            // licence. Without this, generating three months of slots for a locum whose contract ends next
+            // week produces a calendar that looks entirely healthy until the patient arrives.
+            //
+            // An open-ended assignment (valid_to NULL) bounds nothing, and a practitioner with several
+            // overlapping assignments to one branch is bounded by the LATEST — they keep working there while
+            // any of them runs.
+            DateOnly? assignmentValidTo = covering.Any(v => v is null) ? null : covering.Max();
 
             var p = await db.Practitioners.AsNoTracking()
                 .Where(x => x.PractitionerId == id && !x.IsDeleted)
@@ -468,6 +480,7 @@ public static class PractitionerEndpoints
                 // The NUMBER is never returned by this probe — emr has no business holding staff licence
                 // numbers, and the field-mask on the picker exists for the same reason.
                 licenceEnforceable = p is not null && PractitionerLicence.IsEnforceable(p.LicenseNo, p.LicenseExpiry),
+                assignmentValidTo,
             });
         });
     }
