@@ -48,7 +48,7 @@
     "services/eligibility:Api": 0,
     "services/eligibility:Domain": 95,
     "services/eligibility:Infrastructure": 35,
-    "services/emr:Api": 0,
+    "services/emr:Api": 42,
     "services/emr:Domain": 79,
     "services/emr:Infrastructure": 77,
     "services/finance:Api": 0,
