@@ -45,7 +45,7 @@
     "services/claims:Infrastructure": 77,
     "services/document:Domain": 79,
     "services/document:Infrastructure": 0,
-    "services/eligibility:Api": 0,
+    "services/eligibility:Api": 44,
     "services/eligibility:Domain": 95,
     "services/eligibility:Infrastructure": 35,
     "services/emr:Api": 42,
