@@ -6,6 +6,8 @@
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Npgsql" />
+    <!-- 24.3 — hosts the real notification endpoints; Api was 0.0% covered without it. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Notification.Domain.csproj" />

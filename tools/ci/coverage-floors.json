@@ -63,7 +63,7 @@
     "services/masterdata:Api": 77,
     "services/masterdata:Domain": 60,
     "services/masterdata:Infrastructure": 91,
-    "services/notification:Api": 0,
+    "services/notification:Api": 85,
     "services/notification:Domain": 82,
     "services/notification:Infrastructure": 78,
     "services/orders:Api": 39,
