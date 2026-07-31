@@ -102,5 +102,8 @@ but "what did it actually read".**
 1. `docs/BUILD-STATUS.md` — phase by phase, with a legend that now exists and is enforced
 2. `docs/quality/invariant-registry.yaml` — every invariant the platform claims, and the tests that prove it
 3. `docs/AUDIT-R2-E2E.md`, `docs/AUDIT-R3-COMPLETION-MAP.md` — the standing audit findings
-4. `docs/adr/` — decisions, including ADR-0027 on coverage and gate integrity
-5. `docs/runbooks/` — operational procedures, including the 2026-07-30 history purge
+4. `docs/quality/deferred-findings.md` — real divergences found in passing and deliberately left, each
+   with the reason and what closing it means. Short by design: an entry leaves by being fixed or by
+   being retired in writing, never by ageing
+5. `docs/adr/` — decisions, including ADR-0027 on coverage and gate integrity
+6. `docs/runbooks/` — operational procedures, including the 2026-07-30 history purge
