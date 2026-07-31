@@ -170,6 +170,25 @@ apart, so whichever a reader hit first is what they believed.
 | 24 | Coverage, CI truth & hygiene | 24.5 Migration 0010: rehearse, prove both directions, apply | ☑ | 2026-07-30 — Rehearsed on a restored dump: with a non-superuser owner and FORCE off, 6 of 6 rows visible with no tenant GUC and 6 under a wrong one; with FORCE on, 0/0/6. Rollback written and executed (7→0), rolled forward twice for idempotency. Applied to dev. NOTE: 0010's own header claims FORCE stops the owner bypassing — true only for a non-superuser owner, and `hbmp` is SUPERUSER + BYPASSRLS, so the advertised protection does not materialise here. Running the fuzzer afterwards found **1,191 rows across 7 tables with `tenant_id = ''`** — belonging to no tenant, invisible to every real one. |
 | 24 | Coverage, CI truth & hygiene | 24.6 Purge the 62 MB PDF from history, make it unrepeatable | ☑ | 2026-07-30 — Classified first (CPT 2022 code book: no beneficiary data, so not a DPIA incident; AMA-copyrighted, so a licensing question). Mirror backup, rehearsed on a throwaway clone, `git-filter-repo`, force-pushed all refs + tags, verified from a fresh clone: 96 MB → 22 MB, zero occurrences. Branch protection was NOT restored because there was none — the API returns 403 on this plan. `check-large-blobs.py` (pre-commit + CI) stops the next one. Runbook: `docs/runbooks/history-purge-2026-07-30.md`. |
 | 24 | Coverage, CI truth & hygiene | 24.7 Make the status documents stop lying | ☑ | 2026-07-30 — Eleven sub-prompt ids were listed twice with opposite glyphs (one row shipped, another not started, hundreds of lines apart) and six glyphs were in use with nothing defining them. Stale duplicates removed, legend written, `check-build-status.py` enforces both rules plus "every defined glyph is used". HANDOFF.md rewritten — it still described Keycloak (replaced in phase 17), hello-service, and "107 tests green" against a suite of ~2,160. |
+| 25 | Branch Management | 25.0 ADR + the sponsor decisions | ☑ | 2026-07-31 — **ADR-0029** (not 0025: that number was taken by the bulk-and-extract engine and ADRs run to 0028 — one sequence across the platform, not per-phase; phase 21 hit the same collision and 24.7 resolved it the same way). Records the authority-vs-reach decision — ONE permission set, two reach modes — and the rejected alternative of two roles with two capability lists, whose failure is drift: someone adds a capability to the coordinator, forgets the manager, and the supervisor of six clinics can do less than the coordinator of one. Records `BranchSetScoped` and why `MemberScoped` was rejected for the manager: it is an ungoverned "everything" with no grant behind it, and reach that no assignment produced cannot be reviewed, revoked or explained. **Five sponsor decisions implemented as PROVISIONAL — sign-off outstanding, same status as ADR-0019/0020:** D1 controlled substances excluded from v1 *by CHECK constraint, not convention*; D2 consumption does NOT link to an encounter (keeps inventory PHI-free); D3 a coordinator MAY create a practitioner, guarded by licence uniqueness; D4 the clinics manager has WRITE everywhere; D5 vaccines/injectables are PHARMACY stock, not clinic stock. |
+| 25 | Branch Management | 25.1 Roles & scopes: one set, two reaches | ☐ | |
+| 25 | Branch Management | 25.2 Practitioner administration at branch level | ☐ | |
+| 25 | Branch Management | 25.3 Licence expiry as an enforced gate | ☐ | |
+| 25 | Branch Management | 25.4 Roster exceptions + ONE availability computation | ☐ | |
+| 25 | Branch Management | 25.5 Clinic inventory: schema + append-only ledger | ☐ | |
+| 25 | Branch Management | 25.6 Inventory API + worklists | ☐ | |
+| 25 | Branch Management | 25.7 Branch Management portal | ☐ | |
+| 25 | Branch Management | 25.8 Docs, seeds, routes, status | ☐ | |
+
+> **Phase 25 (Branch Management) — the five provisional sponsor decisions.** D1–D5 above are **implemented, not
+> signed off**. They carry the same status as ADR-0019/0020 ("still need sponsor signatures", 19.7). Two of them
+> are load-bearing on platform invariants rather than on preference: if **D2** (no encounter link) or **D5**
+> (vaccines are pharmacy stock) is decided the other way, invariants 8 and 9 — clinic inventory never dispenses
+> to a patient, inventory carries no PHI — are what is at stake, and reversing either is a design decision with
+> a DPIA, not a schema tweak. **D1** is enforced by `CHECK (is_controlled = false)` specifically so that
+> enabling controlled substances is a deliberate, reviewable migration rather than a checkbox. Design:
+> [`../HBMP-Design/42-branch-management.md`](../HBMP-Design/42-branch-management.md) §8; ADR:
+> [`adr/0029-branch-management.md`](adr/0029-branch-management.md).
 
 > **Phase 21 (User & Access Model)** implements [`../HBMP-Design/40-user-access-model.md`](../HBMP-Design/40-user-access-model.md), adapting an external
 > reference design. **Doc 40 §0 (adaptations A1–A6) is normative**: the platform-admin flag is never a PHI wildcard (A1);
