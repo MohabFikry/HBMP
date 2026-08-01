@@ -112,6 +112,18 @@ const ROLE_MAP: Array<[string, Role]> = [
   ["finance", "finance"],
   ["provider_admin", "provider_admin"],
   ["network_team", "provider_admin"],
+  // 25.1 — the two branch roles. They were MISSING here while everything else about them shipped: the
+  // portal exists (`base: "branch"`), the permissions exist (BRANCH_ROLE_PERMISSIONS), the scopes are
+  // requested above, and the issuer seeds and grants both roles. Only this table was not updated — so the
+  // token carried `branch_coordinator`, `roleFromClaimRoles` found no row, returned null, and the SPA
+  // fail-closed to "No portal assigned". A correct login, a correct token and a complete portal, presented
+  // to the user as an account with no role.
+  //
+  // SET BEFORE SINGLE, matching BranchScope.ModeFor on the server: someone holding both supervises the
+  // network, and matching the coordinator first would narrow them to one clinic — making the wider,
+  // explicitly-granted authority the weaker one.
+  ["clinics_manager", "clinics_manager"],
+  ["branch_coordinator", "branch_coordinator"],
   ["beneficiary_mgmt", "beneficiary_mgmt"],
   ["doctor", "doctor"],
   ["nurse", "nurse"],

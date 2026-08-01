@@ -60,11 +60,40 @@ def spa_scopes(source: str) -> set[str]:
     return set(" ".join(re.findall(r'"([^"]*)"', body)).split())
 
 
+def spa_mapped_roles(source: str) -> set[str]:
+    """The issuer role names the SPA's ROLE_MAP can translate into a portal.
+
+    Harvests the FIRST string of each `["issuer_role", "portal_key"]` row. Comment lines are skipped for the
+    same reason as in spa_scopes: the table is annotated in place, and a quoted word inside a comment read as
+    a mapping would make this gate confidently wrong.
+    """
+    match = re.search(r"const ROLE_MAP: Array<\[string, Role\]> = \[(.*?)\n\];", source, re.S)
+    if not match:
+        sys.exit(f"check-spa-scopes: could not find `ROLE_MAP` in {CONFIG.relative_to(ROOT)}")
+    body = "\n".join(ln for ln in match.group(1).splitlines() if not ln.lstrip().startswith("//"))
+    return set(re.findall(r'\[\s*"([^"]+)"\s*,', body))
+
+
 def main() -> int:
     contract = CONTRACT.read_text(encoding="utf-8")
     scopes = csharp_list(contract, "Scopes")
     service = set(csharp_list(contract, "ServiceScopes"))
     interactive = {s for s in scopes if s not in service}
+
+    # ROLES DRIFT THE SAME WAY SCOPES DO, one file over, and 25.1 proved it: `branch_coordinator` and
+    # `clinics_manager` were added to the issuer, seeded, granted their scopes, given a portal and a full
+    # permission set — and left out of ROLE_MAP. `roleFromClaimRoles` found no row, returned null, and the
+    # SPA fail-closed to "No portal assigned". Everything was correct except the one table nobody re-read,
+    # and the symptom reads as "my account is broken" rather than "a mapping is missing".
+    #
+    # This is the exact failure this file's own docstring describes for a missing scope — signs in
+    # perfectly, then behaves as though the user has no access — so it belongs in the same gate.
+    contract_roles = set(csharp_list(contract, "Roles"))
+    mapped_roles = spa_mapped_roles(CONFIG.read_text(encoding="utf-8"))
+    unmapped = contract_roles - mapped_roles
+    # The reverse is NOT an error: ROLE_MAP legitimately holds names the contract does not, because several
+    # issuer roles collapse onto one portal (network_team → provider_admin). Only the missing direction
+    # strands a real user.
 
     requested = spa_scopes(CONFIG.read_text(encoding="utf-8"))
     missing_protocol = PROTOCOL_SCOPES - requested
@@ -89,17 +118,24 @@ def main() -> int:
         )
     if unknown:
         problems.append(f"  requested but not in the issuer's vocabulary at all:\n    {sorted(unknown)}")
+    if unmapped:
+        problems.append(
+            f"  issuer roles with NO row in ROLE_MAP — these users sign in and get 'No portal assigned':\n"
+            f"    {sorted(unmapped)}"
+        )
 
     if problems:
         print("SPA scope guard: apps/web/src/config.ts has drifted from IdentityContract", file=sys.stderr)
         print("\n".join(problems), file=sys.stderr)
         print(
-            "\nFix: make the `scope:` literal equal openid + offline_access + InteractiveScopes.",
+            "\nFix: make the `scope:` literal equal openid + offline_access + InteractiveScopes,"
+            "\n     and give every IdentityContract role a ROLE_MAP row.",
             file=sys.stderr,
         )
         return 1
 
     print(f"SPA scope guard: {len(interactive)} interactive scopes, all requested; no machine scopes leaked")
+    print(f"SPA role guard:  {len(contract_roles)} issuer roles, all mapped to a portal")
     print("✓ apps/web/src/config.ts matches IdentityContract")
     return 0
 
