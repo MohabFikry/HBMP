@@ -123,6 +123,24 @@ expensive way.
   platform does X" read identically in prose and are not the same claim. Closed by ADR-0029 §4.1: item
   creation asks masterdata whether the thing is a medicine and refuses it if so, *and refuses it when
   masterdata is unreachable*, so the gate cannot open quietly during an outage.
+- **The a11y-contrast job had never once executed its assertions.** It failed with
+  `Timed out waiting 120000ms from config.webServer` — which reads like a slow server and was actually a
+  command that never ran. Playwright's `webServer.command` was
+  `pnpm --filter @mersal/web preview --port 4173 --strictPort`, and **pnpm parses `--port` as one of its own
+  options**, so the process died instantly and Playwright spent two minutes waiting for a server nobody had
+  started. Port and host now live in `apps/web/vite.config.ts`'s `preview` block and the command is a bare
+  `npx vite preview` — flags that must survive two argument parsers eventually do not.
+
+  **What is still unknown, and say so rather than assume:** because the server never came up, the contrast
+  assertions have *never executed*. Unblocking the job is not the same as passing it — the first green run is
+  the first evidence any of those colours are AA, and a real violation surfacing now would be the gate
+  working, not a regression.
+
+  **Running it locally needs pnpm**, which is broken on this machine
+  (`ERR_UNKNOWN_BUILTIN_MODULE` from the pnpm/Node pairing), so `@playwright/test` is in the lockfile but not
+  installed. The vite half is verifiable without it: `cd apps/web && npx vite preview` must answer
+  `http://127.0.0.1:4173`. The host is pinned because vite's default binds `localhost`, which resolves to
+  `::1` first on some hosts — the server would be up and the probe would still time out.
 - **A gate with no local entry point is a gate you learn about from CI.** Three committed OpenAPI specs
   (`approvals`, `patient`, `policy`) were stale on 2026-08-01 and `openapi-drift` — a blocking gate — had been
   **red in CI for a day** while local runs reported every other gate green. Both halves of that sentence

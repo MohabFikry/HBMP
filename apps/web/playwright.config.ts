@@ -37,7 +37,12 @@ export default defineConfig({
   ],
   // Serve the built bundle: contrast depends on the real compiled CSS, not the dev server's injected styles.
   webServer: {
-    command: "pnpm --filter @mersal/web preview --port 4173 --strictPort",
+    // vite directly, not through pnpm. `pnpm --filter @mersal/web preview --port 4173 --strictPort` swallowed
+    // `--port` as a pnpm option, so this command exited immediately and the job spent 120s waiting for a
+    // server that was never launched. Port/host now live in vite.config.ts's `preview` block; nothing here
+    // needs arguments, so nothing can eat them. It also means `npx vite preview` is exactly what a person
+    // runs to reproduce this locally.
+    command: "npx vite preview",
     url: "http://127.0.0.1:4173",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

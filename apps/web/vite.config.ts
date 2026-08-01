@@ -11,6 +11,16 @@ export default defineConfig(({ mode }) => ({
   // substituted at transform time, so this cannot be fixed at runtime in a setup file — the tests are pointed
   // at an env directory that holds no .env at all.
   envDir: mode === "test" ? "./test" : undefined,
+  // THE CONTRAST GATE'S SERVER, configured HERE rather than as CLI flags. Playwright's webServer used to run
+  // `pnpm --filter @mersal/web preview --port 4173 --strictPort`; pnpm parses `--port` as one of ITS OWN
+  // options, so the command died before vite ever started and the job failed with
+  // "Timed out waiting 120000ms from config.webServer" — a message that reads like a slow server rather than
+  // a command that never ran. Flags that have to survive two argument parsers are flags that eventually do
+  // not; in the config there is nothing to swallow them.
+  //
+  // host is pinned to 127.0.0.1 to MATCH playwright.config's url. Vite's default binds localhost, which
+  // resolves to ::1 first on some hosts — the server would then be up and the probe still timing out.
+  preview: { port: 4173, strictPort: true, host: "127.0.0.1" },
   test: {
     globals: true,
     environment: "jsdom",

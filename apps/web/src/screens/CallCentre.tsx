@@ -37,6 +37,20 @@ export interface Cc360 {
 }
 export interface CcCallRow { callRef: string; startedAt: string; status: string; reasonCode?: string | null; outcome?: string | null }
 
+// ── Wire rows for the four gateway reads with no generated contract ────────────────────────────────────
+// These were `any[]`, which CLAUDE.md's "TS strict, no `any`" forbids and which eslint had been failing the
+// frontend build on. `any` here was not laziness so much as honesty about untyped aggregation endpoints —
+// but it disables checking on every field access below, so a renamed field would have compiled and produced
+// a clinic list of "undefined". Named shapes restore that check.
+//
+// The String()/Number() coercions at the call sites are deliberately KEPT. These types describe what the
+// gateway is expected to send; they do not verify it, and there is no runtime validation on this path. A
+// declared type plus a coercion says "expected string, defended anyway", which is the true position.
+interface BranchClinicRow { providerId: string; locationId: string; branchId?: string | null; openSlots?: number | null }
+interface ClinicLabelRow { locationId: string; providerName: string; locationName: string }
+interface BranchLabelRow { branchId: string; nameEn: string }
+interface AppointmentSlotRow { slotId: string; slotStart: string }
+
 /** The narrow surface the workspace needs. The default implementation calls the gateway; tests inject a fake. */
 export interface CcApi {
   openInteraction(reasonCode: string): Promise<{ interactionId: string; callRef: string }>;
@@ -135,19 +149,19 @@ export function createHttpCcApi(): CcApi {
     async clinics() {
       // emr answers which clinics have bookable times; provider-service puts names to the ids. Neither needs
       // provider:read, which the call centre does not hold.
-      const r = await req<any[]>("GET", "/branch-clinics");
+      const r = await req<BranchClinicRow[]>("GET", "/branch-clinics");
       const rows = r.data ?? [];
       if (rows.length === 0) return [];
       const ids = rows.map((c) => c.locationId).filter(Boolean).join(",");
       const labels = new Map<string, string>();
-      const l = await req<any[]>("GET", `/clinic-labels?locationIds=${encodeURIComponent(ids)}`);
+      const l = await req<ClinicLabelRow[]>("GET", `/clinic-labels?locationIds=${encodeURIComponent(ids)}`);
       for (const row of l.data ?? []) labels.set(String(row.locationId), `${row.providerName} · ${row.locationName}`);
 
       // Branch NAMES too: the agent chooses the branch they are booking into, so it has to be a name.
       const branchIds = [...new Set(rows.map((c) => c.branchId).filter(Boolean).map(String))];
       const branchNames = new Map<string, string>();
       if (branchIds.length > 0) {
-        const b = await req<any[]>("GET", `/branch-labels?branchIds=${encodeURIComponent(branchIds.join(","))}`);
+        const b = await req<BranchLabelRow[]>("GET", `/branch-labels?branchIds=${encodeURIComponent(branchIds.join(","))}`);
         for (const row of b.data ?? []) branchNames.set(String(row.branchId), String(row.nameEn));
       }
 
@@ -159,7 +173,7 @@ export function createHttpCcApi(): CcApi {
       }));
     },
     async slots(providerId, locationId) {
-      const r = await req<any[]>("GET", `/appointment-slots?providerId=${providerId}&locationId=${locationId}&onlyOpen=true`);
+      const r = await req<AppointmentSlotRow[]>("GET", `/appointment-slots?providerId=${providerId}&locationId=${locationId}&onlyOpen=true`);
       return (r.data ?? []).map((x) => ({ slotId: String(x.slotId), start: String(x.slotStart) }));
     },
     async book(interactionId, beneficiaryId, slotId, branchId, extra) {
