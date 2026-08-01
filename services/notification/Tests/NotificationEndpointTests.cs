@@ -173,7 +173,7 @@ public class NotificationEndpointTests
         // The event type and the role key both come from RoutingTable — an unrouted event fans out to nobody
         // and the ingest reports created: 0, which is a correct answer to a question the test did not mean
         // to ask. `ref` is the placeholder the seeded appointment.reminder template renders.
-        EventId: app.EventId, EventType: "AppointmentReminder", TenantId: app.Tenant, EntityRef: "APPT-1",
+        EventId: app.EventId, EventType: "AppointmentReminderIssued", TenantId: app.Tenant, EntityRef: "APPT-1",
         Fields: new Dictionary<string, string> { ["ref"] = "APPT-1" },
         RoleRecipients: new Dictionary<string, List<RecipientDto>>
         {
@@ -237,7 +237,7 @@ public sealed class NotificationApiFactory : WebApplicationFactory<Program>
     /// <summary>
     /// The two recipients' IN-APP notifications, or nulls when the ingest produced none.
     ///
-    /// <para>The channel filter is load-bearing: AppointmentReminder targets the beneficiary on InApp AND
+    /// <para>The channel filter is load-bearing: AppointmentReminderIssued targets the beneficiary on InApp AND
     /// Email, so each recipient gets two rows, and the inbox route returns only the InApp one. Picking either
     /// row would make this suite assert against a notification the endpoint under test never returns.</para>
     /// </summary>

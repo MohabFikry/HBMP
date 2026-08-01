@@ -58,8 +58,31 @@ public sealed class RabbitMqEventPublisher(IOptions<EventsOptions> options) : IE
         props.ContentType = "application/json";
         props.Persistent = true;
 
+        var body = Encoding.UTF8.GetBytes(message.Payload);
         channel.BasicPublish(exchange: "", routingKey: message.Destination,
-            basicProperties: props, body: Encoding.UTF8.GetBytes(message.Payload));
+            basicProperties: props, body: body);
+
+        /*
+         * THE READ-MODEL MIRROR (see ProjectionFeed).
+         *
+         * A second copy of the SAME body, with the SAME MessageId, onto reporting-service's own queue. The
+         * transport is point-to-point, so reporting cannot simply subscribe to `policy.events` — it would
+         * compete with eligibility-service and each event would reach one of them. And it must not: the
+         * publish above is the contract every existing consumer depends on, and this changes nothing about it.
+         *
+         * Publishing to the mirror is not allowed to lose the original. If the second publish throws, the
+         * relay marks the whole message failed and retries — which would re-deliver the ORIGINAL too, to
+         * consumers that already had it. They are idempotent (every consumer dedupes on event id), so that is
+         * survivable, and it is the correct trade: a dashboard silently missing a fact is worse than a
+         * redelivery the consumers are built to absorb.
+         */
+        if (ProjectionFeed.Includes(message.EventType))
+        {
+            channel.QueueDeclare(ProjectionFeed.Queue, durable: true, exclusive: false, autoDelete: false);
+            channel.BasicPublish(exchange: "", routingKey: ProjectionFeed.Queue,
+                basicProperties: props, body: body);
+        }
+
         return Task.CompletedTask;
     }
 

@@ -18,7 +18,11 @@ public sealed record TimelineEntryView(
     string SummaryEn, string SummaryAr,
     string? ChangeDiff, bool DiffWithheld,
     string VisibilityClass, string SourceService, string? CorrelationId,
-    Guid? TargetRef, string? TargetKind)
+    Guid? TargetRef, string? TargetKind,
+    /// <summary>True when this entry was READ OFF the record rather than projected from an event — see
+    /// <see cref="TimelineEndpoints"/>' origin resolution. The client says so; a log that presents a derived
+    /// row as a projected one is a log that cannot be trusted about the rest.</summary>
+    bool Derived = false)
 {
     public static TimelineEntryView For(TimelineEntry e, IReadOnlyCollection<string> roles)
     {
@@ -32,7 +36,20 @@ public sealed record TimelineEntryView(
     }
 }
 
-public sealed record TimelinePage(IReadOnlyList<TimelineEntryView> Entries, DateTimeOffset? NextCursor);
+/// <summary>
+/// A page of history, plus the entry the history STARTS from.
+///
+/// <para><b>Why origin is separate from the entries.</b> The page is newest-first and cursor-paged, so the one
+/// entry that is always worth seeing — the day this membership came into existence, and who put it there — is
+/// the single entry guaranteed to be furthest from the reader. On a member with a year of activity it sat
+/// behind however many "load older" clicks the record had earned. It is returned on the FIRST page only
+/// (a cursor means the reader already has it) and is removed from <see cref="Entries"/> when it happens to
+/// fall inside the same page, so nothing renders twice.</para>
+/// </summary>
+public sealed record TimelinePage(
+    IReadOnlyList<TimelineEntryView> Entries,
+    DateTimeOffset? NextCursor,
+    TimelineEntryView? Origin = null);
 
 /// <summary>
 /// Phase 19.3c — "what happened to this policy / this member, when, and who did it" (design 38 §5c).
@@ -79,6 +96,17 @@ public static class TimelineEndpoints
 
             var views = rows.Select(e => TimelineEntryView.For(e, principal.Roles)).ToList();
 
+            // The first entry is always the record's creation. Only on the first page — a caller holding a
+            // cursor has already been given it — and never twice: if the creation entry is also inside this
+            // page (a short history, or the last page of a long one), it is shown as the origin and dropped
+            // from the body.
+            TimelineEntryView? origin = null;
+            if (scope == NoteScope.Member && cursor is null)
+            {
+                origin = await OriginAsync(db, id, principal.Roles, ct);
+                if (origin is not null) views.RemoveAll(v => v.EntryId == origin.EntryId);
+            }
+
             // Reading a member's timeline is a PHI read: it names their care, their claims and who accessed
             // their record. Audited whether or not any diff was disclosed.
             if (scope == NoteScope.Member)
@@ -92,8 +120,36 @@ public static class TimelineEndpoints
                 }, ct);
             }
 
-            return Results.Ok(new TimelinePage(views, hasMore ? rows[^1].OccurredAt : null));
+            return Results.Ok(new TimelinePage(views, hasMore ? rows[^1].OccurredAt : null, origin));
         });
+    }
+
+    /// <summary>
+    /// Where this membership's history begins, as the caller may see it.
+    ///
+    /// <para>The resolution rules live in <see cref="TimelineOriginQuery"/>. What is decided HERE is how each
+    /// of its two answers renders: a projected entry goes through the same role projection every other entry
+    /// does, and a derived one is given the enrolment's own summary, no actor — nothing is invented to sign it
+    /// with — and <see cref="TimelineEntryView.Derived"/> set, so the reader is told which kind of line they
+    /// are looking at.</para>
+    /// </summary>
+    private static async Task<TimelineEntryView?> OriginAsync(
+        PolicyDbContext db, Guid enrollmentId, IReadOnlyCollection<string> roles, CancellationToken ct)
+    {
+        var origin = await TimelineOriginQuery.ForMemberAsync(db, enrollmentId, ct);
+        if (origin is null) return null;
+        if (origin.Projected is { } projected) return TimelineEntryView.For(projected, roles);
+
+        // The id is the enrolment's own — stable across reads (so a client keyed on it does not remount the
+        // row) and impossible to confuse with a projected entry id, which is a hash of a source event.
+        return new TimelineEntryView(
+            enrollmentId, NoteScope.Member.ToString(), enrollmentId, origin.DerivedAt!.Value,
+            "MemberEnrolled", TimelineCategory.Enrolment.ToString(),
+            ActorUsername: null, ActorDisplay: null,
+            SummaryEn: "Member enrolled", SummaryAr: "تم تسجيل العضو",
+            ChangeDiff: null, DiffWithheld: false,
+            VisibilityClass: NoteVisibility.Administrative.ToString(), SourceService: "policy",
+            CorrelationId: null, TargetRef: null, TargetKind: null, Derived: true);
     }
 
     private static void MapExport(RouteGroupBuilder read)

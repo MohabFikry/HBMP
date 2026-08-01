@@ -113,6 +113,10 @@ public static class BreakGlass
                 source = "Manual", approvedScope = approvedScopeJson is null ? null : Codes.Parse(approvedScopeJson),
                 releasesDownstream = true, breakGlass = true,
             }, ct);
+            // No notification copy here, deliberately. A manual/emergency authorization is CREATED by the
+            // person deciding it, so `CreatedBy` is the decider — and telling somebody the thing they just did
+            // has been done is the noise that teaches a team to ignore the channel. The retrospective-review
+            // flag and the audit event are what make this decision visible to somebody else.
             await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft

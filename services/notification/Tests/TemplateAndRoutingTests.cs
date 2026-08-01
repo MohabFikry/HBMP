@@ -41,7 +41,8 @@ public class TemplateAndRoutingTests
     [InlineData("AuthApproved", "auth.approved")]
     [InlineData("AuthRejected", "auth.rejected")]
     [InlineData("AuthInfoRequested", "auth.info_requested")]
-    [InlineData("ResultReady", "result.ready")]
+    // Keyed on what orders-service actually publishes (§11.3); the TEMPLATE key is unchanged.
+    [InlineData("OrderResultUploaded", "result.ready")]
     [InlineData("OrderLineAvailable", "order.line_available")]
     [InlineData("RxLineOutOfStock", "rx.out_of_stock")]
     public void Routes_known_events_to_their_template(string eventType, string templateKey)
@@ -62,6 +63,48 @@ public class TemplateAndRoutingTests
     public void Unknown_event_has_no_route()
     {
         RoutingTable.Route("SomethingUnmapped").Should().BeNull();
+    }
+
+    /// <summary>
+    /// The names four other services actually publish (audit §11.3).
+    ///
+    /// <para>These four routes were keyed on a vocabulary written here and never adopted anywhere else —
+    /// `ResultReady`, `RxReady`, `AppointmentReminder`, `AppointmentNoShow` — while orders, pharmacy and emr
+    /// were sending `OrderResultUploaded`, `RxApproved`, `AppointmentReminderIssued` and `ApptNoShow`. Nothing
+    /// failed and nothing was delivered: an event with no route is dropped with a log, so a routing table full
+    /// of unreachable entries reads exactly like a working fan-out.</para>
+    ///
+    /// <para>Pinned by NAME rather than by behaviour because a name is the whole contract here. A rename on
+    /// either side puts the fan-out back to silent, and silence is the failure mode no test catches by
+    /// accident.</para>
+    /// </summary>
+    [Theory]
+    [InlineData("OrderResultUploaded")]   // orders-service, Results.cs
+    [InlineData("RxApproved")]            // pharmacy-service, Prescriptions.cs
+    [InlineData("AppointmentReminderIssued")]  // emr-service, Reminders.cs
+    [InlineData("ApptNoShow")]            // emr-service, Appointments.cs
+    public void Routes_are_keyed_on_the_names_publishers_actually_send(string publishedEventType)
+    {
+        RoutingTable.Route(publishedEventType).Should().NotBeNull(
+            "the fan-out is keyed on the event type off the wire, so a route under any other name is unreachable");
+    }
+
+    /// <summary>
+    /// The old names must NOT resolve.
+    ///
+    /// <para>Keeping both would be the alias approach, and this codebase refuses it for the reason §11.2
+    /// records about the audit sink and §3.1 about column headers: two names for one fact is two places to
+    /// change, and they drift. A stale key that still routes lets a publisher be "fixed" to the wrong name
+    /// without anything noticing.</para>
+    /// </summary>
+    [Theory]
+    [InlineData("ResultReady")]
+    [InlineData("RxReady")]
+    [InlineData("AppointmentReminder")]
+    [InlineData("AppointmentNoShow")]
+    public void The_names_no_service_publishes_are_gone_rather_than_aliased(string retiredEventType)
+    {
+        RoutingTable.Route(retiredEventType).Should().BeNull();
     }
 
     [Fact]

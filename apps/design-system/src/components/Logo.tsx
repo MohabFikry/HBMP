@@ -1,5 +1,7 @@
 import logoLockup from "../assets/mersal-logo.svg";
+import logoLockupDark from "../assets/mersal-logo-dark.svg";
 import { cx } from "../lib/cx";
+import { useTheme } from "../theme/ThemeProvider";
 
 export interface LogoProps {
   /** `lockup` = full Mersal Foundation wordmark (auth screen, large). `mark` = compact tile (nav rail). */
@@ -17,11 +19,20 @@ export interface LogoProps {
  * from breaking if the asset fails to load. RTL/LTR both supported — the mark itself is direction-neutral.
  */
 export function Logo({ variant = "mark", wordmark, className, height = 44 }: LogoProps) {
+  const { theme } = useTheme();
   if (variant === "lockup") {
     return (
       <span className={cx("mrs-brand", className)}>
+        {/*
+          * Two assets, one per surface (0B §8; audit §5.5).
+          *
+          * The light lockup's Latin wordmark is the brand teal and its sub-wordmark is slate — both picked
+          * against white, and both sitting at around 2:1 on the dark surface. It was the sign-in screen's
+          * least legible element, which is the first thing anyone sees of this product. Recolouring in CSS
+          * was not available: these are `<text fill="…">` inside an `<img>`, so the page cannot reach them.
+          */}
         <img
-          src={logoLockup}
+          src={theme === "dark" ? logoLockupDark : logoLockup}
           alt="Mersal Foundation"
           height={height}
           style={{ height, width: "auto", display: "block" }}

@@ -1,6 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup><RootNamespace>Mersal.Notification.Api</RootNamespace></PropertyGroup>
   <ItemGroup>
+    <!-- The registration consumer's envelope parser is unit-tested directly: the branch that matters is the
+         one that REFUSES a message with no tenant or no addressee, and reaching it through RabbitMQ would
+         make a pure decision into an integration test. -->
+    <InternalsVisibleTo Include="Mersal.Notification.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Notification.Domain.csproj" />
     <ProjectReference Include="../Infrastructure/Mersal.Notification.Infrastructure.csproj" />
     <ProjectReference Include="../../../libs/auth/Mersal.Auth.csproj" />
@@ -12,6 +18,8 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Swashbuckle.AspNetCore" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <!-- The registration info-request consumer (US-003) — same transport the policy enrolment consumer uses. -->
+    <PackageReference Include="RabbitMQ.Client" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />

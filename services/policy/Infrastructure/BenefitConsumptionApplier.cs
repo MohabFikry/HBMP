@@ -104,6 +104,22 @@ public sealed class BenefitConsumptionApplier(PolicyDbContext db, IOutbox outbox
         // Invalidate the eligibility projection with the POST-move remaining (the consumer already exists).
         var fresh = await db.CoverageLimits.AsNoTracking()
             .Where(l => moved.Contains(l.CoverageLimitId)).ToListAsync(ct);
+
+        /*
+         * WHO the accumulator moved for, not just BY how much.
+         *
+         * The payload carried the limit and the new totals and nothing else — enough for eligibility, which
+         * only needs to drop a cached snapshot. reporting-service's member-utilization fact needs the
+         * DIMENSIONS: payer, policy, plan, group, branch, beneficiary, enrolment and benefit category are
+         * every axis the analytics filter bar narrows by. Without them each fact lands under Guid.Empty and
+         * "unknown", which is worse than no fact at all: the totals are then right only when nobody filters.
+         *
+         * Resolved here rather than looked up by the consumer, for the reason MemberEnrolled's payload
+         * already states — a read model that has to go back and ask is querying the transactional benefit
+         * spine, which is the one thing it exists to avoid.
+         */
+        var dims = await ConsumptionDimensionsAsync(coverageId, ct);
+
         foreach (var l in fresh)
         {
             await outbox.EnqueueAsync("CoverageLimitChanged", "policy.events", new
@@ -116,6 +132,15 @@ public sealed class BenefitConsumptionApplier(PolicyDbContext db, IOutbox outbox
                 l.ConsumedValue,
                 remaining = l.Remaining,
                 reason = instruction.Direction == ConsumptionDirection.Reversed ? "fulfillment-reversed" : "fulfillment-consumed",
+                // Read-model dimensions.
+                beneficiaryId = instruction.BeneficiaryId,
+                benefitCategoryCode = instruction.BenefitCategory,
+                providerId = instruction.ProviderId,
+                dims?.EnrollmentId, dims?.PayerId, dims?.PolicyId, dims?.PolicyPlanId,
+                dims?.GroupId, dims?.BranchId,
+                // A limit that moved is by definition metered cover, which is what separates `Unlimited` from
+                // `Zero` in the band classifier — both otherwise sum to a zero limit.
+                hasCoverage = true,
             }, ct);
         }
 
@@ -123,6 +148,29 @@ public sealed class BenefitConsumptionApplier(PolicyDbContext db, IOutbox outbox
         db.ChangeTracker.Clear();
         return new ConsumptionResult(outcome, coverageId, moved);
     }
+
+    /// <summary>
+    /// The membership axes behind a coverage, for the read model's utilization fact.
+    /// </summary>
+    /// <remarks>
+    /// One join from the coverage the accumulator moved on. Null when the coverage predates 19.2's
+    /// provenance columns and carries no <c>EnrollmentId</c>: the fact is then written with the axes it does
+    /// have rather than with invented ones, and lands in the unattributed bucket — which is a true statement
+    /// about an old row, unlike a Guid.Empty policy id that would read as a real policy nobody can open.
+    /// </remarks>
+    private async Task<ConsumptionDimensions?> ConsumptionDimensionsAsync(Guid? coverageId, CancellationToken ct)
+    {
+        if (coverageId is not { } id) return null;
+        return await db.Coverages.AsNoTracking()
+            .Where(c => c.CoverageId == id && c.EnrollmentId != null)
+            .Join(db.Enrollments.AsNoTracking(), c => c.EnrollmentId, e => e.EnrollmentId, (c, e) => e)
+            .Join(db.Policies.AsNoTracking(), e => e.PolicyId, p => p.PolicyId, (e, p) => new ConsumptionDimensions(
+                e.EnrollmentId, p.PayerId, e.PolicyId, e.PolicyPlanId, e.GroupId, e.BranchId))
+            .FirstOrDefaultAsync(ct);
+    }
+
+    private sealed record ConsumptionDimensions(
+        Guid EnrollmentId, Guid? PayerId, Guid PolicyId, Guid? PolicyPlanId, Guid? GroupId, Guid? BranchId);
 
     /// <summary>Resolve the applicable coverage and its accumulating limits, or the reason there is none.</summary>
     private async Task<(ConsumptionOutcome Outcome, Guid? CoverageId, IReadOnlyList<Guid> LimitIds)> ResolveAsync(

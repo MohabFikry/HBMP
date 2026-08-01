@@ -23,6 +23,15 @@ builder.Services.AddHbmpEvents(builder.Configuration);
 builder.Services.AddHbmpDurableOutbox<ReportingDbContext>();
 builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddReportingInfrastructure(builder.Configuration);
+
+// THE FEED. `EventProjector` and `AnalyticsProjector` have been complete since phases 8.2 and 19.6b, and the
+// only caller was a `POST /projections` seam nothing ever hit — so every fact table was empty and the
+// dashboards correctly rendered nothing. See ProjectionConsumer / Mersal.Events.ProjectionFeed.
+//
+// Registered unconditionally: the consumer degrades to a warning when the broker is absent (dev without
+// RabbitMQ) rather than taking the report API down with it.
+builder.Services.Configure<ProjectionConsumerOptions>(builder.Configuration.GetSection(ProjectionConsumerOptions.SectionName));
+builder.Services.AddHostedService<ProjectionConsumer>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ReportingGate>();
 builder.Services.AddScoped<ReportContext>();

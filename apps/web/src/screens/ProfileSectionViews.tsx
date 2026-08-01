@@ -476,7 +476,15 @@ function CoverageView({ data }: { data: ProfileCoverage }) {
           data.effectiveTo !== undefined && { label: L.effectiveTo, value: fmt.date(data.effectiveTo) },
           data.waitingPeriodState !== undefined && {
             label: L.waitingPeriod,
-            value: <Status status={data.waitingPeriodState} />,
+            // "None" is not a state, so it does not get a chip — the same rule the membership roster now
+            // follows. A chip on every profile for the members who have NO waiting period spends the one
+            // loud element in this row on the answer "nothing applies here".
+            value:
+              norm(data.waitingPeriodState) === "none" ? (
+                "—"
+              ) : (
+                <Status status={data.waitingPeriodState} />
+              ),
           },
         ]}
       />

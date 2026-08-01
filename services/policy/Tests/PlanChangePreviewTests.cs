@@ -143,6 +143,42 @@ public class PlanChangePreviewTests
         finally { await Cleanup(f); }
     }
 
+    // ---- The member's history ----------------------------------------------------------------------------
+
+    [SkippableFact]
+    public async Task The_history_records_who_changed_the_plan_and_which_plan_it_was()
+    {
+        Skip.If(Db is null, "POLICY_TEST_DB not set — DB integration test skipped.");
+        var f = await Seed();
+        try
+        {
+            await using var db = Ctx();
+            var actor = new ActorRef(Guid.NewGuid(), "0f4c-subject-uuid", "Layla Mansour");
+
+            var applied = await Commands(db).ChangePlanAsync(
+                f.EnrollmentId, f.LeanPolicyPlanId, new DateOnly(2026, 6, 1), "moved to the lean plan", actor);
+            applied.Ok.Should().BeTrue();
+
+            var entry = await db.TimelineEntries.AsNoTracking()
+                .Where(e => e.ScopeRef == f.EnrollmentId && e.EventType == "MemberPlanChanged")
+                .OrderByDescending(e => e.OccurredAt)
+                .FirstAsync();
+
+            // WHO — the name, not the subject uuid. "Somebody changed this member's plan" is not a log, and
+            // an entry signed 0f4c-… answers the question only for a reader who can resolve it.
+            entry.ActorDisplay.Should().Be("Layla Mansour");
+            entry.ActorUsername.Should().Be("0f4c-subject-uuid", "the machine-stable id is kept alongside it");
+
+            // WHAT — the label the officer chose from, both sides of the arrow. The identifiers stay on
+            // policy.enrollment_event, which is what the as-of extraction reconstructs history from.
+            entry.ChangeDiff.Should().NotBeNull();
+            entry.ChangeDiff.Should().Contain("\"plan\"").And.Contain("Rich").And.Contain("Lean");
+            entry.ChangeDiff.Should().NotContain(f.LeanPolicyPlanId.ToString(),
+                "a uuid in the diff is the same fact written so that reading it takes two more lookups");
+        }
+        finally { await Cleanup(f); }
+    }
+
     // ---- It fails where the change fails ------------------------------------------------------------------
 
     [SkippableFact]

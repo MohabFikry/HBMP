@@ -52,6 +52,12 @@ function renderPanel(api: PolicyApi) {
 
 afterEach(() => cleanup());
 
+/** Filing a document is a dialog now — the tab is the list. Every form assertion opens it first. */
+async function openFileDialog() {
+  await userEvent.click(screen.getByRole("button", { name: /add document/i }));
+  return screen.findByRole("dialog");
+}
+
 describe("Beneficiary documents", () => {
   it("shows the file name, the upload date and who uploaded it", async () => {
     renderPanel(stub());
@@ -99,16 +105,48 @@ describe("Beneficiary documents", () => {
     renderPanel(stub({ documents: async () => [doc({ canDownload: false })] } as Partial<PolicyApi>));
     await screen.findByText("unhcr-card-front.jpg");
 
-    // An empty cell reads as a broken screen; the rule is the useful thing to say.
+    // An empty cell reads as a broken screen; the rule is the useful thing to say — and it is said ON the
+    // row, not in a `title` that needs a hover and does not exist on touch. An officer who filed the
+    // paperwork themselves and then cannot open it deserves the reason without having to go looking.
     expect(screen.getByText(/^locked$/i)).toBeInTheDocument();
+    expect(screen.getByText(/carries a clinical floor/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /view —/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /download —/i })).not.toBeInTheDocument();
+  });
+
+  it("opens the tab on the documents, not on an empty upload form", async () => {
+    renderPanel(stub());
+    await screen.findByText("unhcr-card-front.jpg");
+
+    // The form is behind the + button. Reading is the common case and it used to sit under four controls.
+    expect(screen.queryByRole("combobox", { name: /document type/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^file/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /add document/i })).toBeInTheDocument();
+
+    await openFileDialog();
+    expect(screen.getByRole("combobox", { name: /document type/i })).toBeInTheDocument();
+  });
+
+  it("lists the newest document first whatever order the server returned", async () => {
+    renderPanel(
+      stub({
+        documents: async () => [
+          doc({ linkId: "old", title: "old-scan.jpg", uploadedAt: "2026-01-02T09:00:00Z" }),
+          doc({ linkId: "new", title: "new-scan.jpg", uploadedAt: "2026-05-02T09:00:00Z" }),
+        ],
+      } as Partial<PolicyApi>),
+    );
+
+    // Three scans of the same card, and the current one has to be the one at the top.
+    const names = (await screen.findAllByText(/-scan\.jpg$/)).map((n) => n.textContent);
+    expect(names).toEqual(["new-scan.jpg", "old-scan.jpg"]);
   });
 
   it("refuses an upload with no type and no file, at the fields", async () => {
     const attachDocument = vi.fn();
     renderPanel(stub({ attachDocument } as Partial<PolicyApi>));
     await screen.findByText("unhcr-card-front.jpg");
+    await openFileDialog();
 
     await userEvent.click(screen.getByRole("button", { name: /^upload$/i }));
 
@@ -120,6 +158,7 @@ describe("Beneficiary documents", () => {
   it("states the photo consent rule before the upload is attempted, not as a 422", async () => {
     renderPanel(stub());
     await screen.findByText("unhcr-card-front.jpg");
+    await openFileDialog();
 
     await userEvent.click(screen.getByRole("combobox", { name: /document type/i }));
     await userEvent.click(await screen.findByRole("option", { name: /personal photo/i }));
@@ -134,6 +173,7 @@ describe("Beneficiary documents", () => {
     const attachDocument = vi.fn().mockResolvedValue(doc());
     renderPanel(stub({ attachDocument } as Partial<PolicyApi>));
     await screen.findByText("unhcr-card-front.jpg");
+    await openFileDialog();
 
     await userEvent.click(screen.getByRole("combobox", { name: /document type/i }));
     await userEvent.click(await screen.findByRole("option", { name: /^investigations$/i }));

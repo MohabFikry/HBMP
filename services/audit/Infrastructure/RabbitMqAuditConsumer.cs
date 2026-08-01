@@ -48,12 +48,32 @@ public sealed class RabbitMqAuditConsumer(
         return Task.CompletedTask;
     }
 
+    /*
+     * ============================================================================================================
+     * THE SAME SERIALIZER THE PUBLISHER USES. EVERY AUDIT EVENT ON THE PLATFORM DEPENDED ON THIS.
+     * ============================================================================================================
+     * `OutboxBase` writes payloads with `JsonSerializerDefaults.Web` — camelCase, case-insensitive on read.
+     * This consumer deserialized with the DEFAULT options, which are PascalCase and case-SENSITIVE, so
+     * `auditEventId` never bound to `AuditEventId`. `AuditEvent` declares those properties `required`, so
+     * every single message failed with "missing required properties" and was nacked to the dead-letter queue.
+     *
+     * The failure was invisible in exactly the way that matters: every service emitted its events correctly,
+     * every relay published them, the queue drained, and `audit.audit_event` stayed empty — 0 rows across the
+     * whole platform. Nothing reported an outage, because from every publisher's point of view the write
+     * succeeded. 19-audit-strategy makes the audit trail immutable and hash-chained; none of that helps when
+     * the chain has no links.
+     *
+     * The serializer is shared with the publisher deliberately, rather than set to case-insensitive here: the
+     * two sides of one wire format should be one decision, not two that happen to agree.
+     */
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
     private async Task OnReceivedAsync(BasicDeliverEventArgs ea, CancellationToken ct)
     {
         try
         {
             var json = Encoding.UTF8.GetString(ea.Body.Span);
-            var evt = JsonSerializer.Deserialize<AuditEvent>(json)
+            var evt = JsonSerializer.Deserialize<AuditEvent>(json, Json)
                       ?? throw new InvalidOperationException("null audit payload");
 
             using var scope = scopeFactory.CreateScope();

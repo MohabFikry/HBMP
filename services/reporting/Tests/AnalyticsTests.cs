@@ -254,8 +254,36 @@ public class AnalyticsTests
             series.Should().OnlyContain(s => !string.IsNullOrWhiteSpace(s.SummaryEn));
             series.Should().OnlyContain(s => !string.IsNullOrWhiteSpace(s.SummaryAr));
             series.Should().OnlyContain(s => !string.IsNullOrWhiteSpace(s.TitleAr));
+
+            // §3.1 — the headers are the element the accessible table exists FOR, and they were the only
+            // untranslated text left on an Arabic dashboard.
+            series.Should().OnlyContain(s => s.Columns.All(c => c.IsComplete));
+
+            // §5.8 — the Arabic sentence was composed under InvariantCulture, so it printed Latin numerals
+            // into Arabic prose sitting above figures the client renders Arabic-Indic. One card, two systems.
+            series.Should().OnlyContain(s => !s.SummaryAr.Any(char.IsAsciiDigit));
+            series.Should().Contain(s => s.SummaryAr.Any(ch => ch >= '٠' && ch <= '٩'));
         }
         finally { await Cleanup(tenant); }
+    }
+
+    /// <summary>
+    /// The digit mapping converts EVERY digit, including ones inside an identifier.
+    ///
+    /// <para>Pinned deliberately, as a warning rather than as an endorsement: it is safe on the analytics
+    /// summary because that sentence carries a title, a count, a total and a dimension label, and no business
+    /// key. Reaching for this helper anywhere a member number, an AUTH reference or a card number can appear
+    /// would rewrite the identifier itself — and an identifier is a token to be matched against a card in
+    /// somebody's hand, not a quantity to be localised.</para>
+    /// </summary>
+    [Fact]
+    public void The_digit_mapping_is_indiscriminate_and_must_not_be_pointed_at_identifiers()
+    {
+        AnalyticsQueries.ToArabicIndic("الخطة 12؛ الإجمالي 4,500.75")
+            .Should().Be("الخطة ١٢؛ الإجمالي ٤,٥٠٠.٧٥");
+        AnalyticsQueries.ToArabicIndic("no digits here").Should().Be("no digits here");
+        // The hazard, stated: a reference passed through this would stop being the reference.
+        AnalyticsQueries.ToArabicIndic("AUTH-2026-0777").Should().Be("AUTH-٢٠٢٦-٠٧٧٧");
     }
 
     // ── Filter round-trip ─────────────────────────────────────────────────────────────────────────────────
@@ -297,8 +325,17 @@ public class AnalyticsTests
         Period = Day, OccurredAt = new DateTimeOffset(2026, 6, 15, 9, 0, 0, TimeSpan.Zero),
     };
 
+    /// <summary>
+    /// A movement of the accumulator, under the name policy-service actually publishes.
+    /// </summary>
+    /// <remarks>
+    /// Was <c>BenefitConsumed</c>, which no service has ever published — the projector accepted both that and
+    /// <c>CoverageLimitChanged</c> on one case, so these tests passed against a name that could never arrive.
+    /// A fixture using an event the platform does not emit proves the projector's arithmetic and nothing about
+    /// whether the fact is ever written.
+    /// </remarks>
     private static ReportingEvent Event(string tenant, Guid payer, decimal limit, decimal consumed) =>
-        new(Guid.NewGuid(), "BenefitConsumed", tenant, new Dictionary<string, string>
+        new(Guid.NewGuid(), "CoverageLimitChanged", tenant, new Dictionary<string, string>
         {
             ["policyId"] = Guid.NewGuid().ToString(),
             ["payerId"] = payer.ToString(),
@@ -313,7 +350,7 @@ public class AnalyticsTests
     private static AnalyticsSeries Series(string key, params (string Key, decimal Value)[] points) =>
         new(key, key, key, "count",
             [.. points.Select(p => new AnalyticsPoint(p.Key, p.Key, p.Key, p.Value))],
-            "summary", "ملخص", ["A", "B"]);
+            "summary", "ملخص", [new BiText("A", "أ"), new BiText("B", "ب")]);
 
     private static async Task Cleanup(string tenant)
     {

@@ -120,6 +120,10 @@ public static class BeneficiaryIntakeEndpoints
                         RegistrationId = registrationId, BeneficiaryId = person.BeneficiaryId,
                         TenantId = person.TenantId, Status = RegistrationStatus.Pending,
                         CoverageBound = req.Enrolment is not null,
+                        // The bulk engine runs AS the operator whose file it is, so the applications a file
+                        // creates are filed by that operator — and a request for more information on one of
+                        // them reaches the person who uploaded it, not a queue with no owner.
+                        CreatedBy = actor, CreatedByName = me.Principal?.DisplayName,
                         CreatedAt = now, UpdatedAt = now,
                     });
                     WriteIntent(db, registrationId, person.TenantId, req.Enrolment, now, existing: null);

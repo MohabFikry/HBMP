@@ -388,17 +388,19 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
               <InlineAlert tone={recon.balances ? "ok" : "bad"}>
                 {recon.balances ? t(S.balanced) : t(S.unbalanced)}
               </InlineAlert>
-              <table className="pol-costshare">
-                <caption className="sr-only">{t(S.reconcile)}</caption>
-                <tbody>
-                  <tr><th scope="row">{t(S.submitted)}</th><td>{fmt.number(recon.submitted)}</td></tr>
-                  <tr><th scope="row">{t(S.valid)}</th><td>{fmt.number(recon.valid)}</td></tr>
-                  <tr><th scope="row">{t(S.invalid)}</th><td>{fmt.number(recon.invalid)}</td></tr>
-                  <tr><th scope="row">{t(S.applied)}</th><td>{fmt.number(recon.applied)}</td></tr>
-                  <tr><th scope="row">{t(S.failed)}</th><td>{fmt.number(recon.failed)}</td></tr>
-                  <tr><th scope="row">{t(S.skipped)}</th><td>{fmt.number(recon.skipped)}</td></tr>
-                </tbody>
-              </table>
+              <div className="pol-tablewrap">
+                <table className="pol-costshare">
+                  <caption className="sr-only">{t(S.reconcile)}</caption>
+                  <tbody>
+                    <tr><th scope="row">{t(S.submitted)}</th><td>{fmt.number(recon.submitted)}</td></tr>
+                    <tr><th scope="row">{t(S.valid)}</th><td>{fmt.number(recon.valid)}</td></tr>
+                    <tr><th scope="row">{t(S.invalid)}</th><td>{fmt.number(recon.invalid)}</td></tr>
+                    <tr><th scope="row">{t(S.applied)}</th><td>{fmt.number(recon.applied)}</td></tr>
+                    <tr><th scope="row">{t(S.failed)}</th><td>{fmt.number(recon.failed)}</td></tr>
+                    <tr><th scope="row">{t(S.skipped)}</th><td>{fmt.number(recon.skipped)}</td></tr>
+                  </tbody>
+                </table>
+              </div>
               {recon.errorDocumentId && <InlineAlert tone="info">{t(S.errorFile)}</InlineAlert>}
             </div>
           )}

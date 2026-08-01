@@ -87,8 +87,14 @@ public static class PrescriptionEndpoints
 
             await outbox.EnqueueAsync("RxCreated", "pharmacy.events",
                 new { tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, rx.RxNo, beneficiaryId = rx.BeneficiaryId }, ct);
+            // `orderedByUserId` — the prescriber, carried forward for whoever ingests this into approvals, so
+            // the decision notice has a human to reach. Same reason as OrderPendingApproval (§11.3).
             await outbox.EnqueueAsync("RxSubmitted", "pharmacy.events",
-                new { tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, rx.RxNo, requiresApproval = route.RequiresApproval }, ct);
+                new
+                {
+                    tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, rx.RxNo,
+                    requiresApproval = route.RequiresApproval, orderedByUserId = rx.PrescriberId.ToString(),
+                }, ct);
             if (rx.Status == RxStatus.Approved)
                 await outbox.EnqueueAsync("RxApproved", "pharmacy.events", new { tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, rx.RxNo, auto = true }, ct);
             await tx.CommitAsync(ct);

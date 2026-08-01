@@ -315,6 +315,48 @@ public class PolicyEndpointTests
         finally { await app.CleanupAsync(); }
     }
 
+    /// <summary>
+    /// The Logs tab opens on the day the membership began.
+    ///
+    /// <para>The page is newest-first and cursor-paged, which put the creation — the one line every reader
+    /// wants and the only one that can never be inferred from the others — at the far end of the history. It
+    /// is returned alongside the page now, and removed from it, so a short history does not render the
+    /// enrolment twice.</para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_members_log_is_anchored_on_the_enrolment_and_never_repeats_it()
+    {
+        Skip.If(PolicyApiFactory.Db is null, "POLICY_TEST_DB not set — DB integration test skipped.");
+        await using var app = new PolicyApiFactory();
+        try
+        {
+            using var admin = app.ProductAdminClient();
+            var (policyId, _) = await PolicyWithPlanAsync(app, admin);
+
+            using var memberAdmin = app.MemberAdminClient();
+            var enrolled = await PostAsync(memberAdmin, "/api/v1/enrollments", Guid.NewGuid().ToString(),
+                new CreateEnrollment(Guid.NewGuid(), policyId, null, null, "Principal", null, Today, null, 34, null));
+            enrolled.StatusCode.Should().Be(HttpStatusCode.Created, "{0}", await enrolled.Content.ReadAsStringAsync());
+            var enrollmentId = (await enrolled.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("enrollmentId").GetGuid();
+
+            var page = await memberAdmin.GetFromJsonAsync<JsonElement>(
+                new Uri($"/api/v1/enrollments/{enrollmentId}/timeline", UriKind.Relative), Web);
+
+            var origin = page.GetProperty("origin");
+            origin.ValueKind.Should().NotBe(JsonValueKind.Null, "the log begins where the membership does");
+            origin.GetProperty("eventType").GetString().Should().Be("MemberEnrolled");
+            origin.GetProperty("derived").GetBoolean()
+                .Should().BeFalse("this one was projected from the enrolment — nothing had to be inferred");
+            var originId = origin.GetProperty("entryId").GetGuid();
+
+            page.GetProperty("entries").EnumerateArray()
+                .Select(e => e.GetProperty("entryId").GetGuid())
+                .Should().NotContain(originId, "the anchor is pulled out of the run, not duplicated into it");
+        }
+        finally { await app.CleanupAsync(); }
+    }
+
     [SkippableFact]
     public async Task An_unauthenticated_caller_reaches_nothing()
     {

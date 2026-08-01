@@ -38,7 +38,9 @@ import {
   zBreakGlassGrant,
   zMasterDataVersion,
   zSystemConfigEntry,
-  zRegistrationWorkItem,
+  zBeneficiaryDocument,
+  zRegistrationThreadEntry,
+  zRegistrationWorklistPage,
   zRegistrationDecisionResult,
   zMembershipRow,
   zMembershipDetail,
@@ -96,7 +98,7 @@ import {
   type RoleScopeGrant,
   type ReportAccessRequestRow,
 } from "@mersal/contracts";
-import type { BookingRequest } from "@mersal/contracts";
+import type { BeneficiaryEdit, BookingRequest, BulkDecisionOutcome } from "@mersal/contracts";
 import type { ApiClient, ApiScenario } from "./client";
 import { ApiError } from "./http";
 
@@ -146,6 +148,262 @@ const DEV_INACTIVE = { kind: "neu" as const, label: loc("Inactive", "غير نش
 /** Widened deliberately: the row literals below only mention two of the three, so without this TS narrows
  *  the field to those two and a status change to Inactive stops compiling. */
 type DevStatusChip = typeof DEV_ACTIVE | typeof DEV_SUSPENDED | typeof DEV_INACTIVE;
+
+// ---- Registration approval queue (US-003) ------------------------------------------------------------------
+//
+// Twelve rows, deliberately. The worklist grew search, a status filter, sortable columns and a pager, and every
+// one of those is invisible on a fixture set of three: the pager never appears, the filter never removes
+// anything, and "sort by oldest" reorders rows that were already in order. A fixture that cannot exercise a
+// control is a fixture in which that control's bugs ship.
+//
+// Spread across four filing officers and six weeks so date and officer sorting both do something, and mixed
+// across the three application states plus one legacy row with no application at all.
+const REG_PENDING = { kind: "info" as const, label: loc("Pending", "قيد الانتظار") };
+
+const REGISTRATION_QUEUE = [
+  {
+    beneficiary: {
+      id: "BEN-1", cardNumber: "MF-04821", givenName: "Omar", familyName: "Khaled",
+      status: REG_PENDING, statusRaw: "Pending",
+      identifiers: [{ type: "NationalID", value: "•••2931", isPrimary: true }],
+      birthDate: "1989-03-14", sex: "Male", nationalityCode: "SY", caseNo: "CASE-2211",
+      contacts: [{ type: "Phone", value: "+20 100 ••• 4412", isPrimary: true }],
+    },
+    registration: {
+      id: "REG-1", status: "Pending" as const, documentsVerified: true, coverageBound: true, notes: null,
+      createdAt: "2026-06-18T08:05:00Z", createdBy: "u-layla", createdByName: "Layla Hassan",
+      updatedAt: "2026-07-02T10:20:00Z", threadCount: 0,
+      enrolment: { planId: "PLAN-MERSAL", networkTierId: "TIER-COMP", contributionPercent: 10, defaultBranchId: "BR-MAADI" },
+      standingNotes: [
+        { slot: 1, labelEn: "Known diagnosis", labelAr: "التشخيص المعروف", visibility: "Clinical" as const, value: null, withheld: true },
+        { slot: 2, labelEn: "Forecasted case cost", labelAr: "التكلفة المتوقعة للحالة", visibility: "Administrative" as const, value: "EGP 4,000", withheld: false },
+      ],
+    },
+  },
+  {
+    beneficiary: {
+      id: "BEN-6", cardNumber: "MF-04833", givenName: "Rania", familyName: "Mostafa",
+      status: REG_PENDING, statusRaw: "Pending",
+      identifiers: [{ type: "RefugeeID", value: "R•••501", isPrimary: true }],
+      birthDate: "1994-11-02", sex: "Female", nationalityCode: "SD", individualNo: "IND-7781",
+      contacts: [{ type: "Phone", value: "+20 111 ••• 9087", isPrimary: true }],
+    },
+    registration: {
+      id: "REG-2", status: "InfoRequested" as const, documentsVerified: false, coverageBound: false,
+      notes: "UNHCR letter is expired — request a current one",
+      createdAt: "2026-06-21T11:40:00Z", createdBy: "u-layla", createdByName: "Layla Hassan",
+      updatedAt: "2026-07-14T09:00:00Z", threadCount: 2,
+      enrolment: null, standingNotes: [],
+    },
+  },
+  {
+    beneficiary: {
+      id: "BEN-7", cardNumber: "MF-04902", givenName: "Karim", familyName: "Fawzy",
+      status: REG_PENDING, statusRaw: "Pending",
+      identifiers: [{ type: "UNHCRNo", value: "803-•••12", isPrimary: true }],
+      birthDate: "2001-07-30", sex: "Male", nationalityCode: "SY",
+    },
+    // The legacy row: a Pending person whose application predates auto-creation. The queue must still show
+    // them — a person the queue cannot show is a person nobody reviews.
+    registration: null,
+  },
+  {
+    beneficiary: {
+      id: "BEN-8", cardNumber: "MF-04915", givenName: "Nour", familyName: "Abdelrahman",
+      status: REG_PENDING, statusRaw: "Pending",
+      identifiers: [{ type: "NationalID", value: "•••7744", isPrimary: true }],
+      birthDate: "1978-01-19", sex: "Female", nationalityCode: "EG", caseNo: "CASE-2240",
+    },
+    registration: {
+      id: "REG-4", status: "Pending" as const, documentsVerified: true, coverageBound: false, notes: null,
+      createdAt: "2026-06-29T07:15:00Z", createdBy: "u-tarek", createdByName: "Tarek Sabry",
+      updatedAt: "2026-06-29T07:15:00Z", threadCount: 0,
+      enrolment: { planId: "PLAN-UNCR-DB", networkTierId: "TIER-MERSAL", contributionPercent: 0 },
+      standingNotes: [],
+    },
+  },
+  {
+    beneficiary: {
+      id: "BEN-9", cardNumber: "MF-05001", givenName: "Hala", familyName: "Zaki",
+      status: REG_PENDING, statusRaw: "Pending",
+      identifiers: [{ type: "Passport", value: "P•••338", isPrimary: true }],
+      birthDate: "1996-05-05", sex: "Female", nationalityCode: "SD",
+    },
+    registration: {
+      id: "REG-5", status: "Pending" as const, documentsVerified: false, coverageBound: true, notes: null,
+      createdAt: "2026-07-01T13:25:00Z", createdBy: "u-tarek", createdByName: "Tarek Sabry",
+      updatedAt: "2026-07-01T13:25:00Z", threadCount: 0,
+      enrolment: { planId: "PLAN-MERSAL", networkTierId: "TIER-RESTRICTED", contributionPercent: 20 },
+      standingNotes: [],
+    },
+  },
+  {
+    beneficiary: {
+      id: "BEN-10", cardNumber: "MF-05018", givenName: "Bassel", familyName: "Naim",
+      status: REG_PENDING, statusRaw: "Pending",
+      identifiers: [{ type: "RefugeeID", value: "R•••622", isPrimary: true }],
+      birthDate: "1985-09-12", sex: "Male", nationalityCode: "SY",
+    },
+    registration: {
+      id: "REG-6", status: "InfoRequested" as const, documentsVerified: true, coverageBound: false,
+      notes: "Card copy is unreadable — rescan both sides",
+      createdAt: "2026-07-03T09:50:00Z", createdBy: "u-mona", createdByName: "Mona Adel",
+      updatedAt: "2026-07-19T15:30:00Z", threadCount: 3,
+      enrolment: null, standingNotes: [],
+    },
+  },
+  {
+    beneficiary: {
+      id: "BEN-11", cardNumber: "MF-05033", givenName: "Yara", familyName: "Selim",
+      status: REG_PENDING, statusRaw: "Pending",
+      identifiers: [{ type: "NationalID", value: "•••1180", isPrimary: true }],
+      birthDate: "2010-02-28", sex: "Female", nationalityCode: "EG", caseNo: "CASE-2240",
+    },
+    registration: {
+      id: "REG-7", status: "Pending" as const, documentsVerified: true, coverageBound: true, notes: null,
+      createdAt: "2026-07-06T08:00:00Z", createdBy: "u-mona", createdByName: "Mona Adel",
+      updatedAt: "2026-07-06T08:00:00Z", threadCount: 0,
+      enrolment: { planId: "PLAN-MERSAL", networkTierId: "TIER-COMP", contributionPercent: 10, defaultBranchId: "BR-MAADI" },
+      standingNotes: [],
+    },
+  },
+  {
+    beneficiary: {
+      id: "BEN-12", cardNumber: "MF-05047", givenName: "Ismail", familyName: "Darwish",
+      status: REG_PENDING, statusRaw: "Pending",
+      identifiers: [{ type: "UNHCRNo", value: "803-•••55", isPrimary: true }],
+      birthDate: "1962-12-01", sex: "Male", nationalityCode: "SY",
+    },
+    registration: {
+      id: "REG-8", status: "Pending" as const, documentsVerified: false, coverageBound: false, notes: null,
+      createdAt: "2026-07-09T14:10:00Z", createdBy: "u-fady", createdByName: "Fady Boutros",
+      updatedAt: "2026-07-09T14:10:00Z", threadCount: 0,
+      enrolment: null, standingNotes: [],
+    },
+  },
+  {
+    beneficiary: {
+      id: "BEN-13", cardNumber: "MF-05060", givenName: "Sara", familyName: "Gamal",
+      status: REG_PENDING, statusRaw: "Pending",
+      identifiers: [{ type: "NationalID", value: "•••4407", isPrimary: true }],
+      birthDate: "1999-08-21", sex: "Female", nationalityCode: "EG",
+    },
+    registration: {
+      id: "REG-9", status: "Pending" as const, documentsVerified: true, coverageBound: true, notes: null,
+      createdAt: "2026-07-13T10:35:00Z", createdBy: "u-fady", createdByName: "Fady Boutros",
+      updatedAt: "2026-07-13T10:35:00Z", threadCount: 0,
+      enrolment: { planId: "PLAN-UNCR-CR", networkTierId: "TIER-MERSAL", contributionPercent: 15 },
+      standingNotes: [],
+    },
+  },
+  {
+    beneficiary: {
+      id: "BEN-14", cardNumber: "MF-05072", givenName: "Ahmed", familyName: "Sherif",
+      status: REG_PENDING, statusRaw: "Pending",
+      identifiers: [{ type: "Passport", value: "P•••901", isPrimary: true }],
+      birthDate: "1991-04-04", sex: "Male", nationalityCode: "SD",
+    },
+    registration: {
+      id: "REG-10", status: "Rejected" as const, documentsVerified: false, coverageBound: false,
+      notes: "Not eligible — resident outside the programme's governorates",
+      createdAt: "2026-07-15T12:00:00Z", createdBy: "u-layla", createdByName: "Layla Hassan",
+      updatedAt: "2026-07-20T08:45:00Z", threadCount: 1,
+      enrolment: null, standingNotes: [],
+    },
+  },
+  {
+    beneficiary: {
+      id: "BEN-15", cardNumber: "MF-05088", givenName: "Malak", familyName: "Riad",
+      status: REG_PENDING, statusRaw: "Pending",
+      identifiers: [{ type: "RefugeeID", value: "R•••733", isPrimary: true }],
+      birthDate: "2015-06-17", sex: "Female", nationalityCode: "SY", caseNo: "CASE-2311",
+    },
+    registration: {
+      id: "REG-11", status: "Pending" as const, documentsVerified: true, coverageBound: true, notes: null,
+      createdAt: "2026-07-20T09:05:00Z", createdBy: "u-tarek", createdByName: "Tarek Sabry",
+      updatedAt: "2026-07-20T09:05:00Z", threadCount: 0,
+      enrolment: { planId: "PLAN-MERSAL", networkTierId: "TIER-COMP", contributionPercent: 0, defaultBranchId: "BR-SHOUBRA" },
+      standingNotes: [],
+    },
+  },
+  {
+    beneficiary: {
+      id: "BEN-16", cardNumber: "MF-05094", givenName: "Ziad", familyName: "Kamel",
+      status: REG_PENDING, statusRaw: "Pending",
+      identifiers: [{ type: "NationalID", value: "•••6620", isPrimary: true }],
+      birthDate: "1973-10-09", sex: "Male", nationalityCode: "EG",
+    },
+    registration: {
+      id: "REG-12", status: "Pending" as const, documentsVerified: false, coverageBound: true, notes: null,
+      createdAt: "2026-07-27T07:45:00Z", createdBy: "u-mona", createdByName: "Mona Adel",
+      updatedAt: "2026-07-27T07:45:00Z", threadCount: 0,
+      enrolment: { planId: "PLAN-MERSAL", networkTierId: "TIER-RESTRICTED", contributionPercent: 25 },
+      standingNotes: [],
+    },
+  },
+];
+
+/** Threads keyed by registration id. Mutable, so a reply posted in the dev app persists for the session. */
+const REGISTRATION_THREADS: Record<string, Array<{
+  id: string; kind: "Decision" | "Reply"; decision: "Approve" | "RequestInfo" | "Reject" | null;
+  body: string; authorName: string | null; authorRole: string | null; createdAt: string;
+}>> = {
+  "REG-2": [
+    {
+      id: "THR-2-1", kind: "Decision", decision: "RequestInfo",
+      body: "UNHCR letter is expired — request a current one",
+      authorName: "Dina Farouk", authorRole: "beneficiary_mgmt_supervisor", createdAt: "2026-07-14T09:00:00Z",
+    },
+    {
+      id: "THR-2-2", kind: "Reply", decision: null,
+      body: "Beneficiary has an appointment at UNHCR on 5 August. I will upload the new letter the same day.",
+      authorName: "Layla Hassan", authorRole: "beneficiary_mgmt", createdAt: "2026-07-15T11:20:00Z",
+    },
+  ],
+  "REG-6": [
+    {
+      id: "THR-6-1", kind: "Decision", decision: "RequestInfo",
+      body: "Card copy is unreadable — rescan both sides",
+      authorName: "Dina Farouk", authorRole: "beneficiary_mgmt_supervisor", createdAt: "2026-07-16T13:05:00Z",
+    },
+    {
+      id: "THR-6-2", kind: "Reply", decision: null,
+      body: "Rescanned the front. The back is faded on the physical card; the member is applying for a reprint.",
+      authorName: "Mona Adel", authorRole: "beneficiary_mgmt", createdAt: "2026-07-18T08:40:00Z",
+    },
+    {
+      id: "THR-6-3", kind: "Reply", decision: null,
+      body: "Reprint issued today, card number unchanged. New scan uploaded.",
+      authorName: "Mona Adel", authorRole: "beneficiary_mgmt", createdAt: "2026-07-19T15:30:00Z",
+    },
+  ],
+  "REG-10": [
+    {
+      id: "THR-10-1", kind: "Decision", decision: "Reject",
+      body: "Not eligible — resident outside the programme's governorates",
+      authorName: "Dina Farouk", authorRole: "beneficiary_mgmt_supervisor", createdAt: "2026-07-20T08:45:00Z",
+    },
+  ],
+};
+
+/** Documents filed against a beneficiary, keyed by beneficiary id. Metadata only — no bytes. */
+const REGISTRATION_DOCUMENTS: Record<string, Array<{
+  id: string; docType: string; classification: string; uploadedAt: string | null; uploadedBy: string | null;
+}>> = {
+  "BEN-1": [
+    { id: "DOC-1", docType: "CardCopy", classification: "Administrative", uploadedAt: "2026-06-18T08:12:00Z", uploadedBy: "Layla Hassan" },
+    { id: "DOC-2", docType: "IdentityDocument", classification: "Administrative", uploadedAt: "2026-06-18T08:14:00Z", uploadedBy: "Layla Hassan" },
+  ],
+  "BEN-6": [
+    { id: "DOC-3", docType: "IdentityDocument", classification: "Administrative", uploadedAt: "2026-06-21T11:52:00Z", uploadedBy: "Layla Hassan" },
+  ],
+  "BEN-10": [
+    { id: "DOC-4", docType: "CardCopy", classification: "Administrative", uploadedAt: "2026-07-19T15:28:00Z", uploadedBy: "Mona Adel" },
+    // A clinical class an administrative role may see EXISTS but not open — the same locked state the
+    // documents screen renders. It is here so the modal's withheld path is exercised, not theoretical.
+    { id: "DOC-5", docType: "MedicalReport", classification: "Clinical", uploadedAt: "2026-07-03T10:00:00Z", uploadedBy: "Mona Adel" },
+  ],
+};
 
 function ok<T>(schema: z.ZodType<T>, data: unknown): T {
   const r = schema.safeParse(data);
@@ -1671,39 +1929,54 @@ export class DevApiClient implements ApiClient {
     return this.gate(() => ok(zStatusChangeResult, { id, status: { kind: toStatus === "Active" ? "ok" : "warn", label: loc(toStatus, toStatus) } }));
   }
 
-  // Registration approval worklist (US-003). The three shapes the screen must make legible: an application
-  // mid-preparation, one bounced back for more information, and a legacy beneficiary with no application.
+  // Registration approval worklist (US-003). The shapes the screen must make legible: an application ready to
+  // approve, one mid-preparation, one bounced back for more information, and a legacy beneficiary with no
+  // application at all. Enough rows, and enough SPREAD of date and officer, that search, the status filter,
+  // sorting and the pager all do something visible in fixture mode — a fixture set of three makes every one of
+  // those controls look broken.
   registrationWorklist() {
-    return this.gate(
-      () =>
-        ok(z.array(zRegistrationWorkItem), [
-          {
-            beneficiary: {
-              id: "BEN-1", memberNo: undefined, givenName: "Omar", familyName: "Khaled",
-              status: { kind: "info", label: loc("Pending", "قيد الانتظار") }, statusRaw: "Pending",
-              identifiers: [{ type: "NationalID", value: "•••2931", isPrimary: true }],
-            },
-            registration: { id: "REG-1", status: "Pending", documentsVerified: true, coverageBound: false, notes: null },
-          },
-          {
-            beneficiary: {
-              id: "BEN-6", memberNo: undefined, givenName: "Rania", familyName: "Mostafa",
-              status: { kind: "info", label: loc("Pending", "قيد الانتظار") }, statusRaw: "Pending",
-              identifiers: [{ type: "RefugeeID", value: "R•••501", isPrimary: true }],
-            },
-            registration: { id: "REG-2", status: "InfoRequested", documentsVerified: false, coverageBound: false, notes: "UNHCR letter is expired — request a current one" },
-          },
-          {
-            beneficiary: {
-              id: "BEN-7", memberNo: undefined, givenName: "Karim", familyName: "Fawzy",
-              status: { kind: "info", label: loc("Pending", "قيد الانتظار") }, statusRaw: "Pending",
-              identifiers: [{ type: "UNHCRNo", value: "803-•••12", isPrimary: true }],
-            },
-            registration: null,
-          },
-        ]),
-      [],
-    );
+    return this.gate(() => ok(zRegistrationWorklistPage, { items: REGISTRATION_QUEUE, total: REGISTRATION_QUEUE.length }), {
+      items: [],
+      total: 0,
+    });
+  }
+  registrationThread(id: string) {
+    return this.gate(() => ok(z.array(zRegistrationThreadEntry), REGISTRATION_THREADS[id] ?? []), []);
+  }
+  replyToRegistration(id: string, body: string) {
+    return this.gate(() => {
+      const entry = {
+        id: `THR-${id}-${(REGISTRATION_THREADS[id]?.length ?? 0) + 1}`,
+        kind: "Reply" as const,
+        decision: null,
+        body,
+        authorName: "Layla Hassan",
+        authorRole: "beneficiary_mgmt",
+        createdAt: "2026-07-31T09:15:00Z",
+      };
+      // Written back into the fixture so the modal shows the reply it just posted, exactly as a live thread
+      // would — a reply that vanishes on reload is the bug this screen exists to avoid.
+      REGISTRATION_THREADS[id] = [...(REGISTRATION_THREADS[id] ?? []), entry];
+      return ok(zRegistrationThreadEntry, entry);
+    });
+  }
+  beneficiary(id: string) {
+    // Reuses the approval queue's people, so the detail and the worklist agree about who exists.
+    const hit = REGISTRATION_QUEUE.find((r) => r.beneficiary.id === id)?.beneficiary;
+    return this.gate(() => ok(zBeneficiaryRow, hit ?? {
+      id, givenName: "Amina", familyName: "Yusuf",
+      status: REG_PENDING, statusRaw: "Pending", identifiers: [],
+      birthDate: "1992-04-11", sex: "Female", nationalityCode: "SY", caseNo: "CASE-2211",
+      contacts: [{ type: "Phone", value: "+20 100 ••• 4412", isPrimary: true }],
+    }));
+  }
+  updateBeneficiary(_id: string, edit: BeneficiaryEdit) {
+    // Echoes the field names back, which is what the screen announces — "3 fields updated" is the confirmation
+    // an operator needs, and inventing a fixed answer would hide a form that sent nothing.
+    return this.gate(() => ({ changed: Object.keys(edit) }));
+  }
+  beneficiaryDocuments(beneficiaryId: string) {
+    return this.gate(() => ok(z.array(zBeneficiaryDocument), REGISTRATION_DOCUMENTS[beneficiaryId] ?? []), []);
   }
   createRegistration() {
     return this.gate(() => undefined);
@@ -1717,6 +1990,24 @@ export class DevApiClient implements ApiClient {
         ? { status: "Active", memberNo: "MRS-M-2026-000418" }
         : { status: decision === "Reject" ? "Rejected" : "InfoRequested" }),
     );
+  }
+  async decideRegistrations(ids: readonly string[], decision: "Approve" | "RequestInfo" | "Reject") {
+    const outcomes: BulkDecisionOutcome[] = [];
+    for (const id of ids) {
+      // One row refuses, so the screen's partial-result path is exercised in fixture mode rather than only
+      // against a live server. A bulk action that has never been seen to half-fail is a bulk action whose
+      // failure branch has never been read.
+      //
+      // REG-9 deliberately: its guards BOTH hold, so the client lets it through and the server still says no.
+      // That is the real shape of a bulk refusal — somebody unbound the coverage between the page loading and
+      // the supervisor pressing confirm — and picking a row the client would have blocked anyway would
+      // exercise nothing.
+      const blocked = decision === "Approve" && id === "REG-9";
+      outcomes.push(blocked
+        ? { registrationId: id, ok: false, error: "cannot approve: no policy/coverage is bound" }
+        : { registrationId: id, ok: true, memberNo: decision === "Approve" ? "MRS-M-2026-000418" : undefined });
+    }
+    return outcomes;
   }
 
   adminMasterData() {

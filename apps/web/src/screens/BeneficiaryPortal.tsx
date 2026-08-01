@@ -3,24 +3,19 @@ import { useNavigate } from "react-router-dom";
 import {
   Button,
   Card,
-  DataTable,
   InlineAlert,
   InputField,
   Combobox,
-  Modal,
+  Icon,
   SegmentedControl,
   StatusChip,
   TextareaField,
-  useToast,
 } from "@mersal/design-system";
 import { useWrite } from "../api/useWrite";
-import type { Column, ComboboxOption } from "@mersal/design-system";
-import type { BeneficiaryRow, Localized, RegisterBeneficiaryInput, RegistrationWorkItem } from "@mersal/contracts";
+import type { ComboboxOption } from "@mersal/design-system";
+import type { Localized, RegisterBeneficiaryInput } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
-import { useAsync } from "../api/useAsync";
-import { useAuth } from "../auth/AuthProvider";
-import { ApiError } from "../api/http";
-import { AsyncSection, classifyReadError, PageHeader, useLoc } from "./_shared";
+import { PageHeader, useLoc } from "./_shared";
 import { NATIONALITIES, DIAL_CODES } from "../data/nationalities";
 import { flagUrl } from "../data/flags";
 import { useRegistrationReference } from "./useRegistrationReference";
@@ -34,14 +29,14 @@ import type { PolicyApi } from "../api/policyApi";
 const policyApiForRegistration = createHttpPolicyApi();
 
 const S = {
-  manageTitle: { en: "Search / manage", ar: "بحث / إدارة" },
-  statusTitle: { en: "Status & reactivation", ar: "الحالة وإعادة التفعيل" },
+  manageTitle: { en: "Search / Manage", ar: "بحث / إدارة" },
+  statusTitle: { en: "Status & Reactivation", ar: "الحالة وإعادة التفعيل" },
   registerTitle: { en: "Register New", ar: "تسجيل جديد" },
   searchField: { en: "Search by name", ar: "ابحث بالاسم" },
   search: { en: "Search", ar: "بحث" },
   idle: { en: "Search for a beneficiary by name.", ar: "ابحث عن مستفيد بالاسم." },
   manageIntro: {
-    en: "Find a beneficiary and open their record. Registration state changes live in Status & reactivation.",
+    en: "Find a beneficiary and open their record. Registration state changes live in Status & Reactivation.",
     ar: "ابحث عن مستفيد وافتح سجلّه. تغييرات حالة التسجيل في «الحالة وإعادة التفعيل».",
   },
   statusIntro: {
@@ -99,7 +94,7 @@ const S = {
   // would lead the operator to re-type and re-submit — manufacturing the duplicate record the identifier
   // check exists to prevent. The remedy is the search screen.
   alreadyRegistered: {
-    en: "This identifier is already registered. Open Search / manage to find the existing record — registering again would create a duplicate.",
+    en: "This identifier is already registered. Open Search / Manage to find the existing record — registering again would create a duplicate.",
     ar: "هذا المعرّف مسجَّل بالفعل. افتح «بحث / إدارة» للعثور على السجل الموجود — التسجيل مرة أخرى سينشئ سجلًا مكررًا.",
   },
   // A DIFFERENT remedy from the identifier clash, which is why it is a different message. A card conflict is
@@ -120,11 +115,14 @@ const S = {
   secDocuments: { en: "Documents", ar: "المستندات" },
 
   cardNumber: { en: "Card number", ar: "رقم البطاقة" },
-  cardHelp: { en: "Usually starts with #", ar: "يبدأ عادةً بعلامة #" },
+  // "Usually starts with #" told the operator about a character and nothing about the thing. The card
+  // number is the key the whole record dedupes on, so the hint says where to read it from and that the #
+  // is optional — which is the question the old wording actually raised.
+  cardHelp: { en: "The number printed on the beneficiary's card. A leading # is optional.", ar: "الرقم المطبوع على بطاقة المستفيد. علامة # في البداية اختيارية." },
   cardInvalid: { en: "Letters, digits, hyphen and slash only.", ar: "حروف وأرقام وشرطة وشرطة مائلة فقط." },
   statusPending: { en: "Pending", ar: "قيد الانتظار" },
   statusLocked: {
-    en: "Every registration starts as Pending. Activating a member is a supervisor's decision, taken once the documents are verified — you can change status later in Status & reactivation.",
+    en: "Every registration starts as Pending. Activating a member is a supervisor's decision, taken once the documents are verified — you can change status later in Status & Reactivation.",
     ar: "يبدأ كل تسجيل بحالة «قيد الانتظار». تفعيل العضو قرار المشرف بعد التحقق من المستندات — ويمكن تغيير الحالة لاحقًا من «الحالة وإعادة التفعيل».",
   },
   gender: { en: "Gender", ar: "النوع" },
@@ -195,222 +193,18 @@ const ID_TYPE_LABELS: Record<(typeof ID_TYPES)[number], Localized> = {
   UNHCRNo: { en: "UNHCR number", ar: "رقم المفوضية (UNHCR)" },
 };
 
-/**
- * The transitions this DESK may offer, per current status — the UI mirror of `BeneficiaryLifecycle` +
- * 23 §1's Actor column. Offering an illegal move (the old screen showed Activate/Suspend on every row)
- * just manufactures 409s: the server refuses, and the operator learns the rules by being told off.
+/*
+ * Search / Manage and Status & Reactivation lived here and are GONE (19.7 nav rework).
  *
- * `needsReason` mirrors `RequiresReason`: a reason is demanded exactly where the server records one, and
- * not where it would be theatre (activation needs no justification — it is the default good outcome).
- * Blocked is absent on purpose: both edges of the fraud state are a director's, and the screen says so
- * instead of rendering a button that 403s.
+ * Search / Manage was a second, weaker search over the registry that the Beneficiaries list already
+ * searches — two screens answering one question is two places for the answers to differ.
+ *
+ * Status & Reactivation was a screen whose whole job was: find a person you were usually just looking at,
+ * then press one button. It is an action on a record, not a place. It now opens from the beneficiary's
+ * detail as `Status change`, next to Change plan — see `BeneficiaryStatusDialog.tsx`, which holds the
+ * transition table and the dialog unchanged.
  */
-const DESK_TRANSITIONS: Record<string, Array<{ to: string; label: Localized; needsReason: boolean; danger?: boolean }>> = {
-  Pending: [
-    { to: "Active", label: S.activate, needsReason: false },
-    { to: "Inactive", label: S.deactivate, needsReason: true, danger: true },
-  ],
-  Active: [
-    { to: "Suspended", label: S.suspend, needsReason: true, danger: true },
-    { to: "Inactive", label: S.deactivate, needsReason: true, danger: true },
-  ],
-  Suspended: [{ to: "Active", label: S.reinstate, needsReason: false }],
-  Expired: [{ to: "Active", label: S.renew, needsReason: false }],
-  Inactive: [{ to: "Active", label: S.reactivate, needsReason: false }],
-  Blocked: [],
-};
 
-function beneficiaryColumns(t: (l: Localized) => string): Column<BeneficiaryRow>[] {
-  return [
-    { key: "name", header: t(S.name), cell: (r) => `${r.givenName} ${r.familyName}` },
-    { key: "member", header: t(S.memberNo), cell: (r) => <span className="tnum">{r.memberNo ?? "—"}</span> },
-    { key: "id", header: t(S.identifier), cell: (r) => <span className="tnum">{r.identifiers[0] ? `${r.identifiers[0].type}: ${r.identifiers[0].value}` : "—"}</span> },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-  ];
-}
-
-/** A shared name search that renders its results through a caller-supplied column set. */
-function BeneficiarySearch({ title, intro, extraCols }: { title: Localized; intro?: Localized; extraCols?: (reload: () => void) => Column<BeneficiaryRow> }) {
-  const api = useApi();
-  const t = useLoc();
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<"idle" | "loading" | "error" | "ready">("idle");
-  const [error, setError] = useState<ApiError | null>(null);
-  const [rows, setRows] = useState<BeneficiaryRow[]>([]);
-
-  async function run(e: React.FormEvent) {
-    e.preventDefault();
-    if (query.trim().length < 1) return;
-    setStatus("loading");
-    setError(null);
-    try {
-      setRows(await api.beneficiarySearch({ name: query.trim() }));
-      setStatus("ready");
-    } catch (err) {
-      // The typed failure is kept: a 403 ("outside your permissions") and a dropped connection demand
-      // different actions, and the old single "couldn't reach the registry" line hid which one happened.
-      setError(err instanceof ApiError ? err : new ApiError("network", String(err)));
-      setStatus("error");
-    }
-  }
-  const reload = () => void run({ preventDefault() {} } as React.FormEvent);
-
-  const cols = beneficiaryColumns(t);
-  if (extraCols) cols.push(extraCols(reload));
-
-  return (
-    <>
-      <PageHeader title={t(title)} />
-      <Card as="section" style={{ padding: "var(--sp5)" }}>
-        {/* QA P1-6: this screen is shared by two sections that rendered byte-identically before the first
-            search — the caller now states what the page DOES, so an operator knows which door they are in. */}
-        {intro ? <p className="muted" style={{ marginTop: 0 }}>{t(intro)}</p> : null}
-        <form onSubmit={run} className="stack" aria-label={t(title)}>
-          <InputField label={t(S.searchField)} value={query} onChange={(e) => setQuery(e.currentTarget.value)} autoComplete="off" />
-          <div><Button type="submit" variant="primary" loading={status === "loading"}>{t(S.search)}</Button></div>
-        </form>
-      </Card>
-      <div aria-live="polite" style={{ marginTop: "var(--sp4)" }}>
-        {status === "idle" && <Card style={{ padding: "var(--sp5)" }}><p className="muted">{t(S.idle)}</p></Card>}
-        {status === "error" && (
-          <Card style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp3)" }}>
-            <InlineAlert tone="bad">
-              <span>{t(classifyReadError(error).headline)}</span>
-              {error?.problem?.detail ? (
-                <span style={{ display: "block", marginTop: "var(--sp1)", opacity: 0.85, fontSize: "0.9em" }}>{error.problem.detail}</span>
-              ) : null}
-            </InlineAlert>
-            {classifyReadError(error).remedy === "retry" ? (
-              <div><Button variant="secondary" onClick={reload}>{t(S.retry)}</Button></div>
-            ) : null}
-          </Card>
-        )}
-        {status === "ready" && rows.length === 0 && <Card style={{ padding: "var(--sp5)" }}><StatusChip kind="neu" label={t(S.none)} /></Card>}
-        {status === "ready" && rows.length > 0 && (
-          <Card as="section" style={{ padding: "var(--sp3)" }}>
-            <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(title)} />
-          </Card>
-        )}
-      </div>
-    </>
-  );
-}
-
-/** Search / manage — find a beneficiary and OPEN them (QA P1-7: the rows were a dead end, on the very
- *  screen the duplicate-registration message sends people to). Opens the unified patient profile, whose
- *  server-side projection decides what this role sees of it. */
-export function BeneficiaryManage() {
-  const t = useLoc();
-  const navigate = useNavigate();
-  const openCol = (): Column<BeneficiaryRow> => ({
-    key: "open",
-    header: "",
-    cell: (r) => (
-      <Button variant="secondary" size="sm" onClick={() => navigate(`/patients/${encodeURIComponent(r.id)}`)}>
-        {t(S.open)}
-      </Button>
-    ),
-  });
-  return <BeneficiarySearch title={S.manageTitle} intro={S.manageIntro} extraCols={openCol} />;
-}
-
-/** Status & reactivation — find a beneficiary, then apply a LEGAL lifecycle transition with a reason. */
-export function BeneficiaryStatus() {
-  const t = useLoc();
-  const [target, setTarget] = useState<{ row: BeneficiaryRow; reload: () => void } | null>(null);
-
-  const actionCol = (reload: () => void): Column<BeneficiaryRow> => ({
-    key: "action",
-    header: t(S.action),
-    cell: (r) =>
-      (DESK_TRANSITIONS[r.statusRaw] ?? []).length === 0 ? (
-        // Not an empty cell: an absent button with no explanation reads as a broken screen. The desk can't
-        // act on a Blocked record, and the reason why is the useful thing to say.
-        <span className="muted">{t(S.blockedLocked)}</span>
-      ) : (
-        <Button variant="secondary" size="sm" onClick={() => setTarget({ row: r, reload })}>
-          {t(S.changeStatus)}
-        </Button>
-      ),
-  });
-
-  return (
-    <>
-      <BeneficiarySearch title={S.statusTitle} intro={S.statusIntro} extraCols={actionCol} />
-      {target ? (
-        <StatusChangeModal
-          row={target.row}
-          onClose={() => setTarget(null)}
-          onChanged={() => {
-            setTarget(null);
-            // Server truth, not local patching: reactivation can ISSUE a member number now, and only a
-            // re-query shows it. The re-read is a fresh disclosure and is audited as one.
-            target.reload();
-          }}
-        />
-      ) : null}
-    </>
-  );
-}
-
-function StatusChangeModal({ row, onClose, onChanged }: { row: BeneficiaryRow; onClose: () => void; onChanged: () => void }) {
-  const api = useApi();
-  const t = useLoc();
-  const { toast } = useToast();
-  const write = useWrite();
-  const options = DESK_TRANSITIONS[row.statusRaw] ?? [];
-  const [choice, setChoice] = useState(options.length === 1 ? options[0].to : "");
-  const [reason, setReason] = useState("");
-  const [touched, setTouched] = useState(false);
-
-  const selected = options.find((o) => o.to === choice);
-  const reasonError = touched && selected?.needsReason && reason.trim() === "" ? t(S.reasonRequired) : undefined;
-
-  const confirm = async () => {
-    setTouched(true);
-    if (!selected) return;
-    if (selected.needsReason && reason.trim() === "") return;
-    const ok = await write.run(() => api.changeBeneficiaryStatus(row.id, selected.to, reason.trim()));
-    if (ok) {
-      toast(t(S.changed), "ok");
-      onChanged();
-    }
-    // On failure the modal STAYS OPEN with the typed error rendered below — the old screen's try/finally
-    // swallowed the rejection entirely, so a 409 looked identical to success with a stopped spinner.
-  };
-
-  return (
-    <Modal
-      open
-      onOpenChange={(o) => !o && onClose()}
-      title={`${t(S.changeStatusFor)} — ${row.givenName} ${row.familyName}`}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>{t(S.cancel)}</Button>
-          <Button variant={selected?.danger ? "danger" : "primary"} onClick={confirm} disabled={write.busy || !selected}>
-            {t(S.confirm)}
-          </Button>
-        </>
-      }
-    >
-      {write.error ? <InlineAlert tone="bad">{t(write.error.message)}</InlineAlert> : null}
-
-      <fieldset className="mrs-choice">
-        <legend className="mrs-label">{t(S.newStatus)}</legend>
-        {options.map((o) => (
-          <label key={o.to} className="mrs-choice-opt">
-            <input type="radio" name="transition" value={o.to} checked={choice === o.to} onChange={() => setChoice(o.to)} />
-            <span>{t(o.label)}</span>
-          </label>
-        ))}
-      </fieldset>
-
-      {selected?.needsReason ? (
-        <InputField label={t(S.reason)} value={reason} error={reasonError} onChange={(e) => setReason(e.currentTarget.value)} autoComplete="off" />
-      ) : null}
-    </Modal>
-  );
-}
 
 /**
  * Register new — the operational registration record (US-001).
@@ -507,7 +301,10 @@ function ComboField({
       <Combobox
         id={id}
         aria-labelledby={labelId}
-        aria-describedby={help ? `${id}-help` : error ? `${id}-err` : undefined}
+        /* Both, joined — the ternary announced the help text INSTEAD of the error whenever a field had
+           both, which is exactly when the error matters most. `Labelled` in the design system joins them;
+           this is the same contract, not a second one. */
+        aria-describedby={[help && `${id}-help`, error && `${id}-err`].filter(Boolean).join(" ") || undefined}
         options={options}
         value={value}
         onChange={onChange}
@@ -517,7 +314,12 @@ function ComboField({
       />
       {help && <div className="mrs-help" id={`${id}-help`}>{help}</div>}
       {error && (
+        /* The icon is not decoration: without it a chosen field's error is red text and nothing else, so a
+           reader who cannot see red sees an ordinary caption. Every typed field on this form already
+           renders it (design-system `Labelled`); the chosen ones were the only ones that did not, which is
+           why "Required." looked like a hint and "✕ Enter a real date" looked like a failure. */
         <div className="mrs-error" id={`${id}-err`} role="alert">
+          <Icon name="cross" />
           <span>{error}</span>
         </div>
       )}
@@ -601,13 +403,43 @@ function RegisterOneMember({ policyApi }: { policyApi: PolicyApi }) {
     }
   };
   const REQUIRED_ORDER = [
-    ["reg-card", "cardNumber"], ["reg-given", "givenName"], ["reg-middle", "middleName"],
-    ["reg-family", "familyName"], ["reg-sex", "sex"], ["reg-nationality", "nationalityCode"],
-    ["reg-birth", "birthDate"], ["reg-phone", "phoneNumber"], ["reg-plan", "planId"],
-    ["reg-tier", "networkTierId"], ["reg-contribution", "contribution"], ["reg-id-value", "idValue"],
+    ["reg-card", "cardNumber", S.cardNumber], ["reg-given", "givenName", S.givenName],
+    ["reg-middle", "middleName", S.middleName], ["reg-family", "familyName", S.familyName],
+    ["reg-sex", "sex", S.gender], ["reg-nationality", "nationalityCode", S.nationality],
+    ["reg-birth", "birthDate", S.birthDate], ["reg-phone", "phoneNumber", S.phone],
+    ["reg-plan", "planId", S.plan], ["reg-tier", "networkTierId", S.networkTier],
+    ["reg-contribution", "contribution", S.contribution], ["reg-id-value", "idValue", S.idValue],
   ] as const;
   const invalid = () => REQUIRED_ORDER.some(([, key]) => invalidField(key));
-  const err = (key: string, message: Localized) => (touched && invalidField(key) ? t(message) : undefined);
+
+  /**
+   * Is the field invalid only because nothing was typed in it?
+   *
+   * Every typed field failed with its FORMAT rule regardless of why it failed, so an operator who pressed
+   * Register on an empty form was told "Names can contain letters, spaces, hyphens, apostrophes and periods
+   * only" under three blank name boxes, and "Enter 8–15 digits, with an optional leading +" under a blank
+   * phone. That is an answer to a question nobody asked: the field is not wrong, it is missing. Worse, the
+   * chosen fields beside them said "Required." — so the same failure had two different explanations
+   * depending on whether the control happened to be a text box or a droplist.
+   *
+   * The format rule is still exactly right once something HAS been typed, which is the case it was written
+   * for. This only decides which of the two sentences applies.
+   */
+  const isMissing = (key: string): boolean => {
+    switch (key) {
+      case "cardNumber": return f.cardNumber.trim() === "";
+      case "givenName": return f.givenName.trim() === "";
+      case "familyName": return f.familyName.trim() === "";
+      case "birthDate": return f.birthDate.trim() === "";
+      case "phoneNumber": return f.phoneNumber.trim() === "";
+      case "contribution": return f.contribution.trim() === "";
+      case "idValue": return f.idValue.trim() === "";
+      // `middleName` is optional: blank is valid, so it never reaches here.
+      default: return false;
+    }
+  };
+  const err = (key: string, message: Localized) =>
+    touched && invalidField(key) ? t(isMissing(key) ? S.required : message) : undefined;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -704,6 +536,37 @@ function RegisterOneMember({ policyApi }: { policyApi: PolicyApi }) {
           bubbles must not pre-empt our submit handler — the app renders its own field errors, summary and
           focus management, in both languages. */}
       <form onSubmit={submit} noValidate className="ben-form" aria-label={t(S.registerTitle)}>
+
+        {/*
+          * The error summary, at the TOP of the form.
+          *
+          * It used to be the "fix the marked fields" line in the live region beside the Register button —
+          * correct for a screen reader, and around 1300px below the first error for everyone else (audit
+          * §5.10). This form is seven sections tall; a refusal reported only at the bottom leaves a sighted
+          * operator scrolling a long page hunting for red.
+          *
+          * It NAMES the fields rather than saying how many, and each name is a link to its control, so the
+          * summary is also the way back to the work. Focus still moves to the first invalid field on submit
+          * (that is the faster path for a keyboard user, and it is where the field-level message is); this is
+          * the map for everyone who then scrolls away from it.
+          */}
+        {touched && status === "idle" && !write.error && invalid() && (
+          <div className="ben-errorsummary" role="alert" tabIndex={-1} data-testid="register-error-summary">
+            <InlineAlert tone="bad">{t(S.fixMarked)}</InlineAlert>
+            <ul>
+              {REQUIRED_ORDER.filter(([, key]) => invalidField(key)).map(([id, key, label]) => (
+                <li key={key}>
+                  <a
+                    href={`#${id}`}
+                    onClick={(e) => { e.preventDefault(); document.getElementById(id)?.focus(); }}
+                  >
+                    {t(label)}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* ---- 1 · Identity ------------------------------------------------------------------------- */}
         <fieldset className="ben-section">
@@ -834,7 +697,7 @@ function RegisterOneMember({ policyApi }: { policyApi: PolicyApi }) {
 
             <InputField
               id="reg-contribution" name="contribution" required type="number" inputMode="decimal"
-              min={0} max={100} step="0.01"
+              className="ben-w-num" min={0} max={100} step="0.01"
               label={`${t(S.contribution)} (%)`} help={t(S.contributionHelp)}
               value={f.contribution} error={err("contribution", S.contributionInvalid)}
               onChange={set("contribution")}
@@ -853,11 +716,11 @@ function RegisterOneMember({ policyApi }: { policyApi: PolicyApi }) {
           <legend>{t(S.secReferences)}</legend>
           <div className="ben-grid">
             <InputField
-              id="reg-individual" name="individualNo" label={t(S.individualNo)}
+              id="reg-individual" name="individualNo" label={t(S.individualNo)} className="ben-w-code"
               value={f.individualNo} onChange={set("individualNo")} autoComplete="off"
             />
             <InputField
-              id="reg-case" name="caseNo" label={t(S.caseNo)}
+              id="reg-case" name="caseNo" label={t(S.caseNo)} className="ben-w-code"
               value={f.caseNo} onChange={set("caseNo")} autoComplete="off"
             />
           </div>
@@ -900,10 +763,9 @@ function RegisterOneMember({ policyApi }: { policyApi: PolicyApi }) {
           <InlineAlert tone="info">{t(S.documentsAfter)}</InlineAlert>
         </fieldset>
 
+        {/* The refusal moved to the summary at the top of the form; this region carries what happens AFTER a
+            submit the client accepted — the server's answer, and the two next steps on success. */}
         <div aria-live="polite" className="stack ben-actions" style={{ gap: "var(--sp3)", minHeight: 32 }}>
-          {touched && status === "idle" && !write.error && invalid() && (
-            <InlineAlert tone="bad">{t(S.fixMarked)}</InlineAlert>
-          )}
           {/* 18.D1 (U2): the server's own reason, translated and typed — a 409 reads differently from a
               dropped connection, because they demand opposite actions. The two duplicate conflicts get
               their own copy: their remedies are different from each other's and from the generic one. */}
@@ -964,268 +826,9 @@ function isRealPastDate(value: string): boolean {
   return date.getTime() <= Date.now();
 }
 
-// ================================================================ REGISTRATION APPROVALS (US-003)
-
-const A = {
-  title: { en: "Registration Approvals", ar: "اعتماد التسجيلات" },
-  intro: {
-    en: "Pending registrations, oldest first. Approval needs verified documents and bound coverage; the decision itself is a supervisor's.",
-    ar: "التسجيلات قيد الانتظار، الأقدم أولًا. يتطلب الاعتماد التحقق من المستندات وربط تغطية؛ والقرار نفسه من صلاحية المشرف.",
-  },
-  empty: { en: "No registrations waiting for review.", ar: "لا توجد تسجيلات بانتظار المراجعة." },
-  person: { en: "Person", ar: "الشخص" },
-  application: { en: "Application", ar: "الطلب" },
-  docs: { en: "Documents verified", ar: "تم التحقق من المستندات" },
-  coverage: { en: "Coverage bound", ar: "تم ربط التغطية" },
-  notes: { en: "Notes", ar: "ملاحظات" },
-  decide: { en: "Decide", ar: "قرار" },
-  startReview: { en: "Start review", ar: "بدء المراجعة" },
-  // Application-status chips (the beneficiary chip already says Pending — this is the WORKFLOW state).
-  appPending: { en: "In review", ar: "قيد المراجعة" },
-  appInfo: { en: "Info requested", ar: "بانتظار معلومات" },
-  appRejected: { en: "Rejected", ar: "مرفوض" },
-  notStarted: { en: "Not started", ar: "لم تبدأ" },
-
-  decisionTitle: { en: "Registration decision", ar: "قرار التسجيل" },
-  approve: { en: "Approve & activate", ar: "اعتماد وتفعيل" },
-  requestInfo: { en: "Request information", ar: "طلب معلومات" },
-  reject: { en: "Reject", ar: "رفض" },
-  decisionLabel: { en: "Decision", ar: "القرار" },
-  notesLabel: { en: "Notes", ar: "ملاحظات" },
-  notesRequired: {
-    en: "Notes are required — they go back to the officer (request info) or onto the record (reject).",
-    ar: "الملاحظات مطلوبة — تعود إلى الموظف (طلب معلومات) أو تُسجَّل في الملف (رفض).",
-  },
-  approveBlocked: {
-    en: "Approval needs both checks: documents verified and coverage bound.",
-    ar: "يتطلب الاعتماد اكتمال الشرطين: التحقق من المستندات وربط التغطية.",
-  },
-  approved: { en: "Approved — member number", ar: "تم الاعتماد — رقم العضوية" },
-  decided: { en: "Decision recorded.", ar: "تم تسجيل القرار." },
-  supervisorOnly: {
-    en: "Decisions are made by a beneficiary-management supervisor.",
-    ar: "القرارات من صلاحية مشرف إدارة المستفيدين.",
-  },
-} satisfies Record<string, Localized>;
-
-function appStatusChip(item: RegistrationWorkItem): { kind: "ok" | "info" | "warn" | "bad" | "neu"; label: Localized } {
-  if (!item.registration) return { kind: "neu", label: A.notStarted };
-  switch (item.registration.status) {
-    case "InfoRequested": return { kind: "warn", label: A.appInfo };
-    case "Rejected": return { kind: "bad", label: A.appRejected };
-    default: return { kind: "info", label: A.appPending };
-  }
-}
-
-/**
- * The approver's worklist (US-003): verify the guards, then decide.
- *
- * Two roles share this screen with different halves. The OFFICER prepares — toggles the two guards as the
- * evidence arrives, and can open an application for a legacy record. The SUPERVISOR decides. The decision
- * buttons are hidden from the officer as a courtesy only (§6 — UI gating is cosmetic); the server refuses a
- * hand-crafted officer decision with `urn:hbmp:approver-required`, because the person who vouched for the
- * documents must not be the one who activates the member.
+/*
+ * Registration Approvals moved to its own module when it grew the queue controls (search, status filter,
+ * sortable columns, pagination), the notes thread and the bulk decision — it is a screen, not a section of
+ * this one. Re-exported here so the lazy route and the existing tests keep their import path.
  */
-export function RegistrationApprovals() {
-  const api = useApi();
-  const t = useLoc();
-  const { session } = useAuth();
-  const { toast } = useToast();
-  const write = useWrite();
-  const [reloadKey, setReloadKey] = useState(0);
-  const [target, setTarget] = useState<RegistrationWorkItem | null>(null);
-  const state = useAsync<RegistrationWorkItem[]>(() => api.registrationWorklist(), [reloadKey]);
-  const reload = () => setReloadKey((k) => k + 1);
-  const isSupervisor = session?.role === "beneficiary_mgmt_supervisor";
-
-  const toggle = async (item: RegistrationWorkItem, key: "documentsVerified" | "coverageBound") => {
-    if (!item.registration) return;
-    const ok = await write.run(() => api.setRegistrationChecks(item.registration!.id, { [key]: !item.registration![key] }));
-    if (ok) reload();
-  };
-
-  const start = async (item: RegistrationWorkItem) => {
-    const ok = await write.run((key) => api.createRegistration(item.beneficiary.id, key));
-    if (ok) reload();
-  };
-
-  const cols: Column<RegistrationWorkItem>[] = [
-    {
-      key: "person",
-      header: t(A.person),
-      cell: (r) => (
-        <span>
-          {r.beneficiary.givenName} {r.beneficiary.familyName}
-          <span className="muted tnum" style={{ display: "block" }}>
-            {r.beneficiary.identifiers[0] ? `${r.beneficiary.identifiers[0].type}: ${r.beneficiary.identifiers[0].value}` : "—"}
-          </span>
-        </span>
-      ),
-    },
-    {
-      key: "application",
-      header: t(A.application),
-      cell: (r) => {
-        const chip = appStatusChip(r);
-        return <StatusChip kind={chip.kind} label={t(chip.label)} />;
-      },
-    },
-    {
-      // The two approval guards as real checkboxes: the officer records evidence as it arrives, and the
-      // supervisor sees at a glance what is still missing. Disabled (not hidden) when there is no
-      // application yet — the state is legible either way.
-      key: "checks",
-      header: t(A.docs),
-      cell: (r) => (
-        <label style={{ display: "inline-flex", alignItems: "center", gap: "var(--sp2)" }}>
-          <input
-            type="checkbox"
-            className="mrs-checkbox"
-            checked={r.registration?.documentsVerified ?? false}
-            disabled={!r.registration || write.busy}
-            onChange={() => void toggle(r, "documentsVerified")}
-            aria-label={`${t(A.docs)} — ${r.beneficiary.givenName} ${r.beneficiary.familyName}`}
-          />
-        </label>
-      ),
-    },
-    {
-      key: "coverage",
-      header: t(A.coverage),
-      cell: (r) => (
-        <label style={{ display: "inline-flex", alignItems: "center", gap: "var(--sp2)" }}>
-          <input
-            type="checkbox"
-            className="mrs-checkbox"
-            checked={r.registration?.coverageBound ?? false}
-            disabled={!r.registration || write.busy}
-            onChange={() => void toggle(r, "coverageBound")}
-            aria-label={`${t(A.coverage)} — ${r.beneficiary.givenName} ${r.beneficiary.familyName}`}
-          />
-        </label>
-      ),
-    },
-    {
-      // The approver's notes are ON the worklist, not behind a click: "UNHCR letter is expired" is the
-      // officer's to-do item, and hiding it in a detail view is how it gets missed.
-      key: "notes",
-      header: t(A.notes),
-      // Bounded and wrapping (QA P2-18): the approver's note is prose and was clipping mid-word at the
-      // viewport edge, forcing the whole table sideways.
-      cell: (r) => (
-        <span className="muted" style={{ display: "inline-block", maxWidth: 260, whiteSpace: "normal", overflowWrap: "break-word" }}>
-          {r.registration?.notes ?? "—"}
-        </span>
-      ),
-    },
-    {
-      key: "action",
-      header: "",
-      cell: (r) =>
-        !r.registration || r.registration.status === "Rejected" ? (
-          <Button variant="secondary" size="sm" onClick={() => void start(r)}>{t(A.startReview)}</Button>
-        ) : isSupervisor ? (
-          <Button variant="primary" size="sm" onClick={() => setTarget(r)}>{t(A.decide)}</Button>
-        ) : (
-          <span className="muted" style={{ display: "inline-block", maxWidth: 220, whiteSpace: "normal" }}>{t(A.supervisorOnly)}</span>
-        ),
-    },
-  ];
-
-  return (
-    <>
-      <PageHeader title={t(A.title)} />
-      <Card as="section" style={{ padding: "var(--sp3)" }}>
-        <p className="muted" style={{ marginTop: 0 }}>{t(A.intro)}</p>
-        {write.error ? <InlineAlert tone="bad">{t(write.error.message)}</InlineAlert> : null}
-        <AsyncSection<RegistrationWorkItem[]> state={state} isEmpty={(d) => d.length === 0} emptyLabel={A.empty}>
-          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => r.beneficiary.id} caption={t(A.title)} />}
-        </AsyncSection>
-      </Card>
-      {target?.registration ? (
-        <DecisionModal
-          item={target}
-          onClose={() => setTarget(null)}
-          onDecided={(memberNo) => {
-            setTarget(null);
-            toast(memberNo ? `${t(A.approved)}: ${memberNo}` : t(A.decided), "ok");
-            reload();
-          }}
-        />
-      ) : null}
-    </>
-  );
-}
-
-function DecisionModal({ item, onClose, onDecided }: { item: RegistrationWorkItem; onClose: () => void; onDecided: (memberNo?: string) => void }) {
-  const api = useApi();
-  const t = useLoc();
-  const write = useWrite();
-  const reg = item.registration!;
-  const canApprove = reg.documentsVerified && reg.coverageBound;
-  const [decision, setDecision] = useState<"Approve" | "RequestInfo" | "Reject" | "">(canApprove ? "Approve" : "");
-  const [notes, setNotes] = useState("");
-  const [touched, setTouched] = useState(false);
-
-  const needsNotes = decision === "RequestInfo" || decision === "Reject";
-  const notesError = touched && needsNotes && notes.trim() === "" ? t(A.notesRequired) : undefined;
-
-  const confirm = async () => {
-    setTouched(true);
-    if (!decision) return;
-    if (needsNotes && notes.trim() === "") return;
-    // The issued member number is the ONE fact the approver must hand onward (it goes on the card), so it
-    // is captured out of the write rather than re-queried — a re-query races the projection and can miss it.
-    let memberNo: string | undefined;
-    const ok = await write.run(async () => {
-      const r = await api.decideRegistration(reg.id, decision, notes.trim() || undefined);
-      memberNo = r.memberNo;
-      return r;
-    });
-    if (ok) onDecided(memberNo);
-  };
-
-  return (
-    <Modal
-      open
-      onOpenChange={(o) => !o && onClose()}
-      title={`${t(A.decisionTitle)} — ${item.beneficiary.givenName} ${item.beneficiary.familyName}`}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>{t(S.cancel)}</Button>
-          <Button variant={decision === "Reject" ? "danger" : "primary"} onClick={confirm} disabled={write.busy || !decision}>
-            {t(S.confirm)}
-          </Button>
-        </>
-      }
-    >
-      {write.error ? <InlineAlert tone="bad">{t(write.error.message)}</InlineAlert> : null}
-
-      <fieldset className="mrs-choice">
-        <legend className="mrs-label">{t(A.decisionLabel)}</legend>
-        <label className="mrs-choice-opt">
-          <input type="radio" name="decision" value="Approve" disabled={!canApprove} checked={decision === "Approve"} onChange={() => setDecision("Approve")} />
-          <span>
-            {t(A.approve)}
-            {/* Disabled WITH the reason inside the option (§6 — the server re-checks either way): an
-                approve option that is simply missing reads as a broken screen, not an incomplete
-                application. */}
-            {!canApprove ? <span className="mrs-choice-hint">{t(A.approveBlocked)}</span> : null}
-          </span>
-        </label>
-        <label className="mrs-choice-opt">
-          <input type="radio" name="decision" value="RequestInfo" checked={decision === "RequestInfo"} onChange={() => setDecision("RequestInfo")} />
-          <span>{t(A.requestInfo)}</span>
-        </label>
-        <label className="mrs-choice-opt">
-          <input type="radio" name="decision" value="Reject" checked={decision === "Reject"} onChange={() => setDecision("Reject")} />
-          <span>{t(A.reject)}</span>
-        </label>
-      </fieldset>
-
-      {needsNotes ? (
-        <InputField label={t(A.notesLabel)} value={notes} error={notesError} onChange={(e) => setNotes(e.currentTarget.value)} autoComplete="off" />
-      ) : null}
-    </Modal>
-  );
-}
+export { RegistrationApprovals } from "./RegistrationApprovals";

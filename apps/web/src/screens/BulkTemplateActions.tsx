@@ -135,7 +135,16 @@ export function BulkTemplateActions({ jobType, template, open, onOpenChange }: B
         </Button>
       </div>
 
-      <Modal open={isOpen} onOpenChange={setOpen} title={t(S.columns)} description={t(S.columnsDesc)}>
+      <Modal
+        open={isOpen}
+        onOpenChange={setOpen}
+        title={t(S.columns)}
+        description={t(S.columnsDesc)}
+        closeLabel={t(S.close)}
+        /* Three columns of exact match keys, read by scanning downward. At the default 520px the key column
+           broke `card_number` across two lines (0B §10c). */
+        wide
+      >
         {template ? (
           <div className="bulk-columns" data-testid="expected-columns-table">
             <table className="pol-costshare">

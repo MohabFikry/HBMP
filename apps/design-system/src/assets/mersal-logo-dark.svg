@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Mersal Foundation lockup, dark-surface variant (0B §8; audit §5.5).
+
+  The light lockup sets "Mersal" in the brand teal #16808D and "FOUNDATION" in slate #566E76. Both are chosen
+  against a white page. On the dark surface they sit at roughly 2:1 and 1.8:1 — the wordmark of the
+  organisation, rendered as the least legible thing on the sign-in screen, which is the first thing anyone
+  sees of this product.
+
+  0B §8 calls for the white mark on dark surfaces, so the Latin wordmark is white and the sub-wordmark is a
+  light slate. The gold Arabic مرسال is unchanged: #E0A106 carries its own contrast on both surfaces, and it
+  is the half of the lockup the organisation is actually known by.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 190" role="img" aria-label="Mersal Foundation">
+  <title>Mersal Foundation</title>
+  <!-- Arabic wordmark — same gold on both surfaces -->
+  <text x="180" y="78" text-anchor="middle" direction="rtl"
+        font-family="Cairo, 'Noto Sans Arabic', system-ui, sans-serif" font-weight="600"
+        font-size="82" fill="#E0A106" letter-spacing="-1">مرسال</text>
+  <!-- Latin wordmark -->
+  <text x="180" y="150" text-anchor="middle"
+        font-family="Inter, 'Segoe UI', system-ui, sans-serif" font-weight="600"
+        font-size="88" fill="#FFFFFF" letter-spacing="-3">Mersal</text>
+  <!-- Sub-wordmark -->
+  <text x="180" y="182" text-anchor="middle"
+        font-family="Inter, 'Segoe UI', system-ui, sans-serif" font-weight="500"
+        font-size="22" fill="#C7D6DB" letter-spacing="14">FOUNDATION</text>
+</svg>

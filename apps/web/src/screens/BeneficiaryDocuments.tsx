@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Card, Icon, InlineAlert, InputField, Modal, Select, StatusChip } from "@mersal/design-system";
+import { Button, Card, Icon, InlineAlert, InputField, Modal, SelectField, StatusChip } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type { PolicyApi, PolicyDocumentView } from "../api/policyApi";
 import { createHttpPolicyApi } from "../api/policyApi";
@@ -26,6 +26,15 @@ const httpPolicyApi = createHttpPolicyApi();
  * renders as their avatar — so choosing it here IS the way a photo reaches the member's file.
  *
  * ============================================================================================================
+ * THE DOCUMENTS ARE THE PANEL. FILING ONE IS A MODAL.
+ * ============================================================================================================
+ * The upload form used to sit permanently above the list — four controls and a button — so opening the tab
+ * showed an empty form and pushed the filed paperwork, the thing somebody came to look at, below it. On a
+ * member with no documents the tab was a form with a one-line footnote saying there was nothing on file.
+ * Reading is the common case; filing is occasional, and it gets the room a dialog gives it. Same shape as the
+ * notes panel next door, because "add a thing to this record" should not be a different gesture per tab.
+ *
+ * ============================================================================================================
  * LOOKING AND TAKING ARE DIFFERENT ACTS
  * ============================================================================================================
  * The eye and the download icon both resolve a short-TTL signed URL through the same audited endpoint, but
@@ -46,6 +55,8 @@ const S = {
   docTitle: { en: "Title", ar: "العنوان" },
   docDate: { en: "Date on the document", ar: "تاريخ المستند" },
   upload: { en: "Upload", ar: "رفع" },
+  add: { en: "Add document", ar: "إضافة مستند" },
+  cancelUpload: { en: "Cancel", ar: "إلغاء" },
   uploaded: { en: "Document filed.", ar: "تم حفظ المستند." },
   none: { en: "No documents on file yet.", ar: "لا توجد مستندات بعد." },
   needType: { en: "Choose a document type.", ar: "اختر نوع المستند." },
@@ -56,8 +67,8 @@ const S = {
   uploadedBy: { en: "uploaded by", ar: "رفعه" },
   locked: { en: "Locked", ar: "مقيّد" },
   lockedHint: {
-    en: "Your role may see that this document exists but not open it.",
-    ar: "يمكن لدورك رؤية وجود هذا المستند دون فتحه.",
+    en: "This document's type carries a clinical floor — your role may see that it exists, and may not open it.",
+    ar: "نوع هذا المستند سريري — يمكن لدورك رؤية وجوده دون فتحه.",
   },
   withdrawn: { en: "Withdrawn", ar: "مسحوب" },
   expired: { en: "Expired", ar: "منتهٍ" },
@@ -111,6 +122,7 @@ export function BeneficiaryDocuments({
   const [docs, setDocs] = useState<PolicyDocumentView[] | null>(null);
   const [error, setError] = useState<Localized | null>(null);
   const [announce, setAnnounce] = useState("");
+  const [filing, setFiling] = useState(false);
   const [preview, setPreview] = useState<{ doc: PolicyDocumentView; url: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -125,6 +137,13 @@ export function BeneficiaryDocuments({
     void load();
   }, [load]);
 
+  /** Newest first, and sorted HERE rather than trusted from the wire — the same rule the notes list follows,
+   *  so the two panels on the same record cannot disagree about what "most recent" means. */
+  const ordered = useMemo(
+    () => [...(docs ?? [])].sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt)),
+    [docs],
+  );
+
   async function open(doc: PolicyDocumentView, purpose: "preview" | "download") {
     setError(null);
     try {
@@ -138,30 +157,46 @@ export function BeneficiaryDocuments({
 
   return (
     <Card as="section" style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp4)" }}>
-      <div>
+      <div className="pol-panel-head">
         <h3 style={{ margin: 0 }}>{t(S.title)}</h3>
-        <p className="muted" style={{ margin: "var(--sp1) 0 0" }}>{t(S.intro)}</p>
+        <Button
+          variant="primary"
+          size="sm"
+          leadingIcon={<Icon name="plus" />}
+          onClick={() => setFiling(true)}
+          aria-haspopup="dialog"
+          data-testid="add-document"
+        >
+          {t(S.add)}
+        </Button>
       </div>
 
       <div aria-live="polite" role="status" className="sr-only">{announce}</div>
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
 
-      <DocumentUpload
-        api={api}
-        enrollmentId={enrollmentId}
-        onUploaded={async () => {
-          setAnnounce(t(S.uploaded));
-          await load();
-        }}
-      />
+      {filing && (
+        <DocumentUpload
+          api={api}
+          enrollmentId={enrollmentId}
+          onClose={() => setFiling(false)}
+          onUploaded={async () => {
+            setFiling(false);
+            setAnnounce(t(S.uploaded));
+            await load();
+          }}
+        />
+      )}
 
       {docs && docs.length === 0 && <InlineAlert tone="info">{t(S.none)}</InlineAlert>}
 
       <ul className="ben-docs">
-        {(docs ?? []).map((d) => (
+        {ordered.map((d) => (
           <li key={d.linkId} className="ben-doc">
             <div className="ben-doc-body">
               <div className="ben-doc-head">
+                {/* The glyph is decorative — the type is stated in words on the chip beside it. It is here so
+                    a list of nine rows reads as a stack of documents at a glance rather than a stack of text. */}
+                <Icon name="doc" aria-hidden className="ben-doc-glyph" />
                 <strong className="ben-doc-name">{d.title}</strong>
                 <StatusChip kind="neu" label={t(classLabel(d.documentClass))} />
                 {d.status === "Withdrawn" && <StatusChip kind="bad" label={t(S.withdrawn)} />}
@@ -176,6 +211,17 @@ export function BeneficiaryDocuments({
                 <span>{t(S.uploadedBy)} {d.uploadedByDisplay}</span>
                 {d.versionNo > 1 && <span className="tnum">· v{d.versionNo}</span>}
               </div>
+              {/*
+                * WHY there are no buttons on this row, in words, on the row.
+                *
+                * It was a `title` on the "Locked" chip — invisible unless you hover, and absent entirely on
+                * touch. The case is common and confusing by construction: a registration officer FILES a
+                * medical file or a set of investigations (they receive the paperwork at the desk) and then
+                * cannot open it back, because the class carries a clinical floor their role does not clear.
+                * Two glyphs that vanish for one row in a list of nine read as a broken screen; the rule reads
+                * as a rule.
+                */}
+              {!d.canDownload && <p className="ben-doc-locked">{t(S.lockedHint)}</p>}
             </div>
 
             <div className="ben-doc-actions">
@@ -201,8 +247,9 @@ export function BeneficiaryDocuments({
                   </Button>
                 </>
               ) : (
-                // Named, not absent: an empty cell reads as a broken screen rather than as a rule.
-                <span className="pol-locked-inline" title={t(S.lockedHint)}>
+                // Named, not absent: an empty cell reads as a broken screen rather than as a rule. The
+                // sentence explaining it sits on the row itself, above.
+                <span className="pol-locked-inline">
                   <Icon name="info" aria-hidden /> {t(S.locked)}
                 </span>
               )}
@@ -223,10 +270,12 @@ export function BeneficiaryDocuments({
 function DocumentUpload({
   api,
   enrollmentId,
+  onClose,
   onUploaded,
 }: {
   api: PolicyApi;
   enrollmentId: string;
+  onClose: () => void;
   onUploaded: () => Promise<void>;
 }) {
   const t = useLoc();
@@ -276,64 +325,74 @@ function DocumentUpload({
   }
 
   return (
-    <form onSubmit={submit} noValidate className="ben-doc-upload" aria-label={t(S.title)}>
-      <div className="mrs-field">
-        <label className="mrs-label" id="doc-type-label">{t(S.type)} *</label>
-        <Select
-          aria-labelledby="doc-type-label"
+    <Modal
+      open
+      onOpenChange={(o) => !o && !busy && onClose()}
+      title={t(S.add)}
+      /* The type rule is stated where the type is chosen. It used to head the whole tab, where it explained a
+         form to people who had come to read a list. */
+      description={t(S.intro)}
+      closeLabel={t(S.cancelUpload)}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>{t(S.cancelUpload)}</Button>
+          {/* `form` + `type="submit"` so the footer button drives the form's own validation path — the
+              required-field messages below are the form's, not a second set written for the dialog. */}
+          <Button type="submit" form="doc-upload" variant="primary" loading={busy}>{t(S.upload)}</Button>
+        </>
+      }
+    >
+      <form id="doc-upload" onSubmit={submit} noValidate className="ben-doc-upload" aria-label={t(S.add)}>
+        <SelectField
+          id="doc-type"
+          label={t(S.type)}
+          required
           options={options}
           value={documentClass}
           onChange={setDocumentClass}
           placeholder={t(S.choose)}
+          error={touched && !documentClass ? t(S.needType) : undefined}
         />
-        {touched && !documentClass && <span className="mrs-error">{t(S.needType)}</span>}
-      </div>
 
-      <InputField
-        label={`${t(S.docTitle)} *`}
-        value={title}
-        error={touched && title.trim() === "" ? t(S.needTitle) : undefined}
-        onChange={(e) => setTitle(e.currentTarget.value)}
-        autoComplete="off"
-      />
-
-      <InputField
-        type="date"
-        label={t(S.docDate)}
-        value={documentDate}
-        onChange={(e) => setDocumentDate(e.currentTarget.value)}
-      />
-
-      <div className="mrs-field">
-        <label className="mrs-label" htmlFor="doc-file">{t(S.file)} *</label>
-        <input
-          ref={fileInput}
-          id="doc-file"
-          className="mrs-control"
-          type="file"
-          accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.doc,.docx"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+        <InputField
+          label={t(S.docTitle)}
+          required
+          value={title}
+          error={touched && title.trim() === "" ? t(S.needTitle) : undefined}
+          onChange={(e) => setTitle(e.currentTarget.value)}
+          autoComplete="off"
         />
-        {touched && !file && <span className="mrs-error">{t(S.needFile)}</span>}
-      </div>
 
-      {/* The consent rule for a photograph is stated BEFORE the upload is attempted. The server enforces it
-          either way; saying so here turns a 422 into something the operator could have known. */}
-      {chosen?.note && (
-        <div className="ben-doc-upload-wide">
-          <InlineAlert tone="info">{t(chosen.note)}</InlineAlert>
-        </div>
-      )}
-      {error && (
-        <div className="ben-doc-upload-wide">
-          <InlineAlert tone="bad">{t(error)}</InlineAlert>
-        </div>
-      )}
+        <InputField
+          type="date"
+          label={t(S.docDate)}
+          value={documentDate}
+          onChange={(e) => setDocumentDate(e.currentTarget.value)}
+        />
 
-      <div className="ben-doc-upload-wide">
-        <Button type="submit" variant="secondary" loading={busy}>{t(S.upload)}</Button>
-      </div>
-    </form>
+        <div className="mrs-field">
+          <label className="mrs-label" htmlFor="doc-file">
+            {t(S.file)}
+            <span className="mrs-req" aria-hidden="true"> *</span>
+          </label>
+          <input
+            ref={fileInput}
+            id="doc-file"
+            className="mrs-control"
+            type="file"
+            required
+            accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.doc,.docx"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          />
+          {touched && !file && <span className="mrs-error">{t(S.needFile)}</span>}
+        </div>
+
+        {/* The consent rule for a photograph is stated BEFORE the upload is attempted. The server enforces it
+            either way; saying so here turns a 422 into something the operator could have known. */}
+        {chosen?.note && <InlineAlert tone="info">{t(chosen.note)}</InlineAlert>}
+        {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
+      </form>
+    </Modal>
   );
 }
 
@@ -344,7 +403,7 @@ function DocumentUpload({
 const IMAGE = /\.(png|jpe?g|webp|gif|bmp)(\?|$)/i;
 const PDF = /\.pdf(\?|$)/i;
 
-function DocumentPreview({
+export function DocumentPreview({
   doc,
   url,
   onClose,
@@ -366,7 +425,10 @@ function DocumentPreview({
       open
       onOpenChange={(o) => !o && onClose()}
       title={doc.title}
-      footer={<Button variant="ghost" onClick={onClose}>{t(S.close)}</Button>}
+      closeLabel={t(S.close)}
+      /* No footer button. Dismissal is now part of the dialog chrome for every modal in the app, and this
+         one's ONLY action is dismissal — two controls with the same name for the same job is one more thing
+         to read, not one more way out. */
     >
       <p className="muted" style={{ marginTop: 0 }}>
         <span className="tnum">{fmt.dateTime(doc.uploadedAt)}</span> · {t(S.uploadedBy)} {doc.uploadedByDisplay}

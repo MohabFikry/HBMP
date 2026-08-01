@@ -18,7 +18,10 @@ describe("Permission-driven routing (US-070 / US-071)", () => {
     renderApp("/", "reception");
     const nav = await screen.findByRole("navigation", { name: "Reception" });
     // Reception sees its own sections…
-    expect(within(nav).getByText("Eligibility Search")).toBeInTheDocument();
+    // "Eligibility Check", not "Eligibility Search": one screen was mounted under two portals whose rails
+    // named it differently (reception said Search, beneficiary management said Check) while its own
+    // heading said a third thing. Both rails and the heading now use the nav label.
+    expect(within(nav).getByText("Eligibility Check")).toBeInTheDocument();
     expect(within(nav).getByText("Dashboard")).toBeInTheDocument();
     // "Today's Visits" and "Check-in" were folded into the dashboard and the appointments table in 14.5;
     // leaving them in the rail would offer two doors to one thing.
@@ -74,8 +77,8 @@ describe("Browser tab title (replaces the on-screen breadcrumb)", () => {
     await waitFor(() => expect(document.title).toBe("Dashboard | Mersal HBMP"));
 
     const nav = await screen.findByRole("navigation", { name: "Reception" });
-    await userEvent.click(within(nav).getByText("Eligibility Search"));
-    await waitFor(() => expect(document.title).toBe("Eligibility Search | Mersal HBMP"));
+    await userEvent.click(within(nav).getByText("Eligibility Check"));
+    await waitFor(() => expect(document.title).toBe("Eligibility Check | Mersal HBMP"));
   });
 
   it("keeps the brand alone outside a portal, and renders no breadcrumb inside one", async () => {

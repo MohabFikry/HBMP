@@ -122,6 +122,11 @@ builder.Services.AddHostedService<BenefitConsumptionConsumer>();
 // Active, and every eligibility check answered "not covered".
 builder.Services.Configure<RegistrationEnrolmentOptions>(builder.Configuration.GetSection(RegistrationEnrolmentOptions.SectionName));
 builder.Services.AddHostedService<RegistrationEnrolmentConsumer>();
+
+// 19.7 — corrections to the identity record land on the member's Logs tab. patient-service owns the record and
+// cannot write into this service's projection, so it publishes and this projects.
+builder.Services.Configure<BeneficiaryEventOptions>(builder.Configuration.GetSection(BeneficiaryEventOptions.SectionName));
+builder.Services.AddHostedService<BeneficiaryEventConsumer>();
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("policy-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
     .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());

@@ -15,7 +15,23 @@ public sealed record CreateAuthorizationRequest(
     Guid? RequestingProviderId,
     IReadOnlyList<string> ServiceCodes,
     string? RequestedScope,
-    AuthPriority Priority);
+    AuthPriority Priority,
+    /// <summary>
+    /// The user id of the clinician who ordered the thing being authorized — the person waiting for the answer.
+    ///
+    /// <para>Audit §11.3 named this as the one real limit on the auth notifications. This endpoint requires
+    /// <c>auth:ingest</c>, a machine-only scope, so <c>CreatedBy</c> is the routing saga rather than a human.
+    /// <c>NotifyDecisionAsync</c> addresses the decision notice to <c>CreatedBy</c> and returns early when it
+    /// is blank — so on the ordinary flow (order or prescription routed to approval) the decision was
+    /// correctly not sent to anybody, and the clinician who asked for it learned the answer by going and
+    /// looking. Only the break-glass path, where a human IS the caller, ever notified anyone.</para>
+    ///
+    /// <para>So the ingesting service passes the clinician forward, exactly as <c>registration.created_by</c>
+    /// carries the filing officer. Optional: a genuinely unattended authorization (a migration, a seed) has no
+    /// human behind it, and inventing one would address a notice to a machine account. When it is absent the
+    /// notice is still correctly not sent.</para>
+    /// </summary>
+    string? OrderedByUserId = null);
 
 // ---- Worklist projection (MIN-NECESSARY — no clinical payload) ----
 

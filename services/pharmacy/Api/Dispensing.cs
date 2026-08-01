@@ -168,7 +168,24 @@ public static class DispensingEndpoints
                             idempotencyKey = idem,
                         }, c);
                     if (rx.Status == RxStatus.Dispensed)
-                        await outbox.EnqueueAsync("RxDispensed", "pharmacy.events", new { tenantId = rx.TenantId, prescriptionId = rxId, rx.RxNo }, c);
+                        await outbox.EnqueueAsync("RxDispensed", "pharmacy.events", new
+                        {
+                            tenantId = rx.TenantId, prescriptionId = rxId, rx.RxNo,
+                            /*
+                             * `drugId` — WHICH drug, for the read model's drug-utilization dimension and its
+                             * medication code count. It carried none, so every dispense would have counted
+                             * under "unknown" and the "top medications" figure would have been one bar.
+                             *
+                             * The drug ID, not the ATC class the projector's field is named for: the ATC
+                             * lives in masterdata-service, and resolving it here would put a cross-service
+                             * call inside the dispense transaction — on the path that moves a benefit
+                             * accumulator. The id is a real code for "which drug"; `DimensionLabelled` is the
+                             * mechanism that puts a name to an id, and classing by ATC is a masterdata
+                             * enrichment on the reporting side rather than a lookup on the dispensing path.
+                             */
+                            drugId = evt.SubstitutedDrugId
+                                     ?? rx.Lines.FirstOrDefault(l => l.PrescriptionLineId == evt.PrescriptionLineId)?.DrugId,
+                        }, c);
                 }, ct);
 
             switch (result.Outcome)
@@ -240,6 +257,35 @@ public static class DispensingEndpoints
                 prescriberId = rx.PrescriberId, drugId = line.DrugId, quantity = req.Quantity ?? line.QuantityRemaining,
                 note = req.Note,
             }, ct);
+            /*
+             * THE SECOND, NOTIFICATION-SHAPED COPY (audit §11.3).
+             *
+             * `RxLineOutOfStock` has matched `RoutingTable` by name since the routing table was written, and
+             * it still notified nobody: the transport is point-to-point, so a notification consumer bound to
+             * `pharmacy.events` would COMPETE with policy-service for those messages and each event would
+             * reach one of them, never both. So a service that wants a notification enqueues a copy to
+             * notification-service's own queue — the decision `policy.registration-enrolments` already made,
+             * and the one the auth decisions follow.
+             *
+             * Addressed to the PRESCRIBER, who is the person who has to act: the route is actionable and
+             * escalates to the pharmacy supervisor after eight hours, and an escalation on a notice nobody
+             * received is a safety net with nothing under it. The field bag carries the prescription number
+             * and nothing clinical — not the drug, not the note. What is out of stock is between the
+             * pharmacy and the prescriber; an inbox line is read by whoever holds the device.
+             */
+            if (rx.PrescriberId is { } prescriber)
+            {
+                await outbox.EnqueueAsync("RxLineOutOfStock", "notification.domain-events", new
+                {
+                    tenantId = rx.TenantId,
+                    entityRef = $"prescription:{rxId}",
+                    fields = new { @ref = rx.RxNo },
+                    recipients = new[]
+                    {
+                        new { userId = prescriber.ToString(), role = "ordering_doctor", locale = "ar" },
+                    },
+                }, ct);
+            }
             await audit.EmitAsync(new AuditEventDraft
             {
                 EntityType = "prescription_line", EntityId = lineId.ToString(), Action = AuditAction.StateChange,

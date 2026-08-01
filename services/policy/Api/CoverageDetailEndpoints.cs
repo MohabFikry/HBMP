@@ -33,6 +33,7 @@ public static class CoverageDetailEndpoints
 
         MapCoverageDetail(sections);
         MapAdministrative360(sections);
+        MapCoveredFamily(sections);
     }
 
     // ---- Coverage details --------------------------------------------------------------------------------
@@ -235,7 +236,7 @@ public static class CoverageDetailEndpoints
             // The COVERED family: who is enrolled under whom. A membership fact policy-service owns — and
             // deliberately not patient-service's household, which answers "who lives with this person" and
             // would disagree the moment a relative is not enrolled.
-            var family = await CoveredFamilyAsync(db, visible, ct);
+            var family = await CoveredFamilyAsync(db, query, patient, token, visible, ct);
 
             var history = await db.EnrollmentEvents.AsNoTracking()
                 .Where(e => visibleIds.Contains(e.EnrollmentId))
@@ -296,25 +297,145 @@ public static class CoverageDetailEndpoints
         });
     }
 
-    /// <summary>Principals and dependants around this member's memberships, from the enrolment graph.</summary>
+    // ---- The covered family ------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Who else this cover reaches, asked from one membership.
+    ///
+    /// <para>The data was already here — <c>CoveredFamilyMemberView</c> has been a section of the 360 since
+    /// 19.5, and nothing in the product ever called it. It is its own endpoint now because the question gets
+    /// asked on its own: an officer with a mother at the desk needs to know whether the children are on the
+    /// cover, and composing the notes, the documents and two hundred history rows to answer it is a lot of
+    /// disclosure for one list.</para>
+    ///
+    /// <para>Names come from patient-service for THIS HOUSEHOLD only, through the caller's own token — a
+    /// family is a handful of rows, so the roster's per-page batching applies unchanged.</para>
+    /// </summary>
+    private static void MapCoveredFamily(RouteGroupBuilder read)
+    {
+        read.MapGet("/enrollments/{enrollmentId:guid}/family", async (
+            Guid enrollmentId,
+            PolicyDbContext db, AdministrativeQuery query, IBeneficiaryAdministrativeSource patient,
+            PolicyGate gate, IPayerDirectory payers, IAuditClient audit, HttpContext http,
+            CancellationToken ct) =>
+        {
+            var principal = gate.Principal;
+            if (principal is null) return GateResults.Unauthenticated();
+
+            var (exists, _, root, payerId) = await query.EnrollmentHouseholdRootAsync(enrollmentId, ct);
+            if (!exists) return ProblemResults.NotFound("ENROLLMENT_NOT_FOUND", "No such enrolment.");
+
+            var permitted = await payers.GetAsync(principal, ct);
+            if (PayerScopeRules.Check(permitted, payerId) == PayerScopeOutcome.Denied)
+            {
+                await audit.EmitAsync(new AuditEventDraft
+                {
+                    EntityType = "enrollment", EntityId = enrollmentId.ToString(), Action = AuditAction.Read,
+                    ActorUserId = principal.Subject, ActorRole = string.Join(',', principal.Roles),
+                    TenantId = principal.TenantId,
+                    DecisionOutcome = "AccessDenied", DecisionReasonCode = "payer-not-permitted",
+                }, ct);
+                return GateResults.Forbidden("urn:hbmp:payer-scope-denied",
+                    detail: "You are not permitted to read this member's household.", reason: "payer-not-permitted");
+            }
+
+            var household = await query.HouseholdAsync([root], ct);
+
+            // A household CAN span policies — a dependant enrolled under one payer and the principal under
+            // another is unusual but nothing forbids it. Rows behind a payer this caller may not read are
+            // dropped and COUNTED, so a family of five never renders as three with no explanation.
+            var scoped = new List<Enrollment>(household.Count);
+            foreach (var member in household)
+            {
+                var (_, memberPayer) = await query.PolicyPayerAsync(member.PolicyId, ct);
+                if (PayerScopeRules.Check(permitted, memberPayer) == PayerScopeOutcome.Allowed) scoped.Add(member);
+            }
+
+            var (members, namesUnavailable) = await ComposeHouseholdAsync(
+                db, patient, http.Request.Headers.Authorization.FirstOrDefault(), scoped,
+                subjectEnrollmentId: enrollmentId, ct);
+
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "enrollment", EntityId = enrollmentId.ToString(), Action = AuditAction.Read,
+                ActorUserId = principal.Subject, ActorRole = string.Join(',', principal.Roles),
+                TenantId = principal.TenantId,
+                DecisionOutcome = "covered-family",
+                DecisionReasonCode = $"members:{members.Count}"
+                    + (household.Count > scoped.Count ? ";withheld" : "")
+                    + (namesUnavailable ? ";partial" : ""),
+                // A family list is names + membership. Saying so is what makes "who looked up this family"
+                // answerable later.
+                FieldClasses = ["identity", "coverage"],
+            }, ct);
+
+            return Results.Ok(new FamilyView(
+                enrollmentId, members,
+                namesUnavailable ? ["patient-service"] : [],
+                Withheld: household.Count - scoped.Count));
+        });
+    }
+
+    /// <summary>
+    /// Principals and dependants around this member's memberships, from the enrolment graph.
+    ///
+    /// <para>Rooted on the principal (see <see cref="Household"/>) rather than walked one hop from the rows the
+    /// caller already had. The one-hop version answered correctly from a principal and wrongly from a child:
+    /// it reached the father and stopped, so a child's record listed no siblings and the omission looked like
+    /// a family with one parent.</para>
+    /// </summary>
     private static async Task<IReadOnlyList<CoveredFamilyMemberView>> CoveredFamilyAsync(
-        PolicyDbContext db, IReadOnlyList<Enrollment> mine, CancellationToken ct)
+        PolicyDbContext db, AdministrativeQuery query, IBeneficiaryAdministrativeSource patient,
+        string? token, IReadOnlyList<Enrollment> mine, CancellationToken ct)
     {
         if (mine.Count == 0) return [];
 
-        var myIds = mine.Select(e => e.EnrollmentId).ToList();
-        var principalIds = mine.Where(e => e.PrincipalEnrollmentId is not null)
-            .Select(e => e.PrincipalEnrollmentId!.Value).Distinct().ToList();
+        var roots = Household.RootsOf(mine.Select(e => (e.EnrollmentId, e.PrincipalEnrollmentId)));
+        var household = await query.HouseholdAsync(roots, ct);
 
-        var related = await db.Enrollments.AsNoTracking()
-            .Where(e => !e.IsDeleted
-                        && ((e.PrincipalEnrollmentId != null && myIds.Contains(e.PrincipalEnrollmentId.Value))
-                            || principalIds.Contains(e.EnrollmentId)))
-            .OrderBy(e => e.MemberNo)
-            .ToListAsync(ct);
+        // The 360's family section is the family AROUND this person: their own memberships are the
+        // Memberships section directly above it, and repeating them here would read as a duplicate.
+        var mineIds = mine.Select(e => e.EnrollmentId).ToHashSet();
+        var others = household.Where(e => !mineIds.Contains(e.EnrollmentId)).ToList();
 
-        return [.. related.Select(e => new CoveredFamilyMemberView(
-            e.EnrollmentId, e.BeneficiaryId, e.MemberNo, e.Relationship.ToString(), e.Status.ToString(),
-            IsPrincipal: principalIds.Contains(e.EnrollmentId)))];
+        var (members, _) = await ComposeHouseholdAsync(db, patient, token, others, null, ct);
+        return members;
+    }
+
+    /// <summary>Turn household enrolments into the view: plan labels from here, names from their owner.</summary>
+    private static async Task<(IReadOnlyList<CoveredFamilyMemberView> Members, bool NamesUnavailable)>
+        ComposeHouseholdAsync(
+            PolicyDbContext db, IBeneficiaryAdministrativeSource patient, string? token,
+            IReadOnlyList<Enrollment> household, Guid? subjectEnrollmentId, CancellationToken ct)
+    {
+        if (household.Count == 0) return ([], false);
+
+        // The caller's own token, so patient-service applies ITS projection and writes ITS disclosure audit —
+        // the same rule the 360 follows, for the same reason (see AdministrativeSeams).
+        var summaries = await patient.SummariesAsync(
+            [.. household.Select(e => e.BeneficiaryId).Distinct()], token, ct);
+
+        var planIds = household.Select(e => e.PolicyPlanId).Distinct().ToList();
+        var labels = await db.PolicyPlans.AsNoTracking()
+            .Where(pp => planIds.Contains(pp.PolicyPlanId))
+            .Select(pp => new { pp.PolicyPlanId, pp.PlanLabel })
+            .ToDictionaryAsync(x => x.PolicyPlanId, x => x.PlanLabel, ct);
+
+        var members = household.Select(e =>
+        {
+            var summary = summaries?.GetValueOrDefault(e.BeneficiaryId);
+            return new CoveredFamilyMemberView(
+                e.EnrollmentId, e.BeneficiaryId, e.MemberNo,
+                summary?.GivenName, summary?.FamilyName,
+                e.Relationship.ToString(), e.Status.ToString(),
+                IsPrincipal: e.PrincipalEnrollmentId is null,
+                PlanLabel: labels.GetValueOrDefault(e.PolicyPlanId),
+                EffectiveFrom: e.EffectiveFrom, EffectiveTo: e.EffectiveTo,
+                IsSubject: subjectEnrollmentId == e.EnrollmentId);
+        }).ToList();
+
+        // Null means patient-service could not be ASKED — the names are blank rather than absent, and the
+        // caller is told which is which.
+        return (members, summaries is null);
     }
 }

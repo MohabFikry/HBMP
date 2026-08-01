@@ -82,7 +82,26 @@ public static class DecisionEndpoints
                         new { claimId, line.ClaimLineId, decision = kind.ToString(), decision.AllowedAmount, tenantId = deps.Tenant }, c);
                     if (terminal)
                         await deps.Outbox.EnqueueAsync($"Claim{claim.Status}.v1", "claims.events",
-                            new { claimId, status = claim.Status.ToString(), claim.NetPayable, tenantId = deps.Tenant }, c);
+                            new
+                            {
+                                claimId, status = claim.Status.ToString(), claim.NetPayable, tenantId = deps.Tenant,
+                                /*
+                                 * The money, for the read model's cost fact — `reporting.fact_cost` held zero
+                                 * rows, and this terminal decision is the moment a claim becomes a cost.
+                                 *
+                                 * NOT the adjudication event, which was the other candidate: adjudication is a
+                                 * pre-decision RECOMMENDATION, so counting it as cost would book money that a
+                                 * reviewer may still reduce, and then book it again here.
+                                 *
+                                 * What is deliberately absent: payer, policy, plan and benefit category. This
+                                 * service does not hold them — a claim knows its provider and its service
+                                 * codes, and the coverage axes live in policy-service. They are left null
+                                 * rather than guessed, so the financial TOTALS are exact and the per-payer
+                                 * breakdown is visibly unattributed instead of quietly wrong.
+                                 */
+                                claim.ClaimedAmount, claim.ApprovedAmount, claim.AdjustedAmount,
+                                claim.CurrencyCode, providerId = claim.ProviderId, claimCount = 1,
+                            }, c);
                 },
                 ct);
 

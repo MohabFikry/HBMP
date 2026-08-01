@@ -169,13 +169,53 @@ public static class Decisions
         });
         await deps.Db.SaveChangesAsync(ct);
 
-        await deps.Outbox.EnqueueAsync(EventType(decision), "approvals.events", new
+        var eventType = EventType(decision);
+        await deps.Outbox.EnqueueAsync(eventType, "approvals.events", new
         {
             authorizationId = auth.AuthorizationId, auth.AuthNo, beneficiaryId = auth.BeneficiaryId,
             source = auth.Source.ToString(), sourceRef = auth.SourceRef,
             approvedScope = approvedScopeJson is null ? null : Codes.Parse(approvedScopeJson),
             releasesDownstream = AuthorizationWorkflow.ReleasesDownstream(decision), breakGlass,
+            /*
+             * THE DECISION'S OWN MEASUREMENTS.
+             *
+             * `auth.TatSeconds` and `auth.SlaBreached` are computed four lines above this and were written to
+             * the row and nowhere else, so the approval-TAT report — the whole point of an authorization read
+             * model — had no turnaround times and no breach counts to build from. `priority` matters for the
+             * same reason: TAT is meaningless unaggregated by it, because Urgent and Routine are answering
+             * different promises.
+             *
+             * `reviewerId` is the one attribution the read model can legitimately hold.
+             *
+             * `rejectionReason` is deliberately NOT sent, even though `AuthorizationFact` has a column for it.
+             * This domain has no reason-code vocabulary — a rejection carries the free-text rationale the
+             * reviewer typed, and that is clinical prose which stays on the authorization, behind
+             * authorization. Deriving a "code" from it would be inventing a taxonomy at the point of export,
+             * and a report that groups by a made-up code is worse than one that admits it cannot group. The
+             * column stays null until there is a real coded reason to put in it.
+             */
+            priority = auth.Priority.ToString(),
+            reviewerId,
+            auth.TatSeconds,
+            auth.SlaBreached,
         }, ct);
+
+        // ── TELL THE PERSON WHO IS WAITING ──────────────────────────────────────────────────────────────────
+        //
+        // A SECOND, notification-shaped copy on notification-service's own queue. Not a redirect of the line
+        // above: `approvals.events` carries the decision to whatever consumes it for projections, and the
+        // transport is point-to-point, so a second consumer on that queue would COMPETE for the messages and
+        // each event would reach one of them, never both.
+        //
+        // Until now this did not exist. `RoutingTable` has routed `AuthApproved`, `AuthRejected`,
+        // `AuthInfoRequested`, `AuthPartiallyApproved` and `AuthEmergencyApproved` since phase 8.1, with
+        // bilingual templates authored for each — and nothing ever delivered one, so a clinician learned their
+        // authorization had been decided by opening the worklist and looking.
+        //
+        // Addressed to the SUBMITTER by subject, which approvals-service is the only service that knows. An
+        // authorization with no recorded submitter (a manual one, created out of band) has no addressee, and
+        // the consumer drops it rather than broadcasting to a role.
+        await NotifyDecisionAsync(deps, auth, eventType, ct);
         await tx.CommitAsync(ct);
 
         await deps.Audit.EmitAsync(new AuditEventDraft
@@ -188,6 +228,36 @@ public static class Decisions
         }, ct);
 
         return Results.Ok(DecisionView.From(auth, row));
+    }
+
+    /// <summary>
+    /// Publish the notification-shaped copy of a decision.
+    ///
+    /// <para>The field bag is min-necessary and NON-clinical (11-permission-matrix, and the dispatcher throws
+    /// on a forbidden key): the authorization number the clinician recognises, and nothing else. The rationale
+    /// the reviewer wrote stays on the authorization, behind authorization.</para>
+    /// </summary>
+    private static async Task NotifyDecisionAsync(
+        DecisionDeps deps, Authorization auth, string eventType, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(auth.CreatedBy)) return;
+        await deps.Outbox.EnqueueAsync(eventType, "notification.domain-events", new
+        {
+            tenantId = auth.TenantId,
+            entityRef = $"authorization:{auth.AuthorizationId}",
+            // `ref`, because that is the token every auth template interpolates ("Authorization {ref} was
+            // approved"). Named `authNo` at first, and a missing token renders EMPTY rather than leaking the
+            // brace — so the notice went out reading "Authorization  was approved" and nothing failed. The
+            // field bag and the template vocabulary are one contract; the template owns the names.
+            fields = new { @ref = auth.AuthNo },
+            recipients = new[]
+            {
+                // `requesting_provider` is the role `RoutingTable` targets for every auth decision. The person
+                // is the one who submitted it — a role-wide fan-out would put a decision about one clinician's
+                // patient in every clinician's inbox.
+                new { userId = auth.CreatedBy, role = "requesting_provider", locale = "ar" },
+            },
+        }, ct);
     }
 
     private static string EventType(AuthDecision d) => d switch

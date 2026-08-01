@@ -1,19 +1,35 @@
 import { useState } from "react";
 import { useFormat } from "../i18n/useFormat";
-import { Button, Card, InputField, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
 import type { EligibilityResult, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { ApiError } from "../api/http";
 import { PageHeader, useLoc } from "./_shared";
 
 const S = {
-  title: { en: "Eligibility Search", ar: "التحقق من الأهلية" },
+  title: { en: "Eligibility Check", ar: "التحقق من الأهلية" },
   field: { en: "Card number, national ID, or name", ar: "رقم البطاقة أو الهوية أو الاسم" },
-  help: { en: "Minimum-necessary — reception sees coverage only, never clinical data.", ar: "الحد الأدنى — يرى الاستقبال التغطية فقط دون بيانات سريرية." },
+  // This screen is mounted under BOTH /reception/eligibility and /beneficiaries/eligibility (see
+  // screens/registry.tsx), so it cannot name reception: a registration officer reading "reception sees
+  // coverage only" is being told about somebody else's permissions, not their own. The rule is a property
+  // of the SEARCH, not of who is running it, so it is now stated that way and is true for every caller.
+  help: { en: "Minimum necessary — this search returns coverage only, never clinical data.", ar: "الحد الأدنى — يعرض هذا البحث التغطية فقط دون بيانات سريرية." },
   check: { en: "Check eligibility", ar: "تحقق من الأهلية" },
-  idle: { en: "Search a beneficiary to check coverage and visit eligibility.", ar: "ابحث عن مستفيد للتحقق من التغطية وأهلية الزيارة." },
+  // The idle card used to repeat the instruction already sitting on the field above it. What it says now is
+  // the thing the field cannot: what the check ANSWERS, so an operator knows before running it whether this
+  // is the screen that settles the question in front of them.
+  idle: {
+    en: "A check returns the plan, benefit band, copay, annual cap remaining, and whether a visit is allowed today.",
+    ar: "يعرض التحقق الخطة وفئة المنفعة والمساهمة والمتبقي من الحد السنوي، وما إذا كانت الزيارة مسموحة اليوم.",
+  },
   loading: { en: "Checking…", ar: "جارٍ التحقق…" },
   error: { en: "Couldn't check eligibility. Try again.", ar: "تعذّر التحقق من الأهلية. حاول مجدداً." },
+  retry: { en: "Try again", ar: "حاول مجدداً" },
+  noneTitle: { en: "No matching beneficiary", ar: "لا يوجد مستفيد مطابق" },
+  noneBody: {
+    en: "Check the card or ID number for a mis-read digit. If it is right, this person is not registered yet — register them before the visit.",
+    ar: "تحقّق من رقم البطاقة أو الهوية بحثًا عن رقم مقروء خطأ. وإذا كان صحيحًا فهذا الشخص غير مسجَّل بعد — سجّله قبل الزيارة.",
+  },
   coverage: { en: "Coverage", ar: "التغطية" },
   plan: { en: "Plan", ar: "الخطة" },
   band: { en: "Benefit band", ar: "فئة المنفعة" },
@@ -30,7 +46,6 @@ const S = {
 export function ReceptionEligibility() {
   const api = useApi();
   const t = useLoc();
-  const { lang } = useTheme();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "error" | "success">("idle");
   const [result, setResult] = useState<EligibilityResult | null>(null);
@@ -96,17 +111,31 @@ export function ReceptionEligibility() {
         )}
         {status === "error" && (
           <Card style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp3)" }}>
-            <StatusChip kind="bad" label={t(S.error)} />
+            {/*
+             * A failed lookup is an ALERT, not a badge. `StatusChip` is the vocabulary for the state of a
+             * THING on screen — a membership is Active, a visit is allowed — and it was being borrowed here
+             * to report the outcome of something the operator just did. Every other screen in the portal
+             * says that with `InlineAlert`, which carries `role="alert"` and the cross icon, so a reader
+             * who has learned what a failure looks like once recognises it everywhere.
+             */}
+            <InlineAlert tone="bad" data-testid="elig-error">{t(S.error)}</InlineAlert>
             <div>
               <Button variant="secondary" onClick={() => void run()}>
-                {t(S.check)}
+                {t(S.retry)}
               </Button>
             </div>
           </Card>
         )}
         {status === "success" && !result && (
-          <Card style={{ padding: "var(--sp5)" }}>
-            <StatusChip kind="neu" label={lang === "ar" ? "لا توجد نتائج" : "No matching beneficiary"} />
+          /*
+           * "No matching beneficiary" is where the desk's work forks, and a grey chip saying so left the
+           * operator to work out both branches themselves: the number may be mis-read, or this person may
+           * genuinely not be registered yet. Naming the two is the whole content of the state — an empty
+           * screen is an invitation to act.
+           */
+          <Card style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp2)" }} data-testid="elig-empty">
+            <h2 className="empty-title">{t(S.noneTitle)}</h2>
+            <p className="muted" style={{ margin: 0 }}>{t(S.noneBody)}</p>
           </Card>
         )}
         {status === "success" && result && <ResultCard result={result} t={t} S={S} />}

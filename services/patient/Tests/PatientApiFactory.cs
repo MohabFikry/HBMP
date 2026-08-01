@@ -85,6 +85,8 @@ public sealed class PatientApiFactory : WebApplicationFactory<Program>
         await using var db = Ctx();
         await db.Database.ExecuteSqlRawAsync(
             "SET session_replication_role = replica; " +
+            "DELETE FROM patient.registration_thread WHERE registration_id IN " +
+            "  (SELECT registration_id FROM patient.registration WHERE tenant_id = {0}); " +
             "DELETE FROM patient.registration_note WHERE registration_id IN " +
             "  (SELECT registration_id FROM patient.registration WHERE tenant_id = {0}); " +
             "DELETE FROM patient.enrolment_intent WHERE registration_id IN " +

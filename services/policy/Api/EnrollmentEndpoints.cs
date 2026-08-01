@@ -405,7 +405,8 @@ public static class EnrollmentEndpoints
     private static string Detail(MembershipError error) =>
         error.Failures is { Count: > 0 } f ? $"{error.Detail} ({string.Join("; ", f)})" : error.Detail;
 
-    private static ActorRef Actor(PolicyGate gate) => new(gate.SubjectId, gate.Subject);
+    private static ActorRef Actor(PolicyGate gate) =>
+        new(gate.SubjectId, gate.Subject, gate.Principal?.DisplayName);
 
     // ---- helpers -----------------------------------------------------------------------------------------
 

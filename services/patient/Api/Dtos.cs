@@ -19,6 +19,11 @@ public sealed record IdentifierDto(string Type, string Value, bool IsPrimary);
 public sealed record CreateRegistration(Guid BeneficiaryId);
 public sealed record PatchRegistration(bool? DocumentsVerified, bool? CoverageBound, string? Notes);
 public sealed record DecisionRequest(string Decision, string? Notes);
+
+/// <summary>An answer on a registration's thread. Body only — the author, the role and the time are taken from
+/// the caller's token and the clock, never from the request, because an entry that can name its own author is
+/// not a record of who said it.</summary>
+public sealed record ThreadReply(string Body);
 public sealed record StatusChange(string ToStatus, string? Reason);
 
 /// <summary>The coverage elected at the desk, as it arrives over the wire.</summary>

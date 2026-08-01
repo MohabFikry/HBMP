@@ -176,6 +176,8 @@ export interface MemberQueryRow {
   givenName?: string | null;
   familyName?: string | null;
   beneficiaryStatus?: string | null;
+  /** The number printed on the card the beneficiary hands over — how a desk matches person to row. */
+  cardNumber?: string | null;
   policyId: string;
   policyPlanId: string;
   planLabel?: string | null;
@@ -194,6 +196,34 @@ export interface MemberQueryRow {
   totalRemaining?: number | null;
   percentUsed?: number | null;
   utilizationBand: string;
+}
+
+/** One person on the same cover. Names ride on the same per-request lookup the roster uses, so they are null
+ *  under exactly the same conditions — patient-service could not be asked. */
+export interface CoveredFamilyMember {
+  enrollmentId: string;
+  beneficiaryId: string;
+  memberNo: string;
+  givenName?: string | null;
+  familyName?: string | null;
+  relationship: string;
+  status: string;
+  isPrincipal: boolean;
+  planLabel?: string | null;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  /** The member the list was opened from. Marked rather than removed — a family list missing the person you
+   *  are looking at reads as a list with somebody missing. */
+  isSubject: boolean;
+}
+
+export interface FamilyView {
+  enrollmentId: string;
+  members: CoveredFamilyMember[];
+  unavailable: string[];
+  /** Household members behind a payer this caller may not read. Counted, so a family of five never renders as
+   *  three with nothing to say why. */
+  withheld: number;
 }
 
 export interface PolicyPlanView {
@@ -329,7 +359,13 @@ export interface AnalyticsSeries {
   points: AnalyticsPoint[];
   summaryEn: string;
   summaryAr: string;
-  columns: string[];
+  /**
+   * Bilingual, like every other label on the series. It was `string[]` — the last monolingual text on the
+   * dashboard, and it sat on the accessible table, so an Arabic reader who could not see the chart got the
+   * one part naming what each number IS in English (audit §3.1). Authored server-side rather than mapped
+   * here: a client-side table of header translations is a second place deciding what "Net payable" is called.
+   */
+  columns: { en: string; ar: string }[];
 }
 
 /** A period-over-period movement. `direction` is a WORD because the four-cue rule needs a text cue, and
@@ -512,11 +548,17 @@ export interface TimelineEntryView {
   correlationId?: string | null;
   targetRef?: string | null;
   targetKind?: string | null;
+  /** True when the entry was read off the membership record rather than projected from an event. Only the
+   *  origin entry is ever derived, and the panel says so on the row. */
+  derived?: boolean;
 }
 
 export interface TimelinePage {
   entries: TimelineEntryView[];
   nextCursor?: string | null;
+  /** The record's creation, returned on the first page only and excluded from `entries`. Null on a policy
+   *  timeline and on an id the service does not know. */
+  origin?: TimelineEntryView | null;
 }
 
 export interface CategoryUtilizationView {
@@ -780,6 +822,8 @@ export interface PolicyApi {
   /** Dry run. Carries no Idempotency-Key: nothing is written, so there is nothing to double-apply. */
   previewPlanChange(enrollmentId: string, policyPlanId: string, effectiveDate: string): Promise<PlanChangePreviewView>;
   coverageDetails(enrollmentId: string, asOf?: string): Promise<MemberCoverageDetail>;
+  /** Who else this cover reaches — the principal and every dependant under them, this member included. */
+  family(enrollmentId: string): Promise<FamilyView>;
 
   /** The six analytical views. `reporting-service`, not policy — the dashboard reads a pre-aggregated read
    *  model and never the transactional benefit spine. */
@@ -894,6 +938,7 @@ export function createHttpPolicyApi(): PolicyApi {
       postRaw(`/enrollments/${id}/change-plan/preview`, { policyPlanId, effectiveDate }) as Promise<PlanChangePreviewView>,
     coverageDetails: (id, asOf) =>
       getRaw(`/enrollments/${id}/coverage-details${q({ asOf })}`) as Promise<MemberCoverageDetail>,
+    family: (id) => getRaw(`/enrollments/${id}/family`) as Promise<FamilyView>,
 
     notes: (scope, id) => getRaw(`/${scope}/${id}/notes`) as Promise<NoteView[]>,
     addNote: (scope, id, body, key) => postRaw(`/${scope}/${id}/notes`, body, key) as Promise<NoteView>,

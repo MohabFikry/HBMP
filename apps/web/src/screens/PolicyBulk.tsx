@@ -104,6 +104,25 @@ const JOB_TYPES = [
   "BenefitRuleImport",
 ];
 
+/**
+ * What the operator sees in the "What are you uploading?" list.
+ *
+ * The values above are the ENGINE's job types and are sent to it verbatim — they must not change. What was
+ * wrong is that they were also the labels: the droplist read "MemberEnrolment", "ProviderTierAssignment",
+ * "BenefitRuleImport", so the first thing the screen asked was answered in the platform's vocabulary rather
+ * than the operator's, and in English regardless of locale. Naming things by how the system is built is the
+ * one thing the writing guidance is unambiguous about.
+ */
+const JOB_TYPE_LABELS: Record<string, Localized> = {
+  MemberEnrolment: { en: "Enrol members", ar: "تسجيل أعضاء" },
+  MemberTermination: { en: "End memberships", ar: "إنهاء عضويات" },
+  PlanChange: { en: "Move members to another plan", ar: "نقل أعضاء إلى خطة أخرى" },
+  GroupAssignment: { en: "Assign members to groups", ar: "إسناد أعضاء إلى مجموعات" },
+  ContactUpdate: { en: "Update contact details", ar: "تحديث بيانات الاتصال" },
+  ProviderTierAssignment: { en: "Assign providers to network tiers", ar: "إسناد مقدّمي الخدمة لشرائح الشبكة" },
+  BenefitRuleImport: { en: "Import benefit rules", ar: "استيراد قواعد المنافع" },
+};
+
 function jobStatusKind(status: string): "ok" | "warn" | "bad" | "neu" | "info" {
   switch (status) {
     case "Completed": return "ok";
@@ -219,7 +238,7 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
           <select className="mrs-control" id="bulk-type" value={jobType} onChange={(e) => { setJobType(e.target.value); reset(); }}>
             {JOB_TYPES.map((x) => (
               <option key={x} value={x}>
-                {x}
+                {JOB_TYPE_LABELS[x] ? t(JOB_TYPE_LABELS[x]) : x}
               </option>
             ))}
           </select>
@@ -326,17 +345,19 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
               <InlineAlert tone={recon.balances ? "ok" : "bad"}>
                 {recon.balances ? t(S.balanced) : t(S.unbalanced)}
               </InlineAlert>
-              <table className="pol-costshare">
-                <caption className="sr-only">{t(S.reconcile)}</caption>
-                <tbody>
-                  <tr><th scope="row">{t(S.submitted)}</th><td>{fmt.number(recon.submitted)}</td></tr>
-                  <tr><th scope="row">{t(S.valid)}</th><td>{fmt.number(recon.valid)}</td></tr>
-                  <tr><th scope="row">{t(S.invalid)}</th><td>{fmt.number(recon.invalid)}</td></tr>
-                  <tr><th scope="row">{t(S.applied)}</th><td>{fmt.number(recon.applied)}</td></tr>
-                  <tr><th scope="row">{t(S.failed)}</th><td>{fmt.number(recon.failed)}</td></tr>
-                  <tr><th scope="row">{t(S.skipped)}</th><td>{fmt.number(recon.skipped)}</td></tr>
-                </tbody>
-              </table>
+              <div className="pol-tablewrap">
+                <table className="pol-costshare">
+                  <caption className="sr-only">{t(S.reconcile)}</caption>
+                  <tbody>
+                    <tr><th scope="row">{t(S.submitted)}</th><td>{fmt.number(recon.submitted)}</td></tr>
+                    <tr><th scope="row">{t(S.valid)}</th><td>{fmt.number(recon.valid)}</td></tr>
+                    <tr><th scope="row">{t(S.invalid)}</th><td>{fmt.number(recon.invalid)}</td></tr>
+                    <tr><th scope="row">{t(S.applied)}</th><td>{fmt.number(recon.applied)}</td></tr>
+                    <tr><th scope="row">{t(S.failed)}</th><td>{fmt.number(recon.failed)}</td></tr>
+                    <tr><th scope="row">{t(S.skipped)}</th><td>{fmt.number(recon.skipped)}</td></tr>
+                  </tbody>
+                </table>
+              </div>
               {recon.errorDocumentId && <InlineAlert tone="info">{t(S.errorFile)}</InlineAlert>}
             </div>
           )}

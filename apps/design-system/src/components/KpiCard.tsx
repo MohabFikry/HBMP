@@ -39,3 +39,34 @@ export function KpiCard({ label, value, delta, direction, className }: KpiCardPr
     </div>
   );
 }
+
+export interface KpiListItem {
+  label: string;
+  value: string;
+}
+
+/**
+ * A row of KPIs as a definition list.
+ *
+ * Same 0B §10b treatment as {@link KpiCard} — hairline, uppercase micro-label, 34px tabular numerals — over
+ * `<dl>/<dt>/<dd>` instead of nested `<div>`s. The screens that render a FIXED set of figures about one thing
+ * ("members / limit / consumed / remaining" for a policy) are describing one subject with four terms, which
+ * is what a definition list is; a screen reader then announces "Total consumed, EGP 41,200" as a pair rather
+ * than as two unrelated lines of text.
+ *
+ * `KpiCard` stays for the dashboards, where each tile is an independent headline with its own delta and the
+ * grouping is a layout choice rather than a claim about the content. Both draw from the same classes, so the
+ * two cannot drift into two different-looking KPIs.
+ */
+export function KpiList({ items, className }: { items: KpiListItem[]; className?: string }) {
+  return (
+    <dl className={cx("mrs-kpilist", className)}>
+      {items.map((k) => (
+        <div key={k.label} className="mrs-card mrs-kpi">
+          <dt className="mrs-kpi-lab">{k.label}</dt>
+          <dd className="mrs-kpi-val">{k.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}

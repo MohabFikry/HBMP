@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mersal.Audit.Client;
 using Mersal.Events;
+using System.Globalization;
 using Mersal.Policy.Domain;
 using Mersal.Time;
 using Microsoft.EntityFrameworkCore;
@@ -46,7 +47,16 @@ public static class MembershipResults
 
 /// <summary>Who is making the change. Passed explicitly rather than read from the request gate, because a
 /// bulk row is applied outside the request that submitted it.</summary>
-public sealed record ActorRef(Guid? UserId, string? Subject);
+/// <summary>
+/// Who performed a membership change.
+///
+/// <param name="Subject">The token subject — a uuid. Machine-stable and unreadable.</param>
+/// <param name="Display">The human name off the token (<c>name</c> / <c>preferred_username</c>), snapshotted
+/// at write time like every other signature on this platform. Without it the member's history says a change
+/// was made by <c>129d2a05-8c27-43c7-aae2-f2cc4c7fda30</c>, which answers "who did this" only for somebody
+/// willing to go and look the id up — so in practice it does not answer it.</param>
+/// </summary>
+public sealed record ActorRef(Guid? UserId, string? Subject, string? Display = null);
 
 public sealed record EnrollCommand(
     Guid BeneficiaryId, Guid PolicyId, Guid? PolicyPlanId, Guid? GroupId, string Relationship,
@@ -249,6 +259,13 @@ public sealed class MembershipCommands(
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<EnrollOutcome>(default, conflict);
 
         await audit.EmitAsync(Draft("enrollment", enrollment.EnrollmentId, AuditAction.Create, actor), ct);
+        await ProjectMemberHistoryAsync(enrollment, "MemberEnrolled", actor, Changed(
+            // A creation, so every "before" is genuinely null — which the reader renders as "set to", not as
+            // a value that vanished.
+            ("status", null, enrollment.Status.ToString()),
+            ("plan", null, plan.PlanLabel),
+            ("relationship", null, enrollment.Relationship.ToString()),
+            ("effectiveFrom", null, Day(enrollment.EffectiveFrom))), ct);
         // 19.6b widened the payload with the ANALYTIC DIMENSIONS (payer, group, branch, relationship). The
         // dashboard aggregates by them, and an event that says "a member was enrolled" without saying under
         // which payer forces every consumer to go back and ask — which for reporting-service means querying
@@ -368,6 +385,10 @@ public sealed class MembershipCommands(
             ? await db.Database.BeginTransactionAsync(ct)
             : null;
         var now = clock.GetUtcNow();
+        // Captured BEFORE the mutation: the history's whole job is to say what the value used to be, and by
+        // the time the projection runs the row no longer holds it.
+        var wasStatus = e.Status;
+        var wasCoveredUntil = e.EffectiveTo;
         e.Status = EnrollmentStatus.Terminated;
         e.EffectiveTo = effectiveDate;      // INCLUSIVE: the member IS covered on this day
         e.TerminationReason = reason;
@@ -381,6 +402,9 @@ public sealed class MembershipCommands(
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<Enrollment>(default, conflict);
 
         await audit.EmitAsync(Draft("enrollment", enrollmentId, AuditAction.StateChange, actor, "terminated", reason), ct);
+        await ProjectMemberHistoryAsync(e, "MemberTerminated", actor, Changed(
+            ("status", wasStatus.ToString(), e.Status.ToString()),
+            ("coveredUntil", Day(wasCoveredUntil), Day(e.EffectiveTo))), ct);
         var termDims = await DimensionsAsync(e, ct);
         await outbox.EnqueueAsync("MemberTerminated", "policy.events", new
         {
@@ -413,6 +437,8 @@ public sealed class MembershipCommands(
             ? await db.Database.BeginTransactionAsync(ct)
             : null;
         var now = clock.GetUtcNow();
+        var wasStatus = e.Status;
+        var wasCoveredUntil = e.EffectiveTo;
         e.Status = EnrollmentStatus.Active;
         e.EffectiveTo = null;
         e.TerminationReason = null;
@@ -425,6 +451,10 @@ public sealed class MembershipCommands(
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<Enrollment>(default, conflict);
 
         await audit.EmitAsync(Draft("enrollment", enrollmentId, AuditAction.StateChange, actor, "reinstated", reason), ct);
+        await ProjectMemberHistoryAsync(e, "MemberReinstated", actor, Changed(
+            ("status", wasStatus.ToString(), e.Status.ToString()),
+            // Cleared, not set — "12 Mar 2026 → —" is how the reader sees an end date being lifted.
+            ("coveredUntil", Day(wasCoveredUntil), null)), ct);
         var reinDims = await DimensionsAsync(e, ct);
         await outbox.EnqueueAsync("MemberReinstated", "policy.events", new
         {
@@ -460,7 +490,117 @@ public sealed class MembershipCommands(
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<GroupChangeOutcome>(default, conflict);
 
         await audit.EmitAsync(Draft("enrollment", enrollmentId, AuditAction.Update, actor, "group-changed", reason), ct);
+        await ProjectMemberHistoryAsync(e, "MemberGroupChanged", actor, Changed(
+            ("group", await GroupCodeAsync(from, ct), await GroupCodeAsync(groupId, ct)),
+            ("effectiveDate", null, Day(effectiveDate))), ct);
+        /*
+         * The only membership movement that never left this service.
+         *
+         * Terminate, reinstate, plan-change and cancel all publish to `policy.events` with the same dimension
+         * bag; a group change wrote its enrollment_event row and its timeline entry and stopped there. So the
+         * enrolment curve counted five of the six movements, and a member moving between groups — which is
+         * how a cohort is re-cut, and therefore exactly what a group-level report is asked about — was
+         * invisible to every consumer outside policy-service.
+         */
+        var groupDims = await DimensionsAsync(e, ct);
+        await outbox.EnqueueAsync("MemberGroupChanged", "policy.events", new
+        {
+            tenantId = e.TenantId, enrollmentId, beneficiaryId = e.BeneficiaryId, effectiveDate,
+            fromGroupId = from,
+            groupDims.PayerId, groupDims.PolicyId, groupDims.PolicyPlanId, groupDims.GroupId,
+            groupDims.BranchId, groupDims.Relationship, groupDims.Status,
+        }, ct);
         return MembershipResults.Success(new GroupChangeOutcome(e, from));
+    }
+
+
+    // ============================================================================================================
+    // THE MEMBER'S HISTORY — written HERE, in the transaction that made the change.
+    // ============================================================================================================
+    //
+    // The Logs tab reads `policy.entity_timeline`. Every membership event this class performs was published to
+    // `policy.events` and NOTHING projected it, so the only rows in that table were the ones the demo seed
+    // wrote: a plan change made in the app left no trace, which is exactly what an operator reported.
+    //
+    // `TimelineProjector` documents an intent that the timeline should be projected from events "that already
+    // exist", so it cannot drift from the audit trail. That intent is honoured — this runs immediately after
+    // the audit event is emitted, from the same values, inside the same transaction — and the guarantee is
+    // stronger than a consumer's would be: a change and its history entry commit together or neither does.
+    // A consumer on `policy.events` was the alternative and it buys eventual consistency for a projection the
+    // operator expects to see the moment the dialog closes.
+    //
+    // The event id is DERIVED from what happened rather than random, so a retry of the same change projects
+    // the same row: `ProjectAsync` dedupes on the source event id, and a random one would make every retry a
+    // duplicate line in somebody's history.
+    private async Task ProjectMemberHistoryAsync(
+        Enrollment e, string eventType, ActorRef actor,
+        IReadOnlyDictionary<string, (string? Before, string? After)>? changes,
+        CancellationToken ct)
+    {
+        var occurredAt = clock.GetUtcNow();
+        await new TimelineProjector(db, clock).ProjectAsync(
+            [new TimelineSource(
+                EventId: DerivedEventId(e.EnrollmentId, eventType, occurredAt),
+                EventType: eventType,
+                Scope: NoteScope.Member,
+                ScopeRef: e.EnrollmentId,
+                OccurredAt: occurredAt,
+                SourceService: "policy-service",
+                ActorUserId: actor.UserId,
+                ActorUsername: actor.Subject,
+                // The NAME, snapshotted. The reader of a member's history is asking "who changed this", and a
+                // subject uuid is an answer only to somebody who can resolve it.
+                ActorDisplay: actor.Display,
+                Changes: changes)],
+            e.TenantId, ct);
+    }
+
+    /// <summary>
+    /// The before/after bag for one change, in the vocabulary the READER has.
+    ///
+    /// <para>Labels, not identifiers. "Plan: Standard → Enhanced" is the sentence somebody opens the Logs tab
+    /// to read; <c>policyPlanId: 4f2c… → 91ab…</c> is the same fact written so that answering the question
+    /// requires two more lookups. The identifiers are not lost — <c>policy.enrollment_event</c> keeps them, and
+    /// it is what 19.5b's as-of extraction reconstructs history from, precisely because a label can be reused
+    /// on a renewed policy and an id cannot.</para>
+    ///
+    /// <para><b>The termination reason is deliberately absent</b> from every bag below. It can say "deceased"
+    /// or "suspected misuse", <c>AdministrativeProjection.MayReadCase</c> withholds it from roles that read
+    /// this history, and a diff carries ONE visibility class — so putting it here would route it around the
+    /// projection that exists to hold it back. It stays on the enrolment event and in the audit trail.</para>
+    /// </summary>
+    private static Dictionary<string, (string? Before, string? After)> Changed(
+        params (string Field, string? Before, string? After)[] fields)
+    {
+        var bag = new Dictionary<string, (string?, string?)>(StringComparer.Ordinal);
+        foreach (var (field, before, after) in fields) bag[field] = (before, after);
+        return bag;
+    }
+
+    /// <summary>Dates in the diff are ISO, and formatted invariantly: the entry is rendered in whichever
+    /// language the reader has chosen, so a value serialized in the server's culture would be a second
+    /// formatting decision made in the wrong place.</summary>
+    private static string? Day(DateOnly? date) =>
+        date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    /// <summary>The group's CODE for the history. Null id → null, which the reader shows as "no group" rather
+    /// than as a missing value.</summary>
+    private async Task<string?> GroupCodeAsync(Guid? groupId, CancellationToken ct) =>
+        groupId is not { } id ? null
+            : await db.MemberGroups.AsNoTracking()
+                .Where(g => g.GroupId == id).Select(g => g.GroupCode).FirstOrDefaultAsync(ct);
+
+    /// <summary>The plan's LABEL for the history, by id — the previous plan is only an id by the time the
+    /// change has been applied.</summary>
+    private async Task<string?> PlanLabelAsync(Guid policyPlanId, CancellationToken ct) =>
+        await db.PolicyPlans.AsNoTracking()
+            .Where(pp => pp.PolicyPlanId == policyPlanId).Select(pp => pp.PlanLabel).FirstOrDefaultAsync(ct);
+
+    /// <summary>A stable id for one change: same enrollment, same event type, same instant → same id.</summary>
+    private static Guid DerivedEventId(Guid enrollmentId, string eventType, DateTimeOffset occurredAt)
+    {
+        var seed = $"{enrollmentId:N}|{eventType}|{occurredAt.UtcTicks}";
+        return new Guid(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(seed))[..16]);
     }
 
     // ---- Change plan -------------------------------------------------------------------------------------
@@ -625,6 +765,9 @@ public sealed class MembershipCommands(
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<PlanChangeOutcome>(default, conflict);
 
         await audit.EmitAsync(Draft("enrollment", enrollmentId, AuditAction.StateChange, actor, "plan-changed", reason), ct);
+        await ProjectMemberHistoryAsync(e, "MemberPlanChanged", actor, Changed(
+            ("plan", await PlanLabelAsync(previousPlanId, ct), plan.PlanLabel),
+            ("effectiveDate", null, Day(effectiveDate))), ct);
         var planDims = await DimensionsAsync(e, ct);
         await outbox.EnqueueAsync("MemberPlanChanged", "policy.events", new
         {
@@ -665,6 +808,7 @@ public sealed class MembershipCommands(
             ? await db.Database.BeginTransactionAsync(ct)
             : null;
         var now = clock.GetUtcNow();
+        var wasStatus = e.Status;
         e.Status = EnrollmentStatus.Cancelled;
         e.TerminationReason = reason;
         e.UpdatedAt = now;
@@ -677,6 +821,8 @@ public sealed class MembershipCommands(
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<Enrollment>(default, conflict);
 
         await audit.EmitAsync(Draft("enrollment", enrollmentId, AuditAction.StateChange, actor, "cancelled", reason), ct);
+        await ProjectMemberHistoryAsync(e, "MemberEnrolmentCancelled", actor, Changed(
+            ("status", wasStatus.ToString(), e.Status.ToString())), ct);
         var cancelDims = await DimensionsAsync(e, ct);
         await outbox.EnqueueAsync("MemberEnrolmentCancelled", "policy.events", new
         {

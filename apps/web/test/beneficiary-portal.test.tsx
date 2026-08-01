@@ -8,7 +8,8 @@ import { DevApiClient } from "../src/api/DevApiClient";
 import { ApiError } from "../src/api/http";
 import type { ApiClient } from "../src/api/client";
 import type { PolicyApi } from "../src/api/policyApi";
-import { BeneficiaryManage, BeneficiaryRegister, BeneficiaryStatus } from "../src/screens/BeneficiaryPortal";
+import { BeneficiaryRegister } from "../src/screens/BeneficiaryPortal";
+import { StatusChangeModal } from "../src/screens/BeneficiaryStatusDialog";
 import { seedSession } from "./helpers";
 
 /**
@@ -32,47 +33,60 @@ function renderScreen(ui: React.ReactElement, client: ApiClient = new DevApiClie
   );
 }
 
-async function search(name: string) {
-  await userEvent.type(screen.getByLabelText(/search by name/i), name);
-  await userEvent.click(screen.getByRole("button", { name: /^search$/i }));
-}
-
 beforeEach(() => localStorage.clear());
 afterEach(() => cleanup());
 
-describe("Status & reactivation — legal transitions only", () => {
-  it("offers only the current status's legal moves, named as operations", async () => {
-    renderScreen(<BeneficiaryStatus />);
-    await search("a"); // matches all fixtures
+describe("Status change — legal transitions only", () => {
+  /*
+   * These used to drive the "Status & Reactivation" SCREEN, which is gone (19.7 nav rework): its whole job
+   * was to find a person you had usually just been looking at and press one button, so it is now an action on
+   * the beneficiary's detail. The DIALOG is unchanged and so are these assertions — they simply render it
+   * directly rather than through a search that no longer exists.
+   */
+  const openDialog = (props: Partial<React.ComponentProps<typeof StatusChangeModal>> = {}, client?: ApiClient) =>
+    renderScreen(
+      <StatusChangeModal
+        beneficiaryId="BEN-2"
+        name="Salma Adel"
+        statusRaw="Active"
+        onClose={() => {}}
+        onChanged={() => {}}
+        {...props}
+      />,
+      client,
+    );
 
+  it("offers only the current status's legal moves, named as operations", async () => {
     // Suspended → the one legal desk move is Reinstate. The old screen offered Activate AND Suspend
     // here; Suspend was an invited "already in status" 409.
-    const suspended = (await screen.findAllByRole("row")).find((r) => within(r).queryByText(/Amina Yusuf/))!;
-    await userEvent.click(within(suspended).getByRole("button", { name: /change status/i }));
+    openDialog({ beneficiaryId: "BEN-3", name: "Amina Yusuf", statusRaw: "Suspended" });
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("radio", { name: /reinstate/i })).toBeInTheDocument();
     expect(within(dialog).queryByRole("radio", { name: /suspend/i })).toBeNull();
     expect(within(dialog).queryByRole("radio", { name: /^activate$/i })).toBeNull();
   });
 
-  it("locks the fraud-Blocked state and says WHY instead of rendering a doomed button", async () => {
-    renderScreen(<BeneficiaryStatus />);
-    await search("Hassan");
+  it("locks the fraud-Blocked state and says WHY instead of rendering a doomed control", async () => {
+    // 23 §1: both edges of Blocked belong to a director's case review. A radio here would 403.
+    openDialog({ beneficiaryId: "BEN-9", name: "Hassan Tariq", statusRaw: "Blocked" });
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByRole("radio")).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: /confirm/i })).toBeNull();
+    expect(within(dialog).getByText(/unlocked by a director/i)).toBeInTheDocument();
+  });
 
-    const row = (await screen.findAllByRole("row")).find((r) => within(r).queryByText(/Hassan Tariq/))!;
-    // 23 §1: both edges of Blocked belong to a director's case review. A button here would 403.
-    expect(within(row).queryByRole("button", { name: /change status/i })).toBeNull();
-    expect(within(row).getByText(/medical director/i)).toBeInTheDocument();
+  it("names a status it was never told, rather than showing an empty dialog", async () => {
+    // A caller whose role was not disclosed the beneficiary's status. "No moves" and "we cannot see the
+    // status" are different facts and lead to different next steps.
+    openDialog({ statusRaw: null });
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/was not disclosed to your role/i)).toBeInTheDocument();
   });
 
   it("demands a reason exactly where the server records one", async () => {
     const client = new DevApiClient({ latencyMs: 0 });
     const spy = vi.spyOn(client, "changeBeneficiaryStatus");
-    renderScreen(<BeneficiaryStatus />, client);
-    await search("Salma"); // Active
-
-    const row = (await screen.findAllByRole("row")).find((r) => within(r).queryByText(/Salma Adel/))!;
-    await userEvent.click(within(row).getByRole("button", { name: /change status/i }));
+    openDialog({}, client);
     const dialog = await screen.findByRole("dialog");
 
     await userEvent.click(within(dialog).getByRole("radio", { name: /suspend/i }));
@@ -89,11 +103,7 @@ describe("Status & reactivation — legal transitions only", () => {
   it("does not demand a reason for reinstatement — activation is the default good outcome", async () => {
     const client = new DevApiClient({ latencyMs: 0 });
     const spy = vi.spyOn(client, "changeBeneficiaryStatus");
-    renderScreen(<BeneficiaryStatus />, client);
-    await search("Amina");
-
-    const row = (await screen.findAllByRole("row")).find((r) => within(r).queryByText(/Amina Yusuf/))!;
-    await userEvent.click(within(row).getByRole("button", { name: /change status/i }));
+    openDialog({ beneficiaryId: "BEN-3", name: "Amina Yusuf", statusRaw: "Suspended" }, client);
     const dialog = await screen.findByRole("dialog");
     // Single legal move → pre-selected; no reason field rendered at all.
     expect(within(dialog).queryByLabelText(/reason/i)).toBeNull();
@@ -106,11 +116,7 @@ describe("Status & reactivation — legal transitions only", () => {
     vi.spyOn(client, "changeBeneficiaryStatus").mockRejectedValue(
       new ApiError("http", "conflict", 409, { title: "transition-denied", detail: "already in status Active" }),
     );
-    renderScreen(<BeneficiaryStatus />, client);
-    await search("Amina");
-
-    const row = (await screen.findAllByRole("row")).find((r) => within(r).queryByText(/Amina Yusuf/))!;
-    await userEvent.click(within(row).getByRole("button", { name: /change status/i }));
+    openDialog({ beneficiaryId: "BEN-3", name: "Amina Yusuf", statusRaw: "Suspended" }, client);
     const dialog = await screen.findByRole("dialog");
     await userEvent.click(within(dialog).getByRole("button", { name: /confirm/i }));
 
@@ -120,48 +126,18 @@ describe("Status & reactivation — legal transitions only", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("re-queries after a successful change so the row shows server truth", async () => {
+  it("tells its caller to re-read after a successful change", async () => {
+    // Reactivation can ISSUE a member number, and only the server knows it — so the dialog's contract is to
+    // report success and let the caller re-query, never to patch the row locally.
     const client = new DevApiClient({ latencyMs: 0 });
-    const searchSpy = vi.spyOn(client, "beneficiarySearch");
-    renderScreen(<BeneficiaryStatus />, client);
-    await search("Amina");
-    expect(searchSpy).toHaveBeenCalledTimes(1);
-
-    const row = (await screen.findAllByRole("row")).find((r) => within(r).queryByText(/Amina Yusuf/))!;
-    await userEvent.click(within(row).getByRole("button", { name: /change status/i }));
-    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: /confirm/i }));
-
-    // Reactivation can ISSUE a member number now; only the server knows it. The old screen left the stale
-    // row and painted "Status updated" next to the old status.
-    await vi.waitFor(() => expect(searchSpy).toHaveBeenCalledTimes(2));
-    expect(screen.queryByRole("dialog")).toBeNull();
+    const onChanged = vi.fn();
+    openDialog({ beneficiaryId: "BEN-3", name: "Amina Yusuf", statusRaw: "Suspended", onChanged }, client);
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: /confirm/i }));
+    await vi.waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
 });
 
-describe("Search — typed failures", () => {
-  it("names a permission denial instead of blaming the connection", async () => {
-    const client = new DevApiClient({ latencyMs: 0 });
-    vi.spyOn(client, "beneficiarySearch").mockRejectedValue(
-      new ApiError("http", "forbidden", 403, { title: "forbidden" }),
-    );
-    renderScreen(<BeneficiaryManage />, client);
-    await search("x");
-
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toMatch(/don't have access/i);
-    // Retrying an authorization decision cannot change it.
-    expect(screen.queryByRole("button", { name: /retry/i })).toBeNull();
-  });
-
-  it("offers retry for a server fault", async () => {
-    const client = new DevApiClient({ latencyMs: 0 });
-    vi.spyOn(client, "beneficiarySearch").mockRejectedValue(new ApiError("http", "boom", 503));
-    renderScreen(<BeneficiaryManage />, client);
-    await search("x");
-    await screen.findByRole("alert");
-    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
-  });
-});
 
 /**
  * The registration form's reference data, stubbed.
@@ -313,9 +289,17 @@ describe("Register — the operational record", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /register beneficiary/i }));
 
-    // The four closed vocabularies that are simply unchosen. Everything else carries a rule-specific message
-    // ("an Egyptian National ID is exactly 14 digits") rather than a bare "Required".
-    expect(await screen.findAllByText(/^required\.$/i)).toHaveLength(4);
+    // Every required field that is simply EMPTY says the same thing, whether it is typed or chosen.
+    //
+    // This assertion used to expect 4 — the four closed vocabularies — because the typed fields answered a
+    // blank box with their FORMAT rule instead: three empty name boxes explained that "names can contain
+    // letters, spaces, hyphens, apostrophes and periods only", and an empty phone box asked for "8–15
+    // digits, with an optional leading +". Neither is what went wrong. The operator had not filled the
+    // field in, and the form said so in one vocabulary for droplists and another for text boxes.
+    //
+    // The rule-specific messages are still exactly right for a field that HAS a value and got it wrong —
+    // which is the case they were written for, and which the birthdate and National ID tests below cover.
+    expect(await screen.findAllByText(/^required\.$/i)).toHaveLength(11);
     expect(spy).not.toHaveBeenCalled();
   });
 

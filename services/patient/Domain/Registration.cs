@@ -19,10 +19,55 @@ public sealed class Registration
     public bool DocumentsVerified { get; set; }
     public bool CoverageBound { get; set; }
 
+    /// <summary>The CURRENT outstanding note — what is missing, or why it was refused. The history of how it
+    /// got here, and the officer's answer, live on <see cref="RegistrationThreadEntry"/>.</summary>
     public string? Notes { get; set; }
+
+    /// <summary>The officer who filed the application, and their name as it stood when they filed it.
+    ///
+    /// <para>The name is a copy on purpose. Resolving it through identity-service on every worklist read would
+    /// make the queue unable to render a column while that service restarts, and someone who has since left
+    /// must still be named on the applications they filed: the record is of what happened.</para>
+    ///
+    /// <para>This is also the address a RequestInfo decision is delivered to — without it, "we need more
+    /// information" has no queue to land in.</para></summary>
+    public string? CreatedBy { get; set; }
+    public string? CreatedByName { get; set; }
+
     public int RowVersion { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>Whether a thread entry is a ruling or an answer to one. Rendered differently, and never
+/// interchangeable — a reply that reads as a decision is a reply that gets acted on as one.</summary>
+public enum RegistrationThreadKind { Decision, Reply }
+
+/// <summary>
+/// One entry in the conversation about a registration.
+///
+/// <para><b>Append-only.</b> The application role holds SELECT and INSERT on this table and nothing else
+/// (migration 0005), so an entry cannot be edited or removed after the fact. A supervisor's stated reason for
+/// refusing an application is evidence, and evidence that can be quietly rewritten is not evidence.</para>
+///
+/// <para>This is what makes RequestInfo a workflow rather than a dead end: the decision writes a Decision
+/// entry, the officer it was addressed to answers with a Reply, and both are on the record in order.</para>
+/// </summary>
+public sealed class RegistrationThreadEntry
+{
+    public Guid EntryId { get; set; }
+    public Guid RegistrationId { get; set; }
+    public string TenantId { get; set; } = "";
+    public RegistrationThreadKind Kind { get; set; }
+
+    /// <summary>Which decision this entry recorded, or null on a reply.</summary>
+    public RegistrationDecision? Decision { get; set; }
+
+    public string Body { get; set; } = default!;
+    public string? AuthorUserId { get; set; }
+    public string? AuthorName { get; set; }
+    public string? AuthorRole { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
 }
 
 /// <summary>

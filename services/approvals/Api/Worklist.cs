@@ -57,7 +57,19 @@ public static class Worklist
                 Priority = req.Priority,
                 Status = AuthStatus.Submitted,
                 SubmittedAt = now, CreatedAt = now, UpdatedAt = now,
-                IdempotencyKey = idem, CreatedBy = me.Principal?.Subject,
+                /*
+                 * The ORDERING CLINICIAN, falling back to the caller.
+                 *
+                 * `CreatedBy` is what `NotifyDecisionAsync` addresses the decision notice to, and on this
+                 * endpoint the caller is a service principal holding `auth:ingest` — so it named the routing
+                 * saga, the notice had no human addressee, and it was correctly not sent (§11.3). The
+                 * ingesting service knows who ordered the thing; it now says so.
+                 *
+                 * The fallback keeps the break-glass and manual paths working unchanged: there the caller IS
+                 * the human, and `me.Principal.Subject` is already the right answer.
+                 */
+                IdempotencyKey = idem,
+                CreatedBy = string.IsNullOrWhiteSpace(req.OrderedByUserId) ? me.Principal?.Subject : req.OrderedByUserId,
             };
 
             await using var tx = await db.Database.BeginTransactionAsync(ct);
@@ -69,7 +81,15 @@ public static class Worklist
             });
             await db.SaveChangesAsync(ct);
             await outbox.EnqueueAsync("AuthSubmitted", "approvals.events",
-                new { authorizationId = auth.AuthorizationId, auth.AuthNo, beneficiaryId = auth.BeneficiaryId, source = auth.Source.ToString() }, ct);
+                new
+                {
+                    authorizationId = auth.AuthorizationId, auth.AuthNo, beneficiaryId = auth.BeneficiaryId,
+                    source = auth.Source.ToString(),
+                    // The read model's pending-queue row is keyed on priority and its SLA clock; without them
+                    // every pending authorization would sit in the Routine bucket with no due time, which is
+                    // the two facts an approvals dashboard exists to show.
+                    priority = auth.Priority.ToString(), slaDueAt = auth.SlaDueAt,
+                }, ct);
             await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
@@ -147,7 +167,7 @@ public static class Worklist
                     detail: "This request was picked up by another reviewer.", type: "urn:hbmp:already-assigned");
             }
             await outbox.EnqueueAsync("AuthUnderReview", "approvals.events",
-                new { authorizationId = auth.AuthorizationId, auth.AuthNo, reviewerId, slaDueAt = auth.SlaDueAt }, ct);
+                new { authorizationId = auth.AuthorizationId, auth.AuthNo, reviewerId, slaDueAt = auth.SlaDueAt, priority = auth.Priority.ToString() }, ct);
             await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft

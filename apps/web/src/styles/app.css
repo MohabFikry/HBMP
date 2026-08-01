@@ -9,6 +9,19 @@
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
+  /*
+   * A containing block for absolutely positioned descendants — WITHOUT this the shell does not actually
+   * contain them.
+   *
+   * `overflow: hidden` clips descendants it contains, but an `position: absolute` box whose containing
+   * block is the initial containing block is not one of them: it is laid out against the document, and the
+   * clip never applies. Every `.sr-only` (design-system `base.css`) is exactly that box. One of them 1100px
+   * down a scrolled worklist made the DOCUMENT 1100px tall behind a 100dvh shell, so the page grew a second
+   * scrollbar; scrolling it dragged the whole app — bar, rail and content — upward and exposed an
+   * unpainted band below. Nothing was broken inside the shell, which is why it read as "the layout is
+   * scrolling wrong" rather than as one stray element.
+   */
+  position: relative;
 }
 .app-bar {
   grid-column: 1 / 3;
@@ -116,6 +129,10 @@ nav.mrs-rail {
 }
 .app-main {
   grid-row: 2;
+  /* Containing block for the `.sr-only` boxes inside the scrolled content — see `.app-grid` above. Pinning
+     them to this pane means they extend its scroll area (which already reaches that far, so nothing moves)
+     instead of the document's. */
+  position: relative;
   min-width: 0;
   /* min-height:0 lets this grid child shrink below its content so overflow-y actually scrolls. */
   min-height: 0;
@@ -220,6 +237,15 @@ nav.mrs-rail {
   display: flex;
   gap: var(--sp2);
   flex-wrap: wrap;
+}
+
+/* The heading of an empty state. Card-sized, not page-sized: it names the situation, and the sentence under
+   it names the way out. `h2` inherits the page scale otherwise and shouts louder than the result it stands
+   in for. */
+.empty-title {
+  margin: 0;
+  font-size: var(--fs-title-3);
+  font-weight: 600;
 }
 
 /* Key/value grid used by result cards, vitals, review panels. */
@@ -419,8 +445,23 @@ nav.mrs-rail {
     z-index: 40;
     display: flex;
     flex-direction: row;
+    /* The desktop rail is a full-height grid column (`grid-row: 2`, `height: calc(100dvh - 60px)`,
+       `align-self: start`). None of that was reset here, so the "tab bar" was still 100dvh tall — a fixed
+       panel covering the entire screen with the page content behind it, and `align-items: stretch` made each
+       tab as tall as the viewport. The portal was unreachable below 760px, which is the width this block
+       exists to serve. Everything the desktop rail sets is undone explicitly. */
+    grid-row: auto;
+    align-self: auto;
+    /* `top` MUST be cleared too: the desktop rule sets `top: 60px`, and a fixed box with both `top` and
+       `bottom` resolved stretches to fill between them no matter what `height` says. */
+    top: auto;
+    height: auto;
+    block-size: auto;
+    max-block-size: 30vh;         /* a portal with many sections scrolls; it never eats the page */
+    align-items: stretch;
     gap: 0;
     overflow-x: auto;
+    overflow-y: hidden;
     overscroll-behavior-x: contain;
     padding: 0;
     /* Clear the iOS home indicator / Android gesture bar. */
@@ -442,6 +483,9 @@ nav.mrs-rail {
     align-items: center;
     justify-content: center;
     gap: 2px;
+    /* The rail item is `width: 100%` — right for a vertical list, and left in place here, so every tab was
+       as wide as the whole bar and exactly one was ever on screen. A tab bar showing one tab is a label. */
+    width: auto;
     /* The project's own ≥44px target bar (21-accessibility). */
     min-width: 4.5rem;
     min-height: 56px;
@@ -956,10 +1000,49 @@ nav.mrs-rail {
    Tokens only: no literal colours, sizes or spacings. Every interactive target is at least 44px and every
    status is carried by text as well as by hue (0B / 21). */
 .pol-screen { display: grid; gap: var(--sp4); }
+/*
+ * Grid items default to `min-width: auto`, so a child is never allowed to be narrower than its own
+ * min-content. A 1000px-wide member table therefore pushed `.mrs-card` — and with it this grid — past the
+ * viewport, where `.app-main { overflow-x: hidden }` simply CUT IT OFF: at 768px the last four columns
+ * (status, from, waiting period, % used) were unreachable, with no scrollbar to suggest they existed.
+ * `.mrs-wl-scroll` already owns the horizontal scroll and already declares `max-inline-size: 100%` — it just
+ * had nothing finite to resolve that percentage against. This gives it one.
+ */
+.pol-screen > * { min-inline-size: 0; }
 /* Policy-portal cards never passed the inline padding every other portal's cards carry, so their content
    — most visibly the member search pill — sat flush against the card border and the card itself read as
    edgeless (QA follow-up). Direct children only; cards that set their own padding inline still win. */
-.pol-screen > .mrs-card { padding: var(--sp4); }
+/*
+  CARDS IN THESE SCREENS HAVE PADDING.
+
+  `.mrs-card` deliberately carries none — a card is a surface, and each screen sets its own — but that makes
+  a forgotten padding invisible in review and obvious on screen: content sits hard against the border and the
+  card reads as a rendering fault.
+
+  This rule used to be `.pol-screen > .mrs-card`, DIRECT CHILDREN ONLY, and every analytics card is inside a
+  tab panel. So the filter bar (a direct child) was padded and the six view panels below it were not — the
+  same card, the same screen, two different insets depending on whether a `Tabs` happened to sit between it
+  and `.pol-screen`. The member detail had the identical fault for the identical reason.
+
+  `> .mrs-card` under the pane as well, not a descendant selector: a card nested inside another card keeps
+  whatever its parent gives it, and a panel that sets its own inline padding still wins (inline beats this).
+*/
+.pol-screen > .mrs-card,
+.pol-screen .mrs-tabpane .mrs-card,
+.pol-detail > .mrs-card,
+.pol-detail .mrs-tabpane .mrs-card {
+  padding: var(--sp4);
+}
+/*
+  A card INSIDE a card would otherwise be padded twice. There is no such nesting on these screens today —
+  checked across every analytics tab and the member detail's five — so this is a guard against the next one
+  rather than a fix for a current fault: the inner surface keeps whatever its parent gives it, which is what
+  the nesting was for.
+*/
+.pol-screen .mrs-card .mrs-card,
+.pol-detail .mrs-card .mrs-card {
+  padding: 0;
+}
 .pol-detail { display: grid; gap: var(--sp4); margin-block-start: var(--sp4); }
 .pol-panel { display: grid; gap: var(--sp3); }
 .pol-panel h3 { margin: 0; }
@@ -983,9 +1066,82 @@ nav.mrs-rail {
 .pol-identity dd { margin: 0; }
 .pol-actions { display: flex; flex-wrap: wrap; gap: var(--sp2); margin-block-start: var(--sp3); }
 
+/* ── The member card (19.6d) ──────────────────────────────────────────────────────────────────────────────
+   Three bands — who / what they hold / what you can do — separated by rules rather than by spacing alone,
+   because the third band contains Terminate and spacing is not a boundary anyone reads under pressure. */
+.mem-card { display: grid; gap: var(--sp3); }
+.mem-identity { display: flex; gap: var(--sp3); align-items: start; }
+/* min-width:0 so a long name wraps INSIDE the flex item instead of widening it and pushing the card into a
+   horizontal scroll — a grid/flex child's default min-width is auto, which is content-sized. */
+.mem-identity-text { display: grid; gap: var(--sp1); min-inline-size: 0; }
+.mem-nameline { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; }
+.mem-nameline h2 { margin: 0; }
+.mem-sub { margin: 0; color: var(--text-2); font-size: 0.9rem; }
+
+.mem-avatar {
+  flex: 0 0 auto;
+  border-radius: var(--r-lg);
+  object-fit: cover;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.mem-avatar--initials {
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 0.02em;
+}
+
+/* The general-information strip. Icon + value pairs, wrapping — never a fixed row, because a phone number and
+   a two-letter nationality do not want the same width and a grid would give them one. */
+.mem-info { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp1) var(--sp4); }
+.mem-info li { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-2); font-size: 0.9rem; }
+.mem-info svg { color: var(--text-3); flex: 0 0 auto; }
+
+.mem-facts {
+  display: flex; flex-wrap: wrap; gap: var(--sp2) var(--sp5); margin: 0;
+  padding-block-start: var(--sp3); border-block-start: 1px solid var(--border);
+}
+.mem-facts dt { color: var(--text-2); font-size: 0.82rem; }
+.mem-facts dd { margin: 0; }
+
+.mem-actions {
+  display: flex; flex-wrap: wrap; gap: var(--sp2); align-items: center;
+  padding-block-start: var(--sp3); border-block-start: 1px solid var(--border);
+}
+/* A hairline between the reads and the changes. Decorative and aria-hidden — the separation it draws is a
+   convenience for the eye, and the buttons say what they do on their own. */
+.mem-actions-split {
+  inline-size: 1px; align-self: stretch; min-block-size: 1.5rem;
+  background: var(--border); margin-inline: var(--sp1);
+}
+/*
+  Terminate stays in the FLOW, behind its own separator — it is not pushed to the far edge.
+
+  It was `margin-inline-start: auto`, which reads well only while the row fits on one line. As soon as it
+  wrapped, Terminate sat alone against the opposite edge of the card with a gap where the other buttons had
+  been, which looks like a layout fault rather than like emphasis. The separator already does the work the
+  margin was there for, and it survives wrapping.
+*/
+.mem-actions-end { margin-inline-start: 0; }
+
 /* The two-level grid. Wide by nature (one column per tier once expanded), so it scrolls INSIDE its own
    container — the page body must never scroll sideways. */
 .pol-grid, .pol-costshare { width: 100%; border-collapse: collapse; display: block; overflow-x: auto; }
+/*
+ * `display: block` buys the horizontal scroll, but it also takes the table OUT of table layout: the browser
+ * wraps the rows in an anonymous shrink-to-fit table, so `width: 100%` applies to the block box while the
+ * columns size to their own content. A two-column series table then draws its row rules across a quarter of
+ * the card and stops — which reads as a clipped or broken table, not as a narrow one (seen on Analytics'
+ * chart alternatives). Where a wrapper already owns the scroll, the table can stay a table and fill it.
+ */
+.pol-tablewrap > .pol-grid,
+.pol-tablewrap > .pol-costshare,
+/* `.bulk-columns` is itself the scroll container (it owns the max-height and the sticky header), so the
+   contract table gets the same treatment without a second, nested scrollport — which would have detached
+   `position: sticky` on the thead from the box that actually scrolls. */
+.bulk-columns > .pol-costshare { display: table; overflow-x: visible; }
 .pol-grid th, .pol-grid td, .pol-costshare th, .pol-costshare td {
   padding: var(--sp2) var(--sp3);
   border-block-end: 1px solid var(--border);
@@ -1015,10 +1171,15 @@ nav.mrs-rail {
 .pol-note.cancelled .pol-note-body { text-decoration: line-through; }
 .pol-note-meta { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; font-size: 0.85rem; }
 .pol-note-author { font-weight: 600; }
-.pol-note-time { color: var(--text-2); font-variant-numeric: tabular-nums; }
+/* The timestamp to the end of the meta line: chips and author are what you scan for, the time is what you
+   check once you have found the note. `margin-inline-start` follows the writing direction, so it mirrors. */
+.pol-note-time { color: var(--text-2); font-variant-numeric: tabular-nums; margin-inline-start: auto; }
 .pol-note-body { margin: 0; white-space: pre-wrap; }
 .pol-note-cancel { margin: 0; color: var(--text-2); font-size: 0.85rem; }
-.pol-note-form { display: grid; gap: var(--sp2); }
+/* A grid item stretches by default, so the cancel button spanned the whole note and its centred label read as
+   a primary action on a record it only withdraws. */
+.pol-note > .mrs-btn { justify-self: end; }
+.pol-note-form { display: grid; gap: var(--sp3); }
 .pol-check { display: flex; gap: var(--sp2); align-items: center; min-block-size: 44px; }
 .pol-check input { inline-size: 24px; block-size: 24px; }
 
@@ -1033,12 +1194,38 @@ nav.mrs-rail {
 
 .pol-docs { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--sp2); }
 .pol-doc { display: flex; gap: var(--sp3); align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.pol-doc-actions { display: flex; gap: var(--sp1); align-items: center; }
+/* ≥44px targets even though the glyph is 20px (21-accessibility-checklist). */
+.pol-doc-actions .mrs-btn { min-inline-size: 44px; min-block-size: 44px; padding-inline: var(--sp2); }
+.pol-doc-actions svg { inline-size: 20px; block-size: 20px; }
 .pol-doc-meta { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; }
 
 .pol-timeline { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--sp3); }
 .pol-timeline li { border-inline-start: 3px solid var(--border); padding-inline-start: var(--sp3); }
 .pol-timeline p { margin: var(--sp1) 0 0; }
 .pol-timeline-head { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; font-size: 0.85rem; color: var(--text-2); }
+/* The origin is the anchor, not the newest thing that happened — it carries the accent rail and a label so
+   its position at the top does not read as a break in the reverse-chronological run below it. */
+.pol-timeline-origin { border-inline-start-color: var(--accent); }
+/* The pager sits INSIDE the run, between the loaded entries and the anchor, so it needs neither the rail nor
+   the indent the entries carry. */
+.pol-timeline-more { border-inline-start: none; padding-inline-start: 0; }
+.pol-timeline-eyebrow {
+  display: block; margin-block-end: var(--sp1);
+  font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--text-2);
+}
+
+/* What moved, under the sentence that says something moved. A definition list, not a table: these are one to
+   four pairs, and a table of two columns and two rows is heavier than the fact it carries. */
+.pol-diff-fields { margin: var(--sp2) 0 0; display: grid; gap: var(--sp1); font-size: 0.9rem; }
+.pol-diff-fields > div { display: flex; gap: var(--sp2); flex-wrap: wrap; align-items: baseline; }
+.pol-diff-fields dt { color: var(--text-2); min-inline-size: 8rem; }
+.pol-diff-fields dd { margin: 0; }
+/* The OLD value is de-emphasised and struck: at a glance the current value is the one that reads as current.
+   Never colour alone — the strike-through and the arrow both carry it. */
+.pol-diff-before { color: var(--text-3); text-decoration: line-through; }
+.pol-diff-after { font-weight: 600; }
 
 /* Meters. Decorative by design — the numbers live in the always-present sr-only table beside them. */
 .pol-meters { display: grid; gap: var(--sp3); }
@@ -1052,7 +1239,12 @@ nav.mrs-rail {
 .pol-meter-fill.bad { background: var(--st-bad-fg); }
 .pol-meter-fill.neu { background: var(--st-neu-fg); }
 
-.pol-dialog { display: grid; gap: var(--sp3); border: 2px solid var(--accent); }
+/*
+  The membership dialog's BODY. It used to be the dialog itself — a card with a 2px accent border, standing in
+  for a modal it was not (see `MembershipDialog`). Inside a real modal the border and the surface belong to
+  the modal, so all that is left here is the stack.
+*/
+.pol-dialog { display: grid; gap: var(--sp3); }
 .pol-dialog-actions { display: flex; gap: var(--sp2); flex-wrap: wrap; }
 
 /* ── Paired actions + reference-table modal (0B §11) ─────────────────────────────────────────────────
@@ -1075,8 +1267,19 @@ nav.mrs-rail {
   z-index: 1;
   background: var(--surface-1);
 }
+/*
+ * `overflow-wrap: anywhere` is required by 0B §10c — these are exact match keys and must never be clipped.
+ * But the column had no width of its own, so "anywhere" is where it broke: `card_number` rendered as
+ * `card_num` / `ber` and `first_name` as `first_na` / `me`, across two lines, in a table whose entire job
+ * is to tell the operator what to type. A key that has to be reassembled by eye is not a contract. The
+ * column now gets enough room for a realistic key; `anywhere` stays as the backstop for a longer one.
+ */
+.bulk-columns th[scope="row"] { min-inline-size: 12rem; }
 .bulk-columns code { font-size: var(--fs-caption); overflow-wrap: anywhere; }
 .bulk-req { display: inline-flex; gap: var(--sp1); align-items: center; white-space: nowrap; }
+/* `Icon` carries no intrinsic size — unsized inside a flex row it collapsed, so required-ness was left
+   carried by the word alone, which is the four-cue rule half-applied. */
+.bulk-req svg { inline-size: 16px; block-size: 16px; flex: 0 0 auto; }
 
 /* ── Phase 20: the unified patient profile ─────────────────────────────────────────────────────────────
    The three withheld states must be visually distinct, not three shades of grey — a user has to be able
@@ -1221,8 +1424,20 @@ nav.mrs-rail {
   align-items: center;
 }
 .pol-bar-label { color: var(--text-2); overflow-wrap: anywhere; }
+/*
+ * A GROOVE, not a bar.
+ *
+ * The track was a solid `--surface-2` block running the full width of its column, so a series member with a
+ * zero value rendered as a full-width filled pill with "0" printed beside it — "Over the limit ▬▬▬▬▬ 0"
+ * (audit §5.4). Two readings of the same row, and the wrong one is the one the eye reaches first, on the
+ * series that exists to flag people who have crossed their limit.
+ *
+ * An inset hairline over a transparent well reads as a container waiting to be filled, so an empty one reads
+ * as empty. The fill keeps its solid colour, so a bar that IS full still looks full.
+ */
 .pol-bar-track {
-  background: var(--surface-2);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border);
   border-radius: var(--r-pill);
   height: 14px;
   overflow: hidden;
@@ -1234,6 +1449,20 @@ nav.mrs-rail {
 .pol-bar-fill.p-2 { background-image: repeating-linear-gradient(-45deg, transparent 0 3px, rgb(255 255 255 / 45%) 3px 6px); }
 .pol-bar-fill.p-3 { background-image: repeating-linear-gradient(90deg, transparent 0 5px, rgb(255 255 255 / 45%) 5px 8px); }
 .pol-bar-value { color: var(--text-1); font-variant-numeric: tabular-nums; text-align: end; }
+
+/*
+ * The bars and the table beneath them are the same series read twice — once as shape, once as figures — and
+ * the card is meant to read as one object. It did not: the bars put their value hard against the card's
+ * right edge while the table's value column started a third of the way across, so the eye found two
+ * different "value" columns stacked on top of each other and had to work out that they were the same
+ * numbers. Right-aligning the table's numeric cells lands both on the same edge, which is also simply
+ * correct for numbers — they are compared by scanning a column of digits, not by reading a sentence.
+ */
+.pol-series .pol-costshare td,
+.pol-series .pol-costshare thead th:not(:first-child) {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
 
 /* Wide tables scroll inside their own container so the page body never scrolls sideways. */
 .pol-tablewrap { overflow-x: auto; }
@@ -1642,7 +1871,11 @@ nav.mrs-rail {
   gap: var(--sp3);
   inline-size: 100%;
   font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em;
-  color: var(--text-3); font-weight: 600;
+  /* --text-3 is the META tone and it measures 4.34:1 on white — under AA, and at 11.5px, nowhere near the
+     large-text exemption. Caught by the in-browser axe pass the moment it could run again (§12.5): jsdom has
+     no layout engine, so `color-contrast` reports nothing there whatever the palette does. These are SECTION
+     HEADINGS, not incidental metadata; --text-2 is 7.0:1 and is the tone for text that has to be read. */
+  color: var(--text-2); font-weight: 600;
   padding: 0;
   margin-block-end: var(--sp4);        /* the air between a heading and the fields it introduces */
 }
@@ -1659,11 +1892,64 @@ nav.mrs-rail {
 }
 /* Notes are prose; a 220px column hides the beginning of what was typed. */
 .ben-grid--notes { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+
+/*
+ * The CELL keeps the grid's rhythm; the CONTROL is sized by what goes in it (audit §5.9).
+ *
+ * Every box on this form was the width of its column, so "Contribution (%)" — one to three digits, never
+ * more, the server clamps it to 0–100 — got the same 220px+ box as "Middle name", and a field spanning two
+ * columns got 540px for a reference number. A box far wider than its content is a question about what else
+ * you are supposed to type, and on a numeric field it invites the answer.
+ *
+ * Sized on the control rather than the grid track so the labels still line up across the row: shrinking the
+ * cell would ragged the whole section to save a few pixels on one field. `ch` because these are character
+ * counts, not layout constants — 10ch is "100.00 and a little air" in whatever the form's face happens to be.
+ */
+.ben-w-num > .mrs-control { max-inline-size: 10ch; }
+.ben-w-code > .mrs-control { max-inline-size: 24ch; }
+
+/* The error summary sits above the first section, so it needs the same bottom air a fieldset has or it
+   crowds the legend under it. The list is the map back to the work; the alert above it is the headline. */
+.ben-errorsummary { display: grid; gap: var(--sp2); margin-block-end: var(--sp4); }
+.ben-errorsummary ul { margin: 0; padding-inline-start: var(--sp5); display: grid; gap: var(--sp1); }
+/* The same red the field-level messages use — a summary in link-blue would read as navigation rather than
+   as the list of things that are wrong. */
+.ben-errorsummary a { color: var(--st-bad-fg); }
 .ben-span-2 { grid-column: span 2; }
 @media (max-width: 640px) { .ben-span-2 { grid-column: auto; } }
 
-/* A phone is one value entered as two fields; the pair reads and tabs as one control. */
-.ben-phone { display: grid; grid-template-columns: minmax(96px, 140px) 1fr; gap: var(--sp2); align-items: end; }
+/*
+ * A phone is one value entered as two fields; the pair reads and tabs as one control.
+ *
+ * `align-items: end` bottom-aligned them, which is right only while both cells are the same height. The
+ * moment the number fails validation it grows an error line, the pair's bottom edge moves with it, and the
+ * country code — the half that did NOT fail — slid a whole line down the page, so the two boxes of one value
+ * no longer sat on the same row. `start` plus the same label/control/message anatomy the rest of the grid
+ * uses keeps the controls on one line in every state. The two cells are nested inside `.ben-phone`, so the
+ * `.ben-grid > .mrs-field` rule below never reached them.
+ */
+.ben-phone { display: grid; grid-template-columns: minmax(96px, 140px) 1fr; gap: var(--sp2); align-items: start; }
+/*
+ * A dialling code is an LTR token, not a phrase.
+ *
+ * "+20" is stored and read left-to-right, but "+" is a bidi-neutral character: dropped into an Arabic
+ * paragraph it takes the paragraph's direction and moves to the other end, so the Egypt option rendered as
+ * "20+" — a country code that does not exist, on the field an operator uses to reach a beneficiary.
+ * `unicode-bidi: isolate` plus `direction: ltr` fences the token off from the surrounding run without
+ * touching the mirroring of anything around it (the flag and the chevron still swap sides).
+ */
+.ben-phone .mrs-combo-label,
+.ben-phone .mrs-combo-hint {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+.ben-phone > .mrs-field {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  align-content: start;
+  min-inline-size: 0;
+}
+.ben-phone .mrs-label { display: block; min-block-size: 2.4em; }
 
 /* Every cell in the grid has the same anatomy — label, control, then help/error — so the controls sit on one
    baseline whether they are typed or chosen. Without this the label wraps on one field and not its neighbour
@@ -1692,24 +1978,25 @@ nav.mrs-rail {
 .ben-doc-body { display: grid; gap: var(--sp1); min-inline-size: 0; }
 .ben-doc-head { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; }
 .ben-doc-name { overflow-wrap: anywhere; }
+/* Decorative, and sized to the text beside it rather than to the 24px grid — it marks the start of a row, it
+   is not a control. */
+.ben-doc-glyph { inline-size: 18px; block-size: 18px; color: var(--text-2); flex: 0 0 auto; }
 /* The upload date sits UNDER the file name — the order an officer reads them in. */
 .ben-doc-sub {
   display: flex; gap: var(--sp1); align-items: center; flex-wrap: wrap;
   color: var(--text-2); font-size: 0.85rem;
 }
+/* The reason a row has no buttons, said on the row rather than in a tooltip nobody hovers. */
+.ben-doc-locked { margin: 0; color: var(--text-2); font-size: 0.85rem; max-inline-size: 60ch; }
 .ben-doc-actions { display: flex; gap: var(--sp1); align-items: center; }
 /* ≥44px targets even though the glyph is 20px (21-accessibility-checklist). */
 .ben-doc-actions .mrs-btn { min-inline-size: 44px; min-block-size: 44px; padding-inline: var(--sp2); }
 .ben-doc-actions svg { inline-size: 20px; block-size: 20px; }
 
-.ben-doc-upload {
-  display: grid; gap: var(--sp3);
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  align-items: end;
-  padding: var(--sp3); border: 1px solid var(--border);
-  border-radius: var(--r-md); background: var(--surface-2);
-}
-.ben-doc-upload-wide { grid-column: 1 / -1; }
+/* One column: the form lives in a dialog now, not across the top of the tab, so it reads as a short sequence
+   of questions rather than a row of boxes competing for the same width. */
+.ben-doc-upload { display: grid; gap: var(--sp3); }
+.ben-doc-upload .mrs-control { inline-size: 100%; }
 
 .ben-doc-preview {
   inline-size: 100%; max-block-size: min(70vh, 640px);
@@ -1775,7 +2062,11 @@ iframe.ben-doc-preview { block-size: min(70vh, 640px); }
   gap: var(--sp3);
   flex: 1 1 auto;                      /* grows, so its rule reaches the count */
   font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em;
-  color: var(--text-3); font-weight: 600;
+  /* --text-3 is the META tone and it measures 4.34:1 on white — under AA, and at 11.5px, nowhere near the
+     large-text exemption. Caught by the in-browser axe pass the moment it could run again (§12.5): jsdom has
+     no layout engine, so `color-contrast` reports nothing there whatever the palette does. These are SECTION
+     HEADINGS, not incidental metadata; --text-2 is 7.0:1 and is the tone for text that has to be read. */
+  color: var(--text-2); font-weight: 600;
 }
 /* The same hairline the <legend> sections carry, so a collapsed section and an open one read alike. */
 .ben-disclosure-title::after {
@@ -1816,15 +2107,18 @@ iframe.ben-doc-preview { block-size: min(70vh, 640px); }
   display: inline-flex;
   align-items: center;
   gap: var(--sp2);
-  min-block-size: 40px;              /* the control height, so the row's baseline is unbroken */
+  /* 44px, not 40: the whole row is the target and the project's own bar is 44 (21-accessibility-checklist),
+     so the row that WAS the justification for a small box was itself 4px short of it. */
+  min-block-size: 44px;
 }
 .ben-checkbox input {
-  inline-size: 18px;
-  block-size: 18px;
+  /* Size comes from `.mrs-checkbox` (24px) rather than being re-declared at 18px here. The same control was
+     drawn at two sizes depending on which screen it appeared on, and the smaller one was below the 24px
+     WCAG 2.2 minimum on its own. */
   margin: 0;
   flex: none;
 }
-/* The whole row is the target, not just the 18px box (21-accessibility-checklist: ≥44px). */
+/* The whole row is the target, not just the box (21-accessibility-checklist: ≥44px). */
 .ben-checkbox { cursor: pointer; padding-inline-end: var(--sp2); }
 
 /* ── Reception dashboard (14.5) ──────────────────────────────────────────────
@@ -1956,3 +2250,216 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
    navigation aid and at full scale it dwarfed the header it drops out of. */
 .dash-daypop .bk-cal-day { min-block-size: 0; }
 .dash-daypop .bk-cal-num { font-size: 11.5px; }
+
+/* ============================================================================================================
+   REGISTRATION APPROVALS — the queue, its notes thread and the registration detail
+   ============================================================================================================ */
+
+/*
+  Icon-only actions. 18px glyph in a 44px target (21-accessibility): the visible box stays cell-sized so the
+  row does not grow, and the touch target is the padding around it.
+*/
+.reg-iconbtn,
+.reg-notebtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-inline-size: 44px;
+  min-block-size: 44px;
+  padding-inline: var(--sp2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+  color: var(--text-1);
+  cursor: pointer;
+}
+.reg-iconbtn:hover,
+.reg-notebtn:hover { background: var(--surface-2); }
+
+/* The count is the load-bearing half of the notes affordance — it says whether opening it is worth a click. */
+.reg-notecount {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.reg-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+  /* Never wraps: a two-control cell that breaks puts the decision button under the view icon and doubles the
+     height of every row on the page. */
+  flex-wrap: nowrap;
+}
+
+/*
+  The bulk bar lives in the toolbar's trailing slot, so it appears where the other table controls are rather
+  than as a strip that pushes the table down when rows are selected.
+*/
+.reg-bulkbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp3);
+  padding: var(--sp2) var(--sp3);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--accent-tint);
+}
+
+.reg-rolenote {
+  margin: var(--sp3) 0 0;
+  font-size: 13px;
+}
+
+/* ---- the notes thread ------------------------------------------------------------------------------------
+   An ordered list, because the order IS the content: a reply only means anything after the question it
+   answers. */
+.reg-thread {
+  list-style: none;
+  margin: 0 0 var(--sp4);
+  padding: 0;
+  display: grid;
+  gap: var(--sp3);
+}
+.reg-entry {
+  padding: var(--sp3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+}
+/* A ruling is marked by a leading accent bar as well as its chip — hue is never the only cue (0B four-cue). */
+.reg-entry-decision {
+  border-inline-start: 4px solid var(--accent);
+  background: var(--surface-2);
+}
+.reg-entry-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp2);
+  margin-block-end: var(--sp2);
+  font-size: 13px;
+}
+.reg-entry-who { font-weight: 600; }
+.reg-entry-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.reg-reply {
+  display: grid;
+  gap: var(--sp3);
+  padding-block-start: var(--sp3);
+  border-block-start: 1px solid var(--border);
+}
+
+/* ---- the detail modal ------------------------------------------------------------------------------------ */
+.reg-detail {
+  margin-block-end: var(--sp4);
+}
+.reg-detail h3 {
+  margin: 0 0 var(--sp2);
+  font-size: 15px;
+}
+/*
+  Two columns of label/value pairs that collapse to one on a narrow modal. `minmax(0, 1fr)` rather than `1fr`
+  because a grid item's default `min-width: auto` refuses to shrink below its content, and a long identifier
+  would push the modal wider than the viewport.
+*/
+.reg-kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: var(--sp2) var(--sp4);
+  margin: 0;
+}
+.reg-kv > div { min-inline-size: 0; }
+.reg-kv dt {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  font-weight: 600;
+}
+.reg-kv dd {
+  margin: 2px 0 0;
+  overflow-wrap: break-word;
+}
+
+.reg-docs,
+.reg-bulklist,
+.reg-failures {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp2);
+}
+.reg-docs li,
+.reg-failures li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp2);
+}
+.reg-bulklist {
+  margin-block-end: var(--sp4);
+  max-block-size: 30vh;
+  overflow-y: auto;
+}
+.reg-bulklist li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+}
+/* The refusal reason wraps under the name rather than pushing it off the modal. */
+.reg-failures li { display: grid; gap: 2px; }
+
+/* ---- advanced search on the Beneficiaries roster ----------------------------------------------------------
+   Ten filters. A flex row would leave a ragged last line and fields of three different widths; the grid gives
+   every filter the same footprint and reflows to fewer columns as the viewport narrows, so a date field is
+   never squeezed below the width its own control needs. */
+.pol-advanced {
+  display: grid;
+  gap: var(--sp3);
+  margin-block-start: var(--sp4);
+  padding-block-start: var(--sp4);
+  border-block-start: 1px solid var(--border);
+}
+.pol-advanced > .pol-muted { margin: 0; font-size: 13px; }
+.pol-advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr));
+  gap: var(--sp3) var(--sp4);
+}
+/* `min-inline-size: 0` because a grid item defaults to `auto`, which refuses to shrink below its content —
+   a long option label would otherwise push the grid wider than its card. */
+.pol-advanced-grid > * { min-inline-size: 0; }
+.pol-advanced-grid .mrs-control { inline-size: 100%; }
+.pol-advanced-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp3);
+  flex-wrap: wrap;
+}
+/* The search bar now carries three controls (query, search, advanced), so the field keeps the flexible share
+   and the two buttons keep their intrinsic width instead of all three splitting the row equally. */
+.pol-searchbar > .mrs-btn { flex: 0 0 auto; }
+
+/* The details panel's header: title and its edit action on one line, wrapping rather than colliding. */
+.pol-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp4);
+  flex-wrap: wrap;
+  margin-block-end: var(--sp4);
+}
+.pol-panel-head h3 { margin: 0 0 var(--sp1); }
+.pol-panel-head p { margin: 0; font-size: 13px; }
+/* The "changed elsewhere" note sits under the fields it explains, not beside them. */
+.pol-lockednote {
+  margin: var(--sp4) 0 0;
+  font-size: 13px;
+  padding-block-start: var(--sp3);
+  border-block-start: 1px solid var(--border);
+}

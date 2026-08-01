@@ -78,7 +78,10 @@ import {
   zIdentityUser,
   zRoleScopeGrant,
   zReportAccessRequestRow,
+  zBeneficiaryDocument,
+  zRegistrationThreadEntry,
   zRegistrationWorkItem,
+  zRegistrationWorklistPage,
   zRegistrationDecisionResult,
   zMembershipRow,
   zMembershipDetail,
@@ -94,7 +97,7 @@ import {
   zAppointmentDay,
   zAppointmentCounts,
 } from "@mersal/contracts";
-import type { BookingRequest, CreatePractitionerInput, PractitionerAttachFailure } from "@mersal/contracts";
+import type { BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, CreatePractitionerInput, PractitionerAttachFailure } from "@mersal/contracts";
 import type { ApiClient } from "./client";
 import { ApiError, getRaw, postRaw, putRaw, patchRaw, postForm, parseOr, getAbsolute, postAbsolute, deleteAbsolute } from "./http";
 import { GATEWAY_BASE } from "../config";
@@ -1906,30 +1909,142 @@ export class HttpApiClient implements ApiClient {
   // Registration approval workflow (US-003). The worklist row carries the beneficiary through the same
   // field-projected disclosure the directory search uses, so the mapping tolerates classes the caller's
   // role cannot read.
-  async registrationWorklist() {
-    const r = (await getRaw(`/registrations`)) as any;
+  async registrationWorklist(pageSize = 100) {
+    // The server clamps pageSize to 100. Asking for the maximum in one request loads the OLDEST 100
+    // applications, which — the queue being ordered oldest-first — is exactly the work at the front of it.
+    // `total` comes back regardless, so the screen can say when there is more behind this page rather than
+    // implying the queue is 100 long. Paging the server in a loop was the alternative and it buys nothing: a
+    // supervisor does not work application 400 before application 4.
+    const r = (await getRaw(`/registrations?pageSize=${pageSize}`)) as any;
     const items: any[] = r?.items ?? [];
-    return items.map((it: any) => {
+    const mapped = items.map((it: any) => {
       const b = it?.beneficiary ?? {};
+      const reg = it?.registration;
       return parseOr(zRegistrationWorkItem, {
         beneficiary: {
           id: b.beneficiaryId,
           memberNo: b.memberNo ?? undefined,
+          cardNumber: b.cardNumber ?? undefined,
           givenName: String(b.givenName ?? ""),
+          middleName: b.middleName ?? undefined,
           familyName: String(b.familyName ?? ""),
           status: beneficiaryStatusChip(b.status),
           statusRaw: String(b.status ?? ""),
           identifiers: (b.identifiers ?? []).map((i: any) => ({ type: String(i.type ?? ""), value: String(i.value ?? ""), isPrimary: Boolean(i.isPrimary) })),
+          // Field-projected on the server: a key that is absent was withheld from this role, and stays
+          // undefined here rather than being defaulted into a value nobody disclosed.
+          birthDate: b.birthDate ?? undefined,
+          birthDateIsApproximate: b.birthDateIsApproximate ?? undefined,
+          sex: b.sex ?? undefined,
+          nationalityCode: b.nationalityCode ?? undefined,
+          individualNo: b.individualNo ?? undefined,
+          caseNo: b.caseNo ?? undefined,
+          contacts: b.contacts ?? undefined,
         },
-        registration: it?.registration
+        registration: reg
           ? {
-              id: it.registration.registrationId,
-              status: String(it.registration.status ?? "Pending"),
-              documentsVerified: it.registration.documentsVerified === true,
-              coverageBound: it.registration.coverageBound === true,
-              notes: it.registration.notes ?? null,
+              id: reg.registrationId,
+              status: String(reg.status ?? "Pending"),
+              documentsVerified: reg.documentsVerified === true,
+              coverageBound: reg.coverageBound === true,
+              notes: reg.notes ?? null,
+              createdAt: String(reg.createdAt ?? ""),
+              createdBy: reg.createdBy ?? null,
+              createdByName: reg.createdByName ?? null,
+              updatedAt: reg.updatedAt ?? undefined,
+              threadCount: Number(reg.threadCount ?? 0),
+              enrolment: reg.enrolment
+                ? {
+                    planId: reg.enrolment.planId,
+                    networkTierId: reg.enrolment.networkTierId,
+                    contributionPercent: Number(reg.enrolment.contributionPercent ?? 0),
+                    defaultBranchId: reg.enrolment.defaultBranchId ?? undefined,
+                  }
+                : null,
+              standingNotes: (reg.standingNotes ?? []).map((n: any) => ({
+                slot: Number(n.slot),
+                labelEn: String(n.labelEn ?? ""),
+                labelAr: String(n.labelAr ?? ""),
+                visibility: n.visibility === "Clinical" ? "Clinical" : "Administrative",
+                value: n.value ?? null,
+                withheld: n.withheld === true,
+              })),
             }
           : null,
+      });
+    });
+    return parseOr(zRegistrationWorklistPage, {
+      items: mapped,
+      // Falls back to the loaded count rather than 0: a server that predates the field would otherwise make
+      // the pager claim an empty queue underneath a full table.
+      total: Number.isFinite(r?.total) ? Number(r.total) : mapped.length,
+    });
+  }
+  async registrationThread(id: string) {
+    const r = (await getRaw(`/registrations/${encodeURIComponent(id)}/thread`)) as any[];
+    return (r ?? []).map((e: any) =>
+      parseOr(zRegistrationThreadEntry, {
+        id: e.entryId,
+        kind: e.kind === "Reply" ? "Reply" : "Decision",
+        decision: e.decision ?? null,
+        body: String(e.body ?? ""),
+        authorName: e.authorName ?? null,
+        authorRole: e.authorRole ?? null,
+        createdAt: String(e.createdAt ?? ""),
+      }));
+  }
+  async replyToRegistration(id: string, body: string) {
+    const e = (await postRaw(`/registrations/${encodeURIComponent(id)}/thread`, { body })) as any;
+    return parseOr(zRegistrationThreadEntry, {
+      id: e?.entryId,
+      kind: "Reply",
+      decision: null,
+      body: String(e?.body ?? body),
+      authorName: e?.authorName ?? null,
+      authorRole: e?.authorRole ?? null,
+      createdAt: String(e?.createdAt ?? new Date().toISOString()),
+    });
+  }
+  async beneficiary(id: string) {
+    const b = (await getRaw(`/beneficiaries/${encodeURIComponent(id)}`)) as any;
+    // The SAME field-projected shape the worklist rows are built from, mapped once — an absent key means the
+    // server withheld it from this role, and stays undefined rather than being defaulted into a value nobody
+    // disclosed.
+    return parseOr(zBeneficiaryRow, {
+      id: b?.beneficiaryId ?? id,
+      memberNo: b?.memberNo ?? undefined,
+      cardNumber: b?.cardNumber ?? undefined,
+      givenName: String(b?.givenName ?? ""),
+      middleName: b?.middleName ?? undefined,
+      familyName: String(b?.familyName ?? ""),
+      status: beneficiaryStatusChip(b?.status),
+      statusRaw: String(b?.status ?? ""),
+      identifiers: (b?.identifiers ?? []).map((i: any) => ({ type: String(i.type ?? ""), value: String(i.value ?? ""), isPrimary: Boolean(i.isPrimary) })),
+      birthDate: b?.birthDate ?? undefined,
+      birthDateIsApproximate: b?.birthDateIsApproximate ?? undefined,
+      sex: b?.sex ?? undefined,
+      nationalityCode: b?.nationalityCode ?? undefined,
+      individualNo: b?.individualNo ?? undefined,
+      caseNo: b?.caseNo ?? undefined,
+      contacts: b?.contacts ?? undefined,
+    });
+  }
+  async updateBeneficiary(id: string, edit: BeneficiaryEdit) {
+    const r = (await patchRaw(`/beneficiaries/${encodeURIComponent(id)}`, edit)) as any;
+    return { changed: Array.isArray(r?.changed) ? (r.changed as string[]) : [] };
+  }
+  async beneficiaryDocuments(beneficiaryId: string) {
+    const r = (await getRaw(`/beneficiaries/${encodeURIComponent(beneficiaryId)}/documents`)) as any[];
+    return (r ?? []).map((d: any) => {
+      // document-service returns every VERSION; the review only needs the current one's provenance.
+      const versions: any[] = d?.versions ?? [];
+      const current = versions.find((v) => v.versionNo === d.currentVersionNo) ?? versions[versions.length - 1];
+      return parseOr(zBeneficiaryDocument, {
+        id: d.documentId,
+        docType: String(d.docType ?? ""),
+        classification: String(d.classification ?? ""),
+        uploadedAt: current?.uploadedAt ?? null,
+        uploadedBy: current?.uploadedBy ?? null,
       });
     });
   }
@@ -1942,6 +2057,28 @@ export class HttpApiClient implements ApiClient {
   async decideRegistration(id: string, decision: "Approve" | "RequestInfo" | "Reject", notes?: string) {
     const r = (await postRaw(`/registrations/${encodeURIComponent(id)}/decision`, { decision, notes: notes ?? null })) as any;
     return parseOr(zRegistrationDecisionResult, { status: String(r?.status ?? ""), memberNo: r?.memberNo ?? undefined });
+  }
+  async decideRegistrations(ids: readonly string[], decision: "Approve" | "RequestInfo" | "Reject", notes?: string) {
+    const outcomes: BulkDecisionOutcome[] = [];
+    // SEQUENTIAL, not Promise.all. Each decision that approves issues a member number from a shared counter
+    // and enrols the member through the outbox; firing twenty at once turns a queue the server serialises
+    // anyway into twenty simultaneous transactions, and makes the failure that matters — one row refused —
+    // arrive interleaved with nineteen successes in no particular order.
+    for (const id of ids) {
+      try {
+        const r = await this.decideRegistration(id, decision, notes);
+        outcomes.push({ registrationId: id, ok: true, memberNo: r.memberNo });
+      } catch (e) {
+        // The server's own reason, kept per row. "cannot approve: no policy/coverage is bound" tells the
+        // supervisor what to do next; "bulk decision failed" tells them nothing.
+        outcomes.push({
+          registrationId: id,
+          ok: false,
+          error: e instanceof ApiError ? e.reason : String((e as Error)?.message ?? e),
+        });
+      }
+    }
+    return outcomes;
   }
 
   // Governance reads (Phase 8b.2) — the master-data versions + typed system-config currently in force. Reference

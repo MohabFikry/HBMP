@@ -24,6 +24,22 @@ builder.Services.AddNotificationInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<NotificationGate>();
 
+// THE FAN-OUT SUBSCRIPTION (US-072). Every routed domain event becomes a notification here.
+//
+// This replaced a registration-only consumer, which was the single delivery path this service had: the
+// routing table, the templates and the escalation model covered thirteen event types and twelve of them had
+// nothing feeding them. One consumer now serves them all, so a new notification is a publisher change and a
+// template row.
+//
+// Registered unconditionally: the consumer degrades to a warning when the broker is absent (dev without
+// RabbitMQ) rather than taking the inbox API down with it.
+builder.Services.Configure<DomainEventOptions>(builder.Configuration.GetSection(DomainEventOptions.SectionName));
+builder.Services.AddHostedService<DomainEventConsumer>();
+
+// The other half of the fan-out. `EscalationService` has been complete since phase 8 and was constructed only
+// by its tests, so every `EscalationDueAt` the dispatcher has ever stamped went by unread. See EscalationSweeper.
+builder.Services.AddHostedService<EscalationSweeper>();
+
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("notification-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
     .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());

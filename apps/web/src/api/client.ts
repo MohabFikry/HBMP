@@ -18,8 +18,12 @@ import type {
   BeneficiaryRow,
   RegisterBeneficiaryInput,
   RegisterResult,
+  BeneficiaryDocument,
+  BeneficiaryEdit,
+  BulkDecisionOutcome,
   RegistrationDecisionResult,
-  RegistrationWorkItem,
+  RegistrationThreadEntry,
+  RegistrationWorklistPage,
   StatusChangeResult,
   ApprovalItem,
   ApprovalReview,
@@ -363,8 +367,34 @@ export interface ApiClient {
   beneficiarySearch(query: { name?: string; status?: string }): Promise<BeneficiaryRow[]>;
   registerBeneficiary(input: RegisterBeneficiaryInput, idempotencyKey?: string): Promise<RegisterResult>;
   changeBeneficiaryStatus(id: string, toStatus: string, reason: string): Promise<StatusChangeResult>;
-  /** The approver's queue (US-003): Pending beneficiaries + their latest application. Oldest first. */
-  registrationWorklist(): Promise<RegistrationWorkItem[]>;
+  /**
+   * The approver's queue (US-003): Pending beneficiaries + their latest application. Oldest first.
+   *
+   * Returns a PAGE plus the size of the whole queue. The screen searches, filters, sorts and paginates the
+   * loaded page in the browser — instant, and incapable of disagreeing with what is on screen — and uses
+   * `total` to say plainly when the queue is larger than what it has. See `RegistrationApprovals`.
+   */
+  registrationWorklist(pageSize?: number): Promise<RegistrationWorklistPage>;
+  /** The conversation about one application: every decision, and every reply to one. Oldest first. */
+  registrationThread(id: string): Promise<RegistrationThreadEntry[]>;
+  /** Answer a decision — the officer supplying what was asked for, or the supervisor following up. */
+  replyToRegistration(id: string, body: string): Promise<RegistrationThreadEntry>;
+  /** The paperwork filed against the person, as metadata. No bytes: opening a scan is its own disclosure. */
+  beneficiaryDocuments(beneficiaryId: string): Promise<BeneficiaryDocument[]>;
+  /**
+   * ONE person's identity record, field-projected by role and audited as a PHI read by the server.
+   *
+   * Distinct from the roster's per-page summary, which carries name + status + card number and nothing else:
+   * a list is the highest-volume disclosure the platform makes, so the rest of the record is read one person
+   * at a time, through here.
+   */
+  beneficiary(id: string): Promise<BeneficiaryRow>;
+  /**
+   * Correct the identity record (US-002). PARTIAL — only the keys present are written, so a form showing five
+   * fields cannot blank the four it did not. Every change is audited with its before/after and lands on the
+   * member's Logs.
+   */
+  updateBeneficiary(id: string, edit: BeneficiaryEdit): Promise<{ changed: string[] }>;
   /** Open an application for a beneficiary that has none (legacy rows) or whose last one was Rejected. */
   createRegistration(beneficiaryId: string, idempotencyKey?: string): Promise<void>;
   /** The officer's preparation step — the two approval guards the server checks before Approve. */
@@ -374,6 +404,23 @@ export interface ApiClient {
    * vouched for the documents must not be the one who activates. Approve returns the issued member number.
    */
   decideRegistration(id: string, decision: "Approve" | "RequestInfo" | "Reject", notes?: string): Promise<RegistrationDecisionResult>;
+  /**
+   * The same decision over many applications.
+   *
+   * Deliberately a LOOP of single decisions rather than one bulk endpoint. Each row keeps its own audit
+   * event, its own idempotency and its own server-side guard check — so an Approve the server refuses because
+   * coverage is not bound fails that row and only that row, and the caller is told which. A bulk endpoint
+   * would have to reproduce all three, and its all-or-nothing failure mode is the wrong one here: refusing
+   * nine good approvals because the tenth was not ready is not safer, it is just slower.
+   *
+   * Never rejects. Per-row outcomes come back in `ok`/`error`, because a thrown error would discard the
+   * results of the rows that succeeded before it.
+   */
+  decideRegistrations(
+    ids: readonly string[],
+    decision: "Approve" | "RequestInfo" | "Reject",
+    notes?: string,
+  ): Promise<BulkDecisionOutcome[]>;
 }
 
 /**

@@ -83,7 +83,16 @@ public static class PlanEndpoints
                 Action = AuditAction.Create, ActorUserId = gate.Subject,
             }, ct);
             await outbox.EnqueueAsync("PayerCreated", "policy.events",
-                new { tenantId = payer.TenantId, payerId = payer.PayerId, payer.PayerCode, payerType = type.ToString() }, ct);
+                new
+                {
+                    tenantId = payer.TenantId, payerId = payer.PayerId, payer.PayerCode,
+                    payerType = type.ToString(),
+                    // The NAMES, so the dashboard can label a payer instead of printing eight characters of
+                    // its uuid. reporting-service keeps a dimension-label table for exactly this and had no
+                    // feed for it; `AnalyticsQueries.Label` falls back to `id.ToString()[..8]` — deliberately,
+                    // because a truncated id sends someone looking while "Unknown payer" hides the gap.
+                    payer.NameEn, payer.NameAr,
+                }, ct);
             await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/payers/{payer.PayerId}", PayerView.From(payer));
         });

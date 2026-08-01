@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Button, Card, DataTable, InlineAlert, InputField, StatusChip, Tabs, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, InlineAlert, InputField, SelectField, StatusChip, Tabs, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   AnalyticsDelta,
@@ -13,7 +13,11 @@ import type {
 import { createHttpPolicyApi } from "../api/policyApi";
 import { writeErrorMessage } from "../api/writeError";
 import { PageHeader, useLoc, readErrorMessage } from "./_shared";
+import { useApi } from "../api/ApiProvider";
 import { useFormat } from "../i18n/useFormat";
+// 19.7 — the scope explorer moved in here when its own nav item was retired. Lazy, because it pulls the
+// policy list and the CSV export path, and most visits to Analytics never open this tab.
+import { UtilizationScreen } from "./PolicyBook";
 
 /**
  * Phase 19.6b — the analytical layer over everything 19.1–19.5b produced.
@@ -40,16 +44,15 @@ import { useFormat } from "../i18n/useFormat";
 
 const S = {
   title: { en: "Analytics", ar: "التحليلات" },
-  subtitle: {
-    en: "Aggregates over the policy and membership book. No clinical data appears in any view.",
-    ar: "تجميعات على سجل الوثائق والعضوية. لا تظهر أي بيانات سريرية في أي عرض.",
-  },
   tabEnrolment: { en: "Enrolment", ar: "التسجيل" },
   tabUtilization: { en: "Utilization", ar: "الاستهلاك" },
   tabFinancial: { en: "Financial", ar: "المالية" },
   tabNetwork: { en: "Network", ar: "الشبكة" },
   tabPlans: { en: "Plan comparison", ar: "مقارنة الخطط" },
   tabOutliers: { en: "Outliers & data quality", ar: "الحالات الشاذة وجودة البيانات" },
+  // Distinct from `tabUtilization`, which is the ANALYTICAL cut. This one is the operational explorer:
+  // pick a policy, group, plan or payer and take the numbers away as a CSV.
+  tabScope: { en: "Utilization by scope", ar: "الاستخدام حسب النطاق" },
 
   filters: { en: "Filters", ar: "عوامل التصفية" },
   from: { en: "From", ar: "من" },
@@ -60,7 +63,14 @@ const S = {
     ar: "النطاق يسأل عمّا حدث خلاله؛ وتاريخ «كما في» يسأل عن حالة السجل في ذلك اليوم.",
   },
   payer: { en: "Payer", ar: "الجهة الممولة" },
+  policy: { en: "Policy", ar: "الوثيقة" },
   plan: { en: "Plan", ar: "الخطة" },
+  anyValue: { en: "Any", ar: "الكل" },
+  pickPolicyFirst: { en: "Choose a policy first", ar: "اختر وثيقة أولًا" },
+  referenceFailed: {
+    en: "Some filter lists could not be loaded. The figures below are unaffected — only the narrowing you can apply here.",
+    ar: "تعذّر تحميل بعض قوائم التصفية. الأرقام أدناه غير متأثرة — التأثير على ما يمكنك تضييقه هنا فقط.",
+  },
   group: { en: "Group", ar: "المجموعة" },
   branch: { en: "Branch", ar: "الفرع" },
   tier: { en: "Network tier", ar: "شريحة الشبكة" },
@@ -111,6 +121,9 @@ const VIEWS = [
   { key: "network", label: S.tabNetwork },
   { key: "plancomparison", label: S.tabPlans },
   { key: "outliers", label: S.tabOutliers },
+  // Was its own nav section until the beneficiary portal was reordered. It belongs beside the other
+  // figures about a cohort rather than in a menu of its own, and nothing about it was lost in the move.
+  { key: "scope", label: S.tabScope },
 ] as const;
 
 /** The filter keys carried in the URL. Listed once so "clear" and "read" cannot drift apart — a clear that
@@ -154,10 +167,16 @@ export function PolicyAnalytics({ api }: { api?: PolicyApi } = {}) {
 
   return (
     <div className="pol-screen">
+      {/*
+        * The subtitle is gone. It read "Aggregates over the policy and membership book. No clinical data
+        * appears in any view." — a true sentence that nobody needed twice: the first half restates the page
+        * title, and the second is a guarantee about the SERVER's projection which no operator can act on and
+        * which reads, to the one person who might worry about it, as a claim rather than a control. It cost a
+        * full row above the filters on every visit. The space goes to the filters and the first view.
+        */}
       <PageHeader title={t(S.title)} />
-      <p className="pol-muted">{t(S.subtitle)}</p>
 
-      <FilterBar filters={filters} onChange={setFilter} onClear={clearFilters} />
+      <FilterBar api={client} filters={filters} onChange={setFilter} onClear={clearFilters} />
 
       <Tabs
         aria-label={t(S.title)}
@@ -168,7 +187,12 @@ export function PolicyAnalytics({ api }: { api?: PolicyApi } = {}) {
           label: t(v.label),
           // Each panel gates its own fetch: `Tabs` force-mounts every panel so hidden content stays available
           // to assistive tech, which means six views would otherwise fire six requests on first paint.
-          content: <ViewPanel api={client} view={v.key} active={view === v.key} filters={filters} onFilter={setFilter} />,
+          content: v.key === "scope"
+            // Mounted only when open. `Tabs` force-mounts every panel so hidden content stays available to
+            // assistive tech, and this one fetches the policy list on mount — six views would otherwise
+            // fire six requests on first paint.
+            ? (view === "scope" ? <UtilizationScreen api={client} embedded /> : null)
+            : <ViewPanel api={client} view={v.key} active={view === v.key} filters={filters} onFilter={setFilter} />,
         }))}
       />
     </div>
@@ -177,42 +201,218 @@ export function PolicyAnalytics({ api }: { api?: PolicyApi } = {}) {
 
 // ── Filter bar ──────────────────────────────────────────────────────────────────────────────────────────
 
+/** The enum vocabularies the dashboard narrows by. The same tokens the server's `AnalyticsFilter` parses —
+ *  `MemberStatus`, `Relationship`, `UtilizationBand` — so an option can never be one the query rejects. */
+const MEMBER_STATUSES: Record<string, Localized> = {
+  Active: { en: "Active", ar: "نشط" },
+  Terminated: { en: "Terminated", ar: "منتهٍ" },
+  Cancelled: { en: "Cancelled", ar: "ملغى" },
+};
+
+const RELATIONSHIPS: Record<string, Localized> = {
+  Principal: { en: "Principal", ar: "المشترك الرئيسي" },
+  Spouse: { en: "Spouse", ar: "الزوج/الزوجة" },
+  Child: { en: "Child", ar: "ابن/ابنة" },
+  Dependent: { en: "Dependent", ar: "معال" },
+};
+
+/**
+ * All SIX bands, not the four the roster filters by.
+ *
+ * `Zero` and `Unlimited` are the two the domain warns about most (`libs/benefit-pricing`: "an unlimited
+ * benefit reported as 0% invites 'plenty left' on something that was never metered"), and "who has used
+ * NOTHING all year" is a question this dashboard exists to answer — a member in that band is healthy,
+ * unaware of their entitlement, or wrongly enrolled, and only the third is findable this way.
+ */
+const BANDS = ["Zero", "Low", "Medium", "High", "Exhausted", "Unlimited"] as const;
+
+const BAND_LABELS: Record<(typeof BANDS)[number], Localized> = {
+  Zero: { en: "Nothing used", ar: "لم يُستخدم شيء" },
+  Low: { en: "Low (under 50%)", ar: "منخفض (أقل من ٥٠٪)" },
+  Medium: { en: "Medium (50–80%)", ar: "متوسط (٥٠–٨٠٪)" },
+  High: { en: "High (80–100%)", ar: "مرتفع (٨٠–١٠٠٪)" },
+  Exhausted: { en: "At or over the limit", ar: "بلغ الحد أو تجاوزه" },
+  Unlimited: { en: "Unlimited", ar: "بلا حد" },
+};
+
+/**
+ * One reference read, reduced to "the list, or nothing".
+ *
+ * A thunk rather than a promise so a SYNCHRONOUS throw is caught too. `Promise.all([f().catch(…)])` only
+ * handles rejection — if the call itself throws before returning a promise, `.catch` is never reached and the
+ * whole batch rejects, so one broken lookup empties five working pickers.
+ */
+async function safe<T>(read: () => Promise<T>): Promise<T | null> {
+  try {
+    return await read();
+  } catch {
+    return null;
+  }
+}
+
+interface ReferenceLists {
+  payers: { value: string; label: string }[];
+  policies: { value: string; label: string }[];
+  plans: { value: string; label: string }[];
+  groups: { value: string; label: string }[];
+  branches: { value: string; label: string }[];
+  tiers: { value: string; label: string }[];
+  categories: { value: string; label: string }[];
+  failed: boolean;
+}
+
+const NO_REFERENCE: ReferenceLists = {
+  payers: [], policies: [], plans: [], groups: [], branches: [], tiers: [], categories: [], failed: false,
+};
+
+/**
+ * The lists behind the pickers.
+ *
+ * Fetched once for the flat sets and again per policy for the two that hang off one. `failed` is a single
+ * flag rather than a per-list error: from the operator's side the consequence is identical — a filter they
+ * cannot use — and six separate warnings above one bar is not six times as useful.
+ *
+ * A failure leaves the lists EMPTY rather than falling back to free text. A picker that silently becomes a
+ * uuid box is the worse of the two states: it looks like it works.
+ */
+function useAnalyticsReference(api: PolicyApi, policyId?: string): ReferenceLists {
+  const { lang } = useTheme();
+  const core = useApi();
+  const [flat, setFlat] = useState<Omit<ReferenceLists, "plans" | "groups">>(NO_REFERENCE);
+  const [scoped, setScoped] = useState<Pick<ReferenceLists, "plans" | "groups">>({ plans: [], groups: [] });
+
+  const bi = useCallback(
+    (en: string, ar: string) => (lang === "ar" ? ar || en : en || ar),
+    [lang],
+  );
+
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const [payers, policies, branches, tiers, categories] = await Promise.all([
+        safe(() => api.payers()),
+        safe(() => api.policyQuery({ pageSize: 200 })),
+        safe(() => core.branches()),
+        safe(() => api.networkTiers()),
+        safe(() => api.benefitCategories()),
+      ]);
+      if (!live) return;
+      setFlat({
+        payers: (payers ?? []).map((p) => ({ value: p.payerId, label: bi(p.nameEn, p.nameAr) })),
+        // A policy is known by its NUMBER, which is what appears on the paperwork and in every other screen.
+        policies: (policies?.items ?? []).map((p) => ({ value: p.policyId, label: p.policyNo })),
+        branches: (branches ?? []).map((b) => ({ value: b.id, label: bi(b.name.en, b.name.ar) })),
+        tiers: (tiers ?? []).map((x) => ({ value: x.tierCode, label: bi(x.nameEn, x.nameAr) })),
+        categories: (categories ?? []).map((c) => ({ value: c.code, label: c.name })),
+        failed: [payers, policies, branches, tiers, categories].some((r) => r === null),
+      });
+    })();
+    return () => { live = false; };
+  }, [api, core, bi]);
+
+  useEffect(() => {
+    if (!policyId) { setScoped({ plans: [], groups: [] }); return; }
+    let live = true;
+    void (async () => {
+      const [plans, groups] = await Promise.all([
+        safe(() => api.policyPlans(policyId)),
+        safe(() => api.policyGroups(policyId)),
+      ]);
+      if (!live) return;
+      setScoped({
+        plans: (plans ?? []).map((p) => ({ value: p.policyPlanId, label: p.planLabel })),
+        groups: (groups ?? []).map((g) => ({ value: g.groupId, label: bi(g.nameEn, g.nameAr) })),
+      });
+    })();
+    return () => { live = false; };
+  }, [api, policyId, bi]);
+
+  return useMemo(() => ({ ...flat, ...scoped }), [flat, scoped]);
+}
+
+/**
+ * Nine of the twelve filters used to be free-text boxes.
+ *
+ * Four of them (`payerId`, `policyId`, `policyPlanId`, `groupId`, `branchId`) are UUID columns, so using the
+ * dashboard's own narrowing meant typing a v7 uuid from memory — nobody can, and the audit (§5.1) recorded
+ * the whole bar as "blank bordered boxes ... nothing saying they are pickers". The other five take exact
+ * enum tokens (`High`, `Principal`, `Terminated`), where a near miss is not an error but an empty chart that
+ * reads as "no data for this period".
+ *
+ * So every filter over a KNOWN set is now a picker, and the sets come from the API — the same payer, plan,
+ * group, tier and category lists the rest of the portal is built from, resolved for this caller. A bundled
+ * catalogue would show a payer somebody is not assigned to, which is both wrong and a small disclosure.
+ *
+ * The three dates stay native: a date has no list.
+ */
 function FilterBar({
+  api,
   filters,
   onChange,
   onClear,
 }: {
+  api: PolicyApi;
   filters: AnalyticsFilters;
   onChange: (key: string, value: string) => void;
   onClear: () => void;
 }) {
   const t = useLoc();
-  const text = (key: keyof AnalyticsFilters, label: Localized, type = "text") => (
+  const reference = useAnalyticsReference(api, filters.policyId);
+
+  const date = (key: keyof AnalyticsFilters, label: Localized) => (
     <InputField
-      type={type}
+      type="date"
       label={t(label)}
       value={filters[key] ?? ""}
       onChange={(e) => onChange(key, e.target.value)}
     />
   );
 
+  /** A filter over a known set. `any` is an option, not a blank — "no narrowing" is a choice, not an absence. */
+  const pick = (
+    key: keyof AnalyticsFilters,
+    label: Localized,
+    options: ReadonlyArray<{ value: string; label: string }>,
+    opts: { disabled?: boolean; help?: string } = {},
+  ) => (
+    <SelectField
+      label={t(label)}
+      value={filters[key] ?? ""}
+      onChange={(v) => onChange(key, v)}
+      disabled={opts.disabled}
+      help={opts.help}
+      options={[{ value: "", label: t(S.anyValue) }, ...options]}
+    />
+  );
+
+  const enumOptions = (labels: Record<string, Localized>) =>
+    Object.entries(labels).map(([value, label]) => ({ value, label: t(label) }));
+
+  // The plan and the group both belong TO a policy, so neither list exists until one is chosen. Rendering
+  // them enabled-and-empty would offer a control that can only disappoint; disabled with the reason is the
+  // honest state, and it also explains the ordering of the bar.
+  const policyChosen = Boolean(filters.policyId);
+  const needsPolicy = policyChosen ? undefined : t(S.pickPolicyFirst);
+
   return (
     <Card className="pol-filterbar" aria-label={t(S.filters)}>
       <h3>{t(S.filters)}</h3>
       <div className="pol-filtergrid">
-        {text("from", S.from, "date")}
-        {text("to", S.to, "date")}
-        {text("asOf", S.asOf, "date")}
-        {text("payerId", S.payer)}
-        {text("policyPlanId", S.plan)}
-        {text("groupId", S.group)}
-        {text("branchId", S.branch)}
-        {text("tier", S.tier)}
-        {text("category", S.category)}
-        {text("status", S.status)}
-        {text("relationship", S.relationship)}
-        {text("band", S.band)}
+        {date("from", S.from)}
+        {date("to", S.to)}
+        {date("asOf", S.asOf)}
+        {pick("payerId", S.payer, reference.payers)}
+        {pick("policyId", S.policy, reference.policies)}
+        {pick("policyPlanId", S.plan, reference.plans, { disabled: !policyChosen, help: needsPolicy })}
+        {pick("groupId", S.group, reference.groups, { disabled: !policyChosen, help: needsPolicy })}
+        {pick("branchId", S.branch, reference.branches)}
+        {pick("tier", S.tier, reference.tiers)}
+        {pick("category", S.category, reference.categories)}
+        {pick("status", S.status, enumOptions(MEMBER_STATUSES))}
+        {pick("relationship", S.relationship, enumOptions(RELATIONSHIPS))}
+        {pick("band", S.band, BANDS.map((v) => ({ value: v, label: t(BAND_LABELS[v]) })))}
       </div>
+      {reference.failed && <InlineAlert tone="warn">{t(S.referenceFailed)}</InlineAlert>}
       <InlineAlert tone="info">{t(S.asOfHint)}</InlineAlert>
       <div className="pol-filteractions">
         <label className="pol-check">
@@ -349,8 +549,22 @@ function SeriesCard({ series, onDrill }: { series: AnalyticsSeries; onDrill?: (b
   const summary = lang === "ar" ? series.summaryAr : series.summaryEn;
   const max = Math.max(1, ...series.points.map((p) => Math.abs(p.value)));
 
+  /*
+   * Every figure goes through the app's formatter — including the two that used to bypass it.
+   *
+   * `fmt.money` resolves `ar-EG`, which renders Arabic-Indic digits; `` `${value}%` `` and `String(value)`
+   * are JavaScript's own number-to-string and are ALWAYS Latin. So an Arabic cost table printed ١٬٢٥٠٫٠٠ in
+   * its currency column and 120 in the count column beside it, under a server-composed summary sentence that
+   * says ١٦٠ — three numeral systems in one card, for the same kind of quantity. Nothing errored, because
+   * both spellings are readable; they just are not the same language.
+   *
+   * A percentage goes through `Intl` as a percentage rather than a number with a "%" glued on, so the sign
+   * lands where Arabic puts it (٪ leads) instead of trailing an Arabic-Indic number in Latin punctuation.
+   */
   const render = (value: number) =>
-    series.unit === "currency" ? fmt.money(value) : series.unit === "percent" ? `${value}%` : String(value);
+    series.unit === "currency" ? fmt.money(value)
+      : series.unit === "percent" ? fmt.number(value / 100, { style: "percent", maximumFractionDigits: 1 })
+      : fmt.number(value);
 
   return (
     <Card className="pol-series" data-testid={`series-${series.key}`}>
@@ -382,8 +596,8 @@ function SeriesCard({ series, onDrill }: { series: AnalyticsSeries; onDrill?: (b
           <thead>
             <tr>
               {series.columns.map((c) => (
-                <th key={c} scope="col">
-                  {c}
+                <th key={c.en} scope="col">
+                  {lang === "ar" ? c.ar : c.en}
                 </th>
               ))}
             </tr>

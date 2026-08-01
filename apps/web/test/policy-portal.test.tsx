@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderNode, seedSession } from "./helpers";
+import { DevApiClient } from "../src/api/DevApiClient";
 import { NotesPanel, LimitMeters } from "../src/screens/PolicyPanels";
 import { PolicyPlans, diffRules } from "../src/screens/PolicyProductAdmin";
 import { MemberSearch } from "../src/screens/MemberAdmin";
@@ -60,6 +62,9 @@ function fakeApi(overrides: Partial<PolicyApi> = {}): PolicyApi {
     changePlan: reject,
     previewPlanChange: reject,
     coverageDetails: reject,
+    // A household of one by default — the shape every member has until somebody is enrolled under them.
+    family: (enrollmentId: string) =>
+      Promise.resolve({ enrollmentId, members: [], unavailable: [], withheld: 0 }),
     notes: () => Promise.resolve([]),
     addNote: reject,
     cancelNote: reject,
@@ -166,7 +171,9 @@ describe("Notes panel — a cancelled note is never hidden", () => {
     expect(locked).toHaveTextContent("Restricted — clinical note");
     expect(locked).toHaveTextContent("Clinical content is not readable by your role.");
     // Existence, type, author and date are all present — the note is not made to look absent.
-    expect(screen.getByText("s.hassan")).toBeInTheDocument();
+    // The author is named — by DISPLAY name, because `authoredByUsername` on a note written through the
+    // portal is the subject uuid, and a record every note of which is signed with a guid names nobody.
+    expect(screen.getByText("Sara Hassan")).toBeInTheDocument();
     expect(screen.getByText("Clinical")).toBeInTheDocument();
   });
 
@@ -211,6 +218,8 @@ describe("Notes panel — idempotency", () => {
     });
     renderNode(<NotesPanel api={api} scope="enrollments" scopeRef="e1" />);
 
+    // Composing is a modal now: the panel opens on the NOTES, not on an empty form.
+    await userEvent.click(await screen.findByTestId("add-note"));
     const body = await screen.findByLabelText("Note");
     await userEvent.type(body, "Branch transfer agreed.");
     await userEvent.click(screen.getByRole("button", { name: "Save note" }));
@@ -222,6 +231,8 @@ describe("Notes panel — idempotency", () => {
     expect(keys[0]).toBe(keys[1]);
 
     // A genuinely new note gets a new key, or the second note would be swallowed as a replay of the first.
+    // The modal closed on the successful save — a failed one keeps it open, so nothing typed is ever lost.
+    await userEvent.click(await screen.findByTestId("add-note"));
     await userEvent.type(await screen.findByLabelText("Note"), "A second, different note.");
     await userEvent.click(screen.getByRole("button", { name: "Save note" }));
     await waitFor(() => expect(keys).toHaveLength(3));
@@ -471,7 +482,24 @@ async function openChangePlan(api: PolicyApi) {
   const { MemberDetail } = await import("../src/screens/MemberAdmin");
   renderNode(<MemberDetail api={api} row={memberRow} onChanged={() => {}} />);
   await userEvent.click(await screen.findByRole("button", { name: "Change plan" }));
-  return screen.findByTestId("dialog-changePlan");
+  // The DIALOG, not the body div that carries the testid. `MembershipDialog` is a real modal now, so its
+  // confirm/cancel live in the modal footer — a sibling of `dialog-changePlan`, not a descendant. Querying
+  // the role also asserts the thing that changed: this is an actual dialog rather than a card that claimed
+  // `aria-modal` while nothing trapped focus.
+  await screen.findByTestId("dialog-changePlan");
+  return screen.findByRole("dialog");
+}
+
+/**
+ * Pick a plan in the change dialog.
+ *
+ * `Move to plan` is the design system's Select — a button + listbox, not a native <select>, because a native
+ * one cannot style its own popup and arrived a few pixels shorter than the date field above it. So the test
+ * drives it the way a person does: open the list, click the option.
+ */
+async function choosePlan(dialog: HTMLElement, label: string) {
+  await userEvent.click(within(dialog).getByRole("combobox", { name: "Move to plan" }));
+  await userEvent.click(await screen.findByRole("option", { name: label }));
 }
 
 describe("Change plan — the officer sees the consequence before confirming", () => {
@@ -484,7 +512,7 @@ describe("Change plan — the officer sees the consequence before confirming", (
     expect(within(dialog).getByRole("button", { name: "Confirm" })).toBeDisabled();
     expect(previewPlanChange).not.toHaveBeenCalled();
 
-    await userEvent.selectOptions(within(dialog).getByLabelText("Move to plan"), "pp2");
+    await choosePlan(dialog, "Lean");
 
     const preview = await within(dialog).findByTestId("carry-preview");
     // 300 consumed against a new ceiling of 500 leaves 200 — the number the whole dialog exists to show.
@@ -506,7 +534,7 @@ describe("Change plan — the officer sees the consequence before confirming", (
         ),
     });
     const dialog = await openChangePlan(api);
-    await userEvent.selectOptions(within(dialog).getByLabelText("Move to plan"), "pp2");
+    await choosePlan(dialog, "Lean");
 
     // The one consequence no client-side estimate could recover: the new plan grants no row for this at all,
     // so without the server saying so the benefit would simply disappear between screens.
@@ -524,13 +552,416 @@ describe("Change plan — the officer sees the consequence before confirming", (
       changePlan,
     });
     const dialog = await openChangePlan(api);
-    await userEvent.selectOptions(within(dialog).getByLabelText("Move to plan"), "pp2");
+    await choosePlan(dialog, "Lean");
 
     expect(await within(dialog).findByTestId("preview-error")).toBeInTheDocument();
     expect(within(dialog).queryByTestId("carry-preview")).not.toBeInTheDocument();
     // The preview runs the same resolution the change does, so a failed preview is a change that would fail.
     expect(within(dialog).getByRole("button", { name: "Confirm" })).toBeDisabled();
     expect(changePlan).not.toHaveBeenCalled();
+  });
+});
+
+// ── The member card ─────────────────────────────────────────────────────────────────────────────────────
+
+/** The dev fixtures with ONE method replaced — the identity read, which is what these cases turn on. */
+function withBeneficiary(beneficiary: (id: string) => Promise<unknown>) {
+  return Object.assign(new DevApiClient({ latencyMs: 0 }), { beneficiary }) as never;
+}
+
+describe("The member card — who this is, before what you can do to them", () => {
+  // BEN-1 is a full record in the dev fixtures: born 1989-03-14, Male, SY, with a primary phone.
+  const rowWithRecord = { ...memberRow, beneficiaryId: "BEN-1" } as const;
+
+  const renderCard = async () => {
+    const { MemberDetail } = await import("../src/screens/MemberAdmin");
+    renderNode(<MemberDetail api={fakeApi()} row={rowWithRecord} onChanged={() => {}} />);
+  };
+
+  it("shows the general information a desk uses to recognise somebody", async () => {
+    await renderCard();
+    const info = await screen.findByTestId("member-general-info");
+
+    expect(within(info).getByText(/\d+ yrs/)).toBeInTheDocument();
+    expect(within(info).getByText("Male")).toBeInTheDocument();
+    expect(within(info).getByText("SY")).toBeInTheDocument();
+    expect(within(info).getByText(/\+20 100/)).toBeInTheDocument();
+  });
+
+  it("labels each fact in text, so the icon is never the only cue", async () => {
+    await renderCard();
+    const info = await screen.findByTestId("member-general-info");
+    // The icon says which field; the visually-hidden label says it again for anyone not looking at it.
+    expect(within(info).getByText("Nationality:")).toBeInTheDocument();
+    expect(within(info).getByText("Phone:")).toBeInTheDocument();
+  });
+
+  it("renders nothing at all when the role received none of those fields", async () => {
+    // patient-service PROJECTS BY ROLE: a caller who may read the membership and not the person gets a record
+    // with those fields absent. A row of dashes would tell an officer the system holds no phone number for
+    // somebody whose number they are simply not entitled to see — and they would then ask the beneficiary to
+    // repeat something already on file.
+    const { MemberDetail } = await import("../src/screens/MemberAdmin");
+    renderNode(
+      <MemberDetail api={fakeApi()} row={rowWithRecord} onChanged={() => {}} />,
+      withBeneficiary(() =>
+        Promise.resolve({
+          id: "BEN-1", givenName: "Omar", familyName: "Khaled",
+          status: { kind: "ok", label: { en: "Active", ar: "نشط" } }, statusRaw: "Active",
+          identifiers: [],
+        })),
+    );
+
+    await screen.findByTestId("member-detail");
+    await waitFor(() => expect(screen.getByTestId("edit-details")).toBeEnabled());
+    expect(screen.queryByTestId("member-general-info")).not.toBeInTheDocument();
+  });
+
+  it("opens the correction form from the card, not only from the Details tab", async () => {
+    await renderCard();
+    const edit = await screen.findByTestId("edit-details");
+    await waitFor(() => expect(edit).toBeEnabled());
+    await userEvent.click(edit);
+
+    // The SAME modal the Details tab opens — same fields, same PATCH, same log entry.
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText("Given name")).toHaveValue("Omar");
+    expect(within(dialog).getByRole("button", { name: "Save changes" })).toBeInTheDocument();
+  });
+
+  it("offers no correction affordance while the record has not arrived", async () => {
+    // Enabled with nothing to edit would open an empty form over a real person's record.
+    const { MemberDetail } = await import("../src/screens/MemberAdmin");
+    renderNode(
+      <MemberDetail api={fakeApi()} row={rowWithRecord} onChanged={() => {}} />,
+      withBeneficiary(() => new Promise(() => {})),   // in flight, and staying that way
+    );
+    expect(await screen.findByTestId("edit-details")).toBeDisabled();
+  });
+});
+
+// ── The covered household ───────────────────────────────────────────────────────────────────────────────
+
+const familyMember = (over: Record<string, unknown>) => ({
+  enrollmentId: "e-x", beneficiaryId: "b-x", memberNo: "MRS-M-2026-000009",
+  givenName: "Sara", familyName: "Ali", relationship: "Child", status: "Active",
+  isPrincipal: false, planLabel: "Rich", effectiveFrom: "2026-01-01", effectiveTo: null,
+  isSubject: false, ...over,
+});
+
+async function openFamily(api: PolicyApi) {
+  const { MemberDetail } = await import("../src/screens/MemberAdmin");
+  renderNode(<MemberDetail api={api} row={memberRow} onChanged={() => {}} />);
+  await userEvent.click(await screen.findByTestId("open-family"));
+  return screen.findByRole("dialog");
+}
+
+describe("Family — who else this cover reaches", () => {
+  it("lists the household and marks the principal and the member you opened", async () => {
+    const api = fakeApi({
+      family: () =>
+        Promise.resolve({
+          enrollmentId: "e1",
+          members: [
+            familyMember({ enrollmentId: "e0", memberNo: "MRS-M-2026-000001", givenName: "Omar", relationship: "Principal", isPrincipal: true }),
+            familyMember({ enrollmentId: "e1", memberNo: "MRS-M-2026-000002", givenName: "Nour", relationship: "Spouse", isSubject: true }),
+            familyMember({ enrollmentId: "e2", memberNo: "MRS-M-2026-000003" }),
+          ],
+          unavailable: [],
+          withheld: 0,
+        } as never),
+    });
+    const dialog = await openFamily(api);
+
+    const rows = await within(dialog).findAllByTestId("family-row");
+    expect(rows).toHaveLength(3);
+    // Both facts are WORDS. A bold row would say nothing to a screen reader, and "which one is the principal"
+    // is the question the list is read to answer.
+    expect(within(rows[0]).getByText("Principal", { selector: ".mrs-chip, .mrs-chip *" })).toBeInTheDocument();
+    expect(within(rows[1]).getByText("This member")).toBeInTheDocument();
+    // The member you opened is IN the list, not filtered out of it.
+    expect(rows[1].dataset.subject).toBe("true");
+  });
+
+  it("says nobody else is covered rather than showing an empty table", async () => {
+    // A table with a header and no rows reads as a failed lookup. This is a real and common answer: most
+    // beneficiaries are enrolled alone.
+    const api = fakeApi({
+      family: () =>
+        Promise.resolve({
+          enrollmentId: "e1",
+          members: [familyMember({ enrollmentId: "e1", isSubject: true, isPrincipal: true })],
+          unavailable: [],
+          withheld: 0,
+        } as never),
+    });
+    const dialog = await openFamily(api);
+
+    expect(await within(dialog).findByText("Nobody else is enrolled under this cover.")).toBeInTheDocument();
+    expect(within(dialog).queryByTestId("family-table")).not.toBeInTheDocument();
+  });
+
+  it("says how many household members its payer scope withheld", async () => {
+    const api = fakeApi({
+      family: () =>
+        Promise.resolve({
+          enrollmentId: "e1",
+          members: [
+            familyMember({ enrollmentId: "e1", isSubject: true }),
+            familyMember({ enrollmentId: "e2" }),
+          ],
+          unavailable: [],
+          withheld: 2,
+        } as never),
+    });
+    const dialog = await openFamily(api);
+
+    // A family of four rendering as two, silently, is a wrong answer. Saying so makes it a true one.
+    expect(await within(dialog).findByText(/2 more household member/)).toBeInTheDocument();
+  });
+
+  it("shows a member number when the name could not be looked up, and says why", async () => {
+    const api = fakeApi({
+      family: () =>
+        Promise.resolve({
+          enrollmentId: "e1",
+          members: [
+            familyMember({ enrollmentId: "e1", isSubject: true }),
+            familyMember({ enrollmentId: "e2", givenName: null, familyName: null }),
+          ],
+          unavailable: ["patient-service"],
+          withheld: 0,
+        } as never),
+    });
+    const dialog = await openFamily(api);
+
+    const rows = await within(dialog).findAllByTestId("family-row");
+    expect(within(rows[1]).getByText("Name unavailable")).toBeInTheDocument();
+    expect(within(dialog).getByText(/Names could not be looked up/)).toBeInTheDocument();
+  });
+});
+
+// ── A policy document can be looked at without being taken ──────────────────────────────────────────────
+
+describe("Policy documents — looking and taking are different acts", () => {
+  const doc = (over: Record<string, unknown> = {}) => ({
+    linkId: "link-1", scope: "Policy", scopeRef: "p1", documentId: "d1", versionNo: 1,
+    documentClass: "PolicyContract", visibilityClass: "Administrative", title: "contract-2026.pdf",
+    uploadedByUsername: "a.hassan", uploadedByDisplay: "A. Hassan", uploadedAt: "2026-02-12T09:30:00Z",
+    status: "Active", expired: false, canDownload: true, ...over,
+  });
+
+  const render = async (over: Record<string, unknown> = {}) => {
+    const { DocumentsPanel } = await import("../src/screens/PolicyPanels");
+    const documentDownloadUrl = vi.fn().mockResolvedValue({ url: "https://minio.example/c.pdf?sig=x" });
+    const api = fakeApi({ documents: () => Promise.resolve([doc(over)]), documentDownloadUrl } as never);
+    renderNode(<DocumentsPanel api={api} scope="policies" scopeRef="p1" />);
+    await screen.findByText("contract-2026.pdf");
+    return documentDownloadUrl;
+  };
+
+  it("offers a view and a download, and records them as different disclosures", async () => {
+    // The panel offered only a download, so reading a contract in place meant taking a copy of it — and the
+    // audit trail could not tell the two apart a year later.
+    const documentDownloadUrl = await render();
+
+    await userEvent.click(screen.getByRole("button", { name: /view — contract-2026\.pdf/i }));
+    expect(documentDownloadUrl).toHaveBeenCalledWith("link-1", "preview");
+
+    await userEvent.click(screen.getByRole("button", { name: /close/i }));
+    await userEvent.click(screen.getByRole("button", { name: /download — contract-2026\.pdf/i }));
+    expect(documentDownloadUrl).toHaveBeenCalledWith("link-1", "download");
+  });
+
+  it("opens the document in place rather than navigating away from the policy", async () => {
+    await render();
+    await userEvent.click(screen.getByRole("button", { name: /view — contract-2026\.pdf/i }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("still names a locked document instead of rendering nothing where the buttons would be", async () => {
+    await render({ canDownload: false });
+    expect(screen.getByText(/^locked$/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /view —/i })).not.toBeInTheDocument();
+  });
+});
+
+// ── The Logs tab says who, and what moved ───────────────────────────────────────────────────────────────
+
+describe("Change timeline — a log that answers who and what", () => {
+  const entry = (over: Record<string, unknown>) => ({
+    entryId: "t1", scope: "Enrollment", scopeRef: "e1",
+    occurredAt: "2026-07-31T15:18:00Z", eventType: "MemberPlanChanged", eventCategory: "Plan",
+    actorUsername: "0f4c-subject-uuid", actorDisplay: "Layla Mansour",
+    summaryEn: "Member moved to another plan", summaryAr: "تم نقل العضو إلى خطة أخرى",
+    changeDiff: null, diffWithheld: false,
+    visibilityClass: "Administrative", sourceService: "policy-service", correlationId: null,
+    targetRef: null, targetKind: null, ...over,
+  });
+
+  const renderTimeline = async (over: Record<string, unknown>) => {
+    const { ChangeTimeline } = await import("../src/screens/PolicyPanels");
+    const api = fakeApi({ timeline: () => Promise.resolve({ entries: [entry(over)], nextCursor: null } as never) });
+    renderNode(<ChangeTimeline api={api} scope="enrollments" scopeRef="e1" lang="en" />);
+  };
+
+  it("names the person who made the change, not their subject id", async () => {
+    await renderTimeline({});
+    const actor = await screen.findByTestId("timeline-actor");
+    expect(actor).toHaveTextContent("Layla Mansour");
+    expect(actor).not.toHaveTextContent("0f4c-subject-uuid");
+  });
+
+  it("still names the actor when only the subject was recorded", async () => {
+    // The guard used to be on actorDisplay while the value rendered was actorUsername — so an entry with a
+    // subject and no display name showed nobody at all, which was every entry the service wrote.
+    await renderTimeline({ actorDisplay: null });
+    expect(await screen.findByTestId("timeline-actor")).toHaveTextContent("0f4c-subject-uuid");
+  });
+
+  it("shows the value the field held and the value it holds now", async () => {
+    await renderTimeline({
+      changeDiff: JSON.stringify({
+        plan: { before: "Standard", after: "Enhanced" },
+        effectiveDate: { before: null, after: "2026-08-01" },
+      }),
+    });
+
+    const diff = await screen.findByTestId("timeline-diff");
+    expect(within(diff).getByText("Plan")).toBeInTheDocument();
+    expect(within(diff).getByText("Standard")).toBeInTheDocument();
+    expect(within(diff).getByText("Enhanced")).toBeInTheDocument();
+    // A field that had no previous value reads as a dash, not as a missing row.
+    expect(within(diff).getByText("Effective date")).toBeInTheDocument();
+    expect(within(diff).getByText("2026-08-01")).toBeInTheDocument();
+  });
+
+  it("renders the summary alone when the diff is malformed, never raw JSON", async () => {
+    // A history panel is not where an operator should discover that an upstream projection changed shape.
+    await renderTimeline({ changeDiff: "not json" });
+    expect(await screen.findByText("Member moved to another plan")).toBeInTheDocument();
+    expect(screen.queryByTestId("timeline-diff")).not.toBeInTheDocument();
+  });
+
+  it("keeps saying the detail is withheld when the role may not read it", async () => {
+    await renderTimeline({ changeDiff: null, diffWithheld: true });
+    expect(await screen.findByText("Change detail withheld for your role.")).toBeInTheDocument();
+    expect(screen.queryByTestId("timeline-diff")).not.toBeInTheDocument();
+  });
+
+  const renderWithOrigin = async (origin: Record<string, unknown> | null) => {
+    const { ChangeTimeline } = await import("../src/screens/PolicyPanels");
+    const api = fakeApi({
+      timeline: () =>
+        Promise.resolve({ entries: [entry({})], nextCursor: "2026-07-30T00:00:00Z", origin } as never),
+    });
+    renderNode(<ChangeTimeline api={api} scope="enrollments" scopeRef="e1" lang="en" />);
+  };
+
+  it("puts the newest change on top and the record's creation at the bottom", async () => {
+    await renderWithOrigin(
+      entry({
+        entryId: "t0", eventType: "MemberEnrolled", eventCategory: "Enrolment",
+        occurredAt: "2026-03-01T09:00:00Z", summaryEn: "Member enrolled", actorDisplay: "Mona Adel",
+      }),
+    );
+
+    // Newest first is the order of the run; the creation is the oldest line there is, so it anchors the end.
+    // What the anchor changes is that it is THERE at all — it used to be behind however many pages of history
+    // the record had earned, and on a record with no projected enrolment it was not reachable at any depth.
+    const items = await screen.findAllByRole("listitem");
+    expect(within(items[0]).getByText("Member moved to another plan")).toBeInTheDocument();
+    const anchor = items[items.length - 1];
+    expect(within(anchor).getByText("Member enrolled")).toBeInTheDocument();
+    expect(within(anchor).getByText("Mona Adel", { exact: false })).toBeInTheDocument();
+  });
+
+  it("sorts the run newest-first whatever order the page arrived in", async () => {
+    const { ChangeTimeline } = await import("../src/screens/PolicyPanels");
+    const api = fakeApi({
+      timeline: () =>
+        Promise.resolve({
+          entries: [
+            entry({ entryId: "old", occurredAt: "2026-01-02T09:00:00Z", summaryEn: "Older change" }),
+            entry({ entryId: "new", occurredAt: "2026-06-02T09:00:00Z", summaryEn: "Newer change" }),
+          ],
+          nextCursor: null,
+        } as never),
+    });
+    renderNode(<ChangeTimeline api={api} scope="enrollments" scopeRef="e1" lang="en" />);
+
+    const items = await screen.findAllByRole("listitem");
+    expect(within(items[0]).getByText("Newer change")).toBeInTheDocument();
+    expect(within(items[1]).getByText("Older change")).toBeInTheDocument();
+  });
+
+  it("never renders the creation twice when paging reaches it", async () => {
+    const origin = entry({ entryId: "t0", eventType: "MemberEnrolled", summaryEn: "Member enrolled" });
+    const { ChangeTimeline } = await import("../src/screens/PolicyPanels");
+    // A service that leaves the anchor in a later page must not produce two enrolment lines.
+    const api = fakeApi({
+      timeline: () => Promise.resolve({ entries: [entry({}), origin], nextCursor: null, origin } as never),
+    });
+    renderNode(<ChangeTimeline api={api} scope="enrollments" scopeRef="e1" lang="en" />);
+
+    expect(await screen.findAllByText("Member enrolled")).toHaveLength(1);
+  });
+
+  it("re-reads the history when the record is written to, without a page reload", async () => {
+    const { ChangeTimeline } = await import("../src/screens/PolicyPanels");
+    const timeline = vi.fn().mockResolvedValue({ entries: [entry({})], nextCursor: null, origin: null });
+    const api = fakeApi({ timeline } as never);
+
+    // Stands in for the member screen: the card's actions bump a counter the tabs below it are given.
+    function Harness() {
+      const [n, setN] = useState(0);
+      return (
+        <>
+          <button type="button" onClick={() => setN((x) => x + 1)}>write</button>
+          <ChangeTimeline api={api} scope="enrollments" scopeRef="e1" lang="en" reloadToken={n} />
+        </>
+      );
+    }
+
+    renderNode(<Harness />);
+    await screen.findByText("Member moved to another plan");
+    expect(timeline).toHaveBeenCalledTimes(1);
+
+    // The tabs stay mounted while the card's actions are used above them, so a plan change left the log
+    // showing the history as it was when the tab was opened — and the only way to see your own change was to
+    // reload the application.
+    await userEvent.click(screen.getByRole("button", { name: "write" }));
+    await waitFor(() => expect(timeline).toHaveBeenCalledTimes(2));
+  });
+
+  it("offers a refresh, because other people write to this record too", async () => {
+    const { ChangeTimeline } = await import("../src/screens/PolicyPanels");
+    const timeline = vi.fn().mockResolvedValue({ entries: [entry({})], nextCursor: null, origin: null });
+    renderNode(<ChangeTimeline api={fakeApi({ timeline } as never)} scope="enrollments" scopeRef="e1" lang="en" />);
+    await screen.findByText("Member moved to another plan");
+
+    await userEvent.click(screen.getByTestId("timeline-refresh"));
+    await waitFor(() => expect(timeline).toHaveBeenCalledTimes(2));
+  });
+
+  it("says when the creation line was read off the record rather than projected", async () => {
+    // A quarter of the dev records have no enrolment event at all. Their history is anchored from the
+    // membership row — which is a fact the record holds, and the reader is told which kind of line it is.
+    await renderWithOrigin(
+      entry({ entryId: "t0", eventType: "MemberEnrolled", summaryEn: "Member enrolled",
+        actorDisplay: null, actorUsername: null, derived: true }),
+    );
+
+    const anchor = await screen.findByTestId("timeline-origin");
+    expect(within(anchor).getByText(/Read from the membership record/)).toBeInTheDocument();
+    // No actor is invented for it: the row carries no username to sign it with.
+    expect(within(anchor).queryByTestId("timeline-actor")).not.toBeInTheDocument();
+  });
+
+  it("renders nothing extra when the service has no origin for the record", async () => {
+    await renderWithOrigin(null);
+    expect(screen.queryByTestId("timeline-origin")).not.toBeInTheDocument();
+    expect(await screen.findByText("Member moved to another plan")).toBeInTheDocument();
   });
 });
 

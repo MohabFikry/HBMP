@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { cx } from "../lib/cx";
+import { sortRows } from "../lib/sortRows";
 import { useTheme } from "../theme/ThemeProvider";
 
 export interface Column<Row> {
@@ -18,6 +19,15 @@ export interface Column<Row> {
    * `localeCompare` so Arabic labels order correctly rather than by code point.
    */
   sortValue?: (row: Row) => string | number | null | undefined;
+  /**
+   * Pin this column to the trailing edge while the rest of the table scroll under it.
+   *
+   * For the ACTIONS column, and effectively only for it. A wide worklist overflows its card — that is what
+   * `.mrs-wl-scroll` is for — but the column that ends up past the fold is the last one, which is where the
+   * buttons are. An operator then has to scroll sideways to reach the control they came for, on every row.
+   * Pinning it means the columns that can be read at a glance are the ones that scroll.
+   */
+  stickyEnd?: boolean;
 }
 
 export type SortDir = "ascending" | "descending" | "none";
@@ -48,6 +58,29 @@ export interface DataTableProps<Row> {
   error?: string;
   /** Overrides the default localized "No results". */
   emptyLabel?: string;
+  /**
+   * MULTI-select, for tables where one decision is taken over many rows at once. Distinct from
+   * `selectedKey`/`onSelect`, which mark the ONE row a detail pane is showing — a worklist can have both, and
+   * conflating them would make opening a row for review silently enlist it in the next bulk action.
+   */
+  selection?: RowSelection<Row>;
+}
+
+/** Multi-select state for {@link DataTableProps.selection}. */
+export interface RowSelection<Row> {
+  /** The selected row keys. Owned by the caller, because a bulk action needs them outside the table. */
+  keys: ReadonlySet<string>;
+  onChange: (keys: Set<string>) => void;
+  /**
+   * Rows this action cannot apply to. Their checkbox renders DISABLED rather than absent: a missing control
+   * reads as a rendering fault, whereas a disabled one says "not this row" — and the header count stays
+   * honest because select-all only ever takes the selectable rows.
+   */
+  isSelectable?: (row: Row) => boolean;
+  /** Accessible name for a row's checkbox, e.g. `(row) => "Select " + row.name`. */
+  rowLabel: (row: Row) => string;
+  /** Accessible name for the select-all checkbox in the header. */
+  allLabel: string;
 }
 
 /**
@@ -70,8 +103,10 @@ export function DataTable<Row>({
   loading = false,
   error,
   emptyLabel,
+  selection,
 }: DataTableProps<Row>) {
   const rowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
 
   // ---- sort: controlled when the caller supplies onSort, otherwise the table's own ------------------------
   const [ownSort, setOwnSort] = useState<{ key: string; dir: Exclude<SortDir, "none"> } | null>(null);
@@ -94,19 +129,9 @@ export function DataTable<Row>({
     if (controlled || !ownSort) return rows;
     const col = columns.find((c) => c.key === ownSort.key);
     if (!col?.sortValue) return rows;
-    const pick = col.sortValue;
-    const sign = ownSort.dir === "ascending" ? 1 : -1;
-    // Copied before sorting: `rows` belongs to the caller and mutating it in place would reorder their state.
-    return [...rows].sort((a, b) => {
-      const x = pick(a);
-      const y = pick(b);
-      // Absent values sink to the bottom in BOTH directions. Reversing them with the sort would put "no
-      // value" at the top of a descending list, which reads as data rather than as its absence.
-      if (x === null || x === undefined) return y === null || y === undefined ? 0 : 1;
-      if (y === null || y === undefined) return -1;
-      if (typeof x === "number" && typeof y === "number") return (x - y) * sign;
-      return String(x).localeCompare(String(y)) * sign;
-    });
+    // The comparator is shared with `useTableQuery` (lib/sortRows) so that turning on pagination cannot
+    // change the order — see the note there.
+    return sortRows(rows, col.sortValue, ownSort.dir);
   }, [controlled, ownSort, rows, columns]);
 
   // 18.D3 (U6) — the DS shipped hardcoded English "Loading…" / "No results". An Arabic user saw English
@@ -119,6 +144,10 @@ export function DataTable<Row>({
   const emptyText = emptyLabel ?? (ar ? "لا توجد نتائج" : "No results");
 
   function onRowKeyDown(e: React.KeyboardEvent, index: number, row: Row) {
+    // A control inside the row owns its own keys. The row handler calls preventDefault on Space, so without
+    // this the select checkbox in a bulk-decision worklist could not be ticked from the keyboard at all — the
+    // keypress opened the row for review instead, which is the opposite of what was pressed.
+    if (e.target !== e.currentTarget) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       onSelect?.(row);
@@ -131,7 +160,44 @@ export function DataTable<Row>({
     }
   }
 
-  const colCount = columns.length;
+  // ---- multi-select ---------------------------------------------------------------------------------------
+  //
+  // Select-all covers THE ROWS ON SCREEN, not every row that exists. With a pager, "all" is ambiguous and the
+  // dangerous reading is the invisible one: a supervisor ticking the header box and approving would decide 210
+  // applications having seen 25. Scoping it to the page makes what was selected exactly what was displayed.
+  const selectableRows = selection ? sortedRows.filter((r) => selection.isSelectable?.(r) ?? true) : [];
+  const selectedOnPage = selection
+    ? selectableRows.filter((r) => selection.keys.has(rowKey(r))).length
+    : 0;
+  const allOnPageSelected = selectableRows.length > 0 && selectedOnPage === selectableRows.length;
+  // `indeterminate` is a DOM property with no HTML attribute, so React cannot set it declaratively. Without
+  // it a partial selection renders as an empty box, which says "nothing is selected" while rows are.
+  if (selectAllRef.current) {
+    selectAllRef.current.indeterminate = selectedOnPage > 0 && !allOnPageSelected;
+  }
+
+  const toggleRow = (row: Row) => {
+    if (!selection) return;
+    const next = new Set(selection.keys);
+    const key = rowKey(row);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    selection.onChange(next);
+  };
+
+  const toggleAllOnPage = () => {
+    if (!selection) return;
+    const next = new Set(selection.keys);
+    // Clearing removes only THIS page's keys, so a selection made on page 1 survives a look at page 2 —
+    // otherwise paging silently discards work the operator has already done.
+    for (const r of selectableRows) {
+      if (allOnPageSelected) next.delete(rowKey(r));
+      else next.add(rowKey(r));
+    }
+    selection.onChange(next);
+  };
+
+  const colCount = columns.length + (selection ? 1 : 0);
 
   return (
     /*
@@ -166,10 +232,28 @@ export function DataTable<Row>({
       <caption className="sr-only">{caption}</caption>
       <thead>
         <tr>
+          {selection && (
+            <th scope="col" className="mrs-selcell">
+              <input
+                ref={selectAllRef}
+                type="checkbox"
+                className="mrs-checkbox"
+                checked={allOnPageSelected}
+                disabled={selectableRows.length === 0}
+                onChange={toggleAllOnPage}
+                aria-label={selection.allLabel}
+              />
+            </th>
+          )}
           {columns.map((c) => {
             const isSorted = activeKey === c.key;
             return (
-              <th key={c.key} aria-sort={c.sortable ? (isSorted ? activeDir : "none") : undefined} scope="col">
+              <th
+                key={c.key}
+                aria-sort={c.sortable ? (isSorted ? activeDir : "none") : undefined}
+                scope="col"
+                className={cx(c.stickyEnd && "mrs-stickyend")}
+              >
                 {/* Sortable now needs only `sortable` — not `sortable && onSort`. Requiring a handler meant a
                     column marked sortable rendered as inert text whenever the caller had not wired one, so
                     the header said "you can sort by this" and nothing happened. */}
@@ -225,8 +309,30 @@ export function DataTable<Row>({
                 onClick={interactive ? () => onSelect?.(row) : undefined}
                 onKeyDown={interactive ? (e) => onRowKeyDown(e, i, row) : undefined}
               >
+                {selection && (
+                  <td className="mrs-selcell" role={interactive ? "gridcell" : undefined}>
+                    <input
+                      type="checkbox"
+                      className="mrs-checkbox"
+                      checked={selection.keys.has(key)}
+                      disabled={!(selection.isSelectable?.(row) ?? true)}
+                      onChange={() => toggleRow(row)}
+                      // An interactive worklist opens a row on click. Without this, ticking the box for a bulk
+                      // decision ALSO swaps the review pane to that row — two different intentions on one
+                      // gesture, and the one that happens is the one the operator did not ask for.
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label={selection.rowLabel(row)}
+                    />
+                  </td>
+                )}
                 {columns.map((c) => (
-                  <td key={c.key} role={interactive ? "gridcell" : undefined}>{c.cell(row)}</td>
+                  <td
+                    key={c.key}
+                    role={interactive ? "gridcell" : undefined}
+                    className={cx(c.stickyEnd && "mrs-stickyend")}
+                  >
+                    {c.cell(row)}
+                  </td>
                 ))}
               </tr>
             );

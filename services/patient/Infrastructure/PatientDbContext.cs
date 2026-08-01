@@ -17,6 +17,7 @@ public sealed class PatientDbContext(DbContextOptions<PatientDbContext> options)
     public DbSet<Registration> Registrations => Set<Registration>();
     public DbSet<EnrolmentIntent> EnrolmentIntents => Set<EnrolmentIntent>();
     public DbSet<RegistrationNote> RegistrationNotes => Set<RegistrationNote>();
+    public DbSet<RegistrationThreadEntry> RegistrationThread => Set<RegistrationThreadEntry>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -67,6 +68,23 @@ public sealed class PatientDbContext(DbContextOptions<PatientDbContext> options)
             e.Property(x => x.Visibility).HasConversion<string>().HasColumnName("visibility");
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+        });
+
+        b.Entity<RegistrationThreadEntry>(e =>
+        {
+            e.ToTable("registration_thread");
+            e.HasKey(x => x.EntryId);
+            e.Property(x => x.Kind).HasConversion<string>().HasColumnName("kind");
+            // Nullable enum → nullable text. Without the explicit conversion EF stores the ordinal, and a
+            // CHECK constraint spelling out 'Approve','RequestInfo','Reject' rejects every write.
+            e.Property(x => x.Decision).HasConversion<string?>().HasColumnName("decision");
+            e.Property(x => x.Body).IsRequired();
+            // Same reason as the intent and the notes above: the edge is what makes EF write the registration
+            // before an entry that references it.
+            e.HasOne<Registration>().WithMany()
+                .HasForeignKey(x => x.RegistrationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.RegistrationId, x.CreatedAt });
         });
 
         b.Entity<Beneficiary>(e =>

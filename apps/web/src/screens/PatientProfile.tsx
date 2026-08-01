@@ -35,7 +35,7 @@ import { useFormat } from "../i18n/useFormat";
 
 const STR = {
   noPatient: {
-    en: "Open a patient from a worklist or from Search / manage to see their file.",
+    en: "Open a patient from a worklist or from Search / Manage to see their file.",
     ar: "افتح مريضًا من قائمة عمل أو من «بحث / إدارة» لعرض ملفّه.",
   },
   title: { en: "Patient Profile", ar: "ملف المريض" },
