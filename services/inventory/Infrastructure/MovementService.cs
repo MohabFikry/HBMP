@@ -79,7 +79,18 @@ public sealed class MovementService(InventoryDbContext db, RlsContext rls, TimeP
 
         var signed = StockRules.ApplySign(kind, magnitude);
 
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        // JOIN the caller's transaction when there is one, own one when there is not.
+        //
+        // `POST /inventory/transfers` opens a transaction and then calls this TWICE — that is what makes a
+        // transfer atomic. Opening a second one on the same DbContext throws, so with an unconditional
+        // BeginTransaction the transfer endpoint returned 500 and could never have worked at all. An endpoint
+        // test found it; nothing below HTTP calls this method twice inside one transaction, so nothing below
+        // HTTP could have.
+        //
+        // The invariant is unaffected when joining: the caller's transaction already covers this write and
+        // its balance check together, which is the whole guarantee. Same shape as policy's MembershipCommands.
+        var joined = db.Database.CurrentTransaction is not null;
+        await using var tx = joined ? null : await db.Database.BeginTransactionAsync(ct);
 
         // THE LOCK. `SELECT ... FOR UPDATE` over this branch+item+batch's movement rows serialises concurrent
         // posts for the same stock line without locking the whole table — two clinics issuing different items
@@ -90,7 +101,9 @@ public sealed class MovementService(InventoryDbContext db, RlsContext rls, TimeP
 
         if (StockRules.ReducesStock(kind) && StockRules.WouldGoNegative(onHandBefore, signed))
         {
-            await tx.RollbackAsync(ct);
+            // Only roll back what we opened. Unwinding the CALLER's transaction from here would abort the
+            // other half of a transfer as a side effect of this half's refusal — the caller decides.
+            if (tx is not null) await tx.RollbackAsync(ct);
             return new PostResult(PostOutcome.InsufficientStock, OnHandBefore: onHandBefore);
         }
 
@@ -107,14 +120,14 @@ public sealed class MovementService(InventoryDbContext db, RlsContext rls, TimeP
         try
         {
             await db.SaveChangesAsync(ct);
-            await tx.CommitAsync(ct);
+            if (tx is not null) await tx.CommitAsync(ct);
         }
         catch (DbUpdateException)
         {
             // The unique index is the authority on idempotency: two concurrent attempts with one key reach
             // here and exactly one survives. The loser reports the WINNER's row, so both callers see the same
             // outcome — which is the whole point of an idempotency key.
-            await tx.RollbackAsync(ct);
+            if (tx is not null) await tx.RollbackAsync(ct);
             db.ChangeTracker.Clear();
             var winner = await db.Movements.AsNoTracking()
                 .FirstOrDefaultAsync(m => m.TenantId == tenant && m.IdempotencyKey == idempotencyKey, ct);

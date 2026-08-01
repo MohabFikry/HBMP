@@ -104,17 +104,7 @@ public sealed class DomainEventConsumer(
             // Background consumer — no HTTP principal — so the RLS tenant comes off the event envelope.
             sp.GetRequiredService<RlsContext>().TenantId = notice.TenantId;
 
-            var envelope = new NotificationEnvelope(
-                eventId, eventType, notice.TenantId, notice.EntityRef, notice.Fields,
-                notice.Recipients
-                    .GroupBy(r => r.Role, StringComparer.Ordinal)
-                    .ToDictionary(
-                        g => g.Key,
-                        g => (IReadOnlyList<Recipient>)g
-                            .Select(r => new Recipient(r.UserId, r.Locale))
-                            .DistinctBy(r => r.UserId, StringComparer.Ordinal)
-                            .ToList(),
-                        StringComparer.Ordinal));
+            var envelope = BuildEnvelope(eventId, eventType, notice);
 
             var result = await sp.GetRequiredService<NotificationDispatcher>().DispatchAsync(envelope, ct);
             logger.LogInformation(
@@ -145,6 +135,32 @@ public sealed class DomainEventConsumer(
     /// with an implied role — kept because messages published before this deployment are still on the queue,
     /// and dropping them would lose the notices they exist to deliver.</para>
     /// </summary>
+    /// <summary>
+    /// Shape the parsed notice into the envelope the dispatcher takes: recipients grouped by ROLE, and
+    /// de-duplicated by USER within each role.
+    ///
+    /// <para>Extracted from the receive path so it can be tested. It was inline, wrapped in RabbitMQ delivery
+    /// handling, which meant the only way to exercise it was to stand up a broker — so the two decisions it
+    /// makes had nothing proving them, and both fail QUIETLY. Losing the grouping sends one message per
+    /// recipient instead of one per role, and losing the dedupe notifies the same person twice for one event:
+    /// neither errors, and both look like the notification service being noisy.</para>
+    /// </summary>
+    internal static NotificationEnvelope BuildEnvelope(Guid eventId, string eventType, Notice notice)
+    {
+        ArgumentNullException.ThrowIfNull(notice);
+        return new NotificationEnvelope(
+            eventId, eventType, notice.TenantId, notice.EntityRef, notice.Fields,
+            notice.Recipients
+                .GroupBy(r => r.Role, StringComparer.Ordinal)
+                .ToDictionary(
+                    g => g.Key,
+                    g => (IReadOnlyList<Recipient>)g
+                        .Select(r => new Recipient(r.UserId, r.Locale))
+                        .DistinctBy(r => r.UserId, StringComparer.Ordinal)
+                        .ToList(),
+                    StringComparer.Ordinal));
+    }
+
     internal static Notice? Parse(string payload)
     {
         using var doc = JsonDocument.Parse(payload);

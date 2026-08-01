@@ -63,7 +63,7 @@
     "services/masterdata:Api": 77,
     "services/masterdata:Domain": 60,
     "services/masterdata:Infrastructure": 91,
-    "services/notification:Api": 85,
+    "services/notification:Api": 66.0,
     "services/notification:Domain": 82,
     "services/notification:Infrastructure": 78,
     "services/orders:Api": 39,
@@ -89,9 +89,9 @@
     "tools/migration:other": 60,
     "libs/time:Lib": 72.0,
     "services/audit:Domain": 99.0,
-    "services/inventory:Api": 0.0,
-    "services/inventory:Domain": 72.0,
-    "services/inventory:Infrastructure": 81.0,
+    "services/inventory:Api": 83.0,
+    "services/inventory:Domain": 78.0,
+    "services/inventory:Infrastructure": 88.0,
     "services/provider:Api": 1.0
   }
 }

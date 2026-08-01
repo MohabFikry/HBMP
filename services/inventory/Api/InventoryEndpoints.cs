@@ -237,11 +237,19 @@ public static class InventoryEndpoints
             if (req.FromBranchId == req.ToBranchId)
                 return Results.Problem(statusCode: 400, title: "a transfer needs two different branches", type: "urn:hbmp:invalid-transfer");
 
-            // BOTH ends are reach-checked. A coordinator may move stock out of their own clinic, and may not
-            // reach into another's to take it — which is the same rule in both directions and is why this is
-            // two checks rather than one.
+            // BOTH ends are checked, with DIFFERENT rules, because they mean different things.
+            //
+            // The SOURCE is where you are working: stock leaves a shelf you are standing at, so the
+            // acting-in rule applies and a branch-scoped caller must have it as their active branch.
+            //
+            // The DESTINATION is a counterparty. You are sending stock to a clinic you are responsible for,
+            // not working in it — and you cannot be working in two clinics at once. Checking it with the
+            // acting-in rule made every coordinator-initiated transfer a 403, since a transfer's two branches
+            // are by definition different and only one can be active. Membership in the permitted set is the
+            // right bar for the far end, and still refuses a transfer into a clinic the caller has no grant
+            // for, which is the property that matters.
             if (await reach.RefuseUnlessInReachAsync(req.FromBranchId, "stock_transfer", req.ItemId.ToString(), ct) is { } d1) return d1;
-            if (await reach.RefuseUnlessInReachAsync(req.ToBranchId, "stock_transfer", req.ItemId.ToString(), ct) is { } d2) return d2;
+            if (await reach.RefuseUnlessPermittedAsync(req.ToBranchId, "stock_transfer", req.ItemId.ToString(), ct) is { } d2) return d2;
 
             var transferRef = Guid.NewGuid();
 

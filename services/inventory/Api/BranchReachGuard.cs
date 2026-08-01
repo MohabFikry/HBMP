@@ -52,7 +52,35 @@ public sealed class BranchReachGuard(IHbmpPrincipalAccessor me, BranchScopeState
     {
         if (CanReach(branchId)) return null;
         return await DenyAsync(entityType, entityId, "branch-not-in-reach",
-            "You may administer practitioners only at the branches you run.", ct);
+            "You may administer stock only at the branches you run.", ct);
+    }
+
+    /// <summary>
+    /// Refuse unless <paramref name="branchId"/> is in the caller's PERMITTED SET — membership only, without
+    /// the "and it is the branch you are currently working in" rule that <see cref="RefuseUnlessInReachAsync"/>
+    /// applies.
+    ///
+    /// <para><b>This exists because a transfer has two ends that mean different things, and treating them the
+    /// same made the endpoint impossible to use.</b> Both ends were checked with the acting-in rule, which for
+    /// a BranchScoped coordinator means "equals my active branch" — and a transfer's two branches are by
+    /// definition different, so source and destination could never both satisfy it. Every coordinator-initiated
+    /// transfer was a 403. Only a clinics manager could transfer at all, and only because their active branch
+    /// is a filter rather than a restriction. An endpoint test found it; nothing below HTTP could have.</para>
+    ///
+    /// <para>The distinction is real, not a workaround. You ACT IN the source: stock leaves a shelf you are
+    /// standing at, and that is the branch you are working in. The destination is a COUNTERPARTY — you are
+    /// sending stock to a clinic you are responsible for, not working in it, and you cannot be working in two
+    /// clinics at once. Membership in the permitted set is the right bar for the far end: it still refuses a
+    /// transfer into a clinic the caller has no grant for, which is the property that matters.</para>
+    /// </summary>
+    public async Task<IResult?> RefuseUnlessPermittedAsync(
+        Guid branchId, string entityType, string entityId, CancellationToken ct = default)
+    {
+        if (IsNetworkWide) return null;
+        if (branch.Context.PermittedBranchIds.Contains(branchId)) return null;
+
+        return await DenyAsync(entityType, entityId, "branch-not-in-reach",
+            "You may transfer stock only between the branches you run.", ct);
     }
 
     /// <summary>

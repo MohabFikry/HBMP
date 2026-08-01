@@ -66,7 +66,7 @@ public sealed class EscalationSweeper(
     /// correctly see zero rows and silently do nothing at all) or a hardcoded one (which would be wrong for
     /// every tenant but the first).</para>
     /// </summary>
-    private async Task SweepAsync(CancellationToken ct)
+    internal async Task<int> SweepAsync(CancellationToken ct)
     {
         using var scope = scopeFactory.CreateScope();
         var sp = scope.ServiceProvider;
@@ -81,6 +81,7 @@ public sealed class EscalationSweeper(
         }
 
         if (total > 0) logger.LogInformation("escalation sweep raised {Count} escalation(s)", total);
+        return total;
     }
 
     /// <summary>
@@ -91,7 +92,7 @@ public sealed class EscalationSweeper(
     /// per tenant. RLS denying rows to this projection would stop the maintenance pass without protecting
     /// anything the service does not already hold.</para>
     /// </summary>
-    private static async Task<List<string>> PendingTenantsAsync(NotificationDbContext db, CancellationToken ct) =>
+    internal static async Task<List<string>> PendingTenantsAsync(NotificationDbContext db, CancellationToken ct) =>
         await db.Database.SqlQuery<string>(
             $"""
              SELECT DISTINCT tenant_id AS "Value" FROM notification.notification
