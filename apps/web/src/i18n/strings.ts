@@ -44,18 +44,27 @@ export const L = {
   ccCloseCall: { en: "Close call", ar: "إنهاء المكالمة" },
   ccOnCall: { en: "On call", ar: "مكالمة جارية" },
   ccReason: { en: "Call reason", ar: "سبب المكالمة" },
-  ccSearchLabel: { en: "Find member (phone, member no, national ID, passport, refugee ID, UNHCR)", ar: "ابحث عن مستفيد (هاتف، رقم عضوية، رقم قومي، جواز، رقم لاجئ، UNHCR)" },
+  ccSearchLabel: { en: "Find member", ar: "ابحث عن مستفيد" },
+  // What ONE box matches. Name leads because it is what a caller offers first and what the old identifier-led
+  // picker made look unsupported.
+  ccSearchHelp: {
+    en: "Search by name, phone number, card or member number, national ID, passport, refugee ID or UNHCR number.",
+    ar: "ابحث بالاسم أو رقم الهاتف أو رقم البطاقة أو العضوية أو الرقم القومي أو الجواز أو رقم اللاجئ أو UNHCR.",
+  },
   ccSearch: { en: "Search", ar: "بحث" },
-  ccNotVerified: { en: "Not yet verified", ar: "لم يتم التحقق بعد" },
-  ccNotVerifiedBody: { en: "Confirm the caller's identity before any member detail is shown. Ask the caller to state at least two identifiers.", ar: "تأكّد من هوية المتصل قبل عرض أي بيانات. اطلب من المتصل ذكر هويّتين على الأقل." },
-  ccChallengeOn: { en: "Challenge on (tick each identifier the caller states correctly):", ar: "تحقّق من (حدّد كل هوية يذكرها المتصل بشكل صحيح):" },
-  ccPass: { en: "Verify — Pass", ar: "تحقّق — نجح" },
-  ccFail: { en: "Verify — Fail", ar: "تحقّق — فشل" },
-  ccNeedTwo: { en: "Tick at least two identifiers to pass verification.", ar: "حدّد هويّتين على الأقل لإتمام التحقق." },
-  ccVerified: { en: "Caller verified — member details unlocked", ar: "تم التحقق من المتصل — تم فتح بيانات المستفيد" },
-  // Phase 20 — into the unified profile, offered only after a verification pass.
+  // Identity is confirmed BY THE AGENT ON THE PHONE. Opening the file records that and binds the call to this
+  // member; the agent is told what the click means rather than asked to tick boxes the platform used to score.
+  ccOpenFile: { en: "Open member file", ar: "فتح ملف المستفيد" },
+  ccOpenFileHelp: {
+    en: "Confirm who you are speaking to before you open the file. Opening it records that you did, against this call.",
+    ar: "تأكّد ممّن تتحدث إليه قبل فتح الملف. فتح الملف يسجّل ذلك على هذه المكالمة.",
+  },
+  ccFileOpened: { en: "Member file open for this call", ar: "ملف المستفيد مفتوح لهذه المكالمة" },
+  ccOpenFileFailed: {
+    en: "Couldn't open the member's file — nothing was recorded. Try again.",
+    ar: "تعذّر فتح ملف المستفيد — لم يُسجَّل شيء. حاول مرة أخرى.",
+  },
   ccOpenProfile: { en: "Open full profile", ar: "فتح الملف الكامل" },
-  ccFailed: { en: "Verification failed — details stay hidden", ar: "فشل التحقق — تبقى البيانات مخفية" },
   ccCoverage: { en: "Coverage & remaining limits", ar: "التغطية والحدود المتبقية" },
   ccContacts: { en: "Contacts", ar: "بيانات التواصل" },
   ccAppointments: { en: "Appointments (all branches)", ar: "المواعيد (كل الفروع)" },
@@ -104,8 +113,8 @@ export const L = {
   // ── Wrap-up: the summary other roles read, and the close outcomes that used to be silent ───────────────
   ccSummary: { en: "Call summary", ar: "ملخّص المكالمة" },
   ccSummaryHelp: {
-    en: "Read by coordinators and clinicians on the member's profile. What the call was about and what you did — no clinical detail.",
-    ar: "يقرأه المنسّقون والأطباء في ملف المستفيد. موضوع المكالمة وما قمت به — بدون أي تفاصيل طبية.",
+    en: "The record of this call. Read by coordinators and clinicians on the member's profile — what the call was about and what you did, with no clinical detail.",
+    ar: "سجل هذه المكالمة. يقرأه المنسّقون والأطباء في ملف المستفيد — موضوع المكالمة وما قمت به، بدون أي تفاصيل طبية.",
   },
   ccSummaryRequired: {
     en: "A summary is required to close this call. Another role reads it later to see what happened.",
@@ -125,29 +134,17 @@ export const L = {
   },
   // ── The member file: act from the file the agent is already looking at ────────────────────────────────
   ccNewAppointment: { en: "New appointment", ar: "موعد جديد" },
-  ccCallNotes: { en: "Call notes", ar: "ملاحظات المكالمة" },
-  ccCallNotesHelp: {
-    en: "Saved to the call record when you close the call. No clinical detail — this is a contact log.",
-    ar: "تُحفظ في سجل المكالمة عند إنهائها. بدون أي تفاصيل طبية — هذا سجل تواصل.",
-  },
-  ccCopy: { en: "Copy notes", ar: "نسخ الملاحظات" },
-  ccCopied: { en: "Call notes copied to the clipboard.", ar: "تم نسخ ملاحظات المكالمة." },
+  ccCopy: { en: "Copy summary", ar: "نسخ الملخّص" },
+  ccCopied: { en: "Call summary copied to the clipboard.", ar: "تم نسخ ملخّص المكالمة." },
   ccCopyFailed: { en: "Couldn't copy — select the text and copy manually.", ar: "تعذّر النسخ — حدّد النص وانسخه يدويًا." },
   // ── Standalone "Book appointment" journey ─────────────────────────────────────────────────────────────
   ccBookTitle: { en: "Book appointment", ar: "حجز موعد" },
   ccBookIntro: {
-    en: "Find the member, verify the caller, then choose the branch, clinic and time. The booking is logged against this call.",
-    ar: "ابحث عن المستفيد، تحقّق من المتصل، ثم اختر الفرع والعيادة والوقت. يُسجَّل الحجز على هذه المكالمة.",
-  },
-  ccSearchBy: { en: "Search by", ar: "البحث بواسطة" },
-  ccSearchByAny: { en: "Any identifier", ar: "أي هوية" },
-  ccSearchByHint: {
-    en: "Any of these finds the member — the choice only sets the keypad and the example.",
-    ar: "أي منها يجد المستفيد — الاختيار يحدّد لوحة الإدخال والمثال فقط.",
+    en: "Find the member, open their file, then choose the branch, clinic and time. The booking is logged against this call.",
+    ar: "ابحث عن المستفيد، افتح ملفه، ثم اختر الفرع والعيادة والوقت. يُسجَّل الحجز على هذه المكالمة.",
   },
   ccStepFind: { en: "1. Find the member", ar: "١. ابحث عن المستفيد" },
-  ccStepVerify: { en: "2. Verify the caller", ar: "٢. تحقّق من المتصل" },
-  ccStepChoose: { en: "3. Choose branch, clinic and time", ar: "٣. اختر الفرع والعيادة والوقت" },
+  ccStepChoose: { en: "2. Choose branch, clinic and time", ar: "٢. اختر الفرع والعيادة والوقت" },
   ccBookAnother: { en: "Book for another member", ar: "حجز لمستفيد آخر" },
   ccBookFinish: { en: "Finish and close the call", ar: "إنهاء المكالمة" },
   ccBookClosed: { en: "Call closed.", ar: "تم إنهاء المكالمة." },

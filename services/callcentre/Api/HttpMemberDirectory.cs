@@ -15,32 +15,19 @@ public sealed class HttpMemberDirectory(IHttpClientFactory factory) : IMemberDir
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    // A sensible default challenge set. The concrete availability is narrowed to what the reception card exposes
-    // (MemberNo) plus the always-available demographic/contact challenges.
-    //
-    // FullName is NOT here, and must not be added back: the display name is shown on the search hit below, so
-    // "confirm your name" is a question the agent can answer off their own screen. See VerificationPolicy —
-    // a type is only challengeable while its value stays undisclosed pre-verification.
-    private static readonly string[] BaseChallenges = ["DateOfBirth", "Phone", "NationalId"];
-
+    /// <summary>Find members. ONE query term, matched by eligibility's reception index against the member number,
+    /// national ID, passport, refugee ID, UNHCR number, primary phone and name (multi-word queries are treated as
+    /// a name). The caller does not say which of those they are supplying, and never had to: the index has always
+    /// matched them all, so a type picker in front of this only ever set the on-screen keypad.</summary>
     public async Task<MemberSearchResult> SearchAsync(string query, string? bearer, CancellationToken ct = default)
     {
         // Required: an empty search result and a refused search must never look the same to the agent.
         var resp = await GetAsync<ReceptionSearchDto>("eligibility", $"/api/v1/reception/search?q={Uri.EscapeDataString(query)}", bearer, ct, required: true);
-        var matches = (resp?.Results ?? []).Select(card =>
-        {
-            var challenges = new List<string>();
-            if (!string.IsNullOrWhiteSpace(card.Identity?.MemberNo)) challenges.Add("MemberNo");
-            challenges.AddRange(BaseChallenges);
-            return new MemberMatch(
+        var matches = (resp?.Results ?? []).Select(card => new MemberMatch(
                 card.Identity?.BeneficiaryId ?? Guid.Empty,
                 card.Identity?.DisplayName ?? "—",
-                // MASKED at the source, so the full value never crosses the wire pre-verification. Masking in
-                // the UI instead would leave it sitting in the network tab and in any client that skips the
-                // formatting — the value has to not be sent, not merely not be drawn.
-                VerificationPolicy.MaskIdentifier(card.Identity?.MemberNo),
-                challenges);
-        }).Where(m => m.BeneficiaryId != Guid.Empty).ToList();
+                card.Identity?.MemberNo))
+            .Where(m => m.BeneficiaryId != Guid.Empty).ToList();
         return new MemberSearchResult(query, matches.Count, matches);
     }
 

@@ -107,7 +107,7 @@ public sealed class FakeMemberDirectory : IMemberDirectory
 
     public Task<MemberSearchResult> SearchAsync(string query, string? bearer, CancellationToken ct = default) =>
         Task.FromResult(new MemberSearchResult(query, 1,
-            [new MemberMatch(BeneficiaryId, "Amal Hassan", "MRS-M-1001", ["MemberNo", "DateOfBirth", "Phone"])]));
+            [new MemberMatch(BeneficiaryId, "Amal Hassan", "MRS-M-1001")]));
 
     /// <summary>Records the interaction it was asked about: profile-service gates the 360 on a verification for
     /// THAT call, so a directory that drops the id produces a 403 the endpoint reports as 404.</summary>

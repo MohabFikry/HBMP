@@ -47,6 +47,9 @@ public sealed class CallCentreDbContext(DbContextOptions<CallCentreDbContext> op
             e.ToTable("caller_verification");
             e.HasKey(x => x.VerificationId);
             e.Property(x => x.Result).HasConversion<string>().HasColumnName("result");
+            // Where identity was confirmed. Stored as text, defaulted to OnSystem in the DDL so historical rows
+            // keep reporting the on-screen challenge they actually were.
+            e.Property(x => x.Method).HasConversion<string>().HasColumnName("method");
             // Store only WHICH identifier TYPES were confirmed — as a JSON string array. NEVER the values.
             e.Property(x => x.VerifiedIdentifierTypes)
                 .HasColumnName("verified_identifiers")

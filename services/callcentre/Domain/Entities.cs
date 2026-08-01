@@ -1,11 +1,16 @@
 namespace Mersal.CallCentre.Domain;
 
 // Contact-centre domain (phase 15.1; design 37 §3 MemberScoped, 10-role-matrix Call Center, 19-audit-strategy).
-// Two aggregates: a call_interaction (the call itself) and the caller_verification attempts bound to it.
+// Two aggregates: a call_interaction (the call itself) and the caller_verification records bound to it.
 //
-// THE DEFINING PRIVACY CONTROL: nothing about a member is disclosed until the agent records a SUCCESSFUL
-// verification for THIS interaction and THIS beneficiary. And we never store the identifier VALUES the caller
-// recited — only WHICH identifier TYPES were confirmed (the values live in patient-service).
+// WHAT THE VERIFICATION RECORD IS NOW. Caller identity is confirmed BY THE AGENT ON THE PHONE — the platform
+// records that it happened, it does not administer it. Opening a member's file writes one attestation bound to
+// this interaction and this beneficiary, and that binding is what every disclose/act endpoint consults: a call
+// still cannot read a member it was not opened against, and it stops disclosing the moment it closes.
+//
+// We never store identifier VALUES (they live in patient-service). For an off-system attestation we do not store
+// identifier TYPES either — the agent does not report which identifiers they used, so recording a set would be
+// inventing one.
 
 /// <summary>Call direction. Inbound = member/clinic calls the hotline; Outbound = agent calls the member.</summary>
 public enum CallDirection { Inbound, Outbound }
@@ -26,11 +31,22 @@ public enum CallReasonCode
 /// <summary>How the call ended. Resolved counts toward first-contact-resolution; Abandoned toward the drop rate.</summary>
 public enum CallOutcome { Resolved, FollowUpRequired, Transferred, Abandoned, NoAction }
 
-/// <summary>Interaction lifecycle. Open while the agent is on the call; Closed on wrap-up (verification expires).</summary>
+/// <summary>Interaction lifecycle. Open while the agent is on the call; Closed on wrap-up (disclosure ends).</summary>
 public enum InteractionStatus { Open, Closed }
 
-/// <summary>The result of a caller-verification attempt.</summary>
+/// <summary>The result of a caller-verification record.</summary>
 public enum VerificationResult { Passed, Failed }
+
+/// <summary>WHERE the caller's identity was confirmed.
+///
+/// <para><see cref="OnSystem"/> is the historical phase-15 challenge: the agent ticked ≥2 identifier types on
+/// screen and the platform decided whether that was enough. <see cref="OffSystem"/> is the current operation —
+/// the agent confirms identity on the phone and the platform records their attestation.</para>
+///
+/// <para>The distinction is kept rather than collapsed BECAUSE OF THE ROWS ALREADY IN THE TABLE. Reading an old
+/// challenge as an attestation, or an attestation as a challenge, would misreport what the platform actually did
+/// on a given call — and this table is audit evidence, not a cache.</para></summary>
+public enum VerificationMethod { OnSystem, OffSystem }
 
 /// <summary>The call itself. <see cref="BeneficiaryId"/> is null until a member is identified; a PASS binds the
 /// interaction to that beneficiary and is the anchor the verification gate consults. Never hard-deleted.</summary>
@@ -74,18 +90,28 @@ public sealed class CallInteraction
     public List<CallerVerification> Verifications { get; set; } = [];
 }
 
-/// <summary>A caller-verification attempt. <see cref="VerifiedIdentifierTypes"/> records only WHICH identifier
-/// TYPES were confirmed verbally (e.g. ["MemberNo","DateOfBirth"]) — NEVER the values. A Fail is persisted and
-/// audited (never silently dropped). A Pass requires ≥ the configured minimum distinct types.</summary>
+/// <summary>A caller-verification record: WHO the agent says they are speaking to, on WHICH call, and WHERE that
+/// was confirmed. It is the anchor the disclosure gate consults.
+///
+/// <para><see cref="VerifiedIdentifierTypes"/> records only WHICH identifier TYPES were confirmed (e.g.
+/// ["MemberNo","DateOfBirth"]) — NEVER the values, which live in patient-service. It is populated only for
+/// <see cref="VerificationMethod.OnSystem"/> rows; an off-system attestation leaves it empty because the agent
+/// does not report which identifiers they asked for.</para></summary>
 public sealed class CallerVerification
 {
     public Guid VerificationId { get; set; }
     public Guid InteractionId { get; set; }
     public Guid BeneficiaryId { get; set; }
     public string TenantId { get; set; } = default!;
-    /// <summary>The identifier TYPES confirmed — stored as a JSON string array. Values are NEVER stored here.</summary>
+    /// <summary>The identifier TYPES confirmed — stored as a JSON string array. Values are NEVER stored here.
+    /// Empty for off-system attestations.</summary>
     public List<string> VerifiedIdentifierTypes { get; set; } = [];
     public VerificationResult Result { get; set; }
+
+    /// <summary>Where identity was confirmed. Defaults to <see cref="VerificationMethod.OnSystem"/> so the rows
+    /// written before this column existed keep meaning what they meant.</summary>
+    public VerificationMethod Method { get; set; } = VerificationMethod.OnSystem;
+
     public string? FailureReason { get; set; }
     public DateTimeOffset VerifiedAt { get; set; }
     public string? VerifiedBy { get; set; }
@@ -104,52 +130,27 @@ public sealed class CallSummaryRevision
     public DateTimeOffset EditedAt { get; set; }
 }
 
-/// <summary>Pure verification rules (no I/O) so the gate + tests share one source of truth (design 37, US privacy).
-/// The Call Centre must confirm at least <see cref="MinIdentifierTypes"/> DISTINCT identifier types for a Pass.</summary>
+/// <summary>What is left of the phase-15 verification rules once identity is confirmed off-system.
+///
+/// <para><b>Deliberately almost empty.</b> The minimum-identifier-types threshold, the challengeable-type
+/// allow-list, the failed-attempt cap and the pre-verification masking helper are all GONE, because each was a
+/// property of an ON-SCREEN CHALLENGE the platform no longer administers. A minimum on a set nobody submits, a
+/// cap on attempts that cannot fail, and a mask on a number the agent is now shown in full are not controls —
+/// they are the shape of a control, and leaving them behind would let this file keep claiming a guarantee the
+/// system stopped providing.</para>
+///
+/// <para>The rule that survives is not here at all: it is the interaction binding in
+/// <c>VerificationService.IsVerifiedAsync</c> — a call may only disclose the member it was opened against, and
+/// only while it is open.</para></summary>
 public static class VerificationPolicy
 {
-    /// <summary>Default minimum distinct identifier types for a Pass (configurable; 2 per the prompt).</summary>
-    public const int MinIdentifierTypes = 2;
-
-    /// <summary>The maximum FAILED attempts allowed on one interaction before verification is locked out. A caller
-    /// who cannot confirm their identity in this many tries is not going to; past that point the retries are
-    /// someone working out which identifiers land, and the audit trail alone does not stop them.</summary>
-    public const int MaxFailedAttempts = 3;
-
-    /// <summary>The identifier TYPES an agent may challenge on. Values live in patient-service; only the type name
-    /// is ever recorded here. Kept as an allow-list so a caller can't smuggle a value in as a "type".
-    ///
-    /// <para><b>The rule that governs this list:</b> a type may only be challengeable if its VALUE is not
-    /// disclosed to the agent before verification. A challenge the agent can answer by reading their own screen
-    /// is not a challenge. <c>FullName</c> is therefore absent — the display name is shown on the
-    /// pre-verification search hit by design (the agent has to know who they are talking to), which makes
-    /// "confirm your name" unverifiable. <c>MemberNo</c> stays, and the pre-verification projection masks its
-    /// value to compensate (see <c>MaskIdentifier</c>); the agent can ask for it but cannot read it back.</para></summary>
+    /// <summary>The identifier TYPES that may be recorded on an ON-SYSTEM verification. Retained as an allow-list
+    /// for reading historical rows and for any future re-introduction of a challenge; nothing writes through it
+    /// today. Values are never stored — only type names.</summary>
     public static readonly IReadOnlySet<string> ChallengeableTypes = new HashSet<string>(StringComparer.Ordinal)
     {
         "MemberNo", "NationalId", "Passport", "RefugeeId", "UnhcrNo", "DateOfBirth", "Phone",
     };
-
-    /// <summary>Mask an identifier for pre-verification display: enough to disambiguate two similar hits in a
-    /// search list, never enough to recite back as a confirmed answer.</summary>
-    public static string? MaskIdentifier(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return value;
-        var v = value.Trim();
-        return v.Length <= 3 ? new string('•', v.Length) : new string('•', v.Length - 3) + v[^3..];
-    }
-
-    /// <summary>Distinct, known types only. Anything outside the allow-list is ignored (defensive against values
-    /// being passed as types).</summary>
-    public static IReadOnlyList<string> Normalise(IEnumerable<string>? types) =>
-        (types ?? [])
-            .Where(t => !string.IsNullOrWhiteSpace(t) && ChallengeableTypes.Contains(t))
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
-    /// <summary>Whether the confirmed set is sufficient for a Pass.</summary>
-    public static bool MeetsThreshold(IReadOnlyList<string> normalisedTypes, int min = MinIdentifierTypes) =>
-        normalisedTypes.Count >= min;
 }
 
 /// <summary>Business-key formatter (0A §3). CALL-YYYY-NNNNNN — 6-digit zero-padded per-year sequence, consistent

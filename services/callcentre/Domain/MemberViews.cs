@@ -10,20 +10,21 @@ namespace Mersal.CallCentre.Domain;
 // knowable from here, so a new one fails the test until someone says what it holds. Adding a string below
 // means adding it there too — deliberately, because that is the review this file's guarantee depends on.
 
-/// <summary>Pre-verification search hit — deliberately thin. ONLY a display name, the beneficiary id, and WHICH
-/// identifier TYPES the agent may challenge on. No coverage, no contacts, no appointments, no history.
+/// <summary>A member search hit — deliberately thin. ONLY the beneficiary id, a display name, and the member
+/// number. No coverage, no contacts, no appointments, no history: this is how the agent picks the right person
+/// out of a list, not a disclosure of their file.
 ///
-/// <para><see cref="MaskedMemberNo"/> is MASKED (e.g. <c>•••001</c>) and is named so no caller can mistake it for
-/// the real thing. It exists to tell two similar search hits apart, not to be read to the member: MemberNo is a
-/// challengeable identifier type, so printing it in full here would let an agent tick the "MemberNo" box by
-/// reading their own screen and pass verification with nothing from the caller.</para></summary>
+/// <para><see cref="MemberNo"/> is the real number, unmasked. It used to arrive as <c>•••001</c> because MemberNo
+/// was a type the agent could challenge on, and printing it in full would have let them tick that box by reading
+/// their own screen. Identity is now confirmed on the phone, so there is no box to tick — and a masked number is
+/// no help at all when the caller reads theirs out and the agent has to find them among four people with the same
+/// name.</para></summary>
 public sealed record MemberMatch(
     Guid BeneficiaryId,
     string DisplayName,
-    string? MaskedMemberNo,
-    IReadOnlyList<string> ChallengeableIdentifierTypes);
+    string? MemberNo);
 
-/// <summary>The pre-verification search response.</summary>
+/// <summary>The member search response.</summary>
 public sealed record MemberSearchResult(string Query, int MatchCount, IReadOnlyList<MemberMatch> Matches);
 
 /// <summary>Non-color status semantics for the UI (21-accessibility): hue is never the only signal.</summary>

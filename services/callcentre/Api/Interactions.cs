@@ -50,7 +50,12 @@ public static class Interactions
             return Results.Created($"/api/v1/call-interactions/{i.InteractionId}", InteractionView.From(i, false));
         }).RequireAuthorization(HbmpPolicies.Scope("callcentre:interaction"));
 
-        // --- Record a caller-verification attempt (pass or fail) --------------------------------------------
+        // --- Record the agent's caller-identity attestation --------------------------------------------------
+        //
+        // Identity is confirmed ON THE PHONE. This endpoint records that the agent did so, and BINDS the call to
+        // the member — which is the part that still carries weight: it is what stops a call disclosing a member
+        // it was never opened against, and what ties every subsequent PHI read to a specific call in the audit
+        // trail. There is no threshold to meet and nothing to fail, so there is no 422 and no lockout.
         v1.MapPost("/{id:guid}/verification", async (Guid id, RecordVerificationRequest req, CallDeps deps, CancellationToken ct) =>
         {
             var denied = await deps.Gate.CheckAsync(CallCentrePolicies.Verify, "record-verification", ct);
@@ -60,73 +65,42 @@ public static class Interactions
             var i = await deps.Db.Interactions.FirstOrDefaultAsync(x => x.InteractionId == id, ct);
             if (i is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             if (i.Status != InteractionStatus.Open)
-                return Conflict("This interaction is closed; open a new call to verify.");
+                return Conflict("This interaction is closed; open a new call to work on a member.");
 
-            // Attempt cap. A caller who cannot confirm two identifiers in this many tries is not going to, and
-            // past that point the retries are someone learning which identifiers the record holds. The refusal
-            // is audited at Warning: a locked-out call is exactly the thing a supervisor should see.
-            if (await deps.Verification.FailedAttemptCountAsync(id, ct) >= VerificationPolicy.MaxFailedAttempts)
-            {
-                await deps.AuditAsync("caller_verification", id.ToString(), AuditAction.Decision,
-                    "CallerVerificationLockedOut", i.CallRef, severity: AuditSeverity.Warning,
-                    after: $"failures:{VerificationPolicy.MaxFailedAttempts}", fieldClasses: ["identity"]);
-                return Results.Problem(statusCode: 429, title: "verification-locked",
-                    detail: $"This call has reached {VerificationPolicy.MaxFailedAttempts} failed verification attempts. "
-                          + "Escalate to a supervisor rather than continuing to challenge the caller.",
-                    type: "urn:hbmp:callcentre-verification-locked");
-            }
-
-            var types = VerificationPolicy.Normalise(req.VerifiedIdentifierTypes);
             var now = deps.Clock.GetUtcNow();
-
-            // A Pass demands at least the minimum DISTINCT known identifier types; otherwise it's rejected (422) but
-            // NOT recorded as a spurious Pass — the agent must challenge on more identifiers.
-            if (req.Result == VerificationResult.Passed && !VerificationPolicy.MeetsThreshold(types))
-                return Unprocessable("insufficient-identifiers",
-                    $"A pass requires at least {VerificationPolicy.MinIdentifierTypes} confirmed identifier types; got {types.Count}.");
-
-            var effectiveResult = req.Result;
             var v = new CallerVerification
             {
                 VerificationId = Guid.NewGuid(),
                 InteractionId = id,
                 BeneficiaryId = req.BeneficiaryId,
                 TenantId = deps.Tenant ?? "unknown",
-                VerifiedIdentifierTypes = types.ToList(),
-                Result = effectiveResult,
-                FailureReason = effectiveResult == VerificationResult.Failed
-                    ? (string.IsNullOrWhiteSpace(req.FailureReason) ? "unconfirmed" : req.FailureReason[..Math.Min(64, req.FailureReason.Length)])
-                    : null,
+                // Empty ON PURPOSE. The agent confirmed identity verbally and does not report which identifiers
+                // they asked for; writing a plausible set here would be inventing evidence.
+                VerifiedIdentifierTypes = [],
+                Result = VerificationResult.Passed,
+                Method = VerificationMethod.OffSystem,
                 VerifiedAt = now,
                 VerifiedBy = deps.Subject,
             };
             deps.Db.Verifications.Add(v);
 
-            // A Pass binds the interaction to this beneficiary — the anchor the verification gate consults.
-            if (effectiveResult == VerificationResult.Passed)
-            {
-                i.BeneficiaryId = req.BeneficiaryId;
-                i.UpdatedAt = now;
-            }
-            // A Pass binds the interaction to a beneficiary — it is what the disclosure gate consults. The
-            // binding and the event recording it commit together.
+            i.BeneficiaryId = req.BeneficiaryId;
+            i.UpdatedAt = now;
+
+            // The binding and the event recording it commit together.
             await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             await deps.Db.SaveChangesAsync(ct);
 
             await deps.Outbox.EnqueueAsync("CallerVerificationRecorded", "callcentre.events",
-                new { interactionId = id, i.CallRef, beneficiaryId = req.BeneficiaryId, result = effectiveResult.ToString(), typeCount = types.Count }, ct);
+                new { interactionId = id, i.CallRef, beneficiaryId = req.BeneficiaryId, result = "Passed", method = "OffSystem" }, ct);
             await tx.CommitAsync(ct);
-            // Both passes and failures are audited. A failure is a Notice (a disclosure was withheld / attempted).
             await deps.AuditAsync("caller_verification", v.VerificationId.ToString(), AuditAction.Decision,
-                effectiveResult == VerificationResult.Passed ? "CallerVerificationPassed" : "CallerVerificationFailed",
-                i.CallRef,
-                severity: effectiveResult == VerificationResult.Passed ? AuditSeverity.Notice : AuditSeverity.Warning,
-                after: $"types:{types.Count}",
-                fieldClasses: ["identity"]);
+                "CallerIdentityAttested", i.CallRef, severity: AuditSeverity.Notice,
+                after: "method:OffSystem", fieldClasses: ["identity"]);
             return Results.Ok(VerificationView.From(v));
         }).RequireAuthorization(HbmpPolicies.Scope("callcentre:verify"));
 
-        // --- Update the call log (reason/outcome/notes) -----------------------------------------------------
+        // --- Update the call log (reason/outcome/summary) ---------------------------------------------------
         v1.MapPatch("/{id:guid}", async (Guid id, UpdateInteractionRequest req, CallDeps deps, CancellationToken ct) =>
         {
             var denied = await deps.Gate.CheckAsync(CallCentrePolicies.Interaction, "update-interaction", ct);
@@ -138,12 +112,13 @@ public static class Interactions
 
             if (req.ReasonCode is not null) i.ReasonCode = req.ReasonCode;
             if (req.Outcome is not null) i.Outcome = req.Outcome;
-            if (req.Notes is not null)
+            if (req.Summary is not null)
             {
-                if (req.Notes.Length > CallSummaryRules.MaxNotesLength)
-                    return Unprocessable("notes-too-long",
-                        $"Call notes are capped at {CallSummaryRules.MaxNotesLength} characters; got {req.Notes.Length}.");
-                i.Notes = req.Notes;
+                var draft = req.Summary.Trim();
+                if (draft.Length > CallSummaryRules.MaxLength)
+                    return Unprocessable("summary-too-long",
+                        $"A call summary is capped at {CallSummaryRules.MaxLength} characters; got {draft.Length}.");
+                i.Summary = draft;
             }
             i.UpdatedAt = deps.Clock.GetUtcNow();
             try { await deps.Db.SaveChangesAsync(ct); }
@@ -166,14 +141,14 @@ public static class Interactions
             var now = deps.Clock.GetUtcNow();
             if (req?.ReasonCode is not null) i.ReasonCode = req.ReasonCode;
             if (req?.Outcome is not null) i.Outcome = req.Outcome;
-            if (req?.Notes is not null)
+            if (req?.Summary is not null)
             {
-                if (req.Notes.Length > CallSummaryRules.MaxNotesLength)
-                    return Unprocessable("notes-too-long",
-                        $"Call notes are capped at {CallSummaryRules.MaxNotesLength} characters; got {req.Notes.Length}.");
-                i.Notes = req.Notes;
+                var draft = req.Summary.Trim();
+                if (draft.Length > CallSummaryRules.MaxLength)
+                    return Unprocessable("summary-too-long",
+                        $"A call summary is capped at {CallSummaryRules.MaxLength} characters; got {draft.Length}.");
+                i.Summary = draft;
             }
-            if (req?.Summary is not null) i.Summary = req.Summary.Trim();
 
             // Phase 20.3b — a summary is REQUIRED at close unless the call was abandoned. Other roles read this
             // field through the patient profile; a call that closed "Resolved" with nothing recorded leaves a

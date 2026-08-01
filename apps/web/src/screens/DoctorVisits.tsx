@@ -7,7 +7,7 @@ import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
 import { ApiError } from "../api/http";
 import { useFormat } from "../i18n/useFormat";
-import { AsyncSection, PageHeader, useLoc } from "./_shared";
+import { AsyncSection, PageHeader, useLoc, useOpenProfile } from "./_shared";
 import { VisitTimelineButton } from "./VisitTimeline";
 
 const S = {
@@ -55,6 +55,9 @@ export function DoctorVisits() {
   const t = useLoc();
   const fmt = useFormat();   // 18.D2 (U7) — Cairo times, app locale
   const navigate = useNavigate();
+  // Separate from `navigate` because it also records the origin, so the profile's Back control returns to
+  // this board rather than guessing from history.
+  const openProfile = useOpenProfile();
   const state = useAsync<AppointmentRow[]>(() => api.appointments("all", true), []);
   const [busy, setBusy] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
@@ -96,7 +99,7 @@ export function DoctorVisits() {
       // for the column their cursor is in (axe empty-table-header).
       header: t(S.openFile),
       cell: (r) => (
-        <Button variant="secondary" size="sm" onClick={() => navigate(`/patients/${encodeURIComponent(r.beneficiary.id)}`)}>
+        <Button variant="secondary" size="sm" onClick={() => openProfile(r.beneficiary.id)}>
           {t(S.openFile)}
         </Button>
       ),

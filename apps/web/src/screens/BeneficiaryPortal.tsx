@@ -15,7 +15,7 @@ import { useWrite } from "../api/useWrite";
 import type { ComboboxOption } from "@mersal/design-system";
 import type { Localized, RegisterBeneficiaryInput } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
-import { PageHeader, useLoc } from "./_shared";
+import { PageHeader, useLoc, useOpenProfile } from "./_shared";
 import { NATIONALITIES, DIAL_CODES } from "../data/nationalities";
 import { flagUrl } from "../data/flags";
 import { useRegistrationReference } from "./useRegistrationReference";
@@ -356,6 +356,9 @@ function RegisterOneMember({ policyApi }: { policyApi: PolicyApi }) {
   const api = useApi();
   const t = useLoc();
   const navigate = useNavigate();
+  // Separate from `navigate` because it also records the origin, so the profile's Back control comes back to
+  // the registration result rather than wherever history happens to point.
+  const openProfile = useOpenProfile();
   const write = useWrite();                       // 18.D1 — per-form idempotency key + typed failures
   const reference = useRegistrationReference(policyApi);
 
@@ -780,7 +783,7 @@ function RegisterOneMember({ policyApi }: { policyApi: PolicyApi }) {
               <span className="muted tnum">{t(S.registeredId)}: {created.id.slice(0, 8)}</span>
               {/* The two next steps ARE the message (QA P2-20). Opening the profile is also where documents
                   are filed, which is why the documents section points here. */}
-              <Button variant="ghost" size="sm" onClick={() => navigate(`/patients/${encodeURIComponent(created.id)}`)}>{t(S.openProfile)}</Button>
+              <Button variant="ghost" size="sm" onClick={() => openProfile(created.id)}>{t(S.openProfile)}</Button>
               <Button variant="ghost" size="sm" onClick={() => navigate("/beneficiaries/eligibility")}>{t(S.toEligibility)}</Button>
             </div>
           )}

@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
-import { Button, Card, InlineAlert, useTheme } from "@mersal/design-system";
+import { useCallback, useMemo, type ReactNode } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Button, Card, Icon, InlineAlert, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import { useAuth } from "../auth/AuthProvider";
 import { portalForRole } from "../portals/catalog";
@@ -36,10 +37,17 @@ const STR = {
   sessionEnded: { en: "Your session has ended. Sign in again to continue.", ar: "انتهت جلستك. سجّل الدخول مجددًا للمتابعة." },
   signIn: { en: "Sign in", ar: "تسجيل الدخول" },
   rateLimited: { en: "Too many requests just now. Wait a moment and retry.", ar: "طلبات كثيرة الآن. انتظر لحظة ثم أعد المحاولة." },
+  back: { en: "Back", ar: "رجوع" },
 } satisfies Record<string, Localized>;
 
-/** Page header (eyebrow + h1 + optional actions), reused by every flagship screen. */
-export function PageHeader({ title, actions }: { title: string; actions?: ReactNode }) {
+/**
+ * Page header (eyebrow + h1 + optional actions), reused by every flagship screen.
+ *
+ * <b>`back` renders a back control ABOVE the title</b>, in every portal at once, because this is the one
+ * component they all share. It is a real `<button>` rather than a styled link: it runs
+ * {@link useBackTarget}'s navigate, so it must be reachable by keyboard and announced as an action.
+ */
+export function PageHeader({ title, actions, back }: { title: string; actions?: ReactNode; back?: BackTarget }) {
   const { session } = useAuth();
   const t = useLoc();
   if (!session?.role) return null;
@@ -47,12 +55,73 @@ export function PageHeader({ title, actions }: { title: string; actions?: ReactN
   return (
     <div className="pagehead">
       <div>
+        {back && (
+          <button type="button" className="pagehead-back" onClick={back.go}>
+            {/* The chevron is drawn pointing DOWN and rotated by CSS off the document direction, exactly as
+                the pager does it — in RTL "back" is to the right, and a hard-coded arrow is the classic way a
+                mirrored layout ends up pointing the wrong way. */}
+            <Icon name="chevron" width={14} height={14} aria-hidden="true" />
+            <span>{back.label ? t(back.label) : t(STR.back)}</span>
+          </button>
+        )}
         <div className="role-eyebrow">{t(portal.eyebrow)}</div>
         <h1>{title}</h1>
       </div>
       {actions && <div className="pagehead-actions">{actions}</div>}
     </div>
   );
+}
+
+/**
+ * Navigate into a patient's profile, recording where we came from.
+ *
+ * <b>Use this rather than a bare `navigate('/patients/…')`.</b> The profile's Back control reads
+ * `location.state.from`, and every call site that forgets to set it degrades that control to `navigate(-1)` —
+ * which is subtly wrong after a redirect and useless on a fresh tab. One helper means the profile can rely on
+ * the origin being there.
+ */
+export function useOpenProfile(): (beneficiaryId: string, search?: string) => void {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return useCallback(
+    (beneficiaryId: string, search?: string) => {
+      navigate(`/patients/${encodeURIComponent(beneficiaryId)}${search ?? ""}`, {
+        state: { from: `${location.pathname}${location.search}` },
+      });
+    },
+    [navigate, location.pathname, location.search],
+  );
+}
+
+/** What a back control needs: where to go, and optionally what to call the place it goes back to. */
+export interface BackTarget {
+  go: () => void;
+  label?: Localized;
+}
+
+/**
+ * Resolve where "back" goes for a screen that is always opened FOR something (the patient profile, chiefly).
+ *
+ * <b>Why not just `navigate(-1)`.</b> History alone is wrong twice: on a deep link pasted into a fresh tab
+ * there is nothing behind this entry, and after an in-page redirect `-1` lands on the redirect rather than the
+ * screen the user came from. So callers pass their origin in `location.state.from` and this prefers it, using
+ * `-1` only as a fallback and rendering nothing at all when there is neither.
+ *
+ * Returns `null` when there is nowhere to go back TO — a back button that leaves the app is worse than none.
+ */
+export function useBackTarget(label?: Localized): BackTarget | null {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const from = (location.state as { from?: string } | null)?.from;
+
+  return useMemo(() => {
+    if (from) return { go: () => navigate(from), label };
+    // `idx` is react-router's position in its own history stack; 0 means this entry is the first, so there is
+    // nothing of ours behind it.
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (idx > 0) return { go: () => navigate(-1), label };
+    return null;
+  }, [from, label, navigate]);
 }
 
 /** What the user can actually do about a failed read. `none` means nothing on this screen will help. */

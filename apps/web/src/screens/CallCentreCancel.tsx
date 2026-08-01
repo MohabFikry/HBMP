@@ -1,27 +1,24 @@
 import { useCallback, useRef, useState } from "react";
 import { Button, Icon, InlineAlert, Modal } from "@mersal/design-system";
 import type { AppointmentRow, Localized } from "@mersal/contracts";
-import { identifierTypeLabel } from "./statusLabels";
 import type { CcApi } from "./CallCentre";
 
 const S = {
   cancel: { en: "Cancel appointment", ar: "إلغاء الموعد" },
   title: { en: "Cancel this appointment?", ar: "إلغاء هذا الموعد؟" },
   body: {
-    en: "The time is released for someone else and anyone on the waitlist may be offered it. Verify the caller first — this cannot be undone from here.",
-    ar: "سيُتاح الوقت لشخص آخر وقد يُعرض على من في قائمة الانتظار. تحقّق من هوية المتصل أولاً — لا يمكن التراجع عن هذا من هنا.",
+    en: "The time is released for someone else and anyone on the waitlist may be offered it. Confirm who you are speaking to before you continue — this cannot be undone from here.",
+    ar: "سيُتاح الوقت لشخص آخر وقد يُعرض على من في قائمة الانتظار. تأكّد ممّن تتحدث إليه قبل المتابعة — لا يمكن التراجع عن هذا من هنا.",
   },
-  verifyStep: { en: "1. Verify the caller", ar: "١. تحقّق من هوية المتصل" },
-  reasonStep: { en: "2. Reason", ar: "٢. السبب" },
-  needTwo: { en: "Confirm at least two identifiers with the caller.", ar: "أكّد هويتين على الأقل مع المتصل." },
+  reasonStep: { en: "Reason", ar: "السبب" },
   needReason: { en: "Choose a reason.", ar: "اختر سبباً." },
   keep: { en: "Keep it", ar: "الاحتفاظ به" },
   lookupFailed: {
-    en: "Couldn't load this member's identifiers. Cancel from the call workspace instead.",
-    ar: "تعذّر تحميل هويات هذا العضو. ألغِ من مساحة المكالمة بدلاً من ذلك.",
+    en: "Couldn't find this member. Cancel from the call workspace instead.",
+    ar: "تعذّر العثور على هذا العضو. ألغِ من مساحة المكالمة بدلاً من ذلك.",
   },
   failed: { en: "The cancellation was refused. Nothing was changed.", ar: "تم رفض الإلغاء. لم يتغير شيء." },
-  loadingIds: { en: "Loading this member's identifiers…", ar: "جاري تحميل هويات هذا العضو…" },
+  loadingMember: { en: "Finding this member…", ar: "جاري البحث عن هذا العضو…" },
   // The appointment IS cancelled at this point — only the call record failed to wrap up. Saying "failed"
   // here would send the agent back to cancel an appointment that is already gone.
   closeFailed: {
@@ -48,14 +45,17 @@ const CANCEL_REASONS = [
  * ============================================================================================================
  * The obvious implementation — call emr's `/appointments/{id}/cancel` directly — WOULD have worked: the call
  * centre holds `appointment:reserve`, so emr permits it. That is exactly the problem. Every reserve path is
- * supposed to run through callcentre-service, which refuses without an interaction carrying a recorded
- * verification PASS, and going straight to emr would step around the one gate the whole of phase 15 exists
- * to enforce. An agent could then cancel any appointment for anyone who rang up and read out a name.
+ * supposed to run through callcentre-service, which refuses on a call not bound to that member, and going
+ * straight to emr would step around the gate entirely — leaving a cancellation with no call behind it and
+ * nothing in the audit trail tying it to a conversation.
  *
- * So this does what `CallCentreBooking` already does for booking: it OPENS its own call record, verifies
- * inside itself, and then acts through the façade. The dialog is a different route to the same rule, not an
- * exemption from it — and if the member's identifiers cannot be loaded it refuses and points at the
- * workspace rather than falling back to the unguarded path.
+ * So this does what `CallCentreBooking` already does for booking: it OPENS its own call record, binds it to
+ * the member, and then acts through the façade. The dialog is a different route to the same rule, not an
+ * exemption from it — and if the member cannot be resolved it refuses and points at the workspace rather than
+ * falling back to the unguarded path.
+ *
+ * <b>The identifier challenge is gone.</b> Identity is confirmed by the agent on the phone; the dialog says so
+ * and asks for the one thing it still needs, which is the reason.
  *
  * The reason is a CODE, not free text: the call centre's cancellations are what the no-show and rebook
  * reports group by, and a typed sentence cannot be counted.
@@ -69,8 +69,9 @@ export function CallCentreCancelButton({
   onCancelled: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [types, setTypes] = useState<string[] | null>(null);
-  const [ticks, setTicks] = useState<Set<string>>(new Set());
+  /** The resolved member. `null` while the lookup is in flight — the dialog cannot act until it knows the
+   *  beneficiary id the call has to be bound to. */
+  const [found, setFound] = useState<{ beneficiaryId: string } | null>(null);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<Localized | null>(null);
   const [busy, setBusy] = useState(false);
@@ -87,14 +88,14 @@ export function CallCentreCancelButton({
   const start = useCallback(async () => {
     setOpen(true);
     setError(null);
-    setTicks(new Set());
     setReason("");
-    setTypes(null);
+    setFound(null);
     // A fresh dialog is a fresh call — never resume the previous one's progress.
     interaction.current = null;
     cancelled.current = false;
-    // Which identifiers this member can be challenged on. Without them there is nothing to verify against,
-    // and verification is the point — so a failure here stops the flow rather than skipping it.
+    // Confirm the row's beneficiary actually resolves through the call-centre directory before offering to
+    // act. Failing here stops the flow rather than skipping it: without a member there is nothing to bind the
+    // call to, and the cancel would be refused anyway — better said now than after the agent commits.
     const name = row.beneficiaryName ?? "";
     const matches = await api.search(name).catch(() => []);
     const hit = matches.find((m) => m.beneficiaryId === row.beneficiary.id);
@@ -102,18 +103,10 @@ export function CallCentreCancelButton({
       setError(S.lookupFailed);
       return;
     }
-    setTypes(hit.challengeableIdentifierTypes);
+    setFound({ beneficiaryId: hit.beneficiaryId });
   }, [api, row]);
 
-  const toggle = (type: string) =>
-    setTicks((prev) => {
-      const next = new Set(prev);
-      if (next.has(type)) next.delete(type); else next.add(type);
-      return next;
-    });
-
   async function confirm() {
-    if (ticks.size < 2) { setError(S.needTwo); return; }
     if (!reason) { setError(S.needReason); return; }
     setError(null);
     setBusy(true);
@@ -128,8 +121,10 @@ export function CallCentreCancelButton({
         if (!opened?.interactionId) { setError(S.failed); return; }
         interaction.current = opened.interactionId;
 
-        const passed = await api.verify(opened.interactionId, row.beneficiary.id, [...ticks], true);
-        if (!passed) { setError(S.failed); return; }
+        // Bind the call to this member — the agent confirmed who they are speaking to on the phone before
+        // opening this dialog, and the server refuses every act on a call it cannot resolve to a member.
+        const bound = await api.openMember(opened.interactionId, row.beneficiary.id);
+        if (!bound) { setError(S.failed); return; }
       }
 
       // Likewise skip the cancellation itself if a previous attempt already made it — retrying the whole
@@ -140,12 +135,10 @@ export function CallCentreCancelButton({
         cancelled.current = true;
       }
 
-      // A summary is REQUIRED to close with outcome Resolved. This used to send notes only and swallow the
-      // refusal with `.catch(() => {})`, so every cancellation taken here left its interaction Open on the
-      // server — and an open interaction is an unexpired caller verification against that member.
-      const closed = await api.close(
-        interaction.current, "Resolved", `Cancelled: ${reason}`, summaryFor(reason),
-      );
+      // A summary is REQUIRED to close with outcome Resolved. This used to swallow the refusal with
+      // `.catch(() => {})`, so every cancellation taken here left its interaction Open on the server — and an
+      // open interaction is still bound to that member, still disclosing.
+      const closed = await api.close(interaction.current, "Resolved", summaryFor(reason));
       if (closed !== "ok") { setError(S.closeFailed); return; }
 
       interaction.current = null;
@@ -181,7 +174,7 @@ export function CallCentreCancelButton({
             {/* "Keep it", not "Cancel": a Cancel button on a cancellation dialog is read by half of
                 operators as "cancel the appointment". */}
             <Button variant="secondary" onClick={() => setOpen(false)}>{t(S.keep)}</Button>
-            <Button variant="danger" loading={busy} disabled={!types} onClick={() => void confirm()}>
+            <Button variant="danger" loading={busy} disabled={!found} onClick={() => void confirm()}>
               {t(S.cancel)}
             </Button>
           </>
@@ -190,19 +183,7 @@ export function CallCentreCancelButton({
         <div className="stack-3">
           <p style={{ margin: 0 }}><strong>{row.beneficiaryName ?? row.beneficiary.token}</strong></p>
 
-          <fieldset className="fieldset">
-            <legend>{t(S.verifyStep)}</legend>
-            {types === null ? (
-              <p className="muted" role="status">{t(S.loadingIds)}</p>
-            ) : (
-              types.map((type) => (
-                <label key={type} className="check">
-                  <input type="checkbox" checked={ticks.has(type)} onChange={() => toggle(type)} />{" "}
-                  {t(identifierTypeLabel(type))}
-                </label>
-              ))
-            )}
-          </fieldset>
+          {found === null && !error && <p className="muted" role="status">{t(S.loadingMember)}</p>}
 
           <div className="cc-field">
             <span id="cc-cancel-reason-code">{t(S.reasonStep)}</span>

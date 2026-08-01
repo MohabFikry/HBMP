@@ -3,43 +3,44 @@ using Mersal.CallCentre.Domain;
 
 namespace Mersal.CallCentre.Tests;
 
-/// <summary>Pure verification-policy rules (no I/O): the ≥2-identifier-type threshold, distinct/known-type
-/// normalisation (the defence against a caller's VALUE being smuggled in as a "type"), and the call-ref format.</summary>
+/// <summary>
+/// What is left to test WITHOUT I/O now that caller identity is confirmed off-system.
+///
+/// <para>The ≥2-identifier-type threshold, the distinct/known-type normalisation and the value-smuggling defence
+/// used to live here. They are gone with the challenge that gave them meaning — a threshold on a set no client
+/// submits proves nothing, and a test for it would go on passing forever while proving nothing too. The rule
+/// that replaced them (a call may only disclose the member it was opened against, and only while open) is I/O
+/// by nature and is proved in <see cref="CallControlsTests"/> against a real database.</para>
+///
+/// <para>What remains here is the one pure invariant worth guarding: the DEFAULT method. It is the reason the
+/// rows written before 2026-08 still mean what they meant.</para>
+/// </summary>
 public class VerificationTests
 {
+    /// <summary>A verification record defaults to <see cref="VerificationMethod.OnSystem"/>.
+    ///
+    /// <para>This is not a formality. The table holds two kinds of row that assert different things — "the
+    /// platform checked ≥2 identifiers and accepted them" and "an agent says they confirmed the caller by
+    /// phone" — and every row written before the column existed is the first kind. Flipping this default (or the
+    /// matching DDL default in <c>0006_verification_method.sql</c>) would silently re-label years of audit
+    /// evidence as attestations nobody ever made.</para></summary>
     [Fact]
-    public void Two_distinct_known_types_meet_the_threshold()
+    public void A_verification_record_defaults_to_the_on_system_method()
     {
-        var types = VerificationPolicy.Normalise(["MemberNo", "DateOfBirth"]);
-        VerificationPolicy.MeetsThreshold(types).Should().BeTrue();
+        new CallerVerification().Method.Should().Be(VerificationMethod.OnSystem);
     }
 
+    /// <summary>An off-system attestation carries no identifier types, and the type list stays empty by default
+    /// rather than nullable — a reader must never have to distinguish "no identifiers recorded" from "null".</summary>
     [Fact]
-    public void One_type_is_below_the_threshold()
+    public void A_verification_record_starts_with_no_identifier_types()
     {
-        var types = VerificationPolicy.Normalise(["MemberNo"]);
-        VerificationPolicy.MeetsThreshold(types).Should().BeFalse();
+        new CallerVerification().VerifiedIdentifierTypes.Should().BeEmpty();
     }
 
+    /// <summary>The allow-list is retained for reading historical on-system rows; it must still describe them.</summary>
     [Fact]
-    public void Duplicate_types_collapse_and_do_not_inflate_the_count()
-    {
-        var types = VerificationPolicy.Normalise(["MemberNo", "MemberNo", "MemberNo"]);
-        types.Should().ContainSingle();
-        VerificationPolicy.MeetsThreshold(types).Should().BeFalse();
-    }
-
-    [Fact]
-    public void Unknown_types_are_dropped_so_a_recited_value_cannot_pose_as_a_type()
-    {
-        // "12345" (a value the caller might recite) is not a challengeable TYPE — it must not count.
-        var types = VerificationPolicy.Normalise(["MemberNo", "12345", "not-a-type"]);
-        types.Should().BeEquivalentTo(["MemberNo"]);
-        VerificationPolicy.MeetsThreshold(types).Should().BeFalse();
-    }
-
-    [Fact]
-    public void All_challengeable_types_include_phone_the_primary_entry_point()
+    public void The_historical_challengeable_types_still_include_phone_the_primary_entry_point()
     {
         VerificationPolicy.ChallengeableTypes.Should().Contain("Phone");
     }

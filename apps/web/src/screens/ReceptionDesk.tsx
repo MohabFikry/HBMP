@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useFormat } from "../i18n/useFormat";
 import { Button, Card, DataTable, Icon, InlineAlert, InputField, StatusChip, TableToolbar } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
@@ -7,7 +6,8 @@ import type { AppointmentRow, Localized, Practitioner, Specialty } from "@mersal
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
 import { ApiError } from "../api/http";
-import { AsyncSection, PageHeader, useLoc } from "./_shared";
+import { AsyncSection, PageHeader, useLoc, useOpenProfile } from "./_shared";
+import { useRestorableState } from "./useRestorableState";
 import { VisitTimelineButton } from "./VisitTimeline";
 import {
   CancelAppointmentButton, doctorColumns, noteColumn, patientColumn, timeAndStatusColumns,
@@ -84,7 +84,10 @@ const NO_SPECIALTIES: Specialty[] = [];
  * beneficiary; without this the unified profile had no entry point on this side of the building at all.
  * The SERVER decides which sections reception may see, so the same route serves every portal.
  */
-function patientFileColumn(t: (l: Localized) => string, go: (to: string) => void): Column<AppointmentRow> {
+function patientFileColumn(
+  t: (l: Localized) => string,
+  openProfile: (beneficiaryId: string) => void,
+): Column<AppointmentRow> {
   return {
     key: "file",
     // A real header, not "": an empty <th> has no accessible name (axe empty-table-header). The fixture routes
@@ -97,7 +100,7 @@ function patientFileColumn(t: (l: Localized) => string, go: (to: string) => void
         variant="primary"
         size="sm"
         leadingIcon={<Icon name="user" />}
-        onClick={() => go(`/patients/${encodeURIComponent(r.beneficiary.id)}`)}
+        onClick={() => openProfile(r.beneficiary.id)}
       >
         {t(S.openFile)}
       </Button>
@@ -118,17 +121,22 @@ export function ReceptionAppointments() {
   const api = useApi();
   const t = useLoc();
   const fmt = useFormat();   // 18.D2 (U7) — Cairo appointment times, app locale
-  const navigate = useNavigate();
+  // Carries where we came from, so the profile's Back control returns to this board rather than guessing.
+  const openProfile = useOpenProfile();
 
   // ---- filters (14.5) --------------------------------------------------------------------------------
   // `when` and the custom range are SERVER-side, because they change which rows exist; `status` and the
   // search are client-side over what came back, because they narrow rows already in hand. Mixing the two
   // freely would mean a status filter that silently missed appointments outside today.
-  const [when, setWhen] = useState<string | null>("today");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
+  //
+  // RESTORED across a visit to a patient's file. Narrowing this board is real work — a custom date range and
+  // a status, typed once and applied to a day's list — and the desk opens a patient file FROM a row, so the
+  // round trip used to throw all of it away and drop the receptionist back on an unfiltered "today".
+  const [when, setWhen] = useRestorableState<string | null>("reception-appts.when", "today");
+  const [from, setFrom] = useRestorableState("reception-appts.from", "");
+  const [to, setTo] = useRestorableState("reception-appts.to", "");
+  const [status, setStatus] = useRestorableState<string | null>("reception-appts.status", null);
+  const [query, setQuery] = useRestorableState("reception-appts.query", "");
 
   const customActive = when === "custom" && from !== "" && to !== "";
   const range = customActive ? { from, to } : undefined;
@@ -170,7 +178,7 @@ export function ReceptionAppointments() {
     ...doctorColumns(deps),
     ...timeAndStatusColumns(deps),
     noteColumn(deps),
-    patientFileColumn(t, navigate),
+    patientFileColumn(t, openProfile),
     {
       key: "actions",
       header: t(S.actions),

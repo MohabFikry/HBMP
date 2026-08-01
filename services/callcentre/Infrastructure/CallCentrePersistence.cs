@@ -7,48 +7,34 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Mersal.CallCentre.Infrastructure;
 
-/// <summary>The reusable VERIFICATION GATE primitive (phase 15.1). Every disclose/act endpoint in 15.2–15.4
-/// consults <see cref="IsVerifiedAsync"/> before revealing or changing member data. A verification is valid ONLY
-/// for the interaction it was recorded on AND the beneficiary it bound, and it EXPIRES when the interaction closes
-/// (Status=Closed). This is the server-side enforcement of "verify before you disclose" — never only in the UI.</summary>
-public sealed class VerificationService(CallCentreDbContext db, TimeProvider? clock = null)
+/// <summary>The DISCLOSURE GATE (phase 15.1, redefined 2026-08). Every disclose/act endpoint consults
+/// <see cref="IsVerifiedAsync"/> before revealing or changing member data.
+///
+/// <para><b>What it enforces now.</b> Identity is confirmed by the agent ON THE PHONE, so this no longer asks
+/// whether the platform administered a good-enough challenge. It asks the two questions that survive: is this
+/// call bound to this member, and is it still open? A verification is valid ONLY for the interaction it was
+/// recorded on AND the beneficiary it bound, and it stops being valid when the interaction closes.</para>
+///
+/// <para><b>The 60-minute TTL was removed with the challenge, not despite it.</b> A TTL was the right backstop
+/// for recorded EVIDENCE — an identifier recited 90 minutes ago says little about who is on the line now — but
+/// an attestation that the agent is speaking to this person does not decay across the call; it ends with the
+/// call. Keeping it would have produced a silent mid-call 403 that the agent could neither see coming nor fix,
+/// on a rule that no longer measured anything. Closing the interaction is the expiry.</para></summary>
+public sealed class VerificationService(CallCentreDbContext db)
 {
-    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
-
-    /// <summary>How long a Passed verification stays valid, measured from when it was recorded.
-    ///
-    /// <para>Closing the interaction was the ONLY expiry until now, which made the control depend on a wrap-up
-    /// the agent's client had to remember to perform — and when the close request started failing validation,
-    /// every verification ever recorded stayed live and kept unlocking its member's 360 indefinitely. A control
-    /// whose expiry depends on a later request succeeding is not an expiry. This is the backstop: not a limit on
-    /// how long a call may run, but the point past which a verification recorded on it is no longer evidence
-    /// that the person on the line was confirmed.</para></summary>
-    public static readonly TimeSpan VerificationTtl = TimeSpan.FromMinutes(60);
-
     public async Task<bool> IsVerifiedAsync(Guid interactionId, Guid beneficiaryId, CancellationToken ct = default)
     {
-        // Valid iff the interaction is still Open, bound to this beneficiary, and has a Passed verification for
-        // it that has not aged out.
+        // Valid iff the interaction is still Open, bound to this beneficiary, and carries a Passed record for it.
         var interaction = await db.Interactions.AsNoTracking()
             .FirstOrDefaultAsync(i => i.InteractionId == interactionId, ct);
         if (interaction is null || interaction.Status != InteractionStatus.Open) return false;
         if (interaction.BeneficiaryId != beneficiaryId) return false;
 
-        var freshAfter = _clock.GetUtcNow() - VerificationTtl;
         return await db.Verifications.AsNoTracking().AnyAsync(
             v => v.InteractionId == interactionId
                  && v.BeneficiaryId == beneficiaryId
-                 && v.Result == VerificationResult.Passed
-                 && v.VerifiedAt > freshAfter, ct);
+                 && v.Result == VerificationResult.Passed, ct);
     }
-
-    /// <summary>Failed attempts recorded on this interaction. The verification endpoint refuses further attempts
-    /// past <see cref="VerificationPolicy.MaxFailedAttempts"/>: unlimited retries let a caller who is guessing
-    /// work out which identifiers the record actually holds, one 'Failed' at a time, and an audit trail records
-    /// that without stopping it.</summary>
-    public Task<int> FailedAttemptCountAsync(Guid interactionId, CancellationToken ct = default) =>
-        db.Verifications.AsNoTracking().CountAsync(
-            v => v.InteractionId == interactionId && v.Result == VerificationResult.Failed, ct);
 
     /// <summary>The beneficiary an OPEN interaction is currently bound to (null if none/closed) — used by the
     /// disclose/act endpoints to resolve "who is this call about" without trusting a client-supplied id.</summary>

@@ -30,12 +30,8 @@ function make360(): Cc360 {
  * crypto.randomUUID(), so every call-centre booking named a slot that could not exist and emr answered 404.
  * The Book button is disabled until a real one is picked, so these steps are the contract now.
  */
-async function verifyAndOpen(user: ReturnType<typeof userEvent.setup>) {
-  await startAndSelect(user);
-  await user.click(screen.getByLabelText("Member number"));
-  await user.click(screen.getByLabelText("Date of birth"));
-  await user.click(screen.getByRole("button", { name: /verify — pass/i }));
-  await screen.findByTestId("cc-360");
+async function openMemberAndReserve(user: ReturnType<typeof userEvent.setup>) {
+  await startAndOpenMember(user);
   await openReservePanel(user);
 }
 
@@ -88,9 +84,11 @@ async function pickClinicAndTime(user: ReturnType<typeof userEvent.setup>) {
 function fakeApi(over: Partial<CcApi> = {}): CcApi {
   return {
     openInteraction: vi.fn().mockResolvedValue({ interactionId: "i1", callRef: "CALL-2026-000001" }),
-    verify: vi.fn().mockImplementation((_i, _b, types: string[], pass: boolean) => Promise.resolve(pass && types.length >= 2)),
-    // The server masks the member number on a pre-verification hit, so the fixture carries the masked shape.
-    search: vi.fn().mockResolvedValue([{ beneficiaryId: BEN, displayName: "Amal Hassan", maskedMemberNo: "•••001", challengeableIdentifierTypes: ["MemberNo", "DateOfBirth", "Phone"] }]),
+    // Records the agent's off-system attestation and binds the call. No identifier types, no pass/fail.
+    openMember: vi.fn().mockResolvedValue(true),
+    // The member number arrives in full: it was masked only while it was an identifier the agent could be
+    // challenged on, and the agent needs it to tell two people with the same name apart.
+    search: vi.fn().mockResolvedValue([{ beneficiaryId: BEN, displayName: "Amal Hassan", memberNo: "MRS-M-1001" }]),
     summary: vi.fn().mockResolvedValue(make360()),
     // Cross-branch clinic list, each option carrying its own branch (15.3).
     clinics: vi.fn().mockResolvedValue([
@@ -111,55 +109,109 @@ function fakeApi(over: Partial<CcApi> = {}): CcApi {
   };
 }
 
-async function startAndSelect(user: ReturnType<typeof userEvent.setup>) {
+/** Start a call and search, stopping BEFORE a member is chosen. */
+async function startAndSearch(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: /start call/i }));
   await user.type(await screen.findByLabelText(/find member/i), "+20100000000");
   await user.click(screen.getByRole("button", { name: /^search$/i }));
-  await user.click(await screen.findByRole("button", { name: /Amal Hassan/ }));
 }
 
-describe("15.5 — Call Centre workspace: verify before disclose", () => {
-  it("shows NO member detail before verification (only name + challenge types)", async () => {
+/**
+ * Start a call, search, and open the member's file.
+ *
+ * Picking the hit IS the whole gesture now — the identifier-challenge step between the two is gone, because
+ * the agent confirms who they are speaking to on the phone.
+ */
+async function startAndOpenMember(user: ReturnType<typeof userEvent.setup>) {
+  await startAndSearch(user);
+  await user.click(await screen.findByRole("button", { name: /Amal Hassan/ }));
+  await screen.findByTestId("cc-360");
+}
+
+describe("Call Centre workspace: opening a member's file", () => {
+  /**
+   * A search hit is a way to pick the right person, not a disclosure. It carries a name and a member number
+   * and nothing else — the same rule as before, minus the challenge the agent no longer administers.
+   */
+  it("discloses nothing about a member until their file is opened", async () => {
     const user = userEvent.setup();
     renderNode(<CallCentreWorkspace api={fakeApi()} />);
-    await startAndSelect(user);
+    await startAndSearch(user);
 
-    expect(screen.getByTestId("cc-lockchip")).toHaveTextContent(/not yet verified/i);
-    // Challenge checkboxes are offered…
-    expect(screen.getByLabelText("Member number")).toBeInTheDocument();
+    // The hit itself is present…
+    expect(await screen.findByRole("button", { name: /Amal Hassan/ })).toBeInTheDocument();
     // …but no coverage / appointment / contact detail is anywhere in the DOM.
     expect(screen.queryByTestId("cc-360")).not.toBeInTheDocument();
     expect(screen.queryByText(/Dr\. Nour/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Outpatient/)).not.toBeInTheDocument();
   });
 
-  it("rejects a pass with fewer than two identifier types", async () => {
+  /** The identifier challenge is GONE, not merely bypassed. If any of it comes back by accident — a
+   *  fieldset, a checkbox, a Pass button — this is what says so. */
+  it("never asks the agent to challenge the caller on identifiers", async () => {
+    const user = userEvent.setup();
+    renderNode(<CallCentreWorkspace api={fakeApi()} />);
+    await startAndSearch(user);
+
+    expect(screen.queryByRole("button", { name: /verify/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.queryByText(/not yet verified/i)).not.toBeInTheDocument();
+    // It says what the click means instead.
+    expect(screen.getByText(/confirm who you are speaking to/i)).toBeInTheDocument();
+  });
+
+  it("records the attestation, binds the call, and shows the cross-branch 360", async () => {
     const user = userEvent.setup();
     const api = fakeApi();
     renderNode(<CallCentreWorkspace api={api} />);
-    await startAndSelect(user);
+    await startAndOpenMember(user);
 
-    await user.click(screen.getByLabelText("Member number"));           // only one
-    await user.click(screen.getByRole("button", { name: /verify — pass/i }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/at least two/i);
-    expect(api.verify).not.toHaveBeenCalled();
-  });
+    // ONE call, carrying the interaction and the beneficiary — nothing else to get wrong.
+    expect(api.openMember).toHaveBeenCalledWith("i1", BEN);
 
-  it("unlocks the cross-branch 360 after a pass and announces it", async () => {
-    const user = userEvent.setup();
-    renderNode(<CallCentreWorkspace api={fakeApi()} />);
-    await startAndSelect(user);
-
-    await user.click(screen.getByLabelText("Member number"));
-    await user.click(screen.getByLabelText("Date of birth"));
-    await user.click(screen.getByRole("button", { name: /verify — pass/i }));
-
-    expect(await screen.findByTestId("cc-360")).toBeInTheDocument();
     // Appointments from every branch are shown.
     expect(screen.getByText(/Aswan/)).toBeInTheDocument();
     expect(screen.getByText(/Maadi/)).toBeInTheDocument();
-    // The outcome is announced for screen readers.
-    await waitFor(() => expect(screen.getByTestId("cc-live")).toHaveTextContent(/unlocked/i));
+    await waitFor(() => expect(screen.getByTestId("cc-live")).toHaveTextContent(/file open/i));
+  });
+
+  /**
+   * The attestation is a WRITE, and a refused write must not leave a member's file on screen.
+   *
+   * This is the failure the flow has to get right: with the challenge gone, the attestation is the only thing
+   * standing between picking a name and reading a file, so a client that renders optimistically would disclose
+   * on a call the server never bound.
+   */
+  it("shows nothing about the member when the attestation is refused", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi({ openMember: vi.fn().mockResolvedValue(false) });
+    renderNode(<CallCentreWorkspace api={api} />);
+    await startAndSearch(user);
+    await user.click(await screen.findByRole("button", { name: /Amal Hassan/ }));
+
+    await waitFor(() => expect(screen.getByTestId("cc-live")).toHaveTextContent(/couldn't open/i));
+    expect(screen.queryByTestId("cc-360")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Dr\. Nour/)).not.toBeInTheDocument();
+    // And the 360 was never even requested — a refused binding is not a "try anyway".
+    expect(api.summary).not.toHaveBeenCalled();
+  });
+
+  /** One box, no type picker. The index matches every identifier at once, so a picker only ever cost the
+   *  agent a decision and implied that guessing wrong would lose the member. */
+  it("searches with one field and no 'search by' picker", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi();
+    renderNode(<CallCentreWorkspace api={api} />);
+    await user.click(screen.getByRole("button", { name: /start call/i }));
+
+    expect(screen.queryByRole("combobox", { name: /search by/i })).not.toBeInTheDocument();
+    const box = await screen.findByLabelText(/find member/i);
+    // The help text names what one box actually matches, including the name a caller offers first.
+    expect(screen.getByText(/search by name, phone number, card or member number/i)).toBeInTheDocument();
+
+    await user.type(box, "Amal Hassan");
+    await user.click(screen.getByRole("button", { name: /^search$/i }));
+    expect(api.search).toHaveBeenCalledWith("Amal Hassan");
   });
 });
 
@@ -167,11 +219,7 @@ describe("15.5 — Call Centre workspace: act", () => {
   it("shows a clear recoverable state when a slot was just taken (409)", async () => {
     const user = userEvent.setup();
     renderNode(<CallCentreWorkspace api={fakeApi({ book: vi.fn().mockResolvedValue("conflict") })} />);
-    await startAndSelect(user);
-    await user.click(screen.getByLabelText("Member number"));
-    await user.click(screen.getByLabelText("Phone"));
-    await user.click(screen.getByRole("button", { name: /verify — pass/i }));
-    await screen.findByTestId("cc-360");
+    await startAndOpenMember(user);
 
     await pickClinicAndTime(user);
     await user.click(screen.getByRole("button", { name: /^book$/i }));
@@ -182,11 +230,7 @@ describe("15.5 — Call Centre workspace: act", () => {
     const user = userEvent.setup();
     const api = fakeApi();
     renderNode(<CallCentreWorkspace api={api} />);
-    await startAndSelect(user);
-    await user.click(screen.getByLabelText("Member number"));
-    await user.click(screen.getByLabelText("Phone"));
-    await user.click(screen.getByRole("button", { name: /verify — pass/i }));
-    await screen.findByTestId("cc-360");
+    await startAndOpenMember(user);
 
     // Open the cancel affordance on the cancellable appointment, then submit with no reason.
     await user.click(screen.getAllByRole("button", { name: /cancel appointment/i })[0]);
@@ -199,11 +243,7 @@ describe("15.5 — Call Centre workspace: act", () => {
     const user = userEvent.setup();
     const api = fakeApi();
     renderNode(<CallCentreWorkspace api={api} />);
-    await startAndSelect(user);
-    await user.click(screen.getByLabelText("Member number"));
-    await user.click(screen.getByLabelText("Phone"));
-    await user.click(screen.getByRole("button", { name: /verify — pass/i }));
-    await screen.findByTestId("cc-360");
+    await startAndOpenMember(user);
 
     // Only the changeable appointment (a1) offers Reschedule.
     await pickClinicAndTime(user);
@@ -217,11 +257,7 @@ describe("15.5 — Call Centre workspace: act", () => {
   it("surfaces a recoverable state when the new slot was just taken (409)", async () => {
     const user = userEvent.setup();
     renderNode(<CallCentreWorkspace api={fakeApi({ reschedule: vi.fn().mockResolvedValue("conflict") })} />);
-    await startAndSelect(user);
-    await user.click(screen.getByLabelText("Member number"));
-    await user.click(screen.getByLabelText("Phone"));
-    await user.click(screen.getByRole("button", { name: /verify — pass/i }));
-    await screen.findByTestId("cc-360");
+    await startAndOpenMember(user);
 
     await pickClinicAndTime(user);
     await user.click(screen.getByRole("button", { name: /^reschedule$/i }));
@@ -239,7 +275,7 @@ describe("15.5 — Call history: load failure is distinct from empty", () => {
   it("offers reservation actions only — never check-in, no-show or start-visit", async () => {
     const user = userEvent.setup();
     renderNode(<CallCentreWorkspace api={fakeApi()} />);
-    await verifyAndOpen(user);
+    await openMemberAndReserve(user);
 
     // Present: the reservation verbs.
     expect(screen.getByRole("button", { name: /^book$/i })).toBeInTheDocument();
@@ -258,7 +294,7 @@ describe("15.5 — Call history: load failure is distinct from empty", () => {
     const user = userEvent.setup();
     const api = fakeApi();
     renderNode(<CallCentreWorkspace api={api} />);
-    await verifyAndOpen(user);
+    await openMemberAndReserve(user);
 
     // The button is disabled rather than sending an invented slot id, which is what it used to do.
     expect(screen.getByRole("button", { name: /^book$/i })).toBeDisabled();
@@ -289,10 +325,17 @@ describe("15.5 — Call history: load failure is distinct from empty", () => {
 });
 
 describe("15.5 — Call Centre workspace: a11y", () => {
-  it("has no serious/critical a11y violations before verification", async () => {
+  it("has no serious/critical a11y violations at the search step", async () => {
     const user = userEvent.setup();
     const { container } = renderNode(<CallCentreWorkspace api={fakeApi()} />);
-    await startAndSelect(user);
+    await startAndSearch(user);
+    expect(await axe(container, { rules: { "color-contrast": { enabled: false } } })).toHaveNoViolations();
+  });
+
+  it("has no serious/critical a11y violations with a member's file open", async () => {
+    const user = userEvent.setup();
+    const { container } = renderNode(<CallCentreWorkspace api={fakeApi()} />);
+    await startAndOpenMember(user);
     expect(await axe(container, { rules: { "color-contrast": { enabled: false } } })).toHaveNoViolations();
   });
 });
@@ -306,7 +349,7 @@ describe("15.3 — the call centre names the branch it is booking into", () => {
   it("offers every branch, and no specialty until one is chosen", async () => {
     const user = userEvent.setup();
     renderNode(<CallCentreWorkspace api={fakeApi()} />);
-    await verifyAndOpen(user);
+    await openMemberAndReserve(user);
 
     // The specialty picker is inert until a branch is named — a specialty list spanning branches is how
     // someone books Maadi for a caller expecting Dokki.
@@ -326,7 +369,7 @@ describe("15.3 — the call centre names the branch it is booking into", () => {
   it("offers only the chosen branch's doctors", async () => {
     const user = userEvent.setup();
     renderNode(<CallCentreWorkspace api={fakeApi()} />);
-    await verifyAndOpen(user);
+    await openMemberAndReserve(user);
 
     await choose(user, /^branch$/i, /Nasr City/);
     await choose(user, /^specialty$/i, /Cardiology/);
@@ -340,7 +383,7 @@ describe("15.3 — the call centre names the branch it is booking into", () => {
   it("changing the branch clears the specialty, the doctor and the times under them", async () => {
     const user = userEvent.setup();
     renderNode(<CallCentreWorkspace api={fakeApi()} />);
-    await verifyAndOpen(user);
+    await openMemberAndReserve(user);
 
     await choose(user, /^branch$/i, /Dokki/);
     await choose(user, /^specialty$/i, /Pediatrics/);
@@ -362,7 +405,7 @@ describe("15.3 — the call centre names the branch it is booking into", () => {
     const user = userEvent.setup();
     const api = fakeApi();
     renderNode(<CallCentreWorkspace api={api} />);
-    await verifyAndOpen(user);
+    await openMemberAndReserve(user);
 
     await choose(user, /^branch$/i, /Nasr City/);
     await choose(user, /^specialty$/i, /Cardiology/);
@@ -390,28 +433,41 @@ describe("15.3 — the call centre names the branch it is booking into", () => {
  * succeeded. These assert the SHAPE of the call and the handling of a refusal, which is where the gap was.
  */
 describe("wrap-up: the call is only closed when the server says so", () => {
-  it("sends the summary the server requires, and clears the call bar on success", async () => {
+  it("sends the one summary the server requires, and clears the call bar on success", async () => {
     const user = userEvent.setup();
     const api = fakeApi();
     renderNode(<CallCentreWorkspace api={api} />);
-    await startAndSelect(user);
+    await startAndSearch(user);
 
     await user.type(screen.getByLabelText(/call summary/i), "Booked a follow-up and corrected the phone number.");
     await user.click(screen.getByRole("button", { name: /close call/i }));
 
     await waitFor(() => expect(api.close).toHaveBeenCalled());
+    // THREE arguments. The fourth was `notes`, a second body of text kept apart from the summary and read by
+    // nobody downstream; there is one account of a call now and this is it.
     expect((api.close as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual([
-      "i1", "Resolved", "", "Booked a follow-up and corrected the phone number.",
+      "i1", "Resolved", "Booked a follow-up and corrected the phone number.",
     ]);
     // Closed for real → back to the pre-call state.
     await screen.findByRole("button", { name: /start call/i });
+  });
+
+  /** One field, one label — whether the agent types it on the member's file or in the wrap-up card. Two
+   *  controls sharing an accessible name is what made an agent wonder which of them saves. */
+  it("offers exactly one call-summary control with a member's file open", async () => {
+    const user = userEvent.setup();
+    renderNode(<CallCentreWorkspace api={fakeApi()} />);
+    await startAndOpenMember(user);
+
+    expect(screen.getAllByLabelText(/call summary/i)).toHaveLength(1);
+    expect(screen.queryByLabelText(/call notes/i)).not.toBeInTheDocument();
   });
 
   it("keeps the call OPEN and says why when the server refuses the close", async () => {
     const user = userEvent.setup();
     const api = fakeApi({ close: vi.fn().mockResolvedValue("summary-required") });
     renderNode(<CallCentreWorkspace api={api} />);
-    await startAndSelect(user);
+    await startAndSearch(user);
 
     await user.click(screen.getByRole("button", { name: /close call/i }));
 
@@ -425,29 +481,28 @@ describe("wrap-up: the call is only closed when the server says so", () => {
   });
 });
 
-describe("pre-verification disclosure and stale writes", () => {
-  it("shows only the MASKED member number on a search hit", async () => {
+describe("search hits and stale writes", () => {
+  /**
+   * The member number is shown IN FULL on a search hit.
+   *
+   * It used to arrive masked (`•••001`) because MemberNo was an identifier the agent could be challenged on,
+   * and a readable one let them tick that box off their own screen. With the challenge gone the mask protects
+   * nothing and costs the agent the one field that separates two people with the same name.
+   */
+  it("shows the real member number on a search hit", async () => {
     const user = userEvent.setup();
     renderNode(<CallCentreWorkspace api={fakeApi()} />);
-    await user.click(screen.getByRole("button", { name: /start call/i }));
-    await user.type(await screen.findByLabelText(/find member/i), "+20100000000");
-    await user.click(screen.getByRole("button", { name: /^search$/i }));
+    await startAndSearch(user);
 
-    // The agent is asked to challenge the caller on their member number, so the real one must not be
-    // readable off this list — otherwise they can tick the box from their own screen.
-    expect(await screen.findByText("•••001")).toBeInTheDocument();
-    expect(screen.queryByText("MRS-M-1001")).not.toBeInTheDocument();
+    expect(await screen.findByText("MRS-M-1001")).toBeInTheDocument();
+    expect(screen.queryByText("•••001")).not.toBeInTheDocument();
   });
 
   it("sends the appointment's rowVersion as the If-Match token on a cancel", async () => {
     const user = userEvent.setup();
     const api = fakeApi();
     renderNode(<CallCentreWorkspace api={api} />);
-    await startAndSelect(user);
-    await user.click(screen.getByLabelText("Member number"));
-    await user.click(screen.getByLabelText("Date of birth"));
-    await user.click(screen.getByRole("button", { name: /verify — pass/i }));
-    await screen.findByTestId("cc-360");
+    await startAndOpenMember(user);
 
     await user.click(screen.getByRole("button", { name: /^cancel appointment — /i }));
     await user.selectOptions(screen.getByRole("combobox", { name: /cancellation reason/i }), "PatientRequest");

@@ -175,6 +175,41 @@ nav.mrs-rail {
   background: linear-gradient(90deg, var(--brand), var(--gold));
 }
 
+/*
+  Back control on a page opened FOR something (the patient profile, chiefly).
+
+  Sits ABOVE the eyebrow rather than beside the title: it is a way out of this screen, not a property of it,
+  and putting it in the actions row would file it with "Print summary" — the things you do to the record.
+
+  44px minimum target (21-accessibility) with the padding pulled back by an equal negative margin, so the
+  touch area is full size while the text still lines up with the title beneath it.
+*/
+.pagehead-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-block-size: 44px;
+  margin-block-end: 2px;
+  margin-inline-start: calc(var(--sp2) * -1);
+  padding-inline: var(--sp2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pagehead-back:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+/* The chevron is drawn pointing DOWN; rotate it off the DOCUMENT direction rather than hard-coding a
+   left-pointing arrow, which is how a mirrored Arabic layout ends up pointing forwards. Same rule as
+   `.mrs-pager-step` in the design system. */
+.pagehead-back svg { transform: rotate(90deg); }
+[dir="rtl"] .pagehead-back svg { transform: rotate(-90deg); }
+
 /* Login screen. */
 .login-wrap {
   min-height: 100vh;

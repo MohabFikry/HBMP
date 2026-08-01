@@ -1,12 +1,11 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useFormat, type Formatters } from "../i18n/useFormat";
 import { Button, Card, DataTable, Modal, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { Localized, OrderRow, PatientListItem, ResultDetail, RxRow } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
-import { AsyncSection, PageHeader, useLoc } from "./_shared";
+import { AsyncSection, PageHeader, useLoc, useOpenProfile } from "./_shared";
 import { RestrictedResultCard, RequestAccessDialog } from "./RestrictedResultCard";
 
 const S = {
@@ -45,7 +44,8 @@ export function DoctorPatients() {
   const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const api = useApi();
   const t = useLoc();
-  const navigate = useNavigate();
+  // Carries where we came from, so the profile's Back control returns to this worklist rather than guessing.
+  const openProfile = useOpenProfile();
   const state = useAsync<PatientListItem[]>(() => api.listPatients(), []);
   const cols: Column<PatientListItem>[] = [
     { key: "patient", header: t(S.patient), cell: (r) => t(r.name) },
@@ -58,7 +58,7 @@ export function DoctorPatients() {
       key: "file",
       header: "",
       cell: (r) => (
-        <Button variant="secondary" size="sm" onClick={() => navigate(`/patients/${encodeURIComponent(r.beneficiaryId)}`)}>
+        <Button variant="secondary" size="sm" onClick={() => openProfile(r.beneficiaryId)}>
           {t(S.openFile)}
         </Button>
       ),

@@ -15,7 +15,7 @@ import { useApi } from "../api/ApiProvider";
 import { useAuth } from "../auth/AuthProvider";
 import { permissionsForRole, hasPermission, type Permission, type Role } from "../authz/permissions";
 import { useAsync } from "../api/useAsync";
-import { AsyncSection, PageHeader, useLoc } from "./_shared";
+import { AsyncSection, PageHeader, useBackTarget, useLoc } from "./_shared";
 import { SectionView } from "./ProfileSectionViews";
 import { useFormat } from "../i18n/useFormat";
 
@@ -156,6 +156,16 @@ const REASONS: Record<string, Localized> = {
 export function PatientProfile({ beneficiaryId }: { beneficiaryId?: string }) {
   const api = useApi();
   const t = useLoc();
+  /**
+   * A profile is opened FOR someone — from a worklist row, a search result, an open call — and never from a
+   * menu (design 39 §6), so there is always somewhere to go back TO, and it was never offered. The agent who
+   * opened a caller's file mid-call had to find their way back through the nav, and the two call-centre entry
+   * points were plain `<a href>`s that reloaded the SPA, so arriving here meant losing the call entirely.
+   *
+   * `useBackTarget` returns null when this really is the first entry in the tab's history — a pasted deep
+   * link — and the control is then absent rather than present and pointing out of the app.
+   */
+  const back = useBackTarget();
   // No fixture fallback. This used to default to "BEN-2" — a DevApiClient id — so the seven
   // /{portal}/patient routes loaded a person who does not exist outside the dev fixtures, and against a
   // real database the profile simply errored. A file is opened FOR someone (design 39 §6: search → profile,
@@ -168,7 +178,7 @@ export function PatientProfile({ beneficiaryId }: { beneficiaryId?: string }) {
   if (!beneficiaryId) {
     return (
       <>
-        <PageHeader title={t(STR.title)} />
+        <PageHeader title={t(STR.title)} back={back ?? undefined} />
         <Card as="section" style={{ padding: "var(--sp5)" }}>
           <InlineAlert tone="info">{t(STR.noPatient)}</InlineAlert>
         </Card>
@@ -178,7 +188,11 @@ export function PatientProfile({ beneficiaryId }: { beneficiaryId?: string }) {
 
   return (
     <>
-      <PageHeader title={t(STR.title)} actions={<PrintSummaryButton beneficiaryId={beneficiaryId} />} />
+      <PageHeader
+        title={t(STR.title)}
+        back={back ?? undefined}
+        actions={<PrintSummaryButton beneficiaryId={beneficiaryId} />}
+      />
       <AsyncSection state={state} emptyLabel={STR.empty} isEmpty={(p) => !p || p.sections.length === 0}>
         {(profile) => <ProfileBody profile={profile!} onRetry={state.reload} />}
       </AsyncSection>
