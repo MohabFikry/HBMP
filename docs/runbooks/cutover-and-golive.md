@@ -22,6 +22,9 @@ All must be **YES** or go-live holds:
       COMPLIANCE signed; DR/PERF/MIGRATION green). UAT signed off.
 - [ ] **Backups + restore proven** (hard gate — see below).
 - [ ] Final **masked-data dry-run** in staging balanced; rollback-by-batch rehearsed.
+- [ ] **Schema DDL rehearsed on a scratch restore** and the outstanding file list written down — there is no
+      migration runner and no ledger, so "which have been applied?" has no query that answers it. The data
+      migration at T-30m writes into these tables and will fail, or land in the wrong shape, if any are missing.
 - [ ] Migration DPIA signed; provider isolation verified on staging.
 - [ ] Persistent issuer keys present (OpenBao RS256; issuer starts, JWKS stable).
 - [ ] Progressive-rollback drill passed on staging (bad canary auto-reverted).
@@ -43,6 +46,7 @@ Prove restore, not just backup:
 |---|---|---|---|
 | T-60m | Freeze legacy writes for the pilot cohort; announce start | PO | legacy read-only |
 | T-45m | Final **masked** dry-run in staging; confirm reconciliation balances | SRE | balances=true |
+| T-35m | **Apply service schema DDL** — every outstanding `services/*/Infrastructure/Migrations/*.sql`, in filename order, per [`deploy-and-rollback.md`](deploy-and-rollback.md#applying-schema-ddl--by-hand-in-order) | SRE | each file exits 0; target objects present via `\d+` |
 | T-30m | **Production migration run** for the pilot cohort (`mersal-migrate run-* --env production --i-understand-prod`) | SRE | provenance + audit written |
 | T-20m | **Reconcile**: source vs loaded/held/rejected; triage exceptions; sign off dedupe review queue | Data owner | balances + queue signed |
 | T-15m | Verify provider isolation on prod (no cross-provider leakage) | Security | isolated=true |
