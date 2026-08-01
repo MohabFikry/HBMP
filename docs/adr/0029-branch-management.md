@@ -161,6 +161,13 @@ Doc 42 §8 raises five questions for the sponsor. The recommended answers are im
 buildable; **all five are provisional and carry the same status as ADR-0019/0020 — implemented, not signed
 off.** They are listed in `docs/BUILD-STATUS.md` under 25.0.
 
+> **The decision pack is [`docs/decisions/phase-25-sponsor-pack.md`](../decisions/phase-25-sponsor-pack.md)** —
+> written for the sponsor rather than for engineers, with what is built today, what each answer is actually
+> enforced by, the cost of reversing it now versus after go-live, and a blank decision table. It records one
+> finding this ADR did not: **D1–D4 are enforced by the platform and D5 is enforced by nothing** — no
+> reference to vaccines, injectables or any medicine identifier exists in the inventory service, so nothing
+> stops a vaccine being catalogued as clinic stock. That gap needs closing whichever way D5 is decided.
+
 | # | Question | Provisional answer | Why, and what changes if the sponsor decides otherwise |
 |---|---|---|---|
 | **D1** | Do clinics hold **controlled substances**? | **Excluded from v1**, enforced by `CHECK (is_controlled = false)` — not by convention | A controlled register needs dual signature, a running balance per ampoule and regulator-facing reporting: a module of its own, not a category flag. Making it a constraint means enabling it is a deliberate, reviewable migration rather than someone ticking a checkbox |

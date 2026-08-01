@@ -109,6 +109,13 @@ expensive way.
   code change behind any of them — and would have failed on whoever's commit happened to land next.
   `freezeClock()` in `apps/web/test/helpers.tsx` now pins the date at file scope. **If you write a fixture
   with an absolute date, freeze the clock in the same file.**
+- **Phase 25's five sponsor decisions (D1–D5) are implemented but NOT signed off.** Pack for the decision
+  maker: `docs/decisions/phase-25-sponsor-pack.md`. Ratifying them as recommended needs no DPIA — the
+  recommendations are the conservative answers on every count. **D5 is the one with a live gap**: it says
+  vaccines are pharmacy stock, and nothing in the inventory service enforces that. D1–D4 are enforced by
+  constraints, indexes and tests; D5 is enforced by memory, so a vaccine can be catalogued as clinic stock
+  today. The strict PHI invariant still holds either way (no patient identifier exists to issue it against),
+  but the prescription, eligibility and dispensing-record controls around giving it would happen nowhere.
 - **Migration 0010's own header overstates what it does.** FORCE ROW LEVEL SECURITY stops a *non-superuser*
   owner bypassing a policy. The owner here, `hbmp`, is SUPERUSER + BYPASSRLS, so the protection it
   advertises does not apply in this deployment. What actually holds is that requests are served by
