@@ -4,7 +4,7 @@
 # bad annotations at build time — without running the services or a database (DB access is lazy, so dummy
 # connection strings satisfy DI registration and nothing actually connects).
 #
-# Prereq: the solution is built (Release) and the local tool is restored (`dotnet tool restore`).
+# Prereq: the local tool is restored (`dotnet tool restore`). THIS SCRIPT BUILDS RELEASE ITSELF — see below.
 #   $1        — output dir for the generated specs (default artifacts/openapi)
 #   DOTNET    — dotnet launcher (default `dotnet`; locally pass DOTNET=./dotnet.sh)
 set -euo pipefail
@@ -12,6 +12,34 @@ cd "$(dirname "$0")/../.."
 OUT="${1:-artifacts/openapi}"
 DOTNET="${DOTNET:-dotnet}"
 mkdir -p "$OUT"
+
+# ── BUILD RELEASE FIRST. This is not a convenience; it is what makes the answer true. ──────────────────────
+#
+# The loop below reads `services/*/Api/bin/Release/net8.0/*.Api.dll`. It used to only CHECK that the file
+# exists, with a comment saying "build the solution in Release first" — advice that appears solely in the
+# branch where the dll is MISSING. A dll that is present but stale sails straight past it.
+#
+# That is the normal state of a working tree. `dotnet build` and `dotnet test` default to Debug, so a
+# developer can change a contract, build, test, and still have a Release dll from days ago sitting on disk.
+# Generation then describes the OLD service, the drift gate compares it against the equally old committed
+# spec, finds no difference, and prints "✓ every committed spec matches the running services".
+#
+# Observed exactly that: an endpoint's request contract was rewritten — three properties removed — and the
+# gate reported clean. A Release build made it report 26 changed lines immediately.
+#
+# A gate that answers "no drift" from stale inputs is worse than no gate, because the green is *reported*
+# rather than merely absent, and CLAUDE.md is explicit that the spec is the contract. Building here means the
+# thing being described and the thing being compared are the same build, always.
+#
+# In CI this is a no-op: backend-ci.yml already builds the solution in Release before calling this, so the
+# incremental build finds nothing to do. Paying that cost is the point — the guarantee must not depend on
+# the caller having remembered.
+echo "==> Building Release so the generated specs describe THIS tree, not a stale artefact…"
+if ! $DOTNET build HbmpPlatform.sln -c Release -v quiet --nologo >/dev/null; then
+  echo "::error::Release build failed — refusing to generate specs from whatever dlls happen to be on disk."
+  echo "Run: $DOTNET build HbmpPlatform.sln -c Release   and fix the errors first."
+  exit 1
+fi
 
 # DI reads ConnectionStrings:<Key> (throws if absent) + Auth:*. Most services connect to the DB lazily so a
 # dummy value suffices; a few (e.g. audit) migrate at startup and need a REAL connection — so any
@@ -62,7 +90,11 @@ for svc in "${want[@]}"; do
   # outright, so the "dll not found" branch below could never actually be reached to explain itself.
   dll=$(ls "$api"/bin/Release/net8.0/Mersal.*.Api.dll 2>/dev/null | head -1 || true)
   if [ -z "$dll" ]; then
-    echo "::error::$svc — built Api dll not found (build the solution in Release first)"; fail=1; continue
+    # The Release build above succeeded, so a missing dll means this service is not IN the solution — it
+    # would silently drop out of the contract otherwise, which is the failure mode the expected-count check
+    # at the end exists to catch. Say which one, and why.
+    echo "::error::$svc — no Api dll after a successful Release build. Is it missing from HbmpPlatform.sln?"
+    fail=1; continue
   fi
   if $DOTNET swagger tofile --output "$OUT/$svc.json" "$dll" v1 >/dev/null 2>"$OUT/$svc.err"; then
     paths=$(python3 -c "import json,sys;print(len(json.load(open('$OUT/$svc.json')).get('paths',{})))" 2>/dev/null || echo "?")

@@ -17,8 +17,13 @@
 #
 #   DOTNET — dotnet launcher (default `dotnet`; locally pass DOTNET=./dotnet.sh)
 #
-# Prereq: the solution builds. Generation is offline — DB access is lazy, so dummy connection strings
-# satisfy DI and nothing connects.
+# Generation BUILDS RELEASE ITSELF (generate-openapi.sh), so this compares the committed spec against the
+# tree you have, not against whatever Release dlls were last left on disk. It did not always: `dotnet build`
+# and `dotnet test` default to Debug, so a stale Release artefact would be described, compared against the
+# equally stale committed spec, and reported clean — a green verdict for a contract nobody had checked.
+#
+# Generation is otherwise offline — DB access is lazy, so dummy connection strings satisfy DI and nothing
+# connects.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
