@@ -43,7 +43,46 @@ Bring it down with `docker compose down` (add `-v` to also wipe data volumes).
 2. **MinIO:** open the console → create buckets: `documents`, `lab-results`, `imaging`, `audit-archive`. Turn on **Object Locking (WORM)** for `audit-archive` (immutable audit). Create a scoped service account per app (not root).
 3. **OpenBao:** log in with the dev root token → enable the `transit` engine (KMS for AES-256 keys) and a `kv` mount → store service secrets there. (Dev mode is in-memory — for production run a real server with unseal keys.)
 4. **OpenSearch:** create the beneficiary/order search indices with **minimum-necessary fields only** (no EMR/clinical fields) — see [`../../claude-code-prompts/phase-2-eligibility-reception.md`](../../claude-code-prompts/phase-2-eligibility-reception.md).
-5. **Kong:** add each service + routes to `config/kong.yml` (JWT + rate-limiting plugins) and `docker compose restart kong`.
+5. **Kong:** add each service + routes to `config/kong.yml` (JWT + rate-limiting plugins) and `docker compose restart kong` — the restart is not optional and applies to *every* later edit too, not just the first. See [Gateway routing](#gateway-routing--reload-kong-after-every-configkongyml-edit).
+
+## Gateway routing — reload Kong after EVERY `config/kong.yml` edit
+
+```sh
+docker compose restart kong          # ~3s; the only way a kong.yml change takes effect
+```
+
+**Kong does not watch the file.** `config/kong.yml` is mounted as a *template* at
+`/etc/kong/kong.template.yml`; the entrypoint renders it to `/tmp/kong.yml` **once, at container start**, and
+Kong runs DB-less from that copy. Edit the file and nothing happens — the running gateway keeps serving
+whatever it rendered when it last booted, indefinitely.
+
+**The failure does not look like a routing problem.** An unmatched path gets Kong's own 404, and that response
+carries **no CORS headers** — the CORS plugin is attached to routes, and by definition there is no route. So
+the browser blocks the response before the SPA ever sees it, `fetch()` rejects, and the screen reports
+*"Couldn't reach the service. Check your connection and retry."* The classifier is right about what it
+observed; it just cannot tell an unrouted gateway from a dead network. You will look at your connection, at
+the service, at its logs — everywhere except the gateway, which answered instantly and correctly.
+
+Seen in the wild: `/api/v1/roster-exceptions` was added to `kong.yml` ten hours after the container last
+started. The route was present in the file, absent from `/tmp/kong.yml`, and the Roster & Availability screen
+reported a network error for two days while emr-service was healthy the whole time.
+
+**Diagnosing it takes one command.** Compare what is loaded against what is on disk:
+
+```sh
+docker exec mersal-hbmp-kong-1 grep -c '<your-path>' /tmp/kong.yml   # 0 = never loaded
+grep -c '<your-path>' infra/compose/config/kong.yml                  # 1 = it is in the file
+```
+
+Or ask the gateway directly — **404 means no route, 401 means the route exists** and the edge JWT plugin
+rejected an anonymous call, which is the healthy answer:
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8000/api/v1/<your-path>
+```
+
+> The CI route-coverage gate will **not** catch this. It checks the *file*, and the file is correct — the
+> whole failure is that the running container never re-read it. No gate can see a stale container from CI.
 
 ## Adding application services
 As each .NET service is built, uncomment/copy the template at the bottom of `compose.yaml` (env wires it to Postgres, Keycloak, RabbitMQ, NATS, Valkey, OpenSearch, MinIO, OpenBao, and Tempo/OTLP). Build images with your CI (GitLab CE + Harbor + Trivy) and reference them by tag.
