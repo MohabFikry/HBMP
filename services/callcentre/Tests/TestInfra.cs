@@ -66,6 +66,21 @@ public sealed class CallCentreFactory : WebApplicationFactory<Program>
         return c;
     }
 
+    /// <summary>A DIFFERENT agent: same tenant, same role, same scopes — everything the policy engine looks at
+    /// is identical to <see cref="AgentClient"/>. Only the subject differs, which is the whole point: the
+    /// write paths on an interaction used to be role+tenant only, so this client could patch, close and rewrite
+    /// the summary on a colleague's call.</summary>
+    public HttpClient OtherAgentClient()
+    {
+        var c = CreateClient();
+        c.DefaultRequestHeaders.Add("X-Test-Sub", "33333333-3333-3333-3333-333333333333");
+        c.DefaultRequestHeaders.Add("X-Test-Role", "call_center");
+        c.DefaultRequestHeaders.Add("X-Test-Scope", "callcentre:interaction callcentre:verify callcentre:read callcentre:act");
+        c.DefaultRequestHeaders.Add("X-Test-Tenant", "t-callcentre");
+        c.DefaultRequestHeaders.Add("X-Test-Mfa", "1");
+        return c;
+    }
+
     public HttpClient SupervisorClient()
     {
         var c = CreateClient();

@@ -78,6 +78,8 @@ public static class Contacts
             i?.CallRef, severity: AuditSeverity.Notice, after: kind, fieldClasses: ["contact"]);
     }
 
+    /// <summary>Pass patient-service's response through faithfully, media type included — a problem+json
+    /// refusal must not reach the agent's client relabelled as a plain JSON result.</summary>
     private static IResult Passthrough(GatewayResult r) =>
-        Results.Content(r.Body ?? "", "application/json", statusCode: r.StatusCode);
+        Results.Content(r.Body ?? "", r.MediaType, statusCode: r.StatusCode);
 }

@@ -62,6 +62,20 @@ public static class Interactions
             if (i.Status != InteractionStatus.Open)
                 return Conflict("This interaction is closed; open a new call to verify.");
 
+            // Attempt cap. A caller who cannot confirm two identifiers in this many tries is not going to, and
+            // past that point the retries are someone learning which identifiers the record holds. The refusal
+            // is audited at Warning: a locked-out call is exactly the thing a supervisor should see.
+            if (await deps.Verification.FailedAttemptCountAsync(id, ct) >= VerificationPolicy.MaxFailedAttempts)
+            {
+                await deps.AuditAsync("caller_verification", id.ToString(), AuditAction.Decision,
+                    "CallerVerificationLockedOut", i.CallRef, severity: AuditSeverity.Warning,
+                    after: $"failures:{VerificationPolicy.MaxFailedAttempts}", fieldClasses: ["identity"]);
+                return Results.Problem(statusCode: 429, title: "verification-locked",
+                    detail: $"This call has reached {VerificationPolicy.MaxFailedAttempts} failed verification attempts. "
+                          + "Escalate to a supervisor rather than continuing to challenge the caller.",
+                    type: "urn:hbmp:callcentre-verification-locked");
+            }
+
             var types = VerificationPolicy.Normalise(req.VerifiedIdentifierTypes);
             var now = deps.Clock.GetUtcNow();
 
@@ -119,11 +133,18 @@ public static class Interactions
             if (denied is not null) return denied;
             var i = await deps.Db.Interactions.FirstOrDefaultAsync(x => x.InteractionId == id, ct);
             if (i is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            if (NotOwner(deps, i) is { } notMine) return notMine;
             if (i.Status != InteractionStatus.Open) return Conflict("This interaction is already closed.");
 
             if (req.ReasonCode is not null) i.ReasonCode = req.ReasonCode;
             if (req.Outcome is not null) i.Outcome = req.Outcome;
-            if (req.Notes is not null) i.Notes = req.Notes;
+            if (req.Notes is not null)
+            {
+                if (req.Notes.Length > CallSummaryRules.MaxNotesLength)
+                    return Unprocessable("notes-too-long",
+                        $"Call notes are capped at {CallSummaryRules.MaxNotesLength} characters; got {req.Notes.Length}.");
+                i.Notes = req.Notes;
+            }
             i.UpdatedAt = deps.Clock.GetUtcNow();
             try { await deps.Db.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Conflict("This interaction was updated by someone else."); }
@@ -139,12 +160,19 @@ public static class Interactions
             if (denied is not null) return denied;
             var i = await deps.Db.Interactions.FirstOrDefaultAsync(x => x.InteractionId == id, ct);
             if (i is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            if (NotOwner(deps, i) is { } notMine) return notMine;
             if (i.Status == InteractionStatus.Closed) return Results.Ok(InteractionView.From(i, false));
 
             var now = deps.Clock.GetUtcNow();
             if (req?.ReasonCode is not null) i.ReasonCode = req.ReasonCode;
             if (req?.Outcome is not null) i.Outcome = req.Outcome;
-            if (req?.Notes is not null) i.Notes = req.Notes;
+            if (req?.Notes is not null)
+            {
+                if (req.Notes.Length > CallSummaryRules.MaxNotesLength)
+                    return Unprocessable("notes-too-long",
+                        $"Call notes are capped at {CallSummaryRules.MaxNotesLength} characters; got {req.Notes.Length}.");
+                i.Notes = req.Notes;
+            }
             if (req?.Summary is not null) i.Summary = req.Summary.Trim();
 
             // Phase 20.3b — a summary is REQUIRED at close unless the call was abandoned. Other roles read this
@@ -177,6 +205,8 @@ public static class Interactions
 
             var i = await deps.Db.Interactions.FirstOrDefaultAsync(x => x.InteractionId == id, ct);
             if (i is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+            if (NotOwner(deps, i) is { } notMine) return notMine;
 
             var next = req.Summary?.Trim();
             if (string.IsNullOrWhiteSpace(next))
@@ -230,18 +260,45 @@ public static class Interactions
             if (beneficiaryId is { } b) q = q.Where(x => x.BeneficiaryId == b);
             if (from is { } f) q = q.Where(x => x.StartedAt >= f);
             if (to is { } t) q = q.Where(x => x.StartedAt <= t);
+            // Cursor over the COMPOSITE (StartedAt, InteractionId), because StartedAt is not unique: two calls
+            // opened in the same tick made `StartedAt < cursor.StartedAt` skip every one of them but the first,
+            // silently dropping calls out of the middle of a supervisor's page. The tie-break has to be part of
+            // both the ordering and the predicate or the two disagree about what "after" means.
             if (Guid.TryParse(cursor, out var after))
             {
                 var afterRow = await deps.Db.Interactions.AsNoTracking().FirstOrDefaultAsync(x => x.InteractionId == after, ct);
-                if (afterRow is not null) q = q.Where(x => x.StartedAt < afterRow.StartedAt);
+                if (afterRow is not null)
+                    q = q.Where(x => x.StartedAt < afterRow.StartedAt
+                                     || (x.StartedAt == afterRow.StartedAt && x.InteractionId.CompareTo(afterRow.InteractionId) > 0));
             }
 
-            var rows = await q.OrderByDescending(x => x.StartedAt).Take(take + 1).ToListAsync(ct);
+            var rows = await q.OrderByDescending(x => x.StartedAt).ThenBy(x => x.InteractionId).Take(take + 1).ToListAsync(ct);
             var page = rows.Take(take).ToList();
             var next = rows.Count > take ? page[^1].InteractionId.ToString() : null;
             return Results.Ok(new InteractionListResponse(
                 page.Select(x => InteractionView.From(x, false)).ToList(), next));
         }).RequireAuthorization(HbmpPolicies.Scope("callcentre:interaction"));
+    }
+
+    /// <summary>Whether this principal may WRITE to this interaction: the agent who took the call, or a
+    /// supervisor/manager. Returns a ready 403 when not, else null.
+    ///
+    /// <para>The policy layer cannot answer this — <c>CallCentrePolicies</c> is role + tenant only, by design
+    /// (the Call Centre is MemberScoped, so there is no branch or per-record ABAC in the engine). The GET list
+    /// below has always narrowed a non-supervisor to their own calls; the write paths did not, so any
+    /// <c>call_center</c> holder could patch, close, or rewrite the summary on any colleague's call in the
+    /// tenant. The summary is the field other roles read, which made that the most consequential of the three.
+    /// The rule the policy doc already stated ("the agent's own calls") is now enforced where it is decided.</para></summary>
+    private static IResult? NotOwner(CallDeps deps, CallInteraction i)
+    {
+        var p = deps.Me.Principal;
+        if (p is null) return GateResults.Unauthenticated();
+        if (p.IsInRole("call_center_supervisor") || p.IsInRole("manager")) return null;
+        if (Guid.TryParse(deps.Subject, out var self) && i.AgentUserId == self) return null;
+
+        return GateResults.Forbidden("urn:hbmp:callcentre-not-your-call",
+            detail: "This call was taken by another agent. Only that agent or a supervisor may change its record.",
+            reason: "not-call-owner");
     }
 
     private static IResult Unprocessable(string title, string detail) =>

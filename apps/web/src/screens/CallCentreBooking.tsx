@@ -60,8 +60,12 @@ export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
   const [verifyError, setVerifyError] = useState(false);
   const [verifiedName, setVerifiedName] = useState<string | null>(null);
   const [verifiedStatus, setVerifiedStatus] = useState<string | null>(null);
+  const [verifiedMemberNo, setVerifiedMemberNo] = useState<string | null>(null);
   const [announce, setAnnounce] = useState("");
   const [notes, setNotes] = useState("");
+  /** The operational account other roles read on the member's profile — required by the server at close. */
+  const [wrapSummary, setWrapSummary] = useState("");
+  const [summaryError, setSummaryError] = useState(false);
   const [closed, setClosed] = useState(false);
 
   const isVerified = !!selected && verifiedFor === selected.beneficiaryId;
@@ -124,6 +128,7 @@ export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
     setVerifiedFor(selected.beneficiaryId);
     setVerifiedName(s?.identity.displayName ?? null);
     setVerifiedStatus(s?.identity.status ?? null);
+    setVerifiedMemberNo(s?.identity.memberNo ?? null);
     setAnnounce(t(L.ccVerified));
   }, [api, interactionId, selected, ticks, t]);
 
@@ -140,13 +145,30 @@ export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
     if (outcome !== "error") setReloadToken((k) => k + 1);
   }, [api, interactionId, verifiedFor, sel, t]);
 
+  /**
+   * Wrap up this booking call. The close is CHECKED — it used to be awaited and discarded, and because the
+   * server requires a summary for any outcome but Abandoned, it had been failing 422 on every booking while
+   * this screen reset itself as though the call were done. The interaction stayed Open, and with it the
+   * caller verification recorded against that member.
+   */
   const finish = useCallback(async () => {
     if (!interactionId) return;
-    await api.close(interactionId, "Resolved", notes);
+    const result = await api.close(interactionId, "Resolved", notes, wrapSummary.trim());
+    if (result !== "ok") {
+      setSummaryError(result === "summary-required");
+      setAnnounce(
+        result === "summary-required" ? t(L.ccSummaryRequired)
+        : result === "not-your-call" ? t(L.ccNotYourCall)
+        : t(L.ccCloseFailed),
+      );
+      return;   // the call is still open — leave the screen showing it
+    }
+    setSummaryError(false);
     setInteractionId(null); setSelected(null); setResults(null); setVerifiedFor(null);
-    setVerifiedName(null); setVerifiedStatus(null); setQuery(""); setNotes(""); setClosed(true);
+    setVerifiedName(null); setVerifiedStatus(null); setVerifiedMemberNo(null);
+    setQuery(""); setNotes(""); setWrapSummary(""); setClosed(true);
     setAnnounce(t(L.ccBookClosed));
-  }, [api, interactionId, notes, t]);
+  }, [api, interactionId, notes, wrapSummary, t]);
 
   const copyNotes = useCallback(async () => {
     // Guard the METHOD, not just the object: a non-secure context exposes `navigator.clipboard` as undefined,
@@ -205,7 +227,7 @@ export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
                   aria-pressed={selected?.beneficiaryId === m.beneficiaryId}
                 >
                   <span>{m.displayName}</span>
-                  {m.memberNo && <span className="cc-muted">{m.memberNo}</span>}
+                  {m.maskedMemberNo && <span className="cc-muted">{m.maskedMemberNo}</span>}
                 </button>
               </li>
             ))}
@@ -246,7 +268,9 @@ export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
           <h2 className="cc-step">{t(L.ccStepChoose)}</h2>
           <div data-testid="cc-booking-for" className="cc-booking-for">
             <span>{verifiedName ?? selected.displayName}</span>
-            {selected.memberNo && <span className="cc-muted">· {selected.memberNo}</span>}
+            {/* The REAL member number, from the post-verification summary — the search hit only ever carries a
+                masked one now, and showing the mask here would be a worse answer than showing none. */}
+            {verifiedMemberNo && <span className="cc-muted">· {verifiedMemberNo}</span>}
             {verifiedStatus && (
               <StatusChip
                 kind={memberStatus(verifiedStatus).kind}
@@ -277,11 +301,21 @@ export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
         </Card>
       )}
 
-      {/* WRAP UP — the notes land on the call record this booking was made under. */}
+      {/* WRAP UP — the notes land on the call record this booking was made under, and the summary lands on
+          the member's profile for the roles who read it later. */}
       {interactionId && (
         <Card>
           <div className="cc-wrapup">
             <CallNotes value={notes} onChange={setNotes} onCopy={copyNotes} />
+            <InputField
+              label={t(L.ccSummary)}
+              help={t(L.ccSummaryHelp)}
+              value={wrapSummary}
+              onChange={(e) => { setWrapSummary(e.target.value); if (summaryError) setSummaryError(false); }}
+              required
+              error={summaryError ? t(L.ccSummaryRequired) : undefined}
+              maxLength={500}
+            />
             <div className="cc-verify-actions">
               <Button variant="secondary" onClick={finish}>{t(L.ccBookFinish)}</Button>
             </div>

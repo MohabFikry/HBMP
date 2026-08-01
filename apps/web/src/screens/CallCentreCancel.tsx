@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Button, Icon, InlineAlert, Modal } from "@mersal/design-system";
 import type { AppointmentRow, Localized } from "@mersal/contracts";
 import { identifierTypeLabel } from "./statusLabels";
@@ -22,7 +22,18 @@ const S = {
   },
   failed: { en: "The cancellation was refused. Nothing was changed.", ar: "تم رفض الإلغاء. لم يتغير شيء." },
   loadingIds: { en: "Loading this member's identifiers…", ar: "جاري تحميل هويات هذا العضو…" },
+  // The appointment IS cancelled at this point — only the call record failed to wrap up. Saying "failed"
+  // here would send the agent back to cancel an appointment that is already gone.
+  closeFailed: {
+    en: "The appointment was cancelled, but this call is still open. Press Confirm again to finish the call record.",
+    ar: "تم إلغاء الموعد، لكن هذه المكالمة ما زالت مفتوحة. اضغط تأكيد مرة أخرى لإنهاء سجل المكالمة.",
+  },
 } satisfies Record<string, Localized>;
+
+/** The wrap-up summary other roles read on the member's profile. Built from the reason code so it says what
+ *  happened without the agent typing it — a cancellation taken from the board has exactly one story. */
+const summaryFor = (reason: string) =>
+  `Appointment cancelled by the call centre on this call. Reason: ${reason}.`;
 
 const CANCEL_REASONS = [
   "PatientRequest", "PatientUnwell", "TransportIssue", "Rescheduling",
@@ -63,6 +74,11 @@ export function CallCentreCancelButton({
   const [reason, setReason] = useState("");
   const [error, setError] = useState<Localized | null>(null);
   const [busy, setBusy] = useState(false);
+  // Progress through the three server steps, so a retry resumes rather than restarts. Refs, not state: a
+  // re-render between attempts must not lose track of a call that is already open or an appointment that is
+  // already cancelled.
+  const interaction = useRef<string | null>(null);
+  const cancelled = useRef(false);
 
   // Only an appointment that is still going to happen can be cancelled. The server refuses the transition
   // otherwise, and a button that can only fail teaches the agent the screen is unreliable.
@@ -74,6 +90,9 @@ export function CallCentreCancelButton({
     setTicks(new Set());
     setReason("");
     setTypes(null);
+    // A fresh dialog is a fresh call — never resume the previous one's progress.
+    interaction.current = null;
+    cancelled.current = false;
     // Which identifiers this member can be challenged on. Without them there is nothing to verify against,
     // and verification is the point — so a failure here stops the flow rather than skipping it.
     const name = row.beneficiaryName ?? "";
@@ -101,16 +120,36 @@ export function CallCentreCancelButton({
     try {
       // The call record this cancellation hangs off. Opened here, exactly as the standalone booking screen
       // opens its own — an action with no call behind it is the audit gap phase 15 closed.
-      const opened = await api.openInteraction("CancelAppointment").catch(() => null);
-      if (!opened?.interactionId) { setError(S.failed); return; }
+      //
+      // Held in a ref across attempts. A retry after a failed wrap-up must finish THIS call, not open a
+      // second one and leave the first Open forever — which is the very state this whole fix is about.
+      if (!interaction.current) {
+        const opened = await api.openInteraction("CancelAppointment").catch(() => null);
+        if (!opened?.interactionId) { setError(S.failed); return; }
+        interaction.current = opened.interactionId;
 
-      const passed = await api.verify(opened.interactionId, row.beneficiary.id, [...ticks], true);
-      if (!passed) { setError(S.failed); return; }
+        const passed = await api.verify(opened.interactionId, row.beneficiary.id, [...ticks], true);
+        if (!passed) { setError(S.failed); return; }
+      }
 
-      const outcome = await api.cancel(opened.interactionId, row.id, reason);
-      if (outcome !== "ok") { setError(S.failed); return; }
+      // Likewise skip the cancellation itself if a previous attempt already made it — retrying the whole
+      // flow would send a second cancel for an appointment that is already gone.
+      if (!cancelled.current) {
+        const outcome = await api.cancel(interaction.current, row.id, reason);
+        if (outcome !== "ok") { setError(S.failed); return; }
+        cancelled.current = true;
+      }
 
-      await api.close(opened.interactionId, "Resolved", `Cancelled: ${reason}`).catch(() => {});
+      // A summary is REQUIRED to close with outcome Resolved. This used to send notes only and swallow the
+      // refusal with `.catch(() => {})`, so every cancellation taken here left its interaction Open on the
+      // server — and an open interaction is an unexpired caller verification against that member.
+      const closed = await api.close(
+        interaction.current, "Resolved", `Cancelled: ${reason}`, summaryFor(reason),
+      );
+      if (closed !== "ok") { setError(S.closeFailed); return; }
+
+      interaction.current = null;
+      cancelled.current = false;
       setOpen(false);
       onCancelled();
     } finally {

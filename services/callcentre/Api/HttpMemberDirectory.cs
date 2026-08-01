@@ -17,7 +17,11 @@ public sealed class HttpMemberDirectory(IHttpClientFactory factory) : IMemberDir
 
     // A sensible default challenge set. The concrete availability is narrowed to what the reception card exposes
     // (MemberNo) plus the always-available demographic/contact challenges.
-    private static readonly string[] BaseChallenges = ["DateOfBirth", "Phone", "NationalId", "FullName"];
+    //
+    // FullName is NOT here, and must not be added back: the display name is shown on the search hit below, so
+    // "confirm your name" is a question the agent can answer off their own screen. See VerificationPolicy —
+    // a type is only challengeable while its value stays undisclosed pre-verification.
+    private static readonly string[] BaseChallenges = ["DateOfBirth", "Phone", "NationalId"];
 
     public async Task<MemberSearchResult> SearchAsync(string query, string? bearer, CancellationToken ct = default)
     {
@@ -31,7 +35,10 @@ public sealed class HttpMemberDirectory(IHttpClientFactory factory) : IMemberDir
             return new MemberMatch(
                 card.Identity?.BeneficiaryId ?? Guid.Empty,
                 card.Identity?.DisplayName ?? "—",
-                card.Identity?.MemberNo,
+                // MASKED at the source, so the full value never crosses the wire pre-verification. Masking in
+                // the UI instead would leave it sitting in the network tab and in any client that skips the
+                // formatting — the value has to not be sent, not merely not be drawn.
+                VerificationPolicy.MaskIdentifier(card.Identity?.MemberNo),
                 challenges);
         }).Where(m => m.BeneficiaryId != Guid.Empty).ToList();
         return new MemberSearchResult(query, matches.Count, matches);
@@ -60,9 +67,11 @@ public sealed class HttpMemberDirectory(IHttpClientFactory factory) : IMemberDir
             contacts.Select(c => new MemberContact(c.ContactId, c.Kind ?? "Phone", c.Value ?? "", c.IsPrimary, c.PreferredChannel)).ToList(),
             appts.Select(a => new MemberAppointment(a.AppointmentId, a.AppointmentType ?? "—", a.Status ?? "—",
                 a.ScheduledStart, a.BranchName, a.DoctorName, a.Specialty,
-                CanReschedule: IsChangeable(a.Status), CanCancel: IsChangeable(a.Status))).ToList(),
+                CanReschedule: IsChangeable(a.Status), CanCancel: IsChangeable(a.Status),
+                RowVersion: a.RowVersion)).ToList(),
             referrals.Select(r => new MemberReferral(r.ReferralRef ?? "—", r.Status ?? "—", r.RequestedSpecialty, r.CreatedAt)).ToList(),
-            followUps.Select(f => new MemberFollowUp(f.OriginEncounterId, f.Reason, f.DueDate, f.Specialty)).ToList());
+            // f.Reason is deliberately NOT projected — see MemberFollowUp. It is not deserialized either.
+            followUps.Select(f => new MemberFollowUp(f.OriginEncounterId, f.DueDate, f.Specialty)).ToList());
     }
 
     private static bool IsChangeable(string? status) =>
@@ -104,10 +113,12 @@ public sealed class HttpMemberDirectory(IHttpClientFactory factory) : IMemberDir
     private sealed record ReceptionIdentityDto(Guid BeneficiaryId, string? MemberNo, string? DisplayName, string? AgeBand, string? Status);
     private sealed record LimitDto(string? Category, decimal? AnnualLimit, decimal? RemainingLimit);
     private sealed record AppointmentDto(Guid AppointmentId, string? AppointmentType, string? Status,
-        DateTimeOffset ScheduledStart, string? BranchName, string? DoctorName, string? Specialty);
+        DateTimeOffset ScheduledStart, string? BranchName, string? DoctorName, string? Specialty, uint RowVersion);
     private sealed record ContactDto(Guid ContactId, string? Kind, string? Value, bool IsPrimary, string? PreferredChannel);
     private sealed record ReferralDto(string? ReferralRef, string? Status, string? RequestedSpecialty, DateTimeOffset? CreatedAt);
-    private sealed record FollowUpDto(Guid? OriginEncounterId, string? Reason, DateOnly? DueDate, string? Specialty);
+    // No Reason property: the clinical free-text on an emr follow-up is not deserialized at all, so it cannot
+    // reach this process, let alone the agent. "Only the fields we project" is enforced by the shape itself.
+    private sealed record FollowUpDto(Guid? OriginEncounterId, DateOnly? DueDate, string? Specialty);
 }
 
 

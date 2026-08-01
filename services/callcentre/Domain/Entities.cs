@@ -111,12 +111,33 @@ public static class VerificationPolicy
     /// <summary>Default minimum distinct identifier types for a Pass (configurable; 2 per the prompt).</summary>
     public const int MinIdentifierTypes = 2;
 
+    /// <summary>The maximum FAILED attempts allowed on one interaction before verification is locked out. A caller
+    /// who cannot confirm their identity in this many tries is not going to; past that point the retries are
+    /// someone working out which identifiers land, and the audit trail alone does not stop them.</summary>
+    public const int MaxFailedAttempts = 3;
+
     /// <summary>The identifier TYPES an agent may challenge on. Values live in patient-service; only the type name
-    /// is ever recorded here. Kept as an allow-list so a caller can't smuggle a value in as a "type".</summary>
+    /// is ever recorded here. Kept as an allow-list so a caller can't smuggle a value in as a "type".
+    ///
+    /// <para><b>The rule that governs this list:</b> a type may only be challengeable if its VALUE is not
+    /// disclosed to the agent before verification. A challenge the agent can answer by reading their own screen
+    /// is not a challenge. <c>FullName</c> is therefore absent — the display name is shown on the
+    /// pre-verification search hit by design (the agent has to know who they are talking to), which makes
+    /// "confirm your name" unverifiable. <c>MemberNo</c> stays, and the pre-verification projection masks its
+    /// value to compensate (see <c>MaskIdentifier</c>); the agent can ask for it but cannot read it back.</para></summary>
     public static readonly IReadOnlySet<string> ChallengeableTypes = new HashSet<string>(StringComparer.Ordinal)
     {
-        "MemberNo", "NationalId", "Passport", "RefugeeId", "UnhcrNo", "DateOfBirth", "Phone", "FullName",
+        "MemberNo", "NationalId", "Passport", "RefugeeId", "UnhcrNo", "DateOfBirth", "Phone",
     };
+
+    /// <summary>Mask an identifier for pre-verification display: enough to disambiguate two similar hits in a
+    /// search list, never enough to recite back as a confirmed answer.</summary>
+    public static string? MaskIdentifier(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return value;
+        var v = value.Trim();
+        return v.Length <= 3 ? new string('•', v.Length) : new string('•', v.Length - 3) + v[^3..];
+    }
 
     /// <summary>Distinct, known types only. Anything outside the allow-list is ignored (defensive against values
     /// being passed as types).</summary>

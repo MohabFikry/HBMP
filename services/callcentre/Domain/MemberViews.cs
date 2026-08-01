@@ -6,11 +6,16 @@ namespace Mersal.CallCentre.Domain;
 // serialized JSON. The Call Centre is MemberScoped, so appointments span ALL branches.
 
 /// <summary>Pre-verification search hit — deliberately thin. ONLY a display name, the beneficiary id, and WHICH
-/// identifier TYPES the agent may challenge on. No coverage, no contacts, no appointments, no history.</summary>
+/// identifier TYPES the agent may challenge on. No coverage, no contacts, no appointments, no history.
+///
+/// <para><see cref="MaskedMemberNo"/> is MASKED (e.g. <c>•••001</c>) and is named so no caller can mistake it for
+/// the real thing. It exists to tell two similar search hits apart, not to be read to the member: MemberNo is a
+/// challengeable identifier type, so printing it in full here would let an agent tick the "MemberNo" box by
+/// reading their own screen and pass verification with nothing from the caller.</para></summary>
 public sealed record MemberMatch(
     Guid BeneficiaryId,
     string DisplayName,
-    string? MemberNo,
+    string? MaskedMemberNo,
     IReadOnlyList<string> ChallengeableIdentifierTypes);
 
 /// <summary>The pre-verification search response.</summary>
@@ -41,16 +46,30 @@ public sealed record CoverageLine(string Category, decimal? AnnualLimit, decimal
 public sealed record MemberContact(Guid ContactId, string Kind, string Value, bool IsPrimary, string? PreferredChannel);
 
 /// <summary>An appointment as the Call Centre sees it — existence + logistics ONLY. Type/time/branch/doctor+
-/// specialty; NEVER the reason, notes, diagnosis, or any result.</summary>
+/// specialty; NEVER the reason, notes, diagnosis, or any result.
+///
+/// <para><see cref="RowVersion"/> is emr's <c>xmin</c> optimistic-concurrency token, surfaced so the agent's
+/// client can echo it back as <c>If-Match</c> on a reschedule/cancel. Without it every call-centre transition
+/// ran unguarded: emr's 412-on-stale-write was implemented, forwarded, and never armed, so two agents holding
+/// the same member's file could both act on an appointment one of them had already moved. It is a row token,
+/// not member data — it carries nothing.</para></summary>
 public sealed record MemberAppointment(
     Guid AppointmentId, string AppointmentType, string Status, DateTimeOffset ScheduledStart,
-    string? BranchName, string? DoctorName, string? Specialty, bool CanReschedule, bool CanCancel);
+    string? BranchName, string? DoctorName, string? Specialty, bool CanReschedule, bool CanCancel,
+    uint RowVersion = 0);
 
 /// <summary>An open referral the agent can convert to a booking in one step (15.4).</summary>
 public sealed record MemberReferral(string ReferralRef, string Status, string? RequestedSpecialty, DateTimeOffset? CreatedAt);
 
-/// <summary>A follow-up due (from the appointment follow-up linkage) — bookable in one step.</summary>
-public sealed record MemberFollowUp(Guid? OriginEncounterId, string? Reason, DateOnly? DueDate, string? Specialty);
+/// <summary>A follow-up due (from the appointment follow-up linkage) — bookable in one step.
+///
+/// <para><b>There is deliberately no <c>Reason</c> here.</b> It used to carry emr's free-text follow-up reason
+/// verbatim, which is where "review biopsy result" lives — a clinical disclosure to a role that must never
+/// receive one. The structural proof in <c>MemberProjectionTests</c> could not catch it: it scans property
+/// names and a hand-populated instance, so a free-text field passed as long as the test author chose a benign
+/// value. The agent's affordance is "book the follow-up", and <see cref="Specialty"/> plus
+/// <see cref="DueDate"/> are what booking needs; the reason is the clinician's, not theirs.</para></summary>
+public sealed record MemberFollowUp(Guid? OriginEncounterId, DateOnly? DueDate, string? Specialty);
 
 /// <summary>The composed, projected Call Centre 360. Every section is logistics/benefit only — there is no
 /// property anywhere in this graph that can hold clinical content.</summary>

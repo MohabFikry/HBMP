@@ -30,7 +30,9 @@ function fakeApi(over: Partial<CcApi> = {}): CcApi {
     openInteraction: vi.fn().mockResolvedValue({ interactionId: "i9", callRef: "CALL-2026-000009" }),
     verify: vi.fn().mockImplementation((_i, _b, types: string[], pass: boolean) => Promise.resolve(pass && types.length >= 2)),
     search: vi.fn().mockResolvedValue([
-      { beneficiaryId: BEN, displayName: "Hana Mansour", memberNo: "MRS-M-2026-000005", challengeableIdentifierTypes: ["MemberNo", "DateOfBirth", "Phone"] },
+      // Pre-verification hits carry a MASKED member number — the real one would let the agent tick the
+      // "MemberNo" challenge off their own screen.
+      { beneficiaryId: BEN, displayName: "Hana Mansour", maskedMemberNo: "•••005", challengeableIdentifierTypes: ["MemberNo", "DateOfBirth", "Phone"] },
     ]),
     summary: vi.fn().mockResolvedValue(make360()),
     clinics: vi.fn().mockResolvedValue([
@@ -41,7 +43,8 @@ function fakeApi(over: Partial<CcApi> = {}): CcApi {
     book: vi.fn().mockResolvedValue("ok"),
     reschedule: vi.fn().mockResolvedValue("ok"),
     cancel: vi.fn().mockResolvedValue("ok"),
-    close: vi.fn().mockResolvedValue(undefined),
+    // A RESULT, not void: the screen now clears only on a confirmed close.
+    close: vi.fn().mockResolvedValue("ok"),
     history: vi.fn().mockResolvedValue([]),
     ...over,
   };
@@ -200,9 +203,14 @@ describe("20.4 — standalone Book appointment (call centre)", () => {
     renderNode(<CallCentreBooking api={api} />);
     await findAndSelect(user);
     await user.type(await screen.findByLabelText(/call notes/i), "Asked for the earliest Dokki slot.");
+    // The summary is a SEPARATE field from the notes and the server refuses the close without it: the notes
+    // stay call-centre-only, while this is what a coordinator reads on the member's profile later.
+    await user.type(screen.getByLabelText(/call summary/i), "Booked a cardiology appointment in Nasr City.");
     await user.click(screen.getByRole("button", { name: /finish and close/i }));
 
-    expect(api.close).toHaveBeenCalledWith("i9", "Resolved", "Asked for the earliest Dokki slot.");
+    expect(api.close).toHaveBeenCalledWith(
+      "i9", "Resolved", "Asked for the earliest Dokki slot.", "Booked a cardiology appointment in Nasr City.",
+    );
     await waitFor(() => expect(screen.getByTestId("cc-live")).toHaveTextContent(/call closed/i));
     // The call is over: its notes field goes with it, so the next caller cannot inherit the last one's note.
     expect(screen.queryByLabelText(/call notes/i)).not.toBeInTheDocument();

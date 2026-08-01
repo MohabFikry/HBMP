@@ -31,7 +31,7 @@ public sealed class HttpContactGateway(IHttpClientFactory factory) : IContactGat
             req.Content = new StringContent(JsonSerializer.Serialize(body, Json), Encoding.UTF8, "application/json");
             using var resp = await http.SendAsync(req, ct);
             var text = await resp.Content.ReadAsStringAsync(ct);
-            return new GatewayResult((int)resp.StatusCode, text, null);
+            return new GatewayResult((int)resp.StatusCode, text, null, resp.Content.Headers.ContentType?.MediaType);
         }
         catch (HttpRequestException) { return new GatewayResult(502, null, null); }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested) { return new GatewayResult(504, null, null); }

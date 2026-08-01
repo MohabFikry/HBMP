@@ -101,6 +101,28 @@ export const L = {
   ccHistoryEmpty: { en: "No calls yet.", ar: "لا توجد مكالمات بعد." },
   ccHistoryError: { en: "Couldn't load call history.", ar: "تعذّر تحميل سجل المكالمات." },
   ccRescheduled: { en: "Appointment rescheduled and confirmed to the member.", ar: "تمت إعادة جدولة الموعد وتأكيده للمستفيد." },
+  // ── Wrap-up: the summary other roles read, and the close outcomes that used to be silent ───────────────
+  ccSummary: { en: "Call summary", ar: "ملخّص المكالمة" },
+  ccSummaryHelp: {
+    en: "Read by coordinators and clinicians on the member's profile. What the call was about and what you did — no clinical detail.",
+    ar: "يقرأه المنسّقون والأطباء في ملف المستفيد. موضوع المكالمة وما قمت به — بدون أي تفاصيل طبية.",
+  },
+  ccSummaryRequired: {
+    en: "A summary is required to close this call. Another role reads it later to see what happened.",
+    ar: "يلزم إدخال ملخّص لإنهاء هذه المكالمة. يقرأه لاحقًا زملاء آخرون لمعرفة ما جرى.",
+  },
+  ccCloseFailed: {
+    en: "The call could not be closed and is still open. Try again.",
+    ar: "تعذّر إنهاء المكالمة وما زالت مفتوحة. حاول مرة أخرى.",
+  },
+  ccNotYourCall: {
+    en: "This call was taken by another agent. Only they or a supervisor can change its record.",
+    ar: "هذه المكالمة تولّاها موظف آخر. لا يمكن تعديل سجلّها إلا بواسطته أو بواسطة مشرف.",
+  },
+  ccApptStale: {
+    en: "This appointment changed while you were on the call. Reload the member's file and try again.",
+    ar: "تغيّر هذا الموعد أثناء المكالمة. أعد تحميل ملف المستفيد وحاول مرة أخرى.",
+  },
   // ── The member file: act from the file the agent is already looking at ────────────────────────────────
   ccNewAppointment: { en: "New appointment", ar: "موعد جديد" },
   ccCallNotes: { en: "Call notes", ar: "ملاحظات المكالمة" },

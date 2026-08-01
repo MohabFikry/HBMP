@@ -18,8 +18,8 @@ function make360(): Cc360 {
     coverage: [{ category: "Outpatient", annualLimit: 10000, remainingLimit: 7500 }],
     contacts: [{ contactId: "c1", kind: "Phone", value: "+20100000000", isPrimary: true }],
     appointments: [
-      { appointmentId: "a1", appointmentType: "Consultation", status: "Scheduled", scheduledStart: new Date().toISOString(), branchName: "Aswan", doctorName: "Dr. Nour", specialty: "Cardiology", canReschedule: true, canCancel: true },
-      { appointmentId: "a2", appointmentType: "Consultation", status: "Completed", scheduledStart: new Date().toISOString(), branchName: "Maadi", doctorName: "Dr. Sami", specialty: "Dermatology", canReschedule: false, canCancel: false },
+      { appointmentId: "a1", appointmentType: "Consultation", status: "Scheduled", scheduledStart: new Date().toISOString(), branchName: "Aswan", doctorName: "Dr. Nour", specialty: "Cardiology", canReschedule: true, canCancel: true, rowVersion: 41 },
+      { appointmentId: "a2", appointmentType: "Consultation", status: "Completed", scheduledStart: new Date().toISOString(), branchName: "Maadi", doctorName: "Dr. Sami", specialty: "Dermatology", canReschedule: false, canCancel: false, rowVersion: 7 },
     ],
     openReferrals: [{ referralRef: "REF-2026-000007", status: "Requested", requestedSpecialty: "Endocrinology" }],
   };
@@ -89,7 +89,8 @@ function fakeApi(over: Partial<CcApi> = {}): CcApi {
   return {
     openInteraction: vi.fn().mockResolvedValue({ interactionId: "i1", callRef: "CALL-2026-000001" }),
     verify: vi.fn().mockImplementation((_i, _b, types: string[], pass: boolean) => Promise.resolve(pass && types.length >= 2)),
-    search: vi.fn().mockResolvedValue([{ beneficiaryId: BEN, displayName: "Amal Hassan", memberNo: "MRS-M-1001", challengeableIdentifierTypes: ["MemberNo", "DateOfBirth", "Phone"] }]),
+    // The server masks the member number on a pre-verification hit, so the fixture carries the masked shape.
+    search: vi.fn().mockResolvedValue([{ beneficiaryId: BEN, displayName: "Amal Hassan", maskedMemberNo: "•••001", challengeableIdentifierTypes: ["MemberNo", "DateOfBirth", "Phone"] }]),
     summary: vi.fn().mockResolvedValue(make360()),
     // Cross-branch clinic list, each option carrying its own branch (15.3).
     clinics: vi.fn().mockResolvedValue([
@@ -101,7 +102,10 @@ function fakeApi(over: Partial<CcApi> = {}): CcApi {
     book: vi.fn().mockResolvedValue("ok"),
     reschedule: vi.fn().mockResolvedValue("ok"),
     cancel: vi.fn().mockResolvedValue("ok"),
-    close: vi.fn().mockResolvedValue(undefined),
+    // Returns a RESULT now. It used to resolve `undefined` for every call, which is what let the missing
+    // `summary` argument survive: the server had required one since 20.3b and refused every close with 422,
+    // and no test could see it because the fake always succeeded.
+    close: vi.fn().mockResolvedValue("ok"),
     history: vi.fn().mockResolvedValue([]),
     ...over,
   };
@@ -204,8 +208,9 @@ describe("15.5 — Call Centre workspace: act", () => {
     // Only the changeable appointment (a1) offers Reschedule.
     await pickClinicAndTime(user);
     await user.click(screen.getByRole("button", { name: /^reschedule$/i }));
-    // A REAL slot id now, taken from the picker rather than generated.
-    expect(api.reschedule).toHaveBeenCalledWith("i1", "a1", "slot-1");
+    // A REAL slot id now, taken from the picker rather than generated — plus a1's rowVersion, which rides
+    // along as If-Match so a reschedule computed against a stale file is refused rather than applied.
+    expect(api.reschedule).toHaveBeenCalledWith("i1", "a1", "slot-1", 41);
     await waitFor(() => expect(screen.getByTestId("cc-live")).toHaveTextContent(/rescheduled/i));
   });
 
@@ -370,5 +375,86 @@ describe("15.3 — the call centre names the branch it is booking into", () => {
     const [iid, ben, , branch, extra] = (api.book as ReturnType<typeof vi.fn>).mock.calls[0];
     expect([iid, ben, branch]).toEqual(["i1", BEN, "BR-NSR"]);
     expect(extra).toMatchObject({ doctorId: "PRC-2" });
+  });
+});
+
+/**
+ * The wrap-up contract, and the reason it needs its own suite.
+ *
+ * Phase 20.3b made `summary` mandatory at close for every outcome but Abandoned. The workspace never collected
+ * or sent one, so every close was refused 422 — and because `close` resolved `void` and the caller cleared the
+ * call bar unconditionally, the agent saw a wrapped-up call while the interaction stayed Open on the server.
+ * An Open interaction is an unexpired caller verification, so the portal's defining control never expired.
+ *
+ * Neither side's tests could catch it: the backend E2E builds its own request body, and the fake here always
+ * succeeded. These assert the SHAPE of the call and the handling of a refusal, which is where the gap was.
+ */
+describe("wrap-up: the call is only closed when the server says so", () => {
+  it("sends the summary the server requires, and clears the call bar on success", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi();
+    renderNode(<CallCentreWorkspace api={api} />);
+    await startAndSelect(user);
+
+    await user.type(screen.getByLabelText(/call summary/i), "Booked a follow-up and corrected the phone number.");
+    await user.click(screen.getByRole("button", { name: /close call/i }));
+
+    await waitFor(() => expect(api.close).toHaveBeenCalled());
+    expect((api.close as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual([
+      "i1", "Resolved", "", "Booked a follow-up and corrected the phone number.",
+    ]);
+    // Closed for real → back to the pre-call state.
+    await screen.findByRole("button", { name: /start call/i });
+  });
+
+  it("keeps the call OPEN and says why when the server refuses the close", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi({ close: vi.fn().mockResolvedValue("summary-required") });
+    renderNode(<CallCentreWorkspace api={api} />);
+    await startAndSelect(user);
+
+    await user.click(screen.getByRole("button", { name: /close call/i }));
+
+    // The refusal is shown as an error on the field that caused it…
+    expect(await screen.findByRole("alert")).toHaveTextContent(/summary is required/i);
+    // …and announced, because an agent mid-call is not looking at the wrap-up card.
+    expect(screen.getByTestId("cc-live")).toHaveTextContent(/summary is required/i);
+    // The call bar is UNCHANGED: the call really is still open, and saying otherwise is the original bug.
+    expect(screen.queryByRole("button", { name: /start call/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /close call/i })).toBeInTheDocument();
+  });
+});
+
+describe("pre-verification disclosure and stale writes", () => {
+  it("shows only the MASKED member number on a search hit", async () => {
+    const user = userEvent.setup();
+    renderNode(<CallCentreWorkspace api={fakeApi()} />);
+    await user.click(screen.getByRole("button", { name: /start call/i }));
+    await user.type(await screen.findByLabelText(/find member/i), "+20100000000");
+    await user.click(screen.getByRole("button", { name: /^search$/i }));
+
+    // The agent is asked to challenge the caller on their member number, so the real one must not be
+    // readable off this list — otherwise they can tick the box from their own screen.
+    expect(await screen.findByText("•••001")).toBeInTheDocument();
+    expect(screen.queryByText("MRS-M-1001")).not.toBeInTheDocument();
+  });
+
+  it("sends the appointment's rowVersion as the If-Match token on a cancel", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi();
+    renderNode(<CallCentreWorkspace api={api} />);
+    await startAndSelect(user);
+    await user.click(screen.getByLabelText("Member number"));
+    await user.click(screen.getByLabelText("Date of birth"));
+    await user.click(screen.getByRole("button", { name: /verify — pass/i }));
+    await screen.findByTestId("cc-360");
+
+    await user.click(screen.getByRole("button", { name: /^cancel appointment — /i }));
+    await user.selectOptions(screen.getByRole("combobox", { name: /cancellation reason/i }), "PatientRequest");
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^cancel appointment$/i }));
+
+    await waitFor(() => expect(api.cancel).toHaveBeenCalled());
+    // a1's token — without it emr's 412-on-stale-write can never fire for a call-centre cancellation.
+    expect((api.cancel as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual(["i1", "a1", "PatientRequest", 41]);
   });
 });

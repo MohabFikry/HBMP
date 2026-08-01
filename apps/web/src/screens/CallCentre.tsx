@@ -15,7 +15,10 @@ import { CallNotes } from "./CallNotes";
 export interface CcMatch {
   beneficiaryId: string;
   displayName: string;
-  memberNo?: string | null;
+  /** MASKED by the server (e.g. `•••001`) — enough to tell two similar hits apart, never enough to recite.
+   *  MemberNo is a challengeable identifier type; printing the real one here let an agent tick that box by
+   *  reading their own screen and pass verification with nothing from the caller. */
+  maskedMemberNo?: string | null;
   challengeableIdentifierTypes: string[];
 }
 export interface CcCoverageLine { category: string; annualLimit?: number | null; remainingLimit?: number | null }
@@ -24,6 +27,9 @@ export interface CcAppointment {
   appointmentId: string; appointmentType: string; status: string; scheduledStart: string;
   branchName?: string | null; doctorName?: string | null; specialty?: string | null;
   canReschedule: boolean; canCancel: boolean;
+  /** emr's `xmin` concurrency token, echoed back as `If-Match` on a reschedule/cancel so a stale write gets
+   *  412 instead of silently clobbering a change another agent already made to this appointment. */
+  rowVersion: number;
 }
 export interface CcReferral { referralRef: string; status: string; requestedSpecialty?: string | null }
 export interface CcClinic { providerId: string; locationId: string; branchId?: string | null; branchName?: string | null; label: string; openSlots: number }
@@ -70,11 +76,25 @@ export interface CcApi {
     branchId?: string | null,
     extra?: { doctorId?: string | null; note?: string },
   ): Promise<"ok" | "conflict" | "error">;
-  reschedule(interactionId: string, appointmentId: string, newSlotId: string): Promise<"ok" | "conflict" | "error">;
-  cancel(interactionId: string, appointmentId: string, reasonCode: string): Promise<"ok" | "error">;
-  close(interactionId: string, outcome: string, notes: string): Promise<void>;
+  /** `rowVersion` rides along as If-Match: a reschedule computed against times the agent loaded before someone
+   *  else moved the appointment must be refused (412 → "stale"), not applied. */
+  reschedule(interactionId: string, appointmentId: string, newSlotId: string, rowVersion?: number): Promise<CcWriteResult>;
+  cancel(interactionId: string, appointmentId: string, reasonCode: string, rowVersion?: number): Promise<CcWriteResult>;
+  /**
+   * Wrap up the call. `summary` is REQUIRED by the server for every outcome but `Abandoned` (phase 20.3b) — it
+   * is what other roles read later through the patient profile. The result is RETURNED rather than swallowed:
+   * this used to be `Promise<void>`, so a 422 for a missing summary was invisible and the workspace cleared the
+   * call bar as though the call had been wrapped up, leaving the interaction Open in the database forever.
+   */
+  close(interactionId: string, outcome: string, notes: string, summary: string): Promise<CcCloseResult>;
   history(): Promise<CcCallRow[]>;
 }
+
+/** A write against the emr engine. `stale` is emr's 412 — the appointment moved under the agent. */
+export type CcWriteResult = "ok" | "conflict" | "stale" | "error";
+
+/** Wrap-up outcome. `summary-required` is the server's 422 and is a correctable mistake, not a failure. */
+export type CcCloseResult = "ok" | "summary-required" | "not-your-call" | "error";
 
 const REASONS = ["BookAppointment", "RescheduleAppointment", "CancelAppointment", "AppointmentEnquiry", "EligibilityEnquiry", "UpdateContact", "Complaint", "Other"];
 const CANCEL_REASONS = ["PatientRequest", "PatientUnwell", "TransportIssue", "Rescheduling", "ClinicClosure", "DuplicateBooking", "Other"];
@@ -102,7 +122,7 @@ const CANCEL_REASON_LABELS: Record<string, { en: string; ar: string }> = {
 const OUTCOMES = ["Resolved", "FollowUpRequired", "Transferred", "Abandoned", "NoAction"];
 
 async function req<T>(
-  method: string, path: string, body?: unknown, idempotencyKey?: string,
+  method: string, path: string, body?: unknown, idempotencyKey?: string, ifMatch?: number,
 ): Promise<{ status: number; data: T | null }> {
   const token = getToken();
   const resp = await fetch(`${API_BASE}${path}`, {
@@ -111,6 +131,10 @@ async function req<T>(
       ...(body ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+      // Quoted per RFC 7232. callcentre-service forwards this verbatim to emr, which has always parsed it and
+      // returned 412 on a stale write — the guarantee was implemented end to end and simply never armed,
+      // because no call-centre client ever sent the header.
+      ...(ifMatch !== undefined ? { "If-Match": `"${ifMatch}"` } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -189,19 +213,30 @@ export function createHttpCcApi(): CcApi {
       if (r.status === 409) return "conflict";
       return r.status >= 200 && r.status < 300 ? "ok" : "error";
     },
-    async reschedule(interactionId, appointmentId, newSlotId) {
+    async reschedule(interactionId, appointmentId, newSlotId, rowVersion) {
       const r = await req("POST", `/call-centre/appointments/${appointmentId}/reschedule`, { interactionId, newSlotId },
-        bookingKey(interactionId, appointmentId, newSlotId));
+        bookingKey(interactionId, appointmentId, newSlotId), rowVersion);
       if (r.status === 409) return "conflict";
+      if (r.status === 412) return "stale";
       return r.status >= 200 && r.status < 300 ? "ok" : "error";
     },
-    async cancel(interactionId, appointmentId, reasonCode) {
+    async cancel(interactionId, appointmentId, reasonCode, rowVersion) {
       const r = await req("POST", `/call-centre/appointments/${appointmentId}/cancel`, { interactionId, reasonCode },
-        `cc-cancel:${interactionId}:${appointmentId}`);
+        `cc-cancel:${interactionId}:${appointmentId}`, rowVersion);
+      if (r.status === 409) return "conflict";
+      if (r.status === 412) return "stale";
       return r.status >= 200 && r.status < 300 ? "ok" : "error";
     },
-    async close(interactionId, outcome, notes) {
-      await req("POST", `/call-interactions/${interactionId}/close`, { outcome, notes });
+    async close(interactionId, outcome, notes, summary) {
+      const r = await req<{ title?: string }>("POST", `/call-interactions/${interactionId}/close`,
+        // `summary` is sent even when blank: letting the server refuse the close is the point. Omitting the
+        // field to avoid the 422 would recreate the bug this replaced — a call that reads as wrapped up and
+        // is still Open, holding a live verification, on the server.
+        { outcome, notes, summary });
+      if (r.status >= 200 && r.status < 300) return "ok";
+      if (r.status === 422 && r.data?.title === "summary-required") return "summary-required";
+      if (r.status === 403) return "not-your-call";
+      return "error";
     },
     async history() {
       const r = await req<{ items: CcCallRow[] }>("GET", "/call-interactions");
@@ -248,6 +283,14 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
   const [cancelError, setCancelError] = useState(false);
   const [outcome, setOutcome] = useState(OUTCOMES[0]);
   const [notes, setNotes] = useState("");
+  /**
+   * The wrap-up summary — a SEPARATE field from `notes`, and the separation is the point: `notes` is the
+   * agent's working text and stays call-centre-only, while this is the operational account other roles read on
+   * the member's profile. The workspace never collected it, so every close was refused 422 by the server while
+   * the UI cleared the call bar as if it had worked.
+   */
+  const [wrapSummary, setWrapSummary] = useState("");
+  const [summaryError, setSummaryError] = useState(false);
   /**
    * The reservation panel is an ACTION ON THE FILE rather than a permanent fixture inside it. Most calls are
    * not bookings — an eligibility question, a contact correction — and a booking form sitting open under every
@@ -324,6 +367,31 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
     if (outcome !== "error") setReloadToken((k) => k + 1);
   }, [api, interactionId, verifiedFor, sel, t]);
 
+  /**
+   * Wrap up. The call bar clears ONLY on a confirmed close — the previous version awaited a `Promise<void>`
+   * and reset regardless, so a refused close left the agent believing the call was wrapped up while the
+   * interaction stayed Open on the server, holding a live caller verification against that member.
+   */
+  const closeCall = useCallback(async () => {
+    if (!interactionId) return;
+    const result = await api.close(interactionId, outcome, notes, wrapSummary.trim());
+    if (result === "ok") {
+      setSummaryError(false);
+      setInteractionId(null);
+      setResults(null); setSelected(null); setVerifiedFor(null); setSummary(null);
+      setQuery(""); setNotes(""); setWrapSummary(""); setShowReserve(false);
+      setAnnounce(t(L.ccBookClosed));
+      return;
+    }
+    // Everything below leaves the call OPEN, which is the truth — so the call bar stays as it is.
+    setSummaryError(result === "summary-required");
+    setAnnounce(
+      result === "summary-required" ? t(L.ccSummaryRequired)
+      : result === "not-your-call" ? t(L.ccNotYourCall)
+      : t(L.ccCloseFailed),
+    );
+  }, [api, interactionId, outcome, notes, wrapSummary, t]);
+
   const copyNotes = useCallback(async () => {
     // Guard the METHOD, not just the object: a non-secure context exposes `navigator.clipboard` as undefined
     // and jsdom exposes neither, so an unguarded call is an unhandled rejection in the agent's face.
@@ -335,23 +403,40 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
     }
   }, [notes, t]);
 
+  /** The appointment's current concurrency token, from the 360 the agent is looking at. */
+  const rowVersionOf = useCallback((appointmentId: string) =>
+    summary?.appointments.find((a) => a.appointmentId === appointmentId)?.rowVersion,
+  [summary]);
+
   const cancel = useCallback(async (appointmentId: string) => {
     if (!interactionId) return;
     if (!cancelReason) { setCancelError(true); return; }
     setCancelError(false);
-    const r = await api.cancel(interactionId, appointmentId, cancelReason);
-    setAnnounce(r === "ok" ? t(L.ccCancelled) : t(L.ccBookFailed));
+    const r = await api.cancel(interactionId, appointmentId, cancelReason, rowVersionOf(appointmentId));
+    setAnnounce(
+      r === "ok" ? t(L.ccCancelled)
+      : r === "stale" ? t(L.ccApptStale)
+      : t(L.ccBookFailed),
+    );
     setCancelFor(null);
-  }, [api, interactionId, cancelReason, t]);
+    // A stale refusal means the file on screen is out of date — re-read it rather than leaving the agent
+    // acting on times that have already moved.
+    if (r === "stale") setReloadToken((k) => k + 1);
+  }, [api, interactionId, cancelReason, rowVersionOf, t]);
 
   const reschedule = useCallback(async (appointmentId: string) => {
     // Rescheduling needs a NEW time, which lives in the reservation panel — so opening the panel is part of
     // the instruction, not a separate thing the agent has to work out.
     if (!interactionId || !sel.slotId) { setShowReserve(true); setAnnounce(t(L.ccPickTime)); return; }
-    const outcome = await api.reschedule(interactionId, appointmentId, sel.slotId);
-    setAnnounce(outcome === "ok" ? t(L.ccRescheduled) : outcome === "conflict" ? t(L.ccSlotTaken) : t(L.ccBookFailed));
+    const outcome = await api.reschedule(interactionId, appointmentId, sel.slotId, rowVersionOf(appointmentId));
+    setAnnounce(
+      outcome === "ok" ? t(L.ccRescheduled)
+      : outcome === "conflict" ? t(L.ccSlotTaken)
+      : outcome === "stale" ? t(L.ccApptStale)
+      : t(L.ccBookFailed),
+    );
     if (outcome !== "error") setReloadToken((k) => k + 1);
-  }, [api, interactionId, sel.slotId, t]);
+  }, [api, interactionId, sel.slotId, rowVersionOf, t]);
 
   const isVerified = !!selected && verifiedFor === selected.beneficiaryId;
 
@@ -376,9 +461,7 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
           ) : (
             <>
               <StatusChip kind="ok" label={t(L.ccOnCall)} />
-              <Button variant="ghost" onClick={async () => { await api.close(interactionId, outcome, notes); setInteractionId(null); }}>
-                {t(L.ccCloseCall)}
-              </Button>
+              <Button variant="ghost" onClick={closeCall}>{t(L.ccCloseCall)}</Button>
             </>
           )}
         </div>
@@ -404,7 +487,7 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
                   <li key={m.beneficiaryId}>
                     <button type="button" className="cc-result" onClick={() => select(m)} aria-pressed={selected?.beneficiaryId === m.beneficiaryId}>
                       <span>{m.displayName}</span>
-                      {m.memberNo && <span className="cc-muted">{m.memberNo}</span>}
+                      {m.maskedMemberNo && <span className="cc-muted">{m.maskedMemberNo}</span>}
                     </button>
                   </li>
                 ))}
@@ -582,10 +665,30 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
           <Card>
             <div className="cc-wrapup" role="group" aria-label={t(L.ccWrapUp)}>
               <label>{t(L.ccOutcome)}
+                {/* Localized like every other enum on this screen. These were rendered as raw literals, so an
+                    Arabic-portal agent picked their wrap-up from "FollowUpRequired" and "NoAction" — the exact
+                    bug already fixed for the identifier types a few cards up. `callOutcomeLabel` existed and
+                    was in use in the call-history list below; only this control skipped it. */}
                 <select value={outcome} onChange={(e) => setOutcome(e.target.value)}>
-                  {OUTCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
+                  {OUTCOMES.map((o) => <option key={o} value={o}>{t(callOutcomeLabel(o))}</option>)}
                 </select>
               </label>
+
+              {/* The summary OTHER ROLES read. Required by the server for every outcome but Abandoned, so it is
+                  asked for here rather than discovered as a 422 after the agent thinks they are done. */}
+              <InputField
+                label={t(L.ccSummary)}
+                help={t(L.ccSummaryHelp)}
+                value={wrapSummary}
+                onChange={(e) => { setWrapSummary(e.target.value); if (summaryError) setSummaryError(false); }}
+                // `required` drives BOTH aria-required and the visible asterisk (InputField derives
+                // requiredMark from it), and `error` renders icon + text + border with role="alert" and
+                // aria-invalid — the design system's non-colour error contract, rather than a bare red <p>.
+                required={outcome !== "Abandoned"}
+                error={summaryError ? t(L.ccSummaryRequired) : undefined}
+                maxLength={500}
+              />
+
               {/* Rendered here ONLY when the file is not showing it — two controls with the same label is an
                   ambiguous accessible name, and the duplicate is what makes an agent wonder which one saves. */}
               {!(isVerified && summary) && (

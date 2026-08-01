@@ -135,7 +135,8 @@ public static class CallAppointments
     private static string? IfMatch(HttpRequest http) =>
         http.Headers.TryGetValue("If-Match", out var v) ? v.ToString() : null;
 
-    /// <summary>Pass the emr response through faithfully so 409/412/422 semantics reach the agent unchanged.</summary>
+    /// <summary>Pass the emr response through faithfully so 409/412/422 semantics reach the agent unchanged —
+    /// including the media type, so an <c>application/problem+json</c> error is not relabelled as a result.</summary>
     private static IResult Passthrough(GatewayResult r) =>
-        Results.Content(r.Body ?? "", "application/json", statusCode: r.StatusCode);
+        Results.Content(r.Body ?? "", r.MediaType, statusCode: r.StatusCode);
 }

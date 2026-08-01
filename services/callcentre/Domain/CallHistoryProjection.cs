@@ -160,6 +160,12 @@ public static class CallSummaryRules
     /// <summary>Length cap, so a summary stays a summary rather than becoming a second notes field.</summary>
     public const int MaxLength = 500;
 
+    /// <summary>Cap on the agent's working notes. `summary` was capped in both the API and the column
+    /// (varchar(500)); `notes` was validated in neither and stored as bare `text`, so the one field on this
+    /// aggregate that is unbounded is also the free-text one an agent types under time pressure. Generous
+    /// enough that no real call hits it, bounded so a client fault cannot write a megabyte per call.</summary>
+    public const int MaxNotesLength = 4000;
+
     public static bool IsRequiredAtClose(CallOutcome? outcome) =>
         outcome is not null && outcome != CallOutcome.Abandoned;
 
