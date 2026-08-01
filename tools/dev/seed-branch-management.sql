@@ -29,6 +29,8 @@ DECLARE
     tenant     CONSTANT text := '11111111-1111-1111-1111-111111111111';
     maadi      uuid;
     dokki      uuid;
+    coord      uuid;
+    mgr        uuid;
     expiring   CONSTANT uuid := '25000000-0000-0000-0000-00000000e001';
     expired    CONSTANT uuid := '25000000-0000-0000-0000-00000000e002';
     onleave    CONSTANT uuid := '25000000-0000-0000-0000-00000000e003';
@@ -43,6 +45,52 @@ BEGIN
     SELECT branch_id INTO dokki FROM provider.branch WHERE branch_code = 'DOK' LIMIT 1;
     IF maadi IS NULL THEN
         RAISE EXCEPTION 'seed: the six branches are not present — apply provider 0005_branch.sql first';
+    END IF;
+
+    -- ---- branch REACH for the two new roles ----------------------------------------------------------
+    --
+    -- WITHOUT THIS THE WHOLE SEED IS INVISIBLE. `branch_coordinator` and `clinics_manager` are the phase-25
+    -- branch-scoped roles, and `admin.user_branch_assignment` ships EMPTY — no migration inserts a row.
+    -- `HttpBranchDirectory` fail-closes on an empty set, so both accounts authenticate perfectly and then see
+    -- nothing: a coordinator is refused everywhere, a manager gets zero branches. Every practitioner, item
+    -- and batch below is seeded into a portal neither of them can reach, and the failure reads like a broken
+    -- login rather than a missing grant.
+    --
+    -- Subjects are LOOKED UP, not hardcoded: UserSeeder mints each demo account with a fresh
+    -- `Guid.NewGuid()`, so the ids differ per machine and per database rebuild. Joining identity's table from
+    -- a dev seed is acceptable precisely because this is not service code — a SERVICE reaching across that
+    -- boundary would be the cross-schema coupling the architecture forbids.
+    SELECT id INTO coord FROM identity."user" WHERE normalized_user_name = 'BRANCH_COORDINATOR' LIMIT 1;
+    SELECT id INTO mgr   FROM identity."user" WHERE normalized_user_name = 'CLINICS_MANAGER'    LIMIT 1;
+
+    IF coord IS NULL OR mgr IS NULL THEN
+        -- A NOTICE rather than an exception: the demo accounts are created by identity-service at STARTUP
+        -- (UserSeeder, gated on Issuer:SeedDemoUsers), not by any migration, so running this seed against a
+        -- database whose identity-service has never booted is an ordinary sequencing mistake and not a
+        -- broken environment. The verification query at the foot counts these rows, so a skipped grant shows
+        -- as a 0 there rather than being announced once and scrolled away.
+        RAISE NOTICE 'seed: branch_coordinator/clinics_manager not found in identity."user" — start identity-service once (Issuer:SeedDemoUsers) and re-run; the branch portal will be EMPTY for both roles until then';
+    ELSE
+        -- Idempotent by delete-and-reinsert, which is only possible because this script runs as the schema
+        -- OWNER. `hbmp_app` holds SELECT/INSERT/UPDATE and no DELETE — assignments are soft-revoked in the
+        -- app so the history stays auditable, and that is deliberate. Re-inserting also sidesteps
+        -- ux_user_home_branch, which would otherwise 409 the second Home on a re-run.
+        DELETE FROM admin.user_branch_assignment WHERE created_by = 'seed' AND tenant_id = tenant;
+
+        -- The coordinator runs ONE clinic. Maadi, because every item and batch below is seeded there.
+        INSERT INTO admin.user_branch_assignment
+            (assignment_id, tenant_id, subject_user_id, branch_id, assignment_type, valid_from, created_by)
+        VALUES (gen_random_uuid(), tenant, coord::text, maadi, 'Home', today, 'seed');
+
+        -- The manager supervises all six: one Home plus five Additional. This is what makes BranchSetScoped
+        -- observable — the same screens the coordinator sees, returning six branches in one response instead
+        -- of one. Reach comes from real, revocable assignments and never from the job title (ADR-0029, D4),
+        -- so the manager's breadth has to be seeded as rows like anyone else's.
+        INSERT INTO admin.user_branch_assignment
+            (assignment_id, tenant_id, subject_user_id, branch_id, assignment_type, valid_from, created_by)
+        SELECT gen_random_uuid(), tenant, mgr::text, b.branch_id,
+               CASE WHEN b.branch_code = 'MAA' THEN 'Home' ELSE 'Additional' END, today, 'seed'
+        FROM provider.branch b;
     END IF;
 
     -- ---- practitioners -------------------------------------------------------------------------------
@@ -151,12 +199,20 @@ BEGIN
             (gen_random_uuid(), tenant, maadi, toner,   NULL,   'Count',    -1, 'Annual stock-take (seed data)', 'seed', now() - interval '1 day', 'seed:tnr-count');
     END IF;
 
-    RAISE NOTICE 'seed: branch management demo data applied (3 practitioners, 1 leave, 3 items, 2 batches)';
+    RAISE NOTICE 'seed: branch management demo data applied (3 practitioners, 1 leave, 3 items, 2 batches, branch reach for both roles)';
 END $$;
 
 -- Verify every alert path actually has something behind it. A seed that silently seeded nothing is worse
 -- than no seed: the screens look correct and empty, and nobody discovers otherwise until a demo.
-SELECT 'licence expiring within 30d' AS path, count(*) AS rows FROM provider.practitioner
+-- The two reach rows come FIRST because they gate everything under them: if the coordinator shows 0, none of
+-- the counts below are reachable in the UI no matter how correct they are.
+SELECT 'REACH coordinator (expect 1)' AS path, count(*) AS rows FROM admin.user_branch_assignment a
+    JOIN identity."user" u ON u.id::text = a.subject_user_id
+    WHERE a.created_by = 'seed' AND a.status = 'Active' AND u.normalized_user_name = 'BRANCH_COORDINATOR'
+UNION ALL SELECT 'REACH clinics manager (expect 6)', count(*) FROM admin.user_branch_assignment a
+    JOIN identity."user" u ON u.id::text = a.subject_user_id
+    WHERE a.created_by = 'seed' AND a.status = 'Active' AND u.normalized_user_name = 'CLINICS_MANAGER'
+UNION ALL SELECT 'licence expiring within 30d', count(*) FROM provider.practitioner
     WHERE license_no LIKE 'SEED-%' AND license_expiry BETWEEN current_date AND current_date + 30
 UNION ALL SELECT 'licence expired', count(*) FROM provider.practitioner
     WHERE license_no LIKE 'SEED-%' AND license_expiry < current_date
