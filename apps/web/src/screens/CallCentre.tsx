@@ -1,4 +1,4 @@
-import { memberStatus, callOutcomeLabel, identifierTypeLabel, appointmentTypeLabel } from "./statusLabels";
+import { memberStatus, callOutcomeLabel, callReasonLabel, identifierTypeLabel, appointmentTypeLabel } from "./statusLabels";
 import { useFormat } from "../i18n/useFormat";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
@@ -62,7 +62,14 @@ interface AppointmentSlotRow { slotId: string; slotStart: string }
 
 /** The narrow surface the workspace needs. The default implementation calls the gateway; tests inject a fake. */
 export interface CcApi {
-  openInteraction(reasonCode: string): Promise<{ interactionId: string; callRef: string }>;
+  /**
+   * Open the call record. `direction` says WHO RANG WHOM — inbound (the member called us) or outbound (we
+   * called them). It was hard-coded "Inbound" on every call the portal ever opened, which made the field a
+   * constant dressed as data: outbound follow-up calls, the ones a supervisor most wants to count, were all
+   * filed as inbound. It is set at open and cannot be corrected afterwards, so the control that collects it
+   * locks once the call is under way.
+   */
+  openInteraction(reasonCode: string, direction: CcDirection): Promise<{ interactionId: string; callRef: string }>;
   /**
    * Open a member's file on this call.
    *
@@ -99,9 +106,12 @@ export interface CcApi {
    * There is no `notes` argument. It carried a second body of text kept apart from the summary; the call centre
    * now writes one account of the call, which is this one.
    */
-  close(interactionId: string, outcome: string, summary: string): Promise<CcCloseResult>;
+  close(interactionId: string, outcome: string, summary: string, reasonCode?: string): Promise<CcCloseResult>;
   history(): Promise<CcCallRow[]>;
 }
+
+/** Who rang whom. Recorded on the interaction when it opens. */
+export type CcDirection = "Inbound" | "Outbound";
 
 /** A write against the emr engine. `stale` is emr's 412 — the appointment moved under the agent. */
 export type CcWriteResult = "ok" | "conflict" | "stale" | "error";
@@ -109,20 +119,10 @@ export type CcWriteResult = "ok" | "conflict" | "stale" | "error";
 /** Wrap-up outcome. `summary-required` is the server's 422 and is a correctable mistake, not a failure. */
 export type CcCloseResult = "ok" | "summary-required" | "not-your-call" | "error";
 
-const REASONS = ["BookAppointment", "RescheduleAppointment", "CancelAppointment", "AppointmentEnquiry", "EligibilityEnquiry", "UpdateContact", "Complaint", "Other"];
+/** The call reasons the service accepts (mirrors `CallReasonCode`). Exported: the booking journey offers the
+ *  same list in its call-record step, and two copies would drift the moment one gained a value. */
+export const CALL_REASONS = ["BookAppointment", "RescheduleAppointment", "CancelAppointment", "AppointmentEnquiry", "EligibilityEnquiry", "UpdateContact", "Complaint", "Other"];
 const CANCEL_REASONS = ["PatientRequest", "PatientUnwell", "TransportIssue", "Rescheduling", "ClinicClosure", "DuplicateBooking", "Other"];
-// Bilingual display labels for the reason enums — the enum stays the option `value` (sent to the service),
-// only the shown text is localized so the AR portal never renders a raw English enum literal.
-const REASON_LABELS: Record<string, { en: string; ar: string }> = {
-  BookAppointment: { en: "Book appointment", ar: "حجز موعد" },
-  RescheduleAppointment: { en: "Reschedule appointment", ar: "إعادة جدولة موعد" },
-  CancelAppointment: { en: "Cancel appointment", ar: "إلغاء موعد" },
-  AppointmentEnquiry: { en: "Appointment enquiry", ar: "استفسار عن موعد" },
-  EligibilityEnquiry: { en: "Eligibility enquiry", ar: "استفسار عن الأهلية" },
-  UpdateContact: { en: "Update contact", ar: "تحديث بيانات الاتصال" },
-  Complaint: { en: "Complaint", ar: "شكوى" },
-  Other: { en: "Other", ar: "أخرى" },
-};
 const CANCEL_REASON_LABELS: Record<string, { en: string; ar: string }> = {
   PatientRequest: { en: "Patient request", ar: "طلب المريض" },
   PatientUnwell: { en: "Patient unwell", ar: "اعتلال صحة المريض" },
@@ -167,8 +167,8 @@ const bookingKey = (interactionId: string, beneficiaryId: string, slotId: string
 /** The live gateway-backed implementation (used in the app; tests inject a fake instead). */
 export function createHttpCcApi(): CcApi {
   return {
-    async openInteraction(reasonCode) {
-      const r = await req<{ interactionId: string; callRef: string }>("POST", "/call-interactions", { direction: "Inbound", reasonCode });
+    async openInteraction(reasonCode, direction) {
+      const r = await req<{ interactionId: string; callRef: string }>("POST", "/call-interactions", { direction, reasonCode });
       return r.data ?? { interactionId: "", callRef: "" };
     },
     async openMember(interactionId, beneficiaryId) {
@@ -242,12 +242,15 @@ export function createHttpCcApi(): CcApi {
       if (r.status === 412) return "stale";
       return r.status >= 200 && r.status < 300 ? "ok" : "error";
     },
-    async close(interactionId, outcome, summary) {
+    async close(interactionId, outcome, summary, reasonCode) {
       const r = await req<{ title?: string }>("POST", `/call-interactions/${interactionId}/close`,
         // `summary` is sent even when blank: letting the server refuse the close is the point. Omitting the
         // field to avoid the 422 would recreate the bug this replaced — a call that reads as wrapped up and
         // is still Open, still bound to that member, on the server.
-        { outcome, summary });
+        //
+        // `reasonCode` rides along so a reason corrected mid-call lands on the record. The direction cannot:
+        // it is fixed when the interaction opens, which is why its control locks rather than pretending.
+        { outcome, summary, ...(reasonCode ? { reasonCode } : {}) });
       if (r.status >= 200 && r.status < 300) return "ok";
       if (r.status === 422 && r.data?.title === "summary-required") return "summary-required";
       if (r.status === 403) return "not-your-call";
@@ -307,7 +310,11 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
    *  field any more; this is it, so it is drafted on the file and sent at close. */
   const [wrapSummary, setWrapSummary] = useRestorableState("cc-workspace.summary", "");
 
-  const [reason, setReason] = useState(REASONS[0]);
+  const [reason, setReason] = useState(CALL_REASONS[0]);
+  /** Who rang whom. INBOUND by default because most hotline calls are — but it was HARD-CODED "Inbound" on
+   *  every interaction the portal ever opened, so outbound follow-up calls (the ones a supervisor most wants
+   *  to count) were all filed as inbound. Chosen before the call opens, because that is when it is written. */
+  const [direction, setDirection] = useState<CcDirection>("Inbound");
   const [results, setResults] = useState<CcMatch[] | null>(null);
   const [summary, setSummary] = useState<Cc360 | null>(null);
   const [announce, setAnnounce] = useState("");
@@ -324,10 +331,10 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
   const [showReserve, setShowReserve] = useState(false);
 
   const startCall = useCallback(async () => {
-    const { interactionId: id } = await api.openInteraction(reason);
+    const { interactionId: id } = await api.openInteraction(reason, direction);
     setInteractionId(id);
     setResults(null); setOpenedFor(null); setSummary(null); setAnnounce("");
-  }, [api, reason, setInteractionId, setOpenedFor]);
+  }, [api, reason, direction, setInteractionId, setOpenedFor]);
 
   const doSearch = useCallback(async () => {
     if (!query.trim()) return;
@@ -410,12 +417,13 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
    */
   const closeCall = useCallback(async () => {
     if (!interactionId) return;
-    const result = await api.close(interactionId, outcome, wrapSummary.trim());
+    const result = await api.close(interactionId, outcome, wrapSummary.trim(), reason);
     if (result === "ok") {
       setSummaryError(false);
       setInteractionId(null);
       setResults(null); setOpenedFor(null); setSummary(null);
       setQuery(""); setWrapSummary(""); setShowReserve(false);
+      setDirection("Inbound");
       setAnnounce(t(L.ccBookClosed));
       return;
     }
@@ -426,7 +434,7 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
       : result === "not-your-call" ? t(L.ccNotYourCall)
       : t(L.ccCloseFailed),
     );
-  }, [api, interactionId, outcome, wrapSummary, setInteractionId, setOpenedFor, setQuery, setWrapSummary, t]);
+  }, [api, interactionId, outcome, wrapSummary, reason, setInteractionId, setOpenedFor, setQuery, setWrapSummary, t]);
 
   const copySummary = useCallback(async () => {
     // Guard the METHOD, not just the object: a non-secure context exposes `navigator.clipboard` as undefined
@@ -488,7 +496,18 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
             <>
               <label htmlFor="cc-reason">{t(L.ccReason)}</label>
               <select id="cc-reason" value={reason} onChange={(e) => setReason(e.target.value)}>
-                {REASONS.map((r) => <option key={r} value={r}>{t(REASON_LABELS[r])}</option>)}
+                {CALL_REASONS.map((r) => <option key={r} value={r}>{t(callReasonLabel(r))}</option>)}
+              </select>
+              {/* Offered BEFORE the call opens, because that is the only moment it can be recorded — the
+                  interaction stores it at creation and nothing changes it afterwards. */}
+              <label htmlFor="cc-direction">{t(L.ccDirection)}</label>
+              <select
+                id="cc-direction"
+                value={direction}
+                onChange={(e) => setDirection(e.target.value as CcDirection)}
+              >
+                <option value="Inbound">{t(L.ccInbound)}</option>
+                <option value="Outbound">{t(L.ccOutbound)}</option>
               </select>
               <Button variant="primary" onClick={startCall}>{t(L.ccStartCall)}</Button>
             </>
@@ -513,7 +532,6 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
               onQueryChange={setQuery}
               onSearch={() => void doSearch()}
               results={results}
-              selectedId={openedFor?.beneficiaryId ?? null}
               onSelect={(m) => void openMember(m)}
             />
           </Card>

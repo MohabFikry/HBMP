@@ -117,7 +117,9 @@ export function CallCentreCancelButton({
       // Held in a ref across attempts. A retry after a failed wrap-up must finish THIS call, not open a
       // second one and leave the first Open forever — which is the very state this whole fix is about.
       if (!interaction.current) {
-        const opened = await api.openInteraction("CancelAppointment").catch(() => null);
+        // Inbound: the dialog is opened while the member is on the phone asking to cancel. An agent ringing
+        // OUT to cancel does it from the workspace, where the direction is a choice.
+        const opened = await api.openInteraction("CancelAppointment", "Inbound").catch(() => null);
         if (!opened?.interactionId) { setError(S.failed); return; }
         interaction.current = opened.interactionId;
 

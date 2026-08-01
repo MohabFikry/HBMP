@@ -145,6 +145,46 @@ All six get `useOpenProfile`, so Back works from every one of them. Only where a
 built by hand does `useRestorableState` earn its keep; adding it to a screen that re-fetches everything would be
 ceremony.
 
+## 6. The booking journey is laid out like reception's
+
+Follow-up from review of the built screen. Three problems, one cause.
+
+**`.mrs-card` has no padding at all** — by design, so a card can hold a flush table or image. Every other screen
+supplies its own (reception writes `style={{ padding: "var(--sp5)" }}` per card); the call centre never did, so
+its content sat hard against the card edge. Fixed once in CSS for the workspace
+(`.cc-workspace > .mrs-card`) and with reception's explicit padding on the booking journey — not as an inline
+style per card, which the next card added to the screen would not inherit.
+
+**The appointment step was missing.** It was gated behind the chosen member, so an agent who had not yet found
+the caller — or whose file failed to open — was looking at a booking screen with no booking on it. It is now
+always rendered, exactly as reception's is, and what is missing is reported *when the agent tries to book*
+(`Choose a member first.` — reception's own wording). Availability is not member data; reception loads it with
+nobody chosen. What must be withheld is the **write**, and the server refuses that on a call bound to no member
+regardless of what is on screen.
+
+**The two front-of-house screens taught different gestures.** The call centre had grown its own
+`cc-search`/`cc-results` pair — a whole-row button with name and number pushed to opposite edges — where
+reception uses `book-search`/`book-hits` with a per-row Choose button. `MemberSearch` now emits reception's
+markup, and the dead CSS is deleted rather than left for the next screen to copy. The Choose button is labelled
+with the member's name, because a list of identical "Choose" buttons has no usable accessible name.
+
+Structure now: one padded card, `1. Member` → `2. Appointment` → `3. Call record`.
+
+## 7. The call record carries reason and direction
+
+`CallDirection` existed on the interaction from phase 15 and the portal sent **`"Inbound"` hard-coded on every
+call it ever opened** — a constant dressed as data, so the outbound follow-up calls a supervisor most wants to
+count were all filed as inbound. Both screens now collect it, defaulting to Inbound.
+
+It is written when the interaction **opens** and no endpoint changes it, so the control **locks** once the call
+is under way and says why. An editable control there would accept a correction and silently drop it, which is
+worse than not offering one.
+
+The **reason** is editable throughout and rides along on the close (`UpdateInteractionRequest.ReasonCode`), so an
+agent who came to book and ended up answering an eligibility question can say so. Its bilingual labels moved from
+a screen-local map into `statusLabels.ts` beside the other enum labels — two screens render them now, and a copy
+per screen is exactly how one of them ends up showing an Arabic-portal agent a raw enum.
+
 ## Out of scope
 
 - **Visual restyling.** Every item above is functional; this stays inside the existing design system.

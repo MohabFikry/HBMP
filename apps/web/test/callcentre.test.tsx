@@ -446,7 +446,7 @@ describe("wrap-up: the call is only closed when the server says so", () => {
     // THREE arguments. The fourth was `notes`, a second body of text kept apart from the summary and read by
     // nobody downstream; there is one account of a call now and this is it.
     expect((api.close as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual([
-      "i1", "Resolved", "Booked a follow-up and corrected the phone number.",
+      "i1", "Resolved", "Booked a follow-up and corrected the phone number.", "BookAppointment",
     ]);
     // Closed for real → back to the pre-call state.
     await screen.findByRole("button", { name: /start call/i });

@@ -143,8 +143,28 @@ export const L = {
     en: "Find the member, open their file, then choose the branch, clinic and time. The booking is logged against this call.",
     ar: "ابحث عن المستفيد، افتح ملفه، ثم اختر الفرع والعيادة والوقت. يُسجَّل الحجز على هذه المكالمة.",
   },
-  ccStepFind: { en: "1. Find the member", ar: "١. ابحث عن المستفيد" },
-  ccStepChoose: { en: "2. Choose branch, clinic and time", ar: "٢. اختر الفرع والعيادة والوقت" },
+  // The three steps of a call-centre booking, mirroring reception's "1. Patient / 2. Appointment" so the two
+  // front-of-house screens read the same way — with the step the call centre has and reception does not.
+  ccStepMember: { en: "1. Member", ar: "١. المستفيد" },
+  ccStepAppointment: { en: "2. Appointment", ar: "٢. الموعد" },
+  ccStepCallRecord: { en: "3. Call record", ar: "٣. سجل المكالمة" },
+  ccChoose: { en: "Choose", ar: "اختيار" },
+  ccChange: { en: "Change", ar: "تغيير" },
+  ccBookAction: { en: "Book appointment", ar: "احجز الموعد" },
+  // Told only AFTER a booking is attempted — listing what is missing before the agent has tried is noise.
+  ccNeedMember: { en: "Choose a member first.", ar: "اختر المستفيد أولاً." },
+  ccNeedDoctor: { en: "Choose a specialty and doctor.", ar: "اختر التخصص والطبيب." },
+  ccNeedSlot: { en: "Choose a time.", ar: "اختر الوقت." },
+  ccNoteTooLong: { en: "Shorten the appointment notes before booking.", ar: "اختصر ملاحظات الموعد قبل الحجز." },
+  // Who rang whom. Recorded on the interaction at the moment it opens, so it cannot be corrected afterwards —
+  // hence the control locks once the call is under way rather than pretending a later change would stick.
+  ccDirection: { en: "Direction", ar: "اتجاه المكالمة" },
+  ccInbound: { en: "Inbound — the member called us", ar: "وارد — المستفيد اتصل بنا" },
+  ccOutbound: { en: "Outbound — we called the member", ar: "صادر — نحن اتصلنا بالمستفيد" },
+  ccDirectionLocked: {
+    en: "Set when the call was opened and kept as the record of what happened.",
+    ar: "حُدِّد عند فتح المكالمة ويُحفظ كسجل لما حدث.",
+  },
   ccBookAnother: { en: "Book for another member", ar: "حجز لمستفيد آخر" },
   ccBookFinish: { en: "Finish and close the call", ar: "إنهاء المكالمة" },
   ccBookClosed: { en: "Call closed.", ar: "تم إنهاء المكالمة." },

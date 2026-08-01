@@ -93,22 +93,30 @@ describe("standalone Book appointment (call centre)", () => {
     const api = fakeApi();
     renderNode(<CallCentreBooking api={api} />);
     await findAndOpenMember(user);
-    await waitFor(() => expect(api.openInteraction).toHaveBeenCalledWith("BookAppointment"));
+    // Reason AND direction. Direction was hard-coded "Inbound" for every interaction the portal opened, so
+    // it is now passed explicitly — defaulting to Inbound, which is what this screen sends unless changed.
+    await waitFor(() => expect(api.openInteraction).toHaveBeenCalledWith("BookAppointment", "Inbound"));
   });
 
-  it("discloses nothing and offers no times until the member's file is open", async () => {
+  /**
+   * The appointment step is ALWAYS on screen, exactly as reception's is.
+   *
+   * It used to be hidden until a member had been chosen, so an agent who had not yet found the caller — or
+   * whose file failed to open — was looking at a booking screen with no booking on it. Availability is not
+   * member data (reception loads it with nobody chosen), so there is nothing to withhold; what has to be
+   * withheld is the WRITE, and the server refuses that on a call bound to no member regardless.
+   */
+  it("shows the appointment step before a member is chosen, and refuses to book without one", async () => {
     const user = userEvent.setup();
     const api = fakeApi();
     renderNode(<CallCentreBooking api={api} />);
-    await user.type(screen.getByLabelText(/find member/i), "01001234567");
-    await user.click(screen.getByRole("button", { name: /^search$/i }));
-    await screen.findByRole("button", { name: /Hana Mansour/i });
 
-    // No booking surface at all: not the branch picker, not the Book button.
-    expect(screen.queryByRole("combobox", { name: /^branch$/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^book$/i })).not.toBeInTheDocument();
-    // And the clinic list is not even fetched — a call with no member has no business enumerating availability.
-    expect(api.clinics).not.toHaveBeenCalled();
+    expect(await screen.findByRole("combobox", { name: /^branch$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^book appointment$/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^book appointment$/i }));
+    expect(await screen.findByText(/choose a member first/i)).toBeInTheDocument();
+    expect(api.book).not.toHaveBeenCalled();
   });
 
   /** One box, no type picker. It offered seven identifier types and narrowed nothing — the index matched them
@@ -142,9 +150,14 @@ describe("standalone Book appointment (call centre)", () => {
     await findAndOpenMember(user);
 
     await waitFor(() => expect(screen.getByTestId("cc-live")).toHaveTextContent(/couldn't open/i));
+    // No member is on the booking — the step is on screen (it always is), but nobody is chosen for it, and
+    // the 360 was never even requested. A refused binding is not a "try anyway".
     expect(screen.queryByTestId("cc-booking-for")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^book$/i })).not.toBeInTheDocument();
     expect(api.summary).not.toHaveBeenCalled();
+    // And the Book action refuses, naming the reason.
+    await user.click(screen.getByRole("button", { name: /^book appointment$/i }));
+    expect(await screen.findByText(/choose a member first/i)).toBeInTheDocument();
+    expect(api.book).not.toHaveBeenCalled();
   });
 
   it("books into the branch the agent named, against the bound call", async () => {
@@ -159,7 +172,7 @@ describe("standalone Book appointment (call centre)", () => {
     await choose(user, /^specialty$/i, /Cardiology/);
     await choose(user, /^doctor$/i, /Youssef Adel/);
     await user.click((await screen.findAllByRole("radio", { name: /:/ }))[0]);
-    await user.click(screen.getByRole("button", { name: /^book$/i }));
+    await user.click(screen.getByRole("button", { name: /^book appointment$/i }));
 
     // The interaction id is the one this screen opened, the branch is the one the agent named, and the
     // doctor now rides along with it.
@@ -201,7 +214,7 @@ describe("standalone Book appointment (call centre)", () => {
     await choose(user, /^doctor$/i, /Hana Mansour/);
     await user.click((await screen.findAllByRole("radio", { name: /:/ }))[0]);
 
-    await user.click(screen.getByRole("button", { name: /^book$/i }));
+    await user.click(screen.getByRole("button", { name: /^book appointment$/i }));
     await waitFor(() => expect(screen.getByTestId("cc-live")).toHaveTextContent(/just taken/i));
     // The agent is still on the screen with their branch, specialty and doctor intact — a 409 is someone
     // else's race, and making the agent re-enter the caller's request mid-call is a cost they should not pay.
@@ -231,10 +244,66 @@ describe("standalone Book appointment (call centre)", () => {
     await user.type(await screen.findByLabelText(/call summary/i), "Booked a cardiology appointment in Nasr City.");
     await user.click(screen.getByRole("button", { name: /finish and close/i }));
 
-    expect(api.close).toHaveBeenCalledWith("i9", "Resolved", "Booked a cardiology appointment in Nasr City.");
+    // The reason rides along on the close, so a correction made mid-call lands on the record.
+    expect(api.close).toHaveBeenCalledWith(
+      "i9", "Resolved", "Booked a cardiology appointment in Nasr City.", "BookAppointment",
+    );
     await waitFor(() => expect(screen.getByTestId("cc-live")).toHaveTextContent(/call closed/i));
-    // The call is over: the field goes with it, so the next caller cannot inherit the last one's summary.
-    expect(screen.queryByLabelText(/call summary/i)).not.toBeInTheDocument();
+    // The call is over: the field is CLEARED rather than removed. On a single-card journey the step stays
+    // where it was — but carrying the last caller's summary into the next call would put one member's
+    // account on another's record.
+    expect(screen.getByLabelText(/call summary/i)).toHaveValue("");
+    expect(screen.queryByTestId("cc-booking-for")).not.toBeInTheDocument();
+  });
+
+  /**
+   * The call record carries WHY the call happened and WHO RANG WHOM.
+   *
+   * Direction was hard-coded "Inbound" on every interaction the portal ever opened — a constant dressed as
+   * data, so the outbound follow-up calls a supervisor most wants to count were all filed as inbound.
+   */
+  it("defaults to an inbound call and sends the chosen direction when the call opens", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi();
+    renderNode(<CallCentreBooking api={api} />);
+
+    const dir = screen.getByLabelText(/direction/i);
+    expect(dir).toHaveValue("Inbound");
+
+    await user.selectOptions(dir, "Outbound");
+    await findAndOpenMember(user);
+
+    await waitFor(() => expect(api.openInteraction).toHaveBeenCalledWith("BookAppointment", "Outbound"));
+  });
+
+  /**
+   * Direction is written when the interaction OPENS and no endpoint changes it. An editable control after
+   * that would accept a correction and silently drop it, which is worse than not offering one — so it locks,
+   * and says why.
+   */
+  it("locks the direction once the call is under way, and explains that it is locked", async () => {
+    const user = userEvent.setup();
+    renderNode(<CallCentreBooking api={fakeApi()} />);
+
+    expect(screen.getByLabelText(/direction/i)).toBeEnabled();
+    await findAndOpenMember(user);
+
+    expect(screen.getByLabelText(/direction/i)).toBeDisabled();
+    expect(screen.getByText(/set when the call was opened/i)).toBeInTheDocument();
+  });
+
+  it("opens the call with the reason the agent chose, not the one the screen is named after", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi();
+    renderNode(<CallCentreBooking api={api} />);
+
+    // The default is the reason this screen exists for…
+    expect(screen.getByLabelText(/call reason/i)).toHaveValue("BookAppointment");
+    // …but an agent who came here to book and ended up answering something else can say so.
+    await user.selectOptions(screen.getByLabelText(/call reason/i), "EligibilityEnquiry");
+    await findAndOpenMember(user);
+
+    await waitFor(() => expect(api.openInteraction).toHaveBeenCalledWith("EligibilityEnquiry", "Inbound"));
   });
 
   it("copies the summary and says so, and cannot claim to have copied nothing", async () => {

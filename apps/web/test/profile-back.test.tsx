@@ -53,16 +53,26 @@ describe("the patient profile can be left the way it was entered", () => {
     renderApp("/reception/appointments", "reception");
 
     // Reception's board offers the patient file on every row.
-    const openFile = await screen.findAllByRole("button", { name: /^patient file$/i });
+    //
+    // A generous timeout, deliberately. This renders the whole app at a route and waits for a board to load,
+    // and the default 1000ms is a measure of how loaded the machine is rather than of whether the feature
+    // works — it passed alone and timed out at 1393ms with forty test files running beside it. A test that
+    // fails for a reason nobody changed is worse than no test, because the natural response is to distrust
+    // the suite.
+    const openFile = await screen.findAllByRole("button", { name: /^patient file$/i }, { timeout: 10_000 });
     await user.click(openFile[0]);
 
-    await screen.findByRole("heading", { name: /patient profile/i });
-    const back = await screen.findByRole("button", { name: /^back$/i });
+    await screen.findByRole("heading", { name: /patient profile/i }, { timeout: 10_000 });
+    const back = await screen.findByRole("button", { name: /^back$/i }, { timeout: 10_000 });
 
     await user.click(back);
     // Back to the board, not to a blank screen or out of the app.
-    await waitFor(() => expect(screen.queryByRole("heading", { name: /patient profile/i })).not.toBeInTheDocument());
-    expect(await screen.findAllByRole("button", { name: /^patient file$/i })).not.toHaveLength(0);
+    await waitFor(
+      () => expect(screen.queryByRole("heading", { name: /patient profile/i })).not.toBeInTheDocument(),
+      { timeout: 10_000 },
+    );
+    expect(await screen.findAllByRole("button", { name: /^patient file$/i }, { timeout: 10_000 }))
+      .not.toHaveLength(0);
   });
 
   /**
@@ -72,7 +82,7 @@ describe("the patient profile can be left the way it was entered", () => {
   it("offers no Back on a deep link with no history behind it", async () => {
     renderApp(`/patients/${BEN}`, "reception");
 
-    await screen.findByRole("heading", { name: /patient profile/i });
+    await screen.findByRole("heading", { name: /patient profile/i }, { timeout: 10_000 });
     expect(screen.queryByRole("button", { name: /^back$/i })).not.toBeInTheDocument();
   });
 });

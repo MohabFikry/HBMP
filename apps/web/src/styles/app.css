@@ -940,26 +940,22 @@ nav.mrs-rail {
 
 /* ── 15.5 Call Centre workspace ─────────────────────────────────────────────── */
 .cc-workspace { display: flex; flex-direction: column; gap: var(--sp5); }
+/*
+  PAD THE CARDS. `.mrs-card` carries surface, border, radius and shadow — and no padding at all, by design, so
+  a card can hold a flush table or an image. Every other screen supplies its own (reception writes
+  `style={{ padding: "var(--sp5)" }}` on each one); the call centre never did, so its content sat hard against
+  the card edge and each step read as a separate slab rather than a step in one flow.
+
+  Done once here rather than as an inline style per card: there are five of them across the workspace, and an
+  inline style is a rule the next card added to this screen will not inherit.
+*/
+.cc-workspace > .mrs-card { padding: var(--sp5); }
 .cc-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .cc-callbar { display: flex; align-items: center; gap: var(--sp4); flex-wrap: wrap; min-block-size: 44px; }
-.cc-callbar select, .cc-search select, .cc-wrapup select, .cc-cancel select {
+.cc-callbar select, .cc-wrapup select, .cc-cancel select, .cc-callmeta select {
   min-block-size: 44px; padding: 0 var(--sp3); border: 1px solid var(--border);
   border-radius: var(--r-sm); background: var(--surface-1); color: var(--text-1);
 }
-.cc-search {
-  display: flex;
-  /* flex-START, not flex-end: the text field carries help text under it, so aligning bottoms dropped the
-     "Search by" control a line below the field it sits beside. Aligning the tops lines the LABELS up, and
-     since both label+control pairs are the same height, the controls line up too. */
-  align-items: flex-start;
-  gap: var(--sp3);
-  flex-wrap: wrap;
-}
-.cc-results { list-style: none; margin: var(--sp3) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp2); }
-.cc-result { display: flex; align-items: center; justify-content: space-between; gap: var(--sp4); inline-size: 100%;
-  min-block-size: 44px; padding: 0 var(--sp4); border: 1px solid var(--border); border-radius: var(--r-sm);
-  background: var(--surface-1); color: var(--text-1); cursor: pointer; }
-.cc-result[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 .cc-muted { color: var(--text-2); }
 .cc-locked { display: flex; flex-direction: column; gap: var(--sp3); }
 .cc-lockchip { display: inline-flex; align-items: center; gap: var(--sp2); align-self: flex-start;
@@ -973,6 +969,19 @@ nav.mrs-rail {
 .cc-appts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp2); }
 .cc-appts li { display: flex; align-items: center; justify-content: space-between; gap: var(--sp4); flex-wrap: wrap; }
 .cc-wrapup { display: flex; gap: var(--sp4); flex-wrap: wrap; align-items: flex-end; }
+/* The call's own metadata — reason and direction — side by side above the summary. Wraps to one column on a
+   narrow screen rather than squeezing two selects into an unreadable width. */
+.cc-callmeta {
+  display: flex;
+  gap: var(--sp4);
+  flex-wrap: wrap;
+  margin-block-end: var(--sp4);
+}
+.cc-callmeta .cc-field { flex: 1 1 260px; min-inline-size: 0; }
+.cc-field { display: flex; flex-direction: column; gap: 6px; }
+/* Says why a control is disabled. Muted and small, like the design system's field help, because it explains
+   the control rather than competing with it. */
+.cc-hint { font-size: 12px; color: var(--text-2); }
 .cc-history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp2); }
 
 /* ---- 18.F2 — command palette (⌘K / Ctrl+K) ------------------------------------------------------
