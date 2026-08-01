@@ -669,7 +669,13 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
                     Arabic-portal agent picked their wrap-up from "FollowUpRequired" and "NoAction" — the exact
                     bug already fixed for the identifier types a few cards up. `callOutcomeLabel` existed and
                     was in use in the call-history list below; only this control skipped it. */}
-                <select value={outcome} onChange={(e) => setOutcome(e.target.value)}>
+                <select
+                  value={outcome}
+                  // Changing the outcome can make the summary optional (Abandoned), so a "summary is
+                  // required" error left over from a Resolved attempt would be sitting on a form that is
+                  // now valid — telling the agent to fix something the server no longer asks for.
+                  onChange={(e) => { setOutcome(e.target.value); setSummaryError(false); }}
+                >
                   {OUTCOMES.map((o) => <option key={o} value={o}>{t(callOutcomeLabel(o))}</option>)}
                 </select>
               </label>

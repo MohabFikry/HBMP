@@ -24,7 +24,16 @@ public sealed class CallCentreFactory : WebApplicationFactory<Program>
     public FakeMemberDirectory Directory { get; } = new();
     public FakeAppointmentGateway Gateway { get; } = new();
     public FakeContactGateway Contacts { get; } = new();
-    public InMemoryOutbox Outbox { get; private set; } = default!;
+    /// <summary>The in-memory outbox this host published to.
+    ///
+    /// <para>Resolved on READ, not assigned in <see cref="CreateClient"/>. It used to be a settable property
+    /// populated only when a client was created, so a test that touched the outbox before its first
+    /// <c>AgentClient()</c> call — <c>CallCentreE2ETests</c> opens with <c>factory.Outbox.Clear()</c> — got a
+    /// NullReferenceException unless a SIBLING test in the same class happened to run first and set it. xUnit
+    /// does not order test methods, so that suite passed or failed on which test the runner picked first.
+    /// The outbox is a singleton in the host, so resolving it here is the same object, minus the ordering
+    /// hazard. Reading it also forces host creation, exactly as <c>CreateClient</c> does.</para></summary>
+    public InMemoryOutbox Outbox => (InMemoryOutbox)Services.GetRequiredService<InMemoryOutbox>();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -50,9 +59,7 @@ public sealed class CallCentreFactory : WebApplicationFactory<Program>
 
     public new HttpClient CreateClient()
     {
-        var c = base.CreateClient();
-        Outbox = (InMemoryOutbox)Services.GetRequiredService<InMemoryOutbox>();
-        return c;
+        return base.CreateClient();
     }
 
     public HttpClient AgentClient()

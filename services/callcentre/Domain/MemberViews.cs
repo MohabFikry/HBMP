@@ -2,8 +2,13 @@ namespace Mersal.CallCentre.Domain;
 
 // The call-centre member views (phase 15.2). MINIMUM-NECESSARY + CLINICAL-FREE by construction (design 37 §6,
 // 11-permission-matrix): the shapes below CANNOT carry a diagnosis, result, prescription, note, vital, or
-// examination detail — there is no field for them. Proven additionally by an authorization test over the
-// serialized JSON. The Call Centre is MemberScoped, so appointments span ALL branches.
+// examination detail — there is no field for them. The Call Centre is MemberScoped, so appointments span ALL
+// branches.
+//
+// The proof is an ALLOW-LIST over every string field in this graph (MemberProjectionTests), not a scan for
+// clinical-sounding names: a free-text field carries whatever the sibling service wrote into it, which is not
+// knowable from here, so a new one fails the test until someone says what it holds. Adding a string below
+// means adding it there too — deliberately, because that is the review this file's guarantee depends on.
 
 /// <summary>Pre-verification search hit — deliberately thin. ONLY a display name, the beneficiary id, and WHICH
 /// identifier TYPES the agent may challenge on. No coverage, no contacts, no appointments, no history.
