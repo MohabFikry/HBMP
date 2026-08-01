@@ -42,15 +42,20 @@ cd apps/web && npx vitest run          # 377 tests
 
 Infrastructure: `infra/compose` (Tier 1, single node). Postgres is published on **55432**, not 5432.
 
-## Measured state, 2026-07-30
+## Measured state, 2026-08-01
 
 | | |
 |---|---|
-| Backend suite | **2,157 passed, 0 failed, 0 skipped** (32 assemblies, `--with-db`) |
-| Web suite | **377 passed** (35 files) |
-| Domain coverage | **82.5%** against an enforced floor of 58 |
-| Overall coverage | **50.7%** against an enforced floor of 45 |
-| CI gates | 17, all green on the last backend commit |
+| Backend suite | **2,500 passed, 0 failed, 0 skipped** (33 assemblies, `--with-db`) — measured 2026-08-01 |
+| Web suite | **449 passed, 0 failed** (38 files) — measured 2026-08-01 |
+| Domain coverage | **82.5%** against an enforced floor of 58 — *last measured 2026-07-30, not re-run since* |
+| Overall coverage | **50.7%** against an enforced floor of 45 — *last measured 2026-07-30, not re-run since* |
+| CI gates | 18 |
+
+The two suite rows were re-measured for this update. The two coverage rows were **not**, and say so rather
+than being carried forward as though they were: restating an old number under a new date is the precise habit
+that made the previous version of this file describe Keycloak and 107 tests. The floors are live in
+`tools/ci/coverage-floors.json`, which remains the source of truth for any figure that disagrees.
 
 Coverage comes from `tools/ci/coverage-report.py`, which merges cobertura reports as a UNION. The previous
 gate summed them, and `dotnet test` writes one per test assembly, so 161 files were counted more than once
@@ -71,9 +76,23 @@ expensive way.
 - **55 outbox call sites** still commit their event separately from the state change it announces, so a
   crash between the two loses the event with nothing recording it was owed. Ratcheted one-way in
   `docs/quality/outbox-atomicity-debt.txt` — the number can only go down.
-- **Two invariants are unproven**: `INV-DEDUPE-SURVIVES-RESTART` (needs the durable `IProcessedEventStore`
-  from phase 22) and the Api-layer coverage gap. CI runs the registry checker with `--allow-unproven`
-  until they are covered; dropping that flag is the exit criterion.
+- ~~**Two invariants are unproven**~~ — **CLOSED, and this entry was stale.** `INV-DEDUPE-SURVIVES-RESTART`
+  is proven against the DURABLE store (`ProcessedEventDurabilityTests`), `INV-OUTBOX-SURVIVES-CRASH` by the
+  library + architecture pair, and CI has NOT passed `--allow-unproven` since 24.3 — the exit criterion this
+  entry describes as pending was met before it was written. The registry reports **zero** unproven entries
+  today. Left visible rather than deleted, because a handover that quietly drops its own open items teaches
+  the next reader to distrust the list; struck through, it says the check was done.
+- **`services/inventory` has no per-module coverage floor.** `tools/ci/coverage-floors.json` lists a floor for
+  every other module; the service added in phase 25 is absent, so its coverage is unenforced — the aggregate
+  floors still bind it, but nothing stops that one service regressing on its own. Deliberately not invented
+  here: a floor must come from a measured run (`raise-floors.py` proposes them after a green one), and a
+  number guessed to fill a gap is worse than the gap, because it looks enforced.
+- **Four web suites were a calendar time-bomb, now defused.** `reception-booking`, `callcentre`,
+  `callcentrebooking` and `reception-dashboard` pinned fixtures to July 2026 while the booking calendar
+  defaults its month to `new Date()`. They went red at midnight on 1 August 2026 — 14 tests, four files, no
+  code change behind any of them — and would have failed on whoever's commit happened to land next.
+  `freezeClock()` in `apps/web/test/helpers.tsx` now pins the date at file scope. **If you write a fixture
+  with an absolute date, freeze the clock in the same file.**
 - **Migration 0010's own header overstates what it does.** FORCE ROW LEVEL SECURITY stops a *non-superuser*
   owner bypassing a policy. The owner here, `hbmp`, is SUPERUSER + BYPASSRLS, so the protection it
   advertises does not apply in this deployment. What actually holds is that requests are served by

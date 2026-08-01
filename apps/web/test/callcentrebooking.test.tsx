@@ -2,11 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
-import { renderNode } from "./helpers";
+import { freezeClock, renderNode } from "./helpers";
 import { CallCentreBooking } from "../src/screens/CallCentreBooking";
 import type { Cc360, CcApi } from "../src/screens/CallCentre";
 import { rolePermissions } from "../src/authz/permissions";
 import { PORTALS } from "../src/portals/catalog";
+
+// FILE SCOPE, not inside one describe: every suite in this file shares fixtures that name absolute
+// July-2026 dates, and the booking calendar defaults its month to the real clock. Scoping the freeze to
+// a single describe left the others rotting on the same time-bomb.
+freezeClock();
 
 const BEN = "b-hana";
 

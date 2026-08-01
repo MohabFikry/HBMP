@@ -318,10 +318,16 @@ invariants:
       - Mersal.Admin.Tests.BreakGlassIntegrationTests.Full_lifecycle_request_dual_approve_step_up_scoped_access_auto_expire
       - Mersal.Admin.Tests.BreakGlassPolicyTests.The_requester_cannot_approve_their_own_grant
 
-  # ---------------------------------------------------------------- known-unproven (Gate 3 work items)
+  # ---------------------------------------------------------------- formerly unproven (Gate 3 — CLOSED)
   #
-  # These are here BECAUSE they have no test. Do not delete them to make the checker quiet — run it with
-  # --allow-unproven while Gate 3 is in flight, and remove the flag when this section is empty.
+  # This section header used to read "known-unproven" and to say these entries had NO TEST. Both statements
+  # stopped being true when Gate 3 landed their tests, and the header stayed — so the file described a gap it
+  # had already closed, which is the same defect the registry exists to prevent, in the registry itself.
+  #
+  # Both entries below now name tests that exist and run. `--allow-unproven` is gone from CI (backend-ci.yml,
+  # "gate: invariant registry"), and an entry with `tests: []` is a red build. The heading is kept rather than
+  # merged upward because the two invariants below are the platform's hardest to prove — the reason they were
+  # last is worth a reader knowing.
 
   - id: INV-OUTBOX-SURVIVES-CRASH
     statement: >-
