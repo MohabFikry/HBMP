@@ -29,30 +29,16 @@ const CSS_DIRS = [
 ];
 
 /**
- * Classes used by screens that predate this guard and have no rule.
+ * EMPTY, and it should stay that way.
  *
- * NOT a suppression list to grow — every entry is markup pointing at styling that does not exist. The four
- * that mattered most have been fixed and removed: `restricted-card` / `chip` / `chip--restricted` (the
- * withheld-result card, now styled from tokens instead of duplicated inline) and `visually-hidden` (which
- * hid nothing, so a print-failure live region and a filter label both rendered VISIBLY — `sr-only` is the
- * class that exists).
+ * This began at fifteen entries and was cleared rather than carried. Adding a name here is choosing to ship
+ * markup that points at styling which does not exist — which fails silently, since the build is clean and
+ * the only symptom is a screen that looks unfinished. Define the rule instead.
  *
- * What remains is layout and chip styling on the patient profile, the executive dashboard, the beneficiary
- * portal and the booking time picker. Fix one, delete its line; do not add to it.
+ * If a class genuinely needs no styling, delete it from the markup: a className that does nothing is a
+ * promise to the next reader that something, somewhere, is styling this.
  */
-const KNOWN_MISSING = new Set([
-  "ben-checkbox-cell",
-  "bk-time",
-  "bk-times",
-  "call-history",
-  "call-row-duration",
-  "call-row-when",
-  "kpi-cell",
-  "profile-chip--critical",
-  "profile-chip--info",
-  "profile-chip--neutral",
-  "profile-section",
-]);
+const KNOWN_MISSING = new Set<string>([]);
 
 function walk(dir: string, ext: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {

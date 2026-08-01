@@ -2576,3 +2576,104 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   gap: var(--sp3);
   max-inline-size: 480px;
 }
+
+/* ============================================================================================================
+   CLEARING THE CLASS DEBT (the KNOWN_MISSING list in apps/web/test/css-classes-exist.test.ts).
+
+   Eleven names that markup pointed at and no stylesheet defined. Each one is a container or a modifier whose
+   SIBLINGS were written — `.profile-sections` without `.profile-section`, `.bk-time-grid` without `.bk-time`,
+   `.call-row-head` without the two spans inside it, `.profile-chip` with only one of its six tone modifiers.
+   That is the signature of the fault: the specific thing gets a rule and the thing holding it does not, so
+   the layout half-works and nobody looks twice.
+   ============================================================================================================ */
+
+/* ── Patient profile ──────────────────────────────────────────────────────────────────────────────────── */
+/* The section shell — a LANDMARK WRAPPER, not a surface. It carries the id and aria-labelledby that the jump
+   nav targets, and the `<Card>` immediately inside it already draws the border, radius, padding and
+   background. Giving this one a surface too would have produced a card inside a card, inset twice: the
+   double-padding fault the `.pol-screen` and `.branch-screen` rules each guard against explicitly. I wrote
+   it as a card first and had to look at the markup to catch it.
+
+   So: layout only. `min-inline-size: 0` because `.profile-sections` is a grid and a wide table inside a
+   section would otherwise push the column past the viewport. */
+.profile-section {
+  display: grid;
+  min-inline-size: 0;
+}
+.profile-section > * { min-inline-size: 0; }
+
+/* Chip tones. `.profile-chip` draws its border from `currentColor`, so a tone only has to set `color` and the
+   text and the ring move together — which is why the base rule was written that way.
+   THE HUE WAS THE MISSING CUE, not the only one: shape (`data-shape`) and the label text were already there,
+   so these chips were never colour-dependent. They were monochrome, and a critical allergy read exactly like
+   a call outcome. Every token below is AA against all three page surfaces in both themes (checked: worst is
+   --st-ok-fg at 4.84:1), which matters because these chips have NO background of their own — they inherit
+   whatever surface they land on. */
+/* `bad` and `critical` are both emitted (the web fixtures use both; profile-service's FlagAlert uses
+   `critical`) and mean the same severity, so they resolve to the same token rather than one of them silently
+   having no rule. `tone` is `z.string()` on the wire — deliberately open — so an unrecognised value inherits
+   its colour and still renders as a legible chip with its border, label and shape intact. Degrading to
+   monochrome is the right failure for an open vocabulary; degrading to invisible would not be. */
+.profile-chip--bad,
+.profile-chip--critical { color: var(--st-bad-fg); }
+.profile-chip--warn     { color: var(--st-warn-fg); }
+.profile-chip--positive { color: var(--st-ok-fg); }
+.profile-chip--info     { color: var(--st-info-fg); }
+.profile-chip--neutral  { color: var(--st-neu-fg); }
+/* Direction is not a status — an inbound call is not "good" and an outbound one is not "bad". Both stay
+   neutral and are told apart by the icon and the label, which is what those cues are for. */
+.profile-chip--inbound,
+.profile-chip--outbound { color: var(--text-2); }
+
+/* Call history. `.call-history-toolbar` and `.call-row*` were written; the wrapper and the two spans in the
+   row head were not. */
+.call-history {
+  display: grid;
+  gap: var(--sp3);
+}
+/* Tabular figures so a column of times and durations lines up on the digit rather than drifting per glyph
+   width — the same reason `.tnum` exists for the pager beside it. */
+.call-row-when,
+.call-row-duration {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+/* ── Beneficiary portal ───────────────────────────────────────────────────────────────────────────────── */
+/* The checkbox that sits in a field grid beside real inputs. `.mrs-field` + an empty `.mrs-label` already
+   reserve the label box above it (see the comment at the call site); what was missing is pushing the control
+   to the BOTTOM of the cell, so the checkbox aligns with the inputs' control row instead of floating at the
+   top of a taller cell whenever a sibling grows a help line. */
+.ben-checkbox-cell {
+  display: grid;
+  align-content: end;
+}
+
+/* ── Executive dashboard ──────────────────────────────────────────────────────────────────────────────── */
+/* A KPI and its optional status chip are one unit inside `.kpi-row`'s auto-fit grid. Without this the chip
+   was a second grid item's worth of nothing: the card and the chip stretched independently, so a row where
+   only some KPIs carried a status came out ragged. */
+.kpi-cell {
+  display: grid;
+  align-content: start;
+}
+
+/* ── Booking time picker ──────────────────────────────────────────────────────────────────────────────── */
+/* The section around the heading and `.bk-time-grid`. */
+.bk-time {
+  display: grid;
+  gap: var(--sp3);
+}
+/* The times column, sibling to `.bk-cal`. `.bk-cal` is a bordered, padded panel and this one had nothing —
+   two columns of the same control, one in a card and one floating beside it. Same surface treatment, so the
+   pair reads as one picker. */
+.bk-times {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp3);
+  background: var(--surface-1);
+  display: grid;
+  gap: var(--sp3);
+  align-content: start;
+  min-inline-size: 0;
+}
