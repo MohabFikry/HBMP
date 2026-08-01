@@ -123,14 +123,22 @@ expensive way.
   platform does X" read identically in prose and are not the same claim. Closed by ADR-0029 §4.1: item
   creation asks masterdata whether the thing is a medicine and refuses it if so, *and refuses it when
   masterdata is unreachable*, so the gate cannot open quietly during an outage.
-- **Three committed OpenAPI specs are stale, and nothing catches it.** Regenerating into a scratch dir on
-  2026-08-01 and diffing against `docs/api/` showed `approvals` (missing `orderedByUserId`), `patient`
-  (`POST /beneficiaries/{id}/status` is now `PATCH /beneficiaries/{id}`) and `policy` (missing
-  `/enrollments/{enrollmentId}/family` and more) all behind the code. `generate-openapi.sh` proves a spec can
-  be *produced*; **no gate compares the produced spec to the committed one**, so `docs/api/` drifts silently
-  and the Kong route-coverage gate reads the stale copy. Left unfixed deliberately — regenerating three
-  unrelated services inside a D5 commit would hide them. Reproduce with
-  `DOTNET=./dotnet.sh tools/ci/generate-openapi.sh /tmp/spec && diff -q docs/api/X.json /tmp/spec/X.json`.
+- **A gate with no local entry point is a gate you learn about from CI.** Three committed OpenAPI specs
+  (`approvals`, `patient`, `policy`) were stale on 2026-08-01 and `openapi-drift` — a blocking gate — had been
+  **red in CI for a day** while local runs reported every other gate green. Both halves of that sentence
+  matter. The specs are regenerated and the gate passes now; the reason it went unnoticed is the part worth
+  keeping.
+
+  The drift comparison lived **only** inside `.github/workflows/backend-ci.yml`. Every other gate has a
+  script under `tools/ci/`, so "run the gates locally" covered ten of eleven and nobody noticed the
+  eleventh was missing — the only way to run it was to push and wait ~8 minutes for the scoreboard, which
+  is not something anyone does before a commit. **Before saying "all gates green", check that the set you
+  ran is the set CI runs**, or the sentence is about your tooling rather than the code.
+
+  Now: `DOTNET=./dotnet.sh tools/ci/check-openapi-drift.sh` (add `--fix` to regenerate in place). CI calls
+  the same script rather than its own copy, and `openapi-generate`/`openapi-drift` are in
+  `check-gate-freshness.py`'s `REQUIRED_GATES` so the watchdog alarms if they stop running rather than
+  merely failing. **Any new gate belongs in `tools/ci/`, not inline in the workflow.**
 - **Migration 0010's own header overstates what it does.** FORCE ROW LEVEL SECURITY stops a *non-superuser*
   owner bypassing a policy. The owner here, `hbmp`, is SUPERUSER + BYPASSRLS, so the protection it
   advertises does not apply in this deployment. What actually holds is that requests are served by

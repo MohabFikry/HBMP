@@ -41,6 +41,12 @@ REQUIRED_GATES = [
     "coverage-exclusions",
     "floor-monotonicity",
     "invariant-registry",
+    # 25.9 — added after openapi-drift sat red for a day without anyone noticing. It was in the CI
+    # scoreboard but not here, so if it had stopped RUNNING instead of failing, this watchdog would have
+    # said nothing. A gate that reports the API contract is worth exactly as much silence as one that
+    # reports coverage.
+    "openapi-generate",
+    "openapi-drift",
 ]
 
 

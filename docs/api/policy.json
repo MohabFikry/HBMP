@@ -1951,6 +1951,29 @@
         }
       }
     },
+    "/api/v1/enrollments/{enrollmentId}/family": {
+      "get": {
+        "tags": [
+          "Mersal.Policy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "enrollmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/bulk-jobs": {
       "get": {
         "tags": [

@@ -120,3 +120,10 @@ Each service: `Api/ Domain/ Infrastructure/ Tests/` + `README.md` (template in `
   lifecycle among them. `--with-db` points them at the Compose Postgres (`:55432`) using
   `tools/ci/print-test-db-env.sh`, the same variable list CI exports. It fails loudly if the DB is unreachable
   rather than letting a run skip everything quietly. **A green suite is only meaningful with this flag.**
+- **Before claiming "gates green", run the OpenAPI drift gate too:
+  `DOTNET=./dotnet.sh tools/ci/check-openapi-drift.sh`** (`--fix` regenerates `docs/api/` in place). It is
+  blocking in CI and asserts the committed specs still describe the running services. It had no local entry
+  point until 25.9, which is exactly how it stayed red in CI for a day while every local check passed — the
+  gates you can run are not automatically the gates that exist. Every gate now lives in `tools/ci/`; if you
+  add one, put it there rather than inline in the workflow, and add it to `REQUIRED_GATES` in
+  `check-gate-freshness.py` so its *silence* alarms as well as its failure.

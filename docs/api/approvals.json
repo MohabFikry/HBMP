@@ -553,6 +553,10 @@
           },
           "priority": {
             "$ref": "#/components/schemas/AuthPriority"
+          },
+          "orderedByUserId": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false

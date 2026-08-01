@@ -358,24 +358,13 @@ jobs:
         id: gate_openapi_drift
         if: always()
         continue-on-error: true
-        run: |
-          mkdir -p docs/api
-          # 24.1 — REFUSE TO COMPARE NOTHING. This used to be `cp ... 2>/dev/null || true`, which turned a
-          # generation that produced zero specs into a clean `git diff` and a PASS: the louder the upstream
-          # failure, the greener this gate got. Nothing verified reads identically to nothing changed.
-          n=$(ls artifacts/openapi/*.json 2>/dev/null | wc -l)
-          if [ "$n" -eq 0 ]; then
-            echo "::error::no generated specs to compare — the generation step produced none, so this gate"
-            echo "cannot say anything about the committed contract. Failing rather than reporting it clean."
-            exit 1
-          fi
-          echo "comparing $n generated spec(s) against docs/api"
-          cp artifacts/openapi/*.json docs/api/
-          if ! git diff --exit-code -- docs/api; then
-            echo "::error::OpenAPI specs in docs/api are stale."
-            echo "Run tools/ci/generate-openapi.sh locally and commit the result — the spec is the contract."
-            exit 1
-          fi
+        # 25.9 — the comparison moved into tools/ci/check-openapi-drift.sh and this step now calls it.
+        # It used to live here and ONLY here, which made it the one gate with no local entry point: the only
+        # way to run it was to push and wait for the scoreboard. It sat RED for a day while local runs
+        # reported every other gate green, because "every other gate" was all anyone could actually run.
+        # Sharing the script means the local answer and this one cannot differ. The rules it carries —
+        # refuse to compare nothing (24.1), report which specs drifted — are unchanged.
+        run: bash tools/ci/check-openapi-drift.sh artifacts/openapi
 
       # ADVISORY: artefact upload. Losing the upload loses convenience, not a verdict — every number it
       # carries was already asserted by a counted gate above.
