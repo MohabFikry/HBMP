@@ -2507,3 +2507,72 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   max-width: 68ch;
   margin: 0;
 }
+
+/* ============================================================================================================
+   THE RESTRICTED-RESULT CARD (14.8, design 37 §6/§7) — the highest-stakes surface in the app: what a
+   clinician sees when a result is withheld pending a justified, time-boxed, single-result grant.
+
+   `.restricted-card`, `.chip` and `.chip--restricted` were written into the markup and defined NOWHERE. The
+   card did not render unstyled, because every rule was duplicated inline instead — hardcoded 12px radii,
+   16px padding, a 999px pill — which is the same fault wearing better clothes: values that cannot follow the
+   theme, cannot be found by anyone searching the stylesheet, and drift the moment a token moves under them.
+   ============================================================================================================ */
+.restricted-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: var(--sp4);
+  background: var(--surface-2);
+  display: grid;
+  gap: var(--sp3);
+}
+.restricted-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-weight: 600;
+}
+/* Deliberately NEUTRAL, not a warning colour. A withheld result is not an error and not a danger — it is a
+   normal state of a system that gates special-category data by default. Red would train people to read it as
+   a fault and to look for someone to blame; the lock and the word carry the meaning without the alarm. */
+.chip--restricted {
+  border-style: dashed;
+  border-color: var(--border-strong);
+  color: var(--text-1);
+  background: var(--surface-1);
+}
+.chip--restricted svg {
+  inline-size: 14px;
+  block-size: 14px;
+}
+.restricted-meta {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sp1) var(--sp3);
+}
+/* `--text-2` (7.0:1 on white), NOT the `opacity: 0.7` this used to carry. Opacity COMPOSITES: it produced a
+   colour that exists in no token, that the token-contrast test cannot see, and that lands wherever the
+   backdrop happens to put it. That is exactly how a value ends up below AA while looking deliberate — and
+   these labels sit on --surface-2, which is not the surface the author would have checked. */
+.restricted-meta dt {
+  color: var(--text-2);
+}
+.restricted-meta dd {
+  margin: 0;
+}
+.restricted-body {
+  margin: 0;
+}
+.restricted-request {
+  display: grid;
+  gap: var(--sp3);
+  max-inline-size: 480px;
+}

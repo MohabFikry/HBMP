@@ -107,7 +107,12 @@ describe("14.8 — request-access dialog", () => {
     expect(screen.getByText(/a purpose is required/i)).toBeInTheDocument();
     expect(screen.getByText(/a justification is required/i)).toBeInTheDocument();
 
-    await userEvent.selectOptions(screen.getByLabelText(/purpose/i), "ClinicalReview");
+    // The purpose control is the design system's Select (a listbox combobox), not a native <select> — so it
+    // is opened and chosen from, the way a user does, rather than driven by selectOptions. The native
+    // element it replaced could not be styled and opened an OS-drawn list on the one screen that must read
+    // as unmistakably different from an ordinary result.
+    await userEvent.click(screen.getByRole("combobox", { name: /purpose/i }));
+    await userEvent.click(screen.getByRole("option", { name: "ClinicalReview" }));
     await userEvent.type(screen.getByLabelText(/justification/i), "continuity of care");
     await userEvent.click(screen.getByRole("button", { name: /submit request/i }));
 
@@ -143,7 +148,8 @@ describe("14.6/14.8 — results inbox wires the sensitivity gate", () => {
 
     // Request access → dialog → submit reaches the API with the order/line anchor.
     await userEvent.click(screen.getByRole("button", { name: /request access/i }));
-    await userEvent.selectOptions(await screen.findByLabelText(/purpose/i), "ClinicalReview");
+    await userEvent.click(await screen.findByRole("combobox", { name: /purpose/i }));
+    await userEvent.click(screen.getByRole("option", { name: "ClinicalReview" }));
     await userEvent.type(screen.getByLabelText(/justification/i), "continuity of care");
     await userEvent.click(screen.getByRole("button", { name: /submit request/i }));
 

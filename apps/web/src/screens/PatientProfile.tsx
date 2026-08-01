@@ -223,7 +223,7 @@ function PrintSummaryButton({ beneficiaryId }: { beneficiaryId: string }) {
       >
         {t(state === "busy" ? STR.printing : STR.print)}
       </Button>
-      <span aria-live="polite" role="status" className="visually-hidden">
+      <span aria-live="polite" role="status" className="sr-only">
         {state === "failed" ? t(STR.printFailed) : ""}
       </span>
       {state === "failed" ? <InlineAlert tone="bad">{t(STR.printFailed)}</InlineAlert> : null}
@@ -620,7 +620,7 @@ function CallHistoryView({ data, beneficiaryId }: { data: CallHistorySection; be
     <div className="call-history">
       <div className="call-history-toolbar">
         <label>
-          <span className="visually-hidden">{t({ en: "Filter by direction", ar: "تصفية حسب الاتجاه" })}</span>
+          <span className="sr-only">{t({ en: "Filter by direction", ar: "تصفية حسب الاتجاه" })}</span>
           <select value={direction} onChange={(e) => setDirection(e.target.value as typeof direction)}>
             <option value="all">{t({ en: "All calls", ar: "كل المكالمات" })}</option>
             <option value="Inbound">{t(STR.inbound)}</option>

@@ -31,14 +31,14 @@ const CSS_DIRS = [
 /**
  * Classes used by screens that predate this guard and have no rule.
  *
- * NOT a suppression list to grow — every entry is a screen rendering something unstyled right now, and two
- * of them matter more than the rest:
- *   • `restricted-card` / `chip--restricted` — the card that marks HIGHLY SENSITIVE clinical results. It is
- *     supposed to look unmistakably different from an ordinary result; unstyled, it does not.
- *   • `visually-hidden` — intended to hide content from sighted users while leaving it for screen readers.
- *     Undefined, it hides nothing, so that content is simply VISIBLE. (`sr-only` is the defined class this
- *     was probably meant to be.)
- * Fix them and delete the line; do not add to it.
+ * NOT a suppression list to grow — every entry is markup pointing at styling that does not exist. The four
+ * that mattered most have been fixed and removed: `restricted-card` / `chip` / `chip--restricted` (the
+ * withheld-result card, now styled from tokens instead of duplicated inline) and `visually-hidden` (which
+ * hid nothing, so a print-failure live region and a filter label both rendered VISIBLY — `sr-only` is the
+ * class that exists).
+ *
+ * What remains is layout and chip styling on the patient profile, the executive dashboard, the beneficiary
+ * portal and the booking time picker. Fix one, delete its line; do not add to it.
  */
 const KNOWN_MISSING = new Set([
   "ben-checkbox-cell",
@@ -47,15 +47,11 @@ const KNOWN_MISSING = new Set([
   "call-history",
   "call-row-duration",
   "call-row-when",
-  "chip",
-  "chip--restricted",
   "kpi-cell",
   "profile-chip--critical",
   "profile-chip--info",
   "profile-chip--neutral",
   "profile-section",
-  "restricted-card",
-  "visually-hidden",
 ]);
 
 function walk(dir: string, ext: string, out: string[] = []): string[] {

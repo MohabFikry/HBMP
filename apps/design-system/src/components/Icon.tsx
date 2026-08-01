@@ -56,6 +56,15 @@ export const iconPaths = {
   toggle: '<rect x="2" y="7" width="20" height="10" rx="5"/><circle cx="16" cy="12" r="3"/>',
   /** Put back what was ended. */
   undo: '<path d="M3 8h10a5 5 0 0 1 0 10H8"/><path d="m7 4-4 4 4 4"/>',
+  /**
+   * Withheld pending a justified request — the SHAPE cue on a restricted clinical result (design 37 §6).
+   *
+   * The restricted card drew this as a 🔒 emoji. An emoji is not a design-system icon: it is painted by the
+   * platform's own font, so it differs between Windows, macOS and Android, ignores `currentColor` entirely,
+   * and stays full-colour in a theme it was never designed for. On the one card that has to read as
+   * unmistakably different from an ordinary result, "looks different on every machine" is the wrong property.
+   */
+  lock: '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
 } as const;
 
 export type IconName = keyof typeof iconPaths;
