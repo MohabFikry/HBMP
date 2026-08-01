@@ -105,9 +105,9 @@ export function BranchesOverview() {
   const loading = alerts.status === "loading" || flagged.status === "loading" || stock.status === "loading";
 
   return (
-    <>
+    <div className="branch-screen">
       <PageHeader title={t(S.title)} />
-      <p className="lede">{t(S.intro)}</p>
+      <p className="muted lede">{t(S.intro)}</p>
       <p className="muted">{t(S.tableIntro)}</p>
 
       {loading ? (
@@ -119,7 +119,7 @@ export function BranchesOverview() {
           <DataTable caption={t(S.title)} columns={columns} rows={rows} rowKey={(r) => r.branchId} />
         </Card>
       )}
-    </>
+    </div>
   );
 }
 

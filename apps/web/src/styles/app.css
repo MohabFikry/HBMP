@@ -2468,3 +2468,42 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   padding-block-start: var(--sp3);
   border-block-start: 1px solid var(--border);
 }
+
+/* ============================================================================================================
+   BRANCH MANAGEMENT PORTAL (25.7) — the same card-padding fault the policy screens had, and for the same
+   reason. `.mrs-card` deliberately carries no padding: a card is a surface and each screen sets its own.
+   These four screens set none, so every card rendered with its content hard against the border — which does
+   not read as a tight card, it reads as a rendering fault.
+
+   Scoped `> .mrs-card` plus the tab-pane descendant, exactly as `.pol-screen` is, so a card inside a Tabs
+   panel gets the same inset as one directly on the screen. That asymmetry is the bug the policy rule was
+   rewritten to fix; there is no reason to rediscover it here.
+   ============================================================================================================ */
+.branch-screen {
+  display: grid;
+  gap: var(--sp4);
+}
+/* The lesson from `.pol-screen` directly above, applied BEFORE it costs anything here rather than after.
+   Grid items default to `min-width: auto`, so a child can never be narrower than its own min-content — a
+   wide stock or ledger table would push its card, and this grid, past the viewport, where
+   `.app-main { overflow-x: hidden }` silently CUTS IT OFF: columns unreachable with no scrollbar to suggest
+   they exist. `.mrs-wl-scroll` owns the horizontal scroll and declares `max-inline-size: 100%`; this is what
+   gives that percentage something finite to resolve against. Every screen here renders a DataTable, so
+   without this the fault is certain rather than possible. */
+.branch-screen > * { min-inline-size: 0; }
+.branch-screen > .mrs-card,
+.branch-screen .mrs-tabpane .mrs-card {
+  padding: var(--sp4);
+}
+/* A card inside a card keeps whatever its parent gives it, rather than being inset twice. */
+.branch-screen .mrs-card .mrs-card {
+  padding: 0;
+}
+/* The intro paragraph sits directly under the page header, so it carries the header's own bottom rhythm
+   rather than the grid gap on top of it. `.lede` was undefined for the whole of 25.7 — it is the size step,
+   `.muted` beside it is the colour. */
+.branch-screen .lede {
+  font-size: var(--fs-body-lg, 15px);
+  max-width: 68ch;
+  margin: 0;
+}

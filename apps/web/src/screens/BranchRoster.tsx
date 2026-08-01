@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Card, DataTable, InlineAlert, InputField, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, InlineAlert, InputField, SelectField, StatusChip, useTheme } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import { rosterApi } from "../api/branchApi";
 import type { CreateRosterExceptionBody, RosterException, RosterImpact, RosterKind } from "../api/branchApi";
@@ -123,9 +123,9 @@ export function BranchRoster() {
   );
 
   return (
-    <>
+    <div className="branch-screen">
       <PageHeader title={t(S.title)} />
-      <p className="lede">{t(S.intro)}</p>
+      <p className="muted lede">{t(S.intro)}</p>
       <InlineAlert tone="info">{t(S.whyNotDelete)}</InlineAlert>
 
       <AsyncSection state={state} isEmpty={(rows) => rows.length === 0} emptyLabel={S.noneYet}>
@@ -137,7 +137,7 @@ export function BranchRoster() {
       </AsyncSection>
 
       <RecordException lang={lang} onApplied={() => state.reload()} />
-    </>
+    </div>
   );
 }
 
@@ -214,14 +214,12 @@ function RecordException({ lang, onApplied }: { lang: "en" | "ar"; onApplied: ()
     <Card>
       <h2>{t(S.addHeading)}</h2>
 
-      <label className="field">
-        <span className="field-label">{t(S.kind)}</span>
-        <select value={kind} onChange={(e) => invalidate(setKind)(e.target.value as RosterKind)}>
-          {(Object.keys(KIND_LABEL) as RosterKind[]).map((k) => (
-            <option key={k} value={k}>{t(KIND_LABEL[k])}</option>
-          ))}
-        </select>
-      </label>
+      <SelectField
+        label={t(S.kind)}
+        options={(Object.keys(KIND_LABEL) as RosterKind[]).map((k) => ({ value: k, label: t(KIND_LABEL[k]) }))}
+        value={kind}
+        onChange={(v) => invalidate(setKind)(v as RosterKind)}
+      />
 
       <InputField label={t(S.from)} type="date" value={dateFrom} onChange={(e) => invalidate(setDateFrom)(e.target.value)} required />
       <InputField label={t(S.to)} type="date" value={dateTo} onChange={(e) => invalidate(setDateTo)(e.target.value)} />
@@ -260,7 +258,7 @@ function RecordException({ lang, onApplied }: { lang: "en" | "ar"; onApplied: ()
                 rows={impact.affected}
                 rowKey={(a) => a.appointmentId}
               />
-              <label className="field-inline">
+              <label className="check">
                 <input
                   type="checkbox"
                   checked={acknowledged}

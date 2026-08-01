@@ -115,9 +115,9 @@ export function BranchPractitioners() {
   );
 
   return (
-    <>
+    <div className="branch-screen">
       <PageHeader title={t(S.practitionersTitle)} />
-      <p className="lede">{t(S.practitionersIntro)}</p>
+      <p className="muted lede">{t(S.practitionersIntro)}</p>
       <AsyncSection state={state} isEmpty={(rows) => rows.length === 0} emptyLabel={S.noPractitioners}>
         {(rows) => (
             <Card>
@@ -140,7 +140,7 @@ export function BranchPractitioners() {
           }}
         />
       )}
-    </>
+    </div>
   );
 }
 
@@ -252,7 +252,7 @@ export function BranchLicenceAlerts() {
   return (
     <>
       <PageHeader title={t(S.alertsTitle)} />
-      <p className="lede">{t(S.alertsIntro)}</p>
+      <p className="muted lede">{t(S.alertsIntro)}</p>
 
       <AsyncSection state={alerts} isEmpty={(d) => d.alerts.length === 0} emptyLabel={S.noAlerts}>
         {(data) => (
@@ -268,7 +268,7 @@ export function BranchLicenceAlerts() {
       </AsyncSection>
 
       <h2>{t(S.flaggedHeading)}</h2>
-      <p className="lede">{t(S.flaggedIntro)}</p>
+      <p className="muted lede">{t(S.flaggedIntro)}</p>
       <AsyncSection state={flagged} isEmpty={(d) => d.appointments.length === 0} emptyLabel={S.noFlagged}>
         {(data) => (
             <Card>

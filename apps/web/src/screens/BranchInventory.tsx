@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Card, DataTable, InlineAlert, InputField, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, InlineAlert, InputField, SegmentedControl, SelectField, StatusChip, useTheme } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import { inventoryApi } from "../api/branchApi";
 import type { ItemCategory, Movement, MovementKind, StockLine } from "../api/branchApi";
@@ -148,23 +148,25 @@ export function BranchInventory() {
   );
 
   return (
-    <>
+    <div className="branch-screen">
       <PageHeader title={t(S.title)} />
-      <p className="lede">{t(S.intro)}</p>
+      <p className="muted lede">{t(S.intro)}</p>
 
-      <div role="tablist" aria-label={t(S.title)} className="tabs">
-        {(["Medical", "NonMedical"] as ItemCategory[]).map((c) => (
-          <button
-            key={c}
-            role="tab"
-            type="button"
-            aria-selected={tab === c}
-            onClick={() => setTab(c)}
-          >
-            {t(c === "Medical" ? S.medical : S.nonMedical)}
-          </button>
-        ))}
-      </div>
+      {/* Was a hand-rolled `role="tablist"` of BARE buttons under a `.tabs` class that is defined nowhere.
+          `aria-selected` was set, so a screen reader knew which category was showing and a sighted user had
+          NO cue at all — two identical default-grey browser buttons, and the only way to tell which list you
+          were looking at was to read the table. SegmentedControl is the house control for an in-screen
+          switch (ApprovalsWorklist, BeneficiaryPortal use it) and carries the selected state, the roving
+          focus and the 44px targets. Not `Tabs`: this filters one table rather than swapping panels. */}
+      <SegmentedControl<ItemCategory>
+        aria-label={t(S.title)}
+        segments={[
+          { value: "Medical", label: t(S.medical) },
+          { value: "NonMedical", label: t(S.nonMedical) },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
 
       {medical && <InlineAlert tone="info">{t(S.quarantineHelp)}</InlineAlert>}
 
@@ -203,7 +205,7 @@ export function BranchInventory() {
           </Card>
         )}
       </AsyncSection>
-    </>
+    </div>
   );
 }
 
@@ -260,26 +262,25 @@ function RecordMovement({
     <Card>
       <h2>{t(S.record)}</h2>
 
-      <label className="field">
-        <span className="field-label">{t(S.item)}</span>
-        <select value={line} onChange={(e) => setLine(e.target.value)}>
-          <option value="">—</option>
-          {stock.map((l) => (
-            <option key={`${l.itemId}:${l.batchId ?? "-"}`} value={`${l.itemId}:${l.batchId ?? "-"}`}>
-              {(lang === "ar" ? l.nameAr : l.nameEn) + (l.batchNo ? ` · ${l.batchNo}` : "")}
-            </option>
-          ))}
-        </select>
-      </label>
+      <SelectField
+        label={t(S.item)}
+        // The empty option is gone: `placeholder` is how Select says "nothing chosen", and an em-dash in the
+        // list read as a selectable item called "—".
+        placeholder="—"
+        options={stock.map((l) => ({
+          value: `${l.itemId}:${l.batchId ?? "-"}`,
+          label: (lang === "ar" ? l.nameAr : l.nameEn) + (l.batchNo ? ` · ${l.batchNo}` : ""),
+        }))}
+        value={line || null}
+        onChange={setLine}
+      />
 
-      <label className="field">
-        <span className="field-label">{t(S.kind)}</span>
-        <select value={kind} onChange={(e) => setKind(e.target.value as MovementKind)}>
-          {WRITABLE_KINDS.map((k) => (
-            <option key={k.kind} value={k.kind}>{t(k.label)}</option>
-          ))}
-        </select>
-      </label>
+      <SelectField
+        label={t(S.kind)}
+        options={WRITABLE_KINDS.map((k) => ({ value: k.kind, label: t(k.label) }))}
+        value={kind}
+        onChange={(v) => setKind(v as MovementKind)}
+      />
 
       <InputField
         label={t(S.qtyLabel)}
