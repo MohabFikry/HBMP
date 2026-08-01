@@ -82,11 +82,27 @@ expensive way.
   entry describes as pending was met before it was written. The registry reports **zero** unproven entries
   today. Left visible rather than deleted, because a handover that quietly drops its own open items teaches
   the next reader to distrust the list; struck through, it says the check was done.
-- **`services/inventory` has no per-module coverage floor.** `tools/ci/coverage-floors.json` lists a floor for
-  every other module; the service added in phase 25 is absent, so its coverage is unenforced — the aggregate
-  floors still bind it, but nothing stops that one service regressing on its own. Deliberately not invented
-  here: a floor must come from a measured run (`raise-floors.py` proposes them after a green one), and a
-  number guessed to fill a gap is worse than the gap, because it looks enforced.
+- ~~**`services/inventory` has no per-module coverage floor.**~~ **CLOSED — and it was never only inventory.**
+  Measuring found SIX modules with no floor at all: `libs/time:Lib` (72), `services/audit:Domain` (99),
+  `services/provider:Api` (1) and inventory's three. `raise-floors.py` iterated only over floors that ALREADY
+  EXISTED, so a new module could never acquire one — the ratchet had silently stopped covering new code,
+  which is the code most likely to need it, and no gate fails for a module that is simply ABSENT. The tool
+  now adopts unfloored modules at measured-minus-1 (`--new-only` separates that from tightening existing
+  floors), with a selftest for the case. **`services/inventory:Api` measured 0.0% (0/459)** — see below.
+- **`services/inventory:Api` has NO tests at all** (0 of 459 lines). The endpoint handlers — the branch-reach
+  checks, the required `Idempotency-Key`, the 422 mappings for expired batches and insufficient stock — are
+  covered only by unit tests of the pieces beneath them (`BranchReachGuard`, `MovementService`, `StockRules`)
+  and by a source-scan for the no-PHI rule. Its floor is recorded as 0, which ENFORCES NOTHING and is a
+  placeholder, not a guard: it is there so the module is visible in the list rather than absent from it.
+  The fix is an endpoint test host (emr's `EmrApiFactory` is the pattern), not a number.
+- **`services/notification:Api` is 60.1% against an 85% floor — the coverage gate is RED on this branch.**
+  Caused by commit `fe164b6`, which added `DomainEventConsumer.cs` (198 lines) and `EscalationSweeper.cs`
+  (102 lines) — 300 of that layer's 550 lines — with tests covering only the parse seam. Verified independent
+  of the floor work above: the same failure occurs with `coverage-floors.json` at its previous contents. Two
+  honest routes, and they are a decision rather than a chore: write tests for the sweeper's DB pass and the
+  consumer's flag logic (the gate's own advice, "Write the test instead"), or acknowledge that the layer's
+  COMPOSITION changed — 300 lines of background-service plumbing is not the endpoint layer the 85 was set
+  against — which needs an ADR naming the module, per `check-floor-monotonicity.py`.
 - **Four web suites were a calendar time-bomb, now defused.** `reception-booking`, `callcentre`,
   `callcentrebooking` and `reception-dashboard` pinned fixtures to July 2026 while the booking calendar
   defaults its month to `new Date()`. They went red at midnight on 1 August 2026 — 14 tests, four files, no

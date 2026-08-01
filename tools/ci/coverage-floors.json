@@ -86,6 +86,12 @@
     "services/reporting:Domain": 66,
     "services/reporting:Infrastructure": 56,
     "tools/masterdata-loader:other": 19,
-    "tools/migration:other": 60
+    "tools/migration:other": 60,
+    "libs/time:Lib": 72.0,
+    "services/audit:Domain": 99.0,
+    "services/inventory:Api": 0.0,
+    "services/inventory:Domain": 72.0,
+    "services/inventory:Infrastructure": 81.0,
+    "services/provider:Api": 1.0
   }
 }

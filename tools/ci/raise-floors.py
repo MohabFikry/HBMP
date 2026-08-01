@@ -30,9 +30,9 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 FLOORS = os.path.join(REPO, "tools", "ci", "coverage-floors.json")
 
 
-def propose(floors: dict, report: dict, slack: float) -> dict[str, tuple[float, float]]:
-    """{key: (old, new)} for every floor that measured coverage has left behind."""
-    out: dict[str, tuple[float, float]] = {}
+def propose(floors: dict, report: dict, slack: float) -> dict[str, tuple[float | None, float]]:
+    """{key: (old, new)} for every floor measured coverage has left behind. `old is None` = no floor yet."""
+    out: dict[str, tuple[float | None, float]] = {}
 
     measured = {f"{m['module']}:{m['layer']}": m["pct"] for m in report["modules"] if m["layer"] != "Tests"}
     for key, floor in (floors.get("modules") or {}).items():
@@ -41,6 +41,22 @@ def propose(floors: dict, report: dict, slack: float) -> dict[str, tuple[float, 
             continue  # module gone or renamed: not this tool's job to guess
         if pct - floor > slack:
             out[key] = (float(floor), float(int(pct) - 1))
+
+    # A module the floors file has never heard of.
+    #
+    # This loop used to not exist, and its absence was a hole rather than an omission: `propose` iterated
+    # ONLY over floors that already existed, so a NEW module could never acquire one. services/inventory
+    # arrived in phase 25 with no floor, and nothing in this tool would ever have given it one — the
+    # aggregate floors still bound it, but nothing stopped that single service regressing on its own, and
+    # no gate fails for a module that is simply ABSENT. The ratchet silently stopped covering new code,
+    # which is the code most likely to need it.
+    #
+    # New modules are proposed at measured-minus-1 like everything else, with no slack test: there is no
+    # floor to be "close to", and locking in what exists today is the entire point.
+    for key, pct in sorted(measured.items()):
+        if key in (floors.get("modules") or {}):
+            continue
+        out[key] = (None, max(0.0, float(int(pct) - 1)))
 
     for agg in ("domain", "overall"):
         floor = (floors.get("aggregates") or {}).get(agg)
@@ -57,7 +73,7 @@ def propose(floors: dict, report: dict, slack: float) -> dict[str, tuple[float, 
     return out
 
 
-def apply(floors: dict, proposals: dict[str, tuple[float, float]]) -> dict:
+def apply(floors: dict, proposals: dict[str, tuple[float | None, float]]) -> dict:
     for key, (_old, new) in proposals.items():
         if key.startswith("aggregates."):
             floors["aggregates"][key.split(".", 1)[1]] = new
@@ -75,6 +91,9 @@ def selftest() -> int:
             {"module": "a", "layer": "Domain", "pct": 91.0},   # +41 -> raise to 90
             {"module": "b", "layer": "Api", "pct": 12.0},      # +2, inside slack -> untouched
             {"module": "t", "layer": "Tests", "pct": 99.0},    # test code is never ratcheted
+            # A module with NO floor — the phase-25 services/inventory case. It must be proposed, or a new
+            # service escapes the ratchet permanently.
+            {"module": "newsvc", "layer": "Domain", "pct": 74.0},
         ],
         "totals": {"domain": {"pct": 82.5}, "overall": {"pct": 50.7}},
     }
@@ -86,6 +105,9 @@ def selftest() -> int:
         print("FAIL: a rise inside the slack must not propose a change"); ok = False
     if "gone:Api" in p:
         print("FAIL: a module absent from the report must be left alone"); ok = False
+    if p.get("newsvc:Domain") != (None, 73.0):
+        print(f"FAIL: a measured module with no floor must be proposed at measured-1, got {p.get('newsvc:Domain')}")
+        ok = False
     # domain 82.5 is 24.5 above the floor, but the ratchet stops at the 80 target.
     if p.get("aggregates.domain") != (58.0, 80.0):
         print(f"FAIL: domain should ratchet to the 80 target, got {p.get('aggregates.domain')}"); ok = False
@@ -99,7 +121,7 @@ def selftest() -> int:
         print("FAIL: falling coverage must propose nothing — that is the gate's job, not the ratchet's")
         ok = False
 
-    print("selftest: PASS — raises past slack, respects the target cap, never lowers"
+    print("selftest: PASS — raises past slack, adopts new modules, respects the target cap, never lowers"
           if ok else "selftest: FAIL")
     return 0 if ok else 1
 
@@ -110,6 +132,10 @@ def main() -> int:
     ap.add_argument("--floors", default=FLOORS)
     ap.add_argument("--slack", type=float, default=3.0)
     ap.add_argument("--write", action="store_true", help="rewrite the floors file in place")
+    ap.add_argument("--new-only", action="store_true",
+                    help="adopt modules that have NO floor, and leave existing floors alone. Separates "
+                         "'close a hole in the ratchet' from 'tighten 60-odd existing floors' — two very "
+                         "different changes to put in front of a reviewer in one diff.")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
 
@@ -123,6 +149,8 @@ def main() -> int:
     floors = json.load(open(a.floors, encoding="utf-8"))
     report = json.load(open(a.report, encoding="utf-8"))
     proposals = propose(floors, report, a.slack)
+    if a.new_only:
+        proposals = {k: v for k, v in proposals.items() if v[0] is None}
 
     if not proposals:
         print(f"raise-floors: no floor is more than {a.slack:g} points behind measured coverage.")
@@ -130,7 +158,9 @@ def main() -> int:
 
     print(f"raise-floors: {len(proposals)} floor(s) can tighten:")
     for key, (old, new) in sorted(proposals.items()):
-        print(f"  {key}: {old:g} -> {new:g}")
+        # A module with no floor is called out as NEW rather than shown as "0 -> 73", which would read as a
+        # module that had a floor of zero — a very different statement about what was being enforced.
+        print(f"  {key}: {'(no floor — NEW)' if old is None else f'{old:g}'} -> {new:g}")
 
     if a.write:
         apply(floors, proposals)
