@@ -59,7 +59,12 @@ html[data-theme="light"] {
 
   --text-1: #12262b; /* body        14.8:1 */
   --text-2: #4a5a61; /* secondary    7.0:1 */
-  --text-3: #6b7c82; /* meta / micro-labels */
+  /* meta / micro-labels — 5.5:1 on #ffffff, 5.3:1 on --surface-2, 5.0:1 on --surface-0.
+     Was #6b7c82, which measured 4.35 / 4.17 / 3.99 and therefore failed AA on EVERY light surface. Note
+     that --text-1 and --text-2 carry their ratios in a comment and this one did not: the two that were
+     checked said so, and the one that was never checked was silent. Table headers are the visible
+     casualty — every worklist `th` renders in it at 11.5px. */
+  --text-3: #5d6b71;
 
   --accent: #007a7a; /* teal-700 actions/links 5.2:1 */
   --accent-press: #005c5c;
@@ -100,7 +105,9 @@ html[data-theme="dark"] {
 
   --text-1: #eaf5f4;
   --text-2: #a9c4c4;
-  --text-3: #7fa0a0;
+  /* 5.0:1 on --surface-2, 5.8:1 on --surface-1, 6.7:1 on --surface-0. Was #7fa0a0 — 4.18 on --surface-2,
+     so it passed on the page background and failed inside every card, which is where micro-labels live. */
+  --text-3: #8bb0b0;
 
   --accent: #5fd3d3; /* lightened for AA on dark */
   --accent-press: #86e3e3;

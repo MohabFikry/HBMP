@@ -131,10 +131,29 @@ expensive way.
   started. Port and host now live in `apps/web/vite.config.ts`'s `preview` block and the command is a bare
   `npx vite preview` — flags that must survive two argument parsers eventually do not.
 
-  **What is still unknown, and say so rather than assume:** because the server never came up, the contrast
-  assertions have *never executed*. Unblocking the job is not the same as passing it — the first green run is
-  the first evidence any of those colours are AA, and a real violation surfacing now would be the gate
-  working, not a regression.
+  **On its first real run it failed 33 of 48 — the gate working, not a regression.** Four defects, all
+  genuine, none of which any other check could see:
+  - `--text-3` light was `#6b7c82`: **3.94:1 on `--surface-0`, 4.35 on white, 4.17 on `--surface-2`** — below
+    AA on every light surface, and it is the colour every worklist `<th>` renders in. Now `#5d6b71` (≥4.99).
+  - `--text-3` dark was `#7fa0a0`: 4.18:1 on `--surface-2`, so it *passed on the page background and failed
+    inside every card*, which is where micro-labels live. Now `#8bb0b0` (≥5.02).
+  - `.app-avatar` was **1.78:1** — `color: var(--on-accent, #fff)` immediately followed by `color: #fff`,
+    which overrode it. Correct in light theme by luck (`--accent` is dark teal there), catastrophic in dark
+    (it is light teal). **A fix defeated by the line below it**: token, comment and first declaration all said
+    the right thing while the paint did not.
+  - `/login` had **no `<main>` landmark at all** — the login page renders outside the signed-in shell. It
+    surfaced as a 15s `waitForFunction` timeout, which reads like a slow route. Fixed on the page, not by
+    relaxing the wait: that wait is what stops an empty page being audited and reported clean.
+
+  **`apps/web/test/token-contrast.test.ts` now guards the flat-token case** in the fast jsdom suite (37
+  assertions, 11ms) — every text × surface pair, `--on-accent` vs `--accent`, and every status fg/bg, in both
+  themes. Its arithmetic was cross-validated against axe: it reports 4.17:1 for the shipped `--text-3`, the
+  same number the browser measured. **It does not replace the browser job**, which measures *composited*
+  colour — opacity, gradients, overlays — that no hex-pair arithmetic can see.
+
+  Why it went unnoticed for months is worth keeping: `--text-1` and `--text-2` carry their measured ratios in
+  a comment beside them and `--text-3` carried none. The two that had been checked said so; the one that never
+  had was silent, and silence read as fine.
 
   **Running it locally needs pnpm**, which is broken on this machine
   (`ERR_UNKNOWN_BUILTIN_MODULE` from the pnpm/Node pairing), so `@playwright/test` is in the lockfile but not

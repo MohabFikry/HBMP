@@ -807,8 +807,13 @@ nav.mrs-rail {
      text is ~2.2:1 and fails WCAG AA for the initials it carries. --accent is the action colour and is
      specified at 5.2:1 in light and re-derived for dark. */
   background: var(--accent);
+  /* The `color: #fff` that used to sit on the next line DEFEATED the one above it. In light theme white on
+     --accent (#007a7a) is 5.2:1, so it looked correct and nobody re-read it; in dark theme --accent is the
+     LIGHT teal (#5fd3d3) and white on it is 1.78:1 — the worst violation on the platform, on the avatar
+     every signed-in user sees. --on-accent exists precisely to be re-derived per theme (it is #04282a ink
+     in dark, 8.75:1) and was already correct. A fix followed by a line that overrides it is worse than no
+     fix: the token, the comment above and the CSS all said the right thing while the paint did not. */
   color: var(--on-accent, #fff);
-  color: #fff;
   font-weight: 700;
   font-size: 13px;
   letter-spacing: 0.02em;

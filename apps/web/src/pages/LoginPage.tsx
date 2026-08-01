@@ -58,7 +58,12 @@ export function LoginPage() {
   }
 
   return (
-    <div className="login-wrap">
+    // <main>, not <div>. The signed-in shell provides the main landmark; the login page sat OUTSIDE it and
+    // so had none at all — the one page every user meets first, with nothing for a screen reader to jump to
+    // and no skip-link target. The contrast job found it as a 15s timeout waiting for `main` to hold text,
+    // which reads like a slow route and was actually a missing landmark. Fixed here rather than by relaxing
+    // the wait: that wait is load-bearing — it is what stops an empty page being audited and reported clean.
+    <main id="main" className="login-wrap">
       <Card style={{ padding: "var(--sp8)", width: "min(440px, 92vw)" }}>
         <div style={{ display: "flex", justifyContent: "center", marginBottom: "var(--sp5)" }}>
           <Logo variant="lockup" height={72} />
@@ -111,6 +116,6 @@ export function LoginPage() {
         </form>
         )}
       </Card>
-    </div>
+    </main>
   );
 }
