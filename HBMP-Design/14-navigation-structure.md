@@ -214,6 +214,48 @@ flowchart TD
 
 ---
 
+### 2.x Branch Management portal (Phase 25 — base `branch`)
+
+**ONE portal, two roles.** `branch_coordinator` and `clinics_manager` mount the SAME section list — in the
+SPA it is literally one shared array, so a screen added for one is a screen the other has. See
+[42 §6](42-branch-management.md).
+
+```mermaid
+flowchart TD
+  B[Branch Management] --> B1[Dashboard]
+  B --> B2[Eligibility Check]
+  B --> B3[Appointments]
+  B --> B4[Book Appointment]
+  B --> B5[Practitioners]
+  B --> B6[Roster & Availability]
+  B --> B7[Licence Alerts]
+  B --> B8[Inventory]
+  B --> B9[Branches Overview]
+```
+
+The first four are **reception's screens, reused** — the desk work a coordinator does is the same desk work,
+and a second implementation would be a second place for the board to disagree with itself.
+
+**The branch control behaves differently, and that is the ONLY visible difference between the two roles:**
+
+- **Coordinator (BranchScoped)** — the control **SWITCHES**. One active branch at a time, defaulting to Home.
+- **Clinics Manager (BranchSetScoped)** — the control **FILTERS**. No selection means all six clinics in one
+  response; choosing one narrows every screen to it. Clearing it restores all six — a supervisory worklist
+  that empties when you clear its filter would be the bug.
+
+**Branches Overview is REACH-scoped, not permission-scoped.** A coordinator holds every permission the screen
+needs and simply has one clinic to compare, so hiding it is a reach decision. Making it a permission the
+manager holds and the coordinator does not would break the one-permission-set invariant in order to hide a
+table.
+
+**Licence status uses four cues** — hue **and** icon **and** shape **and** word. Valid / Expiring / Expired
+are three distinct chips, and none of them is grey: a grey chip meaning "may not legally practise" is a
+design failure ([0B §5.2](0B-DESIGN-SYSTEM-UI.md)).
+
+**A roster change is a paired action** ([0B §10c](0B-DESIGN-SYSTEM-UI.md)): the impact preview lists the
+booked appointments affected, and Apply stays disabled until the operator has previewed **and** acknowledged
+what they read. Editing any field invalidates the preview.
+
 ## 3. Section title & deep links
 - **The section name lives in the browser tab, not on the page:** `Section | Mersal HBMP` — e.g.
   `Register New | Mersal HBMP`. Section first, because tabs truncate from the end. The name comes from the

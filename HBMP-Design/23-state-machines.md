@@ -262,6 +262,41 @@ stateDiagram-v2
 
 ---
 
+### 6b. The licence and roster gates on booking *(Phase 25 — see [42 §3/§4](42-branch-management.md))*
+
+Two conditions now stand between an availability rule and a bookable slot, and both are evaluated **as at the
+slot date**, not as at today.
+
+```mermaid
+flowchart LR
+  A[provider_availability<br/>weekly rule] --> G1{practitioner licence<br/>valid on the SLOT date?}
+  G1 -- no --> X1[no slot generated<br/>422 urn:hbmp:practitioner-licence-expired on booking]
+  G1 -- yes --> G2{branch assignment<br/>covers the slot date?}
+  G2 -- no --> X2[422 urn:hbmp:practitioner-not-at-branch]
+  G2 -- yes --> G3{roster exception<br/>on that day?}
+  G3 -- subtractive --> X3[no slot]
+  G3 -- AdHocClinic --> S[slot exists on that date only]
+  G3 -- none --> S
+```
+
+**Availability is computed in exactly ONE function** (`SlotGeneration.Generate`) — the doctor picker,
+`/booking/doctor-availability`, `/appointment-days`, slot materialization and the booking validator all
+resolve through it. A second implementation is the bug: the way that failure presents is a patient given an
+appointment with a doctor who is on leave.
+
+**Effect on an appointment already booked — it does NOT change state.** A lapsed licence or a newly recorded
+closure sets `appointment.reassignment_needed_at` and leaves `status` exactly as it was. `Booked` stays
+`Booked`; nothing transitions to `Cancelled`. **No automated process cancels a beneficiary's appointment** —
+it lands on someone who may have no reliable phone number and has lost a day's pay to travel, and who cannot
+tell a cancellation from being dropped. A person decides who covers the clinic; the flag is how they find out
+they need to.
+
+**The licence boundary is INCLUSIVE.** A licence expiring 30 September is valid *through* 30 September — a
+doctor is not unlicensed on the last day printed on their own certificate — and the rule, the slot generator
+and the flagging consumer are asserted to agree on both boundary days.
+
+---
+
 ## 7. Claim Lifecycle
 
 Canonical: `Draft → Submitted → UnderAdjudication → (Approved | PartiallyApproved | Denied) → Settled`; plus `PendingInfo`, `ClinicalReview`, `Appealed`, `Void`. Module design: [36-claims-management.md](36-claims-management.md).

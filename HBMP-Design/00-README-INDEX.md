@@ -63,6 +63,7 @@ Read [`0A-DESIGN-FOUNDATIONS.md`](0A-DESIGN-FOUNDATIONS.md) **first** — it def
 | 38 | Policy & Member Administration (Phase 19) | [38-policy-member-administration.md](38-policy-member-administration.md) | D |
 | 39 | Unified Patient Profile — role-projected 360 (Phase 20) | [39-patient-profile.md](39-patient-profile.md) | D |
 | 40 | User & Access Model — membership as the principal, effective-set algebra (Phase 21) | [40-user-access-model.md](40-user-access-model.md) | D |
+| 42 | Branch Management — coordinator & clinics manager, roster, licensing, clinic inventory (Phase 25) | [42-branch-management.md](42-branch-management.md) | D |
 
 ---
 

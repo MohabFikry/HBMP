@@ -254,6 +254,44 @@ Actions here use the extended tokens from §1: **DC** Decide · **AJ** Adjust ·
 > 4. **Release requires a decided request.** A `report_access_grant` may exist **only** as the product of an `Approved` `report_access_request` carrying a **mandatory `purpose_code` + free-text `justification`**, decided by the **authoring/ordering doctor or a Medical Director** (`SOD`: requester ≠ decider). A Director decision is flagged `decided_by_role=MedicalDirector` and **extra-audited**.
 > 5. **Branch scoping never replaces an existing control.** `BSC` composes with `TR`/`PO`/`ASG`/`TEN` and with the §4 field rules — it narrows, it never grants.
 
+### 3.5b Branch-management resources (Phase 25 — see [42-branch-management.md](42-branch-management.md))
+
+**THE RULE THAT GOVERNS THIS WHOLE SECTION:** `branch_coordinator` and `clinics_manager` hold an **identical**
+scope set. Every cell below applies to both. They differ only in **reach** — one active branch versus the
+whole permitted set — and reach is grant-derived, never role-derived.
+
+| Resource | Branch Coordinator | Clinics Manager | Everyone else |
+|---|---|---|---|
+| `practitioner` (assign/revoke, specialty, licence) | **W** 🔒 branch-reach | **W** 🔒 branch-reach | `provider:write` (network team) only |
+| `practitioner.license_no` | **R** (field-masked to the maintaining scopes) | **R** | absent from the payload |
+| `practitioner.license_expiry` | **R/W** | **R/W** | **R** — the DATE is not the NUMBER; it is what a status chip renders |
+| `specialty` catalogue | **R** (assign from the seeded 26) | **R** | create/rename stays `provider:write` |
+| `roster_exception` | **W** 🔒 branch-reach | **W** 🔒 branch-reach | — |
+| `inventory.item` | **R/W** | **R/W** | — |
+| `inventory.stock_movement` | **W** (append-only) 🔒 branch-reach | **W** 🔒 branch-reach | — |
+| `branch` (create/retire) | **✗** | **✗** | `provider:write` only |
+| external provider / contract / tariff | **✗** | **✗** | `provider:write` / `provider:admin` |
+| `emr_note`, `diagnosis`, result values | **✗** | **✗** | unchanged |
+
+**New scopes:** `branch:practitioner:write`, `branch:roster:write`, `branch:inventory:read`,
+`branch:inventory:write`.
+
+**HARD RULES**
+
+1. **No `provider:write` for a branch role, ever.** It is network-wide — it creates branches, edits external
+   labs, pharmacies and tariffs, and unmasks `license_no`. A coordinator maintaining a doctor's licence must
+   never acquire the authority to re-price the network to do it.
+2. **The branch-reach check is not the scope check.** Holding `branch:*:write` says *what* you may do; reach
+   says *where*. A caller holding only a branch scope may act **only on branches in reach** — a coordinator at
+   Maadi assigning a practitioner to Dokki is **403 + audited at High**, never a silent success. Widening a
+   scope group without this check is strictly worse than not widening it: it hands every coordinator the whole
+   network while looking, in the route table, like a carefully sized permission.
+3. **Inventory carries no beneficiary identifier** — not in a route, a request body, an entity or a column.
+   Clinic inventory is not a second dispensing path; prescribed items go through `pharmacy-service`.
+4. **Licence numbers stay field-masked.** Widened to the branch-maintaining scope in Phase 25, and
+   deliberately NOT to `practitioner:read` — reception holds that for the booking pickers, and a licence
+   number is not something the front desk needs to book an appointment.
+
 ### 3.6 Call-centre resources (Phase 15 — see [10 §3.3/§3.21](10-role-matrix.md))
 
 The contact centre owns two resources in the `callcentre` schema: `call_interaction` (one row per call, keyed by `call_ref`) and `caller_verification` (one row per verification attempt — **pass *and* fail**). Everything an agent does to a member is gated on `CVP` (§5) and correlated to the interaction.
