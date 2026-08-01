@@ -1,6 +1,6 @@
 # ADR-0029 — Branch management: one permission set, two reaches
 
-**Status:** Accepted (with five provisional sponsor decisions, §4) · **Date:** 2026-07-31 · **Phase:** 25.0
+**Status:** **Accepted** — D1–D5 ratified as recommended 2026-08-01 (§4) · **Date:** 2026-07-31 · **Phase:** 25.0
 **Supersedes:** nothing · **Extends:** [ADR-0021](0021-user-access-model.md) (authority vs reach) and
 [ADR-0014](0014-phase-14-sensitivity-retrofit-scope.md) (branch scoping) — **additively**.
 **Design:** [`HBMP-Design/42-branch-management.md`](../../HBMP-Design/42-branch-management.md) ·
@@ -155,18 +155,26 @@ booked appointments, which) before it applies, then flags them — never bulk-ca
 - The `branch_manager` / `clinic_manager` phantom names are reconciled to one seeded spelling. Leaving two
   spellings of the same idea in the codebase is how the next reader concludes both exist.
 
-## 4. Sponsor decisions D1–D5 — PROVISIONAL, sign-off outstanding
+## 4. Sponsor decisions D1–D5 — RATIFIED as recommended, 2026-08-01
 
-Doc 42 §8 raises five questions for the sponsor. The recommended answers are implemented so the phase is
-buildable; **all five are provisional and carry the same status as ADR-0019/0020 — implemented, not signed
-off.** They are listed in `docs/BUILD-STATUS.md` under 25.0.
+Doc 42 §8 raises five questions for the sponsor. The recommended answers were implemented so the phase was
+buildable and carried as **provisional** for one day short of a fortnight; **all five were ratified unchanged
+on 2026-08-01**. The decision record is the table at the foot of
+[`docs/decisions/phase-25-sponsor-pack.md`](../decisions/phase-25-sponsor-pack.md), which is the source of
+truth — this section restates the outcome, it does not constitute it.
 
-> **The decision pack is [`docs/decisions/phase-25-sponsor-pack.md`](../decisions/phase-25-sponsor-pack.md)** —
-> written for the sponsor rather than for engineers, with what is built today, what each answer is actually
-> enforced by, the cost of reversing it now versus after go-live, and a blank decision table. It records one
-> finding this ADR did not: **D1–D4 are enforced by the platform and D5 is enforced by nothing** — no
-> reference to vaccines, injectables or any medicine identifier exists in the inventory service, so nothing
-> stops a vaccine being catalogued as clinic stock. That gap needs closing whichever way D5 is decided.
+Because nothing was overturned, **no DPIA was triggered and neither the DPO nor the Medical Director was
+required.** Both were only ever in scope for overturning D2 or D5, which move inventory across the PHI
+boundary; confirming them keeps it where it was.
+
+> **What the pack found that this ADR had missed.** Writing the decisions out for a non-engineer forced the
+> question "what is each of these actually enforced BY?", and the answer for D5 was **nothing** — no reference
+> to vaccines, injectables or any medicine identifier existed anywhere in inventory-service, so nothing
+> stopped a vaccine being catalogued as clinic stock. Four decisions were enforced by a constraint, an index,
+> a test suite and a role-reach mode; the fifth was enforced by memory, and this document had said so in the
+> same confident tone as the other four. **See §4.1 for what closed it.** The general lesson is cheap and
+> worth keeping: a decision table should record the MECHANISM beside the answer, because "we decided X" and
+> "the platform does X" look identical in prose and are not the same claim.
 
 | # | Question | Provisional answer | Why, and what changes if the sponsor decides otherwise |
 |---|---|---|---|
@@ -176,8 +184,77 @@ off.** They are listed in `docs/BUILD-STATUS.md` under 25.0.
 | **D4** | Does the clinics manager get **write** everywhere, or read-everywhere/write-own? | **Write everywhere** | They supervise the network of clinics; a supervisor who must raise a request to fix a roster is not a supervisor. Audited, and the branch filter makes the target branch explicit on every write |
 | **D5** | Are vaccines/injectables clinic stock or pharmacy stock? | **Pharmacy**, wherever a prescription or authorization applies | Clinic stock is consumables. Ambiguous items get classified once, centrally — classifying per branch is how the same vial ends up governed two different ways in two clinics |
 
-If D2 or D5 is decided the other way, invariants 8 and 9 (no patient dispensing, no PHI) are the ones at
-stake, and the change is a design decision with a DPIA, not a schema tweak.
+Had D2 or D5 been decided the other way, invariants 8 and 9 (no patient dispensing, no PHI) would have been
+the ones at stake, and the change a design decision with a DPIA rather than a schema tweak. Neither was.
+
+---
+
+## 4.1 Closing D5: the catalogue asks masterdata whether an item is a medicine
+
+**Decision.** `POST /api/v1/inventory/items` calls `GET /api/v1/drugs/classify` on masterdata-service and
+refuses the item when it matches the medicines master (422, `urn:hbmp:medicine-not-clinic-stock`, naming the
+matched drug). Seam: `IMedicinesDirectory` in `services/inventory/Domain`; transport:
+`HttpMedicinesDirectory` in `services/inventory/Api`, the same shape as `HttpBranchDirectory` beside it.
+
+### What the gap actually risked, stated precisely
+
+Worth being exact, because the honest version is narrower than "vaccines could leak" and more serious than it
+first sounds. **The strict invariant held throughout**: inventory could not issue anything to a *named*
+patient, because no patient identifier exists anywhere in it (D2, kept true by `NoPhiInInventoryTests`). What
+was missing was the paperwork around *giving* it — no prescription, no eligibility check, no coverage limit,
+no dispensing record. The vaccine gets given, and every control meant to surround giving it happens nowhere.
+That is precisely the "second dispensing route" D2's rationale warns about, arriving through the catalogue
+instead of through a patient column.
+
+### Why masterdata answers, and not a list kept in inventory
+
+"What counts as a medicine" is a clinical question and the medicines master is its home. A word list
+maintained in a storekeeping service is a second answer to that question, and the two drift the first time a
+drug is added to one and not the other. Cross-service and **by value** — inventory stores no reference to a
+masterdata row; it asks a question and gets a verdict, which is the same posture as every other cross-service
+read on this platform.
+
+This is a **synchronous** call, and it passes the "caller cannot proceed without the result" test: the
+endpoint's entire decision is whether to create the row. It is also a cold path — catalogue items are created
+rarely, by administrators — so the round trip costs nothing that matters. Not cached, unlike
+`HttpBranchDirectory`: a TTL here would mean a drug newly added to the master could still be admitted as
+clinic stock for the length of it, and there is no traffic volume to justify buying that.
+
+### Three choices inside it, each of which could reasonably have gone the other way
+
+1. **Matching is bidirectional-containment, not equality.** The master's "Hepatitis B Vaccine" catches a typed
+   "Hepatitis B Vaccine 20mcg/ml vial". Equality would have caught only the exactly-typed case, which is the
+   one that never happens — protection in appearance only. Floored at six characters of drug name, because
+   without a floor a master entry called "Water" refuses every consumable mentioning water, and a guard that
+   fires on gauze gets switched off within a week.
+2. **Unreachable ⇒ refuse (503), not admit.** The cheap implementation treats "could not ask" as "not a
+   medicine", which leaves the gate open during exactly the window nobody is watching. Fail-closed matches
+   `HttpBranchDirectory`'s posture in this same service, and the trade is easy here: a new gauze SKU waits a
+   few minutes. `AN_UNREACHABLE_MEDICINES_MASTER_REFUSES_THE_ITEM_RATHER_THAN_ADMITTING_IT` is the test that
+   holds it, and it is the most important one in the set.
+3. **No override flag.** The pack says the classification is made once, centrally; an override is exactly how
+   that becomes six clinics each ticking a box on a Tuesday — the same reasoning that made D1 a `CHECK`
+   constraint rather than a setting. **The accepted cost:** a genuine consumable that happens to sit in the
+   medicines master (saline, say) is refused, and the only remedy is to correct the master. That is a real
+   friction and it is chosen deliberately, because the correction is then visible to the people accountable
+   for the master rather than absorbed silently at one clinic.
+
+### Also fixed, found on the way
+
+`CreateItemRequest.Sku`, `NameEn`, `NameAr` and `UnitOfMeasure` are declared non-nullable, which stopped
+nothing: a body with `"sku": null` deserialized to null and the subsequent `.Trim()` was an unhandled 500
+waiting for the first client that sent one. Now a 400 naming the fields. Non-nullable reference types are a
+compile-time convenience and never a validation of what arrived over the wire — worth remembering wherever
+else a request record is trusted.
+
+### Consequences
+
+- **D5 is enforced by the platform**, and §4's table now describes five decisions with five mechanisms.
+- **inventory-service gains a hard dependency on masterdata-service for catalogue writes.** Reads, movements,
+  transfers and alerts are untouched — a masterdata outage cannot stop a clinic recording stock, only adding a
+  new item type. That asymmetry is intended and is what makes fail-closed affordable here.
+- **If clinic stock ever legitimately needs to include a medicine**, this is the constraint to revisit, and
+  revisiting it means D5 itself — DPIA and Medical Director — not a flag on this check.
 
 ---
 

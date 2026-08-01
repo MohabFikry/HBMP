@@ -49,12 +49,22 @@ public static class InventoryEndpoints
             return Results.Ok(rows.Select(ItemView.From));
         });
 
-        write.MapPost("/items", async (CreateItemRequest req, InventoryDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        write.MapPost("/items", async (CreateItemRequest req, InventoryDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, TimeProvider clock, [FromServices] IMedicinesDirectory medicines, CancellationToken ct) =>
         {
             var tenant = me.Principal?.TenantId;
             if (string.IsNullOrEmpty(tenant)) return Results.Problem(statusCode: 403, title: "no tenant scope on principal");
             if (!Enum.TryParse<ItemCategory>(req.Category, out var category))
                 return Results.Problem(statusCode: 400, title: $"unknown category '{req.Category}'", type: "urn:hbmp:invalid-category");
+
+            // These four are declared non-nullable on the record, which stops nothing: a body with
+            // `"sku": null` deserializes to null anyway and the .Trim() below was an unhandled 500 waiting
+            // for the first client that sent one. Checked here, where the answer is a 400 that says which
+            // field. NameAr is required with the rest — a catalogue that is bilingual for most items and not
+            // for some is one an Arabic-speaking storekeeper cannot search.
+            if (string.IsNullOrWhiteSpace(req.Sku) || string.IsNullOrWhiteSpace(req.NameEn)
+                || string.IsNullOrWhiteSpace(req.NameAr) || string.IsNullOrWhiteSpace(req.UnitOfMeasure))
+                return Results.Problem(statusCode: 400, type: "urn:hbmp:missing-field",
+                    title: "sku, nameEn, nameAr and unitOfMeasure are all required");
 
             // D1 — controlled substances are excluded from v1 by a CHECK constraint. Refused here too, with a
             // reason, so the answer is "not in this version" rather than a bare constraint violation.
@@ -64,6 +74,44 @@ public static class InventoryEndpoints
                     detail: "Controlled substances are out of scope for this version (ADR-0029, D1). A controlled " +
                             "register needs dual signature, a per-ampoule running balance and regulator reporting — " +
                             "a module of its own. Enabling it is a deliberate migration, not a setting.");
+
+            // D2 — nothing patient-shaped is sent. The classify call carries a SKU and a name, which are
+            // reference data about a THING, and gets back a verdict about that thing. This does not put
+            // inventory on the wrong side of the PHI boundary and must not be allowed to grow into doing so.
+            var verdict = await medicines.ClassifyAsync(req.Sku.Trim(), req.NameEn.Trim(), req.NameAr.Trim(), ct);
+
+            // D5 — a medicine is PHARMACY stock, and this is the check that makes that a rule the platform
+            // keeps rather than one people remember. Deliberately NOT overridable: an override flag is how a
+            // classification decision that the pack says must be made once, centrally, becomes six clinics
+            // each ticking a box on a Tuesday. If a genuine consumable is refused, the fix is the medicines
+            // master, and that fix is visible to the people accountable for it.
+            if (verdict.Verdict == MedicineVerdict.IsAMedicine)
+            {
+                await audit.EmitAsync(new AuditEventDraft
+                {
+                    EntityType = "inventory_item", EntityId = req.Sku.Trim(), Action = AuditAction.Create,
+                    ActorUserId = me.Principal?.Subject, TenantId = tenant,
+                    DecisionOutcome = verdict.IsVaccine ? "RefusedVaccine" : "RefusedMedicine",
+                }, ct);
+
+                return Results.Problem(statusCode: 422,
+                    title: verdict.IsVaccine ? "vaccines-are-pharmacy-stock" : "medicines-are-pharmacy-stock",
+                    type: MedicineCheck.MedicineProblemType,
+                    detail: $"'{verdict.DrugName}' ({verdict.DrugCode}) is in the medicines master, so it is " +
+                            "pharmacy stock and not clinic stock (ADR-0029, D5). Anything dispensed against a " +
+                            "prescription goes through pharmacy-service, where eligibility, coverage limits, the " +
+                            "approved-medicines list and the dispensing record are enforced; admitting it here " +
+                            "would be a second dispensing route around all four. If this is genuinely a " +
+                            "consumable, the medicines master is what needs correcting — not this item.");
+            }
+
+            // Fail-closed. See MedicineVerdict.DirectoryUnreachable for why this is the easy call: the cost is
+            // that a new gauze SKU waits, and the alternative is an open gate exactly when nobody is looking.
+            if (verdict.Verdict == MedicineVerdict.DirectoryUnreachable)
+                return Results.Problem(statusCode: 503, title: "medicines-directory-unavailable",
+                    type: MedicineCheck.UnavailableProblemType,
+                    detail: "Cannot confirm this item is not a medicine because the medicines master could not " +
+                            "be reached. Item creation is refused until it can (ADR-0029, D5). Retry shortly.");
 
             // MEDICAL ⇒ batch- and expiry-tracked. Forced rather than trusted from the request: a medical
             // consumable whose batch nobody recorded cannot be recalled. The DB CHECK backs this up.

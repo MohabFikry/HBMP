@@ -579,3 +579,33 @@ invariants:
       - Mersal.Inventory.Tests.NoPhiInInventoryTests.NO_INVENTORY_ENDPOINT_ACCEPTS_A_BENEFICIARY_IDENTIFIER
       - Mersal.Inventory.Tests.NoPhiInInventoryTests.NO_DOMAIN_ENTITY_CARRIES_ONE_EITHER
       - Mersal.Inventory.Tests.NoPhiInInventoryTests.The_scan_would_actually_catch_one
+
+  - id: INV-CLINIC-STOCK-HOLDS-NO-MEDICINES
+    statement: >-
+      An item in the medicines master cannot be added to the clinic-stock catalogue — and when the medicines
+      master cannot be reached, the item is refused rather than admitted.
+    source: 42-branch-management.md §8 (D5, ratified 2026-08-01); ADR-0029 §4.1
+    severity: Critical
+    # THIS INVARIANT EXISTED AS A SENTENCE FOR THE WHOLE OF PHASE 25 AND AS CODE FOR NONE OF IT. D5 said
+    # "vaccines are pharmacy stock"; nothing in inventory-service referred to a vaccine, an injectable or any
+    # medicine identifier, so the rule was enforced by whoever happened to remember it. That is the reason
+    # this registry asks for a named test per statement rather than a statement alone.
+    #
+    # What it protects is NARROWER than it sounds and worse than it looks. INV-INVENTORY-CARRIES-NO-PHI still
+    # holds regardless: a vaccine in clinic stock could never be issued to a NAMED patient, because no patient
+    # identifier exists anywhere in the service to issue it against. What is lost is the paperwork around
+    # giving it — prescription, eligibility, coverage limit, dispensing record — every one of which lives in
+    # pharmacy-service. The vaccine gets given and the controls happen nowhere. That is the "second dispensing
+    # route" D2's rationale warns about, arriving through the catalogue instead of through a patient column.
+    #
+    # The unreachable-master case is listed as a test in its own right, not as an edge case, because the
+    # obvious implementation treats "could not ask" as "not a medicine" — which leaves the gate open in
+    # precisely the window nobody is watching.
+    tests:
+      - Mersal.Inventory.Tests.InventoryEndpointTests.A_VACCINE_IS_REFUSED_FROM_THE_CLINIC_CATALOGUE
+      - Mersal.Inventory.Tests.InventoryEndpointTests.AND_SO_IS_ANY_OTHER_MEDICINE_IN_THE_MASTER
+      - Mersal.Inventory.Tests.InventoryEndpointTests.AN_UNREACHABLE_MEDICINES_MASTER_REFUSES_THE_ITEM_RATHER_THAN_ADMITTING_IT
+      - Mersal.Inventory.Tests.InventoryEndpointTests.A_CONSUMABLE_STILL_GOES_IN
+      - Mersal.MasterData.Tests.MasterDataEndpointTests.A_drug_code_is_classified_as_a_medicine_and_an_unrelated_consumable_is_not
+      - Mersal.MasterData.Tests.MasterDataEndpointTests.A_vaccine_is_matched_by_a_name_that_MERELY_CONTAINS_it_and_is_flagged_as_a_vaccine
+      - Mersal.MasterData.Tests.MasterDataEndpointTests.Classify_needs_something_to_go_on

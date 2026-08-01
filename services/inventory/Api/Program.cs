@@ -4,6 +4,7 @@ using Mersal.Authz;
 using Mersal.Data;
 using Mersal.Events;
 using Mersal.Inventory.Api;
+using Mersal.Inventory.Domain;
 using Mersal.Inventory.Infrastructure;
 using Mersal.Time;
 using OpenTelemetry.Metrics;
@@ -33,6 +34,15 @@ builder.Services.AddScoped<BranchScopeState>();
 builder.Services.AddScoped<BranchReachGuard>();
 builder.Services.AddHttpClient<IBranchDirectory, HttpBranchDirectory>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Admin:BaseUrl"] ?? "http://admin-service:8080"));
+
+// D5 (ADR-0029) — the catalogue does not admit medicines, and masterdata-service is what answers "is this a
+// medicine?". Consulted once per catalogue item creation, so a short timeout is right: the endpoint fails
+// CLOSED on timeout, and a caller waiting 30s to be told to retry is worse than being told at 5.
+builder.Services.AddHttpClient<IMedicinesDirectory, HttpMedicinesDirectory>(c =>
+{
+    c.BaseAddress = new Uri(builder.Configuration["MasterData:BaseUrl"] ?? "http://masterdata-service:8080");
+    c.Timeout = TimeSpan.FromSeconds(5);
+});
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("inventory-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddHttpClientInstrumentation().AddOtlpExporter())

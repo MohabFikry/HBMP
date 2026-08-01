@@ -109,13 +109,28 @@ expensive way.
   code change behind any of them — and would have failed on whoever's commit happened to land next.
   `freezeClock()` in `apps/web/test/helpers.tsx` now pins the date at file scope. **If you write a fixture
   with an absolute date, freeze the clock in the same file.**
-- **Phase 25's five sponsor decisions (D1–D5) are implemented but NOT signed off.** Pack for the decision
-  maker: `docs/decisions/phase-25-sponsor-pack.md`. Ratifying them as recommended needs no DPIA — the
-  recommendations are the conservative answers on every count. **D5 is the one with a live gap**: it says
-  vaccines are pharmacy stock, and nothing in the inventory service enforces that. D1–D4 are enforced by
-  constraints, indexes and tests; D5 is enforced by memory, so a vaccine can be catalogued as clinic stock
-  today. The strict PHI invariant still holds either way (no patient identifier exists to issue it against),
-  but the prescription, eligibility and dispensing-record controls around giving it would happen nowhere.
+- **Phase 25's five sponsor decisions (D1–D5) were RATIFIED as recommended on 2026-08-01** — closed, but keep
+  the lesson. Record: `docs/decisions/phase-25-sponsor-pack.md`. Nothing was overturned, so no DPIA and no
+  DPO/Medical Director signature was needed. **One field is deliberately still blank**: the signatory's
+  printed name and role, which nobody but they can supply.
+
+  **The lesson, which generalises past phase 25.** Writing the decisions out for a non-engineer forced the
+  question *"what is each of these actually enforced BY?"*, and D5 answered **nothing** — no reference to
+  vaccines, injectables or any medicine identifier existed anywhere in inventory-service, so "vaccines are
+  pharmacy stock" was a rule people had to remember while D1–D4 were held by a `CHECK` constraint, a unique
+  index, a five-fact test suite and a role-reach mode. The ADR had described all five in the same confident
+  tone. **When you write a decision table, put the mechanism beside the answer** — "we decided X" and "the
+  platform does X" read identically in prose and are not the same claim. Closed by ADR-0029 §4.1: item
+  creation asks masterdata whether the thing is a medicine and refuses it if so, *and refuses it when
+  masterdata is unreachable*, so the gate cannot open quietly during an outage.
+- **Three committed OpenAPI specs are stale, and nothing catches it.** Regenerating into a scratch dir on
+  2026-08-01 and diffing against `docs/api/` showed `approvals` (missing `orderedByUserId`), `patient`
+  (`POST /beneficiaries/{id}/status` is now `PATCH /beneficiaries/{id}`) and `policy` (missing
+  `/enrollments/{enrollmentId}/family` and more) all behind the code. `generate-openapi.sh` proves a spec can
+  be *produced*; **no gate compares the produced spec to the committed one**, so `docs/api/` drifts silently
+  and the Kong route-coverage gate reads the stale copy. Left unfixed deliberately — regenerating three
+  unrelated services inside a D5 commit would hide them. Reproduce with
+  `DOTNET=./dotnet.sh tools/ci/generate-openapi.sh /tmp/spec && diff -q docs/api/X.json /tmp/spec/X.json`.
 - **Migration 0010's own header overstates what it does.** FORCE ROW LEVEL SECURITY stops a *non-superuser*
   owner bypassing a policy. The owner here, `hbmp`, is SUPERUSER + BYPASSRLS, so the protection it
   advertises does not apply in this deployment. What actually holds is that requests are served by

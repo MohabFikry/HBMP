@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Mersal.Auth;
 using Mersal.Authz;
+using Mersal.Inventory.Domain;
 using Mersal.Inventory.Infrastructure;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
@@ -41,6 +42,10 @@ public sealed class InventoryApiFactory : WebApplicationFactory<Program>
     /// only the SOURCE is faked, never the decision.</summary>
     public HashSet<Guid> PermittedBranches { get; } = [];
 
+    /// <summary>What masterdata-service will say about the next item created (D5). Defaults to "not a
+    /// medicine" so every test that is not ABOUT D5 behaves as it did before the guard existed.</summary>
+    public MedicineCheck NextMedicineCheck { get; set; } = MedicineCheck.NotAMedicine;
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
@@ -65,6 +70,11 @@ public sealed class InventoryApiFactory : WebApplicationFactory<Program>
             // the lookup would leave the reach rules untested by the suite written to test them.
             s.RemoveAll<IBranchDirectory>();
             s.AddSingleton<IBranchDirectory>(new FakeBranchDirectory(this));
+
+            // D5 — masterdata-service is not here. Only the LOOKUP is faked; the endpoint's decision about
+            // what to do with each verdict is the real one.
+            s.RemoveAll<IMedicinesDirectory>();
+            s.AddSingleton<IMedicinesDirectory>(new FakeMedicinesDirectory(this));
 
             // The outbox relay runs against a broker that is not here.
             s.RemoveAll<IHostedService>();
@@ -116,6 +126,12 @@ public sealed class InventoryApiFactory : WebApplicationFactory<Program>
             DELETE FROM inventory.item         WHERE tenant_id = {0};
             """, Tenant);
     }
+}
+
+internal sealed class FakeMedicinesDirectory(InventoryApiFactory f) : IMedicinesDirectory
+{
+    public Task<MedicineCheck> ClassifyAsync(string sku, string nameEn, string? nameAr, CancellationToken ct = default) =>
+        Task.FromResult(f.NextMedicineCheck);
 }
 
 internal sealed class FakeBranchDirectory(InventoryApiFactory f) : IBranchDirectory

@@ -39,6 +39,81 @@ public class MasterDataEndpointTests
 {
     private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
 
+    // ---- D5: "is this a medicine?" -----------------------------------------------------------------------
+    //
+    // inventory-service refuses a clinic-stock catalogue item on what this endpoint answers (ADR-0029 D5).
+    // It is therefore the same shape of contract as the /exists routes above and fails the same way: an
+    // endpoint that answered `matched: false` for everything would break no test in inventory — its guard
+    // would simply stop guarding — so the negative and the containment case are both asserted HERE, against
+    // real rows, rather than against a fake on the calling side.
+
+    [SkippableFact]
+    public async Task A_drug_code_is_classified_as_a_medicine_and_an_unrelated_consumable_is_not()
+    {
+        Skip.If(MasterDataApiFactory.Db is null, "MASTERDATA_TEST_DB not set — DB integration test skipped.");
+        await using var app = new MasterDataApiFactory();
+        try
+        {
+            await app.SeedAsync();
+            using var client = app.ClinicalClient();
+
+            var byCode = await client.GetFromJsonAsync<JsonElement>(
+                new Uri($"/api/v1/drugs/classify?code={app.DrugACode}", UriKind.Relative), Web);
+            byCode.GetProperty("matched").GetBoolean().Should().BeTrue();
+            byCode.GetProperty("drugCode").GetString().Should().Be(app.DrugACode);
+            byCode.GetProperty("isVaccine").GetBoolean().Should().BeFalse("Testolol is not in ATC J07");
+
+            // The negation, and the one that decides whether the guard is usable: gauze must go in. A
+            // classify that matched everything would refuse the entire clinic catalogue, and the guard would
+            // be switched off within a day.
+            var gauze = await client.GetFromJsonAsync<JsonElement>(
+                new Uri("/api/v1/drugs/classify?code=GZ-1010&name=Gauze%20swab%2010x10", UriKind.Relative), Web);
+            gauze.GetProperty("matched").GetBoolean().Should().BeFalse();
+        }
+        finally { await app.CleanupAsync(); }
+    }
+
+    [SkippableFact]
+    public async Task A_vaccine_is_matched_by_a_name_that_MERELY_CONTAINS_it_and_is_flagged_as_a_vaccine()
+    {
+        // The real mistake is never typed exactly. Someone catalogues "Fixturevax Vaccine 20mcg/ml vial" and
+        // an equality match lets it straight through — which is why the containment arm exists and why it is
+        // asserted separately from the exact-code arm above.
+        Skip.If(MasterDataApiFactory.Db is null, "MASTERDATA_TEST_DB not set — DB integration test skipped.");
+        await using var app = new MasterDataApiFactory();
+        try
+        {
+            await app.SeedAsync();
+            using var client = app.ClinicalClient();
+
+            var typed = Uri.EscapeDataString(app.VaccineDrugName + " 20mcg/ml vial");
+            var hit = await client.GetFromJsonAsync<JsonElement>(
+                new Uri($"/api/v1/drugs/classify?code=VAX-99&name={typed}", UriKind.Relative), Web);
+
+            hit.GetProperty("matched").GetBoolean().Should().BeTrue("the master's name is contained in what was typed");
+            hit.GetProperty("drugCode").GetString().Should().Be(app.VaccineDrugCode);
+            hit.GetProperty("isVaccine").GetBoolean().Should().BeTrue("ATC J07 is the vaccines group");
+        }
+        finally { await app.CleanupAsync(); }
+    }
+
+    [SkippableFact]
+    public async Task Classify_needs_something_to_go_on()
+    {
+        // An empty query must be a 400, not a cheerful `matched: false`. The caller fails CLOSED on anything
+        // it cannot interpret, and a 200 saying "not a medicine" is the one answer that would let a
+        // malformed call through as an approval.
+        Skip.If(MasterDataApiFactory.Db is null, "MASTERDATA_TEST_DB not set — DB integration test skipped.");
+        await using var app = new MasterDataApiFactory();
+        try
+        {
+            using var client = app.ClinicalClient();
+            var res = await client.GetAsync(new Uri("/api/v1/drugs/classify", UriKind.Relative));
+            res.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        }
+        finally { await app.CleanupAsync(); }
+    }
+
     [SkippableFact]
     public async Task An_icd_code_that_exists_is_confirmed_and_one_that_does_not_is_denied()
     {
@@ -287,9 +362,17 @@ public sealed class MasterDataApiFactory : WebApplicationFactory<Program>
     public string DrugACode => $"TSTA-{Suffix}";
     public string DrugBCode => $"TSTB-{Suffix}";
     public string DrugCCode => $"TSTC-{Suffix}";
+
+    /// <summary>A vaccine fixture, for the D5 classify contract. J07 is the real ATC group for vaccines and
+    /// <c>/drugs/classify</c> reports <c>isVaccine</c> off that prefix, so the fixture has to start with it
+    /// while the rest keeps it unique against the loaded catalogue.</summary>
+    public string VaccineAtcCode => $"J07{Token}01";
+    public string VaccineDrugCode => $"TSTV-{Suffix}";
+    public string VaccineDrugName => "Fixturevax Vaccine";
     public Guid DrugAId { get; } = Guid.NewGuid();
     public Guid DrugBId { get; } = Guid.NewGuid();
     public Guid DrugCId { get; } = Guid.NewGuid();
+    public Guid VaccineDrugId { get; } = Guid.NewGuid();
     public Guid SensitiveExamId { get; } = Guid.NewGuid();
     public Guid StandardExamId { get; } = Guid.NewGuid();
     public Guid RetiredExamId { get; } = Guid.NewGuid();
@@ -338,6 +421,7 @@ public sealed class MasterDataApiFactory : WebApplicationFactory<Program>
         });
         db.AtcClasses.Add(new AtcClass { AtcCode = AtcCode, Title = "Test substance", Level = 5, SourceRelease = Release });
         db.AtcClasses.Add(new AtcClass { AtcCode = OtherAtcCode, Title = "Other substance", Level = 5, SourceRelease = Release });
+        db.AtcClasses.Add(new AtcClass { AtcCode = VaccineAtcCode, Title = "Test vaccine", Level = 5, SourceRelease = Release });
         // Saved in dependency order by hand. The model declares no navigation between these tables, so EF has
         // no graph to sort by and emits the inserts in the order they were tracked — which the real foreign
         // keys (drug → atc_class, drug_interaction → drug) then reject.
@@ -358,6 +442,12 @@ public sealed class MasterDataApiFactory : WebApplicationFactory<Program>
         {
             DrugId = DrugCId, DrugCode = DrugCCode, Name = "Unrelatide 10mg", AtcCode = OtherAtcCode,
             Form = "Capsule", Strength = "10mg", SourceRelease = Release,
+        });
+        db.Drugs.Add(new Drug
+        {
+            DrugId = VaccineDrugId, DrugCode = VaccineDrugCode, Name = VaccineDrugName,
+            NameAr = "لقاح فيكستشرفاكس", AtcCode = VaccineAtcCode,
+            Form = "Vial", Strength = "20mcg/ml", SourceRelease = Release,
         });
         await db.SaveChangesAsync();
 

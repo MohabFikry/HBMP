@@ -145,15 +145,26 @@ Licence status uses the four-cue rule — Valid / Expiring / **Expired** must di
 9. Inventory carries **no PHI**.
 10. Every practitioner, roster, licence and stock mutation is audited; no hard deletes.
 
-## 8. Decisions needed from the sponsor
+## 8. Decisions needed from the sponsor — **all five ratified as recommended, 2026-08-01**
 
-| # | Question | Recommendation |
-|---|---|---|
-| D1 | Do clinics hold **controlled substances**? | **Exclude from v1.** A controlled register needs dual-signature, a running balance per ampoule and regulator-facing reporting — a module of its own, not a category flag. Blocked by a CHECK constraint until designed |
-| D2 | Should consumption link to an **encounter**? | **No by default.** A patient link makes inventory PHI and drags RLS, min-necessary and retention into a storekeeping system. Record consumption by quantity per branch per day. Revisit only if per-patient costing is required |
-| D3 | May a coordinator **create** a practitioner, or only assign existing ones? | **Create, with the licence-uniqueness guard** (§2). Central-only creation makes every new locum a ticket to head office |
-| D4 | Does the clinics manager get **write** everywhere, or read-everywhere/write-own? | **Write everywhere.** They supervise the network of clinics; a supervisor who must raise a request to fix a roster is not a supervisor. Audited, and the branch filter makes the target explicit |
-| D5 | Are vaccines/injectables clinic stock or pharmacy stock? | **Pharmacy**, wherever a prescription or authorization applies. Clinic stock is consumables. Ambiguous items get classified once, centrally, not per branch |
+Decision record: [`docs/decisions/phase-25-sponsor-pack.md`](../docs/decisions/phase-25-sponsor-pack.md)
+(source of truth) · Implementation: [`docs/adr/0029-branch-management.md`](../docs/adr/0029-branch-management.md) §4.
+
+No answer was changed, so no DPIA was triggered and neither the DPO nor the Medical Director was required.
+
+| # | Question | Recommendation | Outcome | Enforced by |
+|---|---|---|---|---|
+| D1 | Do clinics hold **controlled substances**? | **Exclude from v1.** A controlled register needs dual-signature, a running balance per ampoule and regulator-facing reporting — a module of its own, not a category flag. Blocked by a CHECK constraint until designed | ✅ Ratified | `CHECK (is_controlled = false)` on `inventory.item` |
+| D2 | Should consumption link to an **encounter**? | **No by default.** A patient link makes inventory PHI and drags RLS, min-necessary and retention into a storekeeping system. Record consumption by quantity per branch per day. Revisit only if per-patient costing is required | ✅ Ratified | Absence, held by `NoPhiInInventoryTests` (5 facts over schema, routes, model, runtime) |
+| D3 | May a coordinator **create** a practitioner, or only assign existing ones? | **Create, with the licence-uniqueness guard** (§2). Central-only creation makes every new locum a ticket to head office | ✅ Ratified | Partial UNIQUE `ux_practitioner_license_no` |
+| D4 | Does the clinics manager get **write** everywhere, or read-everywhere/write-own? | **Write everywhere.** They supervise the network of clinics; a supervisor who must raise a request to fix a roster is not a supervisor. Audited, and the branch filter makes the target explicit | ✅ Ratified | `BranchSetScoped` reach + a test asserting the two roles' scope sets are identical |
+| D5 | Are vaccines/injectables clinic stock or pharmacy stock? | **Pharmacy**, wherever a prescription or authorization applies. Clinic stock is consumables. Ambiguous items get classified once, centrally, not per branch | ✅ Ratified | `GET /api/v1/drugs/classify` on masterdata, consulted by item creation; fail-closed (ADR-0029 §4.1) |
+
+> **The column that matters is the last one, and it did not exist until sign-off.** Asking "what is each
+> decision enforced BY?" — rather than "what did we decide?" — is what exposed that **D5 was enforced by
+> nothing** for the whole of phase 25: no reference to vaccines, injectables or any medicine identifier
+> existed anywhere in inventory-service, so "vaccines are pharmacy stock" was a rule people had to remember.
+> A decision table without a mechanism column reads as though every row is equally real. They rarely are.
 
 ## 9. Acceptance criteria
 

@@ -324,6 +324,109 @@ public class InventoryEndpointTests : IAsyncLifetime, IDisposable
         item.RequiresExpiry.Should().BeTrue();
     }
 
+    // ---- D5: the catalogue does not admit medicines ------------------------------------------------------
+    //
+    // For one build D5 was enforced by NOTHING — no reference to vaccines, injectables or any medicine
+    // identifier existed in this service, so "vaccines are pharmacy stock" was a rule people had to remember.
+    // These are what turned it into one the platform keeps. The lookup is faked; every decision below it is
+    // the real endpoint's.
+
+    [SkippableFact]
+    public async Task A_VACCINE_IS_REFUSED_FROM_THE_CLINIC_CATALOGUE()
+    {
+        // The case D5 was raised about. Note what is NOT at stake: even admitted, it could not be issued to a
+        // named patient, because no patient identifier exists anywhere in this service. What the refusal
+        // protects is the paperwork around GIVING it — prescription, eligibility, coverage limit, dispensing
+        // record — all of which live in pharmacy-service and none of which exist on this side.
+        SkipWithoutDb();
+        _f.NextMedicineCheck = new MedicineCheck(Domain.MedicineVerdict.IsAMedicine,
+            "HEPB-20", "Hepatitis B Vaccine", "J07BC01", IsVaccine: true);
+
+        var res = await _f.CoordinatorClient(Maadi).SendAsync(Post("/api/v1/inventory/items", new
+        {
+            sku = "VAX-" + Guid.NewGuid().ToString("N")[..6], nameEn = "Hepatitis B Vaccine 20mcg/ml",
+            nameAr = "لقاح التهاب الكبد ب", category = "Medical", unitOfMeasure = "vial",
+        }, idem: null));
+
+        res.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        var body = await res.Content.ReadAsStringAsync();
+        body.Should().Contain("urn:hbmp:medicine-not-clinic-stock");
+        body.Should().Contain("vaccines-are-pharmacy-stock", "the refusal should name the case, not just the rule");
+        body.Should().Contain("HEPB-20", "a refusal that cannot say WHICH medicine it matched is not actionable");
+    }
+
+    [SkippableFact]
+    public async Task AND_SO_IS_ANY_OTHER_MEDICINE_IN_THE_MASTER()
+    {
+        // D5 is about vaccines but the rule is wider: anything dispensed against a prescription is pharmacy
+        // stock. Asserted separately so narrowing the guard to ATC J07 breaks a test rather than passing.
+        SkipWithoutDb();
+        _f.NextMedicineCheck = new MedicineCheck(Domain.MedicineVerdict.IsAMedicine,
+            "AMOX-500", "Amoxicillin 500mg", "J01CA04", IsVaccine: false);
+
+        var res = await _f.CoordinatorClient(Maadi).SendAsync(Post("/api/v1/inventory/items", new
+        {
+            sku = "AMX-" + Guid.NewGuid().ToString("N")[..6], nameEn = "Amoxicillin 500mg",
+            nameAr = "أموكسيسيلين", category = "Medical", unitOfMeasure = "capsule",
+        }, idem: null));
+
+        res.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        (await res.Content.ReadAsStringAsync()).Should().Contain("medicines-are-pharmacy-stock");
+    }
+
+    [SkippableFact]
+    public async Task AN_UNREACHABLE_MEDICINES_MASTER_REFUSES_THE_ITEM_RATHER_THAN_ADMITTING_IT()
+    {
+        // Fail-closed, and this is the test that matters most: the cheap implementation of this guard treats
+        // "could not ask" as "not a medicine", which leaves the gate open during exactly the window nobody is
+        // watching. 503 rather than 422 — nothing is wrong with the item, so the honest instruction is retry.
+        SkipWithoutDb();
+        _f.NextMedicineCheck = MedicineCheck.Unreachable;
+
+        var res = await _f.CoordinatorClient(Maadi).SendAsync(Post("/api/v1/inventory/items", new
+        {
+            sku = "UNK-" + Guid.NewGuid().ToString("N")[..6], nameEn = "Gauze swab",
+            nameAr = "شاش", category = "NonMedical", unitOfMeasure = "box",
+        }, idem: null));
+
+        res.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await res.Content.ReadAsStringAsync()).Should().Contain("urn:hbmp:medicines-directory-unavailable");
+    }
+
+    [SkippableFact]
+    public async Task A_CONSUMABLE_STILL_GOES_IN()
+    {
+        // The guard has to let the ordinary case through, or it gets switched off. Gauze is not in the
+        // medicines master and is created exactly as it was before D5 was enforced.
+        SkipWithoutDb();
+        _f.NextMedicineCheck = MedicineCheck.NotAMedicine;
+
+        var res = await _f.CoordinatorClient(Maadi).SendAsync(Post("/api/v1/inventory/items", new
+        {
+            sku = "GZ-" + Guid.NewGuid().ToString("N")[..6], nameEn = "Gauze swab 10x10",
+            nameAr = "شاش ١٠×١٠", category = "NonMedical", unitOfMeasure = "box",
+        }, idem: null));
+
+        res.StatusCode.Should().Be(HttpStatusCode.Created);
+    }
+
+    [SkippableFact]
+    public async Task A_NULL_SKU_IS_A_400_AND_NOT_A_500()
+    {
+        // `sku` is declared non-nullable on the request record, which stops nothing — a body with
+        // `"sku": null` deserializes to null anyway, and .Trim() on it was an unhandled 500 waiting for the
+        // first client to send one. Found while wiring the D5 guard through the same fields.
+        SkipWithoutDb();
+        var res = await _f.CoordinatorClient(Maadi).SendAsync(Post("/api/v1/inventory/items", new
+        {
+            sku = (string?)null, nameEn = "Gauze", nameAr = "شاش",
+            category = "NonMedical", unitOfMeasure = "box",
+        }, idem: null));
+
+        res.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await res.Content.ReadAsStringAsync()).Should().Contain("urn:hbmp:missing-field");
+    }
+
     // ---- the ledger and the alerts read ------------------------------------------------------------------
 
     [SkippableFact]

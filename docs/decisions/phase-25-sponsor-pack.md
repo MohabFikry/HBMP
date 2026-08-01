@@ -1,24 +1,37 @@
-# Phase 25 — five decisions needing sponsor sign-off
+# Phase 25 — five sponsor decisions: the pack, and the record of what was decided
 
-**Prepared:** 2026-08-01 · **Status:** awaiting decision — **nothing here is signed off**
+**Prepared:** 2026-08-01 · **Status:** **RATIFIED as recommended, 2026-08-01** — see the decision record at the foot
 **Subject:** the Branch Management build ([design 42](../../HBMP-Design/42-branch-management.md), [ADR-0029](../adr/0029-branch-management.md))
-**Audience:** Mersal programme sponsor. **D5 additionally needs the Medical Director; overturning D2 or D5
-additionally needs the DPO.**
+**Audience:** Mersal programme sponsor. **Overturning D2 or D5 would additionally need the DPO and the
+Medical Director; ratifying as recommended needs neither.**
+
+> **Correction, 2026-08-01.** This line previously read "D5 additionally needs the Medical Director",
+> unqualified. That was wrong and it was wrong in the expensive direction — it would have held a decision
+> that changes nothing clinically behind a signature it does not need. The Medical Director is required when
+> D5 is **overturned** to clinic stock, because that puts administering a medicine outside the prescription
+> path. Confirming *pharmacy* keeps it inside, which is the status quo.
 
 ---
 
-## What is being asked
+## What was asked, and what was decided
 
 Phase 25 gave the people who run Mersal's six clinics a workspace: practitioner roster, licence enforcement,
 availability, and clinic stock. Five questions came up during design that are **not engineering choices** —
 they set what the platform is allowed to do. Each was answered with a recommendation so the build could
-proceed, and each answer is **implemented and running**.
+proceed, and each answer was implemented and running while the question stayed open.
 
-You are being asked to **ratify or change** those five answers. This document says, for each one, what is
-built today, what it is actually enforced by, and what changing it would cost now versus after go-live.
+The sponsor was asked to **ratify or change** those five answers, and on **2026-08-01 ratified all five as
+recommended**. This document is kept whole rather than rewritten: the sections below are what the decision was
+taken *on*, and the record at the foot is what was decided. Each section says what was built, what the answer
+is actually enforced by, and what changing it would have cost.
 
-**Ratifying all five as recommended requires no DPIA and no further work.** Only overturning D2 or D5 moves
-patient data into a system designed not to hold any, and that is a different kind of change.
+**No answer was changed, so no DPIA was triggered** and neither the DPO nor the Medical Director was required.
+Only overturning D2 or D5 would have moved patient data into a system designed not to hold any.
+
+> **One thing the pack got wrong, worth leaving visible.** It said ratifying as recommended required "no
+> further work". That was true of D1–D4 and false of D5, whose gap had to be closed either way — and the pack
+> said so itself two sections later. A summary line that contradicts the detail is the kind of error a
+> decision-maker reads and the author never notices.
 
 ---
 
@@ -30,7 +43,7 @@ patient data into a system designed not to hold any, and that is a different kin
 | D2 | Should stock use link to a patient visit? | **No** | Absence + 5 automated checks | Crosses the PHI boundary — **DPIA** |
 | D3 | May a clinic coordinator create a practitioner record? | **Yes** | Unique licence number | Small — hours |
 | D4 | Does the Clinics Manager get write access at all six? | **Yes** | Role reach + audit | Small — hours |
-| D5 | Are vaccines clinic stock or pharmacy stock? | **Pharmacy** | ⚠️ **nothing** — see below | Crosses the PHI boundary — **DPIA** |
+| D5 | Are vaccines clinic stock or pharmacy stock? | **Pharmacy** | Medicines-master check — see below | Crosses the PHI boundary — **DPIA** |
 
 ---
 
@@ -125,11 +138,16 @@ forgotten is always the narrower one.
 
 ## D5 — Vaccines are pharmacy stock, not clinic stock
 
-> ### ⚠️ This is the one that needs action whichever way you decide
+> ### ✅ Closed, 2026-08-01 — this was the one with a live gap
 >
-> D1–D4 are enforced by the platform. **D5 is not enforced by anything.** There is no reference to vaccines,
-> injectables or any medicine identifier anywhere in the stock system. Nothing today stops someone
-> cataloguing "Hepatitis B vaccine" as ordinary clinic stock.
+> When this pack was written, D1–D4 were enforced by the platform and **D5 was enforced by nothing**: there
+> was no reference to vaccines, injectables or any medicine identifier anywhere in the stock system, so
+> nothing stopped someone cataloguing "Hepatitis B vaccine" as ordinary clinic stock.
+>
+> On ratification the check described below was built. **The stock catalogue now refuses any item that
+> matches the medicines master**, naming the medicine it matched, and refuses it *also* when the medicines
+> master cannot be reached — so the gate does not quietly open during an outage. The rule is now one the
+> platform keeps rather than one people must remember.
 
 **The question.** Vaccines and injectables sit between the two systems. Are they clinic stock (a consumable
 used during care) or pharmacy stock (something dispensed against a prescription)?
@@ -137,62 +155,79 @@ used during care) or pharmacy stock (something dispensed against a prescription)
 **Recommended: pharmacy**, wherever a prescription or an authorisation applies. Clinic stock is consumables —
 gloves, sutures, dressings, IV sets.
 
-**What the gap actually risks.** The strict protection still holds: even if a vaccine were catalogued as
+**What the gap actually risked.** The strict protection held throughout: even if a vaccine had been catalogued as
 clinic stock, the system still could not issue it *to a named patient*, because no patient identifier exists
 anywhere in it (D2). What would be lost is the **paperwork around giving it**: no prescription, no
 eligibility check, no coverage limit, no entry in the dispensing record. The vaccine would be given, and the
 controls that are supposed to surround giving it would simply have happened nowhere.
 
-**What we recommend regardless of the decision.** Classification should be made real rather than left to
-memory:
+**What was built on the back of the decision.** Classification is now real rather than left to memory. When
+someone adds an item to the clinic catalogue, the platform asks the medicines master whether it is a medicine,
+and refuses it if so — naming which medicine it matched, so the person is told *why* rather than just *no*.
 
-- **If you confirm pharmacy** — add a check so a catalogue item cannot be created against something in the
-  medicines master. Roughly a day's work, and it turns a rule people must remember into one the platform
-  keeps.
-- **If you decide clinic stock** — this needs a DPIA and Medical Director sign-off, because it puts
-  administering a medicine outside the prescription path. It is a substantially larger change than it sounds.
+Three details worth knowing, because each was a choice:
 
-**Either way, the classification should be made once, centrally.** Deciding it per clinic is how the same
-vial ends up governed two different ways in two branches.
+- **It matches on more than an exact name.** Someone typing "Hepatitis B Vaccine 20mcg/ml vial" is caught by
+  the master's "Hepatitis B Vaccine". The real mistake is never typed exactly, and a check that only caught
+  exact spellings would have looked like protection without being any.
+- **An outage refuses the item rather than admitting it.** If the medicines master cannot be reached, adding a
+  catalogue item is declined with "retry shortly". The cost is that a new gauze SKU waits a few minutes; the
+  alternative is an open gate during exactly the window nobody is watching.
+- **There is no override tick-box, deliberately.** An override is how a decision that must be made once,
+  centrally, becomes six clinics each ticking a box on a Tuesday. If a genuine consumable is ever refused, the
+  medicines master is what gets corrected — and that correction is visible to the people accountable for it.
+
+**Had you decided clinic stock instead**, this would have needed a DPIA and Medical Director sign-off, because
+it puts administering a medicine outside the prescription path — a substantially larger change than it sounds.
 
 ---
 
-## If no decision is made
+## What was at stake in not deciding
 
-Nothing breaks. The platform runs on the recommended answers, which are the conservative ones on every
-count — they hold data in, not out.
-
-The costs of leaving it are these, and they are cumulative:
-
-- **D5's gap stays open**, and stays unguarded. It is the only one with a live risk attached.
-- **The recommended answers get harder to reverse over time.** D2 in particular: reversing it after clinics
-  have been using the system means a data migration and a retrospective DPIA over records already collected,
-  rather than a design change to something not yet in use.
-- **`BUILD-STATUS.md` continues to carry five decisions marked provisional**, which is honest but means
-  anyone reading it to plan work has five open questions in front of them.
+Kept for the record, because it is why the pack was written rather than left as a backlog item. The costs
+were cumulative: D5's gap would have stayed open and unguarded; D2 would have got harder to reverse with every
+week of live use (after go-live it is a data migration plus a retrospective DPIA over records already
+collected, not a design change to something not yet in use); and `BUILD-STATUS.md` would have carried five
+decisions marked provisional, which is honest but leaves anyone planning work with five open questions.
 
 ---
 
 ## Decision record
 
-*To be completed by the sponsor. Leave a row blank rather than guessing at it — an unrecorded decision is
-recoverable; a wrongly recorded one is not.*
+**All five ratified as recommended on 2026-08-01.** No answer was changed, so neither the DPO nor the Medical
+Director block below applies, and no DPIA was triggered — the recommended answers are the conservative ones on
+every count and none of them moves patient data.
 
 | # | Decision | Ratified as recommended? | If changed, what instead | Decided by | Date |
 |---|---|---|---|---|---|
-| D1 | Controlled substances excluded from v1 | | | | |
-| D2 | Stock use not linked to a patient | | | | |
-| D3 | Coordinator may create a practitioner | | | | |
-| D4 | Clinics Manager writes at all six | | | | |
-| D5 | Vaccines are pharmacy stock | | | | |
+| D1 | Controlled substances excluded from v1 | **Yes** | — | Programme sponsor *(name below)* | 2026-08-01 |
+| D2 | Stock use not linked to a patient | **Yes** | — | Programme sponsor *(name below)* | 2026-08-01 |
+| D3 | Coordinator may create a practitioner | **Yes** | — | Programme sponsor *(name below)* | 2026-08-01 |
+| D4 | Clinics Manager writes at all six | **Yes** | — | Programme sponsor *(name below)* | 2026-08-01 |
+| D5 | Vaccines are pharmacy stock | **Yes** | — | Programme sponsor *(name below)* | 2026-08-01 |
 
-**Additional signatures required only if D2 or D5 is changed:**
+**The one field left open — and it is left open on purpose.** The decision above was given by the programme
+owner and is recorded exactly as given. The printed name and role are not, because nobody but the signatory
+can supply those, and a governance record that invents a name is worth less than one that admits a blank:
+
+| | |
+|---|---|
+| **Printed name** | |
+| **Role** | |
+| **Signature / date** | |
+
+**The DPO and Medical Director block stays empty, and that emptiness is itself the record** — it is the
+evidence that no decision crossing the PHI boundary was taken:
 
 | Role | Name | Date |
 |---|---|---|
-| Data Protection Officer | | |
-| Medical Director | | |
+| Data Protection Officer | *n/a — no answer changed* | |
+| Medical Director | *n/a — no answer changed* | |
 
-Once completed, this table is the source of truth. [ADR-0029](../adr/0029-branch-management.md) moves from
-provisional to Accepted, `docs/BUILD-STATUS.md` drops the provisional note under 25.0, and
-[design 42 §8](../../HBMP-Design/42-branch-management.md) records the outcome against each question.
+### What followed from this table
+
+- [ADR-0029](../adr/0029-branch-management.md) moved from *Accepted (with five provisional decisions)* to
+  **Accepted**.
+- `docs/BUILD-STATUS.md` dropped the provisional note under 25.0.
+- [design 42 §8](../../HBMP-Design/42-branch-management.md) records the outcome against each question.
+- **D5's enforcement gap was closed** — see D5 above for what was built.

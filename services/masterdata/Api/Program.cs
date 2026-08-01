@@ -153,6 +153,53 @@ v1.MapGet("/drugs/resolve", async (string code, MasterDataDbContext db, Cancella
         ? Results.Ok(new { d.DrugCode, d.Name, d.Form, d.Strength, d.AtcCode })
         : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found"));
 
+// "Is this thing a medicine?" — asked by inventory-service before it will admit an item to the CLINIC STOCK
+// catalogue (ADR-0029 D5: vaccines and anything dispensed against a prescription are pharmacy stock, not
+// clinic stock).
+//
+// ANSWERED HERE, not in inventory, and that is the point. The medicines master lives in this service; a copy
+// of "what counts as a medicine" kept in a storekeeping service is a second answer to a clinical question,
+// and the two would drift the first time a drug was added here and not there.
+//
+// Reference data only, both ways: the caller sends a SKU and a name and gets back a verdict plus the matched
+// drug's public catalogue fields. No beneficiary, no prescription, nothing patient-shaped crosses this call.
+v1.MapGet("/drugs/classify", async (string? code, string? name, string? nameAr, MasterDataDbContext db, CancellationToken ct) =>
+{
+    var c = code?.Trim();
+    var n = name?.Trim();
+    var na = nameAr?.Trim();
+    if (string.IsNullOrWhiteSpace(c) && string.IsNullOrWhiteSpace(n) && string.IsNullOrWhiteSpace(na))
+        return Results.Problem(statusCode: 400, title: "code, name or nameAr is required",
+            type: "https://mersal.foundation/problems/validation");
+
+    // The containment arm — "Hepatitis B Vaccine 20mcg/ml" must match the master's "Hepatitis B Vaccine" —
+    // is what makes this catch the real mistake rather than only the exactly-typed one. It is floored at
+    // SIX characters of drug name because without a floor a master entry called "Water" refuses every
+    // consumable with "water" in its description, and a guard that fires on gauze gets switched off.
+    const int MinContainmentLength = 6;
+
+    var hit = await db.Drugs.AsNoTracking().FirstOrDefaultAsync(d =>
+           (c != null && EF.Functions.ILike(d.DrugCode, c))
+        || (n != null && EF.Functions.ILike(d.Name, n))
+        || (na != null && d.NameAr != null && EF.Functions.ILike(d.NameAr, na))
+        || (n != null && d.Name.Length >= MinContainmentLength && EF.Functions.ILike(n, "%" + d.Name + "%"))
+        || (n != null && d.ScientificName != null && d.ScientificName.Length >= MinContainmentLength
+            && EF.Functions.ILike(n, "%" + d.ScientificName + "%"))
+        || (na != null && d.NameAr != null && d.NameAr.Length >= MinContainmentLength
+            && EF.Functions.ILike(na, "%" + d.NameAr + "%")), ct);
+
+    return Results.Ok(new
+    {
+        matched = hit is not null,
+        drugCode = hit?.DrugCode,
+        name = hit?.Name,
+        atcCode = hit?.AtcCode,
+        // ATC J07 is the vaccines group. Reported separately because a vaccine landing in clinic stock is the
+        // specific case D5 was raised about, and the refusal reads better when it can say so.
+        isVaccine = hit?.AtcCode is { } atc && atc.StartsWith("J07", StringComparison.OrdinalIgnoreCase),
+    });
+});
+
 // By-id existence checks the EMR uses to validate drug_id / allergen_id references (phase 4 medication
 // history & allergies). Return allow/deny only — no clinical payload.
 v1.MapGet("/drugs/by-id/{id:guid}/exists", async (Guid id, MasterDataDbContext db, CancellationToken ct) =>
