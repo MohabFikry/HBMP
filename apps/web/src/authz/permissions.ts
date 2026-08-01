@@ -28,6 +28,13 @@ export type Permission =
   | "referrals.write"
   | "results.inbox"
   | "vitals.write"
+  // 25.7 — Branch Management (design 42 §6). BOTH branch roles hold ALL of these: one permission set, two
+  // reaches. The manager's extra affordance (comparing the six clinics) is derived from REACH, not from an
+  // extra permission — see the catalog's `reachScoped` flag.
+  | "branch.practitioners"
+  | "branch.roster"
+  | "branch.licences"
+  | "branch.inventory"
   // Lab / imaging
   | "lab.queue"
   | "lab.consume"
@@ -134,14 +141,51 @@ export type Role =
   | "policy_admin"
   | "org_admin"
   | "super_admin"
-  | "medical_director";
+  | "medical_director"
+  // 25.7 — the people who run a clinic. Identical permissions; they differ only in how many branches they
+  // reach (ADR-0029).
+  | "branch_coordinator"
+  | "clinics_manager";
 
 /**
  * Role → granted permissions. Derived from 11-permission-matrix §2/§3. Kept deliberately explicit so the
  * min-necessary hard rules are auditable at a glance (no clinical perms in Reception/Finance, etc.).
  */
+/**
+ * 25.7 — the ONE permission list both branch roles hold (design 42 §1). Declared once and referenced twice
+ * below: a coordinator and a clinics manager may do exactly the same things, and differ only in how many
+ * branches those things reach.
+ */
+const BRANCH_ROLE_PERMISSIONS: Permission[] = [
+  // reception's five, verbatim
+  "eligibility.check",
+  "queue.reception",
+  "appointments.read",
+  "appointments.book",
+  "checkin.write",
+  // and the four branch authorities
+  "branch.practitioners",
+  "branch.roster",
+  "branch.licences",
+  "branch.inventory",
+];
+
 export const rolePermissions: Record<Role, Permission[]> = {
   reception: ["eligibility.check", "queue.reception", "appointments.read", "appointments.book", "checkin.write"],
+
+  /*
+   * 25.7 — THE BRANCH ROLES SHARE ONE PERMISSION LIST, LITERALLY.
+   *
+   * Not two lists a test compares: one constant, referenced twice, so the SPA cannot drift even between test
+   * runs. The server-side equality is pinned separately by BranchRoleScopeParityTests and
+   * BranchRoleSeedTests — three independent statements of one invariant, because this is the rule the whole
+   * phase rests on (design 42 §7 rule 1).
+   *
+   * Reception's five, verbatim, plus the four branch authorities. No `emr.read`: they run the clinic, they
+   * do not read clinical notes.
+   */
+  branch_coordinator: BRANCH_ROLE_PERMISSIONS,
+  clinics_manager: BRANCH_ROLE_PERMISSIONS,
   doctor: [
     "emr.read",
     "emr.write",
@@ -162,27 +206,44 @@ export const rolePermissions: Record<Role, Permission[]> = {
   // person enrolling a member must not also be the person who decides what that plan pays for.
   beneficiary_mgmt: [
     "beneficiary.register",
-    "beneficiary.manage",
-    "beneficiary.status",
     // The officer PREPARES approvals (verifies documents, binds coverage); the decision buttons are
     // supervisor-only and the server enforces it (urn:hbmp:approver-required).
     "beneficiary.approvals",
+    // `beneficiary.manage`, `beneficiary.status` and `policy.utilization` were dropped with the sections they
+    // gated (19.7 nav rework). A permission granted to a role with nothing behind it is one nobody can reason
+    // about: it reads as access that exists somewhere.
     "eligibility.check",
     "policy.members",
     "policy.groups",
-    "policy.utilization",
     "policy.bulk",
     "policy.analytics",
   ],
-  // 19.7's approver persona (US-003): reviews what the officer prepared and decides. No register permission
-  // — the person who creates a record must not be the person who activates it, and the split starts here.
+  /*
+   * 19.7's approver persona (US-003) — a SUPERSET of the officer, plus the decision.
+   *
+   * It used to be a strict subset: no register pen, no bulk import, no analytics. The reasoning was
+   * separation of duties — the person who creates a record must not be the person who activates it — but the
+   * implementation was withholding a menu item, and that is the wrong lever twice over.
+   *
+   * It did not enforce the rule. The server's check was `is the caller a supervisor`, never `did the caller
+   * file THIS application`, so nothing stopped a supervisor from registering someone (the permission was
+   * absent from the nav, not from the API) and approving them. The real rule now lives where it belongs:
+   * patient-service refuses a decision on a registration whose `created_by` is the actor
+   * (`urn:hbmp:self-approval`), which is stricter than the old arrangement and true regardless of what any
+   * menu shows.
+   *
+   * And it made the supervisor less useful than the people they supervise. A supervisor who cannot open the
+   * bulk import they are asked about, or the analytics they report from, is a supervisor who borrows an
+   * officer's screen — which is a worse audit trail than giving them their own.
+   */
   beneficiary_mgmt_supervisor: [
+    "beneficiary.register",
     "beneficiary.approvals",
-    "beneficiary.manage",
-    "beneficiary.status",
     "eligibility.check",
     "policy.members",
     "policy.groups",
+    "policy.bulk",
+    "policy.analytics",
   ],
   case_manager: ["case.read", "case.beneficiary360", "case.escalations"],
   // Call Centre — a call workspace + call history. No clinical permission exists here (min-necessary).

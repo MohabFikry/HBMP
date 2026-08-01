@@ -17,6 +17,15 @@ export interface Section {
   icon: IconName;
   /** Permission required to see + open this section. */
   permission: Permission;
+  /**
+   * 25.7 — show this section only to a caller whose REACH spans more than one branch (design 42 §1/§6).
+   *
+   * The Branches overview compares the six clinics. For a coordinator who runs one, that comparison has a
+   * single row and no meaning. Hiding it is therefore a REACH decision, not an authority one — which is why
+   * it is a flag here and NOT a permission the manager holds and the coordinator does not. Making it a
+   * permission would have broken the one-permission-set invariant this whole phase rests on, to hide a table.
+   */
+  reachScoped?: boolean;
 }
 
 export interface PortalDef {
@@ -46,7 +55,32 @@ const G = {
   insights: { en: "Insights", ar: "المؤشرات" },
   product: { en: "Benefit Product", ar: "منتج المنافع" },
   membership: { en: "Membership", ar: "العضوية" },
+  branch: { en: "Clinic Management", ar: "إدارة العيادة" },
 } satisfies Record<string, Localized>;
+
+/**
+ * 25.7 — THE BRANCH MANAGEMENT SECTIONS, declared ONCE and shared by both branch roles (design 42 §6).
+ *
+ * "Do not build two portals." Both PortalDef entries below reference this same array, so there is literally
+ * one section list: a screen added for the coordinator is a screen the manager has, because it is the same
+ * object. The two roles differ in exactly one visible way — the branch control SWITCHES for a coordinator
+ * and FILTERS for a manager — and that is decided by reach in `useBranchContext`, not here.
+ *
+ * Reception's five verbatim, then the five that make this a clinic-management workspace.
+ */
+const BRANCH_SECTIONS: Section[] = [
+  { key: "dashboard", path: "dashboard", label: { en: "Dashboard", ar: "لوحة المتابعة" }, group: G.access, icon: "chart", permission: "queue.reception" },
+  { key: "eligibility", path: "eligibility", label: { en: "Eligibility Check", ar: "التحقق من الأهلية" }, group: G.access, icon: "user", permission: "eligibility.check" },
+  { key: "appointments", path: "appointments", label: { en: "Appointments", ar: "المواعيد" }, group: G.access, icon: "clock", permission: "appointments.read" },
+  { key: "book", path: "book", label: { en: "Book Appointment", ar: "حجز موعد" }, group: G.access, icon: "plus", permission: "appointments.book" },
+
+  { key: "practitioners", path: "practitioners", label: { en: "Practitioners", ar: "الممارسون" }, group: G.branch, icon: "user", permission: "branch.practitioners" },
+  { key: "roster", path: "roster", label: { en: "Roster & Availability", ar: "الجدول والإتاحة" }, group: G.branch, icon: "clock", permission: "branch.roster" },
+  { key: "licence-alerts", path: "licence-alerts", label: { en: "Licence Alerts", ar: "تنبيهات التراخيص" }, group: G.branch, icon: "triangle", permission: "branch.licences" },
+  { key: "inventory", path: "inventory", label: { en: "Inventory", ar: "المخزون" }, group: G.branch, icon: "flask", permission: "branch.inventory" },
+  // Reach-scoped, not permission-scoped — see Section.reachScoped.
+  { key: "branches", path: "branches", label: { en: "Branches Overview", ar: "نظرة عامة على الفروع" }, group: G.oversight, icon: "chart", permission: "queue.reception", reachScoped: true },
+];
 
 /**
  * The full portal catalog (14-navigation-structure §2). Each role gets a distinct portal; sections are
@@ -63,7 +97,7 @@ export const PORTALS: PortalDef[] = [
     sections: [
       // 14.5 — the desk's landing page: how the day is going, who is in the building, what is still to come.
       { key: "dashboard", path: "dashboard", label: { en: "Dashboard", ar: "لوحة المتابعة" }, group: G.access, icon: "chart", permission: "queue.reception" },
-      { key: "eligibility", path: "eligibility", label: { en: "Eligibility Search", ar: "التحقق من الأهلية" }, group: G.access, icon: "user", permission: "eligibility.check" },
+      { key: "eligibility", path: "eligibility", label: { en: "Eligibility Check", ar: "التحقق من الأهلية" }, group: G.access, icon: "user", permission: "eligibility.check" },
       // "Today's Visits" was its own section until 14.5. It is now the dashboard's middle band, beside the
       // counts and the schedule that give it context — which is how the desk actually reads it.
       // Check-in was a separate section until 14.5. It was always the same server call against a filtered
@@ -73,6 +107,21 @@ export const PORTALS: PortalDef[] = [
       { key: "appointments", path: "appointments", label: { en: "Appointments", ar: "المواعيد" }, group: G.access, icon: "clock", permission: "appointments.read" },
       { key: "book", path: "book", label: { en: "Book Appointment", ar: "حجز موعد" }, group: G.access, icon: "plus", permission: "appointments.book" },
     ],
+  },
+  {
+    // 25.7 — ONE portal, two roles. Both entries share BRANCH_SECTIONS by reference (design 42 §6).
+    role: "branch_coordinator",
+    base: "branch",
+    title: { en: "Clinic Management", ar: "إدارة العيادة" },
+    eyebrow: { en: "Branch Coordinator", ar: "منسق الفرع" },
+    sections: BRANCH_SECTIONS,
+  },
+  {
+    role: "clinics_manager",
+    base: "branch",
+    title: { en: "Clinic Management", ar: "إدارة العيادة" },
+    eyebrow: { en: "Clinics Manager", ar: "مدير العيادات" },
+    sections: BRANCH_SECTIONS,
   },
   {
     role: "doctor",
@@ -152,22 +201,34 @@ export const PORTALS: PortalDef[] = [
     base: "beneficiaries",
     title: { en: "Beneficiary Management", ar: "إدارة المستفيدين" },
     eyebrow: { en: "Beneficiary Mgmt", ar: "إدارة المستفيدين" },
+    /*
+     * MEMBERSHIP FIRST, and therefore Beneficiaries is where a sign-in lands.
+     *
+     * The landing page is `accessible[0]` (AppShell), so section ORDER here is the landing decision — there is
+     * no second place to set it, which is deliberate: a "default page" configured apart from the menu is a
+     * default that drifts from the menu. The beneficiary book is what this role opens all day; registration is
+     * an occasional errand by comparison, and it was on top only because it was built first.
+     *
+     * "Beneficiaries", not "Members": the organisation says beneficiary everywhere else in the product, and
+     * this list is the same people the rest of the portal calls beneficiaries.
+     *
+     * Three sections were REMOVED rather than moved, each because it duplicated something better:
+     *   · Search / Manage — a second, weaker search over the same registry this list already searches.
+     *   · Status & Reactivation — its own screen for one action on one person. It is now a `Status change`
+     *     button in the member's detail, beside Change plan, where the person is already on screen.
+     *   · Utilization — now a tab in Analytics, which is where every other figure about a cohort lives.
+     * The rail groups CONSECUTIVE runs, so the order below is also the group order; an out-of-place entry
+     * renders a second heading with the same name (QA P1-9).
+     */
     sections: [
+      { key: "members", path: "members", label: { en: "Beneficiaries", ar: "المستفيدون" }, group: G.membership, icon: "user", permission: "policy.members" },
+      { key: "groups", path: "groups", label: { en: "Groups", ar: "المجموعات" }, group: G.membership, icon: "refer", permission: "policy.groups" },
+      { key: "bulk", path: "bulk", label: { en: "Bulk & Imports", ar: "الرفع الجماعي" }, group: G.membership, icon: "doc", permission: "policy.bulk" },
       { key: "register", path: "register", label: { en: "Register New", ar: "تسجيل جديد" }, group: G.registration, icon: "plus", permission: "beneficiary.register" },
       // US-003 — the officer PREPARES the application here (documents verified, coverage bound); the
       // decision buttons belong to the supervisor's portal below and the server enforces the split.
       { key: "approvals", path: "approvals", label: { en: "Registration Approvals", ar: "اعتماد التسجيلات" }, group: G.registration, icon: "check2", permission: "beneficiary.approvals" },
-      { key: "manage", path: "manage", label: { en: "Search / Manage", ar: "بحث / إدارة" }, group: G.registration, icon: "user", permission: "beneficiary.manage" },
-      { key: "status", path: "status", label: { en: "Status & Reactivation", ar: "الحالة وإعادة التفعيل" }, group: G.registration, icon: "clock", permission: "beneficiary.status" },
       { key: "eligibility", path: "eligibility", label: { en: "Eligibility Check", ar: "التحقق من الأهلية" }, group: G.access, icon: "check2", permission: "eligibility.check" },
-      // Phase 19.6 — the membership book. Registration answers "who is this person"; these answer "what are
-      // they entitled to, under whose policy, and what have they used".
-      // Bulk sits WITH its membership siblings: the rail groups consecutive runs, so an out-of-order entry
-      // renders a second "MEMBERSHIP" heading after INSIGHTS (QA P1-9).
-      { key: "members", path: "members", label: { en: "Members", ar: "الأعضاء" }, group: G.membership, icon: "user", permission: "policy.members" },
-      { key: "groups", path: "groups", label: { en: "Groups", ar: "المجموعات" }, group: G.membership, icon: "refer", permission: "policy.groups" },
-      { key: "bulk", path: "bulk", label: { en: "Bulk & Imports", ar: "الرفع الجماعي" }, group: G.membership, icon: "doc", permission: "policy.bulk" },
-      { key: "utilization", path: "utilization", label: { en: "Utilization", ar: "الاستخدام" }, group: G.insights, icon: "chart", permission: "policy.utilization" },
       { key: "analytics", path: "analytics", label: { en: "Analytics", ar: "التحليلات" }, group: G.insights, icon: "chart", permission: "policy.analytics" },
     ],
   },
@@ -180,13 +241,25 @@ export const PORTALS: PortalDef[] = [
     base: "beneficiaries",
     title: { en: "Registration Review", ar: "مراجعة التسجيلات" },
     eyebrow: { en: "Registration Supervisor", ar: "مشرف التسجيل" },
+    /*
+     * THE SAME LIST as the officer's, in the same order. The supervisor's portal is the officer's plus the
+     * decision, not a subset of it — a supervisor who cannot open the bulk import they are asked about, or
+     * the analytics they report from, ends up borrowing an officer's screen, which is a worse audit trail
+     * than giving them their own.
+     *
+     * What used to be withheld here was the register pen, as a separation of duties. That is still the rule;
+     * it is simply enforced where it can actually hold: patient-service refuses a decision on a registration
+     * the ACTOR filed (`urn:hbmp:self-approval`). A missing menu item never enforced it — the API was
+     * reachable regardless — and it cost the supervisor half their job to pretend otherwise.
+     */
     sections: [
-      { key: "approvals", path: "approvals", label: { en: "Registration Approvals", ar: "اعتماد التسجيلات" }, group: G.registration, icon: "check2", permission: "beneficiary.approvals" },
-      { key: "manage", path: "manage", label: { en: "Search / Manage", ar: "بحث / إدارة" }, group: G.registration, icon: "user", permission: "beneficiary.manage" },
-      { key: "status", path: "status", label: { en: "Status & Reactivation", ar: "الحالة وإعادة التفعيل" }, group: G.registration, icon: "clock", permission: "beneficiary.status" },
-      { key: "eligibility", path: "eligibility", label: { en: "Eligibility Check", ar: "التحقق من الأهلية" }, group: G.access, icon: "check2", permission: "eligibility.check" },
-      { key: "members", path: "members", label: { en: "Members", ar: "الأعضاء" }, group: G.membership, icon: "user", permission: "policy.members" },
+      { key: "members", path: "members", label: { en: "Beneficiaries", ar: "المستفيدون" }, group: G.membership, icon: "user", permission: "policy.members" },
       { key: "groups", path: "groups", label: { en: "Groups", ar: "المجموعات" }, group: G.membership, icon: "refer", permission: "policy.groups" },
+      { key: "bulk", path: "bulk", label: { en: "Bulk & Imports", ar: "الرفع الجماعي" }, group: G.membership, icon: "doc", permission: "policy.bulk" },
+      { key: "register", path: "register", label: { en: "Register New", ar: "تسجيل جديد" }, group: G.registration, icon: "plus", permission: "beneficiary.register" },
+      { key: "approvals", path: "approvals", label: { en: "Registration Approvals", ar: "اعتماد التسجيلات" }, group: G.registration, icon: "check2", permission: "beneficiary.approvals" },
+      { key: "eligibility", path: "eligibility", label: { en: "Eligibility Check", ar: "التحقق من الأهلية" }, group: G.access, icon: "check2", permission: "eligibility.check" },
+      { key: "analytics", path: "analytics", label: { en: "Analytics", ar: "التحليلات" }, group: G.insights, icon: "chart", permission: "policy.analytics" },
     ],
   },
   {

@@ -16,8 +16,6 @@ const ReceptionBooking = lazy(() => import("./ReceptionBooking").then((m) => ({ 
 const DoctorVisits = lazy(() => import("./DoctorVisits").then((m) => ({ default: m.DoctorVisits })));
 // Beneficiary-management portal (Phase 1) — register / manage / status share one chunk.
 const BeneficiaryRegister = lazy(() => import("./BeneficiaryPortal").then((m) => ({ default: m.BeneficiaryRegister })));
-const BeneficiaryManage = lazy(() => import("./BeneficiaryPortal").then((m) => ({ default: m.BeneficiaryManage })));
-const BeneficiaryStatus = lazy(() => import("./BeneficiaryPortal").then((m) => ({ default: m.BeneficiaryStatus })));
 // US-003 — the approval worklist, shared by the officer (prepares) and the supervisor (decides).
 const RegistrationApprovals = lazy(() => import("./BeneficiaryPortal").then((m) => ({ default: m.RegistrationApprovals })));
 const DoctorEncounter = lazy(() => import("./DoctorEncounter").then((m) => ({ default: m.DoctorEncounter })));
@@ -104,14 +102,37 @@ const PolicyAnalytics = lazy(() => import("./PolicyAnalytics").then((m) => ({ de
 const MembershipRoster = lazy(() => import("./AccessAdmin").then((m) => ({ default: m.MembershipRoster })));
 const ProgramAdmin = lazy(() => import("./ProgramAdmin").then((m) => ({ default: m.ProgramAdmin })));
 
+// 25.7 — Branch Management (design 42 §6). ONE portal, two roles: every path below is mounted once and
+// serves both, because the difference between a coordinator and a clinics manager is REACH, resolved
+// server-side from the active-branch header, not a different screen.
+const BranchPractitioners = lazy(() => import("./BranchLicences").then((m) => ({ default: m.BranchPractitioners })));
+const BranchLicenceAlerts = lazy(() => import("./BranchLicences").then((m) => ({ default: m.BranchLicenceAlerts })));
+const BranchRoster = lazy(() => import("./BranchRoster").then((m) => ({ default: m.BranchRoster })));
+const BranchInventory = lazy(() => import("./BranchInventory").then((m) => ({ default: m.BranchInventory })));
+const BranchesOverview = lazy(() => import("./BranchesOverview").then((m) => ({ default: m.BranchesOverview })));
+
 export const SCREENS: Record<string, () => ReactNode> = {
+  // 25.7 — Branch Management. The first four REUSE reception's screens rather than copying them: the desk
+  // work a coordinator does is the same desk work, and a second implementation would be a second place for
+  // the branch board to disagree with itself.
+  "/branch/dashboard": () => <ReceptionDashboard />,
+  "/branch/eligibility": () => <ReceptionEligibility />,
+  "/branch/appointments": () => <ReceptionAppointments />,
+  "/branch/book": () => <ReceptionBooking />,
+  "/branch/practitioners": () => <BranchPractitioners />,
+  "/branch/roster": () => <BranchRoster />,
+  "/branch/licence-alerts": () => <BranchLicenceAlerts />,
+  "/branch/inventory": () => <BranchInventory />,
+  "/branch/branches": () => <BranchesOverview />,
   // 1. Reception — eligibility (also surfaced in the beneficiary-management portal).
   "/reception/eligibility": () => <ReceptionEligibility />,
   "/beneficiaries/eligibility": () => <ReceptionEligibility />,
   "/beneficiaries/register": () => <BeneficiaryRegister />,
   "/beneficiaries/approvals": () => <RegistrationApprovals />,
-  "/beneficiaries/manage": () => <BeneficiaryManage />,
-  "/beneficiaries/status": () => <BeneficiaryStatus />,
+  // `/beneficiaries/manage`, `/beneficiaries/status` and `/beneficiaries/utilization` were RETIRED with
+  // their nav sections. They are removed from here too, not just from the catalog: a path with no section
+  // falls through to the deep-link branch of AppRouter, which resolves it from this map — so leaving them
+  // would have kept three withdrawn screens reachable by typing their URL, gated only by `profile.read`.
   "/reception/dashboard": () => <ReceptionDashboard />,
   "/reception/appointments": () => <ReceptionAppointments />,
   "/reception/book": () => <ReceptionBooking />,
@@ -196,7 +217,6 @@ export const SCREENS: Record<string, () => ReactNode> = {
   // officer see the money".
   "/beneficiaries/members": () => <MemberSearch />,
   "/beneficiaries/groups": () => <GroupsScreen />,
-  "/beneficiaries/utilization": () => <UtilizationScreen />,
   "/beneficiaries/bulk": () => <BulkJobs />,
   "/beneficiaries/analytics": () => <PolicyAnalytics />,
   // 14. Network tiers under the Network Team's own portal (write) — the same screen policy admins read.
