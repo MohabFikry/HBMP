@@ -285,6 +285,14 @@ v1.MapPatch("/{id:guid}", async (Guid id, BeneficiaryEdit req, PatientDbContext 
     // snapshot happens whether or not this endpoint remembers to. What is added here is the FIELD-LEVEL
     // account — which values moved, from what, to what — because a snapshot answers "what is it now" and an
     // operator asking "who changed this birth date" needs the other question answered.
+    // INV-OUTBOX-SURVIVES-CRASH — the correction and the event it announces commit together.
+    //
+    // `EfOutbox.EnqueueRawAsync` runs its own SaveChanges, so without this the update and the enqueue are two
+    // separate commits. A process kill between them leaves the date of birth changed and the event gone, with
+    // nothing recording it was owed — so the member's Logs tab would show the record as it always was, and no
+    // relay, retry or replay would ever produce the missing entry. Enqueue-first is the mirror failure: a
+    // timeline entry for a correction that never landed.
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
     await db.SaveChangesAsync(ct);
 
     await audit.EmitAsync(new AuditEventDraft
@@ -312,6 +320,7 @@ v1.MapPatch("/{id:guid}", async (Guid id, BeneficiaryEdit req, PatientDbContext 
         actorName = me.Principal?.DisplayName,
         occurredAt = b.UpdatedAt,
     }, ct);
+    await tx.CommitAsync(ct);
 
     return Results.Ok(new { b.BeneficiaryId, changed = changes.Select(c => c.Field).ToArray() });
 });

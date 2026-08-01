@@ -215,7 +215,14 @@ public static class Decisions
         // Addressed to the SUBMITTER by subject, which approvals-service is the only service that knows. An
         // authorization with no recorded submitter (a manual one, created out of band) has no addressee, and
         // the consumer drops it rather than broadcasting to a role.
-        await NotifyDecisionAsync(deps, auth, eventType, ct);
+        //
+        // ENQUEUED HERE, inside the transaction, rather than inside the helper. The payload construction —
+        // which is the part with the judgement in it — stays in `DecisionNotification`; the enqueue does not,
+        // because INV-OUTBOX-SURVIVES-CRASH is a property of the CALL SITE and a helper that enqueues on its
+        // own is a shape the architecture gate cannot verify and a reader cannot check by eye. It was inside
+        // the helper, and it was atomic only because this one caller happened to hold a transaction open.
+        if (DecisionNotification(auth) is { } notice)
+            await deps.Outbox.EnqueueAsync(eventType, "notification.domain-events", notice, ct);
         await tx.CommitAsync(ct);
 
         await deps.Audit.EmitAsync(new AuditEventDraft
@@ -231,17 +238,20 @@ public static class Decisions
     }
 
     /// <summary>
-    /// Publish the notification-shaped copy of a decision.
+    /// Build the notification-shaped copy of a decision, or null when there is no addressee.
     ///
     /// <para>The field bag is min-necessary and NON-clinical (11-permission-matrix, and the dispatcher throws
     /// on a forbidden key): the authorization number the clinician recognises, and nothing else. The rationale
     /// the reviewer wrote stays on the authorization, behind authorization.</para>
+    ///
+    /// <para><b>It builds; it does not publish.</b> The enqueue belongs at the call site, inside the caller's
+    /// transaction — see the note there. Splitting it this way keeps the payload judgement in one place while
+    /// leaving the atomicity visible where it is decided.</para>
     /// </summary>
-    private static async Task NotifyDecisionAsync(
-        DecisionDeps deps, Authorization auth, string eventType, CancellationToken ct)
+    private static object? DecisionNotification(Authorization auth)
     {
-        if (string.IsNullOrWhiteSpace(auth.CreatedBy)) return;
-        await deps.Outbox.EnqueueAsync(eventType, "notification.domain-events", new
+        if (string.IsNullOrWhiteSpace(auth.CreatedBy)) return null;
+        return new
         {
             tenantId = auth.TenantId,
             entityRef = $"authorization:{auth.AuthorizationId}",
@@ -257,7 +267,7 @@ public static class Decisions
                 // patient in every clinician's inbox.
                 new { userId = auth.CreatedBy, role = "requesting_provider", locale = "ar" },
             },
-        }, ct);
+        };
     }
 
     private static string EventType(AuthDecision d) => d switch

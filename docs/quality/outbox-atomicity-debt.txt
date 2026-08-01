@@ -49,7 +49,18 @@ services/case/Api/Beneficiary360Endpoint.cs 1
 # keeps no "reminder sent" row for it to be atomic with.
 services/emr/Api/Reminders.cs 1
 
-# Both sites deliberately change nothing. A substitution outside the approved-alternatives list is REFUSED
-# (409) and routed to approvals — nothing is dispensed and no accumulator moves. Out-of-stock flags the line
-# WITHOUT consuming it, so the unfilled quantity stays available for a backorder or a later visit.
-services/pharmacy/Api/Dispensing.cs 2
+# All three sites deliberately change nothing. A substitution outside the approved-alternatives list is
+# REFUSED (409) and routed to approvals — nothing is dispensed and no accumulator moves. Out-of-stock flags
+# the line WITHOUT consuming it, so the unfilled quantity stays available for a backorder or a later visit.
+#
+# The third is the notification-shaped COPY of RxLineOutOfStock, addressed to the prescriber. It shares a
+# handler with the second and carries the same property that earns the exemption: that handler reads with
+# AsNoTracking and never writes — no SaveChangesAsync, no ExecuteUpdate, no ExecuteDelete — so there is no
+# second commit for a crash to fall between, and a transaction around it would make nothing more atomic. The
+# two copies exist because the transport is point-to-point: a consumer on `pharmacy.events` and one on
+# `notification.domain-events` would COMPETE for a single message and each event would reach one of them.
+#
+# This raises a number in a one-way register, which the rule otherwise forbids, so the argument is made here
+# in writing as the header requires — and it is an argument about the SHAPE of the site, not about the cost
+# of fixing it. If that handler ever gains a write, all three lines become real debt and must be wrapped.
+services/pharmacy/Api/Dispensing.cs 3

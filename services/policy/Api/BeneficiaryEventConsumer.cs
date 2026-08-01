@@ -41,6 +41,7 @@ public sealed class BeneficiaryEventOptions
 public sealed class BeneficiaryEventConsumer(
     IServiceScopeFactory scopeFactory,
     IOptions<BeneficiaryEventOptions> options,
+    TimeProvider clock,
     ILogger<BeneficiaryEventConsumer> logger) : BackgroundService
 {
     private IConnection? _connection;
@@ -83,7 +84,7 @@ public sealed class BeneficiaryEventConsumer(
             }
 
             var eventId = Guid.TryParse(ea.BasicProperties.MessageId, out var id) ? id : Guid.NewGuid();
-            var correction = Parse(Encoding.UTF8.GetString(ea.Body.Span));
+            var correction = Parse(Encoding.UTF8.GetString(ea.Body.Span), clock.GetUtcNow());
             if (correction is null)
             {
                 logger.LogWarning("beneficiary correction {EventId} lacked a tenant or a beneficiary", eventId);
@@ -156,7 +157,20 @@ public sealed class BeneficiaryEventConsumer(
         string? ActorUserId, string? ActorName, DateTimeOffset OccurredAt);
 
     /// <summary>Read the envelope, refusing anything that cannot be attributed to a tenant and a person.</summary>
-    internal static Correction? Parse(string payload)
+    /// <param name="receivedAt">
+    /// 18.A3 — the fallback for an event that carries no <c>occurredAt</c>, passed IN rather than read from
+    /// the wall clock here.
+    ///
+    /// This read the wall clock directly, which the bare-clock architecture gate refuses for two reasons that
+    /// both bite on this line. It is untestable: no boundary test can pin the timestamp a redelivered
+    /// event lands on, so the one case worth asserting — a malformed publisher whose events all fall back —
+    /// cannot be asserted at all. And it is a value that reaches `entity_timeline`, which the member's Logs
+    /// tab renders as a Cairo DATE: every evening between 22:00 Cairo and midnight UTC, a correction filed
+    /// today would be filed under yesterday.
+    ///
+    /// The caller passes the injected clock's instant, so the fallback is as testable as the parsed path.
+    /// </param>
+    internal static Correction? Parse(string payload, DateTimeOffset receivedAt)
     {
         using var doc = JsonDocument.Parse(payload);
         var root = doc.RootElement;
@@ -177,7 +191,7 @@ public sealed class BeneficiaryEventConsumer(
         var occurred = root.TryGetProperty("occurredAt", out var at)
             && at.ValueKind == JsonValueKind.String
             && DateTimeOffset.TryParse(at.GetString(), out var parsed)
-                ? parsed : DateTimeOffset.UtcNow;
+                ? parsed : receivedAt;
 
         return new Correction(tenantId, beneficiary, fields, Str(root, "actorUserId"), Str(root, "actorName"), occurred);
     }

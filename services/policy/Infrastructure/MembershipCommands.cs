@@ -480,6 +480,17 @@ public sealed class MembershipCommands(
             return MembershipResults.Fail<GroupChangeOutcome>(MembershipFailureKind.Invalid,
                 "UNKNOWN_GROUP", "That group does not belong to this policy.");
 
+        // INV-OUTBOX-SURVIVES-CRASH — the same shape every sibling movement uses, and the one this method
+        // was missing. `MemberGroupChanged` was the last movement to gain an outbox publish, and it gained
+        // it without the transaction its five siblings already had: the write and the event were two
+        // separate commits, so a kill between them left the member in the new group with no event saying so
+        // — which for a group change means the cohort reports silently disagree with the membership book.
+        //
+        // Joins the caller's transaction when there is one. The bulk engine already wraps each row, and
+        // opening a second inside it throws, while the invariant is already satisfied there.
+        await using var tx = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(ct)
+            : null;
         var now = clock.GetUtcNow();
         var from = e.GroupId;
         e.GroupId = groupId;
@@ -510,6 +521,7 @@ public sealed class MembershipCommands(
             groupDims.PayerId, groupDims.PolicyId, groupDims.PolicyPlanId, groupDims.GroupId,
             groupDims.BranchId, groupDims.Relationship, groupDims.Status,
         }, ct);
+        if (tx is not null) await tx.CommitAsync(ct);
         return MembershipResults.Success(new GroupChangeOutcome(e, from));
     }
 
