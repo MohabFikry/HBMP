@@ -75,11 +75,27 @@ public class CiGateTests
         }
     }
 
+    private static string DriftGate() =>
+        File.ReadAllText(Path.Combine(RepoRoot(), "tools", "ci", "check-openapi-drift.sh"));
+
+    /// <summary>
+    /// 25.9 — the comparison moved OUT of the workflow and into <c>tools/ci/check-openapi-drift.sh</c>, so
+    /// these two assertions moved with it. The guarantees are unchanged; only their address is different.
+    ///
+    /// <para><b>Why it moved, which is the finding worth keeping.</b> This gate was correct and blocking, and
+    /// it sat RED in CI for a day while local runs reported every other gate green — because it lived ONLY
+    /// inline in the workflow. Every other gate has a script under <c>tools/ci/</c>, so "run the gates
+    /// locally" covered ten of eleven and the eleventh's absence was invisible: the only way to run it was to
+    /// push and wait for the scoreboard. A gate with no local entry point is one you learn about
+    /// afterwards.</para>
+    /// </summary>
     [Fact]
     public void Openapi_drift_is_a_red_build()
     {
-        Workflow().Should().Contain("git diff --exit-code -- docs/api",
+        Workflow().Should().Contain("tools/ci/check-openapi-drift.sh",
             "generating a spec and discarding it lets the committed contract drift from the running service");
+        DriftGate().Should().Contain("exit 1",
+            "the script the workflow delegates to must actually fail on drift");
     }
 
     /// <summary>
@@ -94,16 +110,73 @@ public class CiGateTests
     [Fact]
     public void Openapi_drift_fails_rather_than_comparing_an_empty_spec_directory()
     {
-        var workflow = Workflow();
-        var step = Regex.Match(workflow, @"(?s)gate: OpenAPI drift.*?\n(?=      - )").Value;
+        var gate = DriftGate();
+
+        gate.Should().NotContain("2>/dev/null || true",
+            "that form turns 'the generator produced nothing' into a clean comparison and a PASS");
+        gate.Should().MatchRegex(@"find .*-name '\*\.json'[\s\S]*?wc -l",
+            "the gate must count what it is about to compare");
+        gate.Should().MatchRegex(@"-eq 0[\s\S]*?exit 1",
+            "zero generated specs must fail the gate, not pass it silently");
+    }
+
+    /// <summary>
+    /// The workflow must DELEGATE to the shared script rather than carry its own copy of the comparison.
+    ///
+    /// <para>Two implementations of one gate is how the local answer and CI's come to differ, and the one
+    /// that gets forgotten is always the one nobody runs. Asserted by absence: if the inline <c>git diff</c>
+    /// form ever comes back, this fails.</para>
+    /// </summary>
+    [Fact]
+    public void The_workflow_delegates_the_drift_comparison_instead_of_reimplementing_it()
+    {
+        var step = Regex.Match(Workflow(), @"(?s)gate: OpenAPI drift.*?\n(?=      - )").Value;
         step.Should().NotBeEmpty("the drift gate step must be findable for this assertion to mean anything");
 
-        step.Should().NotContain("cp artifacts/openapi/*.json docs/api/ 2>/dev/null || true",
-            "that form turns 'the generator produced nothing' into a clean diff and a PASS");
-        step.Should().MatchRegex(@"ls artifacts/openapi/\*\.json[\s\S]*?wc -l",
-            "the gate must count what it is about to compare");
-        step.Should().MatchRegex(@"-eq 0[\s\S]*?exit 1",
-            "zero generated specs must fail the gate, not pass it silently");
+        step.Should().Contain("check-openapi-drift.sh");
+        step.Should().NotContain("git diff --exit-code -- docs/api",
+            "a second copy of the comparison in the workflow is how CI and the local run start disagreeing");
+    }
+
+    /// <summary>
+    /// Every gate must be runnable OUTSIDE CI. This is the general form of the 25.9 lesson: the reason
+    /// `openapi-drift` went unnoticed was not that it was wrong, but that no one could run it without
+    /// pushing. A gate whose only home is a workflow file is found broken by a scoreboard, eight minutes at
+    /// a time.
+    ///
+    /// <para>Asserted over the gate SUMMARY's outcome map, which is the authoritative list of what decides
+    /// the build, rather than over step names — so a gate added tomorrow is covered without anyone
+    /// remembering this test exists.</para>
+    /// </summary>
+    [Fact]
+    public void EVERY_GATE_THAT_DECIDES_THE_BUILD_HAS_A_SCRIPT_SOMEONE_CAN_RUN_LOCALLY()
+    {
+        var outcomes = Regex.Match(Workflow(), @"(?s)OUTCOMES:\s*\|(.*?)\n        run:").Groups[1].Value;
+        outcomes.Should().NotBeEmpty("the summary's OUTCOMES map must be parseable");
+
+        var gates = Regex.Matches(outcomes, @"^\s*([a-z0-9-]+)=", RegexOptions.Multiline)
+            .Select(m => m.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
+
+        // A scan is only worth what it scanned. If the OUTCOMES format ever changes shape, the regex above
+        // matches nothing and every assertion below becomes vacuously true — this test would then report
+        // PASS while checking zero gates, which is the failure mode it exists to prevent elsewhere.
+        gates.Should().HaveCountGreaterThan(12, "the outcome map must parse, or this test proves nothing");
+        gates.Should().Contain("openapi-drift", "the gate this test was written for must be among them");
+
+        // These four are the compiler, the migrator, the test runner and its environment — invoked directly
+        // by name locally (`./dotnet.sh build`, `test --with-db`, `tools/ci/apply-migrations.sh`), so they
+        // have no separate check-*.sh and never will.
+        var notScripts = new[] { "build", "tests", "test-db-env", "apply-migrations", "coverage", "openapi-generate" };
+        var ciDir = Path.Combine(RepoRoot(), "tools", "ci");
+
+        foreach (var gate in gates.Except(notScripts, StringComparer.Ordinal))
+        {
+            var candidates = new[] { $"check-{gate}.py", $"check-{gate}.sh" }
+                .Select(n => Path.Combine(ciDir, n));
+            candidates.Any(File.Exists).Should().BeTrue(
+                "gate '{0}' decides the build but has no tools/ci/check-{0}.(py|sh) — so the only way to run " +
+                "it is to push and read the scoreboard, which is how openapi-drift stayed red for a day", gate);
+        }
     }
 
     /// <summary>
