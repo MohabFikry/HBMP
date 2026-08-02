@@ -485,6 +485,9 @@ export function RegistrationApprovals() {
     // Oldest first: this is a queue, and a queue that opens on the newest starves whoever arrived first.
     initialSortKey: "filed",
     initialSortDir: "ascending",
+    // An approver opens an applicant's profile to check the evidence and comes straight back. Losing the
+    // search and the page they were on turns one decision into a hunt through the queue.
+    persistKey: "registration-approvals",
   });
 
   // A decidable row is one with an open application. Rows with none, and rows already Rejected, are excluded

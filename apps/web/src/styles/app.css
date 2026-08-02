@@ -1429,7 +1429,24 @@ nav.mrs-rail {
 
 .patient-context-bar { display: flex; flex-wrap: wrap; gap: var(--sp3); align-items: center; padding: var(--sp2) var(--sp3); border: 1px solid currentColor; border-radius: var(--r-md); margin-bottom: var(--sp3); }
 .patient-context-bar .profile-avatar { width: 2rem; height: 2rem; }
-.context-bar-name { font-weight: 600; }
+/* The patient name in the context strip. A <button> since 25.x (it routes rather than reloading the
+   document), so it has to shed the UA button chrome the <a> it replaced never had — background, border,
+   padding and the centred text a flex/grid parent would otherwise stretch. It stays visibly actionable:
+   underlined on hover/focus, pointer cursor, and the app's own focus ring rather than the OS one. */
+.context-bar-name {
+  font-weight: 600;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+}
+.context-bar-name:hover { text-decoration: underline; }
+.context-bar-name:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .context-bar-meta { opacity: 0.8; font-size: 0.9em; }
 
 /* ── 19.6b analytics dashboard ─────────────────────────────────────────────────────────────────────────── */

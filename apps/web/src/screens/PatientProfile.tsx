@@ -15,7 +15,7 @@ import { useApi } from "../api/ApiProvider";
 import { useAuth } from "../auth/AuthProvider";
 import { permissionsForRole, hasPermission, type Permission, type Role } from "../authz/permissions";
 import { useAsync } from "../api/useAsync";
-import { AsyncSection, PageHeader, useBackTarget, useLoc } from "./_shared";
+import { AsyncSection, PageHeader, useBackTarget, useLoc, useOpenProfile } from "./_shared";
 import { SectionView } from "./ProfileSectionViews";
 import { useFormat } from "../i18n/useFormat";
 
@@ -762,6 +762,9 @@ function CallRow({
 export function PatientContextBar({ beneficiaryId }: { beneficiaryId: string }) {
   const api = useApi();
   const t = useLoc();
+  // The name opens the full file. Routed, and recording where it was opened FROM — see the anchor it
+  // replaced, below.
+  const openProfile = useOpenProfile();
   const state = useAsync(
     useCallback(() => api.patientProfile(beneficiaryId, ["header", "alerts"]), [api, beneficiaryId]),
     [beneficiaryId],
@@ -785,9 +788,22 @@ export function PatientContextBar({ beneficiaryId }: { beneficiaryId: string }) 
   return (
     <aside className="patient-context-bar" aria-label={t(STR.title)}>
       <Avatar photoUrl={data.photoUrl} name={data.displayName} />
-      <a href={`/patients/${encodeURIComponent(beneficiaryId)}`} className="context-bar-name">
+      {/*
+        A BUTTON that routes, not an `<a href>`.
+
+        This strip follows the user into the encounter, dispense, lab, approval and call-centre workspaces, so
+        it was the most-reachable way into the patient file and the most destructive: a bare anchor is a full
+        document load, which tore down the SPA and with it the open encounter, the dispense in progress or the
+        live call. The call-centre screens each carry a comment warning about exactly this; the shared bar
+        they all render was doing it.
+
+        And because the reload emptied the history, the profile then had nothing to go BACK to — the one
+        entry point that most needed a return path was the only one that destroyed it. `useOpenProfile`
+        records the origin, so Back returns to the workspace the clinician left.
+      */}
+      <button type="button" className="context-bar-name" onClick={() => openProfile(beneficiaryId)}>
         {data.displayName}
-      </a>
+      </button>
       <span className="context-bar-meta">
         {[data.memberNo, data.ageBand, data.sex].filter(Boolean).join(" · ")}
       </span>

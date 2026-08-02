@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError } from "./http";
+import { getActiveBranch, subscribeActiveBranch } from "./activeBranch";
 
 export type AsyncStatus = "loading" | "success" | "error";
 
@@ -26,6 +27,20 @@ export function useAsync<T>(loader: () => Promise<T>, deps: unknown[] = []): Asy
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
 
+  /**
+   * The active branch, as a DEPENDENCY.
+   *
+   * Every branch-scoped read is answered for the branch in `X-Active-Branch`, so switching branches changes
+   * the correct answer to a question this hook has already asked. Without this line the switcher was
+   * decorative: it updated the header for a request nobody went on to make, and the worklist on screen kept
+   * showing the previous branch's rows with nothing to indicate it.
+   *
+   * Subscribed rather than passed in, because the alternative is adding a branch id to 78 `useAsync` call
+   * sites and silently reintroducing the bug at every one that gets missed. Member-scoped roles never set a
+   * branch, so for them this value stays null and nothing extra ever re-runs.
+   */
+  const branch = useSyncExternalStore(subscribeActiveBranch, getActiveBranch, getActiveBranch);
+
   useEffect(() => {
     let live = true;
     setStatus("loading");
@@ -46,7 +61,7 @@ export function useAsync<T>(loader: () => Promise<T>, deps: unknown[] = []): Asy
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nonce, ...deps]);
+  }, [nonce, branch, ...deps]);
 
   return { status, data, error, reload };
 }

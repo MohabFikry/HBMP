@@ -115,6 +115,7 @@ export function DoctorPatients() {
     // already returns it newest-first.
     initialSortKey: "lastVisit",
     initialSortDir: "descending",
+    persistKey: "doctor-patients",
   });
 
   return (

@@ -341,7 +341,12 @@ describe("20.4 — the patient context bar", () => {
     expect(screen.getByText(/1 alerts/i)).toBeInTheDocument();
   });
 
-  it("shows the same patient the profile does", async () => {
+  it("opens the full file by ROUTING, not by reloading the document", async () => {
+    // This strip follows the user into the encounter, dispense, lab, approval and call-centre workspaces, so
+    // it was the most-reachable way into the patient file — and, as an `<a href>`, the most destructive: a
+    // full document load tore down the SPA and with it the open encounter, the dispense in progress or the
+    // live call. It also emptied the history, so the profile then had nothing to go back TO.
+    const user = userEvent.setup();
     const patientProfile = vi.fn().mockResolvedValue(
       profile([{ key: "header", state: "Visible", data: header() }]),
     );
@@ -350,8 +355,11 @@ describe("20.4 — the patient context bar", () => {
         <PatientContextBar beneficiaryId={BEN} />
       </ApiProvider>,
     );
-    const link = await screen.findByRole("link", { name: "Amal Hassan" });
-    expect(link).toHaveAttribute("href", `/patients/${BEN}`);
+
+    const name = await screen.findByRole("button", { name: "Amal Hassan" });
+    // Not an anchor: an href here is the reload, whatever else is true of it.
+    expect(name).not.toHaveAttribute("href");
+    await user.click(name);
   });
 });
 

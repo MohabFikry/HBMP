@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Button, Card, DataTable, Icon, InlineAlert, KpiCard, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { AppointmentCounts, AppointmentRow, Localized, Practitioner, Specialty } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
 import { useFormat } from "../i18n/useFormat";
-import { AsyncSection, PageHeader, useLoc } from "./_shared";
+import { AsyncSection, PageHeader, useLoc, useOpenProfile } from "./_shared";
 import { AppointmentNoteButton } from "./AppointmentNote";
 import { patientColumn } from "./booking/appointmentColumns";
 
@@ -85,7 +84,10 @@ export function ReceptionDashboard() {
   const api = useApi();
   const t = useLoc();
   const fmt = useFormat();
-  const navigate = useNavigate();
+  // Records where the profile was opened FROM, so its Back control returns to this board rather than
+  // guessing from history. A bare navigate() leaves `state.from` unset, and Back then falls back to -1 —
+  // wrong after any in-page redirect and absent entirely on a fresh tab.
+  const openProfile = useOpenProfile();
 
   /**
    * The day the whole dashboard is showing. Today by default — that is what the desk opens the screen for —
@@ -171,7 +173,7 @@ export function ReceptionDashboard() {
           variant="primary"
           size="sm"
           leadingIcon={<Icon name="user" />}
-          onClick={() => navigate(`/patients/${encodeURIComponent(r.beneficiary.id)}`)}
+          onClick={() => openProfile(r.beneficiary.id)}
         >
           {t(S.openFile)}
         </Button>

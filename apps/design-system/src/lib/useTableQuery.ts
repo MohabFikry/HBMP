@@ -37,6 +37,46 @@ export interface UseTableQueryOptions<Row> {
   /** Column key to sort by initially. */
   initialSortKey?: string;
   initialSortDir?: Exclude<SortDir, "none">;
+  /**
+   * Remember search, filters, sort and page under this key, so leaving the screen and coming back returns to
+   * the same view.
+   *
+   * <b>Why this belongs to the hook and not to each screen.</b> Every route unmounts on navigation, so a
+   * worklist re-mounts with an empty query. That is what makes "open the patient file and come back" lose
+   * the operator's place: they had searched a name, filtered to Checked in and paged to 3, and they return
+   * to an unfiltered page 1 with the row they were working on somewhere off screen. The narrower the query,
+   * the more work the reset destroys — so the screens where this matters most are the ones where it is
+   * least acceptable.
+   *
+   * Scoped to the tab and dropped when it closes. It holds the SHAPE of the query — a typed string, a
+   * selected filter value, a page number — and never a row, so nothing a role may not see is written to a
+   * browser store on a machine operators share. The rows themselves are re-fetched through the same gate as
+   * the first time.
+   */
+  persistKey?: string;
+}
+
+/** The persisted shape. Deliberately primitives only — see `persistKey`. */
+interface PersistedQuery {
+  search?: string;
+  filterValues?: Record<string, string | null>;
+  page?: number;
+  pageSize?: number;
+  sort?: { key: string; dir: Exclude<SortDir, "none"> } | null;
+}
+
+const PERSIST_PREFIX = "mrs.table.";
+
+function readPersisted(key: string | undefined): PersistedQuery | null {
+  if (!key) return null;
+  try {
+    const raw = sessionStorage.getItem(PERSIST_PREFIX + key);
+    return raw === null ? null : (JSON.parse(raw) as PersistedQuery);
+  } catch {
+    // Unavailable (private mode) or corrupt. A table that cannot restore its query is a table that opens
+    // unfiltered — never one that fails to render.
+    return null;
+  }
 }
 
 export interface TableQuery<Row> {
@@ -103,14 +143,36 @@ export function useTableQuery<Row>({
   pageSize: initialPageSize = 25,
   initialSortKey,
   initialSortDir = "ascending",
+  persistKey,
 }: UseTableQueryOptions<Row>): TableQuery<Row> {
-  const [search, setSearchRaw] = useState("");
+  // Read once, on mount. Restoring later would fight the user's own typing.
+  const [restored] = useState(() => readPersisted(persistKey));
+
+  const [search, setSearchRaw] = useState(restored?.search ?? "");
   const [filterValues, setFilterValues] = useState<Record<string, string | null>>(() =>
-    Object.fromEntries(filters.map((f) => [f.key, f.initial ?? null])));
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSizeRaw] = useState(initialPageSize);
+    // A restored selection wins over the spec's `initial`; a group added since the query was stored still
+    // gets its default rather than becoming undefined.
+    Object.fromEntries(filters.map((f) => [f.key, restored?.filterValues?.[f.key] ?? f.initial ?? null])));
+  const [page, setPage] = useState(restored?.page ?? 1);
+  const [pageSize, setPageSizeRaw] = useState(restored?.pageSize ?? initialPageSize);
   const [sort, setSort] = useState<{ key: string; dir: Exclude<SortDir, "none"> } | null>(
-    initialSortKey ? { key: initialSortKey, dir: initialSortDir } : null);
+    restored?.sort !== undefined
+      ? restored.sort
+      : (initialSortKey ? { key: initialSortKey, dir: initialSortDir } : null));
+
+  // Written on every change rather than on unmount: a tab closed or reloaded mid-work never runs an unmount
+  // handler, and that is exactly when remembering matters.
+  useEffect(() => {
+    if (!persistKey) return;
+    try {
+      sessionStorage.setItem(
+        PERSIST_PREFIX + persistKey,
+        JSON.stringify({ search, filterValues, page, pageSize, sort } satisfies PersistedQuery));
+    } catch {
+      // Storage full or unavailable. The query is still correct for this visit, which is the part on screen;
+      // restoring is the enhancement, working is not.
+    }
+  }, [persistKey, search, filterValues, page, pageSize, sort]);
 
   // Narrowing the set moves the operator to the front of it. Staying on page 4 of a result that now has one
   // page renders an empty table under a pager insisting there are matches.

@@ -188,6 +188,10 @@ export function DoctorVisits() {
     // A clinic runs in time order, so that is the order it opens in.
     initialSortKey: "time",
     initialSortDir: "ascending",
+    // Opening a patient file and coming back returns to the same search, filter and page. Without it the
+    // doctor loses their place every time they check a record — the row they were on is somewhere in an
+    // unfiltered page 1.
+    persistKey: "doctor-visits",
   });
 
   return (
