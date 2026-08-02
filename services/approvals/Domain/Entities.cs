@@ -34,6 +34,9 @@ public sealed class Authorization
     public Guid BeneficiaryId { get; set; }
     public AuthSource Source { get; set; }
     public string? SourceRef { get; set; }                      // originating order-line / prescription id
+    /// <summary>The visit the authorized thing was ordered in (ADR-0031). NULL for a manual authorization —
+    /// a reviewer raising one has no encounter in hand — and for anything ingested before the seam carried it.</summary>
+    public Guid? EncounterId { get; set; }
     public Guid? RequestingProviderId { get; set; }             // null for manual authorizations
     public string ServiceCodes { get; set; } = "[]";            // jsonb array of requested service codes
     public string RequestedScope { get; set; } = "{}";          // jsonb — the itemized requested scope

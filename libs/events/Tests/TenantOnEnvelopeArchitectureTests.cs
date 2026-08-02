@@ -24,6 +24,11 @@ public class TenantOnEnvelopeArchitectureTests
         ("policy.events",   "eligibility-service EventConsumer"),
         ("orders.events",   "policy-service BenefitConsumptionConsumer"),
         ("pharmacy.events", "policy-service BenefitConsumptionConsumer"),
+        // ADR-0031 — these three are ALSO mirrored to emr's care-episode consumer (CareFeed), which binds its
+        // RLS session from the envelope exactly as policy's does. approvals.events is listed because that
+        // mirror is its FIRST tenant-binding consumer: nothing read it before, so nothing had ever noticed
+        // that its publishers omitted the tenant.
+        ("approvals.events", "emr-service CareEpisodeConsumer (via the CareFeed mirror)"),
     ];
 
     [Fact]

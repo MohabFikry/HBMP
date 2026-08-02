@@ -84,7 +84,7 @@ public static class Decisions
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Conflict(); }
             await outbox.EnqueueAsync("AuthInfoSupplied", "approvals.events",
-                new { authorizationId = auth.AuthorizationId, auth.AuthNo }, ct);
+                new { tenantId = auth.TenantId, authorizationId = auth.AuthorizationId, auth.AuthNo }, ct);
             await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
@@ -172,7 +172,12 @@ public static class Decisions
         var eventType = EventType(decision);
         await deps.Outbox.EnqueueAsync(eventType, "approvals.events", new
         {
+            // `tenantId` — emr's care-episode consumer (ADR-0031) binds its RLS session from this envelope and
+            // refuses a message it cannot attribute. `encounterId` is what lets the decision land on the right
+            // patient's episode; NULL on a manual authorization, and the step is then simply not written.
+            tenantId = auth.TenantId,
             authorizationId = auth.AuthorizationId, auth.AuthNo, beneficiaryId = auth.BeneficiaryId,
+            encounterId = auth.EncounterId,
             source = auth.Source.ToString(), sourceRef = auth.SourceRef,
             approvedScope = approvedScopeJson is null ? null : Codes.Parse(approvedScopeJson),
             releasesDownstream = AuthorizationWorkflow.ReleasesDownstream(decision), breakGlass,

@@ -31,7 +31,21 @@ public sealed record CreateAuthorizationRequest(
     /// human behind it, and inventing one would address a notice to a machine account. When it is absent the
     /// notice is still correctly not sent.</para>
     /// </summary>
-    string? OrderedByUserId = null);
+    string? OrderedByUserId = null,
+    /// <summary>
+    /// The encounter the thing being authorized was ordered in (ADR-0031).
+    ///
+    /// <para>Same seam and same argument as <see cref="OrderedByUserId"/>, for a different question. That one
+    /// carries WHO is waiting so the decision notice has an addressee; this carries WHICH VISIT so the
+    /// decision lands on the patient's episode. An authorization is one of the few things that can hold a
+    /// consultation open for days, and until it carried the encounter the appointment's timeline could show
+    /// "sent for approval" and then nothing — the desk could see the wait start and never see it end.</para>
+    ///
+    /// <para>Optional, because a manual authorization is raised by a reviewer with no visit in hand and a
+    /// migration has none at all. Absent means the decision is simply not stepped onto any episode; a guessed
+    /// encounter would put one member's authorization on another member's timeline.</para>
+    /// </summary>
+    Guid? EncounterId = null);
 
 // ---- Worklist projection (MIN-NECESSARY — no clinical payload) ----
 

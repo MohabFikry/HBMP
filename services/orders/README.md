@@ -24,6 +24,13 @@ sees an authorized **queue**, performs the **atomic idempotent consume** (the he
 4. **Outbox** — `OrderCreated` then `OrderActivated | OrderPendingApproval` are enqueued in the same transaction
    as the state change (destination `orders.events`); consumers dedupe on event id.
 
+Every order event carries **`encounterId`** (ADR-0031). The column has been on `orders.order` since phase 4 and
+was never published, so the visit and the work it caused were two facts with nothing joining them: "what did
+this consultation order?" had no answer. emr's care-episode consumer reads these off the `CareFeed` mirror —
+its own queue, because the transport is point-to-point and binding it to `orders.events` would make it compete
+with policy-service's benefit accumulator. Do not drop the field; `CareFeedEnvelopeArchitectureTests` fails the
+build if a publish site does, because the symptom otherwise is a silently missing step.
+
 Creation is idempotent on `Idempotency-Key` (a replay returns the existing order). Every mutation is audited.
 
 Other endpoints: `GET /api/v1/investigation-orders/{id}` (treating-gated read),

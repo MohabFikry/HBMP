@@ -57,33 +57,51 @@ public sealed class RabbitMqEventPublisher(IOptions<EventsOptions> options) : IE
         props.CorrelationId = message.CorrelationId;
         props.ContentType = "application/json";
         props.Persistent = true;
+        // WHEN THE THING HAPPENED, not when the relay got round to it. `OccurredAt` is stamped inside the
+        // business transaction; a consumer that reads its own clock instead records the relay's backlog, and
+        // after an outage that reads as an hour of care delivered in one second (ADR-0031's timeline is the
+        // first consumer to care). Second precision, which is AMQP's — a step is a moment in a day, not a span.
+        props.Timestamp = new AmqpTimestamp(message.OccurredAt.ToUnixTimeSeconds());
 
         var body = Encoding.UTF8.GetBytes(message.Payload);
         channel.BasicPublish(exchange: "", routingKey: message.Destination,
             basicProperties: props, body: body);
 
         /*
-         * THE READ-MODEL MIRROR (see ProjectionFeed).
+         * THE MIRRORS (see ProjectionFeed and CareFeed).
          *
-         * A second copy of the SAME body, with the SAME MessageId, onto reporting-service's own queue. The
-         * transport is point-to-point, so reporting cannot simply subscribe to `policy.events` — it would
-         * compete with eligibility-service and each event would reach one of them. And it must not: the
-         * publish above is the contract every existing consumer depends on, and this changes nothing about it.
+         * A second copy of the SAME body, with the SAME MessageId, onto a consumer's own queue. The transport
+         * is point-to-point, so reporting cannot simply subscribe to `policy.events` and emr cannot simply
+         * subscribe to `orders.events` — each would compete with the service already bound there and RabbitMQ
+         * would deal every event to one of them. And they must not: the publish above is the contract every
+         * existing consumer depends on, and this changes nothing about it.
          *
-         * Publishing to the mirror is not allowed to lose the original. If the second publish throws, the
-         * relay marks the whole message failed and retries — which would re-deliver the ORIGINAL too, to
-         * consumers that already had it. They are idempotent (every consumer dedupes on event id), so that is
-         * survivable, and it is the correct trade: a dashboard silently missing a fact is worse than a
-         * redelivery the consumers are built to absorb.
+         * Publishing to a mirror is not allowed to lose the original. If a mirror publish throws, the relay
+         * marks the whole message failed and retries — which would re-deliver the ORIGINAL too, to consumers
+         * that already had it. They are idempotent (every consumer dedupes on event id), so that is
+         * survivable, and it is the correct trade: a dashboard silently missing a fact, or a timeline silently
+         * missing a step, is worse than a redelivery the consumers are built to absorb.
+         *
+         * Ordered so the mirrors are a LIST rather than a growing run of near-identical `if` blocks: the third
+         * one is where a copy-paste quietly reuses the previous queue name and a whole feed goes to the wrong
+         * consumer while every publish still succeeds.
          */
-        if (ProjectionFeed.Includes(message.EventType))
+        foreach (var queue in Mirrors(message.EventType))
         {
-            channel.QueueDeclare(ProjectionFeed.Queue, durable: true, exclusive: false, autoDelete: false);
-            channel.BasicPublish(exchange: "", routingKey: ProjectionFeed.Queue,
-                basicProperties: props, body: body);
+            channel.QueueDeclare(queue, durable: true, exclusive: false, autoDelete: false);
+            channel.BasicPublish(exchange: "", routingKey: queue, basicProperties: props, body: body);
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>The mirror queues this event belongs on. An event can be on both — a dispense is a cost fact
+    /// for the read model AND a step in the patient's episode, and the two consumers must each get their own
+    /// copy rather than one of them winning it.</summary>
+    private static IEnumerable<string> Mirrors(string? eventType)
+    {
+        if (ProjectionFeed.Includes(eventType)) yield return ProjectionFeed.Queue;
+        if (CareFeed.Includes(eventType)) yield return CareFeed.Queue;
     }
 
     public void Dispose()

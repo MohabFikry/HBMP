@@ -101,7 +101,7 @@ The spine, in the order a patient experiences it:
 | `AuthorizationDecided` | approvals | approve / deny / partial |
 | `SampleConsumed` | orders | lab consumes the order line |
 | `ResultReported` | orders | result uploaded |
-| `PrescriptionWritten` | pharmacy | prescription submitted |
+| `PrescriptionWritten` / `PrescriptionCancelled` | pharmacy | prescription written / withdrawn |
 | `MedicineDispensed` | pharmacy | lines dispensed |
 | `VisitEnded` | emr | encounter closed |
 
@@ -114,12 +114,47 @@ Delivered with this ADR:
   `EndVisitTests`.
 - The emr-owned steps above, written directly and merged into `GET /appointments/{id}/timeline`.
 
-Not yet delivered, and the next slice:
+Delivered in the second slice — the steps emr does not perform itself:
 
-- `encounterId` on the orders / pharmacy / approvals events, and emr's consumer for them. Until that lands,
-  the timeline is complete for everything emr owns and silent about the rest. **It is silent, not wrong** —
-  no step claims an order was never placed; the episode simply ends at what emr can see, and the sections
-  that carry orders and prescriptions are one click away in the patient file.
+- **`encounterId` on the wire.** `orders.order` and `pharmacy.prescription` had both held the column since
+  phase 4 and neither had ever published it, so the visit and the work it caused were two facts with nothing
+  joining them. It is now on `OrderCreated`, `OrderPendingApproval`, `OrderCancelled`, `OrderLinesConsumed`,
+  `OrderResultUploaded`, `RxCreated`, `RxCancelled` and `RxLinesDispensed`. approvals-service had no such
+  column at all — an authorization knew who was waiting and what it was raised against, and nothing about the
+  visit — so migration 0004 adds it and the ingest contract carries it.
+- **`CareFeed`, a mirror rather than a subscription.** The transport is point-to-point, so an emr consumer
+  bound to `orders.events` would compete with policy-service's benefit accumulator and RabbitMQ would deal
+  each event to one of them: half the timeline missing *and* half the coverage accumulator frozen, with
+  nothing in either service's log to say so. emr gets its own queue and its own copy, exactly as reporting
+  does. `RabbitMqEventPublisher` also now stamps the outbox row's `OccurredAt` on the message, so a step is
+  timed when it happened rather than when the relay caught up.
+- **`CareEpisodeConsumer`**, splitting transport from judgement: `CareEpisodeMapping` (pure, no clock, no
+  database) decides what a message means, `CareEpisodeAppender` decides what to do about it. The appointment
+  and the member are read from emr's **own** encounter row and never from the payload — the siblings are
+  truthful about `beneficiaryId`, but emr owns encounters, so emr is the only service that can be *wrong*
+  about which member a visit is for, and trusting a copy would render a sibling's staleness as this patient's
+  history. Dedupe is the `ux_care_timeline_event` unique index; a consumer that restarts has forgotten what it
+  processed and the database has not.
+
+Two deliberate omissions inside that slice, both because the alternative misleads:
+
+- **`AuthInfoRequested` is not a step.** It lands on the same append-only decision ledger as the real
+  decisions, so it is tempting to treat it as one — but it is a reviewer asking for more information, not an
+  answer. A desk shown "authorization decided" stops chasing, and this is the case where somebody must keep
+  chasing.
+- **The five approvals decisions collapse to one `AuthorizationDecided` step.** Approved, partially approved,
+  rejected, overridden and emergency-approved are benefit decisions on a named clinical request. What the desk
+  legitimately needs is that the wait ended and the `AUTH-` number to quote; whoever is entitled to the
+  outcome opens the authorization, where approvals-service gates it.
+
+Still not delivered:
+
+- **Nothing populates `approvals.authorization.encounter_id` automatically**, because the routing saga that
+  would — a consumer of `OrderPendingApproval` / `RxSubmitted` that calls `POST /authorizations` — does not
+  exist in this platform yet. The seam is complete and the field is carried end to end, so `AuthorizationDecided`
+  works the moment anything ingests an authorization with an encounter on it; until then the *order* records
+  that it went for approval (`OrderSentForApproval`) and the decision does not come back. Building that saga
+  is order→approval routing, a feature in its own right, not timeline plumbing.
 
 ## Consequences
 

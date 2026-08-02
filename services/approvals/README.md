@@ -25,6 +25,19 @@ system-to-system seam that the phase-4 routing saga / the `OrderPendingApproval`
 targets; no clinical payload crosses it. Emits `AuthSubmitted` via the outbox. A non-manual request must name the
 requesting provider (**422** otherwise; DB `CHECK` backstop).
 
+The seam carries two things the authorization cannot work out for itself. `orderedByUserId` is **who** is
+waiting, so a decision notice has a human to reach (§11.3). `encounterId` is **which visit** it came out of
+(ADR-0031, migration 0004), so the decision lands on that patient's care episode — an authorization is one of
+the few artefacts that can hold a consultation open for days, and without it the appointment's timeline showed
+the wait begin and never showed it end. Both are optional and both stay optional: a manual authorization is
+raised by a reviewer with no encounter in hand, and a guessed one would put this member's authorization on
+another member's timeline. The decision events carry `encounterId` and `tenantId` outward for the same reason —
+emr's consumer binds its RLS session from that envelope and refuses a message it cannot attribute.
+
+**Note:** nothing populates `encounterId` automatically yet. The routing saga this endpoint is built for — a
+consumer of `OrderPendingApproval`/`RxSubmitted` — does not exist in the platform; until it does, the *order*
+records that it went for approval and the decision does not come back to the episode.
+
 ## Worklist (US-060) — MIN-NECESSARY, no clinical payload
 
 - `GET /api/v1/authorizations` (scope `auth:read`) — the reviewer inbox: filter by `status`, `priority`,

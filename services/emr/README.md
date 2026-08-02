@@ -209,7 +209,38 @@ checks `GET /drugs/by-id/{id}/exists` and `GET /allergens/{id}/exists` for drug/
 - `Infrastructure/Migrations/0005_clinical.sql` — `emr_note`, `diagnosis`, `vital`, `allergy`,
   `medication_history` (canonical-enum CHECKs; `is_deleted` soft delete; addendum self-FK on notes).
 
+- `Infrastructure/Migrations/0019_care_timeline.sql` — `care_timeline`, the care episode (ADR-0031).
+
 Apply in order with `psql`.
+
+## The care episode (ADR-0031)
+
+An appointment is not an event — it is the start of an episode, and almost everything the platform then does
+for that patient descends from it. `GET /appointments/{id}/timeline` used to read only `appointment_history`, a
+row trigger over the appointment ROW, so it was excellent at "booked, rescheduled, checked in" and
+structurally incapable of anything after arrival. A desk asking *"why is this member still here at four
+o'clock?"* got a history that stopped two hours before the question.
+
+`emr.care_timeline` is the episode, keyed on the **encounter** with `appointment_id` carried alongside so it
+reads from either end. The endpoint merges the two sources newest-first.
+
+Steps arrive two ways:
+
+- **emr's own** — `VisitStarted`, `VitalsRecorded`, `DiagnosisCoded`, `NoteSigned`, `VisitEnded` — staged by
+  `CareTimelineWriter` inside the transaction of the thing that caused them. The writer deliberately **does not
+  save**: a step that commits separately from its cause is a timeline that can claim a visit ended when it did
+  not.
+- **From siblings** — orders, pharmacy, approvals — over the `CareFeed` mirror on emr's own queue.
+  `CareEpisodeMapping` (pure: no clock, no database) decides what a message means; `CareEpisodeAppender`
+  decides what to do about it; `CareEpisodeConsumer` is only transport. The **appointment and the member are
+  read from our own encounter row, never from the payload** — the siblings are truthful about
+  `beneficiaryId`, but emr owns encounters, so emr is the only service that can be *wrong* about which member a
+  visit is for. Dedupe is the `ux_care_timeline_event` unique index; a consumer that restarts has forgotten
+  what it processed and the database has not.
+
+**A step is a label, a time, an actor and a business key — never clinical content.** Reception and the call
+centre read this timeline, so `DiagnosisCoded` appears and the ICD code does not; `MedicineDispensed` appears
+and the drug does not. `CareTimelineTests` and `CareEpisodeMappingTests` both assert it.
 
 ## Tests
 

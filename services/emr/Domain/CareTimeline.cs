@@ -61,6 +61,10 @@ public static class CareSteps
     public const string ResultReported = "ResultReported";
     public const string AuthorizationDecided = "AuthorizationDecided";
     public const string PrescriptionWritten = "PrescriptionWritten";
+    /// <summary>The medication analogue of <see cref="OrderCancelled"/>. It exists because the asymmetry
+    /// would be a trap: a timeline that records a cancelled investigation but not a cancelled prescription
+    /// leaves the medicine looking live to anyone reading the episode.</summary>
+    public const string PrescriptionCancelled = "PrescriptionCancelled";
     public const string MedicineDispensed = "MedicineDispensed";
 }
 

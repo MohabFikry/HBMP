@@ -34,6 +34,7 @@ builder.Services.AddScoped<ClinicalGate>();
 // The care-episode timeline (ADR-0031). Scoped, because every step it stages belongs to the
 // transaction of the thing that caused it.
 builder.Services.AddScoped<CareTimelineWriter>();
+builder.Services.AddScoped<CareEpisodeAppender>();
 
 // Clinical code validation against masterdata-service (fail-closed on writes).
 builder.Services.AddHttpClient<IClinicalCodeValidator, HttpClinicalCodeValidator>(c =>
@@ -76,6 +77,13 @@ builder.Services.AddHostedService<PractitionerBranchRevokedConsumer>();
 builder.Services.Configure<PractitionerLicenceExpiredOptions>(
     builder.Configuration.GetSection(PractitionerLicenceExpiredOptions.SectionName));
 builder.Services.AddHostedService<PractitionerLicenceExpiredConsumer>();
+
+// ADR-0031 — the half of a care episode emr does not perform itself: the orders, prescriptions, approvals
+// and dispensing a visit causes. Each was recorded in its own service and joined up in none, so an
+// appointment's timeline stopped at the consulting-room door.
+builder.Services.Configure<CareEpisodeConsumerOptions>(
+    builder.Configuration.GetSection(CareEpisodeConsumerOptions.SectionName));
+builder.Services.AddHostedService<CareEpisodeConsumer>();
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("emr-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())

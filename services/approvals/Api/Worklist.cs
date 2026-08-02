@@ -51,6 +51,7 @@ public static class Worklist
                 BeneficiaryId = req.BeneficiaryId,
                 Source = req.Source,
                 SourceRef = req.SourceRef,
+                EncounterId = req.EncounterId,          // ADR-0031 — the visit this came out of, if it had one
                 RequestingProviderId = req.RequestingProviderId,
                 ServiceCodes = Codes.Serialize(req.ServiceCodes ?? []),
                 RequestedScope = string.IsNullOrWhiteSpace(req.RequestedScope) ? "{}" : req.RequestedScope!,
@@ -83,7 +84,12 @@ public static class Worklist
             await outbox.EnqueueAsync("AuthSubmitted", "approvals.events",
                 new
                 {
+                    // `tenantId` — this stream now feeds a consumer that binds its RLS session from the
+                    // envelope (emr's care-episode consumer, ADR-0031). An untenanted message is refused
+                    // there rather than applied under a guessed tenant, so the field is not optional.
+                    tenantId = auth.TenantId,
                     authorizationId = auth.AuthorizationId, auth.AuthNo, beneficiaryId = auth.BeneficiaryId,
+                    encounterId = auth.EncounterId,
                     source = auth.Source.ToString(),
                     // The read model's pending-queue row is keyed on priority and its SLA clock; without them
                     // every pending authorization would sit in the Routine bucket with no due time, which is
@@ -167,7 +173,12 @@ public static class Worklist
                     detail: "This request was picked up by another reviewer.", type: "urn:hbmp:already-assigned");
             }
             await outbox.EnqueueAsync("AuthUnderReview", "approvals.events",
-                new { authorizationId = auth.AuthorizationId, auth.AuthNo, reviewerId, slaDueAt = auth.SlaDueAt, priority = auth.Priority.ToString() }, ct);
+                new
+                {
+                    tenantId = auth.TenantId,
+                    authorizationId = auth.AuthorizationId, auth.AuthNo, reviewerId,
+                    slaDueAt = auth.SlaDueAt, priority = auth.Priority.ToString(),
+                }, ct);
             await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft

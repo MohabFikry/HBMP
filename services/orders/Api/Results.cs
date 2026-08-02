@@ -81,6 +81,10 @@ public static class ResultEndpoints
             {
                 tenantId = order.TenantId, orderId, lineId, fulfillmentId = target.FulfillmentId, order.OrderNo,
                 orderingProviderId = order.OrderingProviderId, beneficiaryId = order.BeneficiaryId,
+                // ADR-0031 — the visit this result answers. The step it produces says a result was reported
+                // and names the order; the VALUE stays here, behind the 14.7 sensitivity gate, because the
+                // episode timeline is read by reception.
+                encounterId = order.EncounterId,
                 approvalGated = order.AuthorizationId is not null, resultDocumentId = target.ResultDocumentId,
                 sensitivityLevel = line.SensitivityLevel.ToString(),
             }, ct);

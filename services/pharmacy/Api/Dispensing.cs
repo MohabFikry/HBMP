@@ -158,6 +158,11 @@ public static class DispensingEndpoints
                             prescriptionLineId = lineId,
                             tenantId = rx.TenantId,
                             beneficiaryId = rx.BeneficiaryId,
+                            // ADR-0031 — the visit that prescribed it, and the number the step is referenced
+                            // by. The DRUG is not here and must not be: a dispense step is read by reception,
+                            // and "medicine dispensed · RX-2026-000031" is the act; which medicine is care.
+                            encounterId = rx.EncounterId,
+                            rx.RxNo,
                             benefitCategory = "PHARMACY",
                             serviceDate = calendar.Today(),   // 18.A3 — Cairo service date
                             // 19.4 — the dispensing pharmacy, for the utilization tier split. Absent rather

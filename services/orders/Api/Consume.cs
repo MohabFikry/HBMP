@@ -59,6 +59,11 @@ public static class ConsumeEndpoints
                             orderType = order.OrderType.ToString(),
                             tenantId = order.TenantId,
                             beneficiaryId = order.BeneficiaryId,
+                            // ADR-0031 — the episode this fulfilment belongs to, plus the business key the
+                            // step is referenced by. Without the encounter a "sample taken" step has no visit
+                            // to hang from; without the number it has nothing a human can look up.
+                            encounterId = order.EncounterId,
+                            order.OrderNo,
                             benefitCategory = BenefitCategoryMap.ForOrderType(order.OrderType),
                             serviceDate = calendar.Today(),   // 18.A3 — Cairo service date
                             // 19.4 — WHO delivered it, so policy-service can attribute the movement to a

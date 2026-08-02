@@ -25,6 +25,11 @@ interaction/allergy alerts and raises referrals; a **pharmacist** searches dispe
 5. **Outbox** — `RxCreated`, `RxSubmitted` (+ `RxApproved` when auto-approved) to `pharmacy.events`, in the same
    transaction as the state change; consumers dedupe on event id.
 
+`RxCreated`, `RxCancelled` and `RxLinesDispensed` carry **`encounterId`** (ADR-0031) so emr can step them onto
+the patient's care episode. They carry the `rxNo` and **not the drug**: the episode timeline is read by
+reception, so "medicine dispensed · RX-2026-000031" is the act and which medicine is the care.
+`CareFeedEnvelopeArchitectureTests` fails the build if a publish site drops the encounter.
+
 Idempotent on `Idempotency-Key`; every mutation audited. `GET /api/v1/prescriptions/{id}` (treating-gated),
 `POST /api/v1/prescriptions/{id}/cancel` (legal only while not fully dispensed → audited `409` otherwise).
 **Min-necessary:** prescription views never expose investigation results.

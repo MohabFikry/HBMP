@@ -96,8 +96,19 @@ public static class OrdersEndpoints
             await db.SaveChangesAsync(ct);
 
             // Outbox events in the same transaction as the state change (consumers dedupe on event id).
+            //
+            // `encounterId` — ADR-0031. The order has carried the column since phase 4 and never put it on the
+            // wire, so the visit that caused the order and the order itself were two facts with nothing
+            // joining them: "what did this consultation order?" had no answer, and emr's episode timeline
+            // could not record a step it had no way to attach. `orderedByUserId` is the same argument for
+            // WHO — a step with no actor cannot answer the question a timeline is opened to answer.
             await outbox.EnqueueAsync("OrderCreated", "orders.events",
-                new { tenantId = order.TenantId, orderId = order.OrderId, order.OrderNo, beneficiaryId = order.BeneficiaryId, orderType = order.OrderType.ToString() }, ct);
+                new
+                {
+                    tenantId = order.TenantId, orderId = order.OrderId, order.OrderNo,
+                    beneficiaryId = order.BeneficiaryId, encounterId = order.EncounterId,
+                    orderType = order.OrderType.ToString(), orderedByUserId = order.CreatedBy,
+                }, ct);
             if (route.RouteToApproval)
                 // `orderedByUserId` carries the ordering clinician to whoever ingests this into approvals
                 // (§11.3). The authorization's `CreatedBy` is what a decision notice is addressed to, and on
@@ -107,6 +118,7 @@ public static class OrdersEndpoints
                     new
                     {
                         tenantId = order.TenantId, orderId = order.OrderId, order.OrderNo, reason = route.Reason,
+                        beneficiaryId = order.BeneficiaryId, encounterId = order.EncounterId,
                         orderedByUserId = order.CreatedBy,
                     }, ct);
             else
@@ -173,7 +185,16 @@ public static class OrdersEndpoints
             order.Status = OrderStatus.Cancelled;
             foreach (var l in order.Lines.Where(l => l.Status == OrderLineStatus.Active)) l.Status = OrderLineStatus.Cancelled;
             await db.SaveChangesAsync(ct);
-            await outbox.EnqueueAsync("OrderCancelled", "orders.events", new { tenantId = order.TenantId, orderId = order.OrderId, reason = req.Reason }, ct);
+            // ADR-0031: a cancelled order ADDS a step beside its OrderPlaced — an episode records what
+            // happened, so it never retracts one. `orderNo` rides along because the step's reference is a
+            // business key: ORD-2026-000014 is a thing a desk can say out loud and look up, and an internal
+            // uuid is neither.
+            await outbox.EnqueueAsync("OrderCancelled", "orders.events", new
+            {
+                tenantId = order.TenantId, orderId = order.OrderId, order.OrderNo,
+                beneficiaryId = order.BeneficiaryId, encounterId = order.EncounterId,
+                cancelledByUserId = me.Principal?.Subject, reason = req.Reason,
+            }, ct);
             await audit.EmitAsync(new AuditEventDraft
             {
                 EntityType = "investigation_order", EntityId = order.OrderId.ToString(), Action = AuditAction.StateChange,

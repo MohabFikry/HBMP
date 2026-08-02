@@ -56,6 +56,9 @@ const STATUS_CHIP: Record<string, { kind: "ok" | "info" | "warn" | "neu"; label:
   ResultReported: { kind: "ok", label: { en: "Result reported", ar: "صدرت النتيجة" } },
   AuthorizationDecided: { kind: "ok", label: { en: "Authorization decided", ar: "صدر قرار الموافقة" } },
   PrescriptionWritten: { kind: "info", label: { en: "Prescription written", ar: "كُتبت وصفة" } },
+  // The medication counterpart of OrderCancelled. Without it a cancelled prescription leaves no trace and
+  // the episode still reads as though the medicine is waiting to be collected.
+  PrescriptionCancelled: { kind: "neu", label: { en: "Prescription cancelled", ar: "أُلغيت الوصفة" } },
   MedicineDispensed: { kind: "ok", label: { en: "Medicine dispensed", ar: "صُرف الدواء" } },
 };
 

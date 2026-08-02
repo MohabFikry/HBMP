@@ -85,8 +85,16 @@ public static class PrescriptionEndpoints
                 });
             await db.SaveChangesAsync(ct);
 
+            // `encounterId` — ADR-0031. The prescription has held the column since phase 4 and never put it on
+            // the wire, so nothing could join "this consultation" to "these medicines". `orderedByUserId` is
+            // the prescriber, so the step has a person on it rather than an empty "by".
             await outbox.EnqueueAsync("RxCreated", "pharmacy.events",
-                new { tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, rx.RxNo, beneficiaryId = rx.BeneficiaryId }, ct);
+                new
+                {
+                    tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, rx.RxNo,
+                    beneficiaryId = rx.BeneficiaryId, encounterId = rx.EncounterId,
+                    orderedByUserId = rx.CreatedBy,
+                }, ct);
             // `orderedByUserId` — the prescriber, carried forward for whoever ingests this into approvals, so
             // the decision notice has a human to reach. Same reason as OrderPendingApproval (§11.3).
             await outbox.EnqueueAsync("RxSubmitted", "pharmacy.events",
@@ -151,7 +159,15 @@ public static class PrescriptionEndpoints
             rx.Status = RxStatus.Cancelled;
             foreach (var l in rx.Lines.Where(l => l.Status == RxLineStatus.Active)) l.Status = RxLineStatus.Cancelled;
             await db.SaveChangesAsync(ct);
-            await outbox.EnqueueAsync("RxCancelled", "pharmacy.events", new { tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, reason = req.Reason }, ct);
+            // ADR-0031 — a cancelled prescription adds a step beside the one that wrote it; the episode is
+            // what happened, so nothing is retracted. `rxNo` is the step's reference: a business key a
+            // pharmacist can read back, never an internal id.
+            await outbox.EnqueueAsync("RxCancelled", "pharmacy.events", new
+            {
+                tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, rx.RxNo,
+                beneficiaryId = rx.BeneficiaryId, encounterId = rx.EncounterId,
+                cancelledByUserId = me.Principal?.Subject, reason = req.Reason,
+            }, ct);
             await audit.EmitAsync(new AuditEventDraft
             {
                 EntityType = "prescription", EntityId = rx.PrescriptionId.ToString(), Action = AuditAction.StateChange,

@@ -557,6 +557,11 @@
           "orderedByUserId": {
             "type": "string",
             "nullable": true
+          },
+          "encounterId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           }
         },
         "additionalProperties": false
