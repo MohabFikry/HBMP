@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Card, InputField, StatusChip, InlineAlert } from "@mersal/design-system";
+import { Button, Card, Icon, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
 import type { EligibilityHit, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useWrite } from "../api/useWrite";
@@ -143,7 +143,8 @@ export function ReceptionBooking() {
             <p>
               {t(S.bookedAt)} <strong className="tnum">{fmt.dateTime(confirmed.at)}</strong>
             </p>
-            <Button variant="primary" onClick={reset}>
+            <Button variant="primary"
+              leadingIcon={<Icon name="plus" />} onClick={reset}>
               {t(S.bookAnother)}
             </Button>
           </div>
@@ -221,7 +222,8 @@ export function ReceptionBooking() {
         {write.error && <InlineAlert tone="bad">{t(write.error.message)}</InlineAlert>}
 
         <div className="book-actions">
-          <Button variant="primary" loading={write.busy} onClick={() => void doBook()}>
+          <Button variant="primary"
+              leadingIcon={<Icon name="calendar" />} loading={write.busy} onClick={() => void doBook()}>
             {t(S.book)}
           </Button>
         </div>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Card, DataTable, InputField, InlineAlert, Modal, StatusChip, TextareaField } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, InputField, Modal, StatusChip, TextareaField } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { Localized, ProgramEnablement, ProgramFeature, ProgramLimit } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -300,7 +300,8 @@ function LimitTable({ tenant, limits, onChanged }: { tenant: string; limits: Pro
         footer={
           <>
             <Button variant="ghost" onClick={close}>{t(S.cancel)}</Button>
-            <Button variant="primary" onClick={confirm} disabled={write.busy}>{t(S.confirm)}</Button>
+            <Button variant="primary"
+              leadingIcon={<Icon name="check2" />} onClick={confirm} disabled={write.busy}>{t(S.confirm)}</Button>
           </>
         }
       >

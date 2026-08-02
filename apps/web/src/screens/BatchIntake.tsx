@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Card, DataTable, InlineAlert, Select, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, Select, StatusChip, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   BulkCommitView,
@@ -301,7 +301,8 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
           />
         </div>
         <div>
-          <Button variant="primary" onClick={doUpload} loading={busy} disabled={!file || busy}>
+          <Button variant="primary"
+              leadingIcon={<Icon name="download" />} onClick={doUpload} loading={busy} disabled={!file || busy}>
             {t(S.upload)}
           </Button>
         </div>
@@ -334,7 +335,8 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
             </Button>
             {/* Gated on the dry run having said the file is committable. The server enforces the same
                 transition; this only stops an operator reaching for it first. */}
-            <Button variant="primary" onClick={doCommit} disabled={busy || !validation?.committable}>
+            <Button variant="primary"
+              leadingIcon={<Icon name="check2" />} onClick={doCommit} disabled={busy || !validation?.committable}>
               {t(S.commit)}
             </Button>
           </div>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Card, InlineAlert, InputField, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, Icon, InlineAlert, InputField, StatusChip, useTheme } from "@mersal/design-system";
 import { useWrite, writeErrorText } from "../api/useWrite";
 import type { Localized, ResultTask } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -88,7 +88,8 @@ function ResultCard({ task, onDone }: { task: ResultTask; onDone: () => void }) 
             {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
           </div>
           <div>
-            <Button type="submit" variant="primary" loading={status === "saving"}>{t(S.submit)}</Button>
+            <Button type="submit" variant="primary"
+              leadingIcon={<Icon name="check2" />} loading={status === "saving"}>{t(S.submit)}</Button>
           </div>
         </form>
       )}

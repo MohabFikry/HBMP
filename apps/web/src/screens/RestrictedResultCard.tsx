@@ -52,7 +52,8 @@ export function RestrictedResultCard({ result, onRequestAccess }: RestrictedResu
       </dl>
 
       <p className="restricted-body">{t(L.restrictedBody)}</p>
-      <Button variant="primary" onClick={onRequestAccess}>
+      <Button variant="primary"
+              leadingIcon={<Icon name="lock" />} onClick={onRequestAccess}>
         {t(L.requestAccess)}
       </Button>
     </section>
@@ -127,7 +128,8 @@ export function RequestAccessDialog({ onSubmit, onCancel }: RequestAccessDialogP
       />
 
       <div className="row-actions">
-        <Button type="submit" variant="primary">{t(L.submit)}</Button>
+        <Button type="submit" variant="primary"
+              leadingIcon={<Icon name="check2" />}>{t(L.submit)}</Button>
         <Button type="button" variant="ghost" onClick={onCancel}>{t(L.cancel)}</Button>
       </div>
     </form>

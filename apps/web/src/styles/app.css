@@ -1345,8 +1345,11 @@ nav.mrs-rail {
 .profile-sections { display: grid; gap: var(--sp4); }
 .profile-section-head { display: flex; flex-wrap: wrap; gap: var(--sp3); align-items: baseline; justify-content: space-between; }
 .profile-section-actions { display: flex; flex-wrap: wrap; gap: var(--sp2); }
-.profile-action-link { font-size: 0.9em; text-decoration: underline; }
-.profile-action-link:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+/* `.profile-action-link` lived here. Its three call sites — the profile's module actions and both call-centre
+   "open profile" controls — are Buttons now: they were bare `<a href>`s that reloaded the SPA to reach an
+   in-app route, and 0B §10c rules that a bare text link beside a button is a hierarchy claim nobody made
+   deliberately. The rule is left as a comment because the class is the kind of thing that gets re-added.
+   The flex row above already lays these out; buttons need no extra rule. */
 
 /* Restricted: a LOCK and the word, on a hatched surface — deliberately unlike the warning treatment. */
 .profile-restricted { display: grid; gap: var(--sp2); padding: var(--sp3); border: 1px dashed currentColor; border-radius: var(--r-md); opacity: 0.95; }

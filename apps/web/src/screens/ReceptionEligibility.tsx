@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useFormat } from "../i18n/useFormat";
-import { Button, Card, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
+import { Button, Card, Icon, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
 import type { EligibilityResult, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { ApiError } from "../api/http";
@@ -87,7 +87,8 @@ export function ReceptionEligibility() {
             autoComplete="off"
           />
           <div>
-            <Button type="submit" variant="primary" loading={status === "loading"}>
+            <Button type="submit" variant="primary"
+              leadingIcon={<Icon name="check2" />} loading={status === "loading"}>
               {t(S.check)}
             </Button>
           </div>

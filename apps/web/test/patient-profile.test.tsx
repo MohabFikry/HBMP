@@ -366,9 +366,13 @@ describe("20.4 — the patient context bar", () => {
 // ---------------------------------------------------------------- module deep-links & print
 
 describe("20.4 — module deep-links and the print summary", () => {
-  it("offers a section's module link only when the role holds the permission", async () => {
+  it("offers a section's module action only when the role holds the permission", async () => {
     // Rendered or absent — never disabled. A greyed-out "Start encounter" on a receptionist's screen
-    // advertises a capability they will never have; a link that 403s is worse.
+    // advertises a capability they will never have; one that 403s is worse.
+    //
+    // A BUTTON, not a link: these were bare `<a href>`s, so reaching an in-app route reloaded the whole SPA
+    // and took anything unsaved on screen with it — and 0B §10c rules that a bare text link beside a button
+    // is a hierarchy claim, which this one sat next to while being the primary thing to do with the section.
     seedSession("doctor");
     renderProfile(
       fakeApi({
@@ -378,8 +382,8 @@ describe("20.4 — module deep-links and the print summary", () => {
       }),
     );
     const section = await screen.findByRole("region", { name: /encounters/i });
-    expect(within(section).getByRole("link", { name: /start encounter/i })).toHaveAttribute(
-      "href", expect.stringContaining(BEN));
+    const action = within(section).getByRole("button", { name: /start encounter/i });
+    expect(action).not.toHaveAttribute("href");
   });
 
   it("offers no module link to a role without the permission", async () => {
@@ -406,7 +410,9 @@ describe("20.4 — module deep-links and the print summary", () => {
       }),
     );
     const section = await screen.findByRole("region", { name: /investigations/i });
-    expect(within(section).queryByRole("link", { name: /raise investigation/i })).not.toBeInTheDocument();
+    // Queried as a BUTTON, which is what these are now. Left as `link` this assertion would have passed
+    // whether or not the action rendered — a negative test against a role nothing uses proves nothing.
+    expect(within(section).queryByRole("button", { name: /raise investigation/i })).not.toBeInTheDocument();
   });
 
   it("fetches the print summary from the SERVER rather than printing the DOM", async () => {

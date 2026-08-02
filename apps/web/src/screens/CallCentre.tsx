@@ -1,12 +1,11 @@
 import { memberStatus, callOutcomeLabel, callReasonLabel, identifierTypeLabel, appointmentTypeLabel } from "./statusLabels";
 import { useFormat } from "../i18n/useFormat";
 import { useCallback, useEffect, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
 import { Button, Card, Icon, InputField, Modal, StatusChip, useTheme } from "@mersal/design-system";
 import { L } from "../i18n/strings";
 import { API_BASE } from "../config";
 import { getToken } from "../auth/tokenStore";
-import { PageHeader } from "./_shared";
+import { PageHeader, useOpenProfile } from "./_shared";
 import { BookingForm, type BookingSelection } from "./booking/BookingForm";
 import { useApi } from "../api/ApiProvider";
 import type { BranchSummary } from "@mersal/contracts";
@@ -293,7 +292,7 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
   const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const { lang } = useTheme();
   const t = (l: { en: string; ar: string }) => l[lang];
-  const location = useLocation();
+  const openProfile = useOpenProfile();
 
   /**
    * RESTORED state — what the agent needs to still be here after opening the caller's profile and coming back.
@@ -556,13 +555,16 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
                     tore down the open call, the search results and the member on screen — so an agent who
                     looked at the caller's profile mid-call came back to an empty workspace while the interaction
                     was still Open on the server. `state.from` is what the profile's Back button returns to. */}
-                <Link
-                  className="profile-action-link"
-                  to={`/patients/${encodeURIComponent(openedFor.beneficiaryId)}?interactionId=${encodeURIComponent(interactionId ?? "")}`}
-                  state={{ from: `${location.pathname}${location.search}` }}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leadingIcon={<Icon name="user" />}
+                  onClick={() => openProfile(
+                    openedFor.beneficiaryId,
+                    `?interactionId=${encodeURIComponent(interactionId ?? "")}`)}
                 >
                   {t(L.ccOpenProfile)}
-                </Link>
+                </Button>
 
                 <section aria-label={t(L.ccCoverage)}>
                   <h3>{t(L.ccCoverage)}</h3>

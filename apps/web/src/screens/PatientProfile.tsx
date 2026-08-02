@@ -1,5 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Button, Card, InlineAlert, useTheme } from "@mersal/design-system";
+import { useNavigate } from "react-router-dom";
+import { Button, Card, Icon, InlineAlert, useTheme } from "@mersal/design-system";
+import type { IconName } from "@mersal/design-system";
 import type {
   CallHistoryRow,
   ProfileExportSummary,
@@ -75,41 +77,42 @@ const STR = {
  * receptionist's screen advertises a capability they will never have and invites a support ticket; a link that
  * 403s is worse still. The server is the authority either way — this list only decides what is worth offering.
  */
-const SECTION_ACTIONS: Record<string, { label: Localized; permission: Permission; href: (id: string) => string }[]> = {
+const SECTION_ACTIONS: Record<string,
+  { label: Localized; permission: Permission; href: (id: string) => string; icon: IconName }[]> = {
   header: [
-    { label: { en: "Book appointment", ar: "حجز موعد" }, permission: "appointments.read",
+    { icon: "calendar", label: { en: "Book appointment", ar: "حجز موعد" }, permission: "appointments.read",
       href: (id) => `/reception/appointments?beneficiaryId=${encodeURIComponent(id)}` },
   ],
   encounters: [
-    { label: { en: "Start encounter", ar: "بدء زيارة" }, permission: "emr.write",
+    { icon: "doc", label: { en: "Start encounter", ar: "بدء زيارة" }, permission: "emr.write",
       href: (id) => `/clinician/encounter?beneficiaryId=${encodeURIComponent(id)}` },
   ],
   investigations: [
-    { label: { en: "Raise investigation order", ar: "طلب فحص" }, permission: "orders.place",
+    { icon: "flask", label: { en: "Raise investigation order", ar: "طلب فحص" }, permission: "orders.place",
       href: (id) => `/clinician/orders?beneficiaryId=${encodeURIComponent(id)}` },
   ],
   prescriptions: [
-    { label: { en: "New prescription", ar: "وصفة جديدة" }, permission: "prescriptions.write",
+    { icon: "pill", label: { en: "New prescription", ar: "وصفة جديدة" }, permission: "prescriptions.write",
       href: (id) => `/clinician/prescriptions?beneficiaryId=${encodeURIComponent(id)}` },
   ],
   authorizations: [
-    { label: { en: "View authorizations", ar: "عرض الموافقات" }, permission: "approvals.worklist",
+    { icon: "check2", label: { en: "View authorizations", ar: "عرض الموافقات" }, permission: "approvals.worklist",
       href: (id) => `/approvals/worklist?beneficiaryId=${encodeURIComponent(id)}` },
   ],
   financial: [
-    { label: { en: "Open claims", ar: "فتح المطالبات" }, permission: "claims.worklist",
+    { icon: "chart", label: { en: "Open claims", ar: "فتح المطالبات" }, permission: "claims.worklist",
       href: (id) => `/claims/worklist?beneficiaryId=${encodeURIComponent(id)}` },
   ],
   documents: [
-    { label: { en: "Upload document", ar: "رفع مستند" }, permission: "beneficiary.manage",
+    { icon: "folder", label: { en: "Upload document", ar: "رفع مستند" }, permission: "beneficiary.manage",
       href: (id) => `/beneficiaries/manage?beneficiaryId=${encodeURIComponent(id)}` },
   ],
   notes: [
-    { label: { en: "Add note", ar: "إضافة ملاحظة" }, permission: "policy.members",
+    { icon: "pen", label: { en: "Add note", ar: "إضافة ملاحظة" }, permission: "policy.members",
       href: (id) => `/policy/members?beneficiaryId=${encodeURIComponent(id)}` },
   ],
   caseManagement: [
-    { label: { en: "Open case", ar: "فتح الحالة" }, permission: "case.read",
+    { icon: "folder", label: { en: "Open case", ar: "فتح الحالة" }, permission: "case.read",
       href: (id) => `/cases/my-cases?beneficiaryId=${encodeURIComponent(id)}` },
   ],
 };
@@ -355,6 +358,7 @@ function SectionCard({
  */
 function SectionActions({ section, beneficiaryId }: { section: ProfileSection; beneficiaryId: string }) {
   const t = useLoc();
+  const navigate = useNavigate();
   const { session } = useAuth();
   const role = session?.role as Role | undefined;
 
@@ -367,11 +371,29 @@ function SectionActions({ section, beneficiaryId }: { section: ProfileSection; b
   if (offered.length === 0) return null;
 
   return (
+    /*
+      BUTTONS that route — they were bare `<a href>`s, which was two defects at once.
+
+      1. A full document load. "Start encounter" reloaded the whole SPA to reach an in-app route, the same
+         fault the context bar above had; anything unsaved elsewhere on screen went with it.
+      2. 0B §10c: a bare text link beside a button is a hierarchy claim. These sit next to the section's own
+         controls and are the primary thing to DO with a section, so they read as the least important thing
+         on the card while being the most actionable.
+
+      Each carries the icon of the module it opens, so a clinician scanning a long profile finds the
+      prescription action by its shape rather than by reading nine labels.
+    */
     <nav className="profile-section-actions" aria-label={t(STR.actions)}>
       {offered.map((a) => (
-        <a key={a.permission} href={a.href(beneficiaryId)} className="profile-action-link">
+        <Button
+          key={a.permission}
+          variant="secondary"
+          size="sm"
+          leadingIcon={<Icon name={a.icon} />}
+          onClick={() => navigate(a.href(beneficiaryId))}
+        >
           {t(a.label)}
-        </a>
+        </Button>
       ))}
     </nav>
   );

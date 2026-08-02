@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Card, DataTable, InputField, Modal, StatusChip, useToast } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InputField, Modal, StatusChip, useToast } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { LabOrder, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -100,7 +100,8 @@ export function LabQueue({ kind }: { kind: "lab" | "imaging" }) {
         footer={
           <>
             <Button variant="ghost" onClick={() => setActive(null)}>{t(S.cancel)}</Button>
-            <Button variant="primary" loading={busy} onClick={() => void consume()}>{t(S.submit)}</Button>
+            <Button variant="primary"
+              leadingIcon={<Icon name="check2" />} loading={busy} onClick={() => void consume()}>{t(S.submit)}</Button>
           </>
         }
       >

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Card, DataTableView, StatusChip, InlineAlert, useTableQuery } from "@mersal/design-system";
+import { Button, Card, DataTableView, InlineAlert, StatusChip, useTableQuery } from "@mersal/design-system";
 import type { Column, TableFilterSpec } from "@mersal/design-system";
 import type { AppointmentRow, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";

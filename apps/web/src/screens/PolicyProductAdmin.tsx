@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Card, DataTable, InlineAlert, StatusChip } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, StatusChip } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   ActivationProblem,
@@ -674,7 +674,8 @@ function PlanVersionEditor({
 
       <div className="pol-editor-actions">
         {editable && (
-          <Button variant="primary" onClick={save} disabled={busy}>
+          <Button variant="primary"
+              leadingIcon={<Icon name="check2" />} onClick={save} disabled={busy}>
             {t(S.saveRules)}
           </Button>
         )}
@@ -682,7 +683,8 @@ function PlanVersionEditor({
           {t(S.validate)}
         </Button>
         {editable && (
-          <Button variant="primary" onClick={activate} disabled={busy || !valid}>
+          <Button variant="primary"
+              leadingIcon={<Icon name="toggle" />} onClick={activate} disabled={busy || !valid}>
             {t(S.activate)}
           </Button>
         )}

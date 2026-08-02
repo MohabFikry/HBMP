@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useFormat } from "../i18n/useFormat";
-import { Button, Card, DataTable, InlineAlert, InputField, KpiCard, StatusChip, TextareaField, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, InputField, KpiCard, StatusChip, TextareaField, useTheme } from "@mersal/design-system";
 import { useWrite, writeErrorText } from "../api/useWrite";
 import type { Column } from "@mersal/design-system";
 import type { ApprovalItem, Localized, TatSummary } from "@mersal/contracts";
@@ -119,7 +119,8 @@ export function ApprovalsManual() {
                 differently from a dropped connection, because they demand opposite actions. */}
             {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
             {status === "done" && <StatusChip kind="ok" label={t(S.created)} />}
-            <div><Button type="submit" variant="primary" loading={status === "saving"}>{t(S.create)}</Button></div>
+            <div><Button type="submit" variant="primary"
+              leadingIcon={<Icon name="plus" />} loading={status === "saving"}>{t(S.create)}</Button></div>
           </div>
         </form>
       </Card>
@@ -164,7 +165,8 @@ export function ApprovalsEmergency() {
           <div className="stack" style={{ gap: "var(--sp2)", minWidth: 260 }}>
             <InputField label={t(S.emgJust)} value={reason} onChange={(e) => setReason(e.currentTarget.value)} autoComplete="off" />
             <div style={{ display: "flex", gap: "var(--sp2)" }}>
-              <Button variant="primary" size="sm" loading={busy} onClick={() => void confirm(r.id)}>{t(S.confirm)}</Button>
+              <Button variant="primary"
+              leadingIcon={<Icon name="check2" />} size="sm" loading={busy} onClick={() => void confirm(r.id)}>{t(S.confirm)}</Button>
               <Button variant="ghost" size="sm" onClick={() => { setActive(null); setReason(""); }}>{t(S.cancel)}</Button>
             </div>
           </div>

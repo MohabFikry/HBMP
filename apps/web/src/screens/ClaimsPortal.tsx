@@ -1,4 +1,4 @@
-import { KpiCard, Card, DataTable, SegmentedControl, StatusChip } from "@mersal/design-system";
+import { Card, DataTable, KpiCard, SegmentedControl, StatusChip } from "@mersal/design-system";
 import { useFormat } from "../i18n/useFormat";
 import type { Column } from "@mersal/design-system";
 import type { ClaimRow, ClaimsKpis, Localized, ReconciliationRow } from "@mersal/contracts";

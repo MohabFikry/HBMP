@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
-import { Button, Card, InlineAlert, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, Icon, InlineAlert, StatusChip, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import { L } from "../i18n/strings";
-import { PageHeader } from "./_shared";
+import { PageHeader, useOpenProfile } from "./_shared";
 import { memberStatus, callReasonLabel } from "./statusLabels";
 import { BookingForm, NOTE_MAX, type BookingSelection } from "./booking/BookingForm";
 import { CallSummaryDraft } from "./CallNotes";
@@ -48,7 +47,7 @@ const defaultCcApi = createHttpCcApi();
 export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
   const { lang } = useTheme();
   const t = (l: Localized) => l[lang];
-  const location = useLocation();
+  const openProfile = useOpenProfile();
 
   /** Restored so that opening the caller's profile mid-booking does not lose the call, the search or the
    *  member — see useRestorableState. Only the shape of the work; the member's details are re-fetched. */
@@ -240,13 +239,21 @@ export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
             <span className="row-actions">
               {/* A <Link>, not an <a href>: as a plain anchor this reloaded the SPA and destroyed the open
                   call and the booking in progress. `state.from` is what the profile's Back button returns to. */}
-              <Link
-                className="profile-action-link"
-                to={`/patients/${encodeURIComponent(openedFor.beneficiaryId)}?interactionId=${encodeURIComponent(interactionId ?? "")}`}
-                state={{ from: `${location.pathname}${location.search}` }}
+              {/* A BUTTON, not a bare link. It routes (an `<a href>` here reloaded the SPA and destroyed the
+                  open call), and it now looks like the action it is: 0B §10c — a bare text link beside a
+                  button is a hierarchy claim, and this one sat next to one while being the more useful of
+                  the two. `useOpenProfile` records the origin so Back returns to the live workspace, and the
+                  interactionId rides along because profile-service checks that binding itself (ADR-0026). */}
+              <Button
+                variant="secondary"
+                size="sm"
+                leadingIcon={<Icon name="user" />}
+                onClick={() => openProfile(
+                  openedFor.beneficiaryId,
+                  `?interactionId=${encodeURIComponent(interactionId ?? "")}`)}
               >
                 {t(L.ccOpenProfile)}
-              </Link>
+              </Button>
               {/* Changes the member on the SAME call — the agent misidentified the caller, they did not start
                   a different conversation. The call record, its reason and its direction all stand. */}
               <Button variant="secondary" size="sm" onClick={() => { setOpenedFor(null); setMemberName(null); }}>
