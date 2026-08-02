@@ -578,20 +578,22 @@ function HeaderView({ data }: { data: ProfileHeader }) {
             {data.relationship}
           </p>
         )}
-        {facts.length > 0 && (
-          <ul className="profile-facts">
-            {facts.map((f) => (
-              <li key={f.key} title={`${t(f.label)}: ${f.value}`}>
-                <Icon name={f.icon} width={16} height={16} aria-hidden="true" />
-                {/* The icon is decorative, so the FACT still needs naming for a screen reader — otherwise the
-                    strip reads as a bare list of values with nothing saying what any of them is. */}
-                <span className="sr-only">{t(f.label)}: </span>
-                <span>{f.value}</span>
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
+      {/* Outside the text column, so its hairline runs the FULL width of the block rather than starting at
+          the avatar's edge and reading as an indent. Who this is, above; what describes them, below. */}
+      {facts.length > 0 && (
+        <ul className="profile-idfacts">
+          {facts.map((f) => (
+            <li key={f.key} title={`${t(f.label)}: ${f.value}`}>
+              <Icon name={f.icon} width={16} height={16} aria-hidden="true" />
+              {/* The icon is decorative, so the FACT still needs naming for a screen reader — otherwise the
+                  strip reads as a bare list of values with nothing saying what any of them is. */}
+              <span className="sr-only">{t(f.label)}: </span>
+              <span>{f.value}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

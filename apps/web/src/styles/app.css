@@ -1384,7 +1384,16 @@ nav.mrs-rail {
    both places. Status beside the name (it is what anyone checks first, and it used to sit last, under a
    run-on line); the member number quiet on its own row; the facts as a scannable icon-per-fact strip rather
    than four values joined by " · " with nothing saying which is which. */
-.profile-identity { display: flex; gap: var(--sp3); align-items: start; }
+/* Two rows: identity (avatar + name block), then the fact strip spanning both columns so its hairline runs
+   the full width of the card instead of starting at the avatar's edge. `auto 1fr` keeps the avatar at its
+   intrinsic 56px and lets the text take the rest. */
+.profile-identity {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sp1) var(--sp3);
+  align-items: start;
+}
+.profile-identity > .profile-idfacts { grid-column: 1 / -1; }
 /* min-inline-size:0 so a long name wraps INSIDE the flex item instead of widening it and pushing the card
    into a horizontal scroll — a flex child's default min-width is auto, which is content-sized. */
 .profile-identity-text { display: grid; gap: var(--sp1); min-inline-size: 0; }
@@ -1409,10 +1418,30 @@ nav.mrs-rail {
 }
 .profile-name { margin: 0; font-weight: 600; font-size: var(--fs-title-3); }
 .profile-sub { margin: 0; color: var(--text-2); font-size: 0.9rem; }
-/* Wrapping, never a fixed row: a phone number and a branch name are different lengths in every locale. */
-.profile-facts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp1) var(--sp4); }
-.profile-facts li { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-2); font-size: 0.9rem; }
-.profile-facts svg { color: var(--text-3); flex: 0 0 auto; }
+/* The identity strip's icon-per-fact row.
+   ============================================================================================================
+   `.profile-idfacts`, NOT `.profile-facts` — that name was already taken, by the coverage/financial <dl> grid
+   further down this file (`display: grid; minmax(12rem, 1fr)`). Same class on two different elements meant the
+   later rule won and the strip rendered one fact per line no matter how wide the card was. A shared name is
+   not a shared component.
+   ============================================================================================================
+   One row where there is room, wrapping where there is not — a phone number and a nationality code are
+   different lengths in every locale, so a fixed column count clips one of them. The hairline separates the
+   facts from the name and status above: those identify WHO this is, these describe them, and the rule is what
+   stops the block reading as one six-line paragraph. */
+.profile-idfacts {
+  list-style: none;
+  margin: 0;
+  padding-block-start: var(--sp2);
+  margin-block-start: var(--sp1);
+  border-block-start: 1px solid var(--border);
+  padding-inline: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp1) var(--sp4);
+}
+.profile-idfacts li { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-2); font-size: 0.9rem; }
+.profile-idfacts svg { color: var(--text-3); flex: 0 0 auto; }
 .profile-alerts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp2); }
 .profile-rows, .call-history-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp2); }
 /* A fact grid that columnises when there is room. Coverage and financial lead with 4–6 short facts, and one
