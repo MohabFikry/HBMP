@@ -5,7 +5,10 @@ namespace Mersal.Emr.Domain;
 public enum NoteType { SOAP, Progress, Nursing }
 public enum DiagnosisRank { Primary, Secondary }
 public enum ClinicalStatus { Active, Resolved, Recurrence }
-public enum VitalType { BP, HR, Temp, SpO2, Weight, Height, BMI }
+/// <summary>Vital observation types (§6.5). <c>BP</c> is the SYSTOLIC value and <c>BPDiastolic</c> its
+/// partner — a blood pressure is two rows on one encounter, read as a pair (migration 0017). Appended rather
+/// than inserted in clinical order so no persisted ordinal shifts.</summary>
+public enum VitalType { BP, HR, Temp, SpO2, Weight, Height, BMI, BPDiastolic }
 public enum AllergySeverity { Mild, Moderate, Severe }
 public enum AllergyStatus { Active, Inactive, Resolved }
 public enum MedicationSource { Prescribed, SelfReported, External }

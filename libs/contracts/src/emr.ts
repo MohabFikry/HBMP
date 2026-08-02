@@ -31,6 +31,11 @@ export const zVitals = z.object({
   diastolic: z.number().nullable(),
   heartRate: z.number().nullable(),
   tempC: z.number().nullable(),
+  /** Oxygen saturation, %. emr has stored SpO2 since phase 4; nothing had ever read it back. */
+  spo2: z.number().nullable(),
+  /** When this set was measured. A vitals panel with no time on it invites a doctor to read yesterday's
+   *  observations as today's — the one reading error the panel itself can cause. */
+  measuredAt: zInstant.nullable(),
 });
 export type Vitals = z.infer<typeof zVitals>;
 
@@ -45,18 +50,44 @@ export const zSoap = z.object({
 });
 export type Soap = z.infer<typeof zSoap>;
 
+/**
+ * A diagnosis AS RECORDED ON THIS ENCOUNTER — a coded condition plus the id of the row carrying it.
+ *
+ * `zCoded` alone was enough while the workspace only displayed diagnoses. It is not enough to retract one:
+ * the same ICD code can legitimately be recorded twice on one encounter (different rank, different clinical
+ * status), so the code does not identify the row, and a retract keyed on it would remove whichever one the
+ * server happened to find first.
+ */
+export const zEncounterDiagnosis = zCoded.extend({
+  /** Null for a code the doctor has just added and not yet saved — there is no row to address yet. */
+  id: zId.nullable(),
+});
+export type EncounterDiagnosis = z.infer<typeof zEncounterDiagnosis>;
+
 export const zEncounter = z.object({
   id: zId,
   patientId: zId,
   patientName: zLocalized,
   openedAt: zInstant,
   signed: z.boolean(),
+  /**
+   * The working SOAP note this encounter is documented in, or null when nothing has been written yet.
+   *
+   * The workspace needs it to know which verb to use: a first save CREATES the note, every save after that
+   * UPDATES it, and signing addresses it by id. Without it the editor could only ever create, and each save
+   * would leave another partial note behind on the encounter.
+   */
+  noteId: zId.nullable(),
   soap: zSoap,
   vitals: zVitals,
   allergies: z.array(zAllergy),
-  diagnoses: z.array(zCoded),
+  diagnoses: z.array(zEncounterDiagnosis),
 });
 export type Encounter = z.infer<typeof zEncounter>;
+
+/** An ICD-10 code as master data returns it from a search — the picker's row, and nothing more. */
+export const zIcdRef = z.object({ code: z.string().min(1), title: z.string() });
+export type IcdRef = z.infer<typeof zIcdRef>;
 
 /** Place an investigation order (routed to approval when high-cost — server decides). */
 export const zPlaceOrderRequest = z.object({

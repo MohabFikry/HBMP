@@ -32,6 +32,8 @@ import {
   zEligibilityHit,
   zEligibilityResult,
   zEncounter,
+  zEncounterDiagnosis,
+  zIcdRef,
   zExecutiveDashboard,
   zKpiWidget,
   zChartWidget,
@@ -75,6 +77,7 @@ import {
   type PlaceOrderRequest,
   type PrescribeRequest,
   type VitalInput,
+  type Soap,
   zIdentityUser,
   zRoleScopeGrant,
   zReportAccessRequestRow,
@@ -99,7 +102,7 @@ import {
 } from "@mersal/contracts";
 import type { BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, CreatePractitionerInput, PractitionerAttachFailure } from "@mersal/contracts";
 import type { ApiClient } from "./client";
-import { ApiError, getRaw, postRaw, putRaw, patchRaw, postForm, parseOr, getAbsolute, postAbsolute, deleteAbsolute } from "./http";
+import { ApiError, getRaw, postRaw, putRaw, patchRaw, deleteRaw, postForm, parseOr, getAbsolute, postAbsolute, deleteAbsolute } from "./http";
 import { GATEWAY_BASE } from "../config";
 
 /* This client is a deliberate adapter between loosely-typed service JSON and the strict portal contracts;
@@ -719,15 +722,37 @@ export class HttpApiClient implements ApiClient {
     // Cache the raw beneficiaryId so downstream write actions (place order / prescribe) can address the
     // orders/pharmacy services, which key on the beneficiary — the doctor UI itself only ever shows the mask.
     if (e.beneficiaryId) encounterBeneficiary.set(encounterId, String(e.beneficiaryId));
-    const note = (r?.notes ?? [])[0] ?? {};
+
+    // The encounter's WORKING note — the one the workspace edits. Addenda are separate notes that point at
+    // their original, and a signed note is immutable, so "the note to edit" is the newest note that is
+    // neither. Taking `notes[0]` picked whatever the database returned first, which after a single addendum
+    // was as likely to be the locked original as the live draft.
+    const notes: any[] = (r?.notes ?? []).filter((n: any) => !n.addendumOfNoteId);
+    notes.sort((a, b) => String(b.authoredAt ?? "").localeCompare(String(a.authoredAt ?? "")));
+    const note = notes.find((n: any) => !n.isSigned) ?? notes[0] ?? {};
+
     const vitals: any[] = r?.vitals ?? [];
-    const v = (type: string) => vitals.find((x) => String(x.vitalType) === type)?.valueNum ?? null;
+    // Newest first, so `v()` answers with the CURRENT reading. Unsorted, a vitals panel showed whichever row
+    // came back first — on an encounter where a nurse re-took the temperature, that is the reading the
+    // doctor already knows is stale.
+    vitals.sort((a, b) => String(b.measuredAt ?? "").localeCompare(String(a.measuredAt ?? "")));
+    const v = (type: string) => {
+      const hit = vitals.find((x) => String(x.vitalType) === type);
+      return hit?.valueNum === undefined || hit?.valueNum === null ? null : Number(hit.valueNum);
+    };
+
+    // Resolve the ICD titles so the assessment reads as conditions rather than as codes. Cached per session
+    // and failure-tolerant (see `icdTitles`) — a reference lookup must never take the clinical record down.
+    const codes = [...new Set((r?.diagnoses ?? []).map((d: any) => String(d.icdCode ?? "")).filter(Boolean))];
+    const titles = await this.icdTitles(codes as string[]);
+
     return parseOr(zEncounter, {
       id: e.encounterId ?? encounterId,
       patientId: e.beneficiaryId ?? "",
       patientName: neutral(`Beneficiary •••${String(e.beneficiaryId ?? "").slice(-4)}`),
       openedAt: e.startedAt ?? new Date().toISOString(),
-      signed: (r?.notes ?? []).some((n: any) => n.isSigned),
+      signed: Boolean(note.isSigned),
+      noteId: note.noteId ?? null,
       soap: {
         subjective: note.subjective ?? "",
         objective: note.objective ?? "",
@@ -738,9 +763,11 @@ export class HttpApiClient implements ApiClient {
         heightCm: v("Height"),
         weightKg: v("Weight"),
         systolic: v("BP"),
-        diastolic: null,
+        diastolic: v("BPDiastolic"),
         heartRate: v("HR"),
         tempC: v("Temp"),
+        spo2: v("SpO2"),
+        measuredAt: vitals[0]?.measuredAt ?? null,
       },
       allergies: (r?.allergies ?? []).map((a: any) => ({
         id: a.allergyId,
@@ -748,11 +775,70 @@ export class HttpApiClient implements ApiClient {
         severity: String(a.severity ?? "mild").toLowerCase(),
       })),
       diagnoses: (r?.diagnoses ?? []).map((d: any) => ({
+        id: d.diagnosisId ?? null,
         system: "ICD-10",
         code: d.icdCode,
-        label: neutral(d.icdCode),
+        label: neutral(titles.get(String(d.icdCode)) ?? d.icdCode),
       })),
     });
+  }
+
+  // ---- Clinical documentation writes (US-031) --------------------------------------------------------
+  // The workspace's Save Draft / Save & finalize. Three endpoints, deliberately not collapsed into one
+  // "save" call: creating a note, amending it and SIGNING it are three different clinical acts with three
+  // different audit events and three different refusal reasons, and the doctor is entitled to see which one
+  // failed.
+  async saveEncounterNote(encounterId: string, noteId: string | null, soap: Soap) {
+    const enc = encodeURIComponent(encounterId);
+    const body = {
+      subjective: soap.subjective || null,
+      objective: soap.objective || null,
+      assessment: soap.assessment || null,
+      plan: soap.plan || null,
+    };
+    const r = noteId
+      ? ((await putRaw(`/encounters/${enc}/notes/${encodeURIComponent(noteId)}`, body)) as any)
+      : ((await postRaw(`/encounters/${enc}/notes`, { noteType: "SOAP", ...body })) as any);
+    return { noteId: String(r?.noteId ?? noteId ?? "") };
+  }
+  async signEncounterNote(encounterId: string, noteId: string) {
+    await postRaw(
+      `/encounters/${encodeURIComponent(encounterId)}/notes/${encodeURIComponent(noteId)}/sign`,
+      {},
+    );
+  }
+  async addEncounterDiagnosis(encounterId: string, icdCode: string, primary = false) {
+    const r = (await postRaw(`/encounters/${encodeURIComponent(encounterId)}/diagnoses`, {
+      icdCode,
+      // emr requires a rank. The FIRST code on an encounter is its primary and everything after it is
+      // secondary — the caller knows which it is holding, because it holds the list. Defaulting every code
+      // to Primary would make an encounter with four diagnoses claim four primary ones, which is the only
+      // thing the field asserts.
+      diagnosisRank: primary ? "Primary" : "Secondary",
+      clinicalStatus: "Active",
+    })) as any;
+    const titles = await this.icdTitles([icdCode]);
+    return parseOr(zEncounterDiagnosis, {
+      id: r?.diagnosisId ?? null,
+      system: "ICD-10",
+      code: r?.icdCode ?? icdCode,
+      label: neutral(titles.get(icdCode) ?? icdCode),
+    });
+  }
+  async removeEncounterDiagnosis(encounterId: string, diagnosisId: string) {
+    await deleteRaw(
+      `/encounters/${encodeURIComponent(encounterId)}/diagnoses/${encodeURIComponent(diagnosisId)}`,
+    );
+  }
+  async searchIcd(query: string) {
+    const q = query.trim();
+    // An empty query means "show me nothing yet", not "show me the ICD-10 catalogue". masterdata would
+    // happily return the first page of tens of thousands of codes, which is a list nobody picks from.
+    if (q.length < 2) return [];
+    const r = (await getRaw(`/search?domain=icd&q=${encodeURIComponent(q)}`)) as any[];
+    return (Array.isArray(r) ? r : []).map((x: any) =>
+      parseOr(zIcdRef, { code: String(x?.code ?? ""), title: String(x?.title ?? "") }),
+    );
   }
   // Place an investigation order (US-032). The real endpoint is /investigation-orders and it (a) requires an
   // Idempotency-Key and (b) keys on the beneficiary — which the doctor UI never shows, so we recover it from the

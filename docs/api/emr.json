@@ -1173,6 +1173,38 @@
         }
       }
     },
+    "/api/v1/encounters/{id}/diagnoses/{diagnosisId}": {
+      "delete": {
+        "tags": [
+          "Mersal.Emr.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "diagnosisId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/encounters/{id}/vitals": {
       "post": {
         "tags": [
@@ -1793,7 +1825,8 @@
           3,
           4,
           5,
-          6
+          6,
+          7
         ],
         "type": "integer",
         "format": "int32"

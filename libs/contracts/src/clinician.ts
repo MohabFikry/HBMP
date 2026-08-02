@@ -84,10 +84,11 @@ export const zRxRow = z.object({
 export type RxRow = z.infer<typeof zRxRow>;
 
 /**
- * Vitals capture (Phase 4, US-030 nurse triage). The emr VitalType space; a single numeric reading per type
- * (BP is captured as systolic). Recording is treating-gated server-side (the nurse owns the encounter).
+ * Vitals capture (Phase 4, US-030 nurse triage). The emr VitalType space; one numeric reading per type, and
+ * a blood pressure is therefore TWO readings — `BP` (systolic) and `BPDiastolic` — sent together. Recording
+ * is treating-gated server-side (the nurse owns the encounter).
  */
-export const zVitalType = z.enum(["BP", "HR", "Temp", "SpO2", "Weight", "Height", "BMI"]);
+export const zVitalType = z.enum(["BP", "BPDiastolic", "HR", "Temp", "SpO2", "Weight", "Height", "BMI"]);
 export type VitalType = z.infer<typeof zVitalType>;
 
 export const zVitalInput = z.object({ type: zVitalType, value: z.number() });

@@ -8,6 +8,8 @@ import {
   zEligibilityHit,
   zEligibilityResult,
   zEncounter,
+  zEncounterDiagnosis,
+  zIcdRef,
   zExecutiveDashboard,
   zLabOrder,
   zPatientListItem,
@@ -130,6 +132,22 @@ const NOTIFICATION_FIXTURE = [
   },
 ];
 const NOW = "2026-07-22T08:30:00Z";
+
+/**
+ * A handful of real ICD-10 codes for the encounter workspace's assessment picker. Deliberately a short list
+ * of PRESENTING complaints a general clinic actually sees, not a random slice of the catalogue: the demo is
+ * there to show the search narrowing to something a doctor would plausibly pick.
+ */
+const DEV_ICD = [
+  { code: "J01.90", title: "Acute sinusitis, unspecified" },
+  { code: "J06.9", title: "Acute upper respiratory infection, unspecified" },
+  { code: "J20.9", title: "Acute bronchitis, unspecified" },
+  { code: "E11.9", title: "Type 2 diabetes mellitus without complications" },
+  { code: "I10", title: "Essential (primary) hypertension" },
+  { code: "K21.9", title: "Gastro-oesophageal reflux disease without oesophagitis" },
+  { code: "M54.5", title: "Low back pain" },
+  { code: "R51", title: "Headache" },
+];
 
 /**
  * The dev beneficiary whose profile answers with the three withheld states (Restricted / Unavailable /
@@ -651,16 +669,53 @@ export class DevApiClient implements ApiClient {
         patientName: loc("Amal Hassan", "أمل حسن"),
         openedAt: NOW,
         signed: false,
+        noteId: "NOTE-1",
         soap: {
           subjective: "Persistent cough for 5 days, low-grade fever.",
           objective: "Temp 37.8°C, chest clear, no distress.",
           assessment: "Suspected upper respiratory infection.",
           plan: "Supportive care; CBC to rule out bacterial cause.",
         },
-        vitals: { heightCm: 164, weightKg: 61, systolic: 118, diastolic: 76, heartRate: 82, tempC: 37.8 },
+        vitals: {
+          heightCm: 164, weightKg: 61, systolic: 118, diastolic: 76,
+          heartRate: 82, tempC: 37.8, spo2: 97, measuredAt: NOW,
+        },
         allergies: [{ id: "AL-1", substance: loc("Penicillin", "بنسلين"), severity: "moderate" }],
-        diagnoses: [{ system: "ICD-10", code: "J06.9", label: loc("Acute upper respiratory infection", "التهاب تنفسي علوي حاد") }],
+        diagnoses: [{
+          id: "DX-1", system: "ICD-10", code: "J06.9",
+          label: loc("Acute upper respiratory infection", "التهاب تنفسي علوي حاد"),
+        }],
       }),
+    );
+  }
+  saveEncounterNote(_encounterId: string, noteId: string | null) {
+    return this.gate(() => ({ noteId: noteId ?? "NOTE-1" }));
+  }
+  signEncounterNote(): Promise<void> {
+    return this.gate(() => undefined);
+  }
+  addEncounterDiagnosis(_encounterId: string, icdCode: string) {
+    return this.gate(() =>
+      ok(zEncounterDiagnosis, {
+        id: `DX-${icdCode}`,
+        system: "ICD-10",
+        code: icdCode,
+        label: loc(DEV_ICD.find((c) => c.code === icdCode)?.title ?? icdCode, icdCode),
+      }),
+    );
+  }
+  removeEncounterDiagnosis(): Promise<void> {
+    return this.gate(() => undefined);
+  }
+  searchIcd(query: string) {
+    const q = query.trim().toLowerCase();
+    // Same floor as the real client: a two-character minimum, so the demo behaves like the thing it stands in
+    // for rather than dumping every code the moment the field is focused.
+    return this.gate(() =>
+      q.length < 2
+        ? []
+        : DEV_ICD.filter((c) => c.code.toLowerCase().startsWith(q) || c.title.toLowerCase().includes(q))
+            .map((c) => zIcdRef.parse(c)),
     );
   }
   placeOrder(req: PlaceOrderRequest) {

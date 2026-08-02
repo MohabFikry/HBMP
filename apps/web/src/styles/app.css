@@ -2842,3 +2842,278 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   align-content: start;
   min-inline-size: 0;
 }
+
+/* ── Encounter workspace (phase 4, US-030/US-031) ─────────────────────────────────────────────────────── */
+/* The consultation is written in the wide column and judged against the narrow one. The rail is NOT a tab:
+   a doctor writing "Temp 38.2, chest clear" is reading the vitals as they type, and putting the observations
+   behind a tab means alternating between the note and the numbers that justify it. It drops below the note
+   under 1100px, where two columns would leave the textareas too narrow to write a paragraph in. */
+.enc-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 20rem);
+  gap: var(--sp5);
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .enc-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.enc-main {
+  min-inline-size: 0;
+}
+.enc-rail {
+  display: grid;
+  gap: var(--sp4);
+  align-content: start;
+  /* Follows the note down a long consultation — the save actions must never be a scroll away from the text
+     they save. `align-content: start` above keeps the two cards their own height rather than stretching. */
+  position: sticky;
+  top: var(--sp4);
+}
+@media (max-width: 1100px) {
+  .enc-rail {
+    position: static;
+  }
+}
+
+.enc-soap {
+  display: grid;
+  gap: var(--sp4);
+  margin-block-start: var(--sp4);
+}
+.soap-card {
+  padding: var(--sp4);
+  display: grid;
+  gap: var(--sp3);
+}
+.soap-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp3);
+  flex-wrap: wrap;
+}
+/* The letter. Square with a small radius so S/O/A/P read as a set of four markers rather than four
+   circles that could be mistaken for status dots — the one other round thing on this screen. */
+.soap-badge {
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+  font-size: 0.8125rem;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.soap-title {
+  margin: 0;
+  font-size: var(--fs-title-3, 1rem);
+  font-weight: 600;
+}
+/* What belongs in this section, in the section's own header. It is a hint, not a label: it never competes
+   with the heading for the accessible name, and it goes to the end of the row so the four headings stay
+   left-aligned down the column. */
+.soap-hint {
+  margin-inline-start: auto;
+  color: var(--text-3);
+  font-size: 0.8125rem;
+}
+.soap-card-head .mrs-btn {
+  flex: none;
+}
+.soap-input {
+  min-block-size: 6rem;
+  resize: vertical;
+  font: inherit;
+  line-height: 1.55;
+}
+
+/* ── Coded diagnoses on the assessment ────────────────────────────────────────────────────────────────── */
+.dx-list {
+  gap: var(--sp2);
+}
+.dx-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp2);
+  padding: 4px 4px 4px var(--sp2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-size: 0.8125rem;
+}
+.dx-code {
+  font-weight: 700;
+  color: var(--accent);
+}
+.dx-label {
+  color: var(--text-1);
+}
+/* The retract control. 24px drawn, but padded out to the 44px target the rest of the system keeps — a
+   destructive control small enough to hit by accident is the wrong one to make small. */
+.dx-remove {
+  display: grid;
+  place-items: center;
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+  position: relative;
+}
+.dx-remove::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
+}
+.dx-remove:hover:not(:disabled) {
+  background: var(--st-bad-bg);
+  color: var(--st-bad-fg);
+}
+.dx-remove:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.dx-remove:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── ICD-10 picker results ────────────────────────────────────────────────────────────────────────────── */
+.icd-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  max-block-size: 16rem;
+  overflow-y: auto;
+}
+.icd-hit {
+  inline-size: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp3);
+  padding: var(--sp2) var(--sp3);
+  min-block-size: 44px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.icd-hit:hover:not(:disabled) {
+  background: var(--accent-tint);
+}
+.icd-hit:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
+}
+
+/* ── Vitals rail ──────────────────────────────────────────────────────────────────────────────────────── */
+.vitals-panel {
+  padding: var(--sp4);
+  display: grid;
+  gap: var(--sp3);
+}
+.vitals-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp2);
+  flex-wrap: wrap;
+}
+.vitals-when {
+  font-size: 0.75rem;
+}
+.vitals-list {
+  display: grid;
+  gap: var(--sp3);
+  margin: 0;
+}
+.vital-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp3);
+  padding-block-end: var(--sp3);
+  border-block-end: 1px solid var(--border);
+}
+.vital-row:last-child {
+  padding-block-end: 0;
+  border-block-end: 0;
+}
+.vital-row dt {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-1);
+  min-inline-size: 0;
+}
+/* The band the flag was judged against, under the name of the reading. Shown always, not on hover: a doctor
+   overrules an advisory flag by reading what it was measured against, and a tooltip is not readable while
+   holding a stethoscope. */
+.vital-ref {
+  display: block;
+  font-weight: 400;
+  font-size: 0.6875rem;
+  color: var(--text-3);
+}
+.vital-row dd {
+  margin: 0;
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+.vital-value {
+  font-size: 1.0625rem;
+  font-weight: 700;
+  color: var(--text-1);
+}
+.vital-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+.vital-flag--ok {
+  background: var(--st-ok-bg);
+  color: var(--st-ok-fg);
+}
+.vital-flag--warn {
+  background: var(--st-warn-bg);
+  color: var(--st-warn-fg);
+}
+
+/* ── Save actions ─────────────────────────────────────────────────────────────────────────────────────── */
+.enc-actions {
+  padding: var(--sp4);
+  display: grid;
+  gap: var(--sp3);
+}
+/* "Unsaved changes" carries the same amber as an out-of-range vital, and for the same reason: neither is an
+   error, and both are something to deal with before leaving the room. */
+.enc-dirty {
+  color: var(--st-warn-fg);
+  font-weight: 600;
+}
+
+.vitals-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp3) var(--sp4);
+}
+
+/* Trailing controls on the context strip — pushed to the end so the identity stays left and the action
+   stays where a user's eye already goes for one. */
+.patient-context-bar-actions {
+  margin-inline-start: auto;
+}

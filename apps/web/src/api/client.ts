@@ -58,6 +58,9 @@ import type {
   EligibilityHit,
   EligibilityResult,
   Encounter,
+  EncounterDiagnosis,
+  IcdRef,
+  Soap,
   Escalation,
   ExecutiveDashboard,
   ExportRequest,
@@ -190,6 +193,31 @@ export interface ApiClient {
   // Doctor — EMR (Phase 4)
   listPatients(): Promise<PatientListItem[]>;
   getEncounter(patientId: string): Promise<Encounter>;
+  /**
+   * Write the encounter's working SOAP note. Pass the encounter's `noteId` to amend the note already there,
+   * or null to open the first one — the two are different verbs server-side (POST vs PUT), and calling the
+   * wrong one either fails or leaves a second partial note on the encounter. Returns the id to save with
+   * next time.
+   *
+   * Refuses a note with nothing in any of S/O/A/P: emr treats an empty note as a 422, because a blank
+   * clinical record that LOOKS documented is worse than an encounter openly still in progress.
+   */
+  saveEncounterNote(encounterId: string, noteId: string | null, soap: Soap): Promise<{ noteId: string }>;
+  /**
+   * Sign the note — the finalize half of "Save & finalize". Signing LOCKS it: from here corrections are
+   * addenda, never edits, and only the note's author may sign.
+   */
+  signEncounterNote(encounterId: string, noteId: string): Promise<void>;
+  /**
+   * Record an ICD-10 diagnosis on the encounter. The code is validated against master data server-side.
+   * Pass `primary` for the first code on the encounter — an encounter has one primary diagnosis, and the
+   * caller is the one holding the list that says whether this is it.
+   */
+  addEncounterDiagnosis(encounterId: string, icdCode: string, primary?: boolean): Promise<EncounterDiagnosis>;
+  /** Retract one — soft-deleted, and refused once the encounter's note is signed (409). */
+  removeEncounterDiagnosis(encounterId: string, diagnosisId: string): Promise<void>;
+  /** ICD-10 typeahead over master data. Empty query → no rows, never the whole catalogue. */
+  searchIcd(query: string): Promise<IcdRef[]>;
   placeOrder(req: PlaceOrderRequest): Promise<PlaceOrderResult>;
   prescribe(req: PrescribeRequest): Promise<PrescribeResult>;
   /** The clinician's own orders (US-032). Pass status="Completed" for the results inbox. */

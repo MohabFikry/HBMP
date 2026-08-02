@@ -233,6 +233,36 @@ public static class ClinicalEndpoints
             return Results.Created($"/api/v1/encounters/{id}/diagnoses/{dx.DiagnosisId}", DiagnosisResponse.From(dx));
         }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
 
+        // ---- Diagnosis retract (US-031) — a mis-keyed code, taken off the working assessment ----
+        //
+        // Not a hard delete: the row is flagged and stays, like every other clinical record here. And not
+        // available after the encounter's note is signed — at that point the assessment is a signed clinical
+        // statement, and the ONLY correction path is an addendum, exactly as it is for the note itself. A
+        // retract endpoint that ignored that would be a back door around the sign-lock, undoing in one call
+        // what SoapNoteRules refuses in another.
+        enc.MapDelete("/{id:guid}/diagnoses/{diagnosisId:guid}", async (
+            Guid id, Guid diagnosisId, EmrDbContext db, ClinicalGate gate, IAuditClient audit,
+            IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        {
+            var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
+            if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            var denied = await gate.CheckAsync("emr:write", EmrPolicies.Resources.Diagnosis, id.ToString(), enc0.BeneficiaryId, ct);
+            if (denied is not null) return denied;
+
+            var dx = await db.Diagnoses.FirstOrDefaultAsync(d => d.DiagnosisId == diagnosisId && d.EncounterId == id && !d.IsDeleted, ct);
+            if (dx is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+            if (await db.Notes.AsNoTracking().AnyAsync(n => n.EncounterId == id && n.IsSigned && !n.IsDeleted, ct))
+                return Problem(409, "encounter-signed", "The encounter's note is signed — record the correction as an addendum.");
+            if (!string.Equals(dx.RecordedBy, me.Principal!.Subject, StringComparison.Ordinal))
+                return Problem(403, "not-recorder", "Only the clinician who recorded a diagnosis may retract it.");
+
+            dx.IsDeleted = true;
+            await db.SaveChangesAsync(ct);
+            await EmitAsync(audit, "diagnosis", dx.DiagnosisId, AuditAction.SoftDelete, me, $"{{\"icd\":\"{dx.IcdCode}\",\"isDeleted\":true}}", ct);
+            return Results.NoContent();
+        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
+
         // ---- Vital: per-type range + optional LOINC ----
         enc.MapPost("/{id:guid}/vitals", async (
             Guid id, AddVitalRequest req, EmrDbContext db, ClinicalGate gate, IClinicalCodeValidator codes,

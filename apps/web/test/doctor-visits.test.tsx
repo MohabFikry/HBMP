@@ -197,9 +197,12 @@ describe("Encounter workspace deep link", () => {
     // the screen, and one that surfaces as an unhandled error rather than a failure.
     const getEncounter = vi.fn().mockResolvedValue({
       id: "enc-77", patientId: "ben-9", patientName: { en: "Fatma Ibrahim", ar: "فاطمة" },
-      openedAt: "2026-08-01T09:00:00Z", signed: false,
+      openedAt: "2026-08-01T09:00:00Z", signed: false, noteId: null,
       soap: { subjective: "", objective: "", assessment: "", plan: "" },
-      vitals: { heightCm: null, weightKg: null, systolic: null, diastolic: null, heartRate: null, tempC: null },
+      vitals: {
+        heightCm: null, weightKg: null, systolic: null, diastolic: null,
+        heartRate: null, tempC: null, spo2: null, measuredAt: null,
+      },
       allergies: [], diagnoses: [],
     });
     render(

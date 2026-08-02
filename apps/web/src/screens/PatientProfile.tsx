@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Card, Icon, InlineAlert, Select, useTheme } from "@mersal/design-system";
 import type { IconName } from "@mersal/design-system";
@@ -64,6 +64,8 @@ const STR = {
   inbound: { en: "Inbound", ar: "وارد" },
   outbound: { en: "Outbound", ar: "صادر" },
   alerts: { en: "Alerts", ar: "تنبيهات" },
+  allergyTo: { en: "Allergy:", ar: "حساسية:" },
+  moreAlerts: { en: "more alerts", ar: "تنبيهات أخرى" },
   actions: { en: "Actions", ar: "إجراءات" },
   filterByDirection: { en: "Filter by direction", ar: "تصفية حسب الاتجاه" },
   allCalls: { en: "All calls", ar: "كل المكالمات" },
@@ -882,7 +884,24 @@ function CallRow({
  * screen; the failure it prevents is prescribing for the wrong person. It asks for `header,alerts` only —
  * it is on every clinical screen and cannot be slow (build prompt 20.5: p95 &lt; 400ms).
  */
-export function PatientContextBar({ beneficiaryId }: { beneficiaryId: string }) {
+export function PatientContextBar({
+  beneficiaryId,
+  namedAllergens = false,
+  actions,
+}: {
+  beneficiaryId: string;
+  /**
+   * Name the allergens instead of counting them.
+   *
+   * Opt-in, because the two readings answer different questions. On a worklist or an approval queue "2
+   * alerts" is the right amount — it says "open the file before you act". In a room with the patient, about
+   * to prescribe, the substance IS the decision, and a count sends the doctor hunting for something the bar
+   * already knows.
+   */
+  namedAllergens?: boolean;
+  /** Trailing controls, pinned to the end of the strip (the encounter workspace's patient-file entry). */
+  actions?: ReactNode;
+}) {
   const api = useApi();
   const t = useLoc();
   // The name opens the full file. Routed, and recording where it was opened FROM — see the anchor it
@@ -902,11 +921,12 @@ export function PatientContextBar({ beneficiaryId }: { beneficiaryId: string }) 
   const data = header.data as ProfileHeader;
 
   const alerts = profile.sections.find((s) => s.key === "alerts");
-  const alertCount =
-    alerts?.state === "Visible"
-      ? ((alerts.data as ProfileAlerts).allergies.length +
-          ((alerts.data as ProfileAlerts).criticalFlags?.length ?? 0))
-      : 0;
+  const alertData = alerts?.state === "Visible" ? (alerts.data as ProfileAlerts) : null;
+  const alertCount = alertData ? alertData.allergies.length + (alertData.criticalFlags?.length ?? 0) : 0;
+  // Two named substances, then a remainder. A strip is a fixed-height safety control, and an eight-allergy
+  // patient must not push the identity it exists to confirm onto a second line.
+  const named = namedAllergens ? alertData?.allergies.slice(0, 2) ?? [] : [];
+  const namedRest = alertCount - named.length;
 
   return (
     <aside className="patient-context-bar" aria-label={t(STR.title)}>
@@ -933,11 +953,18 @@ export function PatientContextBar({ beneficiaryId }: { beneficiaryId: string }) 
       <span className={`profile-chip profile-chip--${data.statusCue.tone}`} data-shape={data.statusCue.shape}>
         <span aria-hidden="true">●</span> {data.statusCue.label}
       </span>
-      {alertCount > 0 ? (
+      {named.map((a) => (
+        <span key={a.allergen} className="profile-chip profile-chip--critical" data-shape="octagon">
+          <span aria-hidden="true">⚠</span> {t(STR.allergyTo)} {a.allergen}
+        </span>
+      ))}
+      {(namedAllergens ? namedRest : alertCount) > 0 ? (
         <span className="profile-chip profile-chip--critical" data-shape="octagon">
-          <span aria-hidden="true">⚠</span> {alertCount} {t(STR.alerts)}
+          <span aria-hidden="true">⚠</span> {namedAllergens ? namedRest : alertCount}{" "}
+          {namedAllergens ? t(STR.moreAlerts) : t(STR.alerts)}
         </span>
       ) : null}
+      {actions ? <span className="patient-context-bar-actions">{actions}</span> : null}
     </aside>
   );
 }
