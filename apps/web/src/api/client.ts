@@ -58,6 +58,7 @@ import type {
   EligibilityHit,
   EligibilityResult,
   Encounter,
+  DiagnosisRank,
   EncounterDiagnosis,
   IcdRef,
   Soap,
@@ -210,10 +211,10 @@ export interface ApiClient {
   signEncounterNote(encounterId: string, noteId: string): Promise<void>;
   /**
    * Record an ICD-10 diagnosis on the encounter. The code is validated against master data server-side.
-   * Pass `primary` for the first code on the encounter — an encounter has one primary diagnosis, and the
-   * caller is the one holding the list that says whether this is it.
+   * The RANK is the doctor's call — which condition the visit was chiefly about is a clinical judgement,
+   * not something derivable from the order the codes were entered in.
    */
-  addEncounterDiagnosis(encounterId: string, icdCode: string, primary?: boolean): Promise<EncounterDiagnosis>;
+  addEncounterDiagnosis(encounterId: string, icdCode: string, rank?: DiagnosisRank): Promise<EncounterDiagnosis>;
   /** Retract one — soft-deleted, and refused once the encounter's note is signed (409). */
   removeEncounterDiagnosis(encounterId: string, diagnosisId: string): Promise<void>;
   /** ICD-10 typeahead over master data. Empty query → no rows, never the whole catalogue. */

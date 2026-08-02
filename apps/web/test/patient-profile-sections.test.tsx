@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { ApiError } from "../src/api/http";
 import { axe } from "jest-axe";
 import { renderNode } from "./helpers";
 import { PatientProfile } from "../src/screens/PatientProfile";
@@ -35,8 +37,8 @@ function fakeApi(over: Partial<ApiClient> = {}): ApiClient {
 }
 
 /** Render the profile with exactly the sections a test cares about. */
-function renderSections(sections: PatientProfileContract["sections"]) {
-  const api = fakeApi({ patientProfile: vi.fn().mockResolvedValue(profile(sections)) });
+function renderSections(sections: PatientProfileContract["sections"], over: Partial<ApiClient> = {}) {
+  const api = fakeApi({ patientProfile: vi.fn().mockResolvedValue(profile(sections)), ...over });
   return renderNode(
     <ApiProvider client={api}>
       <PatientProfile beneficiaryId={BEN} />
@@ -458,3 +460,91 @@ const FULL_PROFILE: PatientProfileContract["sections"] = [
     items: [{ at: "2026-07-26T09:12:00Z", eventType: "ProfileOpened", visibilityClass: "Access", actorDisplay: "R. Adel", summary: "Sections served", sourceService: "profile" }],
   }),
 ];
+
+// ---------------------------------------------------------------- the visit-details modal
+
+/**
+ * Reading one visit without leaving the file.
+ *
+ * The eye button used to open a restatement of the row it sat on — the same seven facts, in a dialog. That is
+ * a control that costs a click and returns nothing, and it left the only way to read a consultation as
+ * navigating into the workspace and back for every visit in the history.
+ *
+ * So the modal now fetches the clinical record. What it must NOT do is widen anything: the record comes from
+ * emr behind emr's own treating gate, and a caller without one gets the same 403 the workspace would give
+ * them — rendered as restricted, never as an empty note.
+ */
+describe("20.4 — the visit-details modal", () => {
+  const ROW = {
+    encounterRef: "ENC-2026-1", encounterId: "enc-77", occurredAt: "2026-07-02T09:00:00Z",
+    branchName: "Nasr City", clinicianName: "Dr. S. Ibrahim", reason: "Follow-up", status: "Completed",
+  };
+
+  const RECORD = {
+    id: "enc-77", patientId: BEN, patientName: { en: "Amal", ar: "أمل" },
+    openedAt: "2026-07-02T09:00:00Z", signed: true, noteId: "note-1",
+    soap: { subjective: "Cough for five days.", objective: "Chest clear.", assessment: "Acute sinusitis", plan: "" },
+    vitals: {
+      heightCm: null, weightKg: null, systolic: 118, diastolic: 76,
+      heartRate: 72, tempC: 38.2, spo2: 98, measuredAt: "2026-07-02T09:15:00Z",
+    },
+    allergies: [],
+    diagnoses: [{ id: "dx-1", system: "ICD-10", code: "J01.90", rank: "Primary",
+                  label: { en: "Acute sinusitis, unspecified", ar: "التهاب جيوب" } }],
+  };
+
+  async function openModal(over: Partial<ApiClient> = {}) {
+    renderSections([visible("encounters", { items: [ROW] })], over);
+    const section = await screen.findByRole("region", { name: /encounters/i });
+    await userEvent.setup().click(within(section).getByRole("button", { name: /view visit details/i }));
+    return screen.findByRole("dialog");
+  }
+
+  it("splits the visit across tabs and loads the clinical record behind them", async () => {
+    const getEncounter = vi.fn().mockResolvedValue(RECORD);
+    const dialog = within(await openModal({ getEncounter }));
+
+    // The row's facts open the dialog — they are the frame, and they are already in hand.
+    expect(dialog.getByText("Nasr City")).toBeInTheDocument();
+    await waitFor(() => expect(getEncounter).toHaveBeenCalledWith("enc-77"));
+
+    const user = userEvent.setup();
+    await user.click(dialog.getByRole("tab", { name: "Note" }));
+    expect(await dialog.findByText("Cough for five days.")).toBeInTheDocument();
+
+    await user.click(dialog.getByRole("tab", { name: "Diagnoses" }));
+    expect(dialog.getByText("Acute sinusitis, unspecified")).toBeInTheDocument();
+
+    await user.click(dialog.getByRole("tab", { name: "Vitals" }));
+    expect(dialog.getByText("118 / 76 mmHg")).toBeInTheDocument();
+  });
+
+  it("renders a 403 as restricted, not as a visit nobody documented", async () => {
+    const dialog = within(await openModal({
+      getEncounter: vi.fn().mockRejectedValue(new ApiError("http", "not-treating", 403)),
+    }));
+
+    await userEvent.setup().click(dialog.getByRole("tab", { name: "Note" }));
+    // All three clinical panes say it — Radix keeps every panel mounted — so this is findAll, not find.
+    // "No note was written" and "you may not read this note" are opposite statements about the clinician
+    // who saw this patient. Only one of them is true here.
+    expect((await dialog.findAllByText(/available to the treating clinician/i)).length).toBeGreaterThan(0);
+    expect(dialog.queryByText(/no note was written/i)).not.toBeInTheDocument();
+  });
+
+  it("does not ask emr for a record whose id the projection withheld", async () => {
+    // `V(meta)` — reception and finance are given the visit's existence and not its handle. Asking anyway
+    // would be the client trying a door the server already closed.
+    const getEncounter = vi.fn();
+    renderSections(
+      [visible("encounters", { items: [{ ...ROW, encounterId: undefined }] })],
+      { getEncounter },
+    );
+    const section = await screen.findByRole("region", { name: /encounters/i });
+    await userEvent.setup().click(within(section).getByRole("button", { name: /view visit details/i }));
+
+    await screen.findByRole("dialog");
+    expect(getEncounter).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /open encounter/i })).not.toBeInTheDocument();
+  });
+});

@@ -78,6 +78,7 @@ import {
   type PrescribeRequest,
   type VitalInput,
   type Soap,
+  type DiagnosisRank,
   zIdentityUser,
   zRoleScopeGrant,
   zReportAccessRequestRow,
@@ -779,6 +780,7 @@ export class HttpApiClient implements ApiClient {
         system: "ICD-10",
         code: d.icdCode,
         label: neutral(titles.get(String(d.icdCode)) ?? d.icdCode),
+        rank: d.diagnosisRank === "Primary" ? "Primary" : "Secondary",
       })),
     });
   }
@@ -807,14 +809,12 @@ export class HttpApiClient implements ApiClient {
       {},
     );
   }
-  async addEncounterDiagnosis(encounterId: string, icdCode: string, primary = false) {
+  async addEncounterDiagnosis(encounterId: string, icdCode: string, rank: DiagnosisRank = "Secondary") {
     const r = (await postRaw(`/encounters/${encodeURIComponent(encounterId)}/diagnoses`, {
+      // emr requires a rank, and the doctor chooses it: which condition the visit was chiefly about is a
+      // clinical judgement, not something derivable from the order the codes were typed in.
       icdCode,
-      // emr requires a rank. The FIRST code on an encounter is its primary and everything after it is
-      // secondary — the caller knows which it is holding, because it holds the list. Defaulting every code
-      // to Primary would make an encounter with four diagnoses claim four primary ones, which is the only
-      // thing the field asserts.
-      diagnosisRank: primary ? "Primary" : "Secondary",
+      diagnosisRank: rank,
       clinicalStatus: "Active",
     })) as any;
     const titles = await this.icdTitles([icdCode]);
@@ -823,6 +823,7 @@ export class HttpApiClient implements ApiClient {
       system: "ICD-10",
       code: r?.icdCode ?? icdCode,
       label: neutral(titles.get(icdCode) ?? icdCode),
+      rank: r?.diagnosisRank === "Primary" ? "Primary" : rank,
     });
   }
   async removeEncounterDiagnosis(encounterId: string, diagnosisId: string) {

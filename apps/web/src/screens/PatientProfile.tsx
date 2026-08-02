@@ -535,6 +535,35 @@ function SectionContent({ section, beneficiaryId }: { section: ProfileSection; b
  * omits the phone renders no phone chip, rather than an empty one that implies none is recorded.
  */
 function HeaderView({ data }: { data: ProfileHeader }) {
+  return <ProfileIdentity data={data} />;
+}
+
+/**
+ * The identity block — avatar, name + status, member number + relationship, and a hairline-separated strip of
+ * icon-per-fact details.
+ *
+ * <b>One component, used by the profile's own header AND by the context strip that follows a user into every
+ * clinical workspace.</b> The strip used to be its own flat line of dot-separated text: same person, same
+ * fields, a different shape in each place, and the differences were not decisions — the strip simply predated
+ * the block and never caught up. A clinician moving from the patient file into the encounter should not have
+ * to re-find the member number in a new layout.
+ *
+ * `onOpen` makes the NAME the way into the full file (the strip's job); without it the name is inert, which
+ * is right on the file itself, where you are already there.
+ */
+export function ProfileIdentity({
+  data,
+  onOpen,
+  chips,
+  actions,
+}: {
+  data: ProfileHeader;
+  onOpen?: () => void;
+  /** Extra chips beside the status — the encounter workspace's allergy warnings. */
+  chips?: ReactNode;
+  /** Trailing controls, pinned to the end of the block. */
+  actions?: ReactNode;
+}) {
   const { lang } = useTheme();
   const t = useLoc();
   const name = lang === "ar" && data.displayNameAr ? data.displayNameAr : data.displayName;
@@ -561,7 +590,22 @@ function HeaderView({ data }: { data: ProfileHeader }) {
       <Avatar photoUrl={data.photoUrl} name={name} />
       <div className="profile-identity-text">
         <div className="profile-nameline">
-          <h3 className="profile-name">{name}</h3>
+          <h3 className="profile-name">
+            {/*
+              A BUTTON that routes, not an `<a href>`.
+
+              This block follows the user into the encounter, dispense, lab, approval and call-centre
+              workspaces, so it is the most-reachable way into the patient file and a bare anchor is the most
+              destructive: a full document load tears down the SPA and with it the open encounter, the
+              dispense in progress or the live call. `useOpenProfile` records the origin, so Back returns to
+              the workspace the clinician left.
+            */}
+            {onOpen ? (
+              <button type="button" className="linklike" onClick={onOpen}>{name}</button>
+            ) : (
+              name
+            )}
+          </h3>
           {/* Four cues: the tone, the icon, the shape and the word — never colour alone. Styled to match the
               design-system chip the member card uses, so one patient looks the same in both places, but kept
               as its own element: `statusCue` carries a SHAPE too, and a beneficiary's status is exactly the
@@ -572,6 +616,8 @@ function HeaderView({ data }: { data: ProfileHeader }) {
             </span>
             <span>{data.statusCue.label}</span>
           </p>
+          {chips}
+          {actions ? <span className="profile-identity-actions">{actions}</span> : null}
         </div>
         {(data.memberNo || data.relationship) && (
           <p className="profile-sub tnum">
@@ -930,41 +976,33 @@ export function PatientContextBar({
 
   return (
     <aside className="patient-context-bar" aria-label={t(STR.title)}>
-      <Avatar photoUrl={data.photoUrl} name={data.displayName} />
-      {/*
-        A BUTTON that routes, not an `<a href>`.
-
-        This strip follows the user into the encounter, dispense, lab, approval and call-centre workspaces, so
-        it was the most-reachable way into the patient file and the most destructive: a bare anchor is a full
-        document load, which tore down the SPA and with it the open encounter, the dispense in progress or the
-        live call. The call-centre screens each carry a comment warning about exactly this; the shared bar
-        they all render was doing it.
-
-        And because the reload emptied the history, the profile then had nothing to go BACK to — the one
-        entry point that most needed a return path was the only one that destroyed it. `useOpenProfile`
-        records the origin, so Back returns to the workspace the clinician left.
-      */}
-      <button type="button" className="context-bar-name" onClick={() => openProfile(beneficiaryId)}>
-        {data.displayName}
-      </button>
-      <span className="context-bar-meta">
-        {[data.memberNo, data.ageBand, data.sex].filter(Boolean).join(" · ")}
-      </span>
-      <span className={`profile-chip profile-chip--${data.statusCue.tone}`} data-shape={data.statusCue.shape}>
-        <span aria-hidden="true">●</span> {data.statusCue.label}
-      </span>
-      {named.map((a) => (
-        <span key={a.allergen} className="profile-chip profile-chip--critical" data-shape="octagon">
-          <span aria-hidden="true">⚠</span> {t(STR.allergyTo)} {a.allergen}
-        </span>
-      ))}
-      {(namedAllergens ? namedRest : alertCount) > 0 ? (
-        <span className="profile-chip profile-chip--critical" data-shape="octagon">
-          <span aria-hidden="true">⚠</span> {namedAllergens ? namedRest : alertCount}{" "}
-          {namedAllergens ? t(STR.moreAlerts) : t(STR.alerts)}
-        </span>
-      ) : null}
-      {actions ? <span className="patient-context-bar-actions">{actions}</span> : null}
+      {/* The SAME identity block the patient file leads with — see ProfileIdentity. The strip used to be a
+          flat dot-separated line of the same fields in a different shape, which made a clinician moving from
+          the file into the encounter re-find the member number in a new layout for no reason. */}
+      <ProfileIdentity
+        data={data}
+        onOpen={() => openProfile(beneficiaryId)}
+        actions={actions}
+        chips={
+          <>
+            {named.map((a) => (
+              <span key={a.allergen} className="profile-chip profile-chip--critical" data-shape="octagon">
+                <span aria-hidden="true" className="profile-chip-icon">⚠</span>
+                <span>{t(STR.allergyTo)} {a.allergen}</span>
+              </span>
+            ))}
+            {(namedAllergens ? namedRest : alertCount) > 0 ? (
+              <span className="profile-chip profile-chip--critical" data-shape="octagon">
+                <span aria-hidden="true" className="profile-chip-icon">⚠</span>
+                <span>
+                  {namedAllergens ? namedRest : alertCount}{" "}
+                  {namedAllergens ? t(STR.moreAlerts) : t(STR.alerts)}
+                </span>
+              </span>
+            ) : null}
+          </>
+        }
+      />
     </aside>
   );
 }

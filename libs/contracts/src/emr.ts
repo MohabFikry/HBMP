@@ -50,6 +50,10 @@ export const zSoap = z.object({
 });
 export type Soap = z.infer<typeof zSoap>;
 
+/** Which of an encounter's coded conditions the visit was chiefly about. */
+export const zDiagnosisRank = z.enum(["Primary", "Secondary"]);
+export type DiagnosisRank = z.infer<typeof zDiagnosisRank>;
+
 /**
  * A diagnosis AS RECORDED ON THIS ENCOUNTER — a coded condition plus the id of the row carrying it.
  *
@@ -61,6 +65,13 @@ export type Soap = z.infer<typeof zSoap>;
 export const zEncounterDiagnosis = zCoded.extend({
   /** Null for a code the doctor has just added and not yet saved — there is no row to address yet. */
   id: zId.nullable(),
+  /**
+   * Primary or secondary. An encounter has ONE primary diagnosis — the condition it was chiefly about, and
+   * the one the authorization, the claim and the formulary check all key on. Everything else recorded on the
+   * visit is secondary. Carried on the row rather than inferred from position, because the order emr returns
+   * diagnoses in is insertion order and says nothing about which one mattered.
+   */
+  rank: zDiagnosisRank,
 });
 export type EncounterDiagnosis = z.infer<typeof zEncounterDiagnosis>;
 

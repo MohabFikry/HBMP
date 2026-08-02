@@ -1520,18 +1520,36 @@ nav.mrs-rail {
 .copy-fallback { display: grid; gap: var(--sp2); padding: var(--sp3); border: 1px solid currentColor; border-radius: var(--r-md); margin-top: var(--sp3); }
 .copy-fallback textarea { width: 100%; font-family: inherit; }
 
-.patient-context-bar { display: flex; flex-wrap: wrap; gap: var(--sp3); align-items: center; padding: var(--sp2) var(--sp3); border: 1px solid currentColor; border-radius: var(--r-md); margin-bottom: var(--sp3); }
-.patient-context-bar .profile-avatar { width: 2rem; height: 2rem; }
+/* The identity strip that follows a user into every clinical workspace. It holds `ProfileIdentity` — the
+   same block the patient file leads with — so this rule is a surface, not a layout: a padded, bordered panel
+   and nothing else.
+
+   It used to be a flex row of dot-separated text with a 2rem avatar, which meant the same person rendered
+   one way in their file and another way in the strip. `--border`, not `currentColor`: the old value drew the
+   frame in the inherited TEXT colour, so the panel outline was as dark as body copy and shouted louder than
+   the name inside it. */
+.patient-context-bar {
+  padding: var(--sp3) var(--sp4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  margin-bottom: var(--sp4);
+}
+/* Trailing controls sit on the NAME line, pushed to the end — level with the identity they act on rather
+   than below the fact strip, where they would read as another fact. */
+.profile-identity-actions { margin-inline-start: auto; display: flex; gap: var(--sp2); }
 /* A BUTTON that reads as inline text — for the places where the thing to click is a name or a reference,
-   not a control: the patient name in the context strip, an encounter number in the profile.
+   not a control: the patient name in the identity block, an encounter number in the profile.
 
    Each of these was an `<a href>` or plain text before. As anchors they reloaded the SPA to reach an in-app
    route; as text they were dead ends. They are buttons because they run JS navigation, which means shedding
    the UA button chrome an <a> never had — background, border, padding, and the centred text a flex/grid
    parent would otherwise stretch — while staying visibly actionable: underline on hover, pointer cursor, and
-   the app's own focus ring rather than the OS one. */
-.linklike,
-.context-bar-name {
+   the app's own focus ring rather than the OS one.
+
+   `.context-bar-name` used to sit alongside this; it went when the strip started rendering the shared
+   identity block, whose name is an ordinary `.linklike` inside the heading. */
+.linklike {
   background: none;
   border: 0;
   padding: 0;
@@ -1541,14 +1559,11 @@ nav.mrs-rail {
   text-align: start;
   cursor: pointer;
   border-radius: var(--r-sm);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
-.context-bar-name { font-weight: 600; }
-.linklike { text-decoration: underline; text-underline-offset: 2px; }
-.linklike:hover,
-.context-bar-name:hover { text-decoration: underline; }
-.linklike:focus-visible,
-.context-bar-name:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-.context-bar-meta { opacity: 0.8; font-size: 0.9em; }
+.linklike:hover { text-decoration: underline; }
+.linklike:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
 /* ── 19.6b analytics dashboard ─────────────────────────────────────────────────────────────────────────── */
 
@@ -2930,7 +2945,21 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   line-height: 1.55;
 }
 
-/* ── Coded diagnoses on the assessment ────────────────────────────────────────────────────────────────── */
+/* ── The diagnosis panel, above Subjective ────────────────────────────────────────────────────────────── */
+.dx-panel {
+  gap: var(--sp3);
+}
+.dx-group {
+  display: grid;
+  gap: var(--sp2);
+}
+/* The badge carries an icon rather than a letter: S/O/A/P are a lettered SET, and a fifth letter above them
+   would read as part of the mnemonic when this panel is deliberately outside it. */
+.dx-badge {
+  background: var(--surface-2);
+  color: var(--accent);
+  border: 1px solid var(--border-strong);
+}
 .dx-list {
   gap: var(--sp2);
 }
@@ -2943,6 +2972,13 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   border-radius: var(--r-sm);
   background: var(--surface-2);
   font-size: 0.8125rem;
+}
+/* The primary diagnosis is drawn heavier than the rest — it is the code the authorization, the claim and
+   the formulary check all key on, and a row of identical chips said none of them mattered more. The rank is
+   also stated in a heading above each group, so this is emphasis, never the only cue. */
+.dx-chip--primary {
+  border-color: var(--accent);
+  background: var(--accent-tint);
 }
 .dx-code {
   font-weight: 700;
@@ -3024,11 +3060,13 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
 }
 .vitals-head {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
   gap: var(--sp2);
   flex-wrap: wrap;
 }
+/* The heading takes the slack, so the add control stays pinned to the end of the header whether or not
+   there is a measurement time between them. */
+.vitals-head > .section-h { margin-inline-end: auto; }
 .vitals-when {
   font-size: 0.75rem;
 }
@@ -3055,6 +3093,10 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   color: var(--text-1);
   min-inline-size: 0;
 }
+/* Icon and name on one line. The icon is decorative — the name is right beside it — but it gives the eye
+   four distinct anchors to find a reading by in a rail that is otherwise four rows of similar text. */
+.vital-name { display: inline-flex; align-items: center; gap: 0.4rem; }
+.vital-name svg { color: var(--text-3); flex: 0 0 auto; }
 /* The band the flag was judged against, under the name of the reading. Shown always, not on hover: a doctor
    overrules an advisory flag by reading what it was measured against, and a tooltip is not readable while
    holding a stethoscope. */
@@ -3074,6 +3116,14 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   font-size: 1.0625rem;
   font-weight: 700;
   color: var(--text-1);
+}
+/* An unrecorded reading keeps its row and its band, and shows an em dash in the muted weight. The empty
+   slot is the information — it says nobody has taken this patient's temperature — and dropping the row
+   would turn "not measured" into "not applicable". */
+.vital-value--none {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--text-3);
 }
 .vital-flag {
   display: inline-flex;
@@ -3110,10 +3160,4 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: var(--sp3) var(--sp4);
-}
-
-/* Trailing controls on the context strip — pushed to the end so the identity stays left and the action
-   stays where a user's eye already goes for one. */
-.patient-context-bar-actions {
-  margin-inline-start: auto;
 }

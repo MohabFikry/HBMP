@@ -100,7 +100,7 @@ import {
   type RoleScopeGrant,
   type ReportAccessRequestRow,
 } from "@mersal/contracts";
-import type { BeneficiaryEdit, BookingRequest, BulkDecisionOutcome } from "@mersal/contracts";
+import type { BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, DiagnosisRank } from "@mersal/contracts";
 import type { ApiClient, ApiScenario } from "./client";
 import { ApiError } from "./http";
 
@@ -682,7 +682,7 @@ export class DevApiClient implements ApiClient {
         },
         allergies: [{ id: "AL-1", substance: loc("Penicillin", "بنسلين"), severity: "moderate" }],
         diagnoses: [{
-          id: "DX-1", system: "ICD-10", code: "J06.9",
+          id: "DX-1", system: "ICD-10", code: "J06.9", rank: "Primary",
           label: loc("Acute upper respiratory infection", "التهاب تنفسي علوي حاد"),
         }],
       }),
@@ -694,13 +694,14 @@ export class DevApiClient implements ApiClient {
   signEncounterNote(): Promise<void> {
     return this.gate(() => undefined);
   }
-  addEncounterDiagnosis(_encounterId: string, icdCode: string) {
+  addEncounterDiagnosis(_encounterId: string, icdCode: string, rank: DiagnosisRank = "Secondary") {
     return this.gate(() =>
       ok(zEncounterDiagnosis, {
         id: `DX-${icdCode}`,
         system: "ICD-10",
         code: icdCode,
         label: loc(DEV_ICD.find((c) => c.code === icdCode)?.title ?? icdCode, icdCode),
+        rank,
       }),
     );
   }

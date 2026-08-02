@@ -7,13 +7,15 @@ import {
   InlineAlert,
   InputField,
   Modal,
+  SelectField,
   StatusChip,
   Tabs,
   TextareaField,
   useToast,
 } from "@mersal/design-system";
-import type { Column } from "@mersal/design-system";
+import type { Column, IconName } from "@mersal/design-system";
 import type {
+  DiagnosisRank,
   Encounter,
   EncounterDiagnosis,
   IcdRef,
@@ -56,12 +58,9 @@ const S = {
   mrn: { en: "Encounter", ar: "الزيارة" },
   lastVisit: { en: "Started", ar: "بدأت" },
   state: { en: "State", ar: "الحالة" },
-  treating: { en: "Treating", ar: "علاقة علاجية" },
   pickPatient: { en: "Open a patient to document their encounter.", ar: "افتح مريضاً لتوثيق زيارته." },
-  openEncounter: { en: "Open encounter", ar: "فتح الزيارة" },
 
   tabNote: { en: "SOAP note", ar: "ملاحظة SOAP" },
-  tabVitals: { en: "Vitals", ar: "العلامات الحيوية" },
   tabOrders: { en: "Orders", ar: "الطلبات" },
   tabHistory: { en: "History", ar: "السجل" },
 
@@ -78,19 +77,30 @@ const S = {
   phAssessment: { en: "Clinical assessment and differential diagnosis…", ar: "التقييم السريري والتشخيص التفريقي…" },
   phPlan: { en: "Treatment plan, patient instructions, follow-up…", ar: "خطة العلاج، تعليمات المريض، المتابعة…" },
 
-  addCode: { en: "Add ICD-10", ar: "إضافة ICD-10" },
+  diagnosisTitle: { en: "Diagnosis", ar: "التشخيص" },
+  diagnosisHint: { en: "Coded conditions for this visit", ar: "الحالات المرمّزة لهذه الزيارة" },
+  rank: { en: "Rank", ar: "الترتيب" },
+  rankPrimary: { en: "Primary", ar: "أساسي" },
+  rankSecondary: { en: "Secondary", ar: "ثانوي" },
+  noPrimary: { en: "None recorded.", ar: "لم يُسجَّل." },
+  needPrimary: {
+    en: "Record a primary diagnosis — the condition this visit was chiefly about. It is required to finalize.",
+    ar: "سجّل تشخيصاً أساسياً — الحالة التي دارت حولها الزيارة. مطلوب لإنهاء الزيارة.",
+  },
+  replacesPrimary: {
+    en: "This visit already has a primary diagnosis. Recording a second is allowed but rarely intended.",
+    ar: "لهذه الزيارة تشخيص أساسي بالفعل. تسجيل تشخيص ثانٍ مسموح لكنه نادراً ما يكون مقصوداً.",
+  },
+  addCode: { en: "Add diagnosis", ar: "إضافة تشخيص" },
   codePicker: { en: "Add a diagnosis", ar: "إضافة تشخيص" },
   codeSearch: { en: "Search ICD-10 by code or condition", ar: "ابحث في ICD-10 بالرمز أو الحالة" },
   codeSearchHint: { en: "Type at least two characters.", ar: "اكتب حرفين على الأقل." },
   codeNone: { en: "No ICD-10 code matches that search.", ar: "لا يوجد رمز ICD-10 مطابق." },
   codeAdded: { en: "Diagnosis recorded.", ar: "تم تسجيل التشخيص." },
   codeRemoved: { en: "Diagnosis retracted.", ar: "تم سحب التشخيص." },
-  remove: { en: "Retract", ar: "سحب" },
   removeOne: { en: "Retract {code}", ar: "سحب {code}" },
-  noDiagnoses: { en: "No diagnosis coded yet.", ar: "لم يُسجَّل تشخيص بعد." },
 
   vitalsTitle: { en: "Vitals", ar: "العلامات الحيوية" },
-  vitalsNone: { en: "No vitals recorded for this encounter.", ar: "لم تُسجَّل علامات حيوية لهذه الزيارة." },
   vitalsRef: { en: "Reference {range}", ar: "المرجع {range}" },
   vitalHigh: { en: "High", ar: "مرتفع" },
   vitalLow: { en: "Low", ar: "منخفض" },
@@ -300,6 +310,13 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
   const [confirming, setConfirming] = useState(false);
 
   const hasContent = Object.values(soap).some((v) => v.trim().length > 0);
+  // An encounter is finalized WITH a primary diagnosis. Everything downstream of a signed visit — the
+  // authorization, the claim, the utilisation report — keys on that one code, and a signed note with none
+  // is a record that has to be chased back to the doctor after they have moved on to the next patient.
+  //
+  // Enforced here rather than in emr: emr's sign endpoint is shared with nursing and progress notes, which
+  // carry no diagnosis at all, so the rule belongs to SOAP encounter documentation and not to signing.
+  const hasPrimary = diagnoses.some((d) => d.rank === "Primary");
 
   const set = (key: keyof Soap) => (value: string) => {
     setSoap((prev) => ({ ...prev, [key]: value }));
@@ -336,6 +353,11 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
   }
 
   async function finalize() {
+    if (!hasPrimary) {
+      setError(S.needPrimary);
+      setConfirming(false);
+      return;
+    }
     setBusy("final");
     const id = await persist();
     if (!id) {
@@ -402,6 +424,22 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
                         <strong>{t(S.signedTitle)}</strong> — {t(S.signedBody)}
                       </InlineAlert>
                     )}
+                    {/*
+                      The coded diagnosis leads the note, ABOVE Subjective.
+
+                      It sat inside Assessment, which is where a diagnosis belongs in the SOAP mnemonic and
+                      the wrong place for it on a screen. The codes are what everything downstream keys on —
+                      the authorization, the claim, the formulary check — so they are the one part of this
+                      note another team reads without reading the prose around it, and burying them three
+                      cards down made them look like a footnote to the narrative rather than its conclusion.
+                    */}
+                    <DiagnosisPanel
+                      encounterId={encounter.id}
+                      diagnoses={diagnoses}
+                      signed={signed}
+                      onAdded={(d) => setDiagnoses((prev) => [...prev, d])}
+                      onRemoved={(id) => setDiagnoses((prev) => prev.filter((d) => d.id !== id))}
+                    />
                     {soapSections.map((s) => (
                       <SoapSection
                         key={s.key}
@@ -412,36 +450,10 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
                         value={soap[s.key]}
                         onChange={set(s.key)}
                         readOnly={signed}
-                        action={
-                          s.key === "assessment" ? (
-                            <DiagnosisPicker
-                              encounterId={encounter.id}
-                              disabled={signed}
-                              primary={diagnoses.length === 0}
-                              onAdded={(d) => setDiagnoses((prev) => [...prev, d])}
-                            />
-                          ) : undefined
-                        }
-                      >
-                        {s.key === "assessment" && (
-                          <DiagnosisChips
-                            encounterId={encounter.id}
-                            diagnoses={diagnoses}
-                            signed={signed}
-                            onRemoved={(id) => setDiagnoses((prev) => prev.filter((d) => d.id !== id))}
-                          />
-                        )}
-                      </SoapSection>
+                      />
                     ))}
                   </div>
                 ),
-              },
-              {
-                value: "vitals",
-                label: t(S.tabVitals),
-                content: visited.has("vitals")
-                  ? <VitalsTab encounter={encounter} onRecorded={onSaved} />
-                  : null,
               },
               {
                 value: "orders",
@@ -460,7 +472,12 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
         </div>
 
         <aside className="enc-rail">
-          <VitalsPanel vitals={encounter.vitals} />
+          <VitalsPanel
+            encounterId={encounter.id}
+            vitals={encounter.vitals}
+            readOnly={signed}
+            onRecorded={onSaved}
+          />
           <Card as="section" className="enc-actions">
             {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
             {signed ? (
@@ -470,12 +487,17 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
                 <Button
                   variant="primary"
                   loading={busy === "final"}
-                  disabled={!hasContent}
+                  disabled={!hasContent || !hasPrimary}
                   leadingIcon={<Icon name="lock" width={16} height={16} aria-hidden="true" />}
                   onClick={() => setConfirming(true)}
                 >
                   {t(S.finalize)}
                 </Button>
+                {/* Why it is unavailable, next to the control. A disabled primary action with no reason
+                    beside it is the commonest way a screen makes someone feel it is broken. */}
+                {hasContent && !hasPrimary && (
+                  <p className="muted" style={{ margin: 0, fontSize: "0.8125rem" }}>{t(S.needPrimary)}</p>
+                )}
                 <Button
                   variant="secondary"
                   loading={busy === "draft"}
@@ -568,28 +590,102 @@ function SoapSection({
     </Card>
   );
 }
-
 // ---------------------------------------------------------------- diagnoses
 
-function DiagnosisChips({
+/**
+ * The encounter's coded conditions — the panel that opens the note.
+ *
+ * <b>Primary and secondary are drawn as different things, because they are.</b> An encounter has ONE primary
+ * diagnosis: the condition the visit was chiefly about, and the code the authorization, the claim and the
+ * formulary check all key on. The rest are context. Rendering them as one undifferentiated row of chips left
+ * the doctor's own judgement about which was which invisible, and everything downstream reading whichever
+ * row emr happened to return first.
+ */
+function DiagnosisPanel({
   encounterId,
   diagnoses,
   signed,
+  onAdded,
   onRemoved,
 }: {
   encounterId: string;
   diagnoses: EncounterDiagnosis[];
   signed: boolean;
+  onAdded: (d: EncounterDiagnosis) => void;
   onRemoved: (id: string) => void;
+}) {
+  const t = useLoc();
+  const primary = diagnoses.filter((d) => d.rank === "Primary");
+  const secondary = diagnoses.filter((d) => d.rank !== "Primary");
+
+  return (
+    <Card as="section" className="soap-card dx-panel" aria-labelledby="dx-panel-title">
+      <div className="soap-card-head">
+        <span className="soap-badge dx-badge" aria-hidden="true">
+          <Icon name="check2" width={15} height={15} />
+        </span>
+        <h3 className="soap-title" id="dx-panel-title">{t(S.diagnosisTitle)}</h3>
+        <span className="soap-hint">{t(S.diagnosisHint)}</span>
+        <DiagnosisPicker
+          encounterId={encounterId}
+          disabled={signed}
+          defaultRank={primary.length === 0 ? "Primary" : "Secondary"}
+          hasPrimary={primary.length > 0}
+          onAdded={onAdded}
+        />
+      </div>
+
+      {/*
+        Stated in the panel, not discovered at the moment of signing.
+
+        The rule (an encounter is documented with a primary diagnosis) is enforced on Save & finalize, and a
+        doctor who only learns it when the button refuses has already finished writing. So the gap is named
+        while there is still something easy to do about it.
+      */}
+      {!signed && primary.length === 0 && (
+        <InlineAlert tone="warn">{t(S.needPrimary)}</InlineAlert>
+      )}
+
+      <DiagnosisGroup
+        label={t(S.rankPrimary)}
+        rows={primary}
+        encounterId={encounterId}
+        signed={signed}
+        onRemoved={onRemoved}
+        empty={t(S.noPrimary)}
+      />
+      {secondary.length > 0 && (
+        <DiagnosisGroup
+          label={t(S.rankSecondary)}
+          rows={secondary}
+          encounterId={encounterId}
+          signed={signed}
+          onRemoved={onRemoved}
+        />
+      )}
+    </Card>
+  );
+}
+
+function DiagnosisGroup({
+  label,
+  rows,
+  encounterId,
+  signed,
+  onRemoved,
+  empty,
+}: {
+  label: string;
+  rows: EncounterDiagnosis[];
+  encounterId: string;
+  signed: boolean;
+  onRemoved: (id: string) => void;
+  empty?: string;
 }) {
   const api = useApi();
   const t = useLoc();
   const { toast } = useToast();
   const [removing, setRemoving] = useState<string | null>(null);
-
-  if (diagnoses.length === 0) {
-    return <p className="muted" style={{ margin: "0 0 var(--sp3)" }}>{t(S.noDiagnoses)}</p>;
-  }
 
   async function remove(id: string) {
     setRemoving(id);
@@ -606,38 +702,50 @@ function DiagnosisChips({
     }
   }
 
+  if (rows.length === 0 && !empty) return null;
+
   return (
-    <ul className="chip-list dx-list">
-      {diagnoses.map((d) => (
-        <li key={d.id ?? d.code} className="dx-chip">
-          <span className="dx-code tnum">{d.code}</span>
-          <span className="dx-label">{t(d.label)}</span>
-          {!signed && d.id && (
-            <button
-              type="button"
-              className="dx-remove"
-              aria-label={t(S.removeOne).replace("{code}", d.code)}
-              disabled={removing === d.id}
-              onClick={() => void remove(d.id!)}
-            >
-              <Icon name="cross" width={14} height={14} aria-hidden="true" />
-            </button>
-          )}
-        </li>
-      ))}
-    </ul>
+    <div className="dx-group">
+      <h4 className="section-h" style={{ margin: 0 }}>{label}</h4>
+      {rows.length === 0 ? (
+        <p className="muted" style={{ margin: 0 }}>{empty}</p>
+      ) : (
+        <ul className="chip-list dx-list">
+          {rows.map((d) => (
+            <li key={d.id ?? d.code} className={`dx-chip dx-chip--${d.rank.toLowerCase()}`}>
+              <span className="dx-code tnum">{d.code}</span>
+              <span className="dx-label">{t(d.label)}</span>
+              {!signed && d.id && (
+                <button
+                  type="button"
+                  className="dx-remove"
+                  aria-label={t(S.removeOne).replace("{code}", d.code)}
+                  disabled={removing === d.id}
+                  onClick={() => void remove(d.id!)}
+                >
+                  <Icon name="cross" width={14} height={14} aria-hidden="true" />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
 function DiagnosisPicker({
   encounterId,
   disabled,
-  primary,
+  defaultRank,
+  hasPrimary,
   onAdded,
 }: {
   encounterId: string;
   disabled: boolean;
-  primary: boolean;
+  /** Primary while the encounter has none — the commonest first act, pre-selected rather than assumed. */
+  defaultRank: DiagnosisRank;
+  hasPrimary: boolean;
   onAdded: (d: EncounterDiagnosis) => void;
 }) {
   const api = useApi();
@@ -645,9 +753,13 @@ function DiagnosisPicker({
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [rank, setRank] = useState<DiagnosisRank>(defaultRank);
   const [results, setResults] = useState<IcdRef[]>([]);
   const [searching, setSearching] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
+
+  // Reopening after the first code was recorded should not still offer Primary as the default.
+  useEffect(() => { if (open) setRank(defaultRank); }, [open, defaultRank]);
 
   // Debounced: the field is a typeahead over master data, and a request per keystroke would ask the
   // catalogue about "a", "ac", "acu" and "acut" on the way to a search nobody wanted the first four of.
@@ -672,7 +784,7 @@ function DiagnosisPicker({
   async function add(code: string) {
     setAdding(code);
     try {
-      onAdded(await api.addEncounterDiagnosis(encounterId, code, primary));
+      onAdded(await api.addEncounterDiagnosis(encounterId, code, rank));
       toast(t(S.codeAdded), "ok");
       setOpen(false);
       setQuery("");
@@ -692,7 +804,7 @@ function DiagnosisPicker({
       title={t(S.codePicker)}
       trigger={
         <Button
-          variant="ghost"
+          variant="secondary"
           size="sm"
           leadingIcon={<Icon name="plus" width={16} height={16} aria-hidden="true" />}
         >
@@ -701,6 +813,19 @@ function DiagnosisPicker({
       }
     >
       <div className="stack-3">
+        {/* The rank is chosen BEFORE the code, because it changes what the doctor is looking for: the primary
+            is the one condition the visit was about, and picking it from a list of five already-added codes
+            afterwards is a different, harder question. */}
+        <SelectField
+          label={t(S.rank)}
+          value={rank}
+          onChange={(v) => setRank(v as DiagnosisRank)}
+          options={[
+            { value: "Primary", label: t(S.rankPrimary) },
+            { value: "Secondary", label: t(S.rankSecondary) },
+          ]}
+          help={hasPrimary && rank === "Primary" ? t(S.replacesPrimary) : undefined}
+        />
         <InputField
           label={t(S.codeSearch)}
           help={t(S.codeSearchHint)}
@@ -743,53 +868,88 @@ function flagFor(key: string, value: number | null): { tone: "ok" | "warn"; labe
   return { tone: "ok", label: S.vitalNormal, icon: "ok" };
 }
 
-function VitalsPanel({ vitals }: { vitals: Encounter["vitals"] }) {
+/** The four readings the panel leads with, each with its icon, unit and reference band. */
+const VITAL_ROWS: { key: string; label: Localized; icon: IconName; unit: string; range: string }[] = [
+  { key: "systolic", label: S.vBp, icon: "chart", unit: "mmHg", range: "90–120 / 60–80" },
+  { key: "heartRate", label: S.vHr, icon: "half", unit: "bpm", range: "60–100" },
+  { key: "tempC", label: S.vTemp, icon: "triangle", unit: "°C", range: "36.3–37.2" },
+  { key: "spo2", label: S.vSpo2, icon: "info", unit: "%", range: "95–100" },
+];
+
+/**
+ * The vitals rail — read AND write.
+ *
+ * <b>There is no Vitals tab any more.</b> There were two places showing the same four numbers: this panel,
+ * beside the note, and a tab that duplicated it in order to hold the capture form. A doctor writing "Temp
+ * 38.2, chest clear" is reading these as they type, so the panel is the one that has to stay; and once
+ * capture opens in a modal there is nothing left for the tab to hold.
+ *
+ * An unrecorded reading renders as an em dash against its own icon and band, never as an absent row. The
+ * empty slot is the information: it says nobody has taken this patient's temperature.
+ */
+function VitalsPanel({
+  encounterId,
+  vitals,
+  readOnly,
+  onRecorded,
+}: {
+  encounterId: string;
+  vitals: Encounter["vitals"];
+  readOnly: boolean;
+  onRecorded: () => void;
+}) {
   const t = useLoc();
   const { dateTime } = useFormat();
 
-  const rows = [
-    { key: "systolic", label: S.vBp, unit: "mmHg",
-      value: vitals.systolic, display: bpDisplay(vitals), range: "90–120 / 60–80" },
-    { key: "heartRate", label: S.vHr, unit: "bpm", value: vitals.heartRate, display: num(vitals.heartRate), range: "60–100" },
-    { key: "tempC", label: S.vTemp, unit: "°C", value: vitals.tempC, display: num(vitals.tempC), range: "36.3–37.2" },
-    { key: "spo2", label: S.vSpo2, unit: "%", value: vitals.spo2, display: num(vitals.spo2), range: "95–100" },
-  ];
-  const any = rows.some((r) => r.display !== null);
+  const values: Record<string, number | null> = {
+    systolic: vitals.systolic,
+    heartRate: vitals.heartRate,
+    tempC: vitals.tempC,
+    spo2: vitals.spo2,
+  };
+  const display: Record<string, string | null> = {
+    systolic: bpDisplay(vitals),
+    heartRate: num(vitals.heartRate),
+    tempC: num(vitals.tempC),
+    spo2: num(vitals.spo2),
+  };
 
   return (
     <Card as="section" className="vitals-panel">
       <div className="vitals-head">
         <h2 className="section-h" style={{ margin: 0 }}>{t(S.vitalsTitle)}</h2>
         {vitals.measuredAt && <span className="muted vitals-when">{dateTime(vitals.measuredAt)}</span>}
+        {!readOnly && <RecordVitalsModal encounterId={encounterId} onRecorded={onRecorded} />}
       </div>
-      {!any ? (
-        <p className="muted" style={{ margin: 0 }}>{t(S.vitalsNone)}</p>
-      ) : (
-        <dl className="vitals-list">
-          {rows.map((r) => {
-            const flag = flagFor(r.key, r.value);
-            return (
-              <div key={r.key} className="vital-row">
-                <dt>
+      <dl className="vitals-list">
+        {VITAL_ROWS.map((r) => {
+          const flag = flagFor(r.key, values[r.key]);
+          return (
+            <div key={r.key} className="vital-row">
+              <dt>
+                <span className="vital-name">
+                  <Icon name={r.icon} width={15} height={15} aria-hidden="true" />
                   {t(r.label)}
-                  <span className="vital-ref">{t(S.vitalsRef).replace("{range}", `${r.range} ${r.unit}`)}</span>
-                </dt>
-                <dd>
-                  <span className="vital-value tnum">{r.display ?? "—"}</span>
-                  {/* Four cues, not a coloured dot: hue AND icon AND shape AND the word. A doctor who cannot
-                      distinguish the greens from the ambers still reads "High". */}
-                  {flag && (
-                    <span className={`vital-flag vital-flag--${flag.tone}`}>
-                      <Icon name={flag.icon} width={13} height={13} aria-hidden="true" />
-                      {t(flag.label)}
-                    </span>
-                  )}
-                </dd>
-              </div>
-            );
-          })}
-        </dl>
-      )}
+                </span>
+                <span className="vital-ref">{t(S.vitalsRef).replace("{range}", `${r.range} ${r.unit}`)}</span>
+              </dt>
+              <dd>
+                <span className={display[r.key] === null ? "vital-value vital-value--none" : "vital-value tnum"}>
+                  {display[r.key] ?? "—"}
+                </span>
+                {/* Four cues, not a coloured dot: hue AND icon AND shape AND the word. A doctor who cannot
+                    distinguish the greens from the ambers still reads "High". */}
+                {flag && (
+                  <span className={`vital-flag vital-flag--${flag.tone}`}>
+                    <Icon name={flag.icon} width={13} height={13} aria-hidden="true" />
+                    {t(flag.label)}
+                  </span>
+                )}
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
     </Card>
   );
 }
@@ -805,10 +965,11 @@ function bpDisplay(vitals: Encounter["vitals"]): string | null {
   return `${vitals.systolic ?? "—"} / ${vitals.diastolic ?? "—"}`;
 }
 
-function VitalsTab({ encounter, onRecorded }: { encounter: Encounter; onRecorded: () => void }) {
+function RecordVitalsModal({ encounterId, onRecorded }: { encounterId: string; onRecorded: () => void }) {
   const api = useApi();
   const t = useLoc();
   const { toast } = useToast();
+  const [open, setOpen] = useState(false);
   const [form, setForm] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Localized | null>(null);
@@ -825,8 +986,8 @@ function VitalsTab({ encounter, onRecorded }: { encounter: Encounter; onRecorded
 
   async function submit() {
     const readings: VitalInput[] = fields
-      .map((f) => ({ type: f.type, value: Number(form[f.key]) }))
-      .filter((r) => form[fields.find((f) => f.type === r.type)!.key]?.trim() && Number.isFinite(r.value));
+      .filter((f) => (form[f.key] ?? "").trim() !== "" && Number.isFinite(Number(form[f.key])))
+      .map((f) => ({ type: f.type, value: Number(form[f.key]) }));
     if (readings.length === 0) {
       setError(S.vitalsEmpty);
       return;
@@ -834,8 +995,9 @@ function VitalsTab({ encounter, onRecorded }: { encounter: Encounter; onRecorded
     setBusy(true);
     setError(null);
     try {
-      await api.recordVitals(encounter.id, readings);
+      await api.recordVitals(encounterId, readings);
       setForm({});
+      setOpen(false);
       toast(t(S.vitalsSaved), "ok");
       onRecorded();
     } catch {
@@ -846,37 +1008,48 @@ function VitalsTab({ encounter, onRecorded }: { encounter: Encounter; onRecorded
   }
 
   return (
-    <Card as="section" style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp4)" }}>
-      <h3 className="section-h" style={{ margin: 0 }}>{t(S.recordVitals)}</h3>
-      {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
-      <div className="vitals-form">
-        {fields.map((f) => (
-          <InputField
-            key={f.key}
-            label={t(f.label)}
-            type="number"
-            inputMode="decimal"
-            value={form[f.key] ?? ""}
-            // The value is read HERE, not inside the updater: `currentTarget` is null by the time React runs
-            // a functional setState, so reaching for it there throws on the first keystroke.
-            onChange={(e) => {
-              const next = e.currentTarget.value;
-              setForm((prev) => ({ ...prev, [f.key]: next }));
-            }}
-          />
-        ))}
-      </div>
-      <div className="row-actions">
+    <Modal
+      open={open}
+      onOpenChange={setOpen}
+      title={t(S.recordVitals)}
+      trigger={
         <Button
-          variant="primary"
-          loading={busy}
-          leadingIcon={<Icon name="chart" width={16} height={16} aria-hidden="true" />}
-          onClick={() => void submit()}
-        >
-          {t(S.recordVitals)}
-        </Button>
+          variant="ghost"
+          size="sm"
+          // Icon-only in a tight rail header, so the name has to come from aria-label.
+          aria-label={t(S.recordVitals)}
+          title={t(S.recordVitals)}
+          leadingIcon={<Icon name="plus" width={16} height={16} aria-hidden="true" />}
+        />
+      }
+      footer={
+        <>
+          <Button variant="ghost" onClick={() => setOpen(false)}>{t(S.cancel)}</Button>
+          <Button variant="primary" loading={busy} onClick={() => void submit()}>{t(S.submit)}</Button>
+        </>
+      }
+    >
+      <div className="stack-3">
+        {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
+        <div className="vitals-form">
+          {fields.map((f) => (
+            <InputField
+              key={f.key}
+              label={t(f.label)}
+              type="number"
+              inputMode="decimal"
+              value={form[f.key] ?? ""}
+              // The value is read HERE, not inside the updater: `currentTarget` is null by the time React
+              // runs a functional setState, so reaching for it there throws on the first keystroke.
+              onChange={(e) => {
+                const next = e.currentTarget.value;
+                setForm((prev) => ({ ...prev, [f.key]: next }));
+              }}
+            />
+          ))}
+        </div>
       </div>
-    </Card>
+    </Modal>
   );
 }
 

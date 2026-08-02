@@ -9,6 +9,7 @@ import {
   InlineAlert,
   Modal,
   StatusChip,
+  Tabs,
   type Column,
 } from "@mersal/design-system";
 import type {
@@ -18,6 +19,7 @@ import type {
   CoordinationTaskRow,
   CoverageLimitLine,
   DocumentRow,
+  Encounter,
   EncounterRow,
   EscalationRow,
   FinancialClaimRow,
@@ -128,6 +130,39 @@ const L = {
   encounterDetails: { en: "Visit details", ar: "تفاصيل الزيارة" },
   openEncounter: { en: "Open encounter", ar: "فتح الزيارة" },
   close: { en: "Close", ar: "إغلاق" },
+  // the visit-details modal's tabs and its three clinical panes
+  tabVisit: { en: "Visit", ar: "الزيارة" },
+  tabNote: { en: "Note", ar: "الملاحظة" },
+  tabDiagnoses: { en: "Diagnoses", ar: "التشخيصات" },
+  tabVitals: { en: "Vitals", ar: "العلامات الحيوية" },
+  loading: { en: "Loading…", ar: "جارٍ التحميل…" },
+  // "Restricted", not "empty". The record exists and this caller may not read it; showing a blank note
+  // instead would tell a clinician the visit was never documented.
+  encounterRestricted: {
+    en: "The clinical record for this visit is available to the treating clinician and the approval team.",
+    ar: "السجل السريري لهذه الزيارة متاح للطبيب المعالج وفريق الموافقات.",
+  },
+  encounterUnavailable: {
+    en: "The clinical record could not be loaded.",
+    ar: "تعذّر تحميل السجل السريري.",
+  },
+  subjective: { en: "Subjective", ar: "الشكوى" },
+  objective: { en: "Objective", ar: "الفحص" },
+  assessment: { en: "Assessment", ar: "التقييم" },
+  // `soapPlan`, not `plan` — `plan` above is the COVERAGE plan. The two happen to share a word in both
+  // languages and mean entirely different things, and one key serving both is how a benefit plan name ends
+  // up labelling a treatment plan the first time either wording is improved.
+  soapPlan: { en: "Plan", ar: "الخطة" },
+  noNote: { en: "No note was written on this visit.", ar: "لم تُكتب ملاحظة في هذه الزيارة." },
+  noDiagnoses: { en: "No diagnosis was coded on this visit.", ar: "لم يُسجَّل تشخيص في هذه الزيارة." },
+  noVitals: { en: "No vitals were recorded on this visit.", ar: "لم تُسجَّل علامات حيوية في هذه الزيارة." },
+  measuredAt: { en: "Measured", ar: "وقت القياس" },
+  bp: { en: "Blood pressure", ar: "ضغط الدم" },
+  hr: { en: "Heart rate", ar: "النبض" },
+  temp: { en: "Temperature", ar: "الحرارة" },
+  spo2: { en: "Oxygen saturation", ar: "تشبع الأكسجين" },
+  height: { en: "Height", ar: "الطول" },
+  weight: { en: "Weight", ar: "الوزن" },
 
   // investigations
   investigationsCaption: { en: "Investigation orders and results", ar: "طلبات الفحوصات والنتائج" },
@@ -772,43 +807,203 @@ function EncountersView({ data }: { data: ProfileEncounters }) {
       {/*
         The visit, read where you are.
 
-        It shows what the ROW carries and nothing more. The clinical record behind an encounter is the
-        workspace's to serve, behind its own gate — pulling it into a modal here would put a second, wider
-        disclosure path beside the projection the profile already decided this role gets. So the modal is the
-        row, laid out to be read, plus the door to the full record for anyone whose projection includes it.
+        The row's own facts are the FRAME; the clinical record inside it comes from emr, behind emr's own
+        treating gate. That is why the modal fetches rather than rendering the row alone: a clinician
+        scanning a history wants the note and the diagnoses, and sending them to the workspace and back for
+        every visit they glance at is the long way round. Nothing here widens what a role may read — a
+        caller without a treating relationship gets the same 403 the workspace would give them, and the
+        modal says so instead of showing an empty note.
       */}
-      <Modal
-        open={detail !== null}
-        onOpenChange={(open: boolean) => !open && setDetail(null)}
-        title={`${t(L.encounterDetails)} — ${detail?.encounterRef ?? ""}`}
-        closeLabel={t(L.close)}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setDetail(null)}>{t(L.close)}</Button>
-            {detail?.encounterId ? (
-              <Button
-                variant="primary"
-                leadingIcon={<Icon name="doc" />}
-                onClick={() => openEncounter(detail.encounterId!)}
-              >
-                {t(L.openEncounter)}
-              </Button>
-            ) : null}
-          </>
-        }
-      >
-        {detail ? (
-          <dl className="profile-facts">
-            <Fact label={t(L.occurredAt)} value={fmt.dateTime(detail.occurredAt)} />
-            <Fact label={t(L.ref)} value={detail.encounterRef} />
-            <Fact label={t(L.branch)} value={branchOf(detail)} />
-            <Fact label={t(L.clinician)} value={clinicianOf(detail)} />
-            <Fact label={t(L.specialty)} value={specialtyOf(detail)} />
-            <Fact label={t(L.reason)} value={detail.reason} />
-            <Fact label={t(L.status)} value={detail.status} />
-          </dl>
-        ) : null}
-      </Modal>
+      {detail && (
+        <EncounterDetailModal
+          row={detail}
+          branch={branchOf(detail)}
+          clinician={clinicianOf(detail)}
+          specialty={specialtyOf(detail)}
+          onClose={() => setDetail(null)}
+          onOpenEncounter={openEncounter}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * One visit, read in place — identity and context first, then the record, split across tabs.
+ *
+ * <b>Tabs, not one long column.</b> A consultation is four unrelated things (what happened, what was
+ * written, what was coded, what was measured) and stacking them makes a dialog you scroll rather than read;
+ * the vitals end up below the fold of a note whose length nobody controls.
+ */
+function EncounterDetailModal({
+  row,
+  branch,
+  clinician,
+  specialty,
+  onClose,
+  onOpenEncounter,
+}: {
+  row: EncounterRow;
+  branch: string | null;
+  clinician: string | null;
+  specialty: string | null;
+  onClose: () => void;
+  onOpenEncounter: (encounterId: string) => void;
+}) {
+  const t = useLoc();
+  const fmt = useFormat();
+  const api = useApi();
+  const [tab, setTab] = useState("visit");
+
+  // Only when the projection carried a handle. A `V(meta)` role (reception, finance) is given the visit's
+  // existence and not its id, and asking emr for a record we were deliberately not given the key to would
+  // be the client trying a door the server already closed.
+  const encounterId = row.encounterId ?? null;
+  const record = useAsync(
+    useCallback(
+      () => (encounterId ? api.getEncounter(encounterId) : Promise.resolve(null)),
+      [api, encounterId],
+    ),
+    [encounterId],
+  );
+
+  const denied = record.status === "error" && record.error?.status === 403;
+  const e = record.data;
+  const soapFilled = e ? Object.values(e.soap).some((v) => v.trim().length > 0) : false;
+
+  const visitPane = (
+    <dl className="profile-facts">
+      <Fact label={t(L.occurredAt)} value={fmt.dateTime(row.occurredAt)} />
+      <Fact label={t(L.ref)} value={row.encounterRef} />
+      <Fact label={t(L.branch)} value={branch} />
+      <Fact label={t(L.clinician)} value={clinician} />
+      <Fact label={t(L.specialty)} value={specialty} />
+      <Fact label={t(L.reason)} value={row.reason} />
+      <Fact label={t(L.status)} value={row.status} />
+    </dl>
+  );
+
+  // The three clinical panes share one story: withheld, still loading, empty, or here. Kept in a helper so
+  // all three tell it the same way — an empty note and a withheld note must never render alike.
+  const clinical = (body: (enc: NonNullable<typeof e>) => ReactNode, emptyLabel: Localized) => {
+    if (denied) return <InlineAlert tone="info">{t(L.encounterRestricted)}</InlineAlert>;
+    if (record.status === "error") return <InlineAlert tone="bad">{t(L.encounterUnavailable)}</InlineAlert>;
+    if (record.status === "loading") return <p className="profile-empty">{t(L.loading)}</p>;
+    if (!e) return <p className="profile-empty">{t(emptyLabel)}</p>;
+    return body(e);
+  };
+
+  return (
+    <Modal
+      open
+      onOpenChange={(open: boolean) => !open && onClose()}
+      title={`${t(L.encounterDetails)} — ${row.encounterRef}`}
+      closeLabel={t(L.close)}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>{t(L.close)}</Button>
+          {encounterId ? (
+            <Button
+              variant="primary"
+              leadingIcon={<Icon name="doc" />}
+              onClick={() => onOpenEncounter(encounterId)}
+            >
+              {t(L.openEncounter)}
+            </Button>
+          ) : null}
+        </>
+      }
+    >
+      <Tabs
+        aria-label={t(L.encounterDetails)}
+        value={tab}
+        onValueChange={setTab}
+        items={[
+          { value: "visit", label: t(L.tabVisit), content: visitPane },
+          {
+            value: "note",
+            label: t(L.tabNote),
+            content: clinical(
+              (enc) =>
+                soapFilled ? (
+                  <dl className="soap">
+                    <SoapPart label={t(L.subjective)} value={enc.soap.subjective} />
+                    <SoapPart label={t(L.objective)} value={enc.soap.objective} />
+                    <SoapPart label={t(L.assessment)} value={enc.soap.assessment} />
+                    <SoapPart label={t(L.soapPlan)} value={enc.soap.plan} />
+                  </dl>
+                ) : (
+                  <p className="profile-empty">{t(L.noNote)}</p>
+                ),
+              L.noNote,
+            ),
+          },
+          {
+            value: "diagnoses",
+            label: t(L.tabDiagnoses),
+            content: clinical(
+              (enc) =>
+                enc.diagnoses.length === 0 ? (
+                  <p className="profile-empty">{t(L.noDiagnoses)}</p>
+                ) : (
+                  <ul className="chip-list dx-list">
+                    {enc.diagnoses.map((d) => (
+                      <li key={d.id ?? d.code} className="dx-chip">
+                        <span className="dx-code tnum">{d.code}</span>
+                        <span className="dx-label">{t(d.label)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ),
+              L.noDiagnoses,
+            ),
+          },
+          {
+            value: "vitals",
+            label: t(L.tabVitals),
+            content: clinical((enc) => <VitalsFacts vitals={enc.vitals} />, L.noVitals),
+          },
+        ]}
+      />
+    </Modal>
+  );
+}
+
+/** One SOAP section in the read-only view. Absent sections are omitted — a heading over nothing reads as a
+ *  clinician who examined the patient and wrote no findings. */
+function SoapPart({ label, value }: { label: string; value: string }) {
+  if (!value.trim()) return null;
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd style={{ whiteSpace: "pre-wrap" }}>{value}</dd>
+    </div>
+  );
+}
+
+function VitalsFacts({ vitals }: { vitals: Encounter["vitals"] }) {
+  const t = useLoc();
+  const fmt = useFormat();
+  const bp = vitals.systolic === null && vitals.diastolic === null
+    ? null
+    : `${vitals.systolic ?? "—"} / ${vitals.diastolic ?? "—"} mmHg`;
+  const rows: [string, string | null][] = [
+    [t(L.bp), bp],
+    [t(L.hr), vitals.heartRate === null ? null : `${vitals.heartRate} bpm`],
+    [t(L.temp), vitals.tempC === null ? null : `${vitals.tempC} °C`],
+    [t(L.spo2), vitals.spo2 === null ? null : `${vitals.spo2} %`],
+    [t(L.height), vitals.heightCm === null ? null : `${vitals.heightCm} cm`],
+    [t(L.weight), vitals.weightKg === null ? null : `${vitals.weightKg} kg`],
+  ];
+  if (rows.every(([, v]) => v === null)) return <p className="profile-empty">{t(L.noVitals)}</p>;
+  return (
+    <>
+      {vitals.measuredAt && (
+        <p className="profile-sub">{t(L.measuredAt)} {fmt.dateTime(vitals.measuredAt)}</p>
+      )}
+      <dl className="profile-facts">
+        {rows.map(([label, value]) => <Fact key={label} label={label} value={value} />)}
+      </dl>
     </>
   );
 }

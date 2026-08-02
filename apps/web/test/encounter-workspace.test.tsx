@@ -53,6 +53,7 @@ function fakeApi(over: Partial<ApiClient> = {}): ApiClient {
         key: "header", state: "Visible", variant: "full", data: {
           beneficiaryId: "ben-9", memberNo: "MRS-M-884291", displayName: "Fatma Ibrahim",
           status: "Active", statusCue: { label: "Active", tone: "ok", shape: "circle" },
+          sex: "Female", birthDate: "1993-04-11", relationship: "Principal",
         },
       }],
     }),
@@ -130,7 +131,14 @@ describe("Encounter workspace (US-031)", () => {
     const user = userEvent.setup();
     const saveEncounterNote = vi.fn().mockResolvedValue({ noteId: "note-1" });
     const signEncounterNote = vi.fn().mockResolvedValue(undefined);
-    renderWorkspace(fakeApi({ saveEncounterNote, signEncounterNote }));
+    renderWorkspace(fakeApi({
+      saveEncounterNote, signEncounterNote,
+      // A primary diagnosis is required to finalize — see the rule's own test below.
+      getEncounter: vi.fn().mockResolvedValue(encounter({
+        diagnoses: [{ id: "dx-1", system: "ICD-10", code: "J01.90", rank: "Primary",
+                      label: { en: "Acute sinusitis", ar: "التهاب جيوب" } }],
+      })),
+    }));
 
     await user.type(await screen.findByRole("textbox", { name: "Assessment" }), "Acute sinusitis");
     await user.click(screen.getByRole("button", { name: /save & finalize/i }));
@@ -176,10 +184,10 @@ describe("Encounter workspace (US-031)", () => {
     expect(await screen.findByText(/only the note's author/i)).toBeInTheDocument();
   });
 
-  it("adds an ICD-10 code from a search and shows it on the assessment", async () => {
+  it("records a diagnosis at the rank the doctor chose, defaulting the first one to primary", async () => {
     const user = userEvent.setup();
     const addEncounterDiagnosis = vi.fn().mockResolvedValue({
-      id: "dx-1", system: "ICD-10", code: "J01.90",
+      id: "dx-1", system: "ICD-10", code: "J01.90", rank: "Primary",
       label: { en: "Acute sinusitis, unspecified", ar: "التهاب جيوب حاد" },
     });
     renderWorkspace(fakeApi({
@@ -187,19 +195,57 @@ describe("Encounter workspace (US-031)", () => {
       searchIcd: vi.fn().mockResolvedValue([{ code: "J01.90", title: "Acute sinusitis, unspecified" }]),
     }));
 
-    await user.click(await screen.findByRole("button", { name: /add icd-10/i }));
+    await user.click(await screen.findByRole("button", { name: /add diagnosis/i }));
     await user.type(screen.getByRole("textbox", { name: /search icd-10/i }), "sinus");
     await user.click(await screen.findByRole("button", { name: /J01\.90/ }));
 
-    // `primary: true` — the first code on an encounter is its primary diagnosis.
-    await waitFor(() => expect(addEncounterDiagnosis).toHaveBeenCalledWith("enc-77", "J01.90", true));
+    // Primary by default while the encounter has none — the commonest first act, pre-selected.
+    await waitFor(() => expect(addEncounterDiagnosis).toHaveBeenCalledWith("enc-77", "J01.90", "Primary"));
     expect(await screen.findByText("Acute sinusitis, unspecified")).toBeInTheDocument();
+  });
+
+  it("groups primary apart from secondary", async () => {
+    renderWorkspace(fakeApi({
+      getEncounter: vi.fn().mockResolvedValue(encounter({
+        diagnoses: [
+          { id: "dx-1", system: "ICD-10", code: "J01.90", rank: "Primary",
+            label: { en: "Acute sinusitis", ar: "التهاب جيوب" } },
+          { id: "dx-2", system: "ICD-10", code: "I10", rank: "Secondary",
+            label: { en: "Essential hypertension", ar: "ارتفاع ضغط الدم" } },
+        ],
+      })),
+    }));
+
+    // The rank is a HEADING, not just a chip tint: which code the claim and the authorization key on must
+    // not come down to a border colour.
+    expect(await screen.findByRole("heading", { name: "Primary" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Secondary" })).toBeInTheDocument();
+    expect(screen.getByText("Acute sinusitis").closest(".dx-chip")).toHaveClass("dx-chip--primary");
+    expect(screen.getByText("Essential hypertension").closest(".dx-chip")).not.toHaveClass("dx-chip--primary");
+  });
+
+  it("will not finalize an encounter with no primary diagnosis, and says why", async () => {
+    const user = userEvent.setup();
+    const signEncounterNote = vi.fn();
+    renderWorkspace(fakeApi({
+      signEncounterNote,
+      getEncounter: vi.fn().mockResolvedValue(encounter({
+        diagnoses: [{ id: "dx-2", system: "ICD-10", code: "I10", rank: "Secondary",
+                      label: { en: "Essential hypertension", ar: "ارتفاع ضغط الدم" } }],
+      })),
+    }));
+
+    await user.type(await screen.findByRole("textbox", { name: "Plan" }), "Supportive care");
+    expect(screen.getByRole("button", { name: /save & finalize/i })).toBeDisabled();
+    // The reason is on screen, not discovered by pressing a dead button.
+    expect(screen.getAllByText(/primary diagnosis/i).length).toBeGreaterThan(0);
+    expect(signEncounterNote).not.toHaveBeenCalled();
   });
 
   it("retracts a coded diagnosis, and offers no retract once the note is signed", async () => {
     const user = userEvent.setup();
     const dx = {
-      id: "dx-1", system: "ICD-10" as const, code: "J01.90",
+      id: "dx-1", system: "ICD-10" as const, code: "J01.90", rank: "Primary" as const,
       label: { en: "Acute sinusitis, unspecified", ar: "التهاب جيوب حاد" },
     };
     const removeEncounterDiagnosis = vi.fn().mockResolvedValue(undefined);
@@ -246,15 +292,37 @@ describe("Encounter workspace (US-031)", () => {
     const recordVitals = vi.fn().mockResolvedValue({ encounterId: "enc-77", recorded: 2 });
     renderWorkspace(fakeApi({ recordVitals }));
 
-    await user.click(await screen.findByRole("tab", { name: /vitals/i }));
-    await user.type(screen.getByRole("spinbutton", { name: /systolic/i }), "130");
+    await user.click(await screen.findByRole("button", { name: /record vitals/i }));
+    await user.type(await screen.findByRole("spinbutton", { name: /systolic/i }), "130");
     await user.type(screen.getByRole("spinbutton", { name: /diastolic/i }), "85");
-    await user.click(screen.getByRole("button", { name: /record vitals/i }));
+    await user.click(screen.getByRole("button", { name: /^submit$/i }));
 
     await waitFor(() => expect(recordVitals).toHaveBeenCalledWith("enc-77", [
       { type: "BP", value: 130 },
       { type: "BPDiastolic", value: 85 },
     ]));
+  });
+
+  it("leads with the same identity block the patient file uses", async () => {
+    const user = userEvent.setup();
+    const { container } = renderWorkspace(fakeApi());
+    // The strip renders nothing until the profile header has answered — a PARTIAL identity would be worse
+    // than none on a control whose whole job is confirming which record is open.
+    await screen.findByText("Fatma Ibrahim");
+
+    // The SAME component, not a lookalike: the strip used to be a flat dot-separated line of the same
+    // fields, so one patient rendered two different ways depending on which screen you were on.
+    const identity = container.querySelector(".patient-context-bar .profile-identity");
+    expect(identity).not.toBeNull();
+    const block = within(identity as HTMLElement);
+    expect(block.getByText(/MRS-M-884291/)).toBeInTheDocument();
+    expect(block.getByText("Active")).toBeInTheDocument();
+    // Icon-per-fact strip, each fact named for a screen reader rather than left as a bare value.
+    expect(block.getByText(/^33 yrs$/)).toBeInTheDocument();
+    expect(block.getByText("Female")).toBeInTheDocument();
+
+    // And the name still opens the file.
+    await user.click(block.getByRole("button", { name: "Fatma Ibrahim" }));
   });
 
   it("names the patient's allergies rather than counting them", async () => {
@@ -276,6 +344,24 @@ describe("Encounter workspace (US-031)", () => {
     // This is the screen where a prescription is written. "1 alert" sends the doctor hunting for the one
     // fact that decides what they may prescribe.
     expect(await screen.findByText(/Penicillin/)).toBeInTheDocument();
+  });
+
+  it("keeps an unrecorded reading visible as an empty slot rather than dropping its row", async () => {
+    const { container } = renderWorkspace(fakeApi({
+      getEncounter: vi.fn().mockResolvedValue(encounter({
+        vitals: {
+          heightCm: null, weightKg: null, systolic: 118, diastolic: 76,
+          heartRate: 72, tempC: null, spo2: null, measuredAt: "2026-08-01T09:15:00Z",
+        },
+      })),
+    }));
+
+    await screen.findByText("118 / 76");
+    const panel = within(container.querySelector(".vitals-panel") as HTMLElement);
+    // "Nobody took this patient's temperature" and "temperature does not apply here" are different facts.
+    const temp = panel.getByText("Temperature").closest(".vital-row")!;
+    expect(within(temp as HTMLElement).getByText("—")).toBeInTheDocument();
+    expect(within(temp as HTMLElement).queryByText(/high|low|in range/i)).not.toBeInTheDocument();
   });
 
   it("does not read the patient's orders, prescriptions or history until those tabs are opened", async () => {
