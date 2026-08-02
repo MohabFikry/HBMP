@@ -7,6 +7,7 @@ import {
   DataTable,
   Icon,
   InlineAlert,
+  Modal,
   StatusChip,
   type Column,
 } from "@mersal/design-system";
@@ -122,6 +123,11 @@ const L = {
   clinician: { en: "Clinician", ar: "الطبيب" },
   specialty: { en: "Specialty", ar: "التخصص" },
   reason: { en: "Reason", ar: "سبب الزيارة" },
+  view: { en: "View", ar: "عرض" },
+  viewEncounter: { en: "View visit details", ar: "عرض تفاصيل الزيارة" },
+  encounterDetails: { en: "Visit details", ar: "تفاصيل الزيارة" },
+  openEncounter: { en: "Open encounter", ar: "فتح الزيارة" },
+  close: { en: "Close", ar: "إغلاق" },
 
   // investigations
   investigationsCaption: { en: "Investigation orders and results", ar: "طلبات الفحوصات والنتائج" },
@@ -563,8 +569,18 @@ function PastMedicalHistoryView({ data }: { data: ProfilePastMedicalHistory }) {
   const titles = useAsync(
     useCallback(() => api.icdTitles(codes), [api, codes.join(",")]),  // eslint-disable-line react-hooks/exhaustive-deps
     [codes.join(",")]);
-  const titleFor = (r: CodedCondition) =>
-    (r.code ? titles.data?.get(r.code) : undefined) ?? r.display;
+  /**
+   * The record's OWN description wins where it has one; the catalogue only fills the gap.
+   *
+   * emr's display is the code itself, which is the case this lookup exists for. But other providers do send a
+   * real description, and overriding it with the catalogue's wording would replace what was recorded about
+   * this patient with a generic title — "Type 2 diabetes mellitus" becoming "Type 2 diabetes mellitus,
+   * Without complications", which is a different clinical claim from the one in the record.
+   */
+  const titleFor = (r: CodedCondition) => {
+    const recorded = r.display && r.display !== r.code ? r.display : null;
+    return recorded ?? (r.code ? titles.data?.get(r.code) : undefined) ?? r.display;
+  };
 
   const cols = columns<CodedCondition>(
     anyHas(conditions, (r) => r.code) && {
@@ -642,10 +658,42 @@ function PastMedicalHistoryView({ data }: { data: ProfilePastMedicalHistory }) {
 function EncountersView({ data }: { data: ProfileEncounters }) {
   const t = useLoc();
   const fmt = useFormat();
+  const api = useApi();
   const navigate = useNavigate();
   const location = useLocation();
   const rows = data.items ?? [];
-  if (rows.length === 0) return <Empty />;
+
+  /**
+   * Branch and clinician NAMES, and the clinician's specialty.
+   *
+   * The payload carries ids: emr owns no branch label and no practitioner record, so it sends what it has and
+   * the browser joins — the same shape the day board uses for branch labels and the booking picker for
+   * doctors. Two independent lookups, each degrading on its own: a branch that cannot be named leaves that
+   * cell blank rather than taking the table with it.
+   */
+  const branchIds = useMemo(
+    () => [...new Set(rows.map((r) => r.branchId).filter((b): b is string => Boolean(b)))], [rows]);
+  const branches = useAsync(
+    useCallback(() => api.branchLabels(branchIds), [api, branchIds.join(",")]),  // eslint-disable-line react-hooks/exhaustive-deps
+    [branchIds.join(",")]);
+
+  const hasClinicians = rows.some((r) => r.clinicianId);
+  const practitioners = useAsync(
+    useCallback(
+      () => (hasClinicians ? api.practitioners() : Promise.resolve([])),
+      [api, hasClinicians]),
+    [hasClinicians]);
+  const byPractitioner = useMemo(
+    () => new Map((practitioners.data ?? []).map((p) => [p.id, p])), [practitioners.data]);
+
+  const branchOf = (r: EncounterRow) =>
+    r.branchName ?? (r.branchId ? branches.data?.get(r.branchId) ?? null : null);
+  const clinicianOf = (r: EncounterRow) =>
+    r.clinicianName ?? (r.clinicianId ? t(byPractitioner.get(r.clinicianId)?.name ?? EMPTY_NAME) || null : null);
+  const specialtyOf = (r: EncounterRow) =>
+    r.specialty ?? (r.clinicianId ? byPractitioner.get(r.clinicianId)?.primarySpecialty ?? null : null);
+
+  const [detail, setDetail] = useState<EncounterRow | null>(null);
 
   const openEncounter = (encounterId: string) =>
     navigate(`/clinician/encounter?encounter=${encodeURIComponent(encounterId)}`, {
@@ -655,24 +703,19 @@ function EncountersView({ data }: { data: ProfileEncounters }) {
   const cols = columns<EncounterRow>(
     { key: "occurredAt", header: t(L.occurredAt), cell: (r) => fmt.dateTime(r.occurredAt),
       sortable: true, sortValue: (r) => r.occurredAt },
-    { key: "encounterRef", header: t(L.ref),
-      cell: (r) => (r.encounterId
-        ? <button type="button" className="linklike tnum" onClick={() => openEncounter(r.encounterId!)}>
-            {r.encounterRef}
-          </button>
-        : <span className="tnum">{r.encounterRef}</span>),
+    { key: "encounterRef", header: t(L.ref), cell: (r) => <span className="tnum">{r.encounterRef}</span>,
       sortable: true, sortValue: (r) => r.encounterRef },
-    anyHas(rows, (r) => r.branchName) && {
-      key: "branch", header: t(L.branch), cell: (r) => r.branchName,
-      sortable: true, sortValue: (r) => r.branchName,
+    anyHas(rows, (r) => branchOf(r)) && {
+      key: "branch", header: t(L.branch), cell: (r) => branchOf(r),
+      sortable: true, sortValue: (r) => branchOf(r),
     },
-    anyHas(rows, (r) => r.clinicianName) && {
-      key: "clinician", header: t(L.clinician), cell: (r) => r.clinicianName,
-      sortable: true, sortValue: (r) => r.clinicianName,
+    anyHas(rows, (r) => clinicianOf(r)) && {
+      key: "clinician", header: t(L.clinician), cell: (r) => clinicianOf(r),
+      sortable: true, sortValue: (r) => clinicianOf(r),
     },
-    anyHas(rows, (r) => r.specialty) && {
-      key: "specialty", header: t(L.specialty), cell: (r) => r.specialty,
-      sortable: true, sortValue: (r) => r.specialty,
+    anyHas(rows, (r) => specialtyOf(r)) && {
+      key: "specialty", header: t(L.specialty), cell: (r) => specialtyOf(r),
+      sortable: true, sortValue: (r) => specialtyOf(r),
     },
     // Absent for every administrative role (`V(meta)`) — the column disappears rather than standing empty.
     anyHas(rows, (r) => r.reason) && {
@@ -680,18 +723,110 @@ function EncountersView({ data }: { data: ProfileEncounters }) {
     },
     { key: "status", header: t(L.status), cell: (r) => <Status status={r.status} />,
       sortable: true, sortValue: (r) => r.status },
+    {
+      // Last column, on every row. The row itself navigates AWAY to the workspace; this reads the visit
+      // where you are, which is the commoner intent when scanning a history — and it is the only affordance
+      // for a role whose projection carries no encounterId to navigate with.
+      key: "view",
+      header: t(L.view),
+      cell: (r) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          // Icon-only, so it needs a name — and the name says WHICH visit, because a column of identical
+          // "View" buttons is unusable with a screen reader.
+          aria-label={`${t(L.viewEncounter)} — ${r.encounterRef}`}
+          title={t(L.viewEncounter)}
+          leadingIcon={<Icon name="eye" />}
+          // The row is a click target too; without this, opening the modal would also navigate away from it.
+          onClick={(e) => { e.stopPropagation(); setDetail(r); }}
+        />
+      ),
+    },
   );
 
+  if (rows.length === 0) return <Empty />;
+
+  /*
+    THE WHOLE ROW opens the encounter, not the reference alone.
+    ============================================================================================================
+    A link on one cell makes a 6-column row a target the width of "ENC-2026-000074" — the smallest thing in it,
+    and the one a clinician is least likely to aim at when what they want is "that visit". `interactive` makes
+    DataTable a grid with roving focus and Enter/Space per row (18.D3), so the keyboard path is the row too
+    rather than a tab stop buried in a cell.
+
+    Rows with no `encounterId` stay inert: that is the `V(meta)` projection, where the handle was never sent
+    because the role has no encounter workspace to open.
+  */
   return (
-    <DataTable
-      caption={t(L.encountersCaption)}
-      columns={cols}
-      rows={rows}
-      rowKey={(r) => r.encounterRef}
-      density="compact"
-    />
+    <>
+      <DataTable
+        caption={t(L.encountersCaption)}
+        columns={cols}
+        rows={rows}
+        rowKey={(r) => r.encounterRef}
+        density="compact"
+        interactive={rows.some((r) => r.encounterId)}
+        onSelect={(r) => r.encounterId && openEncounter(r.encounterId)}
+      />
+      {/*
+        The visit, read where you are.
+
+        It shows what the ROW carries and nothing more. The clinical record behind an encounter is the
+        workspace's to serve, behind its own gate — pulling it into a modal here would put a second, wider
+        disclosure path beside the projection the profile already decided this role gets. So the modal is the
+        row, laid out to be read, plus the door to the full record for anyone whose projection includes it.
+      */}
+      <Modal
+        open={detail !== null}
+        onOpenChange={(open: boolean) => !open && setDetail(null)}
+        title={`${t(L.encounterDetails)} — ${detail?.encounterRef ?? ""}`}
+        closeLabel={t(L.close)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDetail(null)}>{t(L.close)}</Button>
+            {detail?.encounterId ? (
+              <Button
+                variant="primary"
+                leadingIcon={<Icon name="doc" />}
+                onClick={() => openEncounter(detail.encounterId!)}
+              >
+                {t(L.openEncounter)}
+              </Button>
+            ) : null}
+          </>
+        }
+      >
+        {detail ? (
+          <dl className="profile-facts">
+            <Fact label={t(L.occurredAt)} value={fmt.dateTime(detail.occurredAt)} />
+            <Fact label={t(L.ref)} value={detail.encounterRef} />
+            <Fact label={t(L.branch)} value={branchOf(detail)} />
+            <Fact label={t(L.clinician)} value={clinicianOf(detail)} />
+            <Fact label={t(L.specialty)} value={specialtyOf(detail)} />
+            <Fact label={t(L.reason)} value={detail.reason} />
+            <Fact label={t(L.status)} value={detail.status} />
+          </dl>
+        ) : null}
+      </Modal>
+    </>
   );
 }
+
+/** One labelled value in the detail modal. Renders NOTHING when the field is absent — a dash would claim the
+ *  visit has no branch when the truth is that this role's projection does not carry one. */
+function Fact({ label, value }: { label: string; value?: string | null }) {
+  if (!value) return null;
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
+  );
+}
+
+/** A blank bilingual label, so an unresolved practitioner renders empty rather than "undefined". */
+const EMPTY_NAME = { en: "", ar: "" };
 
 // ---------------------------------------------------------------- 6. investigations
 

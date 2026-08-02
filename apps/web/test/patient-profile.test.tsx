@@ -561,9 +561,9 @@ describe("20.4 — the encounters section opens an encounter", () => {
     ...over,
   });
 
-  it("makes the reference a control that routes to the workspace", async () => {
-    // The section listed a clinician's own visits and offered no way into any of them: the reference is a
-    // human-readable number and addresses nothing, so reading a past visit meant leaving the profile.
+  it("opens the encounter from the WHOLE row, not the reference alone", async () => {
+    // A link on one cell makes a six-column row a target the width of "ENC-2026-000074" — the smallest thing
+    // in it, and the one a clinician is least likely to aim at when what they want is "that visit".
     const user = userEvent.setup();
     seedSession("doctor");
     renderNode(
@@ -577,14 +577,36 @@ describe("20.4 — the encounters section opens an encounter", () => {
       </ApiProvider>,
     );
 
-    await user.click(await screen.findByRole("button", { name: "ENC-2026-000074" }));
+    await user.click(await screen.findByText("ENC-2026-000074"));
     // Carries the id, not the ref — the ref addresses nothing.
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("encounter=e-77"));
   });
 
-  it("renders a row with no id as plain text rather than a dead control", async () => {
-    // `V(meta)` — reception, finance and beneficiary management have no encounter workspace, so the handle was
-    // never sent. Absence means "not openable by you"; a button that goes nowhere would say the opposite.
+  it("opens the visit details in a modal without navigating away", async () => {
+    const user = userEvent.setup();
+    seedSession("doctor");
+    renderNode(
+      <ApiProvider client={fakeApi({
+        patientProfile: vi.fn().mockResolvedValue(
+          profile([{ key: "encounters", state: "Visible",
+                     data: { items: [enc({ encounterId: "e-77", branchName: "Dokki" })] } }]),
+        ),
+      })}>
+        <PatientProfile beneficiaryId={BEN} />
+        <Where />
+      </ApiProvider>,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /view visit details/i }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Dokki");
+    // The row is a click target too — without stopPropagation the eye would open the modal AND navigate.
+    expect(screen.getByTestId("where")).not.toHaveTextContent("encounter=e-77");
+  });
+
+  it("still offers the details view to a role that cannot open the workspace", async () => {
+    // `V(meta)` — reception, finance and beneficiary management have no encounter workspace, so the handle
+    // was never sent and the row does not navigate. Reading the visit is still theirs.
+    const user = userEvent.setup();
     seedSession("reception");
     renderProfile(
       fakeApi({
@@ -594,8 +616,11 @@ describe("20.4 — the encounters section opens an encounter", () => {
       }),
     );
 
-    expect(await screen.findByText("ENC-2026-000074")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "ENC-2026-000074" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /view visit details/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("ENC-2026-000074");
+    // No door to a workspace this role has no projection for.
+    expect(within(dialog).queryByRole("button", { name: /open encounter/i })).not.toBeInTheDocument();
   });
 });
 

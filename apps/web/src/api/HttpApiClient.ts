@@ -1677,6 +1677,21 @@ export class HttpApiClient implements ApiClient {
   }
 
   // ---- Practitioners (Phase 14.5, design 37 §4) -----------------------------------------------------------
+  async branchLabels(branchIds: readonly string[]) {
+    const wanted = [...new Set(branchIds.filter(Boolean))];
+    const out = new Map<string, string>();
+    if (wanted.length === 0) return out;
+    try {
+      const rows = (await getRaw(`/branch-labels?branchIds=${encodeURIComponent(wanted.join(","))}`)) as any[];
+      for (const row of rows ?? []) {
+        if (row?.branchId && row?.nameEn) out.set(String(row.branchId), String(row.nameEn));
+      }
+    } catch {
+      // Unnamed is better than no table — the caller falls back to showing nothing for the branch.
+    }
+    return out;
+  }
+
   async icdTitles(codes: readonly string[]) {
     const wanted = [...new Set(codes.filter(Boolean))];
     const out = new Map<string, string>();

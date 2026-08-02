@@ -132,16 +132,30 @@ public static class ProfileContextEndpoint
                 ? [.. encounters.Select(e =>
                 {
                     var appointment = e.AppointmentId is { } id ? appointmentById.GetValueOrDefault(id) : null;
+                    // IDS in the id fields, and nothing in the name fields.
+                    //
+                    // These three were mismatched: the branch UUID went out as `BranchName`, the creating
+                    // subject as `ClinicianName`, and the APPOINTMENT TYPE as `Specialty` — so the profile
+                    // rendered a raw uuid under "Branch", another under "Clinician", and the word "Scheduled"
+                    // under "Specialty". Each was a value in a field that promised a different thing.
+                    //
+                    // emr holds none of the three names: branch labels are provider-service's, and so are a
+                    // practitioner's name and specialty. It sends what it OWNS — the ids — and the client
+                    // joins, exactly as it already does for the day board's branch labels and for the booking
+                    // picker's doctors. Inventing the names here would make emr a second answerer for another
+                    // service's data, which is the shape design 39 §1 exists to prevent.
                     return new ProfileEncounterView(
                         e.EncounterNo,
                         e.StartedAt,
-                        appointment?.BranchId?.ToString(),
-                        e.CreatedBy,
-                        appointment?.AppointmentType.ToString(),
+                        BranchName: null,
+                        ClinicianName: null,
+                        Specialty: null,
                         // Deliberately null: see the appointment comment above.
-                        null,
-                        e.Status.ToString(),
-                        e.EncounterId);
+                        Reason: null,
+                        Status: e.Status.ToString(),
+                        EncounterId: e.EncounterId,
+                        BranchId: appointment?.BranchId,
+                        ClinicianId: e.CreatedBy);
                 })]
                 : []);
 
@@ -185,7 +199,14 @@ public sealed record ProfileEncounterView(
     /// <summary>The encounter's id, so the profile row can OPEN it. <c>EncounterRef</c> is the human-readable
     /// number (ENC-2026-000074) and addresses nothing; without this the profile could list a clinician's own
     /// visits and offer no way into any of them.</summary>
-    Guid? EncounterId = null);
+    Guid? EncounterId = null,
+    /// <summary>The branch the visit happened at. An ID, because emr holds no branch names — the client
+    /// resolves it through the label lookup it already uses for the day board.</summary>
+    Guid? BranchId = null,
+    /// <summary>Who opened the encounter: the practitioner id, which on this platform IS the identity user id
+    /// (see tools/dev/README.md). The client resolves the NAME and the SPECIALTY from provider-service, which
+    /// owns both.</summary>
+    string? ClinicianId = null);
 
 /// <summary>The two sections, in one response.</summary>
 public sealed record ProfileContextView(

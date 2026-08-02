@@ -200,6 +200,13 @@ export const zEncounterRow = z.object({
    * as "not openable by you", never as a broken row.
    */
   encounterId: zId.optional(),
+  /**
+   * Branch and clinician as IDS. emr owns neither name — branch labels and a practitioner's name and
+   * specialty belong to other services — so the view resolves them, the same join the day board makes for
+   * branch labels and the booking picker makes for doctors.
+   */
+  branchId: zId.optional(),
+  clinicianId: zId.optional(),
 });
 export type EncounterRow = z.infer<typeof zEncounterRow>;
 

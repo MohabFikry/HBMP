@@ -1513,6 +1513,14 @@ export class DevApiClient implements ApiClient {
    */
   /** A handful of real ICD-10 titles — enough that the history table reads as conditions rather than codes
    *  in the dev harness. Anything unlisted is absent, which is exactly what a real miss looks like. */
+  branchLabels(branchIds: readonly string[]) {
+    const names: Record<string, string> = {
+      "0190b100-0000-7000-8000-000000000005": "Dokki",
+      "0190b100-0000-7000-8000-000000000004": "Maadi",
+    };
+    return Promise.resolve(new Map(branchIds.filter((b) => names[b]).map((b) => [b, names[b]] as const)));
+  }
+
   icdTitles(codes: readonly string[]) {
     const catalogue: Record<string, string> = {
       "I10": "Essential (primary) hypertension",

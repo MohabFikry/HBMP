@@ -161,7 +161,11 @@ public sealed record EncounterRow(
     string EncounterRef, DateTimeOffset OccurredAt, string? BranchName,
     string? ClinicianName, string? Specialty, string? Reason, string Status,
     /// <summary>The handle a clinical row is opened by. Null under <c>meta</c> — see the projection.</summary>
-    string? EncounterId = null);
+    string? EncounterId = null,
+    /// <summary>Branch and clinician as IDS. emr owns neither name; the client resolves both from the
+    /// services that do, the same join it makes for the day board and the booking picker.</summary>
+    string? BranchId = null,
+    string? ClinicianId = null);
 
 public sealed record EncountersSection(IReadOnlyList<EncounterRow> Items)
 {

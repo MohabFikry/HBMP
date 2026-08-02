@@ -119,6 +119,12 @@ export interface ApiClient {
    * Missing codes are simply absent from the map; the caller falls back to showing the code.
    */
   icdTitles(codes: readonly string[]): Promise<Map<string, string>>;
+  /**
+   * Branch id → display name, from the LABEL-ONLY lookup. Branch names proper live behind `provider:read`,
+   * which the desks, the call centre and a clinician do not hold; `/branch-labels` exists so a row can be
+   * named without handing out the provider directory. Missing ids are absent from the map.
+   */
+  branchLabels(branchIds: readonly string[]): Promise<Map<string, string>>;
   // Reception — eligibility (Phase 2)
   searchEligibility(query: string): Promise<EligibilityHit[]>;
   checkEligibility(beneficiaryId: string): Promise<EligibilityResult>;

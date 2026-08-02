@@ -108,7 +108,8 @@ public sealed class EncountersSectionProvider(ClinicalContextSource source) : IS
                 e.Str("encounterRef") ?? e.Str("encounterId") ?? "(unknown)",
                 e.Moment("occurredAt") ?? default,
                 e.Str("branchName"), e.Str("clinicianName"), e.Str("specialty"),
-                e.Str("reason"), e.Str("status") ?? "Unknown", e.Str("encounterId")))
+                e.Str("reason"), e.Str("status") ?? "Unknown", e.Str("encounterId"),
+                e.Str("branchId"), e.Str("clinicianId")))
             .ToList();
 
         return new EncountersSection(rows);
