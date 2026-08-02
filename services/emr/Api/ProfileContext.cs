@@ -140,7 +140,8 @@ public static class ProfileContextEndpoint
                         appointment?.AppointmentType.ToString(),
                         // Deliberately null: see the appointment comment above.
                         null,
-                        e.Status.ToString());
+                        e.Status.ToString(),
+                        e.EncounterId);
                 })]
                 : []);
 
@@ -180,7 +181,11 @@ public sealed record ProfileHistoricalRecordView(Guid LinkId, string DocumentCla
 /// clinical reason for a visit is not an appointment field, and the profile's meta variant strips it anyway.</summary>
 public sealed record ProfileEncounterView(
     string EncounterRef, DateTimeOffset OccurredAt, string? BranchName,
-    string? ClinicianName, string? Specialty, string? Reason, string Status);
+    string? ClinicianName, string? Specialty, string? Reason, string Status,
+    /// <summary>The encounter's id, so the profile row can OPEN it. <c>EncounterRef</c> is the human-readable
+    /// number (ENC-2026-000074) and addresses nothing; without this the profile could list a clinician's own
+    /// visits and offer no way into any of them.</summary>
+    Guid? EncounterId = null);
 
 /// <summary>The two sections, in one response.</summary>
 public sealed record ProfileContextView(

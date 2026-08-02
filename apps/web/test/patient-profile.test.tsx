@@ -8,6 +8,7 @@ import { DevApiClient } from "../src/api/DevApiClient";
 import type { ApiClient } from "../src/api/client";
 import type { PatientProfile as PatientProfileContract } from "@mersal/contracts";
 import { ApiProvider } from "../src/api/ApiProvider";
+import { useLocation } from "react-router-dom";
 
 /**
  * Phase 20.4 — the profile screen.
@@ -27,6 +28,13 @@ function profile(sections: PatientProfileContract["sections"]): PatientProfileCo
 function fakeApi(over: Partial<ApiClient> = {}): ApiClient {
   const dev = new DevApiClient({ latencyMs: 0 });
   return Object.assign(dev, over) as ApiClient;
+}
+
+/** Reports the router's current location, so a navigation assertion does not reach for window.location —
+ *  these render under MemoryRouter, where it never changes. */
+function Where() {
+  const loc = useLocation();
+  return <span data-testid="where">{loc.pathname + loc.search}</span>;
 }
 
 function renderProfile(api: ApiClient) {
@@ -308,7 +316,10 @@ describe("20.4 — call history: four cues and a server-generated clipboard", ()
     renderProfile(fakeApi({ patientProfile }));
     await screen.findByRole("region", { name: /call history/i });
 
-    await user.selectOptions(screen.getByRole("combobox"), "Inbound");
+    // The design-system Select renders its own listbox — a native <select> cannot style the OS-drawn popup,
+    // which is why this control was converted. Same keyboard contract, different driving.
+    await user.click(screen.getByRole("combobox"));
+    await user.click(await screen.findByRole("option", { name: /inbound/i }));
     const section = screen.getByRole("region", { name: /call history/i });
     // Scoped to the ROW chips — the filter's own <option> elements carry these words too.
     expect(section.querySelector('[data-direction="Outbound"]')).toBeNull();
@@ -539,3 +550,51 @@ function callHistorySection(): PatientProfileContract["sections"][number] {
     },
   };
 }
+
+// ---------------------------------------------------------------- opening an encounter from the profile
+
+describe("20.4 — the encounters section opens an encounter", () => {
+  const enc = (over: Record<string, unknown> = {}) => ({
+    encounterRef: "ENC-2026-000074",
+    occurredAt: "2026-08-01T09:00:00Z",
+    status: "Completed",
+    ...over,
+  });
+
+  it("makes the reference a control that routes to the workspace", async () => {
+    // The section listed a clinician's own visits and offered no way into any of them: the reference is a
+    // human-readable number and addresses nothing, so reading a past visit meant leaving the profile.
+    const user = userEvent.setup();
+    seedSession("doctor");
+    renderNode(
+      <ApiProvider client={fakeApi({
+        patientProfile: vi.fn().mockResolvedValue(
+          profile([{ key: "encounters", state: "Visible", data: { items: [enc({ encounterId: "e-77" })] } }]),
+        ),
+      })}>
+        <PatientProfile beneficiaryId={BEN} />
+        <Where />
+      </ApiProvider>,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "ENC-2026-000074" }));
+    // Carries the id, not the ref — the ref addresses nothing.
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("encounter=e-77"));
+  });
+
+  it("renders a row with no id as plain text rather than a dead control", async () => {
+    // `V(meta)` — reception, finance and beneficiary management have no encounter workspace, so the handle was
+    // never sent. Absence means "not openable by you"; a button that goes nowhere would say the opposite.
+    seedSession("reception");
+    renderProfile(
+      fakeApi({
+        patientProfile: vi.fn().mockResolvedValue(
+          profile([{ key: "encounters", state: "Visible", data: { items: [enc()] } }]),
+        ),
+      }),
+    );
+
+    expect(await screen.findByText("ENC-2026-000074")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "ENC-2026-000074" })).not.toBeInTheDocument();
+  });
+});

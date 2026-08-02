@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Button,
   DataTable,
@@ -601,16 +602,40 @@ function PastMedicalHistoryView({ data }: { data: ProfilePastMedicalHistory }) {
 
 // ---------------------------------------------------------------- 5. encounters
 
+/**
+ * Encounters — and the way INTO one.
+ *
+ * <b>The reference is a control, not a caption.</b> The section listed a clinician's own visits with no way to
+ * open any of them: the number is human-readable and addresses nothing, so reading a past visit meant leaving
+ * the profile and finding it again from a worklist. The row opens the encounter workspace and records where it
+ * came from, so Back returns to this profile — scrolled and filtered as it was.
+ *
+ * Rows arriving without an `encounterId` render as plain text. That is the `V(meta)` projection: reception,
+ * finance and beneficiary management have no encounter workspace, so the handle was never sent. Absence means
+ * "not openable by you", and a dead button would say the opposite.
+ */
 function EncountersView({ data }: { data: ProfileEncounters }) {
   const t = useLoc();
   const fmt = useFormat();
+  const navigate = useNavigate();
+  const location = useLocation();
   const rows = data.items ?? [];
   if (rows.length === 0) return <Empty />;
+
+  const openEncounter = (encounterId: string) =>
+    navigate(`/clinician/encounter?encounter=${encodeURIComponent(encounterId)}`, {
+      state: { from: `${location.pathname}${location.search}` },
+    });
 
   const cols = columns<EncounterRow>(
     { key: "occurredAt", header: t(L.occurredAt), cell: (r) => fmt.dateTime(r.occurredAt),
       sortable: true, sortValue: (r) => r.occurredAt },
-    { key: "encounterRef", header: t(L.ref), cell: (r) => r.encounterRef,
+    { key: "encounterRef", header: t(L.ref),
+      cell: (r) => (r.encounterId
+        ? <button type="button" className="linklike tnum" onClick={() => openEncounter(r.encounterId!)}>
+            {r.encounterRef}
+          </button>
+        : <span className="tnum">{r.encounterRef}</span>),
       sortable: true, sortValue: (r) => r.encounterRef },
     anyHas(rows, (r) => r.branchName) && {
       key: "branch", header: t(L.branch), cell: (r) => r.branchName,

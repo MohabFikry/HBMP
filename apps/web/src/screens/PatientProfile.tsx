@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Card, Icon, InlineAlert, useTheme } from "@mersal/design-system";
+import { Button, Card, Icon, InlineAlert, Select, useTheme } from "@mersal/design-system";
 import type { IconName } from "@mersal/design-system";
 import type {
   CallHistoryRow,
@@ -65,6 +65,8 @@ const STR = {
   outbound: { en: "Outbound", ar: "صادر" },
   alerts: { en: "Alerts", ar: "تنبيهات" },
   actions: { en: "Actions", ar: "إجراءات" },
+  filterByDirection: { en: "Filter by direction", ar: "تصفية حسب الاتجاه" },
+  allCalls: { en: "All calls", ar: "كل المكالمات" },
   // Names for the identity strip's icon-per-fact chips. The icon is decorative; these are what a screen
   // reader announces, so "Female" is not read out as a bare word with nothing saying it is the sex.
   age: { en: "Age", ar: "العمر" },
@@ -713,14 +715,23 @@ function CallHistoryView({ data, beneficiaryId }: { data: CallHistorySection; be
   return (
     <div className="call-history">
       <div className="call-history-toolbar">
-        <label>
-          <span className="sr-only">{t({ en: "Filter by direction", ar: "تصفية حسب الاتجاه" })}</span>
-          <select value={direction} onChange={(e) => setDirection(e.target.value as typeof direction)}>
-            <option value="all">{t({ en: "All calls", ar: "كل المكالمات" })}</option>
-            <option value="Inbound">{t(STR.inbound)}</option>
-            <option value="Outbound">{t(STR.outbound)}</option>
-          </select>
-        </label>
+        {/*
+          The design-system Select, not a native <select>. A native one cannot style its own option list —
+          the popup is drawn by the OS — so it arrived system-blue and square-cornered inside a rounded
+          Mersal card, with a default border no other control on the profile has. Same reason the branch
+          switcher in the app bar was converted; the keyboard contract (arrows, Home/End, typeahead, Escape)
+          is unchanged.
+        */}
+        <Select
+          aria-label={t(STR.filterByDirection)}
+          value={direction}
+          onChange={(v) => setDirection(v as typeof direction)}
+          options={[
+            { value: "all", label: t(STR.allCalls) },
+            { value: "Inbound", label: t(STR.inbound) },
+            { value: "Outbound", label: t(STR.outbound) },
+          ]}
+        />
         {visible.length > 0 ? (
           <Button variant="secondary" onClick={copyAll}>
             {t(STR.copyAll)}

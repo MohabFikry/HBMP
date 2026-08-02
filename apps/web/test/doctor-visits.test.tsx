@@ -182,3 +182,47 @@ describe("Doctor visits (US-030 / 23 §1)", () => {
     expect(await axe(container, { rules: { "color-contrast": { enabled: false } } })).toHaveNoViolations();
   });
 });
+
+/**
+ * The encounter workspace is reached FROM somewhere — a profile's encounter row, or "Start visit" here. Both
+ * have navigated to it with `?encounter=` since the screen existed, and it never read the parameter: every
+ * arrival landed on the patient picker with nothing selected, so a doctor who pressed "Start visit" got a
+ * list and had to find in it the visit they had just started.
+ */
+describe("Encounter workspace deep link", () => {
+  it("opens the encounter named in the query string", async () => {
+    const { DoctorEncounter } = await import("../src/screens/DoctorEncounter");
+    // A COMPLETE Encounter. Mocking the client bypasses the contract parse that normally guarantees these
+    // fields, so a partial fixture makes the panel throw on `e.soap.subjective` — a fault in the test, not in
+    // the screen, and one that surfaces as an unhandled error rather than a failure.
+    const getEncounter = vi.fn().mockResolvedValue({
+      id: "enc-77", patientId: "ben-9", patientName: { en: "Fatma Ibrahim", ar: "فاطمة" },
+      openedAt: "2026-08-01T09:00:00Z", signed: false,
+      soap: { subjective: "", objective: "", assessment: "", plan: "" },
+      vitals: { heightCm: null, weightKg: null, systolic: null, diastolic: null, heartRate: null, tempC: null },
+      allergies: [], diagnoses: [],
+    });
+    render(
+      <AppProviders
+        authClient={new DevAuthClient()}
+        apiClient={{
+          listPatients: vi.fn().mockResolvedValue([]),
+          getEncounter,
+          // The panel renders PatientContextBar, which reads the profile header. Stubbed so the deep-link
+          // assertion is not tangled up with the context bar's own fetch.
+          patientProfile: vi.fn().mockResolvedValue({ beneficiaryId: "ben-9", servedAt: "2026-08-01T09:00:00Z", sections: [] }),
+        } as unknown as ApiClient}
+      >
+        <MemoryRouter
+          initialEntries={["/clinician/encounter?encounter=enc-77"]}
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
+          <DoctorEncounter />
+        </MemoryRouter>
+      </AppProviders>,
+    );
+
+    // Selected on the FIRST paint, from the URL — not after a click on the picker.
+    await waitFor(() => expect(getEncounter).toHaveBeenCalledWith("enc-77"));
+  });
+});

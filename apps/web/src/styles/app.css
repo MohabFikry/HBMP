@@ -1446,12 +1446,16 @@ nav.mrs-rail {
 
 .patient-context-bar { display: flex; flex-wrap: wrap; gap: var(--sp3); align-items: center; padding: var(--sp2) var(--sp3); border: 1px solid currentColor; border-radius: var(--r-md); margin-bottom: var(--sp3); }
 .patient-context-bar .profile-avatar { width: 2rem; height: 2rem; }
-/* The patient name in the context strip. A <button> since 25.x (it routes rather than reloading the
-   document), so it has to shed the UA button chrome the <a> it replaced never had — background, border,
-   padding and the centred text a flex/grid parent would otherwise stretch. It stays visibly actionable:
-   underlined on hover/focus, pointer cursor, and the app's own focus ring rather than the OS one. */
+/* A BUTTON that reads as inline text — for the places where the thing to click is a name or a reference,
+   not a control: the patient name in the context strip, an encounter number in the profile.
+
+   Each of these was an `<a href>` or plain text before. As anchors they reloaded the SPA to reach an in-app
+   route; as text they were dead ends. They are buttons because they run JS navigation, which means shedding
+   the UA button chrome an <a> never had — background, border, padding, and the centred text a flex/grid
+   parent would otherwise stretch — while staying visibly actionable: underline on hover, pointer cursor, and
+   the app's own focus ring rather than the OS one. */
+.linklike,
 .context-bar-name {
-  font-weight: 600;
   background: none;
   border: 0;
   padding: 0;
@@ -1462,7 +1466,11 @@ nav.mrs-rail {
   cursor: pointer;
   border-radius: var(--r-sm);
 }
+.context-bar-name { font-weight: 600; }
+.linklike { text-decoration: underline; text-underline-offset: 2px; }
+.linklike:hover,
 .context-bar-name:hover { text-decoration: underline; }
+.linklike:focus-visible,
 .context-bar-name:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .context-bar-meta { opacity: 0.8; font-size: 0.9em; }
 

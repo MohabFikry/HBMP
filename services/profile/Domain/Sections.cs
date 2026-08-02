@@ -141,7 +141,9 @@ public sealed record PastMedicalHistorySection(
 
 public sealed record EncounterRow(
     string EncounterRef, DateTimeOffset OccurredAt, string? BranchName,
-    string? ClinicianName, string? Specialty, string? Reason, string Status);
+    string? ClinicianName, string? Specialty, string? Reason, string Status,
+    /// <summary>The handle a clinical row is opened by. Null under <c>meta</c> — see the projection.</summary>
+    string? EncounterId = null);
 
 public sealed record EncountersSection(IReadOnlyList<EncounterRow> Items)
 {
@@ -150,7 +152,10 @@ public sealed record EncountersSection(IReadOnlyList<EncounterRow> Items)
     /// logistics of a visit, never its content.</summary>
     public EncountersSection Project(string? variant) => variant switch
     {
-        ProfileVariants.Meta => new([.. Items.Select(i => i with { Reason = null })]),
+        // `meta` drops the ID as well as the reason. It is not clinical content, it is a CAPABILITY handle:
+        // the roles on this variant (reception, finance, beneficiary management) have no encounter workspace
+        // to open, so sending them a way to address one is a field with no use and a future misuse.
+        ProfileVariants.Meta => new([.. Items.Select(i => i with { Reason = null, EncounterId = null })]),
         _ => this,
     };
 }

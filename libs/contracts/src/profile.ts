@@ -181,6 +181,15 @@ export const zEncounterRow = z.object({
   /** Dropped under `V(meta)`: "chest pain" is clinical content, and reception gets a visit's logistics only. */
   reason: z.string().optional(),
   status: z.string(),
+  /**
+   * The encounter's id, so the row can be OPENED. `encounterRef` is the human-readable number and addresses
+   * nothing.
+   *
+   * Absent under `V(meta)` — reception, finance and beneficiary management have no encounter workspace, so
+   * the handle is withheld rather than sent to a role that cannot use it. A view must therefore treat absence
+   * as "not openable by you", never as a broken row.
+   */
+  encounterId: zId.optional(),
 });
 export type EncounterRow = z.infer<typeof zEncounterRow>;
 

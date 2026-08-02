@@ -15,7 +15,8 @@ import type { Encounter, Localized, PatientListItem } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
 import { PatientContextBar } from "./PatientProfile";
-import { AsyncSection, PageHeader, useLoc } from "./_shared";
+import { useSearchParams } from "react-router-dom";
+import { AsyncSection, PageHeader, useBackTarget, useLoc } from "./_shared";
 
 const S = {
   title: { en: "Encounter Workspace", ar: "مساحة اللقاء" },
@@ -59,8 +60,18 @@ const S = {
 export function DoctorEncounter() {
   const api = useApi();
   const t = useLoc();
+  const back = useBackTarget();
   const patients = useAsync<PatientListItem[]>(() => api.listPatients(), []);
-  const [selected, setSelected] = useState<string | null>(null);
+
+  // `?encounter=` — the encounter this screen was opened FOR, from a profile row or from "Start visit" on the
+  // day board. Both have navigated here with it since the workspace existed and it was never read, so every
+  // arrival landed on the picker with nothing selected: the doctor pressed "Start visit", got a list, and had
+  // to find in it the visit they had just started.
+  //
+  // Initial state, not an effect, so the panel renders with the right encounter on the FIRST paint rather than
+  // flashing the empty state — and so a later click still wins, which an effect keyed on the param would undo.
+  const [params] = useSearchParams();
+  const [selected, setSelected] = useState<string | null>(() => params.get("encounter"));
 
   const cols: Column<PatientListItem>[] = [
     { key: "name", header: t(S.name), cell: (r) => <strong>{t(r.name)}</strong> },
@@ -76,7 +87,11 @@ export function DoctorEncounter() {
 
   return (
     <>
-      <PageHeader title={t(S.title)} />
+      {/* Reached FROM somewhere — a profile's encounter row, a visit board's "Start visit". Without this the
+          workspace was a one-way door: the only way back to the file you opened it from was the nav rail,
+          which lands on that screen fresh. `useBackTarget` renders nothing when there genuinely is no origin
+          (a pasted deep link in a new tab), so it never offers a way out of the app. */}
+      <PageHeader title={t(S.title)} back={back ?? undefined} />
       <div className="split">
         <Card as="section" style={{ padding: "var(--sp3)" }}>
           <h2 className="section-h">{t(S.myPatients)}</h2>
