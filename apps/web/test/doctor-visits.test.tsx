@@ -74,7 +74,7 @@ describe("Doctor visits (US-030 / 23 §1)", () => {
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/clinician/encounter?encounter=enc-77"));
   });
 
-  it("offers no Start visit for a patient who has not arrived, and says what is awaited", async () => {
+  it("offers no Start visit for a patient who has not arrived, and marks the row Pending", async () => {
     renderVisits(fakeApi({
       appointments: vi.fn().mockResolvedValue([
         row({ checkedIn: false, checkInEligible: true, startVisitEligible: false,
@@ -82,8 +82,69 @@ describe("Doctor visits (US-030 / 23 §1)", () => {
       ]),
     }));
 
-    expect(await screen.findByText(/waiting for the desk/i)).toBeInTheDocument();
+    expect(await screen.findByText(/^pending$/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /start visit/i })).not.toBeInTheDocument();
+  });
+
+  it("shows the patient's NAME, falling back to the token only when there isn't one", async () => {
+    renderVisits(fakeApi({
+      appointments: vi.fn().mockResolvedValue([
+        row({ id: "a-named", beneficiaryName: "Fatma Ibrahim" }),
+        row({ id: "a-unnamed", beneficiary: { id: "ben-2", token: "•••7788" } }),
+      ]),
+    }));
+
+    // The doctor is about to call this person into a room; "•••4821" cannot be read out.
+    expect(await screen.findByText("Fatma Ibrahim")).toBeInTheDocument();
+    expect(screen.getByText("•••7788")).toBeInTheDocument();
+  });
+
+  it("searches across patient, type and status", async () => {
+    const user = userEvent.setup();
+    renderVisits(fakeApi({
+      appointments: vi.fn().mockResolvedValue([
+        row({ id: "a-1", beneficiaryName: "Fatma Ibrahim" }),
+        row({ id: "a-2", beneficiaryName: "Khaled Mostafa" }),
+      ]),
+    }));
+
+    await screen.findByText("Fatma Ibrahim");
+    await user.type(screen.getByRole("searchbox"), "khaled");
+
+    await waitFor(() => expect(screen.queryByText("Fatma Ibrahim")).not.toBeInTheDocument());
+    expect(screen.getByText("Khaled Mostafa")).toBeInTheDocument();
+  });
+
+  it("filters by status", async () => {
+    const user = userEvent.setup();
+    renderVisits(fakeApi({
+      appointments: vi.fn().mockResolvedValue([
+        row({ id: "a-in", beneficiaryName: "Fatma Ibrahim" }),
+        row({ id: "a-booked", beneficiaryName: "Khaled Mostafa", checkedIn: false, checkInEligible: true,
+              startVisitEligible: false, status: { kind: "info", label: { en: "Booked", ar: "محجوز" } } }),
+      ]),
+    }));
+
+    await screen.findByText("Fatma Ibrahim");
+    await user.click(screen.getByRole("button", { name: /booked/i }));
+
+    await waitFor(() => expect(screen.queryByText("Fatma Ibrahim")).not.toBeInTheDocument());
+    expect(screen.getByText("Khaled Mostafa")).toBeInTheDocument();
+  });
+
+  it("pages a clinic that does not fit on one screen", async () => {
+    renderVisits(fakeApi({
+      appointments: vi.fn().mockResolvedValue(
+        Array.from({ length: 14 }, (_, i) =>
+          row({ id: `a-${i}`, beneficiaryName: `Patient ${String(i).padStart(2, "0")}`,
+                scheduledStart: `2026-07-26T${String(9 + i).padStart(2, "0")}:00:00Z` })),
+      ),
+    }));
+
+    // Ten per page, in time order — so the last four are on page 2 rather than silently absent.
+    expect(await screen.findByText("Patient 00")).toBeInTheDocument();
+    expect(screen.getByText("Patient 09")).toBeInTheDocument();
+    expect(screen.queryByText("Patient 10")).not.toBeInTheDocument();
   });
 
   it("a 403 says the appointment belongs to another practitioner rather than failing silently", async () => {
