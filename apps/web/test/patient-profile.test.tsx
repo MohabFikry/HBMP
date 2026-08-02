@@ -598,3 +598,59 @@ describe("20.4 — the encounters section opens an encounter", () => {
     expect(screen.queryByRole("button", { name: "ENC-2026-000074" })).not.toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------- past medical history columns
+
+describe("20.4 — past medical history names the condition", () => {
+  const pmh = (conditions: unknown[]) =>
+    profile([{ key: "pastMedicalHistory", state: "Visible", data: { conditions } } as never]);
+
+  it("shows the code alone, and resolves the condition from it", async () => {
+    // emr stores a diagnosis as a bare ICD-10 code and sends that code as the display too, so both columns
+    // read "K21.9": the table said the same thing twice and named no condition at all. Resolving a code to
+    // its meaning is masterdata's job, so the browser joins the two reads it already holds.
+    const icdTitles = vi.fn().mockResolvedValue(new Map([["I10", "Essential (primary) hypertension"]]));
+    renderProfile(
+      fakeApi({
+        icdTitles,
+        patientProfile: vi.fn().mockResolvedValue(
+          pmh([{ system: "ICD-10", code: "I10", display: "I10", clinicalStatus: "Active" }]),
+        ),
+      }),
+    );
+
+    expect(await screen.findByText("Essential (primary) hypertension")).toBeInTheDocument();
+    // The code column carries the code and nothing else — every row in a clinical table is ICD-10, so the
+    // prefix repeated on every line and cost the width the condition needed.
+    expect(screen.getByText("I10")).toBeInTheDocument();
+    expect(screen.queryByText("ICD-10 I10")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the code when masterdata carries no title", async () => {
+    // A blank cell here would read as "no diagnosis recorded", which is a different and much worse claim.
+    renderProfile(
+      fakeApi({
+        icdTitles: vi.fn().mockResolvedValue(new Map()),
+        patientProfile: vi.fn().mockResolvedValue(
+          pmh([{ system: "ICD-10", code: "X99.9", display: "X99.9", clinicalStatus: "Active" }]),
+        ),
+      }),
+    );
+
+    await waitFor(() => expect(screen.getAllByText("X99.9").length).toBeGreaterThan(0));
+  });
+
+  it("does not fail the section when the lookup errors", async () => {
+    // A reference lookup must never take a clinical section down with it.
+    renderProfile(
+      fakeApi({
+        icdTitles: vi.fn().mockRejectedValue(new Error("masterdata down")),
+        patientProfile: vi.fn().mockResolvedValue(
+          pmh([{ system: "ICD-10", code: "I10", display: "I10", clinicalStatus: "Active" }]),
+        ),
+      }),
+    );
+
+    await waitFor(() => expect(screen.getAllByText("I10").length).toBeGreaterThan(0));
+  });
+});

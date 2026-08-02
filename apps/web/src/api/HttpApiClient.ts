@@ -165,6 +165,10 @@ const beneficiaryStatusChip = (s: unknown): { kind: "ok" | "info" | "warn" | "ba
   return map[k] ?? map.Pending;
 };
 /** Map an emr appointment status (Booked/CheckedIn/Completed/NoShow/Cancelled) → a non-color StatusKind chip. */
+/** Code → title, or "" for a code masterdata does not carry. Module-level: the ICD catalogue is immutable
+ *  within a deployment, and the same codes recur across sections and across patients. */
+const icdTitleCache = new Map<string, string>();
+
 const apptStatusChip = (s: unknown): { kind: "ok" | "info" | "warn" | "neu"; label: { en: string; ar: string } } => {
   const k = String(s ?? "Booked");
   const map: Record<string, { kind: "ok" | "info" | "warn" | "neu"; label: { en: string; ar: string } }> = {
@@ -1673,6 +1677,31 @@ export class HttpApiClient implements ApiClient {
   }
 
   // ---- Practitioners (Phase 14.5, design 37 §4) -----------------------------------------------------------
+  async icdTitles(codes: readonly string[]) {
+    const wanted = [...new Set(codes.filter(Boolean))];
+    const out = new Map<string, string>();
+    await Promise.all(wanted.map(async (code) => {
+      const cached = icdTitleCache.get(code);
+      if (cached !== undefined) {
+        if (cached) out.set(code, cached);
+        return;
+      }
+      try {
+        const r = (await getRaw(`/icd-codes/${encodeURIComponent(code)}`)) as any;
+        const title = typeof r?.title === "string" ? r.title : "";
+        // Cached either way. A code masterdata does not carry is a stable fact for this session, and
+        // re-asking for it on every render of every section is a request per row per paint.
+        icdTitleCache.set(code, title);
+        if (title) out.set(code, title);
+      } catch {
+        // A reference lookup must never take a clinical section down with it. The caller shows the code,
+        // which is what it showed before this method existed.
+        icdTitleCache.set(code, "");
+      }
+    }));
+    return out;
+  }
+
   async specialties() {
     const r = (await getRaw(`/specialties`)) as any[];
     return (Array.isArray(r) ? r : []).map((s: any) =>

@@ -1,5 +1,7 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useApi } from "../api/ApiProvider";
+import { useAsync } from "../api/useAsync";
 import {
   Button,
   DataTable,
@@ -540,17 +542,40 @@ function hasAnyValue(data: object): boolean {
 function PastMedicalHistoryView({ data }: { data: ProfilePastMedicalHistory }) {
   const t = useLoc();
   const fmt = useFormat();
+  const api = useApi();
   const conditions = data.conditions ?? [];
   const records = data.uploadedRecords ?? [];
 
+  /**
+   * The CONDITION, resolved from the code.
+   *
+   * emr stores a diagnosis as a bare ICD-10 code and sends that code as the display too — so both columns
+   * read "K21.9" and the table said the same thing twice while naming no condition at all. Resolving a code
+   * to its meaning is masterdata-service's job (emr's own comment says so, and being a second answerer is
+   * what it declines to be), so the browser joins the two reads it already holds.
+   *
+   * Falls back to the code. A condition masterdata does not carry still has to appear on the patient's
+   * history — a blank cell would read as "no diagnosis recorded".
+   */
+  const codes = useMemo(
+    () => [...new Set(conditions.map((c) => c.code).filter((c): c is string => Boolean(c)))],
+    [conditions]);
+  const titles = useAsync(
+    useCallback(() => api.icdTitles(codes), [api, codes.join(",")]),  // eslint-disable-line react-hooks/exhaustive-deps
+    [codes.join(",")]);
+  const titleFor = (r: CodedCondition) =>
+    (r.code ? titles.data?.get(r.code) : undefined) ?? r.display;
+
   const cols = columns<CodedCondition>(
-    { key: "display", header: t(L.condition), cell: (r) => r.display,
-      sortable: true, sortValue: (r) => r.display },
     anyHas(conditions, (r) => r.code) && {
-      key: "code", header: t(L.code),
-      // System and code belong together: "E11" means nothing without the ICD-10 it belongs to.
-      cell: (r) => [r.system, r.code].filter(Boolean).join(" "),
+      // The CODE alone. It carried "ICD-10 K21.9" on the argument that a code means nothing without its
+      // system — true in a payload, not in a column headed "Code" in a clinical table where every row is
+      // ICD-10. The prefix repeated on every line and cost the width the condition needed.
+      key: "code", header: t(L.code), cell: (r) => <span className="tnum">{r.code}</span>,
+      sortable: true, sortValue: (r) => r.code,
     },
+    { key: "display", header: t(L.condition), cell: (r) => titleFor(r),
+      sortable: true, sortValue: (r) => titleFor(r) },
     anyHas(conditions, (r) => r.clinicalStatus) && {
       key: "clinicalStatus", header: t(L.status),
       cell: (r) => (r.clinicalStatus ? <Status status={r.clinicalStatus} /> : null),

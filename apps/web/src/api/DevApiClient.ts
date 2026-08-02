@@ -1511,6 +1511,22 @@ export class DevApiClient implements ApiClient {
    * looked right in dev and filtered to nothing in production, and the specialty filter is the one thing the
    * booking screen depends on. PSYCH and CPSY are present because they drive the 14.6 sensitivity defaults.
    */
+  /** A handful of real ICD-10 titles — enough that the history table reads as conditions rather than codes
+   *  in the dev harness. Anything unlisted is absent, which is exactly what a real miss looks like. */
+  icdTitles(codes: readonly string[]) {
+    const catalogue: Record<string, string> = {
+      "I10": "Essential (primary) hypertension",
+      "E11.9": "Type 2 diabetes mellitus, Without complications",
+      "K21.9": "Gastro-oesophageal reflux disease without oesophagitis",
+      "J22": "Unspecified acute lower respiratory infection",
+      "D50.9": "Iron deficiency anaemia, unspecified",
+      "Z00.0": "General medical examination",
+      "J02.9": "Acute pharyngitis, unspecified",
+    };
+    return Promise.resolve(
+      new Map(codes.filter((c) => catalogue[c]).map((c) => [c, catalogue[c]] as const)));
+  }
+
   specialties() {
     return this.gate(
       () => ok(z.array(zSpecialty), [

@@ -108,6 +108,17 @@ import type {
  * physically cannot read data outside its zone from this surface.
  */
 export interface ApiClient {
+  /**
+   * ICD-10 titles for the codes on screen, from masterdata-service.
+   *
+   * <b>A client-side join, deliberately.</b> emr stores a diagnosis as a bare code and says so: resolving
+   * "I10" to "Essential (primary) hypertension" is masterdata's job, and doing it in emr would make emr a
+   * second place that answers what a code means. The browser holds the read for both, so it joins them —
+   * the same shape as `bookableDoctors`, and no more privileged than either call on its own.
+   *
+   * Missing codes are simply absent from the map; the caller falls back to showing the code.
+   */
+  icdTitles(codes: readonly string[]): Promise<Map<string, string>>;
   // Reception — eligibility (Phase 2)
   searchEligibility(query: string): Promise<EligibilityHit[]>;
   checkEligibility(beneficiaryId: string): Promise<EligibilityResult>;
