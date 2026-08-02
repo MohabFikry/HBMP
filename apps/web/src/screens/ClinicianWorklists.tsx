@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useFormat, type Formatters } from "../i18n/useFormat";
-import { Button, Card, DataTable, Modal, StatusChip } from "@mersal/design-system";
-import type { Column } from "@mersal/design-system";
+import { Button, Card, DataTable, DataTableView, Modal, StatusChip, useTableQuery } from "@mersal/design-system";
+import type { Column, TableFilterSpec } from "@mersal/design-system";
 import type { Localized, OrderRow, PatientListItem, ResultDetail, RxRow } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
@@ -11,6 +11,16 @@ import { RestrictedResultCard, RequestAccessDialog } from "./RestrictedResultCar
 const S = {
   patientsTitle: { en: "My Patients", ar: "مرضاي" },
   patientsEmpty: { en: "No patients on your worklist.", ar: "لا يوجد مرضى في قائمتك." },
+  patientsNoMatches: {
+    en: "No patients match. Change the search or clear the filters.",
+    ar: "لا يوجد مرضى مطابقون. عدّل البحث أو أزل عوامل التصفية.",
+  },
+  search: { en: "Search", ar: "بحث" },
+  patientsSearchHint: { en: "Name, MRN or status", ar: "الاسم أو الرقم الطبي أو الحالة" },
+  // The three encounter states, worded exactly as the chips in the Status column (`encounterStatus`).
+  encInProgress: { en: "In progress", ar: "جارٍ" },
+  encCompleted: { en: "Completed", ar: "مكتمل" },
+  encCancelled: { en: "Cancelled", ar: "ملغى" },
   ordersTitle: { en: "Orders", ar: "الطلبات" },
   ordersEmpty: { en: "You haven't placed any orders.", ar: "لم تقم بطلب أي فحوصات." },
   rxTitle: { en: "Prescriptions", ar: "الوصفات" },
@@ -48,15 +58,25 @@ export function DoctorPatients() {
   const openProfile = useOpenProfile();
   const state = useAsync<PatientListItem[]>(() => api.listPatients(), []);
   const cols: Column<PatientListItem>[] = [
-    { key: "patient", header: t(S.patient), cell: (r) => t(r.name) },
-    { key: "mrn", header: t(S.mrn), cell: (r) => <span className="tnum">{r.mrn}</span> },
-    { key: "lastVisit", header: t(S.lastVisit), cell: (r) => <span className="tnum">{fmt.date(r.lastVisit)}</span> },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    // The patient's NAME. emr supplies it on this endpoint from the appointment the visit was started from;
+    // a walk-in that was never booked still falls back to the masked token, which the client builds.
+    { key: "patient", header: t(S.patient), cell: (r) => <strong>{t(r.name)}</strong>,
+      sortable: true, sortValue: (r) => t(r.name) },
+    { key: "mrn", header: t(S.mrn), cell: (r) => <span className="tnum">{r.mrn}</span>,
+      sortable: true, sortValue: (r) => r.mrn },
+    // Sorts on the ISO date, not the rendered one: `fmt.date` renders Arabic-Indic digits under the Arabic
+    // locale, and sorting those orders the worklist by glyph.
+    { key: "lastVisit", header: t(S.lastVisit), cell: (r) => <span className="tnum">{fmt.date(r.lastVisit)}</span>,
+      sortable: true, sortValue: (r) => r.lastVisit ?? "" },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />,
+      sortable: true, sortValue: (r) => r.status.label.en },
     {
       // design 39 §6's "search → profile" entry, from the list a clinician actually starts their day in.
       // The whole unified profile was unreachable from every clinical worklist without this.
       key: "file",
-      header: "",
+      // A real header, not "": an empty <th> has no accessible name, so a screen-reader user hears nothing
+      // for the column their cursor is in (axe empty-table-header).
+      header: t(S.openFile),
       cell: (r) => (
         <Button variant="secondary" size="sm" onClick={() => openProfile(r.beneficiaryId)}>
           {t(S.openFile)}
@@ -64,12 +84,54 @@ export function DoctorPatients() {
       ),
     },
   ];
+
+  // Matched on the ENGLISH label: the row carries its status only as a pre-resolved `{kind, label}` chip,
+  // and matching the localized half would break the filter the moment the portal is switched to Arabic.
+  const filters: TableFilterSpec<PatientListItem>[] = useMemo(() => [
+    {
+      key: "status",
+      label: t(S.status),
+      options: [
+        { value: S.encInProgress.en, label: t(S.encInProgress) },
+        { value: S.encCompleted.en,  label: t(S.encCompleted) },
+        { value: S.encCancelled.en,  label: t(S.encCancelled) },
+      ],
+      match: (r, value) => r.status.label.en === value,
+    },
+  ], [t]);
+
+  // Read outside AsyncSection's render prop: a hook called there would be conditional on the load finishing.
+  const query = useTableQuery<PatientListItem>({
+    rows: state.data ?? [],
+    columns: cols,
+    // Both languages of the name and the status, because the portal switches and a haystack in one language
+    // goes quiet in the other.
+    searchText: (r) => [r.name.en, r.name.ar, r.mrn, r.status.label.en, r.status.label.ar].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.patientsSearchHint),
+    filters,
+    pageSize: 10,
+    // Most recent visit first — this is a panel a clinician scans for who they have just seen, and emr
+    // already returns it newest-first.
+    initialSortKey: "lastVisit",
+    initialSortDir: "descending",
+  });
+
   return (
     <>
       <PageHeader title={t(S.patientsTitle)} />
       <Card as="section" style={{ padding: "var(--sp3)" }}>
         <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.patientsEmpty}>
-          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.patientsTitle)} />}
+          {() => (
+            <DataTableView
+              query={query}
+              columns={cols}
+              rowKey={(r) => r.id}
+              caption={t(S.patientsTitle)}
+              emptyLabel={t(S.patientsEmpty)}
+              noMatchesLabel={t(S.patientsNoMatches)}
+            />
+          )}
         </AsyncSection>
       </Card>
     </>

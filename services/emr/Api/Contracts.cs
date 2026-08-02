@@ -7,10 +7,18 @@ public sealed record CreateEncounterRequest(Guid BeneficiaryId, Guid? Appointmen
 
 public sealed record EncounterResponse(
     Guid EncounterId, string EncounterNo, Guid BeneficiaryId, Guid? AppointmentId,
-    Guid? ProviderId, string Status, DateTimeOffset StartedAt)
+    Guid? ProviderId, string Status, DateTimeOffset StartedAt,
+    /// <summary>The patient's name, when the caller is entitled to it and emr holds one.
+    ///
+    /// <para>Null on every endpoint except the treating clinician's own worklist (<c>GET /encounters/mine</c>),
+    /// and null there for a walk-in that was never booked. It is NOT fetched from patient-service: the value
+    /// is emr's own <c>appointment.beneficiary_name</c>, captured at booking (0013) — the same column the day
+    /// board reads. emr holds no beneficiary demographics and does not acquire any here.</para></summary>
+    string? BeneficiaryName = null)
 {
-    public static EncounterResponse From(Encounter e) => new(
-        e.EncounterId, e.EncounterNo, e.BeneficiaryId, e.AppointmentId, e.ProviderId, e.Status.ToString(), e.StartedAt);
+    public static EncounterResponse From(Encounter e, string? beneficiaryName = null) => new(
+        e.EncounterId, e.EncounterNo, e.BeneficiaryId, e.AppointmentId, e.ProviderId, e.Status.ToString(),
+        e.StartedAt, beneficiaryName);
 }
 
 public sealed record QueueItemResponse(

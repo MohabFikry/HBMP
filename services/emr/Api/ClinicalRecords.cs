@@ -44,7 +44,31 @@ public static class ClinicalEndpoints
                 .OrderByDescending(e => e.StartedAt)
                 .Take(100)
                 .ToListAsync(ct);
-            return Results.Ok(mine.Select(EncounterResponse.From));
+
+            // The patient's NAME on the treating clinician's own worklist.
+            //
+            // This list was rendering "Beneficiary •••4821" for every row, which is unusable as a worklist:
+            // the doctor cannot tell which of their patients a row is without opening it. The masking is
+            // right on the boards that genuinely do not need identity (lab, pharmacy, approvals); the
+            // treating clinician is not one of them, and already reads the full clinical record behind each
+            // of these rows.
+            //
+            // The source is emr's OWN `appointment.beneficiary_name`, captured at BOOKING — the same column
+            // AppointmentsModule reads for the day board. No call to patient-service: emr holds no
+            // beneficiary demographics, and a service fetching a sibling's data on the caller's behalf is
+            // the aggregation shape this platform forbids outright.
+            //
+            // A walk-in encounter has no appointment and so no name here; it keeps the masked token, which
+            // is the honest answer rather than a blank cell.
+            var apptIds = mine.Select(e => e.AppointmentId).OfType<Guid>().Distinct().ToList();
+            var nameByAppt = apptIds.Count == 0
+                ? []
+                : await db.Appointments.AsNoTracking()
+                    .Where(a => apptIds.Contains(a.AppointmentId) && a.BeneficiaryName != null)
+                    .ToDictionaryAsync(a => a.AppointmentId, a => a.BeneficiaryName, ct);
+
+            return Results.Ok(mine.Select(e => EncounterResponse.From(
+                e, e.AppointmentId is { } id ? nameByAppt.GetValueOrDefault(id) : null)));
         });
 
         // ---- Full clinical record (US-030) — treating clinician or approval team only ----

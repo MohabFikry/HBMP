@@ -696,7 +696,12 @@ export class HttpApiClient implements ApiClient {
       parseOr(zPatientListItem, {
         id: e.encounterId,
         beneficiaryId: String(e.beneficiaryId ?? ""),
-        name: neutral(`Beneficiary •••${String(e.beneficiaryId ?? "").slice(-4)}`),
+        // The name when emr has one — this is the TREATING clinician's own worklist, and they read the full
+        // record behind every row. The masked token stays as the fallback for a walk-in that was never
+        // booked, where no name was ever captured; blank would read as data loss.
+        name: e.beneficiaryName
+          ? neutral(String(e.beneficiaryName))
+          : neutral(`Beneficiary •••${String(e.beneficiaryId ?? "").slice(-4)}`),
         mrn: e.encounterNo ?? "",
         treating: true,
         lastVisit: e.startedAt ? String(e.startedAt).slice(0, 10) : null,
