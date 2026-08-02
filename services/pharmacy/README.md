@@ -25,10 +25,19 @@ interaction/allergy alerts and raises referrals; a **pharmacist** searches dispe
 5. **Outbox** — `RxCreated`, `RxSubmitted` (+ `RxApproved` when auto-approved) to `pharmacy.events`, in the same
    transaction as the state change; consumers dedupe on event id.
 
-`RxCreated`, `RxCancelled` and `RxLinesDispensed` carry **`encounterId`** (ADR-0031) so emr can step them onto
-the patient's care episode. They carry the `rxNo` and **not the drug**: the episode timeline is read by
-reception, so "medicine dispensed · RX-2026-000031" is the act and which medicine is the care.
+`RxCreated`, `RxSubmitted`, `RxCancelled` and `RxLinesDispensed` carry **`encounterId`** (ADR-0031) so emr can
+step them onto the patient's care episode. They carry the `rxNo` and **not the drug**: the episode timeline is
+read by reception, so "medicine dispensed · RX-2026-000031" is the act and which medicine is the care.
 `CareFeedEnvelopeArchitectureTests` fails the build if a publish site drops the encounter.
+
+`RxSubmitted` is the routing one, and the only mirrored event that becomes a step *conditionally* — it is
+emitted for every prescription, so emr reads `requiresApproval` and appends `PrescriptionSentForApproval`
+only when it is set. It has to be on the feed because pharmacy has no other event for a gated prescription:
+`RxCreated` fires either way and `RxApproved` fires only when routing did **not** gate it, so a prescription
+waiting on a reviewer used to read on the episode exactly like one waiting to be collected. Its
+`orderedByUserId` is the token subject (`CreatedBy`) like every sibling event — it named a practitioner row
+id until 25.x, which made the one field whose purpose is "someone to reach" point at a directory entry rather
+than an account.
 
 Idempotent on `Idempotency-Key`; every mutation audited. `GET /api/v1/prescriptions/{id}` (treating-gated),
 `POST /api/v1/prescriptions/{id}/cancel` (legal only while not fully dispensed → audited `409` otherwise).

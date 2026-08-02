@@ -69,6 +69,13 @@ $need$;
 CREATE TEMP TABLE doc ON COMMIT DROP AS
 SELECT id AS uid, id::text AS uid_text FROM identity."user" WHERE user_name = 'doctor';
 
+-- The desk, for the same reason: a check-in is performed by reception, and the appointment timeline resolves
+-- its actors through identity's user-labels endpoint. Attributing it to a literal like 'seed:reception' would
+-- render as an unresolvable id chip on every seeded appointment — a real account resolves to a real name, so
+-- the timeline demonstrates what it is for instead of demonstrating its fallback.
+CREATE TEMP TABLE desk ON COMMIT DROP AS
+SELECT id::text AS uid_text FROM identity."user" WHERE user_name = 'reception';
+
 -- ── Clear this doctor's previous seeding ────────────────────────────────────────────────────────────────────
 -- Re-running on a later day would otherwise leave the old board behind: yesterday's "Booked" appointments
 -- sitting in the past, two sets of slots on the same roster. Scoped strictly to rows this file created — the
@@ -77,7 +84,19 @@ DELETE FROM emr.vital       WHERE encounter_id IN (SELECT e.encounter_id FROM em
 DELETE FROM emr.diagnosis   WHERE encounter_id IN (SELECT e.encounter_id FROM emr.encounter e, doc d WHERE e.created_by = d.uid_text);
 DELETE FROM emr.emr_note    WHERE encounter_id IN (SELECT e.encounter_id FROM emr.encounter e, doc d WHERE e.created_by = d.uid_text);
 DELETE FROM emr.queue_entry WHERE encounter_id IN (SELECT e.encounter_id FROM emr.encounter e, doc d WHERE e.created_by = d.uid_text);
+-- The care episode (ADR-0031) goes too, and for the same reason as the history below: the appointment ids are
+-- derived from the slot, so a re-created appointment would inherit the previous run's steps — orders placed
+-- in a visit that no longer exists, appended to a visit that has not happened yet.
+DELETE FROM emr.care_timeline
+ WHERE encounter_id IN (SELECT e.encounter_id FROM emr.encounter e, doc d WHERE e.created_by = d.uid_text)
+    OR appointment_id IN (SELECT a.appointment_id FROM emr.appointment a WHERE a.doctor_id IN (SELECT uid FROM doc));
 DELETE FROM emr.encounter   WHERE created_by IN (SELECT uid_text FROM doc);
+-- The history goes with them. It has no foreign key to the appointment, so deleting the row leaves its
+-- snapshots behind — and since the appointment ids are DERIVED from the slot, the re-created appointment
+-- inherits them. Left alone, every re-run added another lap to the same timeline: checked in, completed,
+-- booked, checked in, completed.
+DELETE FROM emr.appointment_history
+ WHERE appointment_id IN (SELECT a.appointment_id FROM emr.appointment a WHERE a.doctor_id IN (SELECT uid FROM doc));
 DELETE FROM emr.appointment WHERE doctor_id IN (SELECT uid FROM doc);
 DELETE FROM emr.appointment_slot s
  WHERE s.doctor_id IN (SELECT uid FROM doc)
@@ -274,12 +293,11 @@ JOIN LATERAL (
 ) b ON true
 WHERE s.rn % 7 = 0;
 
-INSERT INTO emr.appointment
-  (appointment_id, beneficiary_id, provider_id, location_id, slot_id, appointment_type, status,
-   scheduled_start, scheduled_end, branch_id, tenant_id, doctor_id, beneficiary_name, created_by, created_at)
-SELECT pg_temp.did('doctor-appt:'||c.slot_id), c.beneficiary_id, c.provider_id, c.location_id, c.slot_id,
-       c.appointment_type, c.appt_status, c.slot_start, c.slot_end, c.branch_id, c.tenant_id, c.doctor_id,
-       c.beneficiary_name, 'seed:doctor-account', now()
+-- ── The board, planned before it is written ─────────────────────────────────────────────────────────────────
+-- Materialised rather than inserted straight, because these rows are not written in their final state: every
+-- appointment is BOOKED first and then walked to where it belongs. See the walk below for why.
+CREATE TEMP TABLE appt_plan ON COMMIT DROP AS
+SELECT pg_temp.did('doctor-appt:'||c.slot_id) AS appointment_id, c.*
 FROM (
     SELECT t.slot_id, t.provider_id, t.location_id, t.slot_start, t.slot_end, t.branch_id, t.tenant_id,
            t.doctor_id, b.beneficiary_id, b.given_name || ' ' || b.family_name AS beneficiary_name,
@@ -297,13 +315,66 @@ FROM (
     SELECT f.slot_id, f.provider_id, f.location_id, f.slot_start, f.slot_end, f.branch_id, f.tenant_id,
            f.doctor_id, f.beneficiary_id, f.beneficiary_name, 'Booked', 'Scheduled'
       FROM future_clinic f
-) c
-ON CONFLICT (appointment_id) DO NOTHING;
+) c;
 
-UPDATE emr.appointment SET no_show = true
- WHERE created_by = 'seed:doctor-account' AND status = 'NoShow';
-UPDATE emr.appointment SET cancel_reason = 'PatientRequest'
- WHERE created_by = 'seed:doctor-account' AND status = 'Cancelled' AND cancel_reason IS NULL;
+INSERT INTO emr.appointment
+  (appointment_id, beneficiary_id, provider_id, location_id, slot_id, appointment_type, status,
+   scheduled_start, scheduled_end, branch_id, tenant_id, doctor_id, beneficiary_name, created_by, created_at)
+SELECT p.appointment_id, p.beneficiary_id, p.provider_id, p.location_id, p.slot_id,
+       p.appointment_type, 'Booked', p.slot_start, p.slot_end, p.branch_id, p.tenant_id, p.doctor_id,
+       p.beneficiary_name, 'seed:doctor-account', now()
+FROM appt_plan p
+-- Untargeted: now that every row starts Booked it also has to clear `ux_appointment_active_slot`, and a slot
+-- may already hold an appointment written under another seed's id. A seed skips; it does not abort.
+ON CONFLICT DO NOTHING;
+
+-- ── Walk each appointment to where it belongs ───────────────────────────────────────────────────────────────
+-- Every appointment goes through Booked. Writing the final status straight into the INSERT skipped that, and
+-- the consequence was not cosmetic: `emr.appointment_history` is filled by a row trigger, so a row inserted
+-- as CheckedIn has exactly one history row and its timeline OPENS at check-in. A desk reading the episode of
+-- a patient who is standing in front of them saw a visit that began mid-story — no booking, no answer to
+-- "when was this arranged, and by whom?", which is the question a timeline is opened for as often as any.
+--
+-- So: insert Booked, then transition. Each UPDATE fires the trigger and lays down the step it represents.
+-- Guarded on the CURRENT status so a re-run over rows that already exist is a no-op rather than a second
+-- lap, and so a NoShow never passes through CheckedIn — the whole point of a no-show is that they did not
+-- arrive, and a timeline claiming otherwise is worse than no timeline.
+UPDATE emr.appointment a SET status = 'CheckedIn', updated_by = (SELECT uid_text FROM desk), updated_at = now()
+  FROM appt_plan p
+ WHERE a.appointment_id = p.appointment_id AND a.status = 'Booked'
+   AND p.appt_status IN ('CheckedIn', 'Completed');
+
+UPDATE emr.appointment a SET status = 'Completed', updated_by = (SELECT uid_text FROM doc), updated_at = now()
+  FROM appt_plan p
+ WHERE a.appointment_id = p.appointment_id AND a.status = 'CheckedIn'
+   AND p.appt_status = 'Completed';
+
+UPDATE emr.appointment a SET status = p.appt_status, no_show = (p.appt_status = 'NoShow'),
+       cancel_reason = CASE WHEN p.appt_status = 'Cancelled' THEN 'PatientRequest' END,
+       updated_by = (SELECT uid_text FROM desk), updated_at = now()
+  FROM appt_plan p
+ WHERE a.appointment_id = p.appointment_id AND a.status = 'Booked'
+   AND p.appt_status IN ('NoShow', 'Cancelled');
+
+-- ── Plausible times on those steps ──────────────────────────────────────────────────────────────────────────
+-- The trigger stamps `changed_at` with the transaction clock, so the walk above would file a booking, an
+-- arrival and a completed visit at the same second — a timeline that is complete and reads as nonsense. The
+-- appointments themselves are invented; their history is invented with them, and to the same standard.
+--
+-- A booking is always in the past (LEAST, so a slot two weeks out is not "booked" a week from now); arrival
+-- is a few minutes before the slot; the visit ends inside the half-hour it was given.
+UPDATE emr.appointment_history h
+   SET changed_at = CASE h.row_snapshot ->> 'status'
+         WHEN 'Booked'    THEN LEAST(now() - interval '2 days', a.scheduled_start - interval '3 days')
+         WHEN 'CheckedIn' THEN a.scheduled_start - interval '9 minutes'
+         WHEN 'Completed' THEN a.scheduled_start + interval '26 minutes'
+         WHEN 'NoShow'    THEN a.scheduled_start + interval '20 minutes'
+         WHEN 'Cancelled' THEN LEAST(now() - interval '1 hour', a.scheduled_start - interval '1 day')
+         ELSE h.changed_at
+       END
+  FROM emr.appointment a
+ WHERE a.appointment_id = h.appointment_id
+   AND a.created_by = 'seed:doctor-account';
 
 -- ── Encounters for the completed visits ─────────────────────────────────────────────────────────────────────
 -- `created_by` is the doctor's user id because that is the column GET /encounters/mine filters on — the

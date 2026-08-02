@@ -61,6 +61,11 @@ public static class CareSteps
     public const string ResultReported = "ResultReported";
     public const string AuthorizationDecided = "AuthorizationDecided";
     public const string PrescriptionWritten = "PrescriptionWritten";
+    /// <summary>The medication analogue of <see cref="OrderSentForApproval"/> — a gated drug is waiting on a
+    /// reviewer, not on the pharmacy. Without it the episode showed the prescription written and then nothing
+    /// until the decision, so "why has this member not collected their medicine?" read as an unexplained
+    /// gap when the answer was that nobody had been asked to release it yet.</summary>
+    public const string PrescriptionSentForApproval = "PrescriptionSentForApproval";
     /// <summary>The medication analogue of <see cref="OrderCancelled"/>. It exists because the asymmetry
     /// would be a trap: a timeline that records a cancelled investigation but not a cancelled prescription
     /// leaves the medicine looking live to anyone reading the episode.</summary>

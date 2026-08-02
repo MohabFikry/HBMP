@@ -238,6 +238,11 @@ Steps arrive two ways:
   visit is for. Dedupe is the `ux_care_timeline_event` unique index; a consumer that restarts has forgotten
   what it processed and the database has not.
 
+One mirrored event maps **conditionally**: `RxSubmitted` is published for every prescription and carries the
+routing outcome as a flag, so it becomes `PrescriptionSentForApproval` only when `requiresApproval` is set —
+the medication counterpart of `OrderSentForApproval`. A missing or non-boolean flag reads as false: a step is
+an assertion, and an unclaimed one should not be made.
+
 **A step is a label, a time, an actor and a business key — never clinical content.** Reception and the call
 centre read this timeline, so `DiagnosisCoded` appears and the ICD code does not; `MedicineDispensed` appears
 and the drug does not. `CareTimelineTests` and `CareEpisodeMappingTests` both assert it.

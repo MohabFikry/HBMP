@@ -5,6 +5,7 @@ import type { Column, TableFilterSpec } from "@mersal/design-system";
 import type { AppointmentRow, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
+import { useRefreshOnFocus } from "../api/useRefreshOnFocus";
 import { ApiError } from "../api/http";
 import { useFormat } from "../i18n/useFormat";
 import { AsyncSection, PageHeader, useLoc, useOpenProfile } from "./_shared";
@@ -71,6 +72,11 @@ export function DoctorVisits() {
   // this board rather than guessing from history.
   const openProfile = useOpenProfile();
   const state = useAsync<AppointmentRow[]>(() => api.appointments("all", true), []);
+  // This board is not the only writer of its own rows. Reception checks patients in, the encounter workspace
+  // ends the visit, and both happen while this list is sitting on screen — so a day board left open keeps
+  // offering "Start visit" against an appointment that was completed half an hour ago. Coming back to the tab
+  // re-asks the server rather than trusting a snapshot of a clinic that has moved on.
+  useRefreshOnFocus(state.reload);
   const [busy, setBusy] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const [denied, setDenied] = useState<Localized | null>(null);

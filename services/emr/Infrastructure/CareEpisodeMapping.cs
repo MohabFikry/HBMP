@@ -81,6 +81,15 @@ public static class CareEpisodeMapping
                 // ---- pharmacy-service: the medication leg ----
                 "RxCreated" => Draft(CareSteps.PrescriptionWritten, encounterId.Value, rxNo,
                     Str(root, "orderedByUserId"), CareStepSources.Pharmacy),
+                // The one CONDITIONAL mapping. Pharmacy publishes RxSubmitted for every prescription — the
+                // routing outcome is the `requiresApproval` flag, not the event name — so an unconditional
+                // step would put "sent for approval" on the timeline of every prescription that was never
+                // sent anywhere. Read the flag, and say nothing when it is false: `RxCreated` has already
+                // recorded that the prescription exists, and the auto-approval is routing mechanics.
+                "RxSubmitted" => Flag(root, "requiresApproval")
+                    ? Draft(CareSteps.PrescriptionSentForApproval, encounterId.Value, rxNo,
+                        Str(root, "orderedByUserId"), CareStepSources.Pharmacy)
+                    : null,
                 "RxCancelled" => Draft(CareSteps.PrescriptionCancelled, encounterId.Value, rxNo,
                     Str(root, "cancelledByUserId"), CareStepSources.Pharmacy),
                 "RxLinesDispensed" => Draft(CareSteps.MedicineDispensed, encounterId.Value, rxNo,
@@ -118,6 +127,11 @@ public static class CareEpisodeMapping
 
     private static string? Str(JsonElement e, string name) =>
         e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    /// <summary>A boolean that must be present and true. A missing or non-boolean flag reads as false, so a
+    /// publisher that drops it produces no step rather than a step asserting something nobody claimed.</summary>
+    private static bool Flag(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
 
     private static Guid? GuidOf(JsonElement e, string name) =>
         Str(e, name) is { } s && Guid.TryParse(s, out var g) ? g : null;

@@ -40,9 +40,15 @@ public static class CareFeed
     /// The event types that describe something a clinician did inside a visit.
     ///
     /// <para>An allow-list, not "mirror everything from the three services". A step is a thing that happened
-    /// TO THE PATIENT in an episode — <c>OrderActivated</c> and <c>RxSubmitted</c> are internal routing
-    /// mechanics that no desk and no clinician would recognise as an event in their day, and putting them on a
-    /// timeline would bury the five steps that matter under ten that do not.</para>
+    /// TO THE PATIENT in an episode — <c>OrderActivated</c> and <c>RxApproved</c> are the routing policy
+    /// saying it did NOT need an approval, which no desk and no clinician would recognise as an event in
+    /// their day, and putting them on a timeline would bury the steps that matter under ones that do not.</para>
+    ///
+    /// <para><b>The one event here that is not unconditionally a step: <c>RxSubmitted</c>.</b> Pharmacy emits
+    /// it for every prescription, carrying <c>requiresApproval</c>, so it is on the feed but becomes a step
+    /// only when that flag is set — see <c>CareEpisodeMapping</c>. It earns its place because it is the ONLY
+    /// event pharmacy publishes when a prescription goes for approval, and a gated prescription that read
+    /// identically to a ready one is precisely the case a desk gets asked about.</para>
     /// </summary>
     private static readonly HashSet<string> Types = new(StringComparer.Ordinal)
     {
@@ -50,8 +56,8 @@ public static class CareFeed
         // result back.
         "OrderCreated", "OrderPendingApproval", "OrderCancelled", "OrderLinesConsumed", "OrderResultUploaded",
 
-        // pharmacy.events — the medication leg: written, cancelled, handed over.
-        "RxCreated", "RxCancelled", "RxLinesDispensed",
+        // pharmacy.events — the medication leg: written, routed for approval, cancelled, handed over.
+        "RxCreated", "RxSubmitted", "RxCancelled", "RxLinesDispensed",
 
         // approvals.events — the DECISION only.
         //

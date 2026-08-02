@@ -62,6 +62,15 @@ public class CareEpisodeMappingTests
             tenantId = "t-1", prescriptionId = Guid.NewGuid(), rxNo = "RX-2026-000031",
             beneficiaryId = Guid.NewGuid(), encounterId = Enc, orderedByUserId = Doctor,
         }),
+        // The GATED prescription — the case that produces a step. The auto-approved twin (same event, flag
+        // false) has its own test, because "every feed event maps to a step" must not be satisfied by an
+        // event that maps only sometimes without anyone noticing which half was tested.
+        "RxSubmitted" => Json(new
+        {
+            tenantId = "t-1", prescriptionId = Guid.NewGuid(), rxNo = "RX-2026-000031",
+            beneficiaryId = Guid.NewGuid(), encounterId = Enc, requiresApproval = true,
+            orderedByUserId = Doctor,
+        }),
         "RxCancelled" => Json(new
         {
             tenantId = "t-1", prescriptionId = Guid.NewGuid(), rxNo = "RX-2026-000031",
@@ -90,6 +99,9 @@ public class CareEpisodeMappingTests
         // The mirror's allow-list and this switch are two lists that must agree. A type on the feed that maps
         // to nothing is a message emr pays to receive and then throws away — and the symptom is a missing
         // step, which reads exactly like "it never happened".
+        //
+        // Each payload is the case that SHOULD produce a step — for RxSubmitted, the gated one. Its other
+        // half is asserted in A_prescription_that_needed_no_approval_was_never_sent_for_one.
         foreach (var type in CareFeed.EventTypes)
             CareEpisodeMapping.For(type, PayloadFor(type))
                 .Should().NotBeNull("{0} is mirrored to emr and must produce a step", type);
@@ -102,6 +114,7 @@ public class CareEpisodeMappingTests
     [InlineData("OrderLinesConsumed", CareSteps.SampleConsumed, "ORD-2026-000014", CareStepSources.Orders)]
     [InlineData("OrderResultUploaded", CareSteps.ResultReported, "ORD-2026-000014", CareStepSources.Orders)]
     [InlineData("RxCreated", CareSteps.PrescriptionWritten, "RX-2026-000031", CareStepSources.Pharmacy)]
+    [InlineData("RxSubmitted", CareSteps.PrescriptionSentForApproval, "RX-2026-000031", CareStepSources.Pharmacy)]
     [InlineData("RxCancelled", CareSteps.PrescriptionCancelled, "RX-2026-000031", CareStepSources.Pharmacy)]
     [InlineData("RxLinesDispensed", CareSteps.MedicineDispensed, "RX-2026-000031", CareStepSources.Pharmacy)]
     [InlineData("AuthApproved", CareSteps.AuthorizationDecided, "AUTH-2026-000009", CareStepSources.Approvals)]
@@ -158,6 +171,45 @@ public class CareEpisodeMappingTests
 
         CareEpisodeMapping.For("OrderCreated", missing).Should().BeNull();
         CareEpisodeMapping.For("OrderCreated", empty).Should().BeNull();
+    }
+
+    [Fact]
+    public void A_prescription_that_needed_no_approval_was_never_sent_for_one()
+    {
+        // RxSubmitted fires for EVERY prescription; the routing outcome is the flag, not the event name. So
+        // the auto-approved case must produce nothing — a "sent for approval" step on a prescription that is
+        // already collectable sends the member's family to chase a reviewer who was never asked anything.
+        var auto = Json(new
+        {
+            tenantId = "t-1", prescriptionId = Guid.NewGuid(), rxNo = "RX-2026-000031",
+            beneficiaryId = Guid.NewGuid(), encounterId = Enc, requiresApproval = false,
+            orderedByUserId = Doctor,
+        });
+
+        CareEpisodeMapping.For("RxSubmitted", auto).Should().BeNull();
+
+        // Absent reads as false for the same reason: a step is an assertion, and nobody asserted this one.
+        var silent = Json(new
+        {
+            tenantId = "t-1", rxNo = "RX-2026-000031", encounterId = Enc, orderedByUserId = Doctor,
+        });
+        CareEpisodeMapping.For("RxSubmitted", silent).Should().BeNull();
+    }
+
+    [Fact]
+    public void The_two_legs_of_a_visit_record_a_wait_the_same_way()
+    {
+        // Symmetry that is load-bearing rather than tidy: an investigation and a prescription can BOTH be
+        // gated, and a timeline that showed the wait on one leg and not the other would read as "the tests
+        // are held up and the medicine is ready" — which is a specific wrong answer, not a vague one.
+        var order = CareEpisodeMapping.For("OrderPendingApproval", PayloadFor("OrderPendingApproval"))!;
+        var rx = CareEpisodeMapping.For("RxSubmitted", PayloadFor("RxSubmitted"))!;
+
+        order.Step.Should().Be(CareSteps.OrderSentForApproval);
+        rx.Step.Should().Be(CareSteps.PrescriptionSentForApproval);
+        // Both name the clinician who raised it — the same person the desk would ring about the wait.
+        order.Actor.Should().Be(Doctor);
+        rx.Actor.Should().Be(Doctor);
     }
 
     [Fact]

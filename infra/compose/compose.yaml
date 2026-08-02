@@ -526,6 +526,15 @@ services:
       Auth__ProtectedScopeRequiresMfa: "false"
       Auth__ValidIssuers__0: "http://localhost:8090/"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
+      # One gated drug, so the medication approval path EXISTS in this environment. `GatedDrugIds` ships empty
+      # and `HighCostThreshold` ships at 0, which means every prescription auto-approves and the whole
+      # Submitted-awaiting-a-decision branch — the routing reason, the approvals worklist item, the episode's
+      # `PrescriptionSentForApproval` step — was unreachable locally. orders-service has `Imaging` gated by
+      # default and so has always been demonstrable; pharmacy had no equivalent.
+      #
+      # Etanercept 50mg: a biologic at ~15,000 EGP a pack, which is exactly the kind of prescription a benefit
+      # scheme reviews rather than dispenses on sight. Dev only — real gating belongs to policy/formulary.
+      Pharmacy__Routing__GatedDrugIds__0: "ba0d449c-723d-4722-a704-cdb92390757f"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8099:8080"]
     depends_on:

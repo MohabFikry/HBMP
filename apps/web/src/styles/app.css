@@ -876,8 +876,8 @@ nav.mrs-rail {
   white-space: nowrap;
 }
 @media (max-width: 560px) {
-  .vt-step { grid-template-columns: minmax(0, 1fr); }
-
+  /* `.vt-step` used to be collapsed here as well as in its own section 1000 lines below — two rules, two
+     breakpoints, one property, and only the later one won. The timeline's own rules now own its layout. */
   .app-userbtn-text {
     display: none;
   }
@@ -1935,21 +1935,41 @@ nav.mrs-rail {
 .vt-step {
   display: grid;
   /*
-    Three FIXED columns, not `auto 1fr auto`.
+    TWO columns, and neither has a fixed width.
 
-    The chips vary in width — "Booked" against "Note edited" — so an auto first column started every row's
-    date at a different x, and the actor column ended at a different one. A timeline is read down the
-    columns ("when did this happen, and who did it?"), and ragged columns make that a scan instead of a
-    glance. The chip column is wide enough for the longest label; the date column is fixed so the actors
-    line up too.
+    This was three fixed tracks (132px / 168px / rest), which held for as long as the timeline showed five
+    appointment statuses. It stopped holding twice over: the care episode added a fourth cell (the ORD-/RX-
+    reference) that had no track to sit in and so displaced the actor, and the step labels outgrew 132px —
+    "Prescription cancelled" printed straight across the date next to it. Any fixed width is a guess that
+    Arabic, a longer label or one more cell will eventually break.
+
+    So: the ACT and WHEN are the primary line, the reference and the actor are metadata beneath them. The
+    time is end-aligned, so every date lines up down the list whatever the chip beside it does.
   */
-  grid-template-columns: 132px 168px minmax(0, 1fr);
-  align-items: center;
-  gap: var(--sp3);
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: baseline;
+  column-gap: var(--sp3);
+  row-gap: var(--sp1);
   padding: var(--sp2) var(--sp3);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--surface-1);
+}
+/* The chip is sized by its label everywhere else; here it also has to be allowed to WRAP rather than
+   overflow its own pill, because the first column is whatever is left after the date. */
+.vt-step .mrs-chip {
+  white-space: normal;
+  text-align: start;
+}
+/* Both halves of the metadata line, in one flow: `RX-2026-000027 · by Dr Karim`. Wraps rather than
+   truncating — an actor's name cut mid-word is the one thing on this row nobody can reconstruct. */
+.vt-meta {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp1) var(--sp2);
+  min-inline-size: 0;
 }
 /* The connecting rule between steps — decorative, so it carries no meaning the text does not already. */
 .vt-step + .vt-step {
@@ -1970,24 +1990,25 @@ nav.mrs-rail {
   font-size: var(--fs-caption);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  /* End-aligned: this is what makes the dates line up now that the chip beside them is free to be any
+     width. It is the only alignment rule in this list that has to hold. */
+  justify-self: end;
 }
 .vt-who {
   color: var(--text-2);
   font-size: var(--fs-caption);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  /* Left-aligned, so every actor starts at the same x. Right-aligning them put a short name and a long one
-     at different distances from the date they belong to. */
+  /* Wraps. It shares a line with the reference and is the last thing on the row, so it has room to; the
+     ellipsis it used to carry existed only because it was competing for a fixed track. */
   text-align: start;
 }
-@media (max-width: 560px) {
+@media (max-width: 420px) {
+  /* Only when the date genuinely cannot share a line with the chip. Above this the two-column row holds,
+     including inside the timeline modal, which is where it is actually read. */
   .vt-step {
-    grid-template-columns: 1fr;
-    gap: var(--sp1);
+    grid-template-columns: minmax(0, 1fr);
   }
-  .vt-who {
-    white-space: normal;
+  .vt-when {
+    justify-self: start;
   }
 }
 .vt-actor {

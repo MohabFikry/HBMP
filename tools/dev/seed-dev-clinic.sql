@@ -300,19 +300,21 @@ ON CONFLICT (slot_id) DO NOTHING;
 -- ── Appointments: a believable board, in mixed states ───────────────────────────────────────────────────────
 -- Taken from real slots so every appointment sits in a time its doctor is rostered for. Past days are
 -- Completed or NoShow, today and ahead are Booked or CheckedIn, plus a couple of Cancelled.
-INSERT INTO emr.appointment
-  (appointment_id, beneficiary_id, provider_id, location_id, slot_id, appointment_type, status,
-   scheduled_start, scheduled_end, branch_id, tenant_id, doctor_id, beneficiary_name, created_by, created_at)
-SELECT pg_temp.did('appt:'||s.slot_id),
-       b.beneficiary_id, s.provider_id, s.location_id, s.slot_id, 'Scheduled',
+-- Planned first, written second: these rows are inserted as Booked and then WALKED to the state they belong
+-- in, because `emr.appointment_history` is filled by a row trigger and a row inserted straight into its final
+-- state has a one-step history. The timeline then opens at "Checked in" with no booking above it — a visit
+-- that begins mid-story, and no answer to "when was this arranged?".
+CREATE TEMP TABLE appt_plan ON COMMIT DROP AS
+SELECT pg_temp.did('appt:'||s.slot_id) AS appointment_id,
+       b.beneficiary_id, s.provider_id, s.location_id, s.slot_id,
        CASE
          WHEN s.slot_start < now() - interval '1 day' THEN (CASE WHEN s.rn % 7 = 0 THEN 'NoShow' ELSE 'Completed' END)
          WHEN s.rn % 11 = 0 THEN 'Cancelled'
          WHEN s.slot_start < now() THEN 'CheckedIn'
          ELSE 'Booked'
-       END,
+       END AS appt_status,
        s.slot_start, s.slot_end, s.branch_id, s.tenant_id, s.doctor_id,
-       b.given_name || ' ' || b.family_name, 'seed', now()
+       b.given_name || ' ' || b.family_name AS beneficiary_name
 FROM (
     SELECT s.*, row_number() OVER (ORDER BY s.slot_start, s.slot_id) AS rn
     FROM emr.appointment_slot s
@@ -325,11 +327,55 @@ JOIN LATERAL (
     WHERE bn.status = 'Active'
     ORDER BY md5(bn.beneficiary_id::text || s.slot_id::text)
     LIMIT 1
-) b ON true
-ON CONFLICT (appointment_id) DO NOTHING;
+) b ON true;
 
-UPDATE emr.appointment SET cancel_reason = 'PatientRequest' WHERE status = 'Cancelled' AND cancel_reason IS NULL;
-UPDATE emr.appointment SET no_show = true WHERE status = 'NoShow';
+INSERT INTO emr.appointment
+  (appointment_id, beneficiary_id, provider_id, location_id, slot_id, appointment_type, status,
+   scheduled_start, scheduled_end, branch_id, tenant_id, doctor_id, beneficiary_name, created_by, created_at)
+SELECT p.appointment_id, p.beneficiary_id, p.provider_id, p.location_id, p.slot_id, 'Scheduled', 'Booked',
+       p.slot_start, p.slot_end, p.branch_id, p.tenant_id, p.doctor_id, p.beneficiary_name, 'seed', now()
+FROM appt_plan p
+-- Untargeted: the appointment id is derived from the slot, so a re-run collides on the primary key — but a
+-- slot may also already hold an appointment written by another seed under a different id, and now that every
+-- row starts Booked that meets `ux_appointment_active_slot` too. A seed skips; it does not abort a database.
+ON CONFLICT DO NOTHING;
+
+-- The walk. Guarded on the CURRENT status so a re-run is a no-op, and so a NoShow goes Booked → NoShow
+-- without passing through CheckedIn: not arriving is the entire content of a no-show.
+--
+-- That guard also means this only reshapes appointments this run CREATES. Rows seeded before it existed keep
+-- their one-step history until the database is seeded from scratch — deliberately, because the alternative is
+-- resetting live rows to Booked, and an appointment seeded as Booked and since checked in through the portal
+-- is indistinguishable here from one that was never touched. A seed does not un-check-in a patient.
+UPDATE emr.appointment a SET status = 'CheckedIn', updated_at = now()
+  FROM appt_plan p
+ WHERE a.appointment_id = p.appointment_id AND a.status = 'Booked'
+   AND p.appt_status IN ('CheckedIn', 'Completed');
+
+UPDATE emr.appointment a SET status = 'Completed', updated_at = now()
+  FROM appt_plan p
+ WHERE a.appointment_id = p.appointment_id AND a.status = 'CheckedIn' AND p.appt_status = 'Completed';
+
+UPDATE emr.appointment a SET status = p.appt_status, no_show = (p.appt_status = 'NoShow'),
+       cancel_reason = CASE WHEN p.appt_status = 'Cancelled' THEN 'PatientRequest' END, updated_at = now()
+  FROM appt_plan p
+ WHERE a.appointment_id = p.appointment_id AND a.status = 'Booked'
+   AND p.appt_status IN ('NoShow', 'Cancelled');
+
+-- The trigger stamps every one of those steps with the transaction clock, which would file the booking, the
+-- arrival and the finished visit at the same second. Invented appointments get invented history, held to the
+-- same standard: a booking always in the past, arrival just before the slot, the visit ending within it.
+UPDATE emr.appointment_history h
+   SET changed_at = CASE h.row_snapshot ->> 'status'
+         WHEN 'Booked'    THEN LEAST(now() - interval '2 days', a.scheduled_start - interval '3 days')
+         WHEN 'CheckedIn' THEN a.scheduled_start - interval '9 minutes'
+         WHEN 'Completed' THEN a.scheduled_start + interval '26 minutes'
+         WHEN 'NoShow'    THEN a.scheduled_start + interval '20 minutes'
+         WHEN 'Cancelled' THEN LEAST(now() - interval '1 hour', a.scheduled_start - interval '1 day')
+         ELSE h.changed_at
+       END
+  FROM emr.appointment a
+ WHERE a.appointment_id = h.appointment_id AND a.created_by = 'seed';
 
 -- ── Call-centre history ─────────────────────────────────────────────────────────────────────────────────────
 -- Closed calls with summaries, because the summary is what other roles read on the patient profile — an empty

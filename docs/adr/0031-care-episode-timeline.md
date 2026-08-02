@@ -102,6 +102,7 @@ The spine, in the order a patient experiences it:
 | `SampleConsumed` | orders | lab consumes the order line |
 | `ResultReported` | orders | result uploaded |
 | `PrescriptionWritten` / `PrescriptionCancelled` | pharmacy | prescription written / withdrawn |
+| `PrescriptionSentForApproval` | pharmacy | gated drug routed to approval |
 | `MedicineDispensed` | pharmacy | lines dispensed |
 | `VisitEnded` | emr | encounter closed |
 
@@ -119,7 +120,7 @@ Delivered in the second slice — the steps emr does not perform itself:
 - **`encounterId` on the wire.** `orders.order` and `pharmacy.prescription` had both held the column since
   phase 4 and neither had ever published it, so the visit and the work it caused were two facts with nothing
   joining them. It is now on `OrderCreated`, `OrderPendingApproval`, `OrderCancelled`, `OrderLinesConsumed`,
-  `OrderResultUploaded`, `RxCreated`, `RxCancelled` and `RxLinesDispensed`. approvals-service had no such
+  `OrderResultUploaded`, `RxCreated`, `RxSubmitted`, `RxCancelled` and `RxLinesDispensed`. approvals-service had no such
   column at all — an authorization knew who was waiting and what it was raised against, and nothing about the
   visit — so migration 0004 adds it and the ingest contract carries it.
 - **`CareFeed`, a mirror rather than a subscription.** The transport is point-to-point, so an emr consumer
@@ -136,7 +137,19 @@ Delivered in the second slice — the steps emr does not perform itself:
   history. Dedupe is the `ux_care_timeline_event` unique index; a consumer that restarts has forgotten what it
   processed and the database has not.
 
-Two deliberate omissions inside that slice, both because the alternative misleads:
+- **Both legs of the visit record a wait the same way.** `RxSubmitted` is on the feed but is the one event
+  that becomes a step *conditionally*: pharmacy publishes it for every prescription and the routing outcome is
+  its `requiresApproval` flag, so the step is appended only when that flag is set. It has to be there —
+  `RxCreated` fires either way and `RxApproved` fires only when routing did **not** gate the prescription, so
+  a gated prescription had no event of its own and read on the episode exactly like one waiting to be
+  collected. A timeline showing the wait on the investigation leg and not the medication leg does not say
+  less than the truth; it says something specific and wrong.
+
+Three deliberate omissions inside that slice, all because the alternative misleads:
+
+- **An auto-approved prescription is not "sent for approval".** Same event, flag false, no step. The
+  prescription is already collectable, and a step saying otherwise sends a family to chase a reviewer who was
+  never asked anything.
 
 - **`AuthInfoRequested` is not a step.** It lands on the same append-only decision ledger as the real
   decisions, so it is tempting to treat it as one — but it is a reviewer asking for more information, not an

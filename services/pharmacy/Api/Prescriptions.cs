@@ -96,12 +96,22 @@ public static class PrescriptionEndpoints
                     orderedByUserId = rx.CreatedBy,
                 }, ct);
             // `orderedByUserId` — the prescriber, carried forward for whoever ingests this into approvals, so
-            // the decision notice has a human to reach. Same reason as OrderPendingApproval (§11.3).
+            // the decision notice has a human to reach. Same reason as OrderPendingApproval (§11.3), and now
+            // the same VALUE: this carried `PrescriberId` (a practitioner row id) while every sibling event
+            // carries the token subject, so the one field whose whole purpose is "someone to reach" named a
+            // directory row rather than an account. `CreatedBy` is the person who wrote it.
+            //
+            // `encounterId` — ADR-0031. A gated prescription is the medication half of OrderSentForApproval,
+            // and pharmacy has no other event for it: `RxCreated` fires either way and `RxApproved` fires only
+            // when routing DIDN'T gate it. Without this step a prescription that went for approval looked, on
+            // the episode, exactly like one that was ready to collect — and the wait it started was invisible
+            // until the decision came back, which is the stretch a desk is most often asked about.
             await outbox.EnqueueAsync("RxSubmitted", "pharmacy.events",
                 new
                 {
                     tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, rx.RxNo,
-                    requiresApproval = route.RequiresApproval, orderedByUserId = rx.PrescriberId.ToString(),
+                    beneficiaryId = rx.BeneficiaryId, encounterId = rx.EncounterId,
+                    requiresApproval = route.RequiresApproval, orderedByUserId = rx.CreatedBy,
                 }, ct);
             if (rx.Status == RxStatus.Approved)
                 await outbox.EnqueueAsync("RxApproved", "pharmacy.events", new { tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, rx.RxNo, auto = true }, ct);

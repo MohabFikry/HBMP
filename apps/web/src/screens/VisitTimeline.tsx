@@ -56,6 +56,9 @@ const STATUS_CHIP: Record<string, { kind: "ok" | "info" | "warn" | "neu"; label:
   ResultReported: { kind: "ok", label: { en: "Result reported", ar: "صدرت النتيجة" } },
   AuthorizationDecided: { kind: "ok", label: { en: "Authorization decided", ar: "صدر قرار الموافقة" } },
   PrescriptionWritten: { kind: "info", label: { en: "Prescription written", ar: "كُتبت وصفة" } },
+  // Same wording and the same `warn` cue as OrderSentForApproval, because they are the same fact about two
+  // different things: this is waiting on a reviewer, not on the pharmacy.
+  PrescriptionSentForApproval: { kind: "warn", label: { en: "Sent for approval", ar: "أُرسلت للموافقة" } },
   // The medication counterpart of OrderCancelled. Without it a cancelled prescription leaves no trace and
   // the episode still reads as though the medicine is waiting to be collected.
   PrescriptionCancelled: { kind: "neu", label: { en: "Prescription cancelled", ar: "أُلغيت الوصفة" } },
@@ -109,34 +112,49 @@ export function VisitTimelineButton({ row }: { row: AppointmentRow }) {
           {!error && steps !== null && steps.length > 0 && (
             <ol className="vt-list">
               {steps.map((s, i) => (
+                /*
+                 * Two lines, not four columns.
+                 *
+                 * The row used to be `chip | time | actor` on fixed 132px/168px tracks, with the reference —
+                 * added when the episode arrived — having no track at all, so it took the actor's and pushed
+                 * them out of the row. And the step labels grew: "Prescription cancelled" does not fit 132px,
+                 * so the chip overflowed its own pill and printed across the date beside it. Fixed tracks were
+                 * always going to lose that race — Arabic sets these labels at different widths again.
+                 *
+                 * So the ACT and WHEN are the primary line, and the reference and actor are metadata under
+                 * them. Only two columns have to agree now, the time is end-aligned so every date lines up
+                 * regardless of the chip's width, and nothing has a hardcoded size.
+                 */
                 <li key={`${s.status}-${s.at}-${i}`} className="vt-step">
                   <StatusChip
                     kind={STATUS_CHIP[s.status]?.kind ?? "neu"}
                     label={t(STATUS_CHIP[s.status]?.label ?? { en: s.status, ar: s.status })}
                   />
                   <span className="vt-when tnum">{fmt.dateTime(s.at)}</span>
-                  {/* The business key the step is about — ENC-*, ORD-*, RX-*. It is the door to the thing,
-                      not the thing: what it resolves to stays behind the owning service's own gate. */}
-                  {s.reference && <code className="vt-ref tnum">{s.reference}</code>}
-                  {/* An unrecorded actor says so. Falling back to whoever booked it would claim they performed
-                      a step they did not — the timeline exists to answer "who", so guessing defeats it. */}
-                  <span className="vt-who">
-                    {s.byName ? (
-                      // A resolved name renders as a name.
-                      <>
-                        {t(S.by)} <span className="vt-name">{s.byName}</span>
-                      </>
-                    ) : s.by ? (
-                      // Unresolved — a deactivated account, or another tenant's actor. Truncated and monospaced
-                      // with the full value in the title, so it reads as an identifier instead of being mistaken
-                      // for a person's name. Never guessed at: an approximate actor is worse than a visible id.
-                      <>
-                        {t(S.by)}{" "}
-                        <code className="vt-actor" title={`${t(S.userRef)}: ${s.by}`}>{s.by.slice(0, 8)}</code>
-                      </>
-                    ) : (
-                      <span className="muted">{t(S.unattributed)}</span>
-                    )}
+                  <span className="vt-meta">
+                    {/* The business key the step is about — ENC-*, ORD-*, RX-*. It is the door to the thing,
+                        not the thing: what it resolves to stays behind the owning service's own gate. */}
+                    {s.reference && <code className="vt-ref tnum">{s.reference}</code>}
+                    {/* An unrecorded actor says so. Falling back to whoever booked it would claim they performed
+                        a step they did not — the timeline exists to answer "who", so guessing defeats it. */}
+                    <span className="vt-who">
+                      {s.byName ? (
+                        // A resolved name renders as a name.
+                        <>
+                          {t(S.by)} <span className="vt-name">{s.byName}</span>
+                        </>
+                      ) : s.by ? (
+                        // Unresolved — a deactivated account, or another tenant's actor. Truncated and monospaced
+                        // with the full value in the title, so it reads as an identifier instead of being mistaken
+                        // for a person's name. Never guessed at: an approximate actor is worse than a visible id.
+                        <>
+                          {t(S.by)}{" "}
+                          <code className="vt-actor" title={`${t(S.userRef)}: ${s.by}`}>{s.by.slice(0, 8)}</code>
+                        </>
+                      ) : (
+                        <span className="muted">{t(S.unattributed)}</span>
+                      )}
+                    </span>
                   </span>
                 </li>
               ))}
