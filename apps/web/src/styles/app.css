@@ -1395,6 +1395,19 @@ nav.mrs-rail {
   align-items: start;
 }
 .profile-identity > .profile-idfacts { grid-column: 2; }
+/* The avatar spans BOTH rows and stretches to fill them, so it stands as tall as the block it belongs to —
+   from the name down to the fact strip — instead of a 56px square floating beside a taller column. Height
+   comes from the grid (`stretch`), width follows it via `aspect-ratio`, so the photo stays square at whatever
+   height the content happens to produce rather than needing a magic number kept in sync with the text. */
+.profile-identity > .profile-avatar {
+  grid-row: 1 / -1;
+  align-self: stretch;
+  block-size: auto;
+  inline-size: auto;
+  aspect-ratio: 1;
+}
+/* Initials scale with the tile; a 14px monogram in a 90px square reads as an empty box with a typo in it. */
+.profile-identity > .profile-avatar--initials { font-size: 1.35rem; }
 /* min-inline-size:0 so a long name wraps INSIDE the flex item instead of widening it and pushing the card
    into a horizontal scroll — a flex child's default min-width is auto, which is content-sized. */
 .profile-identity-text { display: grid; gap: var(--sp1); min-inline-size: 0; }
