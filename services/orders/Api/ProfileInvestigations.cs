@@ -110,7 +110,8 @@ public static class ProfileInvestigationsEndpoint
                         // not a placeholder: the field is absent from the JSON.
                         restricted ? null : result?.ResultValue,
                         restricted,
-                        line.SensitivityLevel.ToString()));
+                        line.SensitivityLevel.ToString(),
+                        order.EncounterId));
                 }
             }
 
@@ -138,6 +139,14 @@ public static class ProfileInvestigationsEndpoint
 /// design-37 §6 decision, made here and not downstream.</summary>
 public sealed record ProfileInvestigationView(
     string OrderNo, Guid LineId, string Category, DateTimeOffset OrderedOn, string Status,
-    string? ProviderName, string? ResultSummary, bool Restricted, string? SensitivityLevel);
+    string? ProviderName, string? ResultSummary, bool Restricted, string? SensitivityLevel,
+    /// <summary>The encounter the order was raised on.
+    ///
+    /// <para>Carried so a caller reading ONE visit can tell which of a member's orders belong to it. Without
+    /// it the profile's investigation list is a flat history of everything ever ordered, and "what did this
+    /// consultation actually order?" is a question nobody can answer from it — which is the question a
+    /// clinician opening a past visit is usually asking. It is an id and nothing more: it discloses no
+    /// clinical content, and a caller who cannot read the encounter still cannot.</para></summary>
+    Guid EncounterId);
 
 public sealed record ProfileInvestigationsView(IReadOnlyList<ProfileInvestigationView> Items);

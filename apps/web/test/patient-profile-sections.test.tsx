@@ -532,6 +532,68 @@ describe("20.4 — the visit-details modal", () => {
     expect(dialog.queryByText(/no note was written/i)).not.toBeInTheDocument();
   });
 
+  it("lists what the visit ordered, scoped to that encounter", async () => {
+    const patientProfile = vi.fn(async (_id: string, sections?: readonly string[]) => {
+      if (sections?.includes("investigations")) {
+        return profile([
+          visible("investigations", { items: [
+            { orderRef: "ORD-1", lineId: "l1", category: "Haematology", orderedOn: "2026-07-02T09:20:00Z",
+              status: "Resulted", resultSummary: "Hb 11.2 g/dL", encounterId: "enc-77" },
+            { orderRef: "ORD-9", lineId: "l9", category: "Chemistry", orderedOn: "2026-06-01T09:20:00Z",
+              status: "Ordered", encounterId: "enc-other" },
+          ] }),
+          visible("prescriptions", { items: [
+            { rxRef: "RX-1", drugDisplay: "Amoxicillin 500mg", status: "Dispensed",
+              prescribedOn: "2026-07-02T09:30:00Z", encounterId: "enc-77" },
+          ] }),
+        ]);
+      }
+      return profile([visible("encounters", { items: [ROW] })]);
+    });
+
+    renderSections([visible("encounters", { items: [ROW] })], {
+      patientProfile: patientProfile as never,
+      getEncounter: vi.fn().mockResolvedValue(RECORD),
+    });
+    const section = await screen.findByRole("region", { name: /encounters/i });
+    const user = userEvent.setup();
+    await user.click(within(section).getByRole("button", { name: /view visit details/i }));
+    const dialog = within(await screen.findByRole("dialog"));
+
+    await user.click(dialog.getByRole("tab", { name: "Orders" }));
+    expect(await dialog.findByText("ORD-1")).toBeInTheDocument();
+    expect(dialog.getByText("Amoxicillin 500mg")).toBeInTheDocument();
+    // The member's OTHER orders belong to other visits. A tab headed "ordered on this visit" that listed
+    // the whole history would be a plain untruth.
+    expect(dialog.queryByText("ORD-9")).not.toBeInTheDocument();
+  });
+
+  it("says why one visit's orders cannot be listed when the projection withheld the encounter id", async () => {
+    // The override replaces `renderSections`'s own sections mock, so it has to answer BOTH calls: the
+    // screen's (no encounter id, which is the case under test) and the modal's.
+    const metaRow = { ...ROW, encounterId: undefined };
+    const patientProfile = vi.fn(async (_id: string, sections?: readonly string[]) =>
+      profile(sections?.includes("investigations") ? [] : [visible("encounters", { items: [metaRow] })]));
+    renderSections([visible("encounters", { items: [metaRow] })], {
+      patientProfile: patientProfile as never,
+    });
+    const section = await screen.findByRole("region", { name: /encounters/i });
+    const user = userEvent.setup();
+    await user.click(within(section).getByRole("button", { name: /view visit details/i }));
+    const dialog = within(await screen.findByRole("dialog"));
+
+    await user.click(dialog.getByRole("tab", { name: "Orders" }));
+    expect(await dialog.findByText(/reference was not included/i)).toBeInTheDocument();
+  });
+
+  it("pins the View column so the control is reachable without scrolling sideways", async () => {
+    renderSections([visible("encounters", { items: [ROW] })]);
+    const section = await screen.findByRole("region", { name: /encounters/i });
+    // Seven columns overflow the card on a laptop, and the column that falls past the fold is the last —
+    // which is the one with the button in it.
+    expect(within(section).getByRole("columnheader", { name: /view/i })).toHaveClass("mrs-stickyend");
+  });
+
   it("does not ask emr for a record whose id the projection withheld", async () => {
     // `V(meta)` — reception and finance are given the visit's existence and not its handle. Asking anyway
     // would be the client trying a door the server already closed.

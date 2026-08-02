@@ -189,7 +189,10 @@ public sealed record EncountersSection(IReadOnlyList<EncounterRow> Items)
 /// value, and the profile has nothing to strip because it was never sent one.</summary>
 public sealed record InvestigationRow(
     string OrderRef, Guid LineId, string Category, DateTimeOffset OrderedOn, string Status,
-    string? ProviderName, string? ResultSummary, bool Restricted, string? SensitivityLevel);
+    string? ProviderName, string? ResultSummary, bool Restricted, string? SensitivityLevel,
+    /// <summary>The encounter this order was raised on, so one visit's orders can be told from the rest of
+    /// the member's history. An id only — it carries no clinical content.</summary>
+    Guid? EncounterId = null);
 
 public sealed record InvestigationsSection(IReadOnlyList<InvestigationRow> Items)
 {
@@ -208,7 +211,9 @@ public sealed record InvestigationsSection(IReadOnlyList<InvestigationRow> Items
 
 public sealed record RxRow(
     string RxRef, string DrugDisplay, string Status, DateTimeOffset PrescribedOn,
-    DateTimeOffset? DispensedOn, string? BatchNo, DateOnly? ExpiryDate, string? SubstitutedWith);
+    DateTimeOffset? DispensedOn, string? BatchNo, DateOnly? ExpiryDate, string? SubstitutedWith,
+    /// <summary>The encounter this prescription was written on — same purpose as on InvestigationRow.</summary>
+    Guid? EncounterId = null);
 
 public sealed record PrescriptionsSection(IReadOnlyList<RxRow> Items)
 {

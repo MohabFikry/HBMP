@@ -47,6 +47,10 @@ function fakeApi(over: Partial<ApiClient> = {}): ApiClient {
     ordersMine: vi.fn().mockResolvedValue([]),
     prescriptionsMine: vi.fn().mockResolvedValue([]),
     recordVitals: vi.fn().mockResolvedValue({ encounterId: "enc-77", recorded: 1 }),
+    // The history's encounters table resolves branch labels and practitioner names in the browser (emr owns
+    // neither). Omitting these is an unhandled rejection inside the table, not a failure.
+    branchLabels: vi.fn().mockResolvedValue(new Map()),
+    practitioners: vi.fn().mockResolvedValue([]),
     patientProfile: vi.fn().mockResolvedValue({
       beneficiaryId: "ben-9", servedAt: "2026-08-01T09:00:00Z",
       sections: [{
@@ -199,9 +203,42 @@ describe("Encounter workspace (US-031)", () => {
     await user.type(screen.getByRole("textbox", { name: /search icd-10/i }), "sinus");
     await user.click(await screen.findByRole("button", { name: /J01\.90/ }));
 
-    // Primary by default while the encounter has none — the commonest first act, pre-selected.
+    // STAGED, not recorded. Nothing reaches emr until the doctor commits the set.
+    expect(addEncounterDiagnosis).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /^add$/i }));
+
+    // Primary by default while the encounter has none — the commonest first pick, pre-selected.
     await waitFor(() => expect(addEncounterDiagnosis).toHaveBeenCalledWith("enc-77", "J01.90", "Primary"));
     expect(await screen.findByText("Acute sinusitis, unspecified")).toBeInTheDocument();
+  });
+
+  it("stages several codes and records them in one pass, the first as primary", async () => {
+    const user = userEvent.setup();
+    const addEncounterDiagnosis = vi.fn(async (_e: string, code: string, rank: string) => ({
+      id: `dx-${code}`, system: "ICD-10", code, rank,
+      label: { en: code, ar: code },
+    }));
+    renderWorkspace(fakeApi({
+      addEncounterDiagnosis: addEncounterDiagnosis as never,
+      searchIcd: vi.fn().mockResolvedValue([
+        { code: "J01.90", title: "Acute sinusitis, unspecified" },
+        { code: "I10", title: "Essential hypertension" },
+      ]),
+    }));
+
+    await user.click(await screen.findByRole("button", { name: /add diagnosis/i }));
+    await user.type(screen.getByRole("textbox", { name: /search icd-10/i }), "ac");
+    await user.click(await screen.findByRole("button", { name: /J01\.90/ }));
+    await user.click(screen.getByRole("button", { name: /I10/ }));
+
+    // A consultation that ends in a primary plus a comorbidity is the ordinary case; it used to mean
+    // opening this dialog twice and retyping the search.
+    await user.click(screen.getByRole("button", { name: /add 2 diagnoses/i }));
+
+    await waitFor(() => expect(addEncounterDiagnosis).toHaveBeenCalledTimes(2));
+    expect(addEncounterDiagnosis).toHaveBeenNthCalledWith(1, "enc-77", "J01.90", "Primary");
+    // Only ONE primary comes out of a batch — the second pick defaults to secondary.
+    expect(addEncounterDiagnosis).toHaveBeenNthCalledWith(2, "enc-77", "I10", "Secondary");
   });
 
   it("groups primary apart from secondary", async () => {
@@ -378,6 +415,41 @@ describe("Encounter workspace (US-031)", () => {
 
     await userEvent.setup().click(screen.getByRole("tab", { name: /orders/i }));
     await waitFor(() => expect(ordersMine).toHaveBeenCalled());
+  });
+
+  it("splits the history into encounters, investigations and prescriptions, in one fetch", async () => {
+    const user = userEvent.setup();
+    const patientProfile = vi.fn(async (_id: string, sections?: readonly string[]) => ({
+      beneficiaryId: "ben-9", servedAt: "2026-08-01T09:00:00Z",
+      sections: sections?.includes("encounters")
+        ? [
+            { key: "encounters", state: "Visible", data: { items: [
+              { encounterRef: "ENC-2026-1", occurredAt: "2026-07-02T09:00:00Z", status: "Completed" }] } },
+            { key: "investigations", state: "Visible", data: { items: [
+              { orderRef: "ORD-1", lineId: "l1", category: "Haematology",
+                orderedOn: "2026-07-02T09:20:00Z", status: "Resulted" }] } },
+            { key: "prescriptions", state: "Visible", data: { items: [
+              { rxRef: "RX-1", drugDisplay: "Amoxicillin 500mg", status: "Dispensed",
+                prescribedOn: "2026-07-02T09:30:00Z" }] } },
+          ]
+        : [{ key: "header", state: "Visible", data: {
+              beneficiaryId: "ben-9", displayName: "Fatma Ibrahim", status: "Active",
+              statusCue: { label: "Active", tone: "ok", shape: "circle" } } }],
+    }));
+    renderWorkspace(fakeApi({ patientProfile: patientProfile as never }));
+
+    await user.click(await screen.findByRole("tab", { name: /history/i }));
+    expect(await screen.findByText("ENC-2026-1")).toBeInTheDocument();
+
+    // All three came back in ONE call — a tab per round trip would be three audited PHI reads for one
+    // question a doctor asks in one breath.
+    const historyCall = patientProfile.mock.calls.find((c) => c[1]?.includes("encounters"));
+    expect(historyCall?.[1]).toEqual(["encounters", "investigations", "prescriptions"]);
+
+    await user.click(screen.getByRole("tab", { name: "Investigations" }));
+    expect(await screen.findByText("ORD-1")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Prescriptions" }));
+    expect(await screen.findByText("Amoxicillin 500mg")).toBeInTheDocument();
   });
 
   it("has no serious/critical a11y violations", async () => {

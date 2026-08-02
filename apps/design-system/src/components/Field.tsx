@@ -15,6 +15,15 @@ interface FieldBase {
    *  aria-required) still passes through to the control — this is only the VISIBLE half, so sighted users
    *  learn a field is mandatory before failing it, not after (QA P2-12). */
   requiredMark?: boolean;
+  /**
+   * Hide the label VISUALLY while keeping it for assistive tech.
+   *
+   * For a control inside a row that already names it — a rank picker on a line reading "J01.90 Acute
+   * sinusitis", where a visible "Rank" above every row would triple the height and say nothing. The label
+   * is still rendered and still bound to the control: this moves it off-screen, it never removes it, and a
+   * field with no accessible name at all remains impossible to build here.
+   */
+  hideLabel?: boolean;
 }
 
 export interface InputFieldProps extends FieldBase, Omit<InputHTMLAttributes<HTMLInputElement>, "className"> {}
@@ -34,6 +43,7 @@ function Labelled({
   base,
   className,
   requiredMark,
+  hideLabel,
   /** False when the control is not a labellable element — a <button>-based combobox names itself with
    *  `aria-labelledby` pointing at this label, and an inert `for` on a button is worse than none. */
   labellable = true,
@@ -41,7 +51,11 @@ function Labelled({
 }: FieldBase & { base: string; labellable?: boolean; children: ReactNode }) {
   return (
     <div className={cx("mrs-field", className)}>
-      <label className="mrs-label" id={`${base}-label`} htmlFor={labellable ? base : undefined}>
+      <label
+        className={cx("mrs-label", hideLabel && "sr-only")}
+        id={`${base}-label`}
+        htmlFor={labellable ? base : undefined}
+      >
         {label}
         {requiredMark && (
           <span className="mrs-req" aria-hidden="true"> *</span>
@@ -105,14 +119,14 @@ export interface SelectFieldProps extends FieldBase {
  * was the labelled wrapper, so each screen wrote its own and half of them forgot the class.
  */
 export function SelectField({
-  label, help, error, className, id, options, value, onChange, placeholder, disabled, required,
+  label, help, error, className, id, options, value, onChange, placeholder, disabled, required, hideLabel,
 }: SelectFieldProps) {
   const auto = useId();
   const base = id ?? auto;
   return (
     <Labelled
       label={label} help={help} error={error} base={base} className={className}
-      requiredMark={required} labellable={false}
+      requiredMark={required} labellable={false} hideLabel={hideLabel}
     >
       {/* The trigger is a <button>, which HTML does not let a <label for> name — so the label carries an id
           and the combobox points at it. Same visible pairing, and a screen reader announces the field name. */}

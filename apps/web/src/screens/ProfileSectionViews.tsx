@@ -34,6 +34,7 @@ import type {
   ProfileEncounters,
   ProfileFinancial,
   ProfileInvestigations,
+  PatientProfile,
   ProfileNotes,
   ProfilePastMedicalHistory,
   ProfilePrescriptions,
@@ -135,6 +136,20 @@ const L = {
   tabNote: { en: "Note", ar: "الملاحظة" },
   tabDiagnoses: { en: "Diagnoses", ar: "التشخيصات" },
   tabVitals: { en: "Vitals", ar: "العلامات الحيوية" },
+  tabOrders: { en: "Orders", ar: "الطلبات" },
+  investigationsOn: { en: "Investigations ordered on this visit", ar: "الفحوصات المطلوبة في هذه الزيارة" },
+  rxOn: { en: "Prescriptions written on this visit", ar: "الوصفات المكتوبة في هذه الزيارة" },
+  noOrdersOnVisit: { en: "No investigation was ordered on this visit.", ar: "لم يُطلب أي فحص في هذه الزيارة." },
+  noRxOnVisit: { en: "No prescription was written on this visit.", ar: "لم تُكتب أي وصفة في هذه الزيارة." },
+  ordersUnavailable: {
+    en: "Orders for a single visit cannot be listed here — the visit's reference was not included in your view of this record.",
+    ar: "لا يمكن عرض طلبات زيارة واحدة هنا — لم يُدرج مرجع الزيارة في عرضك لهذا السجل.",
+  },
+  restrictedSection: {
+    en: "This part of the record is not available at your access level.",
+    ar: "هذا الجزء من السجل غير متاح لمستوى وصولك.",
+  },
+  restrictedResult: { en: "Result restricted", ar: "النتيجة مقيّدة" },
   loading: { en: "Loading…", ar: "جارٍ التحميل…" },
   // "Restricted", not "empty". The record exists and this caller may not read it; showing a blank note
   // instead would tell a clinician the visit was never documented.
@@ -690,7 +705,7 @@ function PastMedicalHistoryView({ data }: { data: ProfilePastMedicalHistory }) {
  * finance and beneficiary management have no encounter workspace, so the handle was never sent. Absence means
  * "not openable by you", and a dead button would say the opposite.
  */
-function EncountersView({ data }: { data: ProfileEncounters }) {
+function EncountersView({ data, beneficiaryId }: { data: ProfileEncounters; beneficiaryId?: string }) {
   const t = useLoc();
   const fmt = useFormat();
   const api = useApi();
@@ -764,6 +779,10 @@ function EncountersView({ data }: { data: ProfileEncounters }) {
       // for a role whose projection carries no encounterId to navigate with.
       key: "view",
       header: t(L.view),
+      // Pinned to the trailing edge. This table is seven columns wide and overflows its card on a laptop, so
+      // the column that ends up past the fold is the last one — which is where the control lives. Without
+      // this, reading a visit meant scrolling sideways first, on every row.
+      stickyEnd: true,
       cell: (r) => (
         <Button
           variant="ghost"
@@ -820,6 +839,7 @@ function EncountersView({ data }: { data: ProfileEncounters }) {
           branch={branchOf(detail)}
           clinician={clinicianOf(detail)}
           specialty={specialtyOf(detail)}
+          beneficiaryId={beneficiaryId}
           onClose={() => setDetail(null)}
           onOpenEncounter={openEncounter}
         />
@@ -840,6 +860,7 @@ function EncounterDetailModal({
   branch,
   clinician,
   specialty,
+  beneficiaryId,
   onClose,
   onOpenEncounter,
 }: {
@@ -847,6 +868,8 @@ function EncounterDetailModal({
   branch: string | null;
   clinician: string | null;
   specialty: string | null;
+  /** Needed for the orders tab, which reads the member's own investigation and prescription sections. */
+  beneficiaryId?: string;
   onClose: () => void;
   onOpenEncounter: (encounterId: string) => void;
 }) {
@@ -865,6 +888,26 @@ function EncounterDetailModal({
       [api, encounterId],
     ),
     [encounterId],
+  );
+
+  /**
+   * What this visit ORDERED — investigations and prescriptions, scoped to this encounter.
+   *
+   * Fetched from the member's own profile sections rather than from orders/pharmacy directly, so the
+   * design-39 §4 matrix decides what comes back exactly as it does on the file itself: a role that may not
+   * read prescriptions gets the section withheld here too, and this modal has no separate opinion. Loaded
+   * only when the orders tab is opened — a dialog that reads three services to show a date is a dialog that
+   * costs three PHI accesses per glance.
+   */
+  const wantOrders = tab === "orders" && Boolean(beneficiaryId) && Boolean(row.encounterId);
+  const orders = useAsync(
+    useCallback(
+      () => (wantOrders
+        ? api.patientProfile(beneficiaryId!, ["investigations", "prescriptions"])
+        : Promise.resolve(null)),
+      [api, beneficiaryId, wantOrders],
+    ),
+    [wantOrders, beneficiaryId],
   );
 
   const denied = record.status === "error" && record.error?.status === 403;
@@ -963,9 +1006,104 @@ function EncounterDetailModal({
             label: t(L.tabVitals),
             content: clinical((enc) => <VitalsFacts vitals={enc.vitals} />, L.noVitals),
           },
+          {
+            value: "orders",
+            label: t(L.tabOrders),
+            content: <EncounterOrders state={orders} encounterId={row.encounterId ?? null} />,
+          },
         ]}
       />
     </Modal>
+  );
+}
+
+/**
+ * What this visit ordered.
+ *
+ * <b>Scoped by encounter id, and honest when it cannot be.</b> A role whose encounter projection carries no
+ * id (`V(meta)` — reception, finance) cannot have this list narrowed to one visit, and showing them the
+ * member's WHOLE order history under a heading that says "on this visit" would be a plain untruth. They get
+ * a sentence saying why instead.
+ *
+ * The two sections come back withheld or absent exactly as they do on the patient file — this reads the same
+ * profile response and applies no rules of its own.
+ */
+function EncounterOrders({
+  state,
+  encounterId,
+}: {
+  state: ReturnType<typeof useAsync<PatientProfile | null>>;
+  encounterId: string | null;
+}) {
+  const t = useLoc();
+  const fmt = useFormat();
+
+  if (!encounterId) return <InlineAlert tone="info">{t(L.ordersUnavailable)}</InlineAlert>;
+  if (state.status === "loading") return <p className="profile-empty">{t(L.loading)}</p>;
+  if (state.status === "error") return <InlineAlert tone="bad">{t(L.encounterUnavailable)}</InlineAlert>;
+
+  const section = (key: string): ProfileSection | null =>
+    state.data?.sections.find((x: ProfileSection) => x.key === key) ?? null;
+  const inv = section("investigations");
+  const rx = section("prescriptions");
+
+  const invRows = inv?.state === "Visible"
+    ? ((inv.data as ProfileInvestigations).items ?? []).filter((r) => r.encounterId === encounterId)
+    : null;
+  const rxRows = rx?.state === "Visible"
+    ? ((rx.data as ProfilePrescriptions).items ?? []).filter((r) => r.encounterId === encounterId)
+    : null;
+
+  return (
+    <div className="stack-3">
+      <section>
+        <h4 className="section-h">{t(L.investigationsOn)}</h4>
+        {/* A withheld section and an empty one are different answers, and only one of them says anything
+            about what the doctor ordered. */}
+        {invRows === null ? (
+          <InlineAlert tone="info">{t(L.restrictedSection)}</InlineAlert>
+        ) : invRows.length === 0 ? (
+          <p className="profile-empty">{t(L.noOrdersOnVisit)}</p>
+        ) : (
+          <ul className="profile-rows">
+            {invRows.map((r) => (
+              <li key={r.lineId} className="enc-order-row">
+                <span className="tnum">{r.orderRef}</span>
+                <span>{r.category ?? "—"}</span>
+                <span className="muted tnum">{fmt.dateTime(r.orderedOn)}</span>
+                <Status status={r.status} />
+                {/* A restricted result is restricted, never "pending" — the same rule the full
+                    investigations section keeps (design 37 §6). */}
+                {r.restricted ? (
+                  <span className="muted">{t(L.restrictedResult)}</span>
+                ) : r.resultSummary ? (
+                  <span>{r.resultSummary}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section>
+        <h4 className="section-h">{t(L.rxOn)}</h4>
+        {rxRows === null ? (
+          <InlineAlert tone="info">{t(L.restrictedSection)}</InlineAlert>
+        ) : rxRows.length === 0 ? (
+          <p className="profile-empty">{t(L.noRxOnVisit)}</p>
+        ) : (
+          <ul className="profile-rows">
+            {rxRows.map((r) => (
+              <li key={`${r.rxRef}-${r.drugDisplay}`} className="enc-order-row">
+                <span className="tnum">{r.rxRef}</span>
+                <span>{r.drugDisplay}</span>
+                <span className="muted tnum">{fmt.dateTime(r.prescribedOn)}</span>
+                <Status status={r.status} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -1634,7 +1772,7 @@ export const DESIGNED_SECTION_KEYS = new Set([
  * role, and every field these views read is optional. A field the server withheld is simply not there, and the
  * views are written to render nothing for it.
  */
-export function SectionView({ section }: { section: ProfileSection; beneficiaryId?: string }) {
+export function SectionView({ section, beneficiaryId }: { section: ProfileSection; beneficiaryId?: string }) {
   const data = section.data;
   if (data === null || data === undefined) return <Empty />;
 
@@ -1644,7 +1782,9 @@ export function SectionView({ section }: { section: ProfileSection; beneficiaryI
     case "pastMedicalHistory":
       return <PastMedicalHistoryView data={data as ProfilePastMedicalHistory} />;
     case "encounters":
-      return <EncountersView data={data as ProfileEncounters} />;
+      // `beneficiaryId` was accepted here and dropped on the floor. The encounters view needs it to scope
+      // the visit-details modal's orders tab to this member.
+      return <EncountersView data={data as ProfileEncounters} beneficiaryId={beneficiaryId} />;
     case "investigations":
       return <InvestigationsView data={data as ProfileInvestigations} />;
     case "prescriptions":

@@ -1563,6 +1563,11 @@ nav.mrs-rail {
   text-underline-offset: 2px;
 }
 .linklike:hover { text-decoration: underline; }
+/* The patient's NAME is not underlined at rest.
+   It is the largest text in the identity block and already reads as the subject of the panel; a permanent
+   rule under it made the block look like a page of links and competed with the hairline separating the
+   facts below. It stays unmistakably actionable — pointer, hover underline, and the app's focus ring. */
+.profile-name .linklike { text-decoration: none; }
 .linklike:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
 /* ── 19.6b analytics dashboard ─────────────────────────────────────────────────────────────────────────── */
@@ -2885,17 +2890,26 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
      they save. `align-content: start` above keeps the two cards their own height rather than stretching. */
   position: sticky;
   top: var(--sp4);
+  /* Level with the first card in the note column, not with the tab strip above it.
+     The tab bar belongs to the main column only, so the rail started one strip higher and the two panels
+     sat on different lines — visible as soon as the vitals card grew tall enough to reach past it. The
+     offset is the strip's own height, stated in the terms it is built from: `.mrs-tab`'s 44px minimum
+     target, the 1px rule under the list, and `.mrs-tabpane`'s top padding. */
+  margin-block-start: calc(44px + 1px + var(--sp5));
 }
 @media (max-width: 1100px) {
   .enc-rail {
     position: static;
+    /* Stacked below the note, there is no tab strip beside it to line up with. */
+    margin-block-start: 0;
   }
 }
 
+/* No top margin: `.mrs-tabpane` already pads the panel, and the two together pushed the first card 16px
+   below where the rail's offset above expects it. */
 .enc-soap {
   display: grid;
   gap: var(--sp4);
-  margin-block-start: var(--sp4);
 }
 .soap-card {
   padding: var(--sp4);
@@ -3051,6 +3065,59 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   outline: 3px solid var(--focus);
   outline-offset: -3px;
 }
+/* Already staged. The row stays pressable and says so in words rather than going disabled — a disabled
+   control cannot explain itself, and "nothing happened when I clicked" is the reading it invites. */
+.icd-hit[aria-pressed="true"] {
+  background: var(--accent-tint);
+}
+.icd-hit-added {
+  margin-inline-start: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--st-ok-fg);
+  flex: none;
+}
+
+/* ── The staging list: codes chosen, not yet recorded ─────────────────────────────────────────────────── */
+.dx-staged {
+  display: grid;
+  gap: var(--sp2);
+  padding-block-start: var(--sp3);
+  border-block-start: 1px solid var(--border);
+}
+.dx-staged-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp2);
+}
+.dx-staged-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 9rem auto;
+  align-items: center;
+  gap: var(--sp2);
+}
+.dx-staged-title {
+  min-inline-size: 0;
+  font-size: 0.875rem;
+}
+/* The per-row rank picker carries no visible label (the row names itself), so it must not keep the field
+   wrapper's stacking gap — otherwise every row sits a label's height taller than its content. */
+.dx-staged-list .mrs-field {
+  gap: 0;
+}
+@media (max-width: 560px) {
+  .dx-staged-list li {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .dx-staged-list .mrs-field {
+    grid-column: 1 / -1;
+  }
+}
 
 /* ── Vitals rail ──────────────────────────────────────────────────────────────────────────────────────── */
 .vitals-panel {
@@ -3160,4 +3227,20 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: var(--sp3) var(--sp4);
+}
+
+/* One order or prescription on the visit-details modal's Orders tab. A row rather than a table: four short
+   facts per line in a dialog that is already narrow, where a table would spend most of its width on headers
+   repeated for three rows. */
+.enc-order-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp2) var(--sp3);
+  padding-block: var(--sp2);
+  border-block-end: 1px solid var(--border);
+  font-size: 0.875rem;
+}
+.enc-order-row:last-child {
+  border-block-end: 0;
 }

@@ -65,6 +65,26 @@ export const iconPaths = {
    * unmistakably different from an ordinary result, "looks different on every machine" is the wrong property.
    */
   lock: '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+
+  // ---- Vital signs -------------------------------------------------------------------------------------
+  // One glyph per measurement, and none of them borrowed from the status family above.
+  //
+  // The encounter workspace first labelled these rows with `chart`, `half`, `triangle` and `info` — three of
+  // which are STATUS shapes. `triangle` was the worst: it labelled "Temperature" on the left of the row and
+  // simultaneously meant "out of range" in the flag chip on the right of the same row, so one glyph carried
+  // two meanings eighteen pixels apart. That is exactly what the member-card note above warns against.
+
+  /** Blood pressure — a dial with a needle, the sphygmomanometer's face. */
+  gauge: '<circle cx="12" cy="12" r="2"/><path d="m13.4 10.6 3.6-3.6"/><path d="M4.2 18a9 9 0 1 1 15.6 0"/>',
+  /** Heart rate. */
+  heart: '<path d="M12 20.3 4.3 12.9a4.8 4.8 0 0 1 6.8-6.8l.9.9.9-.9a4.8 4.8 0 0 1 6.8 6.8Z"/>',
+  temperature: '<path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0Z"/><path d="M12 9.5v6"/>',
+  /** Oxygen saturation — the drop the pulse oximeter reads through. */
+  droplet: '<path d="M12 3.2s6 6.3 6 10.1a6 6 0 0 1-12 0c0-3.8 6-10.1 6-10.1Z"/>',
+  /** Height — a ruler with its graduations. */
+  ruler: '<rect x="2" y="7" width="20" height="10" rx="2"/><path d="M7 7v3M12 7v4M17 7v3"/>',
+  /** Weight — a balance, not a bathroom scale: the dial of one is indistinguishable from `gauge` above. */
+  scale: '<path d="M12 4v17"/><path d="M7 21h10"/><path d="M4 7h16"/><path d="M4 7 1.5 13a3 3 0 0 0 5 0Z"/><path d="M20 7l-2.5 6a3 3 0 0 0 5 0Z"/>',
 } as const;
 
 export type IconName = keyof typeof iconPaths;

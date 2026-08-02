@@ -83,7 +83,8 @@ public static class ProfileSectionEndpoints
                         dispense?.DispensedAt,
                         dispense?.BatchNo,
                         dispense?.ExpiryDate,
-                        dispense?.SubstitutedDrugId?.ToString()));
+                        dispense?.SubstitutedDrugId?.ToString(),
+                        rx.EncounterId));
                 }
             }
 
@@ -147,7 +148,10 @@ public static class ProfileSectionEndpoints
 
 public sealed record ProfilePrescriptionView(
     string RxNo, string DrugDisplay, string Status, DateTimeOffset PrescribedOn,
-    DateTimeOffset? DispensedOn, string? BatchNo, DateOnly? ExpiryDate, string? SubstitutedWith);
+    DateTimeOffset? DispensedOn, string? BatchNo, DateOnly? ExpiryDate, string? SubstitutedWith,
+    /// <summary>The encounter the prescription was written on — see the note on the investigation view.
+    /// An id only; it carries no clinical content of its own.</summary>
+    Guid EncounterId);
 
 public sealed record ProfilePrescriptionsView(IReadOnlyList<ProfilePrescriptionView> Items);
 

@@ -63,6 +63,9 @@ const S = {
   tabNote: { en: "SOAP note", ar: "ملاحظة SOAP" },
   tabOrders: { en: "Orders", ar: "الطلبات" },
   tabHistory: { en: "History", ar: "السجل" },
+  histEncounters: { en: "Encounters", ar: "الزيارات" },
+  histInvestigations: { en: "Investigations", ar: "الفحوصات" },
+  histPrescriptions: { en: "Prescriptions", ar: "الوصفات" },
 
   subjective: { en: "Subjective", ar: "الشكوى" },
   objective: { en: "Objective", ar: "الفحص" },
@@ -92,6 +95,14 @@ const S = {
     ar: "لهذه الزيارة تشخيص أساسي بالفعل. تسجيل تشخيص ثانٍ مسموح لكنه نادراً ما يكون مقصوداً.",
   },
   addCode: { en: "Add diagnosis", ar: "إضافة تشخيص" },
+  addOne: { en: "Add", ar: "إضافة" },
+  addN: { en: "Add {n} diagnoses", ar: "إضافة {n} تشخيصات" },
+  toAdd: { en: "To add ({n})", ar: "للإضافة ({n})" },
+  staged: { en: "Added", ar: "مضاف" },
+  someFailed: {
+    en: "These codes were not recorded: {codes}. They are still listed — press Add to try again.",
+    ar: "لم تُسجَّل هذه الرموز: {codes}. ما زالت مدرجة — اضغط «إضافة» لإعادة المحاولة.",
+  },
   codePicker: { en: "Add a diagnosis", ar: "إضافة تشخيص" },
   codeSearch: { en: "Search ICD-10 by code or condition", ar: "ابحث في ICD-10 بالرمز أو الحالة" },
   codeSearchHint: { en: "Type at least two characters.", ar: "اكتب حرفين على الأقل." },
@@ -629,7 +640,6 @@ function DiagnosisPanel({
         <DiagnosisPicker
           encounterId={encounterId}
           disabled={signed}
-          defaultRank={primary.length === 0 ? "Primary" : "Secondary"}
           hasPrimary={primary.length > 0}
           onAdded={onAdded}
         />
@@ -734,17 +744,27 @@ function DiagnosisGroup({
   );
 }
 
+/**
+ * The ICD-10 picker — several codes per visit, in one pass.
+ *
+ * <b>Search, stage, then commit.</b> It used to record a code the instant it was clicked and close, which is
+ * the right shape for adding one and the wrong shape for the ordinary case: a consultation that ends in a
+ * primary plus two comorbidities meant opening the same dialog three times and retyping a search each time.
+ * Staging also makes the RANK a decision the doctor takes over the whole set — which of these was the visit
+ * about — instead of one they answer three times without seeing the other two.
+ *
+ * Nothing is written until Add is pressed. A code removed from the staging list was never recorded, so it
+ * leaves no retract in the audit trail for a mis-click that never reached the record.
+ */
 function DiagnosisPicker({
   encounterId,
   disabled,
-  defaultRank,
   hasPrimary,
   onAdded,
 }: {
   encounterId: string;
   disabled: boolean;
-  /** Primary while the encounter has none — the commonest first act, pre-selected rather than assumed. */
-  defaultRank: DiagnosisRank;
+  /** Whether the encounter ALREADY has a primary — decides what the first staged pick defaults to. */
   hasPrimary: boolean;
   onAdded: (d: EncounterDiagnosis) => void;
 }) {
@@ -753,13 +773,16 @@ function DiagnosisPicker({
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [rank, setRank] = useState<DiagnosisRank>(defaultRank);
+  const [staged, setStaged] = useState<(IcdRef & { rank: DiagnosisRank })[]>([]);
   const [results, setResults] = useState<IcdRef[]>([]);
   const [searching, setSearching] = useState(false);
-  const [adding, setAdding] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  // Reopening after the first code was recorded should not still offer Primary as the default.
-  useEffect(() => { if (open) setRank(defaultRank); }, [open, defaultRank]);
+  // A fresh dialog each time it opens: staging that survived a cancel would re-offer codes the doctor
+  // decided against.
+  useEffect(() => {
+    if (!open) { setStaged([]); setQuery(""); setResults([]); }
+  }, [open]);
 
   // Debounced: the field is a typeahead over master data, and a request per keystroke would ask the
   // catalogue about "a", "ac", "acu" and "acut" on the way to a search nobody wanted the first four of.
@@ -781,18 +804,45 @@ function DiagnosisPicker({
     return () => { live = false; clearTimeout(timer); };
   }, [api, open, query]);
 
-  async function add(code: string) {
-    setAdding(code);
-    try {
-      onAdded(await api.addEncounterDiagnosis(encounterId, code, rank));
+  const stagedPrimary = staged.some((r) => r.rank === "Primary");
+
+  function stage(hit: IcdRef) {
+    setStaged((prev) => {
+      if (prev.some((r) => r.code === hit.code)) return prev;
+      // The first pick takes Primary only while neither the encounter nor this batch has one.
+      const rank: DiagnosisRank =
+        !hasPrimary && !prev.some((r) => r.rank === "Primary") ? "Primary" : "Secondary";
+      return [...prev, { ...hit, rank }];
+    });
+  }
+
+  function setRank(code: string, rank: DiagnosisRank) {
+    setStaged((prev) => prev.map((r) => (r.code === code ? { ...r, rank } : r)));
+  }
+
+  async function commit() {
+    setBusy(true);
+    // Sequential, not Promise.all: each POST is a separate clinical record with its own audit event, and
+    // firing six at a diagnosis endpoint that validates every code against master data buys nothing but a
+    // harder failure to report.
+    const failed: string[] = [];
+    for (const row of staged) {
+      try {
+        onAdded(await api.addEncounterDiagnosis(encounterId, row.code, row.rank));
+      } catch {
+        failed.push(row.code);
+      }
+    }
+    setBusy(false);
+    if (failed.length === 0) {
       toast(t(S.codeAdded), "ok");
       setOpen(false);
-      setQuery("");
-    } catch {
-      toast(t(S.saveFailed), "bad");
-    } finally {
-      setAdding(null);
+      return;
     }
+    // Partial success is reported as partial. The ones that saved are on the panel behind the dialog; the
+    // ones that did not stay staged, so pressing Add again retries exactly those.
+    setStaged((prev) => prev.filter((r) => failed.includes(r.code)));
+    toast(t(S.someFailed).replace("{codes}", failed.join(", ")), "bad");
   }
 
   if (disabled) return null;
@@ -811,21 +861,23 @@ function DiagnosisPicker({
           {t(S.addCode)}
         </Button>
       }
+      footer={
+        <>
+          <Button variant="ghost" onClick={() => setOpen(false)}>{t(S.cancel)}</Button>
+          <Button
+            variant="primary"
+            loading={busy}
+            disabled={staged.length === 0}
+            onClick={() => void commit()}
+          >
+            {staged.length > 1
+              ? t(S.addN).replace("{n}", String(staged.length))
+              : t(S.addOne)}
+          </Button>
+        </>
+      }
     >
       <div className="stack-3">
-        {/* The rank is chosen BEFORE the code, because it changes what the doctor is looking for: the primary
-            is the one condition the visit was about, and picking it from a list of five already-added codes
-            afterwards is a different, harder question. */}
-        <SelectField
-          label={t(S.rank)}
-          value={rank}
-          onChange={(v) => setRank(v as DiagnosisRank)}
-          options={[
-            { value: "Primary", label: t(S.rankPrimary) },
-            { value: "Secondary", label: t(S.rankSecondary) },
-          ]}
-          help={hasPrimary && rank === "Primary" ? t(S.replacesPrimary) : undefined}
-        />
         <InputField
           label={t(S.codeSearch)}
           help={t(S.codeSearchHint)}
@@ -835,23 +887,72 @@ function DiagnosisPicker({
         />
         {/* aria-live so a screen-reader user learns the list changed under a field they are still typing in. */}
         <ul className="icd-results" aria-live="polite" aria-busy={searching}>
-          {results.map((r) => (
-            <li key={r.code}>
-              <button
-                type="button"
-                className="icd-hit"
-                disabled={adding === r.code}
-                onClick={() => void add(r.code)}
-              >
-                <span className="dx-code tnum">{r.code}</span>
-                <span>{r.title}</span>
-              </button>
-            </li>
-          ))}
+          {results.map((r) => {
+            const already = staged.some((x) => x.code === r.code);
+            return (
+              <li key={r.code}>
+                <button
+                  type="button"
+                  className="icd-hit"
+                  // Not disabled — a disabled control cannot say why it is disabled. It stays pressable and
+                  // announces that this code is already on the list.
+                  aria-pressed={already}
+                  onClick={() => stage(r)}
+                >
+                  <span className="dx-code tnum">{r.code}</span>
+                  <span>{r.title}</span>
+                  {already && (
+                    <span className="icd-hit-added">
+                      <Icon name="ok" width={14} height={14} aria-hidden="true" />
+                      {t(S.staged)}
+                    </span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
           {!searching && query.trim().length >= 2 && results.length === 0 && (
             <li className="muted">{t(S.codeNone)}</li>
           )}
         </ul>
+
+        {staged.length > 0 && (
+          <div className="dx-staged">
+            <h4 className="section-h" style={{ margin: 0 }}>
+              {t(S.toAdd).replace("{n}", String(staged.length))}
+            </h4>
+            {/* The advisory is about the SET, which is the point of staging: a doctor choosing three codes
+                at once can see that two of them claim to be the primary. */}
+            {hasPrimary && stagedPrimary && <InlineAlert tone="warn">{t(S.replacesPrimary)}</InlineAlert>}
+            {!hasPrimary && !stagedPrimary && <InlineAlert tone="warn">{t(S.needPrimary)}</InlineAlert>}
+            <ul className="dx-staged-list">
+              {staged.map((r) => (
+                <li key={r.code}>
+                  <span className="dx-code tnum">{r.code}</span>
+                  <span className="dx-staged-title">{r.title}</span>
+                  <SelectField
+                    label={t(S.rank)}
+                    hideLabel
+                    value={r.rank}
+                    onChange={(v) => setRank(r.code, v as DiagnosisRank)}
+                    options={[
+                      { value: "Primary", label: t(S.rankPrimary) },
+                      { value: "Secondary", label: t(S.rankSecondary) },
+                    ]}
+                  />
+                  <button
+                    type="button"
+                    className="dx-remove"
+                    aria-label={t(S.removeOne).replace("{code}", r.code)}
+                    onClick={() => setStaged((prev) => prev.filter((x) => x.code !== r.code))}
+                  >
+                    <Icon name="cross" width={14} height={14} aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
     </Modal>
   );
@@ -868,12 +969,21 @@ function flagFor(key: string, value: number | null): { tone: "ok" | "warn"; labe
   return { tone: "ok", label: S.vitalNormal, icon: "ok" };
 }
 
-/** The four readings the panel leads with, each with its icon, unit and reference band. */
-const VITAL_ROWS: { key: string; label: Localized; icon: IconName; unit: string; range: string }[] = [
-  { key: "systolic", label: S.vBp, icon: "chart", unit: "mmHg", range: "90–120 / 60–80" },
-  { key: "heartRate", label: S.vHr, icon: "half", unit: "bpm", range: "60–100" },
-  { key: "tempC", label: S.vTemp, icon: "triangle", unit: "°C", range: "36.3–37.2" },
-  { key: "spo2", label: S.vSpo2, icon: "info", unit: "%", range: "95–100" },
+/**
+ * The readings the rail carries, each with its icon and its unit.
+ *
+ * `range` is present only for the four that HAVE a clinical reference band. Height and weight do not: there
+ * is no normal height, and a weight is read against this patient's own trend rather than against a
+ * population band. Printing "Reference 40–120 kg" under a weight would be inventing a norm and flagging
+ * people against it.
+ */
+const VITAL_ROWS: { key: string; label: Localized; icon: IconName; unit: string; range?: string }[] = [
+  { key: "systolic", label: S.vBp, icon: "gauge", unit: "mmHg", range: "90–120 / 60–80" },
+  { key: "heartRate", label: S.vHr, icon: "heart", unit: "bpm", range: "60–100" },
+  { key: "tempC", label: S.vTemp, icon: "temperature", unit: "°C", range: "36.3–37.2" },
+  { key: "spo2", label: S.vSpo2, icon: "droplet", unit: "%", range: "95–100" },
+  { key: "heightCm", label: S.vHeight, icon: "ruler", unit: "cm" },
+  { key: "weightKg", label: S.vWeight, icon: "scale", unit: "kg" },
 ];
 
 /**
@@ -906,12 +1016,16 @@ function VitalsPanel({
     heartRate: vitals.heartRate,
     tempC: vitals.tempC,
     spo2: vitals.spo2,
+    heightCm: vitals.heightCm,
+    weightKg: vitals.weightKg,
   };
   const display: Record<string, string | null> = {
     systolic: bpDisplay(vitals),
     heartRate: num(vitals.heartRate),
     tempC: num(vitals.tempC),
     spo2: num(vitals.spo2),
+    heightCm: num(vitals.heightCm),
+    weightKg: num(vitals.weightKg),
   };
 
   return (
@@ -931,7 +1045,9 @@ function VitalsPanel({
                   <Icon name={r.icon} width={15} height={15} aria-hidden="true" />
                   {t(r.label)}
                 </span>
-                <span className="vital-ref">{t(S.vitalsRef).replace("{range}", `${r.range} ${r.unit}`)}</span>
+                <span className="vital-ref">
+                  {r.range ? t(S.vitalsRef).replace("{range}", `${r.range} ${r.unit}`) : r.unit}
+                </span>
               </dt>
               <dd>
                 <span className={display[r.key] === null ? "vital-value vital-value--none" : "vital-value tnum"}>
@@ -1115,24 +1231,59 @@ function OrdersTab({ encounter }: { encounter: Encounter }) {
 
 // ---------------------------------------------------------------- history
 
+/**
+ * The patient's clinical history, in three registers.
+ *
+ * <b>One fetch, three tabs — not three screens.</b> A doctor asking "what has been done for this patient?"
+ * moves between the visits, what was ordered and what was prescribed in the same breath; making each of them
+ * a separate destination turns one question into three navigations and loses the place each time.
+ *
+ * Every list is a PROFILE section, gated by the design-39 §4 matrix exactly as it is on the patient file —
+ * not a second, parallel history assembled here. One list of a patient's prescriptions, one authority over
+ * who may read it, and a section this role may not see arrives withheld and renders as withheld.
+ */
 function HistoryTab({ beneficiaryId }: { beneficiaryId: string }) {
   const api = useApi();
   const t = useLoc();
-  // The profile's own encounters section, gated by the design-39 §4 matrix exactly as it is in the patient
-  // file — not a second, parallel history assembled here. One list of a patient's encounters, one authority
-  // over who may read it.
+  const [tab, setTab] = useState("encounters");
+
+  // All three in ONE call. The profile endpoint takes a section list and answers them together, so asking
+  // per tab would be three round trips and three audited PHI reads for one question.
   const state = useAsync(
-    useCallback(() => api.patientProfile(beneficiaryId, ["encounters"]), [api, beneficiaryId]),
+    useCallback(
+      () => api.patientProfile(beneficiaryId, ["encounters", "investigations", "prescriptions"]),
+      [api, beneficiaryId],
+    ),
     [beneficiaryId],
   );
 
+  const panes: { value: string; key: string; label: Localized }[] = [
+    { value: "encounters", key: "encounters", label: S.histEncounters },
+    { value: "investigations", key: "investigations", label: S.histInvestigations },
+    { value: "prescriptions", key: "prescriptions", label: S.histPrescriptions },
+  ];
+
   return (
     <AsyncSection state={state} emptyLabel={S.historyEmpty}>
-      {(profile) => {
-        const section = profile.sections.find((s) => s.key === "encounters");
-        if (!section) return <p className="muted">{t(S.historyEmpty)}</p>;
-        return <SectionView section={section} beneficiaryId={beneficiaryId} />;
-      }}
+      {(profile) => (
+        <Tabs
+          aria-label={t(S.tabHistory)}
+          value={tab}
+          onValueChange={setTab}
+          items={panes.map((p) => {
+            const section = profile.sections.find((s) => s.key === p.key);
+            return {
+              value: p.value,
+              label: t(p.label),
+              content: section
+                ? <SectionView section={section} beneficiaryId={beneficiaryId} />
+                // The server did not return this section at all, which is not the same as returning it
+                // empty — and neither is the same as a withheld one, which SectionView renders itself.
+                : <p className="muted">{t(S.historyEmpty)}</p>,
+            };
+          })}
+        />
+      )}
     </AsyncSection>
   );
 }

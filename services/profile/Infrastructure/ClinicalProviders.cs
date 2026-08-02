@@ -151,7 +151,8 @@ public sealed class InvestigationsSectionProvider(CallerScopedHttp http) : ISect
                 i.Str("providerName"),
                 i.Str("resultSummary"),
                 i.Bool("restricted"),
-                i.Str("sensitivityLevel")))
+                i.Str("sensitivityLevel"),
+                i.Uuid("encounterId")))
             .ToList();
 
         return new InvestigationsSection(rows);
@@ -181,7 +182,8 @@ public sealed class PrescriptionsSectionProvider(CallerScopedHttp http) : ISecti
                 r.Moment("dispensedOn"),
                 r.Str("batchNo"),
                 r.Day("expiryDate"),
-                r.Str("substitutedWith")))
+                r.Str("substitutedWith"),
+                r.Uuid("encounterId")))
             .ToList();
 
         return new PrescriptionsSection(rows);

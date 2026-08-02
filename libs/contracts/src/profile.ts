@@ -229,6 +229,9 @@ export const zInvestigationRow = z.object({
   resultSummary: z.string().optional(),
   restricted: z.boolean().optional(),
   sensitivityLevel: z.string().optional(),
+  /** The encounter this order was raised on — lets one visit's orders be told from the member's whole
+   *  history. An id only; it discloses no clinical content of its own. */
+  encounterId: zId.optional(),
 });
 export type InvestigationRow = z.infer<typeof zInvestigationRow>;
 
@@ -246,6 +249,8 @@ export const zProfileRxRow = z.object({
   batchNo: z.string().optional(),
   expiryDate: zDate.optional(),
   substitutedWith: z.string().optional(),
+  /** The encounter this prescription was written on — see the note on `zInvestigationRow`. */
+  encounterId: zId.optional(),
 });
 export type ProfileRxRow = z.infer<typeof zProfileRxRow>;
 
