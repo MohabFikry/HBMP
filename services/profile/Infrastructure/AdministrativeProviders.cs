@@ -61,7 +61,11 @@ public sealed class HeaderSectionProvider(AdministrativeSource source) : ISectio
                 : null,
             // A relative path to this service's own gated endpoint, never a blob URL. The bytes are behind a
             // second authorization check and a short-TTL signature (design 39 §5).
-            $"/api/v1/patients/{request.BeneficiaryId}/photo");
+            $"/api/v1/patients/{request.BeneficiaryId}/photo",
+            membership.ValueKind == JsonValueKind.Object ? membership.Str("relationship") : null,
+            beneficiary?.Str("nationalityCode"),
+            beneficiary?.Str("birthDate") is { } bd && DateOnly.TryParse(bd, out var born) ? born : null,
+            beneficiary?.Bool("birthDateIsApproximate") ?? false);
     }
 
     /// <summary>The primary phone out of patient-service's contacts[], preferring the one flagged primary and

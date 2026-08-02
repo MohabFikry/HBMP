@@ -1357,7 +1357,24 @@ nav.mrs-rail {
 .profile-restricted { display: grid; gap: var(--sp2); padding: var(--sp3); border: 1px dashed currentColor; border-radius: var(--r-md); opacity: 0.95; }
 .profile-empty { margin: 0; opacity: 0.75; font-style: italic; }
 
-.profile-chip { display: inline-flex; align-items: center; gap: var(--sp1); margin: 0; padding: 2px var(--sp2); border-radius: 999px; font-size: 0.85em; border: 1px solid currentColor; }
+/* Sized and filled like `.mrs-chip`, the design-system chip the member card uses, so one patient's status
+   looks the same in beneficiary management and in their file. The BORDER is what changes per tone (see the
+   rules further down) and `data-shape` still varies the radius — the profile's statusCue carries a shape as
+   a fourth cue on top of hue, icon and word, which the generic chip does not have. */
+.profile-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  align-self: start;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  font-size: 12.5px;
+  font-weight: 600;
+  border: 1.5px solid transparent;
+  white-space: nowrap;
+}
 .profile-chip--restricted { border-style: dashed; }
 .profile-chip-icon { font-style: normal; }
 .profile-chip[data-shape="square"] { border-radius: var(--r-md); }
@@ -1372,8 +1389,24 @@ nav.mrs-rail {
    into a horizontal scroll — a flex child's default min-width is auto, which is content-sized. */
 .profile-identity-text { display: grid; gap: var(--sp1); min-inline-size: 0; }
 .profile-nameline { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; }
-.profile-avatar { width: 3rem; height: 3rem; border-radius: 999px; object-fit: cover; flex: 0 0 auto; }
-.profile-avatar--initials { display: grid; place-items: center; border: 1px solid currentColor; font-weight: 600; }
+/* Matches `.mem-avatar`: a rounded SQUARE on a surface tint, not a hairline circle. Same size (56px) so the
+   two identity blocks line up when someone has both open. */
+.profile-avatar {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  border-radius: var(--r-lg);
+  object-fit: cover;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.profile-avatar--initials {
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 0.02em;
+}
 .profile-name { margin: 0; font-weight: 600; font-size: var(--fs-title-3); }
 .profile-sub { margin: 0; color: var(--text-2); font-size: 0.9rem; }
 /* Wrapping, never a fixed row: a phone number and a branch name are different lengths in every locale. */
@@ -2701,11 +2734,14 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
    its colour and still renders as a legible chip with its border, label and shape intact. Degrading to
    monochrome is the right failure for an open vocabulary; degrading to invisible would not be. */
 .profile-chip--bad,
-.profile-chip--critical { color: var(--st-bad-fg); }
-.profile-chip--warn     { color: var(--st-warn-fg); }
-.profile-chip--positive { color: var(--st-ok-fg); }
-.profile-chip--info     { color: var(--st-info-fg); }
-.profile-chip--neutral  { color: var(--st-neu-fg); }
+.profile-chip--critical { color: var(--st-bad-fg); background: var(--st-bad-bg); }
+/* Caution stays OUTLINED where the others are filled — the same distinction `.mrs-chip.warn` draws, so the
+   two attention states are not one green-or-amber judgement in a glance. */
+.profile-chip--warn,
+.profile-chip--caution  { color: var(--st-warn-fg); border-color: currentColor; }
+.profile-chip--positive { color: var(--st-ok-fg); background: var(--st-ok-bg); }
+.profile-chip--info     { color: var(--st-info-fg); background: var(--st-info-bg); }
+.profile-chip--neutral  { color: var(--st-neu-fg); background: var(--st-neu-bg); }
 /* Direction is not a status — an inbound call is not "good" and an outbound one is not "bad". Both stay
    neutral and are told apart by the icon and the label, which is what those cues are for. */
 .profile-chip--inbound,

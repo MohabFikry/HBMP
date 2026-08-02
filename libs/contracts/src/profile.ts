@@ -52,6 +52,16 @@ export const zProfileHeader = z.object({
   contact: z.object({ phone: z.string().optional(), preferredChannel: z.string().optional() }).optional(),
   /** Absent entirely for roles outside the design-39 §5 allow-list — the client renders initials. */
   photoUrl: z.string().optional(),
+  /** Cover relationship — Principal, Spouse, Child, Dependent. */
+  relationship: z.string().optional(),
+  nationalityCode: z.string().optional(),
+  /**
+   * Exact birth date, so the header shows an AGE rather than a band. Stripped by `V(min)`: labs and
+   * pharmacies get `ageBand`, which is all a specimen label or a dose check needs.
+   */
+  birthDate: zDate.optional(),
+  /** Travels WITH the date. An estimate rendered as an exact age becomes a hard eligibility cutoff. */
+  birthDateIsApproximate: z.boolean().optional(),
 });
 export type ProfileHeader = z.infer<typeof zProfileHeader>;
 

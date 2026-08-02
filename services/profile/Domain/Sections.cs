@@ -42,7 +42,22 @@ public sealed record HeaderSection(
     string? BranchName,
     string? PreferredLanguage,
     ContactSummary? Contact,
-    string? PhotoUrl)
+    string? PhotoUrl,
+    /// <summary>Cover relationship — Principal, Spouse, Child, Dependent. Identity, not clinical: which
+    /// person on a policy this is.</summary>
+    string? Relationship = null,
+    /// <summary>ISO country code. The member card in beneficiary management has always shown it; the profile
+    /// header simply never carried it.</summary>
+    string? NationalityCode = null,
+    /// <summary>The exact birth date, so the header can show an AGE rather than a band.
+    ///
+    /// <para>More disclosive than <c>AgeBand</c> and therefore stripped by <c>min</c>: labs and pharmacies get
+    /// the band, which is all a specimen label or a dose check needs. The roles on the full header read the
+    /// birth date one screen away in any case.</para></summary>
+    DateOnly? BirthDate = null,
+    /// <summary>Travels WITH the date, always. An estimated birth date rendered as an exact age is how an
+    /// estimate quietly becomes a hard eligibility cutoff.</summary>
+    bool BirthDateIsApproximate = false)
 {
     /// <summary>
     /// <c>min</c> keeps only what identifies the person: names, member number, age band, sex and status.
@@ -57,6 +72,9 @@ public sealed record HeaderSection(
         ProfileVariants.Min => this with
         {
             BranchName = null, PreferredLanguage = null, Contact = null, PhotoUrl = null,
+            // The exact date goes; AgeBand stays. Relationship and nationality identify a person on a policy,
+            // which is not what a specimen label or a dose check is for.
+            Relationship = null, NationalityCode = null, BirthDate = null, BirthDateIsApproximate = false,
         },
         _ => this,
     };

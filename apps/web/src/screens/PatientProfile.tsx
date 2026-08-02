@@ -72,6 +72,9 @@ const STR = {
   age: { en: "Age", ar: "العمر" },
   sex: { en: "Sex", ar: "النوع" },
   branch: { en: "Branch", ar: "الفرع" },
+  nationality: { en: "Nationality", ar: "الجنسية" },
+  years: { en: "{n} yrs", ar: "{n} سنة" },
+  ageApprox: { en: "approx.", ar: "تقريبي" },
   language: { en: "Preferred language", ar: "اللغة المفضلة" },
   phone: { en: "Phone", ar: "الهاتف" },
   print: { en: "Print summary", ar: "طباعة الملخص" },
@@ -534,12 +537,18 @@ function HeaderView({ data }: { data: ProfileHeader }) {
   const t = useLoc();
   const name = lang === "ar" && data.displayNameAr ? data.displayNameAr : data.displayName;
 
+  // Whole years from the exact date when the caller was given it; the BAND otherwise. `min`-variant roles
+  // (labs, pharmacies) only ever receive the band, so this falls back rather than rendering nothing.
+  const age = data.birthDate ? yearsSince(data.birthDate) : null;
+  const ageText = age !== null
+    ? t(STR.years).replace("{n}", String(age)) + (data.birthDateIsApproximate ? ` (${t(STR.ageApprox)})` : "")
+    : data.ageBand ?? null;
+
   const facts: { key: string; icon: IconName; label: Localized; value: string }[] = [];
-  if (data.ageBand) facts.push({ key: "age", icon: "calendar", label: STR.age, value: data.ageBand });
+  if (ageText) facts.push({ key: "age", icon: "calendar", label: STR.age, value: ageText });
   if (data.sex) facts.push({ key: "sex", icon: "sex", label: STR.sex, value: data.sex });
-  if (data.branchName) facts.push({ key: "branch", icon: "branch", label: STR.branch, value: data.branchName });
-  if (data.preferredLanguage) {
-    facts.push({ key: "lang", icon: "globe", label: STR.language, value: data.preferredLanguage });
+  if (data.nationalityCode) {
+    facts.push({ key: "nat", icon: "globe", label: STR.nationality, value: data.nationalityCode });
   }
   if (data.contact?.phone) {
     facts.push({ key: "phone", icon: "phone", label: STR.phone, value: data.contact.phone });
@@ -551,7 +560,10 @@ function HeaderView({ data }: { data: ProfileHeader }) {
       <div className="profile-identity-text">
         <div className="profile-nameline">
           <h3 className="profile-name">{name}</h3>
-          {/* Four cues: the tone, the icon, the shape and the word — never colour alone. */}
+          {/* Four cues: the tone, the icon, the shape and the word — never colour alone. Styled to match the
+              design-system chip the member card uses, so one patient looks the same in both places, but kept
+              as its own element: `statusCue` carries a SHAPE too, and a beneficiary's status is exactly the
+              disclosure that must not come down to a colour. */}
           <p className={`profile-chip profile-chip--${data.statusCue.tone}`} data-shape={data.statusCue.shape}>
             <span aria-hidden="true" className="profile-chip-icon">
               {data.statusCue.icon === "check-circle" ? "✔" : "●"}
@@ -559,7 +571,13 @@ function HeaderView({ data }: { data: ProfileHeader }) {
             <span>{data.statusCue.label}</span>
           </p>
         </div>
-        {data.memberNo && <p className="profile-sub tnum">{data.memberNo}</p>}
+        {(data.memberNo || data.relationship) && (
+          <p className="profile-sub tnum">
+            {data.memberNo}
+            {data.memberNo && data.relationship && <span aria-hidden="true"> · </span>}
+            {data.relationship}
+          </p>
+        )}
         {facts.length > 0 && (
           <ul className="profile-facts">
             {facts.map((f) => (
@@ -576,6 +594,18 @@ function HeaderView({ data }: { data: ProfileHeader }) {
       </div>
     </div>
   );
+}
+
+/** Whole years between an ISO date and today. Null for anything unparseable rather than a negative age,
+ *  which is what a malformed date would otherwise render as. Same rule as the member card's `yearsSince`. */
+function yearsSince(isoDate: string): number | null {
+  const born = new Date(isoDate);
+  if (Number.isNaN(born.getTime())) return null;
+  const now = new Date();
+  let years = now.getFullYear() - born.getFullYear();
+  const monthDelta = now.getMonth() - born.getMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && now.getDate() < born.getDate())) years -= 1;
+  return years >= 0 && years < 130 ? years : null;
 }
 
 /**
