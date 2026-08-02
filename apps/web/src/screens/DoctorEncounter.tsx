@@ -131,7 +131,10 @@ const S = {
   saveDraft: { en: "Save draft", ar: "حفظ مسودة" },
   finalize: { en: "Save & finalize", ar: "حفظ وإنهاء" },
   draftSaved: { en: "Draft saved.", ar: "تم حفظ المسودة." },
-  finalized: { en: "Encounter finalized. The note is signed and locked.", ar: "تم إنهاء الزيارة. الملاحظة موقّعة ومقفلة." },
+  finalized: {
+    en: "Visit closed. The note is signed and locked, and the appointment is complete.",
+    ar: "أُغلقت الزيارة. الملاحظة موقّعة ومقفلة، والموعد مكتمل.",
+  },
   unsaved: { en: "Unsaved changes", ar: "تغييرات غير محفوظة" },
   saved: { en: "All changes saved", ar: "كل التغييرات محفوظة" },
   emptyNote: { en: "Write something in at least one section before saving.", ar: "اكتب في قسم واحد على الأقل قبل الحفظ." },
@@ -146,11 +149,11 @@ const S = {
   },
   confirmFinalize: { en: "Finalize this encounter?", ar: "إنهاء هذه الزيارة؟" },
   confirmFinalizeBody: {
-    en: "Signing locks the note. After this, corrections can only be added as an addendum — nothing can be changed in place.",
-    ar: "التوقيع يقفل الملاحظة. بعدها لا يمكن التصحيح إلا بإضافة ملحق — ولا يمكن تغيير أي شيء في مكانه.",
+    en: "This signs the note and closes the visit. The appointment moves to Completed and leaves your day list. After this, corrections can only be added as an addendum — nothing can be changed in place.",
+    ar: "سيؤدي هذا إلى توقيع الملاحظة وإغلاق الزيارة. ينتقل الموعد إلى «مكتمل» ويغادر قائمة يومك. بعدها لا يمكن التصحيح إلا بإضافة ملحق — ولا يمكن تغيير أي شيء في مكانه.",
   },
   cancel: { en: "Cancel", ar: "إلغاء" },
-  signAndLock: { en: "Sign & lock", ar: "توقيع وقفل" },
+  signAndLock: { en: "Sign & close visit", ar: "توقيع وإغلاق الزيارة" },
   patientFile: { en: "Patient file", ar: "ملف المريض" },
   notAuthor: { en: "Only the note's author may sign or amend it.", ar: "لا يمكن التوقيع أو التعديل إلا لكاتب الملاحظة." },
   saveFailed: { en: "The note could not be saved.", ar: "تعذّر حفظ الملاحظة." },
@@ -378,6 +381,10 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
     }
     try {
       await api.signEncounterNote(encounter.id, id);
+      // Signing the note and ENDING the visit are two acts, and the second one is what takes the patient
+      // off the day list. Doing only the first left a finished consultation sitting in CheckedIn with
+      // "Start visit" still offered against it — see the endpoint's own note.
+      await api.completeEncounter(encounter.id);
       setConfirming(false);
       toast(t(S.finalized), "ok");
       // Re-read rather than flipping a local flag: signing changes what the SERVER will now allow, and the

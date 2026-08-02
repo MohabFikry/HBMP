@@ -40,6 +40,7 @@ function fakeApi(over: Partial<ApiClient> = {}): ApiClient {
     getEncounter: vi.fn().mockResolvedValue(encounter()),
     saveEncounterNote: vi.fn().mockResolvedValue({ noteId: "note-1" }),
     signEncounterNote: vi.fn().mockResolvedValue(undefined),
+    completeEncounter: vi.fn().mockResolvedValue(undefined),
     addEncounterDiagnosis: vi.fn(),
     removeEncounterDiagnosis: vi.fn().mockResolvedValue(undefined),
     searchIcd: vi.fn().mockResolvedValue([]),
@@ -147,16 +148,40 @@ describe("Encounter workspace (US-031)", () => {
     await user.type(await screen.findByRole("textbox", { name: "Assessment" }), "Acute sinusitis");
     await user.click(screen.getByRole("button", { name: /save & finalize/i }));
 
-    // Signing is irreversible, so it is confirmed — and nothing has been signed yet at this point.
-    expect(await screen.findByText(/signing locks the note/i)).toBeInTheDocument();
+    // Irreversible, so it is confirmed — and nothing has been signed yet at this point. The prompt names
+    // both consequences: the note locks AND the appointment leaves the day list.
+    expect(await screen.findByText(/signs the note and closes the visit/i)).toBeInTheDocument();
     expect(signEncounterNote).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: /sign & lock/i }));
+    await user.click(screen.getByRole("button", { name: /sign & close visit/i }));
     await waitFor(() => expect(signEncounterNote).toHaveBeenCalledWith("enc-77", "note-1"));
     // Saved BEFORE signing: signing a note that was never written would lock an empty record.
     expect(saveEncounterNote).toHaveBeenCalled();
     expect(saveEncounterNote.mock.invocationCallOrder[0])
       .toBeLessThan(signEncounterNote.mock.invocationCallOrder[0]);
+  });
+
+  it("closes the VISIT as well as signing the note", async () => {
+    const user = userEvent.setup();
+    const completeEncounter = vi.fn().mockResolvedValue(undefined);
+    const signEncounterNote = vi.fn().mockResolvedValue(undefined);
+    renderWorkspace(fakeApi({
+      completeEncounter, signEncounterNote,
+      getEncounter: vi.fn().mockResolvedValue(encounter({
+        diagnoses: [{ id: "dx-1", system: "ICD-10", code: "J01.90", rank: "Primary",
+                      label: { en: "Acute sinusitis", ar: "التهاب جيوب" } }],
+      })),
+    }));
+
+    await user.type(await screen.findByRole("textbox", { name: "Plan" }), "Supportive care");
+    await user.click(screen.getByRole("button", { name: /save & finalize/i }));
+    await user.click(await screen.findByRole("button", { name: /sign & close visit/i }));
+
+    // Signing a note is documentation; closing the visit is what moves the appointment to Completed and
+    // takes "Start visit" off the doctor's day list. Doing only the first is the defect this covers.
+    await waitFor(() => expect(completeEncounter).toHaveBeenCalledWith("enc-77"));
+    expect(signEncounterNote.mock.invocationCallOrder[0])
+      .toBeLessThan(completeEncounter.mock.invocationCallOrder[0]);
   });
 
   it("a signed note is read-only and says why", async () => {

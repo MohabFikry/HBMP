@@ -25,6 +25,8 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
     /// <summary>25.4 — leave, holidays, closures and ad-hoc clinics (design 42 §4). The exception layer the
     /// weekly recurring rule never had; without it the only way to stop slots was to delete the rule.</summary>
     public DbSet<RosterException> RosterExceptions => Set<RosterException>();
+    /// <summary>The care-episode timeline (ADR-0031) — append-only, one row per step.</summary>
+    public DbSet<CareStep> CareTimeline => Set<CareStep>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -131,6 +133,19 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             e.HasIndex(x => x.EncounterNo).IsUnique();
             // Idempotent creation: one encounter per Idempotency-Key (partial unique index created in SQL).
             e.HasIndex(x => x.IdempotencyKey);
+        });
+
+        b.Entity<CareStep>(e =>
+        {
+            e.ToTable("care_timeline");
+            e.HasKey(x => x.StepId);
+            // Both directions are read: the workspace opens an episode from the encounter, the desk's board
+            // from the appointment.
+            e.HasIndex(x => new { x.EncounterId, x.OccurredAt });
+            e.HasIndex(x => new { x.AppointmentId, x.OccurredAt });
+            // At-least-once delivery means the same event can arrive twice; the partial unique index in
+            // migration 0019 is what actually enforces this.
+            e.HasIndex(x => x.EventId).IsUnique();
         });
 
         b.Entity<QueueEntry>(e =>

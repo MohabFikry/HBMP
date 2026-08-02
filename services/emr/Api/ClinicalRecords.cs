@@ -4,6 +4,7 @@ using Mersal.Auth.Authorization;
 using Mersal.Authz;
 using Mersal.Emr.Domain;
 using Mersal.Emr.Infrastructure;
+using Mersal.Events;
 using Microsoft.EntityFrameworkCore;
 
 namespace Mersal.Emr.Api;
@@ -154,7 +155,7 @@ public static class ClinicalEndpoints
         // ---- Sign a note (locks it) ----
         enc.MapPost("/{id:guid}/notes/{noteId:guid}/sign", async (
             Guid id, Guid noteId, EmrDbContext db, ClinicalGate gate, IAuditClient audit,
-            IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+            CareTimelineWriter timeline, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
             var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
             if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
@@ -175,6 +176,11 @@ public static class ClinicalEndpoints
             }
 
             note.IsSigned = true; note.SignedAt = clock.GetUtcNow();
+            // The episode records THAT a note was signed and by whom — never what it says. This timeline is
+            // read by reception and the call centre too (ADR-0031 §3).
+            timeline.Add(CareSteps.NoteSigned, enc0.BeneficiaryId,
+                encounterId: id, appointmentId: enc0.AppointmentId,
+                actor: me.Principal!.Subject, reference: enc0.EncounterNo, occurredAt: note.SignedAt);
             await db.SaveChangesAsync(ct);
             await EmitAsync(audit, "emr_note", note.NoteId, AuditAction.StateChange, me, "{\"isSigned\":true}", ct);
             return Results.Ok(NoteResponse.From(note));
@@ -210,7 +216,8 @@ public static class ClinicalEndpoints
         // ---- Diagnosis (US-031): ICD-10 validated vs masterdata ----
         enc.MapPost("/{id:guid}/diagnoses", async (
             Guid id, AddDiagnosisRequest req, EmrDbContext db, ClinicalGate gate, IClinicalCodeValidator codes,
-            IAuditClient audit, IHbmpPrincipalAccessor me, HttpContext http, TimeProvider clock, CancellationToken ct) =>
+            IAuditClient audit, CareTimelineWriter timeline, IHbmpPrincipalAccessor me, HttpContext http,
+            TimeProvider clock, CancellationToken ct) =>
         {
             var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
             if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
@@ -228,9 +235,99 @@ public static class ClinicalEndpoints
                 RecordedBy = me.Principal!.Subject, RecordedAt = clock.GetUtcNow(),
             };
             db.Diagnoses.Add(dx);
+            // The step says a diagnosis was coded, not WHICH — the ICD code is the clinical content this
+            // timeline deliberately does not carry. The reference is the encounter, which is the door to it
+            // for anyone entitled to open it.
+            timeline.Add(CareSteps.DiagnosisCoded, enc0.BeneficiaryId,
+                encounterId: id, appointmentId: enc0.AppointmentId,
+                actor: dx.RecordedBy, reference: enc0.EncounterNo, occurredAt: dx.RecordedAt);
             await db.SaveChangesAsync(ct);
             await EmitAsync(audit, "diagnosis", dx.DiagnosisId, AuditAction.Create, me, $"{{\"icd\":\"{dx.IcdCode}\"}}", ct);
             return Results.Created($"/api/v1/encounters/{id}/diagnoses/{dx.DiagnosisId}", DiagnosisResponse.From(dx));
+        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
+
+        // ---- End the visit (23 §6) — the transition nothing in this platform performed ----
+        //
+        // `EncounterStatus.Completed` and `AppointmentStatus.Completed` have both existed since phase 1, and
+        // `AppointmentWorkflow` has listed CheckedIn → Completed with the comment "encounter closed (phase 4)"
+        // since phase 3. No code path ever wrote either, so every finished consultation stayed InProgress and
+        // its appointment stayed CheckedIn — and the doctor's day list, which offers "Start visit" for any
+        // CheckedIn appointment, kept offering it for patients who had already been seen and sent home.
+        //
+        // The appointment moves in the SAME transaction. Closing the visit and leaving the appointment open is
+        // the state that caused this, and two endpoints for one clinical act is two chances to end up back in
+        // it — the desk's board and the doctor's board would disagree about the same patient.
+        enc.MapPost("/{id:guid}/complete", async (
+            Guid id, EmrDbContext db, ClinicalGate gate, IAuditClient audit, IOutbox outbox,
+            CareTimelineWriter timeline, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        {
+            var encounter = await db.Encounters.FirstOrDefaultAsync(e => e.EncounterId == id, ct);
+            if (encounter is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+            var denied = await gate.CheckAsync("emr:write", EmrPolicies.Resources.Encounter, id.ToString(), encounter.BeneficiaryId, ct);
+            if (denied is not null) return denied;
+
+            // Idempotent: closing an already-closed visit is the answer the caller wanted, not a conflict.
+            // "Save & finalize" saves, signs and closes in sequence, so a retry after a partial failure must
+            // not turn into an error the doctor cannot act on.
+            if (encounter.Status == EncounterStatus.Completed)
+                return Results.Ok(EncounterResponse.From(encounter));
+            if (!EncounterWorkflow.CanComplete(encounter))
+                return Problem(409, "encounter-not-open", $"the encounter is {encounter.Status}; only an in-progress visit can be closed.");
+            if (!EncounterWorkflow.MayComplete(encounter, me.Principal?.Subject))
+                return Problem(403, "not-the-treating-clinician", "only the clinician who opened this visit may close it.");
+
+            var now = clock.GetUtcNow();
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+
+            encounter.Status = EncounterStatus.Completed;
+            encounter.EndedAt = now;
+            encounter.EndedBy = me.Principal?.Subject;
+
+            // The queue entry is the patient sitting on a clinician's worklist. Leaving it Waiting after the
+            // consultation ends is how a board shows a room that has already emptied.
+            var queued = await db.QueueEntries.FirstOrDefaultAsync(q => q.EncounterId == id && q.State != QueueState.Done, ct);
+            if (queued is not null) queued.State = QueueState.Done;
+
+            Appointment? appt = null;
+            if (encounter.AppointmentId is { } apptId)
+            {
+                appt = await db.Appointments.FirstOrDefaultAsync(a => a.AppointmentId == apptId, ct);
+                // Only when the move is legal. A visit opened against an appointment that was later cancelled
+                // still closes — the consultation happened — and the appointment keeps the state it reached.
+                if (appt is not null && AppointmentWorkflow.CanTransition(appt.Status, AppointmentStatus.Completed))
+                {
+                    appt.Status = AppointmentStatus.Completed;
+                    appt.UpdatedBy = me.Principal?.Subject;
+                    appt.UpdatedAt = now;
+                }
+                else
+                {
+                    appt = null;
+                }
+            }
+
+            timeline.Add(CareSteps.VisitEnded, encounter.BeneficiaryId,
+                encounterId: encounter.EncounterId, appointmentId: encounter.AppointmentId,
+                actor: encounter.EndedBy, reference: encounter.EncounterNo, occurredAt: now);
+            await db.SaveChangesAsync(ct);
+            await outbox.EnqueueAsync("EncounterCompleted", "emr.events", new
+            {
+                encounterId = encounter.EncounterId, encounter.EncounterNo,
+                beneficiaryId = encounter.BeneficiaryId, appointmentId = encounter.AppointmentId,
+                endedAt = now,
+            }, ct);
+            if (appt is not null)
+                await outbox.EnqueueAsync("ApptCompleted", "emr.events", new
+                {
+                    appointmentId = appt.AppointmentId, beneficiaryId = appt.BeneficiaryId,
+                    encounterId = encounter.EncounterId, locationId = appt.LocationId,
+                }, ct);
+            await tx.CommitAsync(ct);
+
+            await EmitAsync(audit, "encounter", encounter.EncounterId, AuditAction.StateChange, me,
+                $"{{\"status\":\"Completed\",\"appointmentClosed\":{(appt is not null).ToString().ToLowerInvariant()}}}", ct);
+            return Results.Ok(EncounterResponse.From(encounter));
         }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
 
         // ---- Diagnosis retract (US-031) — a mis-keyed code, taken off the working assessment ----
@@ -266,7 +363,8 @@ public static class ClinicalEndpoints
         // ---- Vital: per-type range + optional LOINC ----
         enc.MapPost("/{id:guid}/vitals", async (
             Guid id, AddVitalRequest req, EmrDbContext db, ClinicalGate gate, IClinicalCodeValidator codes,
-            IAuditClient audit, IHbmpPrincipalAccessor me, HttpContext http, TimeProvider clock, CancellationToken ct) =>
+            IAuditClient audit, CareTimelineWriter timeline, IHbmpPrincipalAccessor me, HttpContext http,
+            TimeProvider clock, CancellationToken ct) =>
         {
             var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
             if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
@@ -285,6 +383,9 @@ public static class ClinicalEndpoints
                 RecordedBy = me.Principal!.Subject, MeasuredAt = req.MeasuredAt ?? clock.GetUtcNow(),
             };
             db.Vitals.Add(vital);
+            timeline.Add(CareSteps.VitalsRecorded, enc0.BeneficiaryId,
+                encounterId: id, appointmentId: enc0.AppointmentId,
+                actor: vital.RecordedBy, reference: enc0.EncounterNo, occurredAt: vital.MeasuredAt);
             await db.SaveChangesAsync(ct);
             await EmitAsync(audit, "vital", vital.VitalId, AuditAction.Create, me, $"{{\"type\":\"{vital.VitalType}\"}}", ct);
             return Results.Created($"/api/v1/encounters/{id}/vitals/{vital.VitalId}", VitalResponse.From(vital));

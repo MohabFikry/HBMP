@@ -210,6 +210,14 @@ export interface ApiClient {
    */
   signEncounterNote(encounterId: string, noteId: string): Promise<void>;
   /**
+   * End the visit: the encounter closes and its appointment moves to Completed, in one server transaction.
+   *
+   * Signing the note is NOT the same act. A signed note is a finished piece of documentation; a closed visit
+   * is a patient who has left the room, and it is what takes the appointment off the day list. Until this
+   * existed, a finished consultation stayed CheckedIn and "Start visit" was still offered for it.
+   */
+  completeEncounter(encounterId: string): Promise<void>;
+  /**
    * Record an ICD-10 diagnosis on the encounter. The code is validated against master data server-side.
    * The RANK is the doctor's call — which condition the visit was chiefly about is a clinical judgement,
    * not something derivable from the order the codes were entered in.

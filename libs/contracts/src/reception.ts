@@ -242,5 +242,15 @@ export const zTimelineStep = z.object({
    *  a name and an unresolved id as an identifier — collapsing them would mean showing a GUID styled as a
    *  person, or worse, treating a name as an id and truncating it to eight characters. */
   byName: z.string().nullish(),
+  /**
+   * Which service recorded the step — "emr", "orders", "pharmacy", "approvals" (ADR-0031).
+   *
+   * Absent on an appointment STATUS step, which comes from the appointment's own history rather than from
+   * the care episode. A reader has to be able to tell the two apart: a gap means something different
+   * depending on where the step was meant to come from.
+   */
+  source: z.string().nullish(),
+  /** The business key the step is about — ENC-*, ORD-*, RX-*, AUTH-*. Never clinical content. */
+  reference: z.string().nullish(),
 });
 export type TimelineStep = z.infer<typeof zTimelineStep>;

@@ -3,7 +3,14 @@ using Microsoft.EntityFrameworkCore;
 namespace Mersal.Emr.Infrastructure;
 
 /// <summary>One step of an appointment's operational history.</summary>
-public sealed record TimelineRow(string Status, DateTimeOffset At, string? By);
+/// <summary>One step in an appointment's operational timeline.
+///
+/// <para><c>Source</c> and <c>Reference</c> arrived with the care episode (ADR-0031): the timeline is now a
+/// merge of the appointment's own STATUS history and the steps of the episode it started, and a reader has
+/// to be able to tell which is which — a missing step means something different depending on where it was
+/// supposed to come from. Both are optional so an appointment-status step, which has neither, is unchanged.</para></summary>
+public sealed record TimelineRow(
+    string Status, DateTimeOffset At, string? By, string? Source = null, string? Reference = null);
 
 /// <summary>
 /// Reads an appointment's status steps out of emr.appointment_history.

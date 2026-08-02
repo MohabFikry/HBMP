@@ -694,6 +694,9 @@ export class DevApiClient implements ApiClient {
   signEncounterNote(): Promise<void> {
     return this.gate(() => undefined);
   }
+  completeEncounter(): Promise<void> {
+    return this.gate(() => undefined);
+  }
   addEncounterDiagnosis(_encounterId: string, icdCode: string, rank: DiagnosisRank = "Secondary") {
     return this.gate(() =>
       ok(zEncounterDiagnosis, {

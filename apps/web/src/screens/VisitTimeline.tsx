@@ -9,8 +9,8 @@ const S = {
   button: { en: "Timeline", ar: "المسار الزمني" },
   title: { en: "Appointment timeline", ar: "المسار الزمني للموعد" },
   subtitle: {
-    en: "How this appointment reached its current status.",
-    ar: "كيف وصل هذا الموعد إلى حالته الحالية.",
+    en: "Everything recorded for this appointment, from booking onwards.",
+    ar: "كل ما سُجّل لهذا الموعد، من الحجز فصاعداً.",
   },
   loading: { en: "Loading the timeline…", ar: "جاري تحميل المسار الزمني…" },
   empty: { en: "No recorded history for this appointment yet.", ar: "لا يوجد سجل لهذا الموعد بعد." },
@@ -38,6 +38,25 @@ const STATUS_CHIP: Record<string, { kind: "ok" | "info" | "warn" | "neu"; label:
   // why they read as verbs.
   Rescheduled: { kind: "info", label: { en: "Moved to a new time", ar: "نُقل إلى وقت جديد" } },
   NoteEdited: { kind: "neu", label: { en: "Note edited", ar: "تم تعديل الملاحظة" } },
+
+  // ---- Care-episode steps (ADR-0031) ----------------------------------------------------------------
+  // An appointment is the START of an episode, and almost everything the platform then does for that
+  // patient descends from it. Until these existed the timeline stopped at check-in, so a desk asking "why
+  // is this member still here at four o'clock?" was shown a history that ended two hours before the
+  // question. Each one names an ACT, never its content — see ADR-0031 §3.
+  VisitStarted: { kind: "info", label: { en: "Visit started", ar: "بدأت الزيارة" } },
+  VitalsRecorded: { kind: "neu", label: { en: "Vitals recorded", ar: "سُجّلت العلامات الحيوية" } },
+  DiagnosisCoded: { kind: "neu", label: { en: "Diagnosis coded", ar: "سُجّل التشخيص" } },
+  NoteSigned: { kind: "neu", label: { en: "Note signed", ar: "وُقّعت الملاحظة" } },
+  VisitEnded: { kind: "ok", label: { en: "Visit ended", ar: "انتهت الزيارة" } },
+  OrderPlaced: { kind: "info", label: { en: "Investigation ordered", ar: "طُلب فحص" } },
+  OrderSentForApproval: { kind: "warn", label: { en: "Sent for approval", ar: "أُرسل للموافقة" } },
+  OrderCancelled: { kind: "neu", label: { en: "Order cancelled", ar: "أُلغي الطلب" } },
+  SampleConsumed: { kind: "info", label: { en: "Sample taken", ar: "أُخذت العينة" } },
+  ResultReported: { kind: "ok", label: { en: "Result reported", ar: "صدرت النتيجة" } },
+  AuthorizationDecided: { kind: "ok", label: { en: "Authorization decided", ar: "صدر قرار الموافقة" } },
+  PrescriptionWritten: { kind: "info", label: { en: "Prescription written", ar: "كُتبت وصفة" } },
+  MedicineDispensed: { kind: "ok", label: { en: "Medicine dispensed", ar: "صُرف الدواء" } },
 };
 
 /**
@@ -93,6 +112,9 @@ export function VisitTimelineButton({ row }: { row: AppointmentRow }) {
                     label={t(STATUS_CHIP[s.status]?.label ?? { en: s.status, ar: s.status })}
                   />
                   <span className="vt-when tnum">{fmt.dateTime(s.at)}</span>
+                  {/* The business key the step is about — ENC-*, ORD-*, RX-*. It is the door to the thing,
+                      not the thing: what it resolves to stays behind the owning service's own gate. */}
+                  {s.reference && <code className="vt-ref tnum">{s.reference}</code>}
                   {/* An unrecorded actor says so. Falling back to whoever booked it would claim they performed
                       a step they did not — the timeline exists to answer "who", so guessing defeats it. */}
                   <span className="vt-who">

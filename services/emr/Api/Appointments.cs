@@ -293,7 +293,8 @@ public static class AppointmentsModule
         // this serves exactly that, under the appointment:read they already hold, and only three fields per step
         // leave the service even though each snapshot contains the entire row.
         read.MapGet("/appointments/{id:guid}/timeline", async (
-            Guid id, BranchScopeState branch, EmrDbContext db, CancellationToken ct) =>
+            Guid id, BranchScopeState branch, EmrDbContext db, CareTimelineWriter episode,
+            CancellationToken ct) =>
         {
             // Same branch rule as reading the appointment itself — a timeline is a read of that appointment.
             if (await AppointmentEndpointsShared.DenyIfOutsideBranchAsync(id, branch, db, ct) is { } outOfScope)
@@ -303,8 +304,23 @@ public static class AppointmentsModule
             if (!exists) return Results.Problem(statusCode: 404, title: "Not Found",
                 type: "https://mersal.foundation/problems/not-found");
 
-            var steps = await AppointmentTimeline.ReadAsync(db, id, ct);
-            return Results.Ok(steps);
+            // TWO sources, merged (ADR-0031).
+            //
+            // The appointment's own STATUS history answers "booked, rescheduled, checked in" and nothing
+            // else, because nothing that happens to the patient after arrival touches the appointment row.
+            // The care episode answers the rest. A desk asking "why is this member still here at four
+            // o'clock?" needs both, and needed them in one list — reading the visit's steps somewhere else
+            // is how the question went unanswered.
+            var status = await AppointmentTimeline.ReadAsync(db, id, ct);
+            var care = await episode.ForAppointmentAsync(id, ct);
+
+            var merged = status
+                .Concat(care.Select(s => new TimelineRow(s.Step, s.OccurredAt, s.Actor, s.Source, s.Reference)))
+                // Newest first, matching what AppointmentTimeline.ReadAsync already returns: whoever opens a
+                // timeline is asking what just happened, not how it began.
+                .OrderByDescending(r => r.At)
+                .ToList();
+            return Results.Ok(merged);
         });
 
         // POST /appointments — concurrency-safe booking (US-020).

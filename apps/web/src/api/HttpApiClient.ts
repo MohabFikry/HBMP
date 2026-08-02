@@ -631,6 +631,8 @@ export class HttpApiClient implements ApiClient {
         at: x.at,
         by: x.by ?? null,
         byName: x.by ? names.get(String(x.by)) ?? null : null,
+        source: x.source ?? null,
+        reference: x.reference ?? null,
       }),
     );
   }
@@ -808,6 +810,9 @@ export class HttpApiClient implements ApiClient {
       `/encounters/${encodeURIComponent(encounterId)}/notes/${encodeURIComponent(noteId)}/sign`,
       {},
     );
+  }
+  async completeEncounter(encounterId: string) {
+    await postRaw(`/encounters/${encodeURIComponent(encounterId)}/complete`, {});
   }
   async addEncounterDiagnosis(encounterId: string, icdCode: string, rank: DiagnosisRank = "Secondary") {
     const r = (await postRaw(`/encounters/${encodeURIComponent(encounterId)}/diagnoses`, {

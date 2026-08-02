@@ -31,6 +31,9 @@ builder.Services.AddEmrInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ClinicalGate>();
+// The care-episode timeline (ADR-0031). Scoped, because every step it stages belongs to the
+// transaction of the thing that caused it.
+builder.Services.AddScoped<CareTimelineWriter>();
 
 // Clinical code validation against masterdata-service (fail-closed on writes).
 builder.Services.AddHttpClient<IClinicalCodeValidator, HttpClinicalCodeValidator>(c =>
@@ -144,7 +147,7 @@ v1.MapPost("", async (
     CreateEncounterRequest req, HttpRequest http,
     IMemberStatusProvider status, EmrDbContext db, EncounterNoIssuer encounterNos,
     IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, BranchScopeState branchScope,
-    TimeProvider clock, CancellationToken ct) =>
+    CareTimelineWriter timeline, TimeProvider clock, CancellationToken ct) =>
 {
     var idem = http.Headers["Idempotency-Key"].ToString();
     if (string.IsNullOrWhiteSpace(idem))
@@ -237,6 +240,12 @@ v1.MapPost("", async (
     await using var tx = await db.Database.BeginTransactionAsync(ct);
     db.Encounters.Add(encounter);
     db.QueueEntries.Add(queueEntry);
+    // The episode's spine (ADR-0031). Staged inside the same transaction as the encounter: a timeline that
+    // could commit separately from the thing it describes is one that can claim a visit started when no
+    // visit exists.
+    timeline.Add(CareSteps.VisitStarted, req.BeneficiaryId,
+        encounterId: encounter.EncounterId, appointmentId: req.AppointmentId,
+        actor: actor, reference: encounter.EncounterNo, occurredAt: now);
     await db.SaveChangesAsync(ct);
 
     await audit.EmitAsync(new AuditEventDraft
