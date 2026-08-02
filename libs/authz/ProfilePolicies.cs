@@ -286,6 +286,42 @@ public static class ProfilePolicies
         (ProfileSections.Timeline, Treating()),
         (ProfileSections.CallHistory, Treating(ProfileVariants.Operational, 60)));
 
+    /// <summary>
+    /// The treating DOCTOR — <see cref="Clinician"/> plus three administrative sections that do not carry the
+    /// treating condition.
+    ///
+    /// <para><b>Why these three are unconditional.</b> Authorizations, Timeline and CallHistory are answered by
+    /// approvals-, policy- and callcentre-service, and NONE of them owns the treating-relationship fact. The
+    /// seam in each builds its context from roles alone and leaves everything it does not own false,
+    /// fail-closed — so a <c>Treating()</c> cell for these sections could never evaluate true no matter how
+    /// many patients the doctor was treating. The cell was not withholding anything; it was unreachable, and
+    /// the profile reported <c>owner-declined</c> on every one of them.</para>
+    ///
+    /// <para><b>What this widens.</b> These three now render for ANY doctor in the tenant, not only the
+    /// treating one. That is a real widening and is recorded here rather than buried: it is what "the doctor
+    /// gets the whole file" costs, and it is the repo owner's decision. The clinical sections — encounters,
+    /// investigations, prescriptions, notes, history — keep the treating gate, so the widening is limited to
+    /// what a visit was authorized for, when it happened, and that a call took place. Every read is still
+    /// audited as sensitive.</para>
+    ///
+    /// <para>The alternative is to teach three services to resolve a treating relationship they have no
+    /// business knowing about, which is the aggregation shape design 39 §1 exists to prevent.</para>
+    /// </summary>
+    private static Dictionary<string, SectionRule> Doctor()
+    {
+        var row = Clinician();
+        row[ProfileSections.Authorizations] = Vis();
+        // ADMINISTRATIVE entries only, and this is load-bearing rather than cautious. The timeline carries a
+        // `visibilityClass` per row, and its Clinical rows hold things like a recorded diagnosis — so granting
+        // the whole section unconditionally would have handed a non-treating doctor a diagnosis through the
+        // event log while the clinical sections that own it stayed Restricted two rows above. A serialized
+        // -payload test caught exactly that. Reach without depth: the log of what happened, not what was found.
+        row[ProfileSections.Timeline] = Vis(ProfileVariants.Admin, 60);
+        // Same shape: operational, never Full — no verification detail and no agent notes (design 39 §5b).
+        row[ProfileSections.CallHistory] = Vis(ProfileVariants.Operational, 60);
+        return row;
+    }
+
     // Lab / imaging — identity enough to label a specimen, allergies because they affect contrast and reagents,
     // and ITS OWN ORDERS. Nothing else exists for this role: no coverage, no prescriptions, no results but its own.
     private static Dictionary<string, SectionRule> Diagnostics() => Row(
@@ -389,7 +425,7 @@ public static class ProfilePolicies
             ["reception"] = Reception(),
             ["call_center"] = CallCentre(),
             ["call_center_supervisor"] = CallCentre(),
-            ["doctor"] = Clinician(),
+            ["doctor"] = Doctor(),
             ["nurse"] = Clinician(),
             ["lab_tech"] = Diagnostics(),
             ["imaging_tech"] = Diagnostics(),
@@ -567,6 +603,19 @@ public static class ProfilePolicies
             Sensitive = true,
         },
         // The call-history read, served by callcentre-service to the profile's provider.
+        .. CallHistoryRules(),
+    ];
+
+    /// <summary>
+    /// The call-history rule, on its own so the service that ENFORCES it can splice it in.
+    ///
+    /// <para>It is defined here because the role set is derived from the profile matrix — but the endpoint
+    /// that checks it lives in callcentre-service. Carried only by this bundle, it matched nothing there and
+    /// the section answered 403 for every role. Kept separate rather than exporting the whole profile bundle:
+    /// the rest of it governs the <c>patient-profile</c> resource, which callcentre-service does not serve.</para>
+    /// </summary>
+    public static IReadOnlyList<PolicyRule> CallHistoryRules() =>
+    [
         new PolicyRule
         {
             Action = CallHistoryRead, ResourceType = CallCentrePolicies.Resource,

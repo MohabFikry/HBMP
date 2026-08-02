@@ -43,9 +43,14 @@ const STR = {
 /**
  * Page header (eyebrow + h1 + optional actions), reused by every flagship screen.
  *
- * <b>`back` renders a back control ABOVE the title</b>, in every portal at once, because this is the one
- * component they all share. It is a real `<button>` rather than a styled link: it runs
- * {@link useBackTarget}'s navigate, so it must be reachable by keyboard and announced as an action.
+ * <b>`back` sits in the ACTION GROUP, alongside the page's own controls</b> — in every portal at once,
+ * because this is the one component they all share. It used to sit above the eyebrow, which pushed the
+ * role label and the title down a line and left the top-left corner carrying three stacked things (Back,
+ * DOCTOR, Patient Profile) while the opposite corner held one. Grouping the controls puts every button on
+ * the page in one place.
+ *
+ * It is a real `<button>` rather than a styled link: it runs {@link useBackTarget}'s navigate, so it must be
+ * reachable by keyboard and announced as an action.
  */
 export function PageHeader({ title, actions, back }: { title: string; actions?: ReactNode; back?: BackTarget }) {
   const { session } = useAuth();
@@ -55,19 +60,25 @@ export function PageHeader({ title, actions, back }: { title: string; actions?: 
   return (
     <div className="pagehead">
       <div>
-        {back && (
-          <button type="button" className="pagehead-back" onClick={back.go}>
-            {/* The chevron is drawn pointing DOWN and rotated by CSS off the document direction, exactly as
-                the pager does it — in RTL "back" is to the right, and a hard-coded arrow is the classic way a
-                mirrored layout ends up pointing the wrong way. */}
-            <Icon name="chevron" width={14} height={14} aria-hidden="true" />
-            <span>{back.label ? t(back.label) : t(STR.back)}</span>
-          </button>
-        )}
         <div className="role-eyebrow">{t(portal.eyebrow)}</div>
         <h1>{title}</h1>
       </div>
-      {actions && <div className="pagehead-actions">{actions}</div>}
+      {(back || actions) && (
+        <div className="pagehead-actions">
+          {/* Back FIRST, so the page's own action stays the last thing in the group — the position the eye
+              lands on last and the one a primary control has everywhere else in the app. */}
+          {back && (
+            <button type="button" className="pagehead-back" onClick={back.go}>
+              {/* The chevron is drawn pointing DOWN and rotated by CSS off the document direction, exactly as
+                  the pager does it — in RTL "back" is to the right, and a hard-coded arrow is the classic way
+                  a mirrored layout ends up pointing the wrong way. */}
+              <Icon name="chevron" width={14} height={14} aria-hidden="true" />
+              <span>{back.label ? t(back.label) : t(STR.back)}</span>
+            </button>
+          )}
+          {actions}
+        </div>
+      )}
     </div>
   );
 }

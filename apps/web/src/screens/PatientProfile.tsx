@@ -65,6 +65,13 @@ const STR = {
   outbound: { en: "Outbound", ar: "صادر" },
   alerts: { en: "Alerts", ar: "تنبيهات" },
   actions: { en: "Actions", ar: "إجراءات" },
+  // Names for the identity strip's icon-per-fact chips. The icon is decorative; these are what a screen
+  // reader announces, so "Female" is not read out as a bare word with nothing saying it is the sex.
+  age: { en: "Age", ar: "العمر" },
+  sex: { en: "Sex", ar: "النوع" },
+  branch: { en: "Branch", ar: "الفرع" },
+  language: { en: "Preferred language", ar: "اللغة المفضلة" },
+  phone: { en: "Phone", ar: "الهاتف" },
   print: { en: "Print summary", ar: "طباعة الملخص" },
   printing: { en: "Preparing…", ar: "جارٍ التحضير…" },
   printFailed: { en: "The summary could not be generated.", ar: "تعذّر إنشاء الملخص." },
@@ -78,10 +85,14 @@ const STR = {
  * 403s is worse still. The server is the authority either way — this list only decides what is worth offering.
  */
 const SECTION_ACTIONS: Record<string,
-  { label: Localized; permission: Permission; href: (id: string) => string; icon: IconName }[]> = {
+  { label: Localized; permission: Permission; href: (id: string, memberNo?: string) => string; icon: IconName }[]> = {
   header: [
+    // `/reception/book`, NOT `/reception/appointments`. It pointed at the day board — the list of everyone's
+    // appointments — so "Book appointment" took you to a screen that books nothing and then had to be
+    // navigated away from. The member number rides along as the booking screen's opening search, because the
+    // one thing that page needs first is which patient, and the profile already knows.
     { icon: "calendar", label: { en: "Book appointment", ar: "حجز موعد" }, permission: "appointments.read",
-      href: (id) => `/reception/appointments?beneficiaryId=${encodeURIComponent(id)}` },
+      href: (_id, memberNo) => `/reception/book${memberNo ? `?q=${encodeURIComponent(memberNo)}` : ""}` },
   ],
   encounters: [
     { icon: "doc", label: { en: "Start encounter", ar: "بدء زيارة" }, permission: "emr.write",
@@ -370,6 +381,9 @@ function SectionActions({ section, beneficiaryId }: { section: ProfileSection; b
   const offered = actions.filter((a) => hasPermission(held, a.permission));
   if (offered.length === 0) return null;
 
+  // Only the header section carries one, which is also the only section whose action wants it.
+  const memberNo = section.key === "header" ? (section.data as ProfileHeader | undefined)?.memberNo : undefined;
+
   return (
     /*
       BUTTONS that route — they were bare `<a href>`s, which was two defects at once.
@@ -390,7 +404,7 @@ function SectionActions({ section, beneficiaryId }: { section: ProfileSection; b
           variant="secondary"
           size="sm"
           leadingIcon={<Icon name={a.icon} />}
-          onClick={() => navigate(a.href(beneficiaryId))}
+          onClick={() => navigate(a.href(beneficiaryId, memberNo))}
         >
           {t(a.label)}
         </Button>
@@ -495,24 +509,68 @@ function SectionContent({ section, beneficiaryId }: { section: ProfileSection; b
   return <SectionView section={section} beneficiaryId={beneficiaryId} />;
 }
 
+/**
+ * The identity block, laid out like the member card in beneficiary management (`.mem-identity`).
+ *
+ * <b>What changed and why.</b> It used to stack three lines — name, then every fact joined by " · ", then the
+ * status chip on a line of its own. Two problems. The status is the first thing anyone checks before acting
+ * on a record, and it sat last, below a run-on line; and that run-on line gave a member number, an age band,
+ * a sex and a branch the same weight and no labels, so it had to be read left to right to find any one of
+ * them. The member card had already solved this: status beside the name, the identifier on its own quiet
+ * line, and the facts as an icon-per-fact strip that can be scanned rather than parsed.
+ *
+ * <b>What did NOT change: the four cues.</b> The status keeps its own chip element rather than adopting the
+ * generic `StatusChip` the member card uses, because `statusCue` carries a tone AND an icon AND a shape AND
+ * the word (design 39 §5), and a beneficiary's status is exactly the disclosure that must not come down to
+ * a colour.
+ *
+ * Every fact is rendered only if the SERVER sent it. This screen invents nothing: a role whose projection
+ * omits the phone renders no phone chip, rather than an empty one that implies none is recorded.
+ */
 function HeaderView({ data }: { data: ProfileHeader }) {
   const { lang } = useTheme();
+  const t = useLoc();
   const name = lang === "ar" && data.displayNameAr ? data.displayNameAr : data.displayName;
+
+  const facts: { key: string; icon: IconName; label: Localized; value: string }[] = [];
+  if (data.ageBand) facts.push({ key: "age", icon: "calendar", label: STR.age, value: data.ageBand });
+  if (data.sex) facts.push({ key: "sex", icon: "sex", label: STR.sex, value: data.sex });
+  if (data.branchName) facts.push({ key: "branch", icon: "branch", label: STR.branch, value: data.branchName });
+  if (data.preferredLanguage) {
+    facts.push({ key: "lang", icon: "globe", label: STR.language, value: data.preferredLanguage });
+  }
+  if (data.contact?.phone) {
+    facts.push({ key: "phone", icon: "phone", label: STR.phone, value: data.contact.phone });
+  }
+
   return (
-    <div className="profile-header-strip">
+    <div className="profile-identity">
       <Avatar photoUrl={data.photoUrl} name={name} />
-      <div>
-        <p className="profile-name">{name}</p>
-        <p className="profile-meta">
-          {[data.memberNo, data.ageBand, data.sex, data.branchName].filter(Boolean).join(" · ")}
-        </p>
-        {/* Four cues: the tone, the icon, the shape and the word — never colour alone. */}
-        <p className={`profile-chip profile-chip--${data.statusCue.tone}`} data-shape={data.statusCue.shape}>
-          <span aria-hidden="true" className="profile-chip-icon">
-            {data.statusCue.icon === "check-circle" ? "✔" : "●"}
-          </span>
-          <span>{data.statusCue.label}</span>
-        </p>
+      <div className="profile-identity-text">
+        <div className="profile-nameline">
+          <h3 className="profile-name">{name}</h3>
+          {/* Four cues: the tone, the icon, the shape and the word — never colour alone. */}
+          <p className={`profile-chip profile-chip--${data.statusCue.tone}`} data-shape={data.statusCue.shape}>
+            <span aria-hidden="true" className="profile-chip-icon">
+              {data.statusCue.icon === "check-circle" ? "✔" : "●"}
+            </span>
+            <span>{data.statusCue.label}</span>
+          </p>
+        </div>
+        {data.memberNo && <p className="profile-sub tnum">{data.memberNo}</p>}
+        {facts.length > 0 && (
+          <ul className="profile-facts">
+            {facts.map((f) => (
+              <li key={f.key} title={`${t(f.label)}: ${f.value}`}>
+                <Icon name={f.icon} width={16} height={16} aria-hidden="true" />
+                {/* The icon is decorative, so the FACT still needs naming for a screen reader — otherwise the
+                    strip reads as a bare list of values with nothing saying what any of them is. */}
+                <span className="sr-only">{t(f.label)}: </span>
+                <span>{f.value}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

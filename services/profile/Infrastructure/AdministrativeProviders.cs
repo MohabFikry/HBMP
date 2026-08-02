@@ -211,7 +211,11 @@ public sealed class TimelineSectionProvider(AdministrativeSource source, CallerS
         if (enrollmentId is null) return null;
 
         using var timeline = await http.GetAsync(
-            AdministrativeSource.ClientName, $"/api/v1/enrollments/{enrollmentId}/timeline?pageSize=100",
+            // The PROFILE seam, not the policy-admin route. `/enrollments/{id}/timeline` sits behind
+            // `policy:read` — the policy-administration scope, which no clinician holds — so this section
+            // answered `owner-declined` for every role outside policy admin, including the ones whose matrix
+            // cell grants it. `/profile/...` is the same rows behind `profile:read` + the design-39 §4 matrix.
+            AdministrativeSource.ClientName, $"/api/v1/profile/enrollments/{enrollmentId}/timeline?pageSize=100",
             request.Caller, ct);
         if (timeline is null) return null;
 

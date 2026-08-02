@@ -178,20 +178,22 @@ nav.mrs-rail {
 /*
   Back control on a page opened FOR something (the patient profile, chiefly).
 
-  Sits ABOVE the eyebrow rather than beside the title: it is a way out of this screen, not a property of it,
-  and putting it in the actions row would file it with "Print summary" — the things you do to the record.
+  It sat ABOVE the eyebrow, on the argument that it is a way OUT of the screen rather than something you do
+  TO the record, and so should not be filed alongside "Print summary". That argument lost to how the corner
+  actually looked: three stacked items top-left (Back / DOCTOR / Patient Profile) against a single button
+  top-right, with the eyebrow and title pushed down a line to make room. Every control on the page now lives
+  in one group, and Back leads it so the page's own action stays last.
 
-  44px minimum target (21-accessibility) with the padding pulled back by an equal negative margin, so the
-  touch area is full size while the text still lines up with the title beneath it.
+  Kept as a quiet ghost rather than a third button: it is grouped WITH the actions, not promoted to one.
+  44px minimum target (21-accessibility), padded rather than negatively offset now that it no longer has to
+  line up with the title beneath it.
 */
 .pagehead-back {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-block-size: 44px;
-  margin-block-end: 2px;
-  margin-inline-start: calc(var(--sp2) * -1);
-  padding-inline: var(--sp2);
+  padding-inline: var(--sp3);
   border: 0;
   border-radius: var(--r-sm);
   background: none;
@@ -1361,11 +1363,23 @@ nav.mrs-rail {
 .profile-chip[data-shape="square"] { border-radius: var(--r-md); }
 .profile-chip[data-shape="octagon"] { border-width: 2px; }
 
-.profile-header-strip { display: flex; gap: var(--sp3); align-items: center; }
-.profile-avatar { width: 3rem; height: 3rem; border-radius: 999px; object-fit: cover; }
+/* The identity block, mirroring `.mem-identity` in beneficiary management so one patient looks the same in
+   both places. Status beside the name (it is what anyone checks first, and it used to sit last, under a
+   run-on line); the member number quiet on its own row; the facts as a scannable icon-per-fact strip rather
+   than four values joined by " · " with nothing saying which is which. */
+.profile-identity { display: flex; gap: var(--sp3); align-items: start; }
+/* min-inline-size:0 so a long name wraps INSIDE the flex item instead of widening it and pushing the card
+   into a horizontal scroll — a flex child's default min-width is auto, which is content-sized. */
+.profile-identity-text { display: grid; gap: var(--sp1); min-inline-size: 0; }
+.profile-nameline { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; }
+.profile-avatar { width: 3rem; height: 3rem; border-radius: 999px; object-fit: cover; flex: 0 0 auto; }
 .profile-avatar--initials { display: grid; place-items: center; border: 1px solid currentColor; font-weight: 600; }
-.profile-name { margin: 0; font-weight: 600; }
-.profile-meta { margin: 0; opacity: 0.8; font-size: 0.9em; }
+.profile-name { margin: 0; font-weight: 600; font-size: var(--fs-title-3); }
+.profile-sub { margin: 0; color: var(--text-2); font-size: 0.9rem; }
+/* Wrapping, never a fixed row: a phone number and a branch name are different lengths in every locale. */
+.profile-facts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp1) var(--sp4); }
+.profile-facts li { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-2); font-size: 0.9rem; }
+.profile-facts svg { color: var(--text-3); flex: 0 0 auto; }
 .profile-alerts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp2); }
 .profile-rows, .call-history-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp2); }
 /* A fact grid that columnises when there is room. Coverage and financial lead with 4–6 short facts, and one

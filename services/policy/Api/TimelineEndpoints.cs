@@ -67,9 +67,24 @@ public static class TimelineEndpoints
         MapRead(read, "/policies/{id:guid}/timeline", NoteScope.Policy);
         MapRead(read, "/enrollments/{id:guid}/timeline", NoteScope.Member);
         MapExport(read);
+
+        // ---- The profile seam ------------------------------------------------------------------------------
+        //
+        // The member timeline is a SECTION of the patient profile, and the profile's provider reads it through
+        // this same route. But `policy:read` is the policy-administration scope, which a clinician has no
+        // business holding — so the section answered `owner-declined` for every role outside policy admin,
+        // including the doctor whose matrix cell grants it.
+        //
+        // Same shape approvals-service already uses for the authorizations section (ProfileAuthorizations):
+        // `profile:read` at the edge, then the shared design-39 §4 matrix decides. policy-service owns no ABAC
+        // fact this section needs, so the context is roles only and everything it does not own stays false,
+        // fail-closed. The policy-admin route above is untouched — this is a second, narrower door to the same
+        // rows, not a widening of the first.
+        var seam = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("profile:read"));
+        MapRead(seam, "/profile/enrollments/{id:guid}/timeline", NoteScope.Member, profileSection: true);
     }
 
-    private static void MapRead(RouteGroupBuilder read, string route, NoteScope scope)
+    private static void MapRead(RouteGroupBuilder read, string route, NoteScope scope, bool profileSection = false)
     {
         read.MapGet(route, async (Guid id, DateTimeOffset? from, DateTimeOffset? to, string? category,
             string? actor, string? eventType, DateTimeOffset? cursor, int? pageSize,
@@ -77,6 +92,13 @@ public static class TimelineEndpoints
         {
             var principal = me.Principal;
             if (principal is null) return GateResults.Unauthenticated();
+
+            // The seam route consults the profile matrix on top of the scope; the admin route does not, because
+            // `policy:read` is already the answer there.
+            if (profileSection &&
+                ProfileSeam.Check(principal, ProfileSeam.ContextFor(principal), ProfileSections.Timeline)
+                    is { } denied)
+                return denied;
 
             var take = Math.Clamp(pageSize ?? 50, 1, 200);
             var q = db.TimelineEntries.AsNoTracking().Where(e => e.Scope == scope && e.ScopeRef == id);

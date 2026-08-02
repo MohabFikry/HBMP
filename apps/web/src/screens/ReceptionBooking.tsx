@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Button, Card, Icon, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
 import type { EligibilityHit, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -53,8 +54,14 @@ export function ReceptionBooking() {
   const fmt = useFormat();
   const write = useWrite();
 
+  // `?q=` — the patient the caller arrived WITH. The profile's "Book appointment" sends the member number,
+  // because otherwise that action lands on an empty form and asks the operator to look up the person whose
+  // file they were just reading.
+  const [params] = useSearchParams();
+  const initialQuery = params.get("q") ?? "";
+
   // Step 1 — patient
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [hits, setHits] = useState<EligibilityHit[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<Localized | null>(null);
@@ -71,13 +78,18 @@ export function ReceptionBooking() {
   const [confirmed, setConfirmed] = useState<{ at: string } | null>(null);
   const [attempted, setAttempted] = useState(false);
 
-  async function doSearch(e: React.FormEvent) {
-    e.preventDefault();
-    if (!query.trim()) return;
+  // Run the arrival search once, on mount. Not on every `query` change — that would fire a request per
+  // keystroke for anyone typing in the box.
+  useEffect(() => {
+    if (initialQuery.trim()) void runSearch(initialQuery.trim());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function runSearch(term: string) {
     setSearching(true);
     setSearchError(null);
     try {
-      setHits(await api.searchEligibility(query.trim()));
+      setHits(await api.searchEligibility(term));
     } catch (err) {
       // 401/403 read differently from "nothing found" — say which one happened.
       setSearchError(readErrorMessage(err));
@@ -85,6 +97,12 @@ export function ReceptionBooking() {
     } finally {
       setSearching(false);
     }
+  }
+
+  async function doSearch(e: React.FormEvent) {
+    e.preventDefault();
+    if (!query.trim()) return;
+    await runSearch(query.trim());
   }
 
   const missing = !patient
