@@ -1384,16 +1384,17 @@ nav.mrs-rail {
    both places. Status beside the name (it is what anyone checks first, and it used to sit last, under a
    run-on line); the member number quiet on its own row; the facts as a scannable icon-per-fact strip rather
    than four values joined by " · " with nothing saying which is which. */
-/* Two rows: identity (avatar + name block), then the fact strip spanning both columns so its hairline runs
-   the full width of the card instead of starting at the avatar's edge. `auto 1fr` keeps the avatar at its
-   intrinsic 56px and lets the text take the rest. */
+/* Two rows: identity (avatar + name block), then the fact strip beneath — in the SECOND column, so the facts
+   and their hairline begin on the same vertical as the name and the member number rather than under the
+   avatar. The block then has one text edge instead of two, and the rule reads as separating the content it
+   sits between. `auto 1fr` keeps the avatar at its intrinsic 56px and lets the text take the rest. */
 .profile-identity {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: var(--sp1) var(--sp3);
   align-items: start;
 }
-.profile-identity > .profile-idfacts { grid-column: 1 / -1; }
+.profile-identity > .profile-idfacts { grid-column: 2; }
 /* min-inline-size:0 so a long name wraps INSIDE the flex item instead of widening it and pushing the card
    into a horizontal scroll — a flex child's default min-width is auto, which is content-sized. */
 .profile-identity-text { display: grid; gap: var(--sp1); min-inline-size: 0; }
