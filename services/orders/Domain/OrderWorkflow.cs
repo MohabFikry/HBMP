@@ -10,7 +10,12 @@ public static class OrderWorkflow
         [OrderStatus.Requested] = [OrderStatus.PendingApproval, OrderStatus.Active, OrderStatus.Cancelled],
         [OrderStatus.PendingApproval] = [OrderStatus.Approved, OrderStatus.Rejected, OrderStatus.Cancelled],
         [OrderStatus.Approved] = [OrderStatus.Active],
-        [OrderStatus.Active] = [OrderStatus.PartiallyUsed, OrderStatus.Completed, OrderStatus.Expired, OrderStatus.Cancelled],
+        // 30.4: PendingApproval ADDED. An amendment that leaves the APPROVED SCOPE (design 46 §5) sends the
+        // order back for review — the authorisation's basis no longer holds, and leaving it Active would be
+        // a way to get approval for one thing and have another performed.
+        [OrderStatus.Active] =
+            [OrderStatus.PartiallyUsed, OrderStatus.Completed, OrderStatus.Expired, OrderStatus.Cancelled,
+             OrderStatus.PendingApproval],
         // 18.A4: the self-loop is declared in 23 §2 — consuming a further subset leaves the order
         // PartiallyUsed and that is a legal, audited move, not a no-op.
         //
@@ -20,7 +25,8 @@ public static class OrderWorkflow
         // could not withdraw the other two. That is the case design 46 §3 opens with, and the endpoint has
         // always refused the whole request rather than doing what it could.
         [OrderStatus.PartiallyUsed] =
-            [OrderStatus.PartiallyUsed, OrderStatus.Completed, OrderStatus.Expired, OrderStatus.Cancelled],
+            [OrderStatus.PartiallyUsed, OrderStatus.Completed, OrderStatus.Expired, OrderStatus.Cancelled,
+             OrderStatus.PendingApproval],
         [OrderStatus.Rejected] = [],
         [OrderStatus.Completed] = [],
         [OrderStatus.Expired] = [],

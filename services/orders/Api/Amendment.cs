@@ -108,6 +108,19 @@ public static class AmendmentEndpoints
                         AmendmentEvents.Domain(o, line, record, record.NewLineId), innerCt);
                     await outbox.EnqueueAsync(AmendmentEvents.LineAmended, AmendmentEvents.NotificationQueue,
                         AmendmentEvents.Notification(o, line, record), innerCt);
+                    // 30.4 — approvals is told ONLY when the amendment left the approved scope (design 46 §5).
+                    // `line` here is the row as it was BEFORE the amendment, which is exactly the "before"
+                    // half a reviewer needs; the executor has not yet replaced it in this callback.
+                    if (o.AuthorizationId is not null
+                        && AuthorizationScope.Assess(
+                            new AmendedScope(line.Code, req.QuantityOrdered, null),
+                            new ApprovedScope([line.Code], line.QuantityOrdered, null))
+                            == AuthorizationImpact.BeyondApprovedScope)
+                    {
+                        await outbox.EnqueueAsync(AmendmentEvents.PendingApproval,
+                            AmendmentEvents.DomainStream,
+                            AmendmentEvents.BeyondScope(o, line, req.QuantityOrdered, record), innerCt);
+                    }
                 }, ct);
 
             await AuditAsync(audit, me, lineId, "Superseded", req.ReasonCode, result.Outcome, ct);
@@ -205,6 +218,10 @@ public static class AmendmentEndpoints
         {
             orderId, orderLineId = lineId, amendmentId = result.AmendmentId, newLineId = result.NewLineId,
             replayed = false,
+            // 30.4 — the doctor is told whether their change sent the order back for review. Discovering
+            // that from a status field two screens away is how an order sits unfulfilled for a week.
+            authorizationImpact = result.Impact.ToString(),
+            returnedForApproval = result.Impact == AuthorizationImpact.BeyondApprovedScope,
         }),
         AmendOutcome.Replayed => Results.Ok(new
         {

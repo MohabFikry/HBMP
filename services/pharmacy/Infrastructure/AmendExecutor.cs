@@ -23,7 +23,9 @@ public sealed record AmendConflict(
     string What, DateTimeOffset? When, Guid? DispensingPharmacyId, string? ReasonCode, string? ReasonText);
 
 public sealed record AmendResult(
-    AmendOutcome Outcome, Guid? AmendmentId = null, Guid? NewLineId = null, AmendConflict? Conflict = null)
+    AmendOutcome Outcome, Guid? AmendmentId = null, Guid? NewLineId = null, AmendConflict? Conflict = null,
+    /// <summary>30.4 — what the amendment did to the authorisation the prescription carried (design 46 §5).</summary>
+    AuthorizationImpact Impact = AuthorizationImpact.NotAuthorized)
 {
     public static AmendResult Fail(AmendOutcome outcome, AmendConflict? conflict = null) =>
         new(outcome, Conflict: conflict);
@@ -149,6 +151,20 @@ public sealed class AmendExecutor(PharmacyDbContext db)
                     await DescribeAsync(fresh, ct));
             }
 
+            // ---- 30.4 THE AUTHORISATION QUESTION (design 46 §5) --------------------------------------
+            // Answered locally, from what the prescription already knows — see the note in orders'
+            // AmendExecutor for why this is not an HTTP call to approvals. The drug id stands in for the
+            // code: it is what a reviewer approved, and a different drug is a different thing however small
+            // the quantity.
+            var impact = newQuantity is { } amendedQty
+                ? AuthorizationScope.Assess(
+                    new AmendedScope(line.DrugId.ToString(), amendedQty, line.DurationDays),
+                    rx.AuthorizationId is null
+                        ? null
+                        : new ApprovedScope([line.DrugId.ToString()], line.QuantityPrescribed, line.DurationDays))
+                // A cancellation cannot exceed what was approved.
+                : AuthorizationImpact.WithinApprovedScope;
+
             var record = new LineAmendmentRecord
             {
                 AmendmentId = amendmentId, TenantId = rx.TenantId, PrescriptionId = rxId,
@@ -170,8 +186,16 @@ public sealed class AmendExecutor(PharmacyDbContext db)
                     .FirstAsync(l => l.PrescriptionLineId == lineId, ct);
                 await insideTransaction(rx, updated, record, ct);
             }
+            // BEYOND the approved scope: back to Submitted, which IsDispensable excludes — so the counter
+            // refuses the script until a reviewer has looked at what changed. Applied after the roll-up,
+            // which recomputes from the lines and would otherwise overwrite it.
+            if (impact == AuthorizationImpact.BeyondApprovedScope)
+                await db.Prescriptions.Where(p => p.PrescriptionId == rxId
+                        && (p.Status == RxStatus.Approved || p.Status == RxStatus.PartiallyDispensed))
+                    .ExecuteUpdateAsync(s => s.SetProperty(p => p.Status, RxStatus.Submitted), ct);
+
             await tx.CommitAsync(ct);
-            return new AmendResult(AmendOutcome.Applied, amendmentId, newLineId);
+            return new AmendResult(AmendOutcome.Applied, amendmentId, newLineId, Impact: impact);
         }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {

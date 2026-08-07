@@ -36,7 +36,9 @@ public sealed record AmendConflict(
     string? ReasonCode, string? ReasonText);
 
 public sealed record AmendResult(
-    AmendOutcome Outcome, Guid? AmendmentId = null, Guid? NewLineId = null, AmendConflict? Conflict = null)
+    AmendOutcome Outcome, Guid? AmendmentId = null, Guid? NewLineId = null, AmendConflict? Conflict = null,
+    /// <summary>30.4 — what the amendment did to the authorisation the order carried (design 46 §5).</summary>
+    AuthorizationImpact Impact = AuthorizationImpact.NotAuthorized)
 {
     public static AmendResult Fail(AmendOutcome outcome, AmendConflict? conflict = null) =>
         new(outcome, Conflict: conflict);
@@ -189,6 +191,23 @@ public sealed class AmendExecutor(OrdersDbContext db)
                     await DescribeAsync(fresh, ct));
             }
 
+            // ---- 30.4 THE AUTHORISATION QUESTION (design 46 §5) --------------------------------------
+            //
+            // Answered LOCALLY, from what the order already knows, and deliberately not by asking
+            // approvals-service: a doctor correcting a mistake must not be blocked by another service being
+            // unreachable. The order carries `authorization_id` (gated or not), and `quantity_ordered` IS the
+            // approved quantity — phase 29 set it from the approved scope precisely so the two could be told
+            // apart from `requested_quantity`.
+            var impact = newQuantity is { } amendedQty
+                ? AuthorizationScope.Assess(
+                    new AmendedScope(line.Code, amendedQty, null),
+                    order.AuthorizationId is null
+                        ? null
+                        : new ApprovedScope([line.Code], line.QuantityOrdered, null))
+                // A CANCELLATION is always within scope: withdrawing something approved cannot exceed what
+                // was approved, and sending it back for review would ask a reviewer to re-approve nothing.
+                : AuthorizationImpact.WithinApprovedScope;
+
             var record = new LineAmendmentRecord
             {
                 AmendmentId = amendmentId, TenantId = order.TenantId, OrderId = orderId, OrderLineId = lineId,
@@ -211,8 +230,16 @@ public sealed class AmendExecutor(OrdersDbContext db)
                 var updated = await db.OrderLines.AsNoTracking().FirstAsync(l => l.OrderLineId == lineId, ct);
                 await insideTransaction(order, updated, record, ct);
             }
+            // BEYOND the approved scope: the authorisation's basis no longer holds, so the order goes back
+            // for review. Applied AFTER the aggregate roll-up, which recomputes from the lines and would
+            // otherwise overwrite it.
+            if (impact == AuthorizationImpact.BeyondApprovedScope)
+                await db.Orders.Where(o => o.OrderId == orderId
+                        && (o.Status == OrderStatus.Active || o.Status == OrderStatus.PartiallyUsed))
+                    .ExecuteUpdateAsync(s => s.SetProperty(o => o.Status, OrderStatus.PendingApproval), ct);
+
             await tx.CommitAsync(ct);
-            return new AmendResult(AmendOutcome.Applied, amendmentId, newLineId);
+            return new AmendResult(AmendOutcome.Applied, amendmentId, newLineId, Impact: impact);
         }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {

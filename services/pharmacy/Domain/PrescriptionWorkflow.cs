@@ -9,14 +9,20 @@ public static class PrescriptionWorkflow
     {
         [RxStatus.Draft] = [RxStatus.Submitted, RxStatus.Cancelled],
         [RxStatus.Submitted] = [RxStatus.Approved, RxStatus.Rejected, RxStatus.Cancelled],
-        [RxStatus.Approved] = [RxStatus.PartiallyDispensed, RxStatus.Dispensed, RxStatus.Expired, RxStatus.Cancelled],
+        // 30.4: Submitted ADDED — an out-of-scope amendment sends the script back for review. Submitted is
+        // the awaiting-approval state, and IsDispensable excludes it, so the counter refuses it until a
+        // reviewer has looked at what changed (design 46 §5).
+        [RxStatus.Approved] =
+            [RxStatus.PartiallyDispensed, RxStatus.Dispensed, RxStatus.Expired, RxStatus.Cancelled,
+             RxStatus.Submitted],
         // 18.A4: declared self-loop in 23 §3 — a further partial dispense leaves the Rx PartiallyDispensed.
         //
         // 30.2: Cancelled ADDED, and its absence was the same defect orders carried. A partly-dispensed
         // prescription could not be cancelled AT ALL, so a doctor whose three-line script had had its first
         // drug handed over could not withdraw the other two — design 46 §3's opening example, unreachable.
         [RxStatus.PartiallyDispensed] =
-            [RxStatus.PartiallyDispensed, RxStatus.Dispensed, RxStatus.Expired, RxStatus.Cancelled],
+            [RxStatus.PartiallyDispensed, RxStatus.Dispensed, RxStatus.Expired, RxStatus.Cancelled,
+             RxStatus.Submitted],
         [RxStatus.Rejected] = [],
         [RxStatus.Dispensed] = [],
         [RxStatus.Expired] = [],

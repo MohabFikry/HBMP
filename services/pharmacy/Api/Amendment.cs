@@ -106,6 +106,18 @@ public static class RxAmendmentEndpoints
                         RxAmendmentEvents.Domain(p, line, record, record.NewLineId), innerCt);
                     await outbox.EnqueueAsync(RxAmendmentEvents.LineAmended, RxAmendmentEvents.NotificationQueue,
                         RxAmendmentEvents.Notification(p, line, record), innerCt);
+                    // 30.4 — approvals is told ONLY when the amendment left the approved scope. `line` is the
+                    // row as it was BEFORE, which is the "before" half the reviewer needs.
+                    if (p.AuthorizationId is not null
+                        && AuthorizationScope.Assess(
+                            new AmendedScope(line.DrugId.ToString(), req.QuantityPrescribed, line.DurationDays),
+                            new ApprovedScope([line.DrugId.ToString()], line.QuantityPrescribed, line.DurationDays))
+                            == AuthorizationImpact.BeyondApprovedScope)
+                    {
+                        await outbox.EnqueueAsync(RxAmendmentEvents.PendingApproval,
+                            RxAmendmentEvents.DomainStream,
+                            RxAmendmentEvents.BeyondScope(p, line, req.QuantityPrescribed, record), innerCt);
+                    }
                 }, ct);
 
             await AuditAsync(audit, me, lineId, "Superseded", req.ReasonCode, result.Outcome, ct);
@@ -142,6 +154,19 @@ public static class RxAmendmentEndpoints
                         RxAmendmentEvents.Domain(p, line, record, record.NewLineId), innerCt);
                     await outbox.EnqueueAsync(RxAmendmentEvents.LineAmended, RxAmendmentEvents.NotificationQueue,
                         RxAmendmentEvents.Notification(p, line, record), innerCt);
+                    // 30.4 — on the CHRONIC path the dimension that leaves the approved scope is the
+                    // DURATION: extending a course beyond what a reviewer approved is the same act as
+                    // increasing a quantity, and a reduction troubles nobody.
+                    if (p.AuthorizationId is not null
+                        && AuthorizationScope.Assess(
+                            new AmendedScope(line.DrugId.ToString(), line.QuantityPrescribed, req.DurationDays),
+                            new ApprovedScope([line.DrugId.ToString()], line.QuantityPrescribed, line.DurationDays))
+                            == AuthorizationImpact.BeyondApprovedScope)
+                    {
+                        await outbox.EnqueueAsync(RxAmendmentEvents.PendingApproval,
+                            RxAmendmentEvents.DomainStream,
+                            RxAmendmentEvents.BeyondScope(p, line, line.QuantityPrescribed, record), innerCt);
+                    }
                 }, ct);
 
             await AuditAsync(audit, me, lineId, "Superseded", req.ReasonCode, result.Outcome, ct);
@@ -284,6 +309,10 @@ public static class RxAmendmentEndpoints
         {
             rxId, prescriptionLineId = lineId, amendmentId = result.AmendmentId,
             newLineId = result.NewLineId, replayed = false,
+            // The prescriber is told whether their change sent the script back for review. Discovering that
+            // from a status field two screens away is how a patient is turned away at the counter.
+            authorizationImpact = result.Impact.ToString(),
+            returnedForApproval = result.Impact == AuthorizationImpact.BeyondApprovedScope,
         }),
         AmendOutcome.Replayed => Results.Ok(new
         {

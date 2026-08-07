@@ -43,6 +43,52 @@ public static class AmendmentEvents
     public const string DomainStream = "orders.events";
     public const string NotificationQueue = "notification.domain-events";
 
+    /// <summary>
+    /// 30.4 — an amendment that leaves the approved scope republishes THE EVENT THE ORIGINAL ROUTING USED
+    /// (design 46 §5).
+    ///
+    /// <para>Deliberately not a new event type. `approvals.fulfilments` parses every message as a
+    /// <c>FulfilmentMessage</c> and dead-letters anything else, so a bespoke type sent there would be logged
+    /// as a refused message and dropped — an orphan that also looks like an error. And a new type on
+    /// `orders.events` would need a new consumer on a point-to-point queue policy-service is already bound
+    /// to.</para>
+    ///
+    /// <para>Re-emitting <c>OrderPendingApproval</c> means whatever routes a newly-gated order routes a
+    /// re-gated one, with no new seam. The care timeline records "sent for approval" a second time, which is
+    /// exactly what happened and exactly what a desk chasing the order needs to see. The before/after fields
+    /// ride along so the reviewer is not made to re-derive the change from two screens.</para>
+    /// </summary>
+    public const string PendingApproval = "OrderPendingApproval";
+
+    /// <summary>
+    /// 30.4 — what approvals is told when an amendment leaves the approved scope (design 46 §5): the item, and
+    /// what it was BEFORE and AFTER. A reviewer asked to re-approve something needs to see what changed; a
+    /// bare "this order was amended" makes them re-derive it from two screens.
+    /// </summary>
+    public static object BeyondScope(
+        InvestigationOrder order, OrderLine before, decimal amendedQuantity, LineAmendmentRecord record) => new
+    {
+        tenantId = order.TenantId,
+        // The care feed mirrors OrderPendingApproval, so the encounter is mandatory: a step without it has
+        // no episode, and a step on the wrong episode is worse than a missing one.
+        encounterId = order.EncounterId,
+        orderedByUserId = record.AmendedBy.ToString(),
+        reason = "amended-beyond-approved-scope",
+        authorizationId = order.AuthorizationId,
+        beneficiaryId = order.BeneficiaryId,
+        orderId = order.OrderId,
+        order.OrderNo,
+        orderLineId = before.OrderLineId,
+        newLineId = record.NewLineId,
+        code = before.Code,
+        previousQuantity = before.QuantityOrdered,
+        amendedQuantity,
+        reasonCode = record.ReasonCode,
+        reasonText = record.ReasonText,
+        amendedByUserId = record.AmendedBy,
+        amendedAt = record.AmendedAt,
+    };
+
     /// <summary><c>encounterId</c> is mandatory on anything the care feed mirrors: without it a step has no
     /// episode to attach to, and a step on the WRONG episode is worse than a missing one. Asserted by
     /// <c>CareFeedEnvelopeArchitectureTests</c>, which fails the build if a mirrored payload drops it.</summary>

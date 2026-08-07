@@ -73,6 +73,8 @@ stateDiagram-v2
     PartiallyUsed --> Expired: validity elapsed
     Active --> Cancelled: cancel
     PartiallyUsed --> Cancelled: cancel remainder
+    Active --> PendingApproval: amended beyond approved scope
+    PartiallyUsed --> PendingApproval: amended beyond approved scope
     Requested --> Cancelled: cancel
     PendingApproval --> Cancelled: cancel
     Rejected --> [*]
@@ -92,6 +94,7 @@ stateDiagram-v2
 | Active / PartiallyUsed | **consume(subset)** | **line unused AND token unseen (atomic, idempotent)** | PartiallyUsed | `OrderLinesConsumed`; unused lines stay available | Lab / Imaging | `(orderId,lineId,consumeToken)` recorded; **no-reuse** enforced |
 | Active / PartiallyUsed | **consume(all/remaining)** | **all remaining lines unused (atomic)** | Completed | `OrderCompleted` | Lab / Imaging | Duplicate consume impossible |
 | Active / PartiallyUsed | expire | validity window elapsed | Expired | `OrderExpired` | System (timer) | Unused lines voided |
+| Active / **PartiallyUsed** | **amend beyond approved scope** (30.4) | the amended line leaves the approved codes, quantity or duration | PendingApproval | `OrderLineAmended`; approvals notified with a before/after | Doctor | The authorisation's basis no longer holds |
 | Requested / PendingApproval / Active / **PartiallyUsed** | cancel | not yet fully consumed | Cancelled | `OrderCancelled` | Doctor / Case Manager | **Coded** reason + actor recorded |
 
 > **30.2 — `PartiallyUsed → Cancelled` was missing, and its absence was a defect.** Without it a partly
@@ -183,6 +186,8 @@ stateDiagram-v2
     Submitted --> Cancelled: cancel
     Approved --> Cancelled: cancel
     PartiallyDispensed --> Cancelled: cancel remainder
+    Approved --> Submitted: amended beyond approved scope
+    PartiallyDispensed --> Submitted: amended beyond approved scope
     Rejected --> [*]
     Dispensed --> [*]
     Expired --> [*]
@@ -199,6 +204,7 @@ stateDiagram-v2
 | Approved / PartiallyDispensed | **dispense(subset)** | **line unused AND token unseen (atomic); substitution only from approved list** | PartiallyDispensed | `RxLinesDispensed`; remaining lines available | Pharmacy | Substitution + OOS captured |
 | Approved / PartiallyDispensed | **dispense(all/remaining)** | **all remaining lines unused (atomic)** | Dispensed | `RxDispensed` | Pharmacy | Duplicate dispense impossible |
 | Approved / PartiallyDispensed | expire | validity window elapsed | Expired | `RxExpired` | System (timer) | Pharmacy must reject if presented |
+| Approved / **PartiallyDispensed** | **amend beyond approved scope** (30.4) | the amended line leaves the approved drug, quantity or duration | Submitted | `PrescriptionLineAmended`; approvals notified. `IsDispensable` excludes Submitted, so the counter refuses it until reviewed | Doctor | The authorisation's basis no longer holds |
 | Draft / Submitted / Approved / **PartiallyDispensed** | cancel | not fully dispensed | Cancelled | `RxCancelled` | Doctor / Case Manager | **Coded** reason + actor recorded |
 | Expired / Completed(Dispensed) | present-at-pharmacy | — | (no transition) | `RxRejectedPresentation` | Pharmacy | **Reject expired/completed** |
 

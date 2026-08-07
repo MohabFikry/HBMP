@@ -25,6 +25,37 @@ public static class RxAmendmentEvents
     public const string DomainStream = "pharmacy.events";
     public const string NotificationQueue = "notification.domain-events";
 
+    /// <summary>
+    /// 30.4 — an amendment beyond the approved scope republishes <c>RxSubmitted</c>, the event the ORIGINAL
+    /// routing used, with <c>requiresApproval</c> set. See orders' AmendmentEvents for why a new event type
+    /// would be an orphan or a dead-letter; the same reasoning applies here, and the care timeline's
+    /// conditional RxSubmitted mapping already renders it as "sent for approval".
+    /// </summary>
+    public const string PendingApproval = "RxSubmitted";
+
+    /// <summary>The before/after a reviewer needs, so they are not made to re-derive the change.</summary>
+    public static object BeyondScope(
+        Prescription rx, PrescriptionLine before, decimal amendedQuantity, LineAmendmentRecord record) => new
+    {
+        tenantId = rx.TenantId,
+        prescriptionId = rx.PrescriptionId,
+        rx.RxNo,
+        encounterId = rx.EncounterId,
+        beneficiaryId = rx.BeneficiaryId,
+        authorizationId = rx.AuthorizationId,
+        prescriptionLineId = before.PrescriptionLineId,
+        newLineId = record.NewLineId,
+        drugId = before.DrugId,
+        drugName = before.DrugName,
+        previousQuantity = before.QuantityPrescribed,
+        amendedQuantity,
+        requiresApproval = true,
+        orderedByUserId = record.AmendedBy.ToString(),
+        reason = "amended-beyond-approved-scope",
+        reasonCode = record.ReasonCode,
+        amendedAt = record.AmendedAt,
+    };
+
     /// <summary><c>encounterId</c> is mandatory on anything the care feed mirrors — a step without it has no
     /// episode, and a step on the wrong episode is worse than a missing one.</summary>
     public static object Domain(

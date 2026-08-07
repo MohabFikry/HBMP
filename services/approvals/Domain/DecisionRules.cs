@@ -11,13 +11,22 @@ public static class DecisionRules
 {
     public static bool IsBlank(string? s) => string.IsNullOrWhiteSpace(s);
 
-    /// <summary>Validate a partial-approval scope against the full requested set (order-insensitive, de-duplicated).</summary>
+    /// <summary>
+    /// Validate a partial-approval scope against the full requested set (order-insensitive, de-duplicated).
+    ///
+    /// <para>30.4 — the subset test itself now lives in <see cref="Mersal.Amendment.AuthorizationScope"/>,
+    /// because orders and pharmacy need the SAME notion of "inside the approved set" when they judge whether
+    /// an amendment left it (design 46 §5) and cannot reference this assembly. The rule here is unchanged and
+    /// its own tests still assert every branch; what moved is the one line both sides must agree on, so there
+    /// is one comparator rather than two that drift.</para>
+    /// </summary>
     public static PartialScopeError ValidatePartialScope(IReadOnlyCollection<string> requested, IReadOnlyCollection<string> approved)
     {
         var full = new HashSet<string>(requested, StringComparer.Ordinal);
         var sub = new HashSet<string>(approved, StringComparer.Ordinal);
         if (sub.Count == 0) return PartialScopeError.Empty;
-        if (!sub.IsSubsetOf(full)) return PartialScopeError.NotSubset;
+        if (!Mersal.Amendment.AuthorizationScope.IsSubsetOfApproved(approved, requested))
+            return PartialScopeError.NotSubset;
         if (sub.SetEquals(full)) return PartialScopeError.EqualsFull;
         return PartialScopeError.None;
     }
