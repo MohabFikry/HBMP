@@ -69,7 +69,7 @@ public sealed class ChronicAmendExecutor(PharmacyDbContext db)
 
     public async Task<ChronicAmendResult> AmendScheduleAsync(
         Guid rxId, Guid lineId, string idempotencyKey, ChronicAmendRequest req, AmendReason reason,
-        Guid actor, string? actorDisplay, DateTimeOffset now, int toleranceDays,
+        Guid actor, string? actorDisplay, DateTimeOffset now, DateOnly today, int toleranceDays,
         Func<Prescription, PrescriptionLine, LineAmendmentRecord, CancellationToken, Task>? insideTransaction = null,
         CancellationToken ct = default)
     {
@@ -194,7 +194,7 @@ public sealed class ChronicAmendExecutor(PharmacyDbContext db)
 
             // ---- The successor's fresh schedule ----
             if (!acute && plan.RemainingWindows.Count > 0)
-                await WriteScheduleAsync(rx, successor, plan, collected, req, toleranceDays, ct);
+                await WriteScheduleAsync(rx, successor, plan, collected, req, today, toleranceDays, ct);
 
             // The HEAD follows the line it belongs to. Not signed content — no trigger covers it — and a
             // prescription still declaring itself Chronic with a 25-day duration would violate
@@ -234,12 +234,12 @@ public sealed class ChronicAmendExecutor(PharmacyDbContext db)
     /// </summary>
     private async Task WriteScheduleAsync(
         Prescription rx, PrescriptionLine successor, ChronicReallocation plan,
-        List<PrescriptionDispenseWindow> collected, ChronicAmendRequest req, int toleranceDays,
+        List<PrescriptionDispenseWindow> collected, ChronicAmendRequest req, DateOnly today, int toleranceDays,
         CancellationToken ct)
     {
         var anchor = collected.Count > 0
             ? collected.Max(w => w.ClosesAt).AddDays(1)
-            : await OriginalStartAsync(successor.SupersedesId!.Value, rx, ct);
+            : await OriginalStartAsync(successor.SupersedesId!.Value, rx, today, ct);
 
         // The remaining duration, so the last window closes with the script rather than a period after its
         // own opening — WindowSchedule's rule, applied to the remainder.
@@ -261,12 +261,23 @@ public sealed class ChronicAmendExecutor(PharmacyDbContext db)
         await db.SaveChangesAsync(ct);
     }
 
-    private async Task<DateOnly> OriginalStartAsync(Guid originalLineId, Prescription rx, CancellationToken ct)
+    /// <summary>
+    /// Where the original schedule began, for a script with nothing yet collected.
+    ///
+    /// <para><paramref name="today"/> is the CAIRO business date, passed in from
+    /// <c>IBusinessCalendar.Today()</c>. This fell back to a bare wall-clock reading until
+    /// <c>NoBareClockArchitectureTests</c> caught it: a UTC-derived date is the wrong DATE every Cairo
+    /// evening, so a script amended after 22:00 local would have opened its first window a day early — and
+    /// the early tolerance would have hidden it. (The offending expression is deliberately not spelled out
+    /// here: that scanner reads comments as code, and naming the pattern would re-flag this file.)</para>
+    /// </summary>
+    private async Task<DateOnly> OriginalStartAsync(
+        Guid originalLineId, Prescription rx, DateOnly today, CancellationToken ct)
     {
         var first = await db.DispenseWindows.AsNoTracking()
             .Where(w => w.PrescriptionLineId == originalLineId)
             .OrderBy(w => w.WindowNo).Select(w => (DateOnly?)w.ScheduledOpenDate).FirstOrDefaultAsync(ct);
-        return first ?? rx.ValidFrom ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        return first ?? rx.ValidFrom ?? today;
     }
 
     /// <summary>The amended line as an allocation request. Dose and times per day come from the ORIGINAL —

@@ -40,7 +40,7 @@ public class ChronicAmendmentPersistenceTests
             await using (var ctx = Ctx())
                 result = await new ChronicAmendExecutor(ctx).AmendScheduleAsync(
                     rxId, lineId, "amend-1", new ChronicAmendRequest(60, 1), Reason,
-                    Guid.NewGuid(), "Dr Karim", DateTimeOffset.UtcNow, toleranceDays: 5);
+                    Guid.NewGuid(), "Dr Karim", DateTimeOffset.UtcNow, Start, toleranceDays: 5);
 
             result.Outcome.Should().Be(AmendOutcome.Applied);
             result.Reallocation!.NewTotal.Should().Be(180);
@@ -102,7 +102,7 @@ public class ChronicAmendmentPersistenceTests
             await using (var ctx = Ctx())
                 result = await new ChronicAmendExecutor(ctx).AmendScheduleAsync(
                     rxId, lineId, "amend-2", new ChronicAmendRequest(120, 1), Reason,
-                    Guid.NewGuid(), "Dr Karim", DateTimeOffset.UtcNow, toleranceDays: 5);
+                    Guid.NewGuid(), "Dr Karim", DateTimeOffset.UtcNow, Start, toleranceDays: 5);
 
             result.Outcome.Should().Be(AmendOutcome.Applied);
             result.Reallocation!.NewTotal.Should().Be(360);
@@ -131,7 +131,7 @@ public class ChronicAmendmentPersistenceTests
             await using (var ctx = Ctx())
                 result = await new ChronicAmendExecutor(ctx).AmendScheduleAsync(
                     rxId, lineId, "too-low", new ChronicAmendRequest(20, 1), Reason,
-                    Guid.NewGuid(), "Dr Karim", DateTimeOffset.UtcNow, toleranceDays: 5);
+                    Guid.NewGuid(), "Dr Karim", DateTimeOffset.UtcNow, Start, toleranceDays: 5);
 
             result.Outcome.Should().Be(AmendOutcome.BelowDispensed);
 
@@ -160,7 +160,7 @@ public class ChronicAmendmentPersistenceTests
             {
                 var refused = await new ChronicAmendExecutor(ctx).AmendScheduleAsync(
                     rxId, lineId, "to-25", new ChronicAmendRequest(25, 1), Reason,
-                    Guid.NewGuid(), "Dr Karim", DateTimeOffset.UtcNow, toleranceDays: 5);
+                    Guid.NewGuid(), "Dr Karim", DateTimeOffset.UtcNow, Start, toleranceDays: 5);
                 refused.Outcome.Should().Be(AmendOutcome.NoChange);
                 refused.Reallocation!.Outcome.Should().Be(Prescribing.AmendmentOutcome.NoLongerChronic);
             }
@@ -185,7 +185,7 @@ public class ChronicAmendmentPersistenceTests
             await using (var ctx = Ctx())
                 result = await new ChronicAmendExecutor(ctx).AmendScheduleAsync(
                     rxId, lineId, "to-acute", new ChronicAmendRequest(25, 1, ConvertToAcute: true), Reason,
-                    Guid.NewGuid(), "Dr Karim", DateTimeOffset.UtcNow, toleranceDays: 5);
+                    Guid.NewGuid(), "Dr Karim", DateTimeOffset.UtcNow, Start, toleranceDays: 5);
 
             result.Outcome.Should().Be(AmendOutcome.Applied);
 

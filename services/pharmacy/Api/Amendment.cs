@@ -5,6 +5,7 @@ using Mersal.Auth.Authorization;
 using Mersal.Authz;
 using Mersal.Events;
 using Mersal.Pharmacy.Domain;
+using Mersal.Time;
 using Mersal.Pharmacy.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 
@@ -159,7 +160,8 @@ public static class RxAmendmentEndpoints
         v1.MapPost("/{rxId:guid}/lines/{lineId:guid}/amend-schedule", async Task<IResult> (
             Guid rxId, Guid lineId, AmendChronicScheduleRequest req, HttpRequest http, PharmacyDbContext db,
             PharmacyGate gate, ChronicAmendExecutor executor, IAuditClient audit, IOutbox outbox,
-            IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+            IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar,
+            CancellationToken ct) =>
         {
             var idem = http.Headers["Idempotency-Key"].ToString();
             if (string.IsNullOrWhiteSpace(idem))
@@ -177,7 +179,9 @@ public static class RxAmendmentEndpoints
                 rxId, lineId, idem,
                 new ChronicAmendRequest(req.DurationDays, req.FrequencyMonths, req.ConvertToAcute),
                 new AmendReason(req.ReasonCode, req.ReasonText), actor, me.Principal?.DisplayName,
-                clock.GetUtcNow(), EarlyToleranceDays,
+                // 18.A3 — the Cairo business date, never a UTC one: a window opened from a UTC date is a day
+                // early every Cairo evening.
+                clock.GetUtcNow(), calendar.Today(), EarlyToleranceDays,
                 insideTransaction: async (p, line, record, innerCt) =>
                 {
                     await outbox.EnqueueAsync("PrescriptionLineAmended", "pharmacy.events", new
