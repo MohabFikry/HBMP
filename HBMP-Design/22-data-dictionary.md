@@ -326,7 +326,10 @@ Index: `(beneficiary_id, started_at DESC)`.
 | `encounter_id` | `uuid` | No | logical FK | | Internal | |
 | `ordering_provider_id` | `uuid` | No | logical FK | | Internal | |
 | `authorization_id` | `uuid` | Yes | logical FK | If auth required | Internal | |
-| `order_type` | `varchar(12)` | No | | enum: Lab/Imaging/Procedure | Internal | |
+| `order_type` | `varchar(12)` | No | | enum: Lab/Radiology/Procedure (`Imaging` retained for the 29.1 dual-accept window only — doc 45 §1) | Internal | |
+| `assigned_provider_id` | `uuid` | Yes | | 29.2b — the provider this order is ROUTED TO. THE row-level ownership anchor for the external portal; NULL means no external owner, never "everyone's" | Internal | |
+| `shared_clinical_context` | `text` | Yes | | 29.2b — what the ordering doctor CHOSE to disclose. Stored, not joined: this column IS the record of the disclosure | Restricted | |
+| `completion_report` | `text` | Yes | | 29.2b — the delivering provider's report back. Mandatory for a referral: an open loop is the classic outpatient safety failure | Restricted | |
 | `status` | `varchar(16)` | No | | Lifecycle | Internal | enum (see §11) |
 | `requested_at` | `timestamptz` | No | | | Internal | |
 | `expires_at` | `timestamptz` | Yes | | Validity window | Internal | > requested |
@@ -342,6 +345,8 @@ Indexes: `UNIQUE(order_no)`; `(beneficiary_id, status)`; partial `(expires_at) W
 | `code_system` | `varchar(10)` | No | | enum: CPT/LOINC/LOCAL | Internal | |
 | `code` | `varchar(20)` | No | | | Internal | exists in masterdata |
 | `description` | `varchar(200)` | Yes | | | Internal | |
+| `procedure_type_code` | `varchar(32)` | Yes | | 29.2 — the OP-Procedure kind (masterdata.procedure_type). Validated against the code's CPT section on the write path | Internal | |
+| `requested_quantity` | `numeric(14,3)` | No | | 29.2 — what the doctor ASKED FOR, pinned at creation. Distinct from `quantity_ordered`, which is what may be DELIVERED and comes from the APPROVED scope | Internal | |
 | `quantity_ordered` | `numeric(14,3)` | No | | | Internal | > 0 |
 | `quantity_consumed` | `numeric(14,3)` | No | | Accumulator | Internal | `CHECK (0 ≤ consumed ≤ ordered)` |
 | `status` | `varchar(16)` | No | | | Internal | enum: Active/PartiallyUsed/Completed/Cancelled |

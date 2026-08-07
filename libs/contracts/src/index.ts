@@ -33,3 +33,4 @@ export * from "./beneficiary";
 export * from "./claims";
 export * from "./profile";
 export * from "./access";
+export * from "./procedures";

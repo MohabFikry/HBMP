@@ -89,7 +89,7 @@ public static class ProviderPolicies
         new PolicyRule
         {
             Action = Actions.QueueRead, ResourceType = "provider_queue",
-            Roles = Set("lab_tech", "imaging_tech", "pharmacist", "provider_admin"),
+            Roles = Set("lab_tech", "imaging_tech", "radiology_tech", "pharmacist", "provider_admin"),
             Scopes = Set("provider:read"),
             RequiredConditions = [AbacConditions.TenantMatch, AbacConditions.ProviderOwnership],
             Sensitive = true,

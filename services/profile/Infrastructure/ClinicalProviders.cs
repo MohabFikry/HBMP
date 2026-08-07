@@ -158,6 +158,10 @@ public sealed class InvestigationsSectionProvider(CallerScopedHttp http) : ISect
                 i.Str("resultSummary"),
                 i.Bool("restricted"),
                 i.Str("sensitivityLevel"),
+                // 29.2 — fail-safe default. An absent orderType reads as "Investigation", never as one of the
+                // real kinds: putting an unknown row in the Procedures pane would tell a doctor a procedure
+                // was ordered when the upstream simply did not say.
+                i.Str("orderType") ?? "Investigation",
                 i.Uuid("encounterId")))
             .ToList();
 

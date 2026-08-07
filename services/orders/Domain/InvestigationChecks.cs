@@ -123,7 +123,10 @@ public static class InvestigationChecks
             var wrongSection = orderType switch
             {
                 OrderType.Lab when IsRadiology(code) => "a radiology procedure on a laboratory order",
-                OrderType.Imaging when IsLaboratory(code) => "a laboratory procedure on an imaging order",
+                // 29.1 — both spellings, until the legacy value is dropped (design 45 §1). Naming only the
+                // legacy one would turn this BLOCKING check into a silent pass for every Radiology order.
+                OrderType.Imaging or OrderType.Radiology when IsLaboratory(code)
+                    => "a laboratory procedure on a radiology order",
                 _ => null,
             };
             if (wrongSection is not null)

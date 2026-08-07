@@ -55,7 +55,7 @@ const S = {
   // VALUES are the English words the row carries and only the labels are localized.
   typeFilter: { en: "Type", ar: "النوع" },
   typeLab: { en: "Lab", ar: "مختبر" },
-  typeImaging: { en: "Imaging", ar: "أشعة" },
+  typeRadiology: { en: "Radiology", ar: "أشعة" },
   // The four order statuses and the five prescription statuses, worded exactly as the chips in the Status
   // column (`orderStatus` / `rxStatus` at the client boundary). An option reading one thing against a chip
   // reading another is two names for one state.
@@ -526,16 +526,28 @@ const orderHaystack = (r: OrderRow, name: Localized | null) =>
     ...r.lines.flatMap((l) => [l.code, l.description]),
   ].filter(Boolean).join(" ");
 
-/** Lab / Imaging. Matched case-insensitively — `orderType` is emr's string, rendered verbatim. */
+/**
+ * Lab / Radiology. Matched case-insensitively — `orderType` is emr's string, rendered verbatim.
+ *
+ * 29.1 — the Radiology option matches BOTH spellings (design 45 §1). Orders placed before the rename kept
+ * `Imaging` in the row for the life of the order, and a filter that matched only the new value would show a
+ * doctor an empty radiology worklist while their orders sat there under the old name — a true statement
+ * ("nothing matching Radiology") standing in for a false one ("no radiology orders").
+ */
 function typeFilter(t: (l: Localized) => string): TableFilterSpec<OrderRow> {
   return {
     key: "type",
     label: t(S.typeFilter),
     options: [
       { value: S.typeLab.en, label: t(S.typeLab) },
-      { value: S.typeImaging.en, label: t(S.typeImaging) },
+      { value: S.typeRadiology.en, label: t(S.typeRadiology) },
     ],
-    match: (r, value) => r.orderType.toLowerCase() === value.toLowerCase(),
+    match: (r, value) => {
+      const row = r.orderType.toLowerCase();
+      const want = value.toLowerCase();
+      if (want === "radiology") return row === "radiology" || row === "imaging";
+      return row === want;
+    },
   };
 }
 

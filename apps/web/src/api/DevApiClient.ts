@@ -1150,7 +1150,7 @@ export class DevApiClient implements ApiClient {
    * order — and models the REFUSALS, which is where the real behaviour lives: one identifier is a 422, an
    * unreachable directory is a 503, and only "matched nobody" is an empty list.
    */
-  async labSearch(kind: "lab" | "imaging", by: { orderNo?: string; cardNumber?: string; memberNo?: string; passport?: string }) {
+  async labSearch(kind: "lab" | "radiology", by: { orderNo?: string; cardNumber?: string; memberNo?: string; passport?: string }) {
     const rows = await this.labQueue(kind);
     const orderNo = (by.orderNo ?? "").trim();
     if (orderNo) return rows.filter((r) => r.orderNo.toLowerCase() === orderNo.toLowerCase());
@@ -1161,7 +1161,147 @@ export class DevApiClient implements ApiClient {
     return rows;
   }
 
-  labQueue(kind: "lab" | "imaging") {
+  // ---- 29.2b — external delivering provider (design 45 §2b) --------------------------------------------
+  //
+  // The fixture models ONE centre, so everything here is already "ours" — the ownership rule it stands in for
+  // is enforced server-side by assigned_provider_id and proved by the two-provider test in orders. What the
+  // fixture DOES model faithfully is the part the UI has to get right: the queue carries no name, the counter
+  // refuses a single identifier, and a replayed session key returns the same progress rather than a second one.
+  private procedureSessions = new Map<string, number>();
+  private procedureSeenKeys = new Set<string>();
+
+  private procedureFixture() {
+    return [
+      {
+        orderId: "ord-proc-1", orderNo: "ORD-2026-000901", orderType: "Procedure", status: "Active",
+        beneficiaryId: "ben-1", beneficiaryDisplayName: null, beneficiaryPhotoUrl: null,
+        codeSystem: "CPT", code: "97110", description: "Therapeutic exercise",
+        procedureTypeCode: "Physiotherapy",
+        sessionsAuthorised: 6, sessionsDelivered: this.procedureSessions.get("ord-proc-1") ?? 0,
+        authorised: true, validUntil: "2026-12-31T00:00:00Z", expired: false,
+        sharedClinicalContext: "Post-op knee rehabilitation, ACL repair 12 Feb.",
+      },
+      {
+        orderId: "ord-proc-2", orderNo: "ORD-2026-000902", orderType: "Procedure", status: "Active",
+        beneficiaryId: "ben-2", beneficiaryDisplayName: null, beneficiaryPhotoUrl: null,
+        codeSystem: "CPT", code: "90935", description: "Haemodialysis",
+        procedureTypeCode: "Dialysis",
+        sessionsAuthorised: 12, sessionsDelivered: this.procedureSessions.get("ord-proc-2") ?? 0,
+        // Deliberately NULL: the ordering doctor shared nothing. It must render as "not disclosed", never as
+        // "no relevant history" — absence of data is never a clean result.
+        authorised: true, validUntil: "2026-12-31T00:00:00Z", expired: false,
+        sharedClinicalContext: null,
+      },
+    ].map((o) => ({
+      ...o,
+      sessionsRemaining: Math.max(0, o.sessionsAuthorised - o.sessionsDelivered),
+      progressLabel: `${o.sessionsDelivered} of ${o.sessionsAuthorised} sessions delivered`,
+    }));
+  }
+
+  procedureQueue() {
+    return this.gate(() => this.procedureFixture());
+  }
+
+  procedureCounterSearch(by: { cardNumber?: string; memberNo?: string; passport?: string }) {
+    return this.gate(() => {
+      const supplied = [by.cardNumber, by.memberNo, by.passport].filter((v) => (v ?? "").trim() !== "");
+      // A card number is a lookup key, not an authenticator — cards are shared and photographed.
+      if (supplied.length < 2) {
+        throw new ApiError("http", "second-identifier-required", 422, { type: "urn:hbmp:second-identifier-required" });
+      }
+      return this.procedureFixture().map((o) => ({ ...o, beneficiaryDisplayName: "Amal Hassan" }));
+    });
+  }
+
+  recordProcedureSession(
+    orderId: string, orderLineId: string, idempotencyKey: string,
+    _by: { practitioner?: string; attended?: boolean; note?: string },
+  ) {
+    return this.gate(() => {
+      const authorised = orderId === "ord-proc-2" ? 12 : 6;
+      // REPLAY: the same key answers the same progress. Not a second session.
+      if (!this.procedureSeenKeys.has(idempotencyKey)) {
+        const done = this.procedureSessions.get(orderId) ?? 0;
+        if (done >= authorised) {
+          throw new ApiError("http", "no-sessions-remaining", 422, { type: "urn:hbmp:no-sessions-remaining" });
+        }
+        this.procedureSeenKeys.add(idempotencyKey);
+        this.procedureSessions.set(orderId, done + 1);
+      }
+      const delivered = this.procedureSessions.get(orderId) ?? 0;
+      return {
+        orderId, orderLineId,
+        sessionsDelivered: delivered, sessionsAuthorised: authorised,
+        sessionsRemaining: Math.max(0, authorised - delivered),
+        progressLabel: `${delivered} of ${authorised} sessions delivered`,
+      };
+    });
+  }
+
+  reportProcedureCompletion(orderId: string, findings: string) {
+    return this.gate(() => {
+      if (findings.trim() === "") {
+        throw new ApiError("http", "report-required", 422, { type: "urn:hbmp:report-required" });
+      }
+      void orderId;
+      return undefined as void;
+    });
+  }
+
+  // 29.4 — the service-history fixture (design 45 §4).
+  //
+  // Carries all THREE states on purpose. A fixture that only ever has history leaves the two "nothing here"
+  // branches — which are the ones that matter clinically — rendered by nobody, in the demo build and in the
+  // route-level axe sweep alike.
+  //   85025  → two numeric results, so the trend renders
+  //   80048  → a RESTRICTED occurrence: existence only, no value anywhere in the payload
+  //   99999  → no previous occurrences (a real, successful answer)
+  //   ERR    → could not load (an error, and a different sentence)
+  serviceHistory(
+    beneficiaryId: string,
+    q: { serviceType?: string; code: string; page?: number; pageSize?: number },
+  ) {
+    return this.gate(() => {
+      if (q.code === "ERR") throw new ApiError("http", "service-history-unavailable", 503, {});
+
+      const rows =
+        q.code === "85025"
+          ? [
+              { orderId: "o1", orderNo: "ORD-2026-7741", orderLineId: "l1", serviceType: "Lab",
+                codeSystem: "CPT", code: "85025", description: "Complete blood count",
+                occurredAt: "2026-02-02T09:20:00Z", status: "Completed", actorUserId: "Dr Adel",
+                branchId: null, restricted: false, sensitivityLevel: "Standard",
+                resultSummary: "11.2", numericValue: 11.2 },
+              { orderId: "o2", orderNo: "ORD-2026-7855", orderLineId: "l2", serviceType: "Lab",
+                codeSystem: "CPT", code: "85025", description: "Complete blood count",
+                occurredAt: "2026-07-02T09:20:00Z", status: "Completed", actorUserId: "Dr Adel",
+                branchId: null, restricted: false, sensitivityLevel: "Standard",
+                resultSummary: "12.8", numericValue: 12.8 },
+            ]
+          : q.code === "80048"
+            ? [
+                // EXISTENCE ONLY. No resultSummary and no numericValue — the server never sent them, so
+                // there is nothing here for the modal to withhold.
+                { orderId: "o3", orderNo: "ORD-2026-7802", orderLineId: "l3", serviceType: "Lab",
+                  codeSystem: "CPT", code: "80048", description: "Basic metabolic panel",
+                  occurredAt: "2026-05-11T11:00:00Z", status: "Completed", actorUserId: "Dr Salma",
+                  branchId: null, restricted: true, sensitivityLevel: "HighlySensitive",
+                  resultSummary: null, numericValue: null },
+              ]
+            : [];
+
+      return {
+        beneficiaryId, serviceType: q.serviceType ?? null, code: q.code,
+        total: rows.length, page: 1, pageSize: 25,
+        trend: rows.filter((r) => !r.restricted && r.numericValue !== null)
+          .map((r) => ({ at: r.occurredAt, value: r.numericValue! })),
+        items: rows,
+      };
+    });
+  }
+
+  labQueue(kind: "lab" | "radiology") {
     return this.gate(() => {
       const base =
         kind === "lab"
@@ -1214,7 +1354,7 @@ export class DevApiClient implements ApiClient {
           : [
               {
                 id: "ORD-77003",
-                kind: "imaging" as const,
+                kind: "radiology" as const,
                 test: { system: "CPT" as const, code: "71046", label: loc("Chest X-ray", "أشعة صدر") },
                 patient: { id: "MRS-M-10231", token: "A.H · •••4821" },
                 priority: "routine" as const,
@@ -1229,7 +1369,7 @@ export class DevApiClient implements ApiClient {
               // The imaging side has a lapsed one too — the two queues must not diverge in what they can show.
               {
                 id: "ORD-77009",
-                kind: "imaging" as const,
+                kind: "radiology" as const,
                 test: { system: "CPT" as const, code: "70450", label: loc("CT head, without contrast", "أشعة مقطعية للرأس بدون صبغة") },
                 patient: { id: "MRS-M-10555", token: "Y.H · •••7702" },
                 priority: "routine" as const,
@@ -1274,7 +1414,7 @@ export class DevApiClient implements ApiClient {
   };
 
   async investigationOrder(orderNo: string): Promise<InvestigationOrder | null> {
-    const rows = [...(await this.labQueue("lab")), ...(await this.labQueue("imaging"))];
+    const rows = [...(await this.labQueue("lab")), ...(await this.labQueue("radiology"))];
     const head = rows.find((o) => o.orderNo === orderNo);
     if (!head) return null;
 
@@ -1316,7 +1456,7 @@ export class DevApiClient implements ApiClient {
    * a screen honest about.</p>
    */
   async orderPricing(orderId: string, performNow?: Record<string, number>): Promise<OrderPricing> {
-    const rows = [...(await this.labQueue("lab")), ...(await this.labQueue("imaging"))];
+    const rows = [...(await this.labQueue("lab")), ...(await this.labQueue("radiology"))];
     const head = rows.find((o) => o.id === orderId);
     const defs = DevApiClient.ORDER_LINES[head?.orderNo ?? ""] ?? [];
     const unpriced = head?.orderNo === "ORD-2026-077009";
@@ -1413,7 +1553,7 @@ export class DevApiClient implements ApiClient {
     });
   }
 
-  awaitingResult(kind: "lab" | "imaging") {
+  awaitingResult(kind: "lab" | "radiology") {
     const rows =
       kind === "lab"
         ? [{ orderId: "ORD-55012", lineId: "L-1", orderNo: "ORD-2026-000118", code: "80053", desc: "Comprehensive metabolic panel", tok: "•••4821" }]
@@ -1509,6 +1649,34 @@ export class DevApiClient implements ApiClient {
       tradeName: loc("Amoxil 500mg caps", "أموكسيل 500مجم"),
       activeIngredient: "amoxicillin",
       strength: "500mg", form: "capsule", priceEgp: 43.5, atcCode: "J01CA04", hasIndicationData: true,
+      // 29.7 — cheapest per CAPSULE in its group (43.5 / 20 = 2.175), and NOT the cheapest pack.
+      isLowestPrice: true, pricePerUnit: 2.175, availability: "Available" as const,
+    },
+    {
+      // The 29.7 correction made visible: a SMALLER pack at a LOWER pack price that is DEARER per capsule
+      // (35 / 10 = 3.50). A chip driven by pack price would point the prescriber here.
+      drugId: "11111111-0000-4000-8000-000000000005",
+      tradeName: loc("Amoxicare 500mg 10 caps", "أموكسي كير 500مجم"),
+      activeIngredient: "amoxicillin",
+      strength: "500mg", form: "capsule", priceEgp: 35, atcCode: "J01CA04", hasIndicationData: true,
+      isLowestPrice: false, pricePerUnit: 3.5, availability: "Unknown" as const,
+    },
+    {
+      // Availability = Unavailable — the ONLY state that renders a badge.
+      drugId: "11111111-0000-4000-8000-000000000006",
+      tradeName: loc("Stockout 500mg caps", "ستوك أوت 500مجم"),
+      activeIngredient: "amoxicillin",
+      strength: "500mg", form: "capsule", priceEgp: 60, atcCode: "J01CA04", hasIndicationData: true,
+      isLowestPrice: false, pricePerUnit: 3, availability: "Unavailable" as const,
+    },
+    {
+      // No pack size upstream ⇒ no per-unit price ⇒ NEVER labelled, however cheap the pack looks. 12 EGP is
+      // the lowest PACK price in this group, and that is precisely why it must not carry the chip.
+      drugId: "11111111-0000-4000-8000-000000000007",
+      tradeName: loc("Nopack 500mg caps", "نو باك 500مجم"),
+      activeIngredient: "amoxicillin",
+      strength: "500mg", form: "capsule", priceEgp: 12, atcCode: "J01CA04", hasIndicationData: true,
+      isLowestPrice: false, availability: "Unknown" as const,
     },
     {
       drugId: "11111111-0000-4000-8000-000000000003",
@@ -2786,11 +2954,15 @@ export class DevApiClient implements ApiClient {
         key: "investigations", state: "Visible" as const,
         data: {
           items: [
-            { orderRef: "ORD-2026-7741", lineId: "line-1", category: "Haematology", orderedOn: "2026-07-02T09:20:00Z", status: "Resulted", providerName: "Central Lab", resultSummary: "Hb 11.2 g/dL — mild anaemia", restricted: false },
+            { orderRef: "ORD-2026-7741", lineId: "line-1", category: "Haematology", orderedOn: "2026-07-02T09:20:00Z", status: "Resulted", providerName: "Central Lab", resultSummary: "Hb 11.2 g/dL — mild anaemia", restricted: false, orderType: "Lab" },
             // Existence-only: the owning service never sent a value, and the row says why rather than looking
             // like a result that has not come back yet (design 37 §6).
-            { orderRef: "ORD-2026-7802", lineId: "line-2", category: "Serology", orderedOn: "2026-07-22T11:00:00Z", status: "Resulted", providerName: "Central Lab", restricted: true, sensitivityLevel: "High" },
-            { orderRef: "ORD-2026-7855", lineId: "line-3", category: "Chemistry", orderedOn: "2026-07-28T08:45:00Z", status: "Ordered", providerName: "Central Lab", restricted: false },
+            { orderRef: "ORD-2026-7802", lineId: "line-2", category: "Serology", orderedOn: "2026-07-22T11:00:00Z", status: "Resulted", providerName: "Central Lab", restricted: true, sensitivityLevel: "High", orderType: "Lab" },
+            // 29.2 — an OP procedure in the SAME section, so the History tab's Procedures pane has something
+            // to show and the axe sweep has something to look at. A fixture that omits it makes the pane
+            // render its empty state in every screenshot and every accessibility run.
+            { orderRef: "ORD-2026-7901", lineId: "line-4", category: "Therapeutic exercise", orderedOn: "2026-07-25T10:00:00Z", status: "PartiallyUsed", providerName: "Cairo Physiotherapy Centre", resultSummary: "4 of 6 sessions delivered", restricted: false, orderType: "Procedure" },
+            { orderRef: "ORD-2026-7855", lineId: "line-3", category: "Chemistry", orderedOn: "2026-07-28T08:45:00Z", status: "Ordered", providerName: "Central Lab", restricted: false, orderType: "Lab" },
           ],
         },
       },

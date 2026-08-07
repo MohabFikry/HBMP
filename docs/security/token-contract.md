@@ -86,16 +86,34 @@ Lower-case, exactly these (authoritative catalog: `services/admin/Domain/RoleCat
 
 ```
 reception  call_center  beneficiary_mgmt  finance  network_team  claims_officer
-case_manager  doctor  nurse  lab_tech  imaging_tech  pharmacist
+case_manager  doctor  nurse  lab_tech  radiology_tech  pharmacist
 medical_approval  medical_director  provider_admin  org_admin  super_admin
 ```
 
+> **29.1 — `imaging_tech` → `radiology_tech` (design 45 §1, ADR-0029).** This **amends** the frozen contract;
+> it does not break it. A rename is not additive the way phase 21's three claims were, so it is handled as a
+> **dual-accept window** rather than a cutover: `imaging_tech` remains a valid, grantable role name and both
+> spellings resolve to the same authority until the contract step. `TokenContractByteCompatTests` carries a
+> checked-in pre-switch fixture (`PreRadiologySwitchToken`) proving a token minted before the switch still
+> authorises with its scopes and provider binding unchanged, and it must stay green for the whole window.
+> Sequence, preconditions and the removal list: [runbooks/radiology-rename.md](../runbooks/radiology-rename.md).
+>
+> The **scope** vocabulary below is unchanged by the rename — see the note in §"Scope vocabulary".
+
 > `claims_officer` is used by the realm + SPA `ROLE_MAP` but is **not yet** in `RoleCatalog.Tiers`; 17.1
 > adds it to the catalog (tier T2) so the store is complete and drift ends. The SPA's clinical-title →
-> portal-key mapping (`lab_tech`→`lab`, `pharmacist`→`pharmacy`, `imaging_tech`→`imaging`,
+> portal-key mapping (`lab_tech`→`lab`, `pharmacist`→`pharmacy`, `radiology_tech`→`radiology`,
 > `network_team`→`provider_admin`) stays in `config.ts`; the token carries the clinical titles above.
+> During the 29.1 window `config.ts` maps **both** `radiology_tech` and `imaging_tech` to `radiology`: the SPA
+> reads the raw `roles` claim, so it does not inherit `libs/auth`'s server-side alias expansion.
 
 ### Scope vocabulary (enforced per endpoint)
+
+> **29.1 — the scope vocabulary is NOT affected by the Radiology rename.** Design 45 §1's table lists
+> `imaging:*` → `radiology:*`, but no OAuth scope on this platform has ever been spelled `imaging:*`: a
+> radiology technician's capabilities are `orders:read` and `orders:consume`, which are **order** scopes shared
+> with the lab bench. The `imaging.*` identifiers that do exist are the SPA's client-side permission keys in
+> `apps/web/src/authz/permissions.ts`, renamed at the switch. Flagged rather than silently resolved — ADR-0029.
 
 Scopes are **data**, enforced per-endpoint by `ScopePolicyProvider`/`ScopeAuthorizationHandler`; the issuer
 must be able to mint any subset. The set the platform enforces today (union across services; see the SPA's

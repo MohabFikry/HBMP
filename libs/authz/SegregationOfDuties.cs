@@ -43,12 +43,12 @@ public static class SegregationOfDuties
 
     /// <summary>Clinical roles a provider-admin must never self-grant (PHI self-elevation).</summary>
     public static readonly IReadOnlySet<string> ClinicalRoles =
-        new HashSet<string>(StringComparer.Ordinal) { "doctor", "nurse", "lab_tech", "imaging_tech", "pharmacist" };
+        new HashSet<string>(StringComparer.Ordinal) { "doctor", "nurse", "lab_tech", "imaging_tech", "radiology_tech", "pharmacist" };
 
     /// <summary>Provider-affiliated roles that must never adjudicate claims (a provider deciding its own money).</summary>
     public static readonly IReadOnlySet<string> ProviderAffiliatedRoles =
         new HashSet<string>(StringComparer.Ordinal)
-        { "provider_admin", "doctor", "nurse", "lab_tech", "imaging_tech", "pharmacist" };
+        { "provider_admin", "doctor", "nurse", "lab_tech", "imaging_tech", "radiology_tech", "pharmacist" };
 
     /// <summary>Roles that carry claims-adjudication authority (decide lines / close batch).</summary>
     public static readonly IReadOnlySet<string> ClaimsAdjudicationRoles =

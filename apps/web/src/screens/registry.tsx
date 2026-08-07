@@ -33,6 +33,8 @@ const NurseResults = lazy(() => import("./NursePortal").then((m) => ({ default: 
 const LabQueue = lazy(() => import("./LabQueue").then((m) => ({ default: m.LabQueue })));
 // Lab/imaging result upload (Phase 5.3) — one chunk, parameterised by capability.
 const ResultUpload = lazy(() => import("./ResultUpload").then((m) => ({ default: m.ResultUpload })));
+// 29.2b — the external delivering provider's portal (design 45 §2b).
+const ProcedureCentre = lazy(() => import("./ProcedureCentre"));
 const PharmacyDispense = lazy(() => import("./PharmacyDispense").then((m) => ({ default: m.PharmacyDispense })));
 const PrescriptionPage = lazy(() => import("./pharmacy/PrescriptionPage").then((m) => ({ default: m.PrescriptionPage })));
 // ADR-0034 — the bench's counterpart of the prescription page. Its own chunk: the queue is opened many times
@@ -157,15 +159,20 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/nurse/patients": () => <DoctorPatients />,
   "/nurse/vitals": () => <NurseVitals />,
   "/nurse/results": () => <NurseResults />,
-  // 3. Lab / imaging — queue + consume.
+  // 3. Lab / radiology — queue + consume.
   // The /queue paths stay resolvable even though the rail no longer offers them: a bookmark or a link in
   // somebody's notes should land on the bench rather than on a 404. Same treatment /pharmacy/queue got.
   "/lab/queue": () => <LabQueue kind="lab" />,
-  "/imaging/queue": () => <LabQueue kind="imaging" />,
+  "/radiology/queue": () => <LabQueue kind="radiology" />,
   "/lab/consume": () => <LabQueue kind="lab" />,
-  "/imaging/consume": () => <LabQueue kind="imaging" />,
+  "/radiology/consume": () => <LabQueue kind="radiology" />,
   "/lab/result": () => <ResultUpload kind="lab" />,
-  "/imaging/result": () => <ResultUpload kind="imaging" />,
+  "/radiology/result": () => <ResultUpload kind="radiology" />,
+  // 3b. 29.2b — the EXTERNAL delivering provider (design 45 §2b): physiotherapy centres, dialysis units and
+  // outside clinics. Its rows are scoped server-side by assigned_provider_id; nothing here filters.
+  "/procedure/queue": () => <ProcedureCentre mode="queue" />,
+  "/procedure/counter": () => <ProcedureCentre mode="counter" />,
+
   // 4. Pharmacy — dispense (queue + partial dispense).
   "/pharmacy/queue": () => <PharmacyDispense />,
   "/pharmacy/dispense": () => <PharmacyDispense />,

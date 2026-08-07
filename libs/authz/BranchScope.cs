@@ -64,7 +64,7 @@ public static class BranchScopeModes
 
     /// <summary>External contracted providers — scoped by provider-ownership, never by branch (37 §3).</summary>
     public static readonly IReadOnlySet<string> ProviderScopedRoles =
-        new HashSet<string>(StringComparer.Ordinal) { "provider_admin", "lab_tech", "imaging_tech", "pharmacist" };
+        new HashSet<string>(StringComparer.Ordinal) { "provider_admin", "lab_tech", "imaging_tech", "radiology_tech", "pharmacist" };
 
     /// <summary>The caller's effective mode. Provider-scoped wins (external actors are never branch-scoped);
     /// then BranchSetScoped, then BranchScoped; everyone else (approvals, medical director, case managers,

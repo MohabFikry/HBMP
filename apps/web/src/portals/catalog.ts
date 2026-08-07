@@ -170,17 +170,30 @@ export const PORTALS: PortalDef[] = [
     ],
   },
   {
-    role: "imaging",
-    base: "imaging",
-    title: { en: "Imaging", ar: "الأشعة" },
-    eyebrow: { en: "Imaging", ar: "الأشعة" },
+    role: "radiology",
+    base: "radiology",
+    title: { en: "Radiology", ar: "الأشعة" },
+    eyebrow: { en: "Radiology", ar: "الأشعة" },
     sections: [
       // 27.8 — "Order Queue" was removed, not renamed: it and "Consume Order" both routed to the SAME
       // component, so the rail offered one screen twice under two names. The same duplication the pharmacy
       // rail had. What is left is the bench, which now opens on a search for one patient rather than on a
       // browse of every patient's orders.
-      { key: "consume", path: "consume", label: { en: "Perform Order", ar: "تنفيذ الطلب" }, group: G.fulfillment, icon: "flask", permission: "imaging.consume" },
-      { key: "result", path: "result", label: { en: "Upload Result", ar: "رفع النتيجة" }, group: G.fulfillment, icon: "doc", permission: "imaging.result.upload" },
+      { key: "consume", path: "consume", label: { en: "Perform Order", ar: "تنفيذ الطلب" }, group: G.fulfillment, icon: "flask", permission: "radiology.consume" },
+      { key: "result", path: "result", label: { en: "Upload Result", ar: "رفع النتيجة" }, group: G.fulfillment, icon: "doc", permission: "radiology.result.upload" },
+    ],
+  },
+  {
+    // 29.2b (design 45 §2b) — the EXTERNAL delivering provider's portal. Two entries only: the queue of work
+    // routed to THIS centre, and the counter where the person present is verified behind two identifiers.
+    // There is no "browse patients" and no result upload — a centre delivering physiotherapy needs neither.
+    role: "procedure_provider",
+    base: "procedure",
+    title: { en: "Procedures", ar: "الإجراءات" },
+    eyebrow: { en: "Delivery Centre", ar: "مركز التنفيذ" },
+    sections: [
+      { key: "queue", path: "queue", label: { en: "Our Queue", ar: "قائمة أعمالنا" }, group: G.fulfillment, icon: "flask", permission: "procedure.queue" },
+      { key: "counter", path: "counter", label: { en: "Verify & Deliver", ar: "التحقق والتنفيذ" }, group: G.fulfillment, icon: "doc", permission: "procedure.deliver" },
     ],
   },
   {

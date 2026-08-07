@@ -17,6 +17,7 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
     public DbSet<ProcessedRequest> ProcessedRequests => Set<ProcessedRequest>();
     public DbSet<PrescriptionValidationRun> PrescriptionValidations => Set<PrescriptionValidationRun>();
     public DbSet<PrescriptionLineOverride> PrescriptionLineOverrides => Set<PrescriptionLineOverride>();
+    public DbSet<PrescriptionDispenseWindow> DispenseWindows => Set<PrescriptionDispenseWindow>();   // 29.5
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -37,6 +38,24 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
             e.HasIndex(x => x.IdempotencyKey);
             e.HasMany(x => x.Lines).WithOne().HasForeignKey(l => l.PrescriptionId);
         });
+        // 29.5 — chronic refill windows (design 45 §5).
+        b.Entity<PrescriptionDispenseWindow>(e =>
+        {
+            e.ToTable("prescription_dispense_window");
+            e.HasKey(x => x.WindowId);
+            e.Property(x => x.PrescriptionLineId).HasColumnName("prescription_line_id");
+            e.Property(x => x.ScheduledOpenDate).HasColumnName("scheduled_open_date");
+            e.Property(x => x.OpensAt).HasColumnName("opens_at");
+            e.Property(x => x.ClosesAt).HasColumnName("closes_at");
+            e.Property(x => x.AllocatedQuantity).HasColumnName("allocated_quantity");
+            e.Property(x => x.DispensedQuantity).HasColumnName("dispensed_quantity");
+            e.Property(x => x.BlockedReason).HasColumnName("blocked_reason");
+            e.Property(x => x.MissedAt).HasColumnName("missed_at");
+            // xmin: the sweeper and the counter both write this row, and exactly one must win.
+            e.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
+            e.HasIndex(x => new { x.PrescriptionLineId, x.WindowNo }).IsUnique();
+        });
+
 
         b.Entity<PrescriptionLine>(e =>
         {

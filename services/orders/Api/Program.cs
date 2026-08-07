@@ -29,12 +29,19 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<OrdersGate>();
 builder.Services.AddScoped<FulfillmentGate>();
+// 29.2b — the external delivering provider's gate. Row-scoped, NOT caller-scoped (design 45 §2b).
+builder.Services.AddScoped<ProcedureProviderGate>();
 
 // Line codes validated against masterdata; treating relationship verified via emr-service (both fail-closed).
 builder.Services.AddHttpClient<ICodeValidator, HttpCodeValidator>(c =>
     c.BaseAddress = new Uri(builder.Configuration["MasterData:BaseUrl"] ?? "http://masterdata-service:8080"));
 // 14.6 — examination-type sensitivity resolved + pinned at order creation (fail-closed).
 builder.Services.AddHttpClient<IExaminationTypeResolver, HttpExaminationTypeResolver>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["MasterData:BaseUrl"] ?? "http://masterdata-service:8080"));
+// 29.2 — the OP-Procedure type and the code's CPT section, both owned by masterdata (design 45 §2).
+// Fail-closed: unreachable resolves the same as unknown, and the write path refuses rather than storing a
+// type nobody validated.
+builder.Services.AddHttpClient<IProcedureTypeResolver, HttpProcedureTypeResolver>(c =>
     c.BaseAddress = new Uri(builder.Configuration["MasterData:BaseUrl"] ?? "http://masterdata-service:8080"));
 // ADR-0034 — the bench's cost quote. The catalogue supplies what an examination costs; eligibility supplies
 // the member/payer split through libs/benefit-pricing, the SAME path claims adjudicates with. Named clients
@@ -141,6 +148,8 @@ app.MapHealthChecks("/health/ready").AllowAnonymous();
 app.MapOrders();
 app.MapValidateOrder();   // step 1 — advisory checks while composing (the ordering workspace)
 app.MapQueue();      // phase 5.1 provider queue + search
+app.MapProcedureProvider();   // 29.2b external delivering provider portal (design 45 §2b)
+app.MapServiceHistory();      // 29.4 one service-history endpoint for every tab (design 45 §4)
 app.MapConsume();    // phase 5.2 atomic idempotent consume
 app.MapOrderPricing(); // ADR-0034 — what the order costs and how it splits (never a zero for an unknown)
 app.MapExtendValidity();   // approvals calls this when a validity-extension request is approved

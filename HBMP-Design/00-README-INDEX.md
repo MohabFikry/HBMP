@@ -66,6 +66,7 @@ Read [`0A-DESIGN-FOUNDATIONS.md`](0A-DESIGN-FOUNDATIONS.md) **first** — it def
 | 42 | Branch Management — coordinator & clinics manager, roster, licensing, clinic inventory (Phase 25) | [42-branch-management.md](42-branch-management.md) | D |
 | 43 | Approval Engine, Benefit Lists & Prescribing Decision Support (Phases 26–27) | [43-approval-engine-and-prescribing-support.md](43-approval-engine-and-prescribing-support.md) | D |
 | 44 | Clinical Validation Hardening — DDI, dosing, drug–disease, ICD hierarchy (Phase 28) | [44-clinical-validation-hardening.md](44-clinical-validation-hardening.md) | D |
+| 45 | Encounter, Service History & Chronic Prescribing — Radiology rename, OP Procedures, per-line service history, acute/chronic refill windows, prescribing units, lowest-price & availability (Phase 29) | [45-encounter-and-prescription-adjustments.md](45-encounter-and-prescription-adjustments.md) | D |
 
 ---
 

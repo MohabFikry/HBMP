@@ -125,6 +125,8 @@ import type {
   SetAutoDecision,
 } from "@mersal/contracts";
 import type { PrescriptionDraftLine, LineAcknowledgement, AddAllergyRequest, BloodGroup } from "@mersal/contracts";
+// 29.2b — VALUE imports (the schemas), not types: the payload is validated at the seam.
+import { zProcedureQueueItem, zSessionProgress, zServiceHistory } from "@mersal/contracts";
 import type { CptSection, InvestigationDraftLine, InvestigationOrderType, OrderAcknowledgement, ValidityExtensionRequest } from "@mersal/contracts";
 import type { SubstitutionRequest } from "@mersal/contracts";
 import { zAllergenOption, zAllergyRecord, zMemberClinicalRecord } from "@mersal/contracts";
@@ -1000,7 +1002,9 @@ export class HttpApiClient implements ApiClient {
     const body = {
       beneficiaryId,
       encounterId: req.encounterId,
-      orderType: req.kind === "imaging" ? "Imaging" : "Lab",
+      // 29.1 (design 45 §1) — the SWITCH: the SPA now writes only the new value. orders-service accepted
+      // both from its EXPAND migration onwards, so this is safe to flip on its own deploy.
+      orderType: req.kind === "radiology" ? "Radiology" : "Lab",
       expiresAt: new Date(Date.now() + 30 * 864e5).toISOString(),
       lines: [{
         codeSystem: req.test.system === "CPT" ? "CPT" : "LOINC",
@@ -1369,8 +1373,8 @@ export class HttpApiClient implements ApiClient {
     await putRaw(`/beneficiaries/${encodeURIComponent(beneficiaryId)}/blood-group`, { bloodGroup });
   }
 
-  // Lab / Imaging (Phase 5, US-040) — the orders service exposes ONE capability-filtered provider queue at
-  // /investigation-orders/queue (a lab_tech sees Lab orders, an imaging_tech Imaging — by role, not URL). We
+  // Lab / Radiology (Phase 5, US-040) — the orders service exposes ONE capability-filtered provider queue at
+  // /investigation-orders/queue (a lab_tech sees Lab orders, a radiology_tech Radiology — by role, not URL). We
   // flatten each order to one row using its first available line as the `test`, cache that line id so consume
   // can target it, and default priority to routine (the fulfillment queue does not carry a clinical priority).
   /**
@@ -1384,7 +1388,7 @@ export class HttpApiClient implements ApiClient {
    * hand. A CARD NUMBER does not identify a person, so it takes a second identifier alongside it; the server
    * enforces that and the screen explains it.</p>
    */
-  async labSearch(kind: "lab" | "imaging", by: { orderNo?: string; cardNumber?: string; memberNo?: string; passport?: string }) {
+  async labSearch(kind: "lab" | "radiology", by: { orderNo?: string; cardNumber?: string; memberNo?: string; passport?: string }) {
     const q = Object.entries(by)
       .filter(([, v]) => (v ?? "").trim() !== "")
       .map(([k, v]) => `${k}=${encodeURIComponent(String(v).trim())}`)
@@ -1395,7 +1399,62 @@ export class HttpApiClient implements ApiClient {
       .map((o: any) => this.toLabOrder(o, kind));
   }
 
-  async labQueue(kind: "lab" | "imaging") {
+  // ---- 29.2b — external delivering provider (design 45 §2b) --------------------------------------------
+  //
+  // NO CLIENT-SIDE OWNERSHIP FILTER anywhere in this block, deliberately. The queue is scoped by
+  // `assigned_provider_id` server-side and proved by the two-provider test in orders; a `.filter()` here would
+  // read like defence and would in fact be the opposite — it would make a server that started returning other
+  // centres' rows look correct in the UI, which is precisely how audit R3's network-wide pharmacy queue went
+  // unnoticed.
+
+  async procedureQueue() {
+    const r = (await getRaw("/procedure-orders/queue?page=1&pageSize=50")) as unknown[];
+    return (r ?? []).map((o) => parseOr(zProcedureQueueItem, o));
+  }
+
+  async procedureCounterSearch(by: { cardNumber?: string; memberNo?: string; passport?: string }) {
+    const qs = new URLSearchParams();
+    if (by.cardNumber?.trim()) qs.set("cardNumber", by.cardNumber.trim());
+    if (by.memberNo?.trim()) qs.set("memberNo", by.memberNo.trim());
+    if (by.passport?.trim()) qs.set("passport", by.passport.trim());
+    const r = (await getRaw(`/procedure-orders/search?${qs}`)) as unknown[];
+    return (r ?? []).map((o) => parseOr(zProcedureQueueItem, o));
+  }
+
+  async recordProcedureSession(
+    orderId: string, orderLineId: string, idempotencyKey: string,
+    by: { practitioner?: string; attended?: boolean; note?: string },
+  ) {
+    // The key is passed through, never generated here: generating one per call would make every retry a new
+    // session, which is the exact opposite of the guarantee it exists to provide.
+    const r = await postRaw(
+      `/procedure-orders/${encodeURIComponent(orderId)}/sessions`,
+      { orderLineId, deliveringPractitioner: by.practitioner ?? null, attended: by.attended ?? true, note: by.note ?? null },
+      idempotencyKey,
+    );
+    return parseOr(zSessionProgress, r);
+  }
+
+  async reportProcedureCompletion(orderId: string, findings: string) {
+    await postRaw(`/procedure-orders/${encodeURIComponent(orderId)}/report`, { findings });
+  }
+
+  async serviceHistory(
+    beneficiaryId: string,
+    q: { serviceType?: string; code: string; page?: number; pageSize?: number },
+  ) {
+    const qs = new URLSearchParams({ code: q.code });
+    if (q.serviceType) qs.set("serviceType", q.serviceType);
+    if (q.page) qs.set("page", String(q.page));
+    if (q.pageSize) qs.set("pageSize", String(q.pageSize));
+    // NOT wrapped in a try/catch that returns an empty list. A failed load must reach the caller as an error,
+    // because the modal renders "could not load" and "no previous occurrences" as different sentences and a
+    // swallowed failure would collapse them into the reassuring one.
+    const r = await getRaw(`/patients/${encodeURIComponent(beneficiaryId)}/service-history?${qs}`);
+    return parseOr(zServiceHistory, r);
+  }
+
+  async labQueue(kind: "lab" | "radiology") {
     const r = (await getRaw(`/investigation-orders/queue?page=1&pageSize=50`)) as any[];
     return (r ?? [])
       .filter((o: any) => String(o.orderType ?? "").toLowerCase() === kind)
@@ -1403,7 +1462,7 @@ export class HttpApiClient implements ApiClient {
   }
 
   /** One queue/search row → the contract shape. Shared so the two reads cannot describe an order differently. */
-  private toLabOrder(o: any, kind: "lab" | "imaging") {
+  private toLabOrder(o: any, kind: "lab" | "radiology") {
     {
       {
         const lines: any[] = o.lines ?? [];
@@ -1443,7 +1502,12 @@ export class HttpApiClient implements ApiClient {
     const o = (rows ?? []).find((x: any) => String(x.orderNo ?? "") === orderNo) ?? (rows ?? [])[0];
     if (!o) return null;
 
-    const kind = String(o.orderType ?? "").toLowerCase() === "imaging" ? "imaging" : "lab";
+    // 29.1 — READS accept BOTH spellings, and must go on doing so long after writes stopped emitting the old
+    // one: orders placed before the switch keep `Imaging` in the row for the life of the order. Narrowing
+    // this to the new value alone would silently reclassify every pre-switch radiology order as a LAB order,
+    // sending it to a bench that cannot perform it.
+    const rawType = String(o.orderType ?? "").toLowerCase();
+    const kind = rawType === "radiology" || rawType === "imaging" ? "radiology" : "lab";
     return parseOr(zInvestigationOrder, {
       id: o.orderId,
       orderNo: String(o.orderNo ?? orderNo),
@@ -1500,7 +1564,7 @@ export class HttpApiClient implements ApiClient {
 
   // Result upload (Phase 5.3, US-042) — the "awaiting result" worklist is the provider's consumed-but-unreported
   // lines; a result posts as multipart form (resultValue and/or a report file — this screen sends the value).
-  async awaitingResult(kind: "lab" | "imaging") {
+  async awaitingResult(kind: "lab" | "radiology") {
     const r = (await getRaw(`/investigation-orders/awaiting-result`)) as any[];
     return (r ?? [])
       .filter((x: any) => String(x.orderType ?? "").toLowerCase() === kind)

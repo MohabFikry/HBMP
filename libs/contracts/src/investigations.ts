@@ -51,7 +51,12 @@ export const zCptSection = z.enum([
 export type CptSection = z.infer<typeof zCptSection>;
 
 /** Which queue the order goes to. One order is one type; the tab decides it, not the clinician. */
-export const zInvestigationOrderType = z.enum(["Lab", "Imaging"]);
+// 29.1 (design 45 §1) — "Radiology" is the canonical value; "Imaging" is retained because orders placed
+// before the switch keep it in the row for the life of the order, and a parse that rejected it would turn
+// every pre-switch radiology order into a validation failure at the bench.
+// 29.2 (design 45 §2) — "Procedure" is the OP-Procedures order type. It reuses orders-service entirely:
+// same consume, same authorisation routing, same claim path (invariant 2).
+export const zInvestigationOrderType = z.enum(["Lab", "Radiology", "Procedure", "Imaging"]);
 export type InvestigationOrderType = z.infer<typeof zInvestigationOrderType>;
 
 /** One composed line, before it is an order. `lineId` is client-minted for correlation only. */

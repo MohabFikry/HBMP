@@ -135,6 +135,24 @@ public class ProjectionFeedTests
         ev.Fields[key].Should().Be(expected);
     }
 
+    [Theory]
+    [InlineData("Imaging")]    // enqueued BEFORE the switch, relayed after it
+    [InlineData("Radiology")]  // enqueued after
+    public void Order_type_maps_to_modality_under_both_spellings(string orderType)
+    {
+        // 29.1 / design 45 §1 (b) — the in-flight-outbox half of the rename. The outbox is durable, so events
+        // enqueued while orders-service still said "Imaging" are relayed after the deploy that made it say
+        // "Radiology". Both must land on ONE modality: if the legacy spelling stopped being translated, a
+        // month of radiology volume would silently split across two dimension values and every utilisation
+        // report over the switch window would be wrong without being empty — the failure mode that is hardest
+        // to notice, because the report still renders.
+        var ev = ProjectionMapping.TryMap(
+            Guid.NewGuid(), "OrderLinesConsumed", $$"""{"tenantId":"t0","orderType":"{{orderType}}"}""",
+            DateTimeOffset.UtcNow)!;
+
+        ev.Fields["modality"].Should().Be("Radiology");
+    }
+
     [Fact]
     public void Deriving_never_overwrites_a_field_the_publisher_already_set()
     {

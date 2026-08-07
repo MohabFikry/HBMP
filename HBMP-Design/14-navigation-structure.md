@@ -62,7 +62,7 @@ flowchart TD
     D[Clinician] --> D1[My Patients / Today]
     D --> D2[Encounter Workspace]
     D2 --> D2a[SOAP Note]
-    D2 --> D2b[Orders: Lab/Imaging]
+    D2 --> D2b[Orders: Lab/Radiology/OP Procedures]
     D2 --> D2c[Prescriptions]
     D2 --> D2d[Referrals]
     D --> D3[Follow-ups]
@@ -349,3 +349,55 @@ for a policy administrator rather than present-and-refused (ADR-0019).
 `+ analytics`. The financial and network views are the money questions this role exists to answer; the server
 gates those two views on the financial reporting zone, so the section is visible and the views a caller may
 not read are refused by the service rather than hidden by a nav rule the service does not know about.
+
+
+---
+
+## 29.3 / 29.4 — the encounter tabs and the service-history modal (design 45)
+
+**The encounter carries five tabs**, split by what the doctor came to DO rather than by what the data is:
+
+`Note · Prescriptions · Labs · Radiology · OP Procedures · History`
+
+- **Radiology** is the renamed Imaging tab (29.1). No user-facing string says "Imaging".
+- **OP Procedures** is new (29.2). It uses the SAME composer as Labs and Radiology, parameterised by order
+  type — not a third copy. The composer reveals a **number of sessions** field when the selected procedure
+  type carries `is_session_based`, never when its name happens to be "Physiotherapy": dialysis and
+  rehabilitation are session-based too, and hard-coding the name guarantees that conversation twice more.
+- **History** gains an **OP Procedures** pane beside Investigations and Prescriptions. It filters the SAME
+  authorised section by order type — the same gate, the same payload, no new access path.
+
+### The service-history modal
+
+**Every service line, in every tab, carries an icon opening ONE shared modal** showing that service's full
+history for this patient. One component, one endpoint — "not one implementation per tab", because four copies
+are four places for the restricted-result branch to drift and the one that drifts is the one nobody reviews.
+
+Three states, distinct **in words**:
+
+| State | Rendering |
+|---|---|
+| Has history | The table, plus a trend where results are numeric and the caller may see them. The table stays in the DOM **alongside** any chart (doc 12 §7) |
+| No previous occurrences | "No previous occurrences of this service for this patient." A real, successful answer |
+| Could not load | "…could not be loaded. This is **NOT** a report that there is none" + a Retry |
+
+The third must never render as the second: a clinician reading "no previous tests" when the service was
+simply unreachable will re-order unnecessarily, or miss a trend.
+
+A **restricted** result renders existence-only — date, service, actor, branch and a Restricted chip — with
+the request-access action. There is no value hidden in the DOM, because the server never sent one.
+
+## 29.2b — the external delivering provider's portal (design 45 §2b)
+
+A new portal for physiotherapy centres, dialysis units and outside clinics. Two entries only:
+
+`Our Queue · Verify & Deliver`
+
+- **The queue carries no beneficiary name and no photo.** It is a list of WORK; a centre browsing a list of
+  refugees' names is a disclosure nobody asked for.
+- **Identity is verified at the counter**, behind TWO identifiers, audited. A card is shared and photographed,
+  so it is a lookup key and never proof of identity.
+- Progress reads identically here and in the ordering doctor's worklist — *"4 of 6 sessions delivered"*. A
+  course that reads differently at each end is a course somebody delivers twice.
+- A withheld referral reason renders as **"Not disclosed"**, never as "none": the ordering doctor chose to
+  share nothing, which is different from there being nothing to share.

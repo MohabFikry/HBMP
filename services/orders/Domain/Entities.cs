@@ -2,7 +2,37 @@ namespace Mersal.Orders.Domain;
 
 // Investigation-orders domain (22-data-dictionary §7, 23-state-machines §2). Canonical enums used EXACTLY.
 
-public enum OrderType { Lab, Imaging, Procedure }
+/// <summary>
+/// 29.1 (design 45 §1) — <see cref="Radiology"/> is the canonical name; <see cref="Imaging"/> is retained
+/// ONLY so rows and event payloads written before the switch still parse.
+///
+/// <para>Two values that mean the same thing is a hazard, so it is bounded on both sides: never write
+/// <c>Imaging</c> in new code (<see cref="OrderTypes.Canonical"/> maps it), and the value disappears entirely
+/// at the contract step — see docs/runbooks/radiology-rename.md.</para>
+/// </summary>
+public enum OrderType { Lab, Imaging, Radiology, Procedure }
+
+/// <summary>29.1 — the one place the deprecated <see cref="OrderType.Imaging"/> spelling is resolved.</summary>
+public static class OrderTypes
+{
+    /// <summary>Collapse the legacy spelling onto the canonical one. Apply on every READ of a stored or
+    /// transported order type, so the rest of the domain only ever sees <see cref="OrderType.Radiology"/>.</summary>
+    public static OrderType Canonical(OrderType type) => type == OrderType.Imaging ? OrderType.Radiology : type;
+
+    /// <summary>Parse a stored/transported value, accepting both spellings, and return the canonical one.
+    /// False when the value is not an order type at all — absence is never resolved to a default here,
+    /// because guessing an order type routes a beneficiary's benefit to the wrong category.</summary>
+    public static bool TryParse(string? value, out OrderType type)
+    {
+        if (Enum.TryParse(value, ignoreCase: true, out type))
+        {
+            type = Canonical(type);
+            return true;
+        }
+        return false;
+    }
+}
+
 public enum CodeSystem { CPT, LOINC, LOCAL }
 
 /// <summary>Order lifecycle (§2): Requested → PendingApproval → (Approved|Rejected) → Active → PartiallyUsed →
@@ -29,6 +59,34 @@ public sealed class InvestigationOrder
     public Guid? OrderingBranchId { get; set; }
     public Guid? AuthorizationId { get; set; }
     public OrderType OrderType { get; set; }
+
+    /// <summary>
+    /// 29.2b — the provider this order is ROUTED TO for delivery (design 45 §2b). THE row-level ownership
+    /// anchor for the external-provider portal.
+    ///
+    /// <para>Distinct from <c>OrderingProviderId</c> (who asked) and from
+    /// <c>order_fulfillment.performing_provider_id</c> (who did it, written after the fact). A queue is work
+    /// NOT YET DONE, so neither of those can scope one — which is how the pharmacy queue came to be
+    /// network-wide (audit R3).</para>
+    ///
+    /// <para>NULL for Lab and Radiology orders fulfilled inside Mersal's own clinics. Null means "no external
+    /// owner", never "everyone's" — see <see cref="ProviderOwnership"/>.</para>
+    /// </summary>
+    public Guid? AssignedProviderId { get; set; }
+
+    /// <summary>29.2b — the clinical context the ordering doctor CHOSE to share with the delivering provider
+    /// (design 45 §2b). Stored, not resolved at read time: this column IS the record of what was disclosed,
+    /// and a live join would let the disclosure drift after the clinician made it.</summary>
+    public string? SharedClinicalContext { get; set; }
+    public string? SharedContextBy { get; set; }
+    public DateTimeOffset? SharedContextAt { get; set; }
+
+    /// <summary>29.2b — the delivering provider's report back to the ordering doctor (design 45 §2b). For a
+    /// REFERRAL this is mandatory: an open referral loop — the beneficiary was sent somewhere and nobody ever
+    /// learned what happened — is the classic outpatient patient-safety failure.</summary>
+    public string? CompletionReport { get; set; }
+    public string? CompletionReportedBy { get; set; }
+    public DateTimeOffset? CompletionReportedAt { get; set; }
     /// <summary>Pinned sensitivity for the order = max of its lines (phase 14.6). Denormalized so read-time
     /// gating (14.7) never needs a cross-service join. Pre-existing rows default to Standard.</summary>
     public SensitivityLevel SensitivityLevel { get; set; } = SensitivityLevel.Standard;
@@ -58,6 +116,23 @@ public sealed class OrderLine
     public Guid? ExaminationTypeId { get; set; }
     /// <summary>Pinned sensitivity from the examination type (phase 14.6). Default Standard; results inherit it.</summary>
     public SensitivityLevel SensitivityLevel { get; set; } = SensitivityLevel.Standard;
+    /// <summary>29.2 — the OP-Procedure KIND (masterdata.procedure_type). NULL on Lab and Radiology lines.
+    /// Validated against the line's CPT section on the WRITE path by <c>ProcedureTypeRules.Validate</c>: an
+    /// unvalidated type field is decorative, and every report built on it is quietly wrong.</summary>
+    public string? ProcedureTypeCode { get; set; }
+
+    /// <summary>
+    /// 29.2 — what the doctor ASKED FOR. Set once at creation and never changed (design 45 §2).
+    ///
+    /// <para>Distinct from <see cref="QuantityOrdered"/>, which is what may actually be DELIVERED and is set
+    /// from the APPROVED scope. Keeping both is what makes "how often are we approving less than we ask for?"
+    /// answerable; overwriting the request on partial approval destroys the only signal that partial approval
+    /// is happening at all.</para>
+    /// </summary>
+    public decimal RequestedQuantity { get; set; }
+
+    /// <summary>What may be delivered — for a session-based procedure, the number of SESSIONS, metered by the
+    /// existing atomic consume rather than by a parallel counter (design 45 §2).</summary>
     public decimal QuantityOrdered { get; set; }
     public decimal QuantityConsumed { get; set; }        // accumulator, 0 ≤ consumed ≤ ordered (phase 5)
     public OrderLineStatus Status { get; set; } = OrderLineStatus.Active;

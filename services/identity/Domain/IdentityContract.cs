@@ -27,6 +27,17 @@ public static class IdentityContract
         // These names also RETIRE the phantoms `branch_manager` / `clinic_manager`, which libs/authz and the
         // SPA both named and nothing ever seeded.
         "branch_coordinator", "clinics_manager",
+        // 29.1 (design 45 §1, ADR-0029) — `radiology_tech` is the canonical name for what was `imaging_tech`,
+        // which stays above for the duration of the dual-accept window and is removed by the contract step
+        // (docs/runbooks/radiology-rename.md). BOTH are listed on purpose: this list pins the role names the
+        // store MUST seed, and during the window the store must seed both — an access token minted before the
+        // switch names the old role for the rest of its 300 s TTL, and a role the store has dropped cannot be
+        // resolved to its scopes. Same tier (T3), same scopes, asserted equal by 0031's drift check.
+        "radiology_tech",
+        // 29.2b (design 45 §2b) — the EXTERNAL delivering provider: physiotherapy centres, dialysis units,
+        // outside specialist clinics. Provider-scoped and NOT branch-scoped: an external centre is not one of
+        // Mersal's six clinics, so a branch reach it does not have would silently narrow or widen its queue.
+        "procedure_provider",
     ];
 
     /// <summary>The frozen OAuth scope vocabulary (docs/security/token-contract.md §2). Kept here so the
@@ -42,6 +53,10 @@ public static class IdentityContract
         // changes through admin-service's governed, effective-dated path (8b.2).
         "masterdata:read",
         "orders:read", "orders:consume", "orders:write",
+        // 29.2b — DISTINCT from orders:consume on purpose. Granting an external centre orders:consume would
+        // leave the ProviderCapability role→type map — a domain rule inside one service — as the only thing
+        // between it and the whole investigation queue. A separate scope means its token cannot even ask.
+        "procedure:read", "procedure:consume",
         "pharmacy:read", "pharmacy:dispense",
         "auth:read", "auth:review", "auth:decide", "auth:emergency", "auth:override", "auth:manual", "auth:ingest",
         // ADR-0035 §5 — author the engine's routing/SLA rules. Separate from auth:decide on purpose.

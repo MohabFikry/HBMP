@@ -4,6 +4,13 @@ import { useApi } from "../../api/ApiProvider";
 import { useLoc } from "../_shared";
 
 const S = {
+  // 29.7 — design 45 §7.
+  lowestPrice: { en: "Lowest price", ar: "الأقل سعراً" },
+  unavailable: { en: "Unavailable", ar: "غير متوفر" },
+  unavailableHint: {
+    en: "This product is out of stock. Alternatives with the same active ingredient are listed below.",
+    ar: "هذا المنتج غير متوفر. البدائل بنفس المادة الفعالة مدرجة أدناه.",
+  },
   label: { en: "Medicine", ar: "الدواء" },
   placeholder: { en: "Search by trade name or ingredient…", ar: "ابحث بالاسم التجاري أو المادة الفعالة…" },
   results: { en: "results", ar: "نتيجة" },
@@ -159,6 +166,25 @@ export function DrugCombobox({
                 {d.strength ? ` · ${d.strength}` : ""}
                 {typeof d.priceEgp === "number" ? ` · ${d.priceEgp} EGP` : ""}
               </span>
+              {/*
+                29.7 — the lowest-price chip, beside the price already shown (design 45 §7). The comparison
+                behind it is per PRESCRIBING UNIT within ingredient + strength + form: a 20-tablet pack at
+                100 EGP is MORE expensive per tablet than a 30-tablet pack at 120 EGP, so a chip driven by
+                pack price would point a prescriber at the dearer box.
+              */}
+              {d.isLowestPrice && (
+                <span className="rx-combobox-chip" data-kind="lowest-price">{t(S.lowestPrice)}</span>
+              )}
+              {/*
+                AVAILABILITY: only a POSITIVE "Unavailable" renders. `Unknown` — the default for all 31,651
+                drugs until stock data exists — renders NOTHING at all: not a warning, not a neutral chip,
+                nothing. An indicator that fires on every row is an indicator prescribers stop seeing.
+              */}
+              {d.availability === "Unavailable" && (
+                <span className="rx-combobox-chip" data-kind="unavailable" title={t(S.unavailableHint)}>
+                  {t(S.unavailable)}
+                </span>
+              )}
             </li>
           ))}
         </ul>

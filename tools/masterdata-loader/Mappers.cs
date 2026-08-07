@@ -1,3 +1,4 @@
+using Mersal.Prescribing;
 using Mersal.Ingredients;
 using Mersal.MasterData.Domain;
 
@@ -64,6 +65,10 @@ public static class Mappers
         AtcCode = string.IsNullOrWhiteSpace(r.AtcCode) ? null : MasterDataNormalize.Atc(r.AtcCode),
         PriceEgp = MasterDataNormalize.Price(r.PriceEgp),
         SourceRelease = release,
+
+        // 29.6 — the legacy CSV carries no pack columns, so unit data stays incomplete on this path and the
+        // quantity check reports NotChecked. Better than a default: the CSV is the fallback source, and a
+        // fallback that invented pack sizes would be worse than one that admits it has none.
     };
 
     /// <summary>
@@ -123,6 +128,22 @@ public static class Mappers
         AtcCode = string.IsNullOrWhiteSpace(r.AtcCode) ? null : MasterDataNormalize.Atc(r.AtcCode),
         PriceEgp = MasterDataNormalize.Price(r.PriceEgp),
         SourceRelease = release,
+
+        // ---- 29.6 — the pack facts (design 45 §6) ------------------------------------------------------
+        //
+        // pack_size comes from "Minor Units (total)" — X — NOT from "Major Units (per box)" — W. W is
+        // strips/blisters per box: a 20-tablet pack is 2 strips of 10, so mapping W would make every tablet
+        // quantity out by a factor of ten. The two columns are adjacent and similarly named, which is exactly
+        // why this is written down rather than left to the reader.
+        PackSize = MasterDataNormalize.Price(r.MinorUnits) is > 0 and var minor ? minor : null,
+        PackUnit = Clean(r.DosageForm),
+        PrescribingUnit = PackUnitRules.FromDosageForm(r.DosageForm).PrescribingUnit,
+        IsPackSplittable = PackUnitRules.FromDosageForm(r.DosageForm).IsPackSplittable,
+        // Rows missing ANY of the three are flagged and LISTED in the load report — "not silently defaulted".
+        UnitDataIncomplete = !PackUnitRules.IsComplete(
+            PackUnitRules.FromDosageForm(r.DosageForm).PrescribingUnit,
+            MasterDataNormalize.Price(r.MinorUnits),
+            PackUnitRules.FromDosageForm(r.DosageForm).IsPackSplittable),
     };
 
     /// <summary>ATC classification nodes from an xlsx row — same truncation rule as the CSV path.</summary>

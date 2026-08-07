@@ -43,7 +43,7 @@ public static class OrdersPolicies
         new PolicyRule
         {
             Action = Consume, ResourceType = "order_line",
-            Roles = Set("lab_tech", "imaging_tech"), Scopes = Set("orders:consume"),
+            Roles = Set("lab_tech", "imaging_tech", "radiology_tech"), Scopes = Set("orders:consume"),
             RequiredConditions = [AbacConditions.TenantMatch, AbacConditions.ProviderOwnership],
             Sensitive = true,
         },

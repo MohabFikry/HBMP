@@ -93,6 +93,44 @@ public static class DbUpsert
     /// indications already point at it. Rows present in the database but absent from this file are left
     /// alone: reference data is never hard-deleted.
     /// </remarks>
+    /// <summary>
+    /// 29.7 — recompute every drug's lowest-price label (design 45 §7).
+    ///
+    /// <para>Run after the drugs are upserted, because it reads the prices that upsert just wrote. It lives
+    /// HERE and not behind an endpoint: masterdata is a read-only reference catalogue with no
+    /// <c>masterdata:write</c> scope, and §7 says the labels are "recomputed whenever prices LOAD".</para>
+    ///
+    /// <para><c>computed_at</c> is stamped on EVERY row, not only the winners — it answers "was this row
+    /// considered?", and stamping only the labelled ones would make an uncomparable drug indistinguishable
+    /// from one the recompute never reached.</para>
+    /// </summary>
+    public static async Task RecomputeLowestPriceAsync(
+        MasterDataDbContext db, DateTimeOffset now, LoadReport report, CancellationToken ct)
+    {
+        var drugs = await db.Drugs.ToListAsync(ct);
+        var labels = LowestPrice.Compute(drugs.ConvertAll(d =>
+            new PricedDrug(d.DrugId.ToString(), d.ScientificName, d.Strength, d.Form, d.PriceEgp, d.PackSize)));
+        var byId = labels.ToDictionary(l => l.DrugId, StringComparer.Ordinal);
+
+        foreach (var drug in drugs)
+        {
+            if (!byId.TryGetValue(drug.DrugId.ToString(), out var label)) continue;
+            drug.IsLowestPrice = label.IsLowestPrice;
+            drug.PricePerUnit = label.PricePerUnit;
+            drug.LowestPriceGroupKey = label.GroupKey;
+            drug.LowestPriceComputedAt = now;
+        }
+
+        await db.SaveChangesAsync(ct);
+
+        var notComparable = labels.Count(l => l.PricePerUnit is null);
+        report.Note(
+            $"lowest-price: {labels.Count(l => l.IsLowestPrice):N0} labelled across "
+            + $"{labels.Count(l => l.GroupKey is not null):N0} grouped rows; {notComparable:N0} NOT comparable "
+            + "(no price or no pack size). A drug with no pack size is never labelled — falling back to PACK "
+            + "price is the exact comparison design 45 §7 exists to prevent.");
+    }
+
     public static async Task UpsertDrugsAsync(MasterDataDbContext db, IReadOnlyList<Drug> items, LoadReport r, CancellationToken ct)
     {
         var existing = await db.Drugs

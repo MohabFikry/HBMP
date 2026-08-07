@@ -3823,6 +3823,30 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   font-size: 0.8125rem;
   color: var(--text-2);
 }
+/* 29.7 (design 45 §7) — the lowest-price chip and the unavailable badge in the drug combobox.
+   Status is never colour alone (0A §5.2): each carries its own TEXT label, so a colour-blind prescriber
+   reads "Lowest price" / "Unavailable" rather than inferring a hue. */
+.rx-combobox-chip {
+  display: inline-block;
+  margin-inline-start: var(--sp2);
+  padding: 0.0625rem 0.375rem;
+  border-radius: var(--r-pill);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.rx-combobox-chip[data-kind="lowest-price"] {
+  background: var(--st-ok-bg);
+  color: var(--st-ok-fg);
+  border: 1px solid var(--st-ok-fg);
+}
+.rx-combobox-chip[data-kind="unavailable"] {
+  background: var(--st-bad-bg);
+  color: var(--st-bad-fg);
+  border: 1px solid var(--st-bad-fg);
+}
+
 .rx-drug-flag {
   color: var(--st-warn-fg);
   font-weight: 600;

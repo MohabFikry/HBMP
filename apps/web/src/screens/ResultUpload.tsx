@@ -20,7 +20,7 @@ const S = {
 } satisfies Record<string, Localized>;
 
 /** Result-upload worklist for a lab/imaging provider — the lines they consumed and still owe a result on. */
-export function ResultUpload({ kind }: { kind: "lab" | "imaging" }) {
+export function ResultUpload({ kind }: { kind: "lab" | "radiology" }) {
   const api = useApi();
   const t = useLoc();
   const state = useAsync<ResultTask[]>(() => api.awaitingResult(kind), [kind]);

@@ -18,7 +18,16 @@ public static class RoleCatalog
             ["doctor"] = SensitivityTier.T3,
             ["nurse"] = SensitivityTier.T3,
             ["lab_tech"] = SensitivityTier.T3,
+            // 29.1 (design 45 §1) — both spellings for the dual-accept window; `imaging_tech` goes at the
+            // contract step. Listing both is not belt-and-braces here, it is required: TierOf falls back to
+            // T1 for an unknown role, and T1 is the LEAST sensitive tier — so a radiology_tech missing from
+            // this table would not fail, it would quietly drop out of quarterly access recertification. A
+            // rename that de-tiers a T3 clinical role is a compliance regression that nothing else catches.
             ["imaging_tech"] = SensitivityTier.T3,
+            ["radiology_tech"] = SensitivityTier.T3,
+            // 29.2b — the external delivering provider. T3: it sees a beneficiary's identity and the service
+            // ordered for them, so it recertifies quarterly like any other clinical grant.
+            ["procedure_provider"] = SensitivityTier.T3,
             ["pharmacist"] = SensitivityTier.T3,
             ["medical_approval"] = SensitivityTier.T3,
             ["medical_director"] = SensitivityTier.T3,

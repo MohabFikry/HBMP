@@ -105,7 +105,7 @@ const PRIORITY_KIND = { routine: "neu", urgent: "warn", emergency: "bad" } as co
  * printed on something that gets shared, photographed and reused — so it takes a second identifier alongside
  * it (doc 43 §7 D5). The server enforces that; this screen explains it.
  */
-export function LabQueue({ kind }: { kind: "lab" | "imaging" }) {
+export function LabQueue({ kind }: { kind: "lab" | "radiology" }) {
   const api = useApi();
   const t = useLoc();
   const navigate = useNavigate();

@@ -84,6 +84,10 @@ builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("pharmac
 
 // Accept enum names in request bodies (matches the string enums we emit on responses); numeric values still work.
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+// 29.5 — records the forfeiture of refill windows that closed uncollected (design 45 §5). It RECORDS; the
+// counter already ENFORCES, so a stall here delays a status, never a patient.
+builder.Services.AddHostedService<RefillWindowSweeper>();
+
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

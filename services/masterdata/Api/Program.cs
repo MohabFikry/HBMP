@@ -277,6 +277,138 @@ v1.MapGet("/cpt-codes/{code}/exists", async (string code, MasterDataDbContext db
     var norm = MasterDataNormalize.Cpt(code);
     return Results.Ok(new { code = norm, exists = await db.CptCodes.AsNoTracking().AnyAsync(x => x.Code == norm, ct) });
 });
+
+// 29.2 — the code's CPT SECTION and the vehicle ordering it creates.
+//
+// Exists so orders-service can validate a procedure type against a code WITHOUT carrying its own copy of the
+// range table. The section is a pure function of the code, which makes a local copy tempting; it is also the
+// thing that decides whether 99213 becomes a Procedure order or a Referral, and two copies of that decision
+// drift the first time either is edited. One owner, asked over HTTP.
+v1.MapGet("/cpt-codes/{code}/section", async (string code, MasterDataDbContext db, CancellationToken ct) =>
+{
+    var norm = MasterDataNormalize.Cpt(code);
+    if (!await db.CptCodes.AsNoTracking().AnyAsync(x => x.Code == norm, ct))
+        return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+    var d = CptRouting.For(norm);
+    return Results.Ok(new
+    {
+        code = norm,
+        section = d.Section,
+        vehicle = d.Vehicle.ToString(),
+        orderType = CptRouting.OrderTypeFor(d.Vehicle),
+        orderable = d.IsOrderable,
+        reasonEn = d.ReasonEn,
+        reasonAr = d.ReasonAr,
+    });
+});
+// -----------------------------------------------------------------------------------------------
+// 29.2 (design 45 §2) — WHAT WILL ORDERING THIS ACTUALLY CREATE?
+//
+// The doctor picks a service; the SYSTEM decides the vehicle. This endpoint exists so the composer can
+// show them which one BEFORE they commit, rather than discovering after the fact that the "procedure"
+// they ordered became a referral with a loop somebody now has to close.
+//
+// `kind` filters to one vehicle (the OP Procedures tab asks for ProcedureOrder + Referral; the Labs tab
+// for LabOrder). Non-orderable codes are RETURNED, with their reason, rather than filtered out — a code
+// that silently fails to appear is indistinguishable from a catalogue gap, and the doctor's next move is
+// to order something adjacent.
+// -----------------------------------------------------------------------------------------------
+v1.MapGet("/orderable-services", async (string? q, string? kind, int? page, int? pageSize,
+    MasterDataDbContext db, CancellationToken ct) =>
+{
+    var (p, ps) = (Clamp(page, 1, int.MaxValue), Clamp(pageSize, 50, 200));
+
+    var needle = q?.Trim() ?? "";
+    var query = db.CptCodes.AsNoTracking();
+    if (needle.Length > 0)
+        query = query.Where(x => EF.Functions.ILike(x.Code, $"{needle}%") || EF.Functions.ILike(x.Description, $"%{needle}%"));
+
+    // Routing is a pure function of the code and cannot be expressed in SQL, so the vehicle filter is applied
+    // after materialising. Bounded by taking a window rather than the whole catalogue: 10,810 rows is small,
+    // but "small today" is how unbounded reads get written.
+    var rows = await query.OrderBy(x => x.Code).Take(5000).ToListAsync(ct);
+
+    var projected = rows.Select(x =>
+    {
+        var d = CptRouting.For(x.Code);
+        return new
+        {
+            code = x.Code,
+            description = x.Description,
+            section = d.Section,
+            vehicle = d.Vehicle.ToString(),
+            orderType = CptRouting.OrderTypeFor(d.Vehicle),
+            orderable = d.IsOrderable,
+            reasonEn = d.ReasonEn,
+            reasonAr = d.ReasonAr,
+        };
+    });
+
+    if (!string.IsNullOrWhiteSpace(kind))
+    {
+        var wanted = kind.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        projected = projected.Where(x => wanted.Contains(x.vehicle, StringComparer.OrdinalIgnoreCase));
+    }
+
+    var all = projected.ToList();
+    return Results.Ok(new
+    {
+        page = p,
+        pageSize = ps,
+        total = all.Count,
+        items = all.Skip((p - 1) * ps).Take(ps).ToList(),
+    });
+});
+
+// 29.2 — the OP-Procedure kinds. MASTER DATA: the composer reads `isSessionBased` off the row and reveals
+// its sessions field from that, never from the type's name.
+v1.MapGet("/procedure-types", async (bool? includeInactive, MasterDataDbContext db, CancellationToken ct) =>
+{
+    var q = db.ProcedureTypes.AsNoTracking();
+    if (includeInactive != true) q = q.Where(x => x.IsActive);
+    var rows = await q.OrderBy(x => x.SortOrder).ThenBy(x => x.Code).ToListAsync(ct);
+    return Results.Ok(rows.ConvertAll(x => new
+    {
+        code = x.Code,
+        nameEn = x.NameEn,
+        nameAr = x.NameAr,
+        isSessionBased = x.IsSessionBased,
+        defaultSessions = x.DefaultSessions,
+        maxSessions = x.MaxSessions,
+        allowedCptScopes = x.Scopes(),
+        isActive = x.IsActive,
+        sortOrder = x.SortOrder,
+    }));
+});
+
+// 29.2 — may this type accompany this code, with this many sessions? Asked by the composer as the doctor
+// picks, and re-asked by orders-service on the write path, because the composer's verdict is display state.
+v1.MapGet("/procedure-types/{code}/validate", async (
+    string code, string cptCode, int? sessions, MasterDataDbContext db, CancellationToken ct) =>
+{
+    var row = await db.ProcedureTypes.AsNoTracking().FirstOrDefaultAsync(x => x.Code == code, ct);
+    var spec = row is null ? null : new ProcedureTypeSpec(
+        row.Code, row.IsSessionBased, row.DefaultSessions, row.MaxSessions, row.Scopes(), row.IsActive);
+
+    var error = ProcedureTypeRules.Validate(spec, cptCode, sessions);
+    if (error == ProcedureTypeError.None)
+        return Results.Ok(new { ok = true, type = code, cptCode, section = CptSections.SectionOf(cptCode) });
+
+    var (en, ar) = ProcedureTypeRules.Explain(error, spec, cptCode);
+    return Results.Problem(statusCode: 422, title: "procedure-type-mismatch",
+        type: "urn:hbmp:procedure-type-mismatch", detail: en,
+        extensions: new Dictionary<string, object?> { ["reason"] = error.ToString(), ["detailAr"] = ar });
+});
+
+// 29.7 — the lowest-price labels are recomputed BY THE LOADER, not by an endpoint here.
+//
+// masterdata is a READ-ONLY reference catalogue: there is no `masterdata:write`, and master data changes
+// through admin-service's governed, effective-dated path (8b.2). MasterDataAuthzTests enforces both halves —
+// every route requires `masterdata:read`, and no write path exists — and a recompute endpoint bolted on here
+// would have been the first crack in that. Design 45 §7 says the labels are "recomputed whenever prices
+// LOAD", which is the loader, so that is where DbUpsert.RecomputeLowestPriceAsync lives.
+
 v1.MapGet("/drugs/resolve", async (string code, MasterDataDbContext db, CancellationToken ct) =>
     await db.Drugs.AsNoTracking().FirstOrDefaultAsync(x => x.DrugCode == code, ct) is { } d
         ? Results.Ok(new { d.DrugCode, d.Name, d.Form, d.Strength, d.AtcCode })

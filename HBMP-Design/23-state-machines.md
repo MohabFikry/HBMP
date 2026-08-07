@@ -650,3 +650,37 @@ Active on plan A ──change-plan (mandatory reason)──▶ Active on plan B
 
 **There is no edit and no delete edge, for any role.** A Cancelled note remains fully visible, struck through,
 with its canceller, timestamp and reason.
+
+
+---
+
+## Refill-window state machine (29.5, design 45 §5)
+
+One window of a chronic prescription. **`Open` is never written** — dispensability is computed from
+`opens_at`/`closes_at` at read time, so a stalled sweeper delays a forfeiture but can never refuse a patient
+at the counter. See `docs/superpowers/specs/2026-08-07-chronic-refill-windows-design.md`.
+
+```
+                    ┌──────────────────────────────► Missed        (sweeper, after closes_at, nothing collected)
+                    │                                  ▲
+   Pending ─────────┼──► PartiallyDispensed ───────────┘           (a partial is NOT swept — the patient attended)
+      │             │            │
+      │             │            └──► Dispensed                    (allocation fully handed over)
+      │             │
+      │             └──► Dispensed                                 (collected in one visit)
+      │
+      └──► Blocked ──► Pending                                     (eligibility failed / restored)
+```
+
+| Transition | Trigger | Written by | Notes |
+|---|---|---|---|
+| Pending → Dispensed / PartiallyDispensed | collection | the counter | Limits consumed PER DISPENSE, as collected |
+| Pending → Blocked | eligibility fails at the counter | the counter | Carries a reason. Does **not** cancel the script |
+| Blocked → Pending | eligibility restored | the counter | The DATES still decide: unblocking after `closes_at` resurrects nothing |
+| Pending → Missed | `closes_at` passed, nothing collected | the sweeper | Records a forfeiture with a timestamp. Idempotent |
+
+**`Blocked` ≠ `Missed`.** One is the system stopping the patient, the other is the patient not coming. Only
+the second is the patient's doing, and only the first should reach a case worker's queue.
+
+**Enforcement is by the dates, not by the status.** A window past `closes_at` is refused by the counter
+whether or not the sweeper has caught up; the sweeper only records what already happened.

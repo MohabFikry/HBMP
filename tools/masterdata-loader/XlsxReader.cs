@@ -69,6 +69,8 @@ public static class XlsxReader
                 RelatedIcds = At(DrugListColumns.RelatedIcds),
                 IcdCount = At(DrugListColumns.IcdCount),
                 IcdBasis = At(DrugListColumns.IcdBasis),
+                MajorUnits = At(DrugListColumns.MajorUnits),
+                MinorUnits = At(DrugListColumns.MinorUnits),
                 VolumeWeight = At(DrugListColumns.VolumeWeight),
                 Strength = At(DrugListColumns.Strength),
                 DosageForm = At(DrugListColumns.DosageForm),

@@ -23,7 +23,8 @@ public static class OrdersEndpoints
         // ---- Create (US-032) ----
         v1.MapPost("", async (
             CreateOrderRequest req, HttpRequest http, OrdersDbContext db, OrdersGate gate, ICodeValidator codes,
-            IExaminationTypeResolver examTypes, OrderRoutingOptions routing, OrderNoIssuer orderNos, IAuditClient audit,
+            IExaminationTypeResolver examTypes, IProcedureTypeResolver procedureTypes, OrderRoutingOptions routing,
+            OrderNoIssuer orderNos, IAuditClient audit,
             IOutbox outbox, IHbmpPrincipalAccessor me, BranchScopeState branch, IValidityPolicySource validity,
             TimeProvider clock, CancellationToken ct) =>
         {
@@ -62,12 +63,42 @@ public static class OrdersEndpoints
                 var mismatched = req.OrderType switch
                 {
                     OrderType.Lab when InvestigationChecks.IsRadiology(line.Code) => "a radiology procedure on a laboratory order",
-                    OrderType.Imaging when InvestigationChecks.IsLaboratory(line.Code) => "a laboratory procedure on an imaging order",
+                    // 29.1 — both spellings, until the legacy value is dropped (design 45 §1).
+                    OrderType.Imaging or OrderType.Radiology when InvestigationChecks.IsLaboratory(line.Code)
+                        => "a laboratory procedure on a radiology order",
                     _ => null,
                 };
                 if (mismatched is not null)
                     return Results.Problem(statusCode: 422, title: "wrong-section", type: "urn:hbmp:wrong-section",
                         detail: $"'{line.Code}' is {mismatched}. It would reach a queue that cannot perform it.");
+            }
+
+            // 29.2 — PROCEDURE TYPE against the CODE, on the write path (design 45 §2).
+            //
+            // The composer checks this too, and that verdict is display state — the same reasoning the section
+            // check above is written under. Design 45 §2 is explicit about the cost of skipping it: "left
+            // unvalidated the field becomes decorative, and any reporting built on it is quietly wrong", which
+            // is worse than having no field at all, because the reports still render.
+            foreach (var line in req.Lines)
+            {
+                // Skip the round-trip entirely when there is nothing to check: a Lab/Radiology line with no
+                // type is the overwhelmingly common case, and it is already correct by construction.
+                if (OrderTypes.Canonical(req.OrderType) != OrderType.Procedure
+                    && string.IsNullOrWhiteSpace(line.ProcedureTypeCode)) continue;
+
+                var lookup = await procedureTypes.ResolveAsync(
+                    line.ProcedureTypeCode, line.CodeSystem == CodeSystem.CPT ? line.Code : null, bearer, ct);
+
+                var procError = ProcedureLineChecks.Validate(
+                    req.OrderType, line.ProcedureTypeCode, lookup.Section, line.QuantityOrdered, lookup.Facts);
+                if (procError != ProcedureLineError.None)
+                {
+                    var (en, ar) = ProcedureLineChecks.Explain(
+                        procError, line.ProcedureTypeCode, line.Code, lookup.Section, lookup.Facts);
+                    return Results.Problem(statusCode: 422, title: "procedure-type-invalid",
+                        type: "urn:hbmp:procedure-type-invalid", detail: en,
+                        extensions: new Dictionary<string, object?> { ["reason"] = procError.ToString(), ["detailAr"] = ar });
+                }
             }
 
             // 14.6 — resolve + PIN examination-type sensitivity (fail-closed: unknown → 422).
@@ -100,7 +131,10 @@ public static class OrdersEndpoints
             var artefact = req.OrderType switch
             {
                 OrderType.Lab => ValidityArtefact.LabOrder,
-                OrderType.Imaging => ValidityArtefact.ImagingOrder,
+                // 29.1 — the new enum value MUST be named here. Left to the `_` arm a Radiology order would
+                // silently take the PROCEDURE validity period, which is the exact class of defect an additive
+                // enum value creates: the compiler stays green and the wrong number is used.
+                OrderType.Imaging or OrderType.Radiology => ValidityArtefact.ImagingOrder,
                 _ => ValidityArtefact.ProcedureOrder,
             };
             var policyExpiry = ValidityPolicy.ExpiryFor(now, await validity.DaysAsync(artefact, bearer, ct));
@@ -117,6 +151,11 @@ public static class OrdersEndpoints
                 {
                     OrderLineId = Guid.NewGuid(), CodeSystem = l.CodeSystem, Code = l.Code,
                     Description = l.Description, QuantityOrdered = l.QuantityOrdered, Status = OrderLineStatus.Active,
+                    // 29.2 — what was ASKED FOR, pinned at creation and never rewritten. On an auto-activated
+                    // order the two are equal; when the order is routed to approval, QuantityOrdered is later
+                    // narrowed to the APPROVED scope while this stays put (ProcedureSessions.ApplyApproval).
+                    RequestedQuantity = l.QuantityOrdered,
+                    ProcedureTypeCode = l.ProcedureTypeCode,
                     ExaminationTypeId = l.ExaminationTypeId,
                     SensitivityLevel = l.ExaminationTypeId is { } etId ? classifications[etId].SensitivityLevel : SensitivityLevel.Standard,
                 }).ToList(),

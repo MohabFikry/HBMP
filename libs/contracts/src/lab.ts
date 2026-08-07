@@ -8,7 +8,7 @@ import { zCoded, zId, zInstant, zPatientRef, zPriority, zStatus } from "./common
  */
 export const zLabOrder = z.object({
   id: zId,
-  kind: z.enum(["lab", "imaging"]),
+  kind: z.enum(["lab", "radiology"]),
   test: zCoded,
   patient: zPatientRef,
   priority: zPriority,
@@ -86,7 +86,7 @@ export type InvestigationOrderLine = z.infer<typeof zInvestigationOrderLine>;
 export const zInvestigationOrder = z.object({
   id: zId,
   orderNo: z.string(),
-  kind: z.enum(["lab", "imaging"]),
+  kind: z.enum(["lab", "radiology"]),
   patient: zPatientRef,
   status: zStatus,
   placedAt: zInstant,

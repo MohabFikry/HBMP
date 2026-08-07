@@ -45,8 +45,67 @@ public sealed class Prescription
     /// </remarks>
     public string? DiagnosisSnapshot { get; set; }
 
+    // ---- 29.5 — acute / chronic (design 45 §5) ----------------------------------------------------------
+
+    /// <summary>"Acute" (today's behaviour, unchanged) or "Chronic".</summary>
+    public string Kind { get; set; } = "Acute";
+
+    /// <summary>The supervisor-configurable refill cadence (<c>pharmacy.refill_frequency</c>). NULL on an
+    /// acute script, and the CHECK enforces that — so "is this chronic?" has exactly one answer.</summary>
+    public string? RefillFrequencyCode { get; set; }
+
+    /// <summary>Treatment length. Chronic requires &gt; 30: "a 14-day course is not chronic".</summary>
+    public int? DurationDays { get; set; }
+
+    /// <summary>The script's validity spans the WHOLE duration; it is dispensable in windows within it.</summary>
+    public DateOnly? ValidFrom { get; set; }
+    public DateOnly? ValidUntil { get; set; }
+
     public uint RowVersion { get; set; }
     public List<PrescriptionLine> Lines { get; set; } = [];
+}
+
+/// <summary>
+/// 29.5 — one refill window of a chronic script (design 45 §5). PER LINE, because lines can have different
+/// durations.
+///
+/// <para><b><see cref="Status"/> is stored for Blocked and Missed, and only for those.</b> Both are EVENTS
+/// with money consequences that need a timestamp; <c>Open</c> is never written, because dispensability is
+/// computed from the dates. A stalled sweeper must delay a forfeiture, never refuse a patient at the
+/// counter — see docs/superpowers/specs/2026-08-07-chronic-refill-windows-design.md.</para>
+/// </summary>
+public sealed class PrescriptionDispenseWindow
+{
+    public Guid WindowId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
+    public Guid PrescriptionId { get; set; }
+    public Guid PrescriptionLineId { get; set; }
+    public int WindowNo { get; set; }
+
+    /// <summary>What the patient is told. The early tolerance never moves this — moving it would pull the
+    /// whole rest of the schedule forward, which is exactly what a FIXED window exists to prevent.</summary>
+    public DateOnly ScheduledOpenDate { get; set; }
+
+    /// <summary>Scheduled minus the early tolerance. STORED rather than computed: the tolerance is
+    /// configurable, and a window issued under a 5-day tolerance keeps it if the setting later changes.</summary>
+    public DateOnly OpensAt { get; set; }
+    public DateOnly ClosesAt { get; set; }
+
+    public decimal AllocatedQuantity { get; set; }
+    public decimal DispensedQuantity { get; set; }
+
+    public string Status { get; set; } = "Pending";
+
+    /// <summary>Why eligibility refused. A block with no reason is not "visible to the case team" — it is a
+    /// stuck row nobody can explain.</summary>
+    public string? BlockedReason { get; set; }
+
+    /// <summary>When the forfeiture was recorded. Without it, "had the member's coverage already lapsed by
+    /// then?" is unanswerable.</summary>
+    public DateTimeOffset? MissedAt { get; set; }
+
+    /// <summary>xmin — the sweeper and the counter both write this row, and exactly one must win.</summary>
+    public uint RowVersion { get; set; }
 }
 
 public sealed class PrescriptionLine

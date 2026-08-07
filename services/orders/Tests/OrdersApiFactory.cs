@@ -1,3 +1,4 @@
+using Mersal.Audit.Client;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Mersal.Auth;
@@ -40,6 +41,23 @@ public sealed class OrdersApiFactory : WebApplicationFactory<Program>
     /// <summary>Whether the ordering doctor treats the beneficiary. False ⇒ the create gate refuses (403).</summary>
     public bool Treats { get; set; } = true;
 
+    /// <summary>29.4 — a branch the caller is assigned to, or null for the default "no permitted set".
+    ///
+    /// <para>Opt-in for the same reason <see cref="Treats"/> is: `doctor` is a BRANCH-SCOPED role, so with no
+    /// permitted branch <c>ApplyBranchScope</c> resolves to the no-branch sentinel and every branch-scoped
+    /// query returns nothing. That is correct behaviour and the right default here — branch scoping has its
+    /// own suite and must not silently decide unrelated outcomes — but a suite that exercises a branch-scoped
+    /// READ needs a branch to read at, or it proves only that an empty set is empty.</para></summary>
+    public Guid? PermittedBranch { get; set; }
+
+    /// <summary>Every audit event this factory's app emitted, in order.
+    ///
+    /// <para>Captured at the <see cref="IAuditOutbox"/> seam rather than read back from
+    /// <c>orders.outbox_message</c>, because the relay drains that table asynchronously — a test that queried
+    /// it would pass or fail on timing, which for an audit assertion is the worst possible property. This
+    /// records what was EMITTED; that it is then durable is <c>EfOutboxDurabilityTests</c>' job.</para></summary>
+    public List<AuditEvent> AuditEvents { get; } = [];
+
     /// <summary>Whether masterdata recognises the line codes. False ⇒ 422 unknown-code, fail-closed.</summary>
     public bool CodesValid { get; set; } = true;
 
@@ -74,10 +92,17 @@ public sealed class OrdersApiFactory : WebApplicationFactory<Program>
             services.AddSingleton<IValidityPolicySource>(new DefaultValidityPolicySource());
             services.RemoveAll<IExaminationTypeResolver>();
             services.AddSingleton<IExaminationTypeResolver>(new FakeExaminationTypes());
+            // 29.2 — the OP-Procedure type resolver. The default fake knows the seeded Physiotherapy type, so
+            // the procedure path is exercisable without a masterdata round-trip; tests that need a different
+            // answer replace it.
+            services.RemoveAll<IProcedureTypeResolver>();
+            services.AddSingleton<IProcedureTypeResolver>(new FakeProcedureTypes());
             services.RemoveAll<IReportDocumentClient>();
             services.AddSingleton<IReportDocumentClient>(new FakeReportDocuments());
             services.RemoveAll<IBranchDirectory>();
-            services.AddSingleton<IBranchDirectory>(new UnrestrictedBranches());
+            services.AddSingleton<IBranchDirectory>(new UnrestrictedBranches(this));
+            services.RemoveAll<IAuditOutbox>();
+            services.AddSingleton<IAuditOutbox>(new CapturingAuditOutbox(this));
 
             // The expiry sweeper is a timer that wakes up mid-test and writes to the same tables the
             // assertions read. It has its own test; here it is only a source of flake.
@@ -144,6 +169,33 @@ internal sealed class FakeTreatingRelationship(OrdersApiFactory f) : ITreatingRe
         => Task.FromResult(f.Treats);
 }
 
+/// <summary>29.2 — mirrors the seeded masterdata rows closely enough to exercise the write-path check:
+/// Physiotherapy is session-based and Medicine-only, MinorSurgery is neither. Sections follow the real CPT
+/// ranges so a test code like 97110 (Medicine) or 29881 (Surgery) classifies the way it would in production.</summary>
+internal sealed class FakeProcedureTypes : IProcedureTypeResolver
+{
+    public Task<ProcedureTypeLookup> ResolveAsync(
+        string? typeCode, string? cptCode, string? bearer, CancellationToken ct = default)
+    {
+        var section = cptCode is null || cptCode.Length != 5 || !int.TryParse(cptCode, out var n) ? null
+            : n is >= 10000 and <= 69999 ? "Surgery"
+            : n is >= 70000 and <= 79999 ? "Imaging"
+            : n is >= 80000 and <= 89999 ? "Laboratory"
+            : n is >= 99202 and <= 99499 ? "EvaluationAndManagement"
+            : n >= 90000 ? "Medicine"
+            : "Anesthesia";
+
+        ProcedureTypeFacts? facts = typeCode switch
+        {
+            "Physiotherapy" => new("Physiotherapy", IsSessionBased: true, MaxSessions: 30, ["Medicine"], IsActive: true),
+            "MinorSurgery" => new("MinorSurgery", IsSessionBased: false, MaxSessions: null, ["Surgery"], IsActive: true),
+            "Retired" => new("Retired", IsSessionBased: false, MaxSessions: null, ["Medicine"], IsActive: false),
+            _ => null,
+        };
+        return Task.FromResult(new ProcedureTypeLookup(section, facts));
+    }
+}
+
 internal sealed class FakeExaminationTypes : IExaminationTypeResolver
 {
     public Task<ExaminationClassification?> ResolveAsync(Guid examinationTypeId, string? bearer, CancellationToken ct = default)
@@ -158,10 +210,22 @@ internal sealed class FakeReportDocuments : IReportDocumentClient
 
 /// <summary>No permitted set — branch scoping has its own suite (BranchScope*Tests); here it must not decide
 /// the outcome, and an empty set is what an unrestricted, non-BranchScoped role resolves to.</summary>
-internal sealed class UnrestrictedBranches : IBranchDirectory
+/// <summary>Records every audit emit so a test can assert on it without racing the outbox relay.</summary>
+internal sealed class CapturingAuditOutbox(OrdersApiFactory f) : IAuditOutbox
+{
+    public ValueTask EnqueueAsync(AuditEvent auditEvent, CancellationToken ct = default)
+    {
+        lock (f.AuditEvents) f.AuditEvents.Add(auditEvent);
+        return ValueTask.CompletedTask;
+    }
+}
+
+internal sealed class UnrestrictedBranches(OrdersApiFactory f) : IBranchDirectory
 {
     public Task<PermittedBranches> GetAsync(HbmpPrincipal principal, CancellationToken ct = default)
-        => Task.FromResult(PermittedBranches.None);
+        => Task.FromResult(f.PermittedBranch is { } b
+            ? new PermittedBranches(Home: b, Permitted: new HashSet<Guid> { b })
+            : PermittedBranches.None);
 }
 
 /// <summary>Builds a principal from X-Test-* headers; the house shape, with provider_id for the ABAC

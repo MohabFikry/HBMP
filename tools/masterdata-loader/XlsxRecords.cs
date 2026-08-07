@@ -23,6 +23,10 @@ public sealed class DrugListXlsxRow
     public string? RelatedIcds { get; set; }            // T  "Related ICDs"          100%  ← the indications
     public string? IcdCount { get; set; }               // U  "ICD Count"             100%  (checksum for T)
     public string? IcdBasis { get; set; }               // V  "ICD Basis"             100%  ← per-row provenance
+    // 29.6 (design 45 §6) — the pack facts. Previously "read past deliberately rather than carried as dead
+    // fields"; they stop being dead the moment a quantity has to be converted into whole packs.
+    public string? MajorUnits { get; set; }             // W  "Major Units (per box)"  — strips/blisters per box
+    public string? MinorUnits { get; set; }             // X  "Minor Units (total)"    — PRESCRIBING units per box
     public string? VolumeWeight { get; set; }           // Y  "Volume / Weight"        33.3%
     public string? Strength { get; set; }               // Z  "Strength"               60.4%
     public string? DosageForm { get; set; }             // AA "Dosage Form"            98.7%
@@ -45,6 +49,8 @@ public static class DrugListColumns
     public const string RelatedIcds = "Related ICDs";
     public const string IcdCount = "ICD Count";
     public const string IcdBasis = "ICD Basis";
+    public const string MajorUnits = "Major Units (per box)";
+    public const string MinorUnits = "Minor Units (total)";
     public const string VolumeWeight = "Volume / Weight";
     public const string Strength = "Strength";
     public const string DosageForm = "Dosage Form";
@@ -54,6 +60,6 @@ public static class DrugListColumns
     [
         SourceRowId, TradeNameEn, PriceEgp, ActiveIngredient, Manufacturer, AtcCode,
         AtcL1, AtcL2, AtcL3, AtcL4, AtcL5, RelatedIcds, IcdCount, IcdBasis,
-        VolumeWeight, Strength, DosageForm,
+        MajorUnits, MinorUnits, VolumeWeight, Strength, DosageForm,
     ];
 }

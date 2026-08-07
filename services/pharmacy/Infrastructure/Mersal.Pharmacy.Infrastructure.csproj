@@ -3,6 +3,8 @@
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Pharmacy.Domain.csproj" />
     <ProjectReference Include="../../../libs/clinical-validation/Mersal.ClinicalValidation.csproj" />
+    <!-- 29.5 — the chronic allocation and window lifecycle. Pure domain, no I/O. -->
+    <ProjectReference Include="../../../libs/prescribing/Mersal.Prescribing.csproj" />
     <ProjectReference Include="../../../libs/time/Mersal.Time.csproj" />
     <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
     <ProjectReference Include="../../../libs/data/Mersal.Data.csproj" />

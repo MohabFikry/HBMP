@@ -184,7 +184,7 @@ export type IcdRef = z.infer<typeof zIcdRef>;
 /** Place an investigation order (routed to approval when high-cost — server decides). */
 export const zPlaceOrderRequest = z.object({
   encounterId: zId,
-  kind: z.enum(["lab", "imaging"]),
+  kind: z.enum(["lab", "radiology"]),
   test: zCoded,
   priority: z.enum(["routine", "urgent"]),
   notes: z.string().max(500).optional(),

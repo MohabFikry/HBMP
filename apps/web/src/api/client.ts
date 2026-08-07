@@ -1,4 +1,7 @@
 import type {
+  ProcedureQueueItem,
+  SessionProgress,
+  ServiceHistory,
   RxPricing,
   AuthorizationItem,
   InvestigationOrder,
@@ -312,7 +315,31 @@ export interface ApiClient {
   setBloodGroup(beneficiaryId: string, bloodGroup: BloodGroup): Promise<void>;
 
   // Lab / imaging — queue + consume (Phase 5)
-  labQueue(kind: "lab" | "imaging"): Promise<LabOrder[]>;
+  labQueue(kind: "lab" | "radiology"): Promise<LabOrder[]>;
+
+  // ---- 29.2b — the external delivering provider's portal (design 45 §2b) ----
+  /** The orders routed to THIS centre. Server-scoped by assigned_provider_id; the client never filters. */
+  procedureQueue(): Promise<ProcedureQueueItem[]>;
+  /** Verify the person at the counter — TWO identifiers required, audited server-side. */
+  procedureCounterSearch(by: { cardNumber?: string; memberNo?: string; passport?: string }): Promise<ProcedureQueueItem[]>;
+  /** Record ONE delivered session. `idempotencyKey` is required: a double-tap must not burn two visits. */
+  recordProcedureSession(
+    orderId: string, orderLineId: string, idempotencyKey: string,
+    by: { practitioner?: string; attended?: boolean; note?: string },
+  ): Promise<SessionProgress>;
+  /** Close the loop with a report back to the ordering doctor. */
+  reportProcedureCompletion(orderId: string, findings: string): Promise<void>;
+
+  /**
+   * 29.4 — THE service-history read (design 45 §4). ONE method, one endpoint, every tab.
+   *
+   * <p>Composed server-side under the caller's token: a withheld field is ABSENT from the response, so this
+   * signature cannot be used to fetch something the caller may not see and then choose not to show it.</p>
+   */
+  serviceHistory(
+    beneficiaryId: string,
+    q: { serviceType?: string; code: string; page?: number; pageSize?: number },
+  ): Promise<ServiceHistory>;
   /**
    * Find a patient's investigation orders by order number, or by TWO of their identifiers (27.8).
    *
@@ -321,7 +348,7 @@ export interface ApiClient {
    * that matter.</p>
    */
   labSearch(
-    kind: "lab" | "imaging",
+    kind: "lab" | "radiology",
     by: { orderNo?: string; cardNumber?: string; memberNo?: string; passport?: string },
   ): Promise<LabOrder[]>;
   consume(req: ConsumeRequest): Promise<ConsumeResult>;
@@ -338,7 +365,7 @@ export interface ApiClient {
   /** Ask the approval team whether another examination may stand in. Returns the AUTH- number raised. */
   requestSubstitution(req: SubstitutionRequest, idempotencyKey?: string): Promise<{ authNo: string }>;
   /** Consumed lines this provider still owes a result on (US-042). */
-  awaitingResult(kind: "lab" | "imaging"): Promise<ResultTask[]>;
+  awaitingResult(kind: "lab" | "radiology"): Promise<ResultTask[]>;
   /** Attach a result value to a consumed line (US-042). */
   uploadResult(orderId: string, lineId: string, resultValue: string, idempotencyKey?: string): Promise<ResultUpload>;
 

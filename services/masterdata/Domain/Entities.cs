@@ -30,6 +30,47 @@ public sealed class CptCode
     public string? SourceRelease { get; set; }
 }
 
+/// <summary>
+/// 29.2 — an OP-Procedure KIND, as master data rather than an enum (design 45 §2). Administered like
+/// refill_frequency: adding "Hydrotherapy" is an INSERT, not a release.
+/// </summary>
+public sealed class ProcedureType
+{
+    public string Code { get; set; } = default!;
+    public string NameEn { get; set; } = default!;
+    public string NameAr { get; set; } = default!;
+
+    /// <summary>Drives the composer's "number of sessions" field. The UI follows THIS, never the type's name —
+    /// dialysis and rehabilitation are session-based too, and hard-coding the name guarantees that
+    /// conversation twice more.</summary>
+    public bool IsSessionBased { get; set; }
+
+    public int? DefaultSessions { get; set; }
+    public int? MaxSessions { get; set; }
+
+    /// <summary>The CPT sections this type may accompany, as a JSON array. Enforced by
+    /// <c>ProcedureTypeRules.Validate</c> — an unvalidated type field is decorative, and every report built on
+    /// it is quietly wrong.</summary>
+    public string AllowedCptScopes { get; set; } = "[]";
+
+    public bool IsActive { get; set; } = true;
+    public int SortOrder { get; set; }
+
+    /// <summary>The declared sections, parsed. Fails CLOSED to an empty list: a type whose scopes cannot be
+    /// read must accompany nothing, rather than everything.</summary>
+    public IReadOnlyList<string> Scopes()
+    {
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<List<string>>(AllowedCptScopes) ?? [];
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return [];
+        }
+    }
+}
+
 /// <summary>LOINC lab observation code. PK = code.</summary>
 public sealed class LoincCode
 {
@@ -64,6 +105,40 @@ public sealed class Drug
     public decimal? PriceEgp { get; set; }
     public string? SourceRelease { get; set; }
     public string? SourceRowId { get; set; }            // the source file's own id; makes DrugId derivable
+
+    // ---- 29.6 — prescribing unit, pack size, splittability (design 45 §6) ------------------------------
+    /// <summary>The unit a doctor prescribes in — Tablet, mL, Puff, IU… NULL where the sheet did not say.</summary>
+    public string? PrescribingUnit { get; set; }
+
+    /// <summary>How many prescribing units are in one pack. NULL where unknown — and the quantity check then
+    /// reports NotChecked NAMING this field rather than guessing (invariant 8).</summary>
+    public decimal? PackSize { get; set; }
+    public string? PackUnit { get; set; }
+
+    /// <summary>Whether a pack can be broken. NULL is NOT "yes": assuming splittable is the dangerous default
+    /// because it silently permits a fractional inhaler. Defaults from the dosage form but is overridable per
+    /// product — "the form is a good heuristic and a poor law".</summary>
+    public bool? IsPackSplittable { get; set; }
+
+    /// <summary>True until the loader has populated the three above. Defaults TRUE, so an unloaded row reports
+    /// NotChecked rather than a confident answer computed from nothing.</summary>
+    public bool UnitDataIncomplete { get; set; } = true;
+
+    // ---- 29.7 — availability and the lowest-price label (design 45 §7) ---------------------------------
+    /// <summary>Available / Unavailable / Unknown. THREE states, not a boolean: a boolean defaulting to false
+    /// would render the entire catalogue as out of stock on day one, and prescribers would learn to ignore the
+    /// indicator before it ever carried real data.</summary>
+    public string Availability { get; set; } = "Unknown";
+
+    /// <summary>DERIVED, never authored — recomputed whenever prices load.</summary>
+    public bool IsLowestPrice { get; set; }
+
+    /// <summary>price_egp ÷ pack_size. NULL where either is unknown, and a NULL is never labelled.</summary>
+    public decimal? PricePerUnit { get; set; }
+    public string? LowestPriceGroupKey { get; set; }
+
+    /// <summary>When the label was last computed, so a stale one is detectable.</summary>
+    public DateTimeOffset? LowestPriceComputedAt { get; set; }
 }
 
 /// <summary>

@@ -111,6 +111,7 @@ public static class ProfileInvestigationsEndpoint
                         restricted ? null : result?.ResultValue,
                         restricted,
                         line.SensitivityLevel.ToString(),
+                        OrderTypes.Canonical(order.OrderType).ToString(),   // 29.2
                         order.EncounterId));
                 }
             }
@@ -140,6 +141,15 @@ public static class ProfileInvestigationsEndpoint
 public sealed record ProfileInvestigationView(
     string OrderNo, Guid LineId, string Category, DateTimeOffset OrderedOn, string Status,
     string? ProviderName, string? ResultSummary, bool Restricted, string? SensitivityLevel,
+    /// <summary>29.2 — the ORDER TYPE (Lab / Radiology / Procedure), so the history can be read by the kind
+    /// of service rather than as one flat list (design 45 §3).
+    ///
+    /// <para>Additive on the EXISTING section, not a new one, and that is the point: a procedure IS an
+    /// investigation order, so it already travels this path under this gate. Splitting the view by a routing
+    /// label the caller has already been authorised to see adds no access, which is what "no new access
+    /// path" has to mean in practice. An order type carries no clinical content — it says which queue the
+    /// request went to, not what was wrong with the patient.</para></summary>
+    string OrderType,
     /// <summary>The encounter the order was raised on.
     ///
     /// <para>Carried so a caller reading ONE visit can tell which of a member's orders belong to it. Without

@@ -674,5 +674,59 @@ tidy-up — not changed here.
   tables/18 schemas reconciled exactly, audit chain-linkage intact → PASS; second-site failover pending target k3s).
   The ✅ items gate now; the 🟡 items need staging/k3s/OpenBao/external-pentest to sign off. Prompt:
   `HBMP-Design/claude-code-prompts/phase-11-hardening-and-nfr.md`.
+
+## Phase 29 — encounter, OP procedures, service history and chronic prescribing
+
+Design: `HBMP-Design/45-encounter-and-prescription-adjustments.md` · ADR-0038 ·
+Prompt: `HBMP-Design/claude-code-prompts/phase-29-encounter-and-chronic-prescribing.md`
+
+> The prompt's INVARIANTS block (lines 21-32) contradicts its own gates — it says the rename is label-only and
+> that E/M is never orderable, where Gate 1 mandates a full identifier rename and Gate 2 routes E/M to a
+> Referral. Doc 45 §8 agrees with the GATES, and the gates were followed. Recorded in ADR-0038 §0.
+
+- **29.1 the Radiology rename, identifiers included.** Full rename executed expand → backfill → switch →
+  contract. `libs/auth/LegacyRoleAliases` expands roles at the single token→principal boundary — BIDIRECTIONALLY,
+  because services deploy independently and the switched issuer mints the new name at a service that has not
+  been redeployed, which recurs on every rollout rather than only in the first 300 s. The CONTRACT step lives
+  in `Migrations/deferred/`, which the migration runner does not glob: beside the others it would have applied
+  on the same deploy as the switch and the window would have been zero seconds wide. Historical audit rows are
+  never rewritten — `LegacyIdentifierDisplay` resolves them for readers permanently, with a counter-proof test
+  that rewriting one breaks the chain. Token contract AMENDED with a checked-in pre-switch fixture. NOT renamed:
+  the `IMAGING` benefit category (a coverage vocabulary with live accumulators) and the reporting consumer's
+  translation (it maps replayed historical events, forever).
+- **29.2 OP Procedures as an order type.** `order_type = 'Procedure'` reuses orders-service entirely; sessions
+  are the line's QUANTITY, metered by the existing atomic consume. `masterdata.procedure_type` is master data
+  with `is_session_based`, validated against the code's CPT section on the WRITE path. Sessions flow from the
+  APPROVED scope, never the requested one. **Two reconciliation findings reported, not silently resolved:**
+  `cpt_code.category` holds the CPT taxonomy (Category I/II/III/PLA/MAAA), not the section, so it cannot drive
+  routing; and doc 45 §2's Medicine and E/M ranges overlap. Emitted with every load against all 10,810 codes.
+- **29.2b the external provider portal.** `assigned_provider_id` binds ownership at the ROW, with the
+  two-provider test written before the queue endpoint — the audit-R3 `DispensingGate` defect asks the ownership
+  question of the caller's own id, and no test caught it because answering it needs TWO providers. Not-yours is
+  404, not 403 (a 403 is a membership oracle). Per-session idempotency; referral loops cannot close on an empty
+  report; identity at the counter behind two identifiers.
+- **29.3 encounter + history tabs.** OP Procedures tab on the SHARED composer (no third copy). History pane
+  filters the SAME authorised section by order type — no new access path. Also fixed a 29.1 leftover: the
+  encounter tab, heading and compose button still said "Imaging".
+- **29.4 per-line service history.** ONE endpoint, ONE component. An INTERSECTION of treating relationship,
+  branch scope and the design-37 §6 sensitivity rule — a restricted result is existence-only with no value
+  anywhere in the payload, asserted over the SERIALIZED bytes. Three states distinct in words: "could not load"
+  is never "none". Trend shown where numeric and permitted, with the table alongside.
+- **29.5 acute/chronic prescriptions.** Brainstormed the window model, then TDD'd the allocation. **The counter
+  enforces; the sweeper records** — `Blocked` and `Missed` are stored (events with money consequences), `Open`
+  is never written, so a stalled sweeper delays a forfeiture but can never refuse a patient. Round ONCE at the
+  total; the sum invariant is a PROPERTY test, not four examples. 66 TDD tests in `libs/prescribing`.
+- **29.6 prescribing unit, pack size, splittability.** `pack_size` ← X "Minor Units (total)" at 100% coverage.
+  **W "Major Units (per box)" is strips-per-box** and mapping it would be 10x wrong. 89% derive a unit and
+  splittability from the dosage form; the other 2,495 rows report NotChecked NAMING the field. Coverage printed
+  on every load.
+- **29.7 lowest price and availability.** Group = ingredient + strength + form; comparison is per PRESCRIBING
+  UNIT (`price ÷ pack_size`). A drug with no pack size is never labelled — falling back to pack price is the
+  exact error the rule prevents. `availability` is three-valued, defaults to `Unknown`, and Unknown renders
+  NOTHING.
+- **29.8 docs.** ADR-0038 (numbered 0038 because 0029 was taken — same collision ADR-0037 records), 13 new
+  invariant-registry entries each with named tests, the rename runbook, the window-model spec and the
+  workbook-mapping note.
+
 - Docker/Compose, Helm, OpenTofu: **not yet installed** (Docker needs root). Tier 1 infra authored in `infra/compose`; run once Docker is installed.
 - Repo initialized in place at `/home/mohab/Mersal` with `HBMP-Design/` as a subfolder.

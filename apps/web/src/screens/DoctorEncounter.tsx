@@ -37,6 +37,7 @@ import { useLocation, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/http";
 import { AsyncSection, PageHeader, useBackTarget, useLoc, useOpenProfile, useWhenFilter } from "./_shared";
 import { draftKeys, useUnsentDrafts } from "./draftStore";
+import { ServiceHistoryModal } from "./ServiceHistoryModal";   // 29.4 — one modal, every tab
 import { PrescribingWorkspace } from "./prescribing/PrescribingWorkspace";
 import { InvestigationWorkspace } from "./investigations/InvestigationWorkspace";
 import { EncounterTimelineButton } from "./VisitTimeline";
@@ -80,17 +81,26 @@ const S = {
   tabNote: { en: "SOAP note", ar: "ملاحظة SOAP" },
   tabPrescriptions: { en: "Prescriptions", ar: "الوصفات" },
   tabLabs: { en: "Labs", ar: "المختبر" },
-  tabImaging: { en: "Imaging", ar: "الأشعة" },
+  tabRadiology: { en: "Radiology", ar: "الأشعة" },
   labsFor: { en: "Lab orders for this patient", ar: "طلبات المختبر لهذا المريض" },
-  imagingFor: { en: "Imaging orders for this patient", ar: "طلبات الأشعة لهذا المريض" },
+  radiologyFor: { en: "Radiology orders for this patient", ar: "طلبات الأشعة لهذا المريض" },
   noLabs: { en: "You have raised no lab orders for this patient.", ar: "لم تطلب أي فحوصات مختبر لهذا المريض." },
-  noImaging: { en: "You have raised no imaging orders for this patient.", ar: "لم تطلب أي فحوصات أشعة لهذا المريض." },
+  noRadiology: { en: "You have raised no radiology orders for this patient.", ar: "لم تطلب أي فحوصات أشعة لهذا المريض." },
   orderLab: { en: "Order a lab test", ar: "طلب فحص مختبر" },
-  orderImaging: { en: "Order imaging", ar: "طلب أشعة" },
+  orderRadiology: { en: "Order radiology", ar: "طلب أشعة" },
+  // 29.2 (design 45 §2) — OP Procedures: surgery, physiotherapy, dialysis, injections. NOT E/M, which the
+  // system turns into a REFERRAL instead — the doctor picks a service and the system decides the vehicle.
+  tabProcedures: { en: "OP Procedures", ar: "الإجراءات الخارجية" },
+  proceduresFor: { en: "Procedures ordered for this patient", ar: "الإجراءات المطلوبة لهذا المريض" },
+  noProcedures: { en: "You have raised no procedures for this patient.", ar: "لم تطلب أي إجراءات لهذا المريض." },
+  orderProcedure: { en: "Order a procedure", ar: "طلب إجراء" },
+  colHistory: { en: "History", ar: "السجل" },
+  viewHistory: { en: "Previous occurrences of this service", ar: "الحالات السابقة لهذه الخدمة" },
   tabHistory: { en: "History", ar: "السجل" },
   histEncounters: { en: "Encounters", ar: "الزيارات" },
   histInvestigations: { en: "Investigations", ar: "الفحوصات" },
   histPrescriptions: { en: "Prescriptions", ar: "الوصفات" },
+  histProcedures: { en: "OP Procedures", ar: "الإجراءات الخارجية" },
 
   subjective: { en: "Subjective", ar: "الشكوى" },
   objective: { en: "Objective", ar: "الفحص" },
@@ -500,7 +510,8 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
     () => [
       { key: draftKeys.prescription(encounter.id), label: S.tabPrescriptions },
       { key: draftKeys.order("Lab", encounter.id), label: S.tabLabs },
-      { key: draftKeys.order("Imaging", encounter.id), label: S.tabImaging },
+      { key: draftKeys.order("Radiology", encounter.id), label: S.tabRadiology },
+      { key: draftKeys.order("Procedure", encounter.id), label: S.tabProcedures },
     ],
     [encounter.id],
   );
@@ -708,9 +719,19 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
               },
               {
                 value: "imaging",
-                label: t(S.tabImaging),
+                label: t(S.tabRadiology),
                 content: visited.has("imaging")
-                  ? <InvestigationsTab encounter={encounter} diagnoses={diagnoses} orderType="Imaging" />
+                  ? <InvestigationsTab encounter={encounter} diagnoses={diagnoses} orderType="Radiology" />
+                  : null,
+              },
+              {
+                value: "procedures",
+                label: t(S.tabProcedures),
+                // The SHARED composer, parameterised — not a third copy. Labs and Radiology already ran
+                // through InvestigationsTab, so a Procedure order reaches the same consume/authorise/claim
+                // path as a lab order rather than forking it (design 45 §2, invariant 2).
+                content: visited.has("procedures")
+                  ? <InvestigationsTab encounter={encounter} diagnoses={diagnoses} orderType="Procedure" />
                   : null,
               },
               {
@@ -1561,6 +1582,8 @@ function InvestigationsTab({
   const api = useApi();
   const t = useLoc();
   const { date } = useFormat();
+  // 29.4 — which service line's history is open, if any. One piece of state, one modal, whichever tab.
+  const [historyFor, setHistoryFor] = useState<{ code: string; label: string } | null>(null);
   const orders = useAsync<OrderRow[]>(useCallback(() => api.ordersMine(), [api]), []);
 
   // Split by TYPE as well as by patient: the imaging tab must not list a blood count. `ordersMine` returns
@@ -1571,9 +1594,12 @@ function InvestigationsTab({
     [orders.data, encounter.patientId, orderType],
   );
 
-  const heading = orderType === "Imaging" ? S.imagingFor : S.labsFor;
-  const empty = orderType === "Imaging" ? S.noImaging : S.noLabs;
-  const composeHeading = orderType === "Imaging" ? S.orderImaging : S.orderLab;
+  // 29.2 — three order types now share this tab (design 45 §2). Kept as a lookup rather than a chain of
+  // ternaries: a fourth type added to the chain silently inherits the Lab labels, which is how a Procedure
+  // tab would come to be headed "Lab orders for this patient".
+  const heading = orderType === "Radiology" ? S.radiologyFor : orderType === "Procedure" ? S.proceduresFor : S.labsFor;
+  const empty = orderType === "Radiology" ? S.noRadiology : orderType === "Procedure" ? S.noProcedures : S.noLabs;
+  const composeHeading = orderType === "Radiology" ? S.orderRadiology : orderType === "Procedure" ? S.orderProcedure : S.orderLab;
 
   const orderCols: Column<OrderRow>[] = [
     { key: "orderNo", header: t(S.colRef), cell: (r) => <span className="tnum">{r.orderNo}</span>,
@@ -1596,6 +1622,22 @@ function InvestigationsTab({
       cell: (r) => (r.encounterId
         ? <EncounterTimelineButton encounterId={r.encounterId} reference={r.orderNo} />
         : <span className="muted">—</span>),
+    },
+    // 29.4 — "has this patient had this service before, and what did it show?" (design 45 §4). THE shared
+    // modal, opened from every service line in every tab — one component and one endpoint, never one
+    // implementation per tab.
+    {
+      key: "history",
+      header: t(S.colHistory),
+      cell: (r) => (
+        <Button
+          variant="ghost"
+          aria-label={`${t(S.viewHistory)} — ${r.primaryCode}`}
+          onClick={() => setHistoryFor({ code: r.primaryCode, label: r.primaryCode })}
+        >
+          <Icon name="clock" />
+        </Button>
+      ),
     },
   ];
 
@@ -1633,6 +1675,22 @@ function InvestigationsTab({
           />
         </div>
       </Card>
+
+      {/*
+        29.4 — THE shared service-history modal (design 45 §4). Rendered once per tab instance and driven by
+        one piece of state, so the Labs, Radiology and OP Procedures tabs open the SAME component against the
+        SAME endpoint. Not one implementation per tab: four copies would be four places for the
+        restricted-result branch to drift, and the one that drifted would be the one nobody reviewed.
+      */}
+      {historyFor && (
+        <ServiceHistoryModal
+          beneficiaryId={encounter.patientId}
+          serviceType={orderType}
+          code={historyFor.code}
+          label={historyFor.label}
+          onClose={() => setHistoryFor(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1653,9 +1711,31 @@ function HistoryTab({ beneficiaryId }: { beneficiaryId: string }) {
     [beneficiaryId],
   );
 
-  const panes: { value: string; key: string; label: Localized }[] = [
+  /*
+    29.2 (design 45 §3) — OP Procedures is a pane over the INVESTIGATIONS section, not a section of its own.
+
+    A procedure IS an investigation order, so it already travels this path, under this gate, in this payload.
+    Splitting the rows the caller has ALREADY been authorised to see, by a routing label that carries no
+    clinical content, is what "same projection rules, same sensitivity gating, NO NEW ACCESS PATH" means when
+    taken literally — a second section would have been a second thing to gate, and the second one is always
+    the one that gets gated differently.
+
+    `filter` narrows the rows; everything else — the restricted-result handling, the request-access action,
+    the audit already emitted for the read — is untouched, because it is the same section object.
+  */
+  const panes: { value: string; key: string; label: Localized; filter?: (row: { orderType?: string }) => boolean }[] = [
     { value: "encounters", key: "encounters", label: S.histEncounters },
-    { value: "investigations", key: "investigations", label: S.histInvestigations },
+    {
+      value: "investigations", key: "investigations", label: S.histInvestigations,
+      // Labs and Radiology. A row whose type the upstream did not state stays HERE rather than being hidden:
+      // an unknown kind is still an investigation the doctor ordered.
+      filter: (r) => r.orderType !== "Procedure",
+    },
+    {
+      value: "procedures", key: "investigations", label: S.histProcedures,
+      // ONLY an explicit Procedure. Absence never qualifies — see the note on `orderType` in the contract.
+      filter: (r) => r.orderType === "Procedure",
+    },
     { value: "prescriptions", key: "prescriptions", label: S.histPrescriptions },
   ];
 
@@ -1667,7 +1747,21 @@ function HistoryTab({ beneficiaryId }: { beneficiaryId: string }) {
           value={tab}
           onValueChange={setTab}
           items={panes.map((p) => {
-            const section = profile.sections.find((s) => s.key === p.key);
+            const found = profile.sections.find((s) => s.key === p.key);
+            // Narrow the ROWS inside `data`, keeping the section's own shape — key, state, reasonCode and
+            // requestAccessAction all survive untouched, so SectionView renders restricted results, the
+            // request-access action and the three states exactly as it does for the unfiltered pane. Filtering
+            // the SECTION rather than its rows would have dropped the gate along with them.
+            const rows = (found?.data as { items?: unknown[] } | undefined)?.items;
+            const section = found && p.filter && Array.isArray(rows)
+              ? {
+                  ...found,
+                  data: {
+                    ...(found.data as Record<string, unknown>),
+                    items: rows.filter((r) => p.filter!(r as { orderType?: string })),
+                  },
+                }
+              : found;
             return {
               value: p.value,
               label: t(p.label),

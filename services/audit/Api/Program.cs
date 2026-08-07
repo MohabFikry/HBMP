@@ -85,7 +85,21 @@ reads.MapGet("/events/{entityType}/{entityId}", async (
         DecisionOutcome = $"returned {rows.Count} records",
     }, ct);
 
-    return Results.Ok(rows.ConvertAll(r => r.ToDomain()));
+    // 29.1 (design 45 §1 (c)) — resolve identifiers renamed since these rows were written, WITHOUT touching
+    // them. The stored value is returned alongside the display value: the row's bytes are what its
+    // record_hash covers, so an investigator reconciling a record against the chain needs to see them. The
+    // rows themselves are never updated — that would break the chain the trail's evidential value rests on.
+    return Results.Ok(rows.ConvertAll(r =>
+    {
+        var e = r.ToDomain();
+        return new
+        {
+            Event = e,
+            ActorRoleAsStored = e.ActorRole,
+            ActorRoleDisplay = LegacyIdentifierDisplay.Display(e.ActorRole),
+            ActorRoleIsRetiredName = LegacyIdentifierDisplay.IsRetired(e.ActorRole),
+        };
+    }));
 });
 
 reads.MapGet("/verify/{partitionKey}", async (string partitionKey, AuditVerifier verifier, CancellationToken ct) =>

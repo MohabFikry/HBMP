@@ -31,7 +31,7 @@ async function findPatient(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: /^Search$/ }));
 }
 
-function renderQueue(kind: "lab" | "imaging" = "lab", api: ApiClient = new DevApiClient({ latencyMs: 0 })) {
+function renderQueue(kind: "lab" | "radiology" = "lab", api: ApiClient = new DevApiClient({ latencyMs: 0 })) {
   return render(
     <AppProviders authClient={new DevAuthClient()} apiClient={api}>
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -80,7 +80,7 @@ describe("an expired order stays in the queue", () => {
 
   it("does the same on the imaging queue", async () => {
     const user = userEvent.setup();
-    renderQueue("imaging");
+    renderQueue("radiology");
     await findPatient(user);
     await screen.findByText("ORD-2026-077009");
 

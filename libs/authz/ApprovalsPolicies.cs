@@ -148,7 +148,7 @@ public static class ApprovalsPolicies
         new PolicyRule
         {
             Action = RequestExtension, ResourceType = Resource,
-            Roles = Set("pharmacist", "lab_tech", "imaging_tech"), Scopes = Set("auth:request-extension"),
+            Roles = Set("pharmacist", "lab_tech", "imaging_tech", "radiology_tech"), Scopes = Set("auth:request-extension"),
             RequiredConditions = [AbacConditions.TenantMatch],
             Sensitive = true,
         },
@@ -157,7 +157,7 @@ public static class ApprovalsPolicies
         new PolicyRule
         {
             Action = RequestSubstitution, ResourceType = Resource,
-            Roles = Set("lab_tech", "imaging_tech"), Scopes = Set("auth:request-substitution"),
+            Roles = Set("lab_tech", "imaging_tech", "radiology_tech"), Scopes = Set("auth:request-substitution"),
             RequiredConditions = [AbacConditions.TenantMatch],
             Sensitive = true,
         },

@@ -40,7 +40,7 @@ public static class DefaultPolicies
         new PolicyRule
         {
             Action = "orders:read", ResourceType = "order_line",
-            Roles = Set("lab_tech", "imaging_tech"),
+            Roles = Set("lab_tech", "imaging_tech", "radiology_tech"),
             Scopes = Set("orders:read"),
             RequiredConditions = [AbacConditions.TenantMatch, AbacConditions.ProviderOwnership],
             Sensitive = true,
@@ -72,7 +72,9 @@ public static class DefaultPolicies
         ["reception"] = Set(Classes.Coverage),                    // NOT diagnosis/clinical
         ["beneficiary_mgmt"] = Set(Classes.Coverage),
         ["lab_tech"] = Set(Classes.Result),                       // NOT prescription
+        // 29.1 — both spellings, identical field reach, for the rename window (design 45 §1).
         ["imaging_tech"] = Set(Classes.Result),                   // NOT prescription
+        ["radiology_tech"] = Set(Classes.Result),                 // NOT prescription
         ["pharmacist"] = Set(Classes.Prescription),               // NOT result
         ["finance"] = Set(Classes.Financials),                    // NOT diagnosis
         ["medical_approval"] = Set(Classes.Diagnosis, Classes.Clinical, Classes.Result, Classes.Prescription),

@@ -241,6 +241,15 @@ export const zInvestigationRow = z.object({
   resultSummary: z.string().optional(),
   restricted: z.boolean().optional(),
   sensitivityLevel: z.string().optional(),
+  /**
+   * 29.2 — Lab / Radiology / Procedure (design 45 §3). Lets the History tab be read by KIND of service
+   * rather than as one flat list.
+   *
+   * <p>Optional, and absence must read as "unknown kind", never as one of the real ones: a row whose type
+   * the upstream did not state must not appear in the Procedures pane, because that would tell a doctor a
+   * procedure was ordered when nothing said so.</p>
+   */
+  orderType: z.string().optional(),
   /** The encounter this order was raised on — lets one visit's orders be told from the member's whole
    *  history. An id only; it discloses no clinical content of its own. */
   encounterId: zId.optional(),

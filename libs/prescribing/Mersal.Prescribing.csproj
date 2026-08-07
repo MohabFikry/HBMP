@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Mersal.Prescribing</RootNamespace>
+    <AssemblyName>Mersal.Prescribing</AssemblyName>
+  </PropertyGroup>
+  <!--
+    29.5 — the chronic allocation. PURE ARITHMETIC, with no I/O and no dependencies at all.
+
+    It lives in its own library rather than inside pharmacy-service because three callers need the SAME
+    answer: the composer, which shows the doctor 34/33/33 BEFORE they submit; the write path, which stores
+    the windows; and the dispensing counter, which meters against them. Three implementations of one
+    division is three chances for the sum to stop equalling the total, and the drift would be discovered as
+    a beneficiary who was over-supplied.
+  -->
+  <ItemGroup>
+    <!-- The Tests directory is its own project; without this the library compiles the tests into itself. -->
+    <Compile Remove="Tests/**/*.cs" />
+  </ItemGroup>
+</Project>

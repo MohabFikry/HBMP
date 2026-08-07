@@ -47,7 +47,7 @@ public static class ExtendValidityEndpoints
             var artefact = order.OrderType switch
             {
                 OrderType.Lab => ValidityArtefact.LabOrder,
-                OrderType.Imaging => ValidityArtefact.ImagingOrder,
+                OrderType.Imaging or OrderType.Radiology => ValidityArtefact.ImagingOrder,  // 29.1 — both spellings
                 _ => ValidityArtefact.ProcedureOrder,
             };
 

@@ -1,3 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><RootNamespace>Mersal.Pharmacy.Domain</RootNamespace></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../libs/prescribing/Mersal.Prescribing.csproj" />
+  </ItemGroup>
 </Project>

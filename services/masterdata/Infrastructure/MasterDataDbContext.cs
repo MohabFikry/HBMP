@@ -18,6 +18,7 @@ public sealed class MasterDataDbContext(DbContextOptions<MasterDataDbContext> op
     public DbSet<DrugInteraction> DrugInteractions => Set<DrugInteraction>();
     public DbSet<Allergen> Allergens => Set<Allergen>();
     public DbSet<ExaminationType> ExaminationTypes => Set<ExaminationType>();   // 14.6
+    public DbSet<ProcedureType> ProcedureTypes => Set<ProcedureType>();         // 29.2
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -31,6 +32,16 @@ public sealed class MasterDataDbContext(DbContextOptions<MasterDataDbContext> op
 
         b.Entity<Drug>(e =>
         {
+            e.Property(x => x.PrescribingUnit).HasColumnName("prescribing_unit");        // 29.6
+            e.Property(x => x.PackSize).HasColumnName("pack_size");
+            e.Property(x => x.PackUnit).HasColumnName("pack_unit");
+            e.Property(x => x.IsPackSplittable).HasColumnName("is_pack_splittable");
+            e.Property(x => x.UnitDataIncomplete).HasColumnName("unit_data_incomplete");
+            e.Property(x => x.Availability).HasColumnName("availability");                  // 29.7
+            e.Property(x => x.IsLowestPrice).HasColumnName("is_lowest_price");
+            e.Property(x => x.PricePerUnit).HasColumnName("price_per_unit");
+            e.Property(x => x.LowestPriceGroupKey).HasColumnName("lowest_price_group_key");
+            e.Property(x => x.LowestPriceComputedAt).HasColumnName("lowest_price_computed_at");
             e.ToTable("drug");
             e.HasKey(x => x.DrugId);
             e.HasIndex(x => x.DrugCode).IsUnique();
@@ -155,6 +166,21 @@ public sealed class MasterDataDbContext(DbContextOptions<MasterDataDbContext> op
         {
             e.ToTable("allergen_cross_reactivity");
             e.HasKey(x => new { x.AllergenId, x.GroupCode });
+        });
+
+        b.Entity<ProcedureType>(e =>
+        {
+            e.ToTable("procedure_type");
+            e.HasKey(x => x.Code);
+            e.Property(x => x.NameEn).HasColumnName("name_en");
+            e.Property(x => x.NameAr).HasColumnName("name_ar");
+            e.Property(x => x.IsSessionBased).HasColumnName("is_session_based");
+            e.Property(x => x.DefaultSessions).HasColumnName("default_sessions");
+            e.Property(x => x.MaxSessions).HasColumnName("max_sessions");
+            e.Property(x => x.AllowedCptScopes).HasColumnName("allowed_cpt_scopes").HasColumnType("jsonb");
+            e.Property(x => x.IsActive).HasColumnName("is_active");
+            e.Property(x => x.SortOrder).HasColumnName("sort_order");
+            e.HasIndex(x => new { x.IsActive, x.SortOrder });
         });
 
         b.Entity<ExaminationType>(e =>

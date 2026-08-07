@@ -30,6 +30,24 @@ export const zPrescribableDrug = z.object({
   priceEgp: z.number().optional(),
   atcCode: z.string().optional(),
   hasIndicationData: z.boolean(),
+
+  // ---- 29.7 (design 45 §7) ------------------------------------------------------------------------------
+  /**
+   * Cheapest per PRESCRIBING UNIT within ingredient + strength + form. Derived server-side and never
+   * authored — the client only renders it.
+   */
+  isLowestPrice: z.boolean().optional(),
+  /** price ÷ pack size. Absent where pack size is unknown, and such a drug is never labelled: comparing
+   *  PACK prices is the error §7 exists to prevent. */
+  pricePerUnit: z.number().optional(),
+  /**
+   * Available / Unavailable / Unknown. THREE states, not a boolean.
+   *
+   * <p>`Unknown` is the default and renders NOTHING — no badge, no warning. A boolean defaulting to false
+   * would show the entire catalogue as out of stock on day one, and prescribers would learn to ignore the
+   * indicator before it ever carried real data.</p>
+   */
+  availability: z.enum(["Available", "Unavailable", "Unknown"]).optional(),
 });
 export type PrescribableDrug = z.infer<typeof zPrescribableDrug>;
 

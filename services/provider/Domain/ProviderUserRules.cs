@@ -25,7 +25,7 @@ public static class ProviderUserRules
 {
     /// <summary>Every role that may ever be attached to a provider-scoped account.</summary>
     public static readonly IReadOnlySet<string> ProviderScopedRoles =
-        new HashSet<string>(StringComparer.Ordinal) { "provider_admin", "lab_tech", "imaging_tech", "pharmacist" };
+        new HashSet<string>(StringComparer.Ordinal) { "provider_admin", "lab_tech", "imaging_tech", "radiology_tech", "pharmacist" };
 
     /// <summary>Clinical roles are never provisioned through the provider onboarding path.</summary>
     public static readonly IReadOnlySet<string> ClinicalRoles =

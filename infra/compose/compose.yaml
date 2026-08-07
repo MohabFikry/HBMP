@@ -531,7 +531,7 @@ services:
       rabbitmq: { condition: service_started }
     networks: [hbmp]
 
-  # --- orders-service (4.2/5): investigation orders + CPT/LOINC + lab/imaging fulfillment. ---
+  # --- orders-service (4.2/5): investigation orders + CPT/LOINC + lab/radiology fulfillment. ---
   orders-service:
     build: { context: ../.., dockerfile: services/orders/Dockerfile }
     <<: *restart

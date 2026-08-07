@@ -1718,3 +1718,192 @@ invariants:
     tests:
       - services/admin/Tests/MasterDataGovernanceTests.cs::Whoever_may_EDIT_master_data_may_also_READ_it
       - services/admin/Tests/MasterDataGovernanceTests.cs::Reading_master_data_does_NOT_grant_the_platform_admin_reads
+
+  # ============================================================================================================
+  # Phase 29 — encounter, OP procedures and chronic prescribing (design 45)
+  # ============================================================================================================
+
+  - id: INV-ALLOCATION-SUMS-TO-TOTAL
+    statement: >-
+      A chronic prescription's per-window allocation sums EXACTLY to the prescribed total. The total is
+      rounded ONCE, before the split; no window is ever rounded independently.
+    source: 45-encounter-and-prescription-adjustments.md §5, §8.5
+    severity: Critical
+    # Rounding per window lets the sum drift ABOVE the prescribed amount — 100 over three windows becomes
+    # 34+34+34 = 102 — which over-supplies the patient and over-consumes their benefit. It fails silently:
+    # every individual window looks like a sensible number and only the sum is wrong.
+    tests:
+      - Mersal.Prescribing.Tests.ChronicAllocationTests.The_allocation_always_sums_exactly_to_the_total
+      - Mersal.Prescribing.Tests.ChronicAllocationTests.The_allocation_never_rounds_per_window
+      - Mersal.Prescribing.Tests.ChronicAllocationTests.One_hundred_units_over_three_windows_is_thirty_four_thirty_three_thirty_three
+      - Mersal.Prescribing.Tests.ChronicAllocationTests.A_non_splittable_inhaler_allocates_whole_items_summing_to_the_rounded_total
+      - Mersal.Prescribing.Tests.WindowScheduleTests.The_schedule_allocates_exactly_what_the_split_allocated
+
+  - id: INV-MISSED-WINDOW-FORFEITED
+    statement: >-
+      A refill window that closes uncollected is forfeited and cannot be claimed later. Enforcement is by the
+      DATES at the counter, not by the sweeper having run — the sweeper only records the forfeiture.
+    source: 45-encounter-and-prescription-adjustments.md §5, §8.6
+    severity: Critical
+    # The counter enforces, the sweeper records. A stalled sweeper must delay a forfeiture, never refuse a
+    # patient — and never let a closed window be collected either.
+    tests:
+      - Mersal.Prescribing.Tests.RefillWindowTests.A_window_past_its_close_is_refused_by_the_COUNTER_even_if_the_sweeper_has_not_run
+      - Mersal.Prescribing.Tests.RefillWindowTests.A_missed_window_cannot_be_recovered_later
+      - Mersal.Prescribing.Tests.RefillWindowTests.A_stalled_sweeper_never_prevents_a_legitimate_collection
+      - Mersal.Prescribing.Tests.RefillWindowTests.Forfeiting_is_idempotent
+      - Mersal.Pharmacy.Tests.ChronicDispensingTests.A_missed_window_cannot_be_collected_and_does_not_block_the_next_one
+
+  - id: INV-BLOCKED-IS-NOT-MISSED
+    statement: >-
+      A window blocked by an eligibility failure is distinct from a missed one, carries a reason, does NOT
+      cancel the script, and resumes if eligibility is restored while the window is still open.
+    source: 45-encounter-and-prescription-adjustments.md §5, §8.6
+    severity: Critical
+    # One is the system stopping the patient; the other is the patient not coming. Only the second is the
+    # patient's doing, and only the first should reach a case worker's queue.
+    tests:
+      - Mersal.Prescribing.Tests.RefillWindowTests.Blocked_and_Missed_are_never_the_same_status
+      - Mersal.Prescribing.Tests.RefillWindowTests.A_blocked_window_is_refused_at_the_counter_but_resumes_when_eligibility_is_restored
+      - Mersal.Prescribing.Tests.RefillWindowTests.The_sweeper_never_forfeits_a_blocked_window
+      - Mersal.Pharmacy.Tests.ChronicDispensingTests.A_lapsed_member_is_BLOCKED_at_the_counter_and_the_script_is_not_cancelled
+      - Mersal.Pharmacy.Tests.ChronicDispensingTests.A_blocked_window_resumes_when_eligibility_is_restored
+
+  - id: INV-LIMITS-CONSUMED-PER-DISPENSE
+    statement: >-
+      Benefit limits move only on collection, per dispense, against ONE authorisation for the whole script.
+      Eligibility is re-validated at each dispense rather than taken from the authorisation.
+    source: 45-encounter-and-prescription-adjustments.md §5, §8.7
+    severity: Critical
+    # Releasing the script's total would consume three months of a benefit limit for one month of medicine,
+    # and an uncollected month would be charged for medicine nobody received.
+    tests:
+      - Mersal.Pharmacy.Tests.ChronicDispensingTests.Only_the_windows_remainder_is_dispensable_never_the_scripts_total
+      - Mersal.Pharmacy.Tests.ChronicDispensingTests.Eligibility_is_re_checked_at_the_counter_not_taken_from_the_authorisation
+
+  - id: INV-SERVICE-HISTORY-RESPECTS-SENSITIVITY-GATE
+    statement: >-
+      The per-line service-history endpoint is an INTERSECTION of the existing gates — treating relationship,
+      branch scope and the design-37 §6 sensitivity rule — never a union. A restricted result is returned as
+      existence metadata only, with no value anywhere in the payload, and every open is an audited PHI read.
+    source: 45-encounter-and-prescription-adjustments.md §4, §8.4; 37-branch-scoping-and-clinical-sensitivity.md §6
+    severity: Critical
+    # This aggregates a patient's whole history of one service onto one screen — the shape that becomes a
+    # side door. A history modal that revealed what the results inbox withholds would defeat the entire gate.
+    tests:
+      - Mersal.Orders.Tests.ServiceHistoryEndpointTests.A_restricted_result_is_existence_only_with_no_value_in_the_payload
+      - Mersal.Orders.Tests.ServiceHistoryEndpointTests.The_ordering_clinician_still_sees_their_own_restricted_result
+      - Mersal.Orders.Tests.ServiceHistoryEndpointTests.A_restricted_row_contributes_nothing_to_the_trend
+      - Mersal.Orders.Tests.ServiceHistoryEndpointTests.Every_open_is_an_audited_PHI_read_naming_the_patient_and_the_service
+
+  - id: INV-SERVICE-HISTORY-THREE-STATES
+    statement: >-
+      "Could not load" is never rendered as "no previous occurrences". The three states — has history, none,
+      unavailable — are distinguishable in words.
+    source: 45-encounter-and-prescription-adjustments.md §4
+    severity: High
+    # A clinician reading "no previous tests" when the service was simply unreachable will re-order
+    # unnecessarily, or miss a trend.
+    tests:
+      - apps/web/test/service-history-modal.test.tsx::says 'could not load' — NOT 'none' — when the read fails
+      - apps/web/test/service-history-modal.test.tsx::says 'no previous occurrences' for a real, successful empty answer
+      - Mersal.Orders.Tests.ServiceHistoryEndpointTests.No_previous_occurrences_is_an_empty_list_and_a_200_not_an_error
+
+  - id: INV-EM-CODE-CREATES-REFERRAL
+    statement: >-
+      An Evaluation & Management CPT code creates a REFERRAL, never a Procedure order. Every other remaining
+      CPT category is orderable, and a non-orderable code states WHY rather than being silently absent.
+    source: 45-encounter-and-prescription-adjustments.md §2, §8.3
+    severity: High
+    # A Procedure order is fulfilled, consumed and finished; a Referral is not done until a report comes back.
+    # Route E/M to a procedure and the loop is never opened, so it can never be found open — the classic
+    # outpatient patient-safety failure.
+    tests:
+      - Mersal.MasterData.Tests.CptRoutingTests.An_evaluation_and_management_code_creates_a_REFERRAL_not_a_procedure
+      - Mersal.MasterData.Tests.CptRoutingTests.The_medicine_and_em_overlap_in_the_published_ranges_resolves_to_referral
+      - Mersal.MasterData.Tests.CptRoutingTests.A_non_orderable_code_says_WHY_rather_than_simply_being_absent
+
+  - id: INV-EXTERNAL-PROVIDER-SEES-ONLY-ITS-OWN-ROWS
+    statement: >-
+      An external delivering provider sees only the orders routed to IT, bound at the row level by
+      assigned_provider_id. An unassigned order belongs to no external provider.
+    source: 45-encounter-and-prescription-adjustments.md §2b, §8.3b
+    severity: Critical
+    # Audit R3: DispensingGate asks the ownership question of the CALLER's own provider id, so the rule
+    # compares the caller against themselves and any authenticated pharmacist browses the whole network
+    # queue. Nothing failed — the queue simply contained other pharmacies' work, which looks like a busy queue.
+    tests:
+      - Mersal.Orders.Tests.ProviderOwnershipTests.Provider_A_cannot_see_provider_Bs_order
+      - Mersal.Orders.Tests.ProviderOwnershipTests.An_unassigned_order_belongs_to_no_external_provider
+      - Mersal.Orders.Tests.ProviderOwnershipTests.Two_empty_ids_do_not_match_each_other
+      - Mersal.Orders.Tests.ProcedureProviderEndpointTests.Provider_A_cannot_see_provider_Bs_orders_in_the_queue
+      - Mersal.Orders.Tests.ProcedureProviderEndpointTests.Provider_A_cannot_record_a_session_against_provider_Bs_order
+
+  - id: INV-SESSION-REPLAY-BURNS-ONE-VISIT
+    statement: >-
+      Each delivered session carries its own idempotency key. A replayed "record session" consumes exactly
+      one of the beneficiary's approved visits, and sessions flow from the APPROVED scope, never the requested.
+    source: 45-encounter-and-prescription-adjustments.md §2b, §2
+    severity: Critical
+    # A double-tapped button must not burn two of a beneficiary's six approved visits. Reading the requested
+    # count instead of the approved one over-supplies by the difference, silently — ten sessions delivered
+    # against a six-session approval reads as a completed course from both ends.
+    tests:
+      - Mersal.Orders.Tests.ProcedureProviderEndpointTests.A_replayed_session_does_not_burn_two_of_the_beneficiarys_visits
+      - Mersal.Orders.Tests.ProcedureSessionsTests.A_partial_approval_of_ten_to_six_makes_six_deliverable
+      - Mersal.Orders.Tests.ProcedureSessionsTests.An_undecided_order_delivers_nothing_rather_than_what_was_requested
+      - Mersal.MasterData.Tests.ProcedureTypeRulesTests.A_partial_approval_of_ten_to_six_yields_six_deliverable_sessions
+
+  - id: INV-MISSING-UNIT-DATA-IS-NOTCHECKED
+    statement: >-
+      Where the drug master lacks the pack data a quantity calculation needs, the result is NotChecked NAMING
+      the missing field — never a guessed quantity, and never zero.
+    source: 45-encounter-and-prescription-adjustments.md §6, §8.8
+    severity: Critical
+    # A silently wrong quantity is a dispensing error. Assuming a pack is splittable is the dangerous default:
+    # it permits a fractional inhaler.
+    tests:
+      - Mersal.Prescribing.Tests.ChronicAllocationTests.Missing_pack_data_on_a_non_splittable_form_yields_NotChecked_naming_the_field
+      - Mersal.Prescribing.Tests.ChronicAllocationTests.Unknown_splittability_yields_NotChecked_rather_than_assuming_splittable
+
+  - id: INV-PROCEDURE-TYPE-MATCHES-CODE
+    statement: >-
+      A procedure type must accept the CPT section of the code it accompanies, validated on the WRITE path
+      and not only in the composer. Sessions follow the type's is_session_based FLAG, never its name.
+    source: 45-encounter-and-prescription-adjustments.md §2
+    severity: High
+    # "Left unvalidated the field becomes decorative, and any reporting built on it is quietly wrong" — which
+    # is worse than having no field, because the reports still render.
+    tests:
+      - Mersal.MasterData.Tests.ProcedureTypeRulesTests.A_physiotherapy_type_on_a_minor_surgery_code_is_refused
+      - Mersal.MasterData.Tests.ProcedureTypeRulesTests.Sessions_follow_the_flag_not_the_name
+      - Mersal.Orders.Tests.ProcedureOrderEndpointTests.A_physiotherapy_type_on_a_minor_surgery_code_is_refused_on_the_WRITE_path
+
+  - id: INV-AUDIT-CHAIN-NEVER-REWRITTEN
+    statement: >-
+      Historical audit rows keep the identifiers they were written with, forever. A rename is resolved for
+      READERS through a permanent display alias; the stored bytes and their record_hash are never altered.
+    source: 45-encounter-and-prescription-adjustments.md §1 (c), §8.1
+    severity: Critical
+    # The hash chain is the single property that makes the audit trail evidence rather than a log. An UPDATE
+    # to a chained field is exactly the tampering the chain exists to detect — the cure would be
+    # indistinguishable from the disease.
+    tests:
+      - Mersal.Audit.Tests.LegacyIdentifierDisplayTests.Displaying_a_renamed_identifier_does_not_change_the_record_hash
+      - Mersal.Audit.Tests.LegacyIdentifierDisplayTests.Rewriting_the_stored_role_would_break_the_chain
+      - Mersal.Audit.Tests.LegacyIdentifierDisplayTests.A_retired_identifier_reads_under_todays_name
+
+  - id: INV-RENAME-DUAL-ACCEPT-WINDOW
+    statement: >-
+      During a role rename's dual-accept window both spellings resolve to the same authority, in BOTH
+      directions, and a token minted before the switch still authorises with its scopes unchanged.
+    source: 45-encounter-and-prescription-adjustments.md §1, §8.1; docs/runbooks/radiology-rename.md
+    severity: Critical
+    # Two artefacts outlive the deploy: a 300 s access token naming the old role, and — on every rollout —
+    # an independently-deployed service that has not been updated yet.
+    tests:
+      - Mersal.Auth.Tests.LegacyRoleAliasTests.A_token_minted_before_the_switch_still_authorises_under_the_new_name
+      - Mersal.Auth.Tests.LegacyRoleAliasTests.A_token_minted_after_the_switch_still_authorises_at_a_service_not_yet_redeployed
+      - Mersal.Auth.Tests.LegacyRoleAliasTests.Aliasing_grants_no_role_that_was_not_already_on_the_token
+      - Mersal.Auth.Tests.TokenContractByteCompatTests.A_token_minted_before_the_radiology_switch_still_authorises_a_radiology_tech
+      - Mersal.Reporting.Tests.ProjectionFeedTests.Order_type_maps_to_modality_under_both_spellings

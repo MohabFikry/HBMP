@@ -41,6 +41,16 @@ services:
           - /api/v1/allergens
           - /api/v1/allergies
           - /api/v1/examination-types
+          # 29.2 — OP Procedures (design 45 §2). `orderable-services` answers "what will ordering this code
+          # actually CREATE — a Procedure order or a Referral?"; `procedure-types` is the session-based-kind
+          # master data the composer reads its sessions field from.
+          - /api/v1/orderable-services
+          - /api/v1/procedure-types
+          # 28 — these two were served but never routed, so every caller outside the compose network got a 404
+          # from Kong for endpoints the service had been answering all along. Found by the route-coverage guard
+          # while adding the routes above; fixed here rather than left for the next person to rediscover.
+          - /api/v1/contraindications
+          - /api/v1/dosing-rules
           - /api/v1/search
         strip_path: false
 
@@ -212,7 +222,7 @@ services:
           - /api/v1/network-tiers
         strip_path: false
 
-  # --- orders-service: investigation orders + lab/imaging fulfillment + report-access ---
+  # --- orders-service: investigation orders + lab/radiology fulfillment + report-access ---
   - name: orders-service
     url: http://orders-service:8080
     plugins: *edge_jwt
@@ -220,6 +230,11 @@ services:
       - name: orders-routes
         paths:
           - /api/v1/investigation-orders
+          # 29.2b — the external delivering provider's portal (design 45 §2b). Same service, same edge JWT
+          # plugin: an external centre reaches it with a `procedure_provider` token and sees only the rows
+          # routed to it. The separation that matters is `procedure:read`/`procedure:consume` vs
+          # `orders:consume`, which is a SCOPE boundary, not a routing one.
+          - /api/v1/procedure-orders
           - /api/v1/report-access-requests
           - /api/v1/report-access-grants
           - /api/v1/report-access

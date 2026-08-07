@@ -157,10 +157,13 @@ public class ScopeIntegrityTests
         foreach (var (file, body) in Statements("INSERT INTO identity.scope"))
             if (ScopesIn(body).Count == 0) unreadable.Add($"{file} — INSERT INTO identity.scope yielded no scope");
 
-        // SeedRoles() as the "already granted" set: this test asks only whether a statement is READABLE, and
-        // the derive-from-existing-grants shape yields nothing against an empty set for a legitimate reason.
+        // The REAL accumulated map as the "already granted" set: this test asks only whether a statement is
+        // READABLE, and both derive-from-existing-grants shapes — (g) fan-out and (h) role copy — yield
+        // nothing against an empty one for a legitimate reason. 29.1 changed this from SeedRoles(): shape (h)
+        // copies a source role's SCOPES, so a set of role names alone reads a rename as unreadable.
+        var accumulated = RoleScopes();
         foreach (var (file, body) in Statements("INSERT INTO identity.role_scope"))
-            if (!IsRedistribution(body) && GrantsIn(body, SeedRoles()).Count == 0)
+            if (!IsRedistribution(body) && GrantsIn(body, accumulated).Count == 0)
                 unreadable.Add($"{file} — INSERT INTO identity.role_scope yielded no grant");
 
         unreadable.Should().BeEmpty(
@@ -178,7 +181,7 @@ public class ScopeIntegrityTests
         // role that ALREADY holds something, so reading it faithfully means knowing what has been granted by
         // the time that migration runs.
         foreach (var (_, body) in Statements("INSERT INTO identity.role_scope"))
-            foreach (var (role, scope) in GrantsIn(body, map.Keys.ToHashSet(StringComparer.Ordinal)))
+            foreach (var (role, scope) in GrantsIn(body, map))
             {
                 if (!map.TryGetValue(role, out var set)) map[role] = set = new HashSet<string>(StringComparer.Ordinal);
                 set.Add(scope);
@@ -201,12 +204,45 @@ public class ScopeIntegrityTests
     /// it found eight migrations this reader was blind to on the day it was written.
     /// </para>
     /// </remarks>
-    /// <param name="rolesGrantedSoFar">
-    /// Roles holding at least one scope by the time this statement runs — the population shape (g) grants to.
+    /// <param name="grantedSoFar">
+    /// Every (role, scope) granted by the time this statement runs. Its KEYS are the population shape (g)
+    /// grants to; its VALUES are what shape (h) copies from.
     /// </param>
-    private static HashSet<(string Role, string Scope)> GrantsIn(string body, IReadOnlySet<string> rolesGrantedSoFar)
+    private static HashSet<(string Role, string Scope)> GrantsIn(
+        string body, IReadOnlyDictionary<string, HashSet<string>> grantedSoFar)
     {
+        var rolesGrantedSoFar = grantedSoFar.Keys.ToHashSet(StringComparer.Ordinal);
         var grants = new HashSet<(string, string)>();
+
+        // (h) 29.1 — ROLE COPY, the shape a RENAME has:
+        //     `SELECT rs.tenant_id, '<new_role>', rs.scope_name FROM identity.role_scope rs
+        //      WHERE rs.role_name = '<old_role>'`
+        //
+        // The new role inherits EVERY scope the old one holds, whatever that turns out to be. It is checked
+        // before IsRedistribution because it names no scope literal — a rename cannot, since enumerating the
+        // scopes is precisely what it must not do. 0031 says why: `imaging_tech` accumulated six scopes across
+        // five migrations, and a hand-written list in the copy would freeze today's set and silently omit
+        // tomorrow's.
+        //
+        // Read as "whatever the source role holds by this point in apply order", which is exactly what the
+        // migration does at runtime. Without this shape the copy reads as ZERO grants and the new role looks
+        // unreachable to Every_role_named_on_a_rule_can_actually_hold_one_of_the_scopes_it_requires — which is
+        // how this shape was found.
+        var roleCopy = Regex.Match(
+            body,
+            @"SELECT\s+\w+\.tenant_id,\s*'(?<target>[a-z_]+)',\s*\w+\.scope_name\s+FROM\s+identity\.role_scope"
+            + @"\s+\w+\s+WHERE\s+\w+\.role_name\s*=\s*'(?<source>[a-z_]+)'",
+            RegexOptions.Singleline);
+        if (roleCopy.Success)
+        {
+            var source = roleCopy.Groups["source"].Value;
+            var target = roleCopy.Groups["target"].Value;
+            if (grantedSoFar.TryGetValue(source, out var sourceScopes))
+            {
+                foreach (var scope in sourceScopes) grants.Add((target, scope));
+            }
+            return grants;
+        }
 
         if (IsRedistribution(body)) return grants;
 
@@ -227,6 +263,22 @@ public class ScopeIntegrityTests
             RegexOptions.Singleline))
             foreach (Match r in Regex.Matches(m.Groups["roles"].Value, @"\('([a-z_]+)'\)"))
                 grants.Add((r.Groups[1].Value, m.Groups["scope"].Value));
+
+        // (i) 29.2b — ONE role literal, MANY scopes from a VALUES list, with a TENANT FAN-OUT in front:
+        //     `SELECT DISTINCT rs.tenant_id, '<role>', s.scope
+        //      FROM (VALUES ('s1'),('s2')) AS s(scope) CROSS JOIN (SELECT DISTINCT tenant_id FROM …) rs`
+        //
+        // Shape (c) is the same idea without the tenant fan-out and cannot match, because the projection now
+        // leads with `rs.tenant_id`; shape (e) is the mirror image (one SCOPE literal, many roles). role_scope
+        // is tenant-scoped and the platform-default row does not stand in for a tenant with its own grants, so
+        // every new role has to fan out this way — which makes this the shape the NEXT new role will use too.
+        foreach (Match m in Regex.Matches(
+            body,
+            @"SELECT\s+(?:DISTINCT\s+)?\w+\.tenant_id,\s*'(?<role>[a-z_]+)',\s*\w+\.scope\b[^;]*?"
+            + @"\(VALUES(?<scopes>.*?)\)\s*AS \w+\(scope\)",
+            RegexOptions.Singleline))
+            foreach (Match sc in Regex.Matches(m.Groups["scopes"].Value, @"\('([a-z:_\-]+)'\)"))
+                grants.Add((m.Groups["role"].Value, sc.Groups[1].Value));
 
         // (c) `SELECT '<role>', scope FROM (VALUES ('a'),('b')) AS s(scope)` — one role, many scopes.
         foreach (Match m in Regex.Matches(body, @"SELECT '([a-z_]+)',\s*scope\s*FROM \(VALUES(.*?)\) AS \w+\(scope\)", RegexOptions.Singleline))

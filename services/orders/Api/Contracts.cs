@@ -7,7 +7,13 @@ namespace Mersal.Orders.Api;
 public sealed record CreateOrderRequest(
     Guid BeneficiaryId, Guid EncounterId, OrderType OrderType, DateTimeOffset? ExpiresAt, List<CreateOrderLine> Lines);
 
-public sealed record CreateOrderLine(CodeSystem CodeSystem, string Code, string? Description, decimal QuantityOrdered, Guid? ExaminationTypeId = null);
+/// <summary>A line on a new order. <paramref name="QuantityOrdered"/> IS the session count for a
+/// session-based OP procedure — sessions are the line's quantity, never a parallel counter (design 45 §2).</summary>
+/// <param name="ProcedureTypeCode">29.2 — the masterdata.procedure_type kind, on Procedure orders only.
+/// Validated against the code's CPT section on this write path, not merely in the composer.</param>
+public sealed record CreateOrderLine(
+    CodeSystem CodeSystem, string Code, string? Description, decimal QuantityOrdered,
+    Guid? ExaminationTypeId = null, string? ProcedureTypeCode = null);
 
 public sealed record CancelOrderRequest(string? Reason);
 

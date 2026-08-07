@@ -2,6 +2,17 @@
 
 > Back to [00-README-INDEX.md](00-README-INDEX.md) · Builds on [43](43-approval-engine-and-prescribing-support.md) · [44](44-clinical-validation-hardening.md)
 > Build prompt: [claude-code-prompts/phase-29-encounter-and-chronic-prescribing.md](claude-code-prompts/phase-29-encounter-and-chronic-prescribing.md)
+>
+> **BUILT — phase 29.** Decisions: [ADR-0038](../docs/adr/0038-radiology-rename-op-procedures-and-chronic-prescribing.md) ·
+> Rename runbook: [radiology-rename.md](../docs/runbooks/radiology-rename.md) ·
+> Window model: [chronic-refill-windows](../docs/superpowers/specs/2026-08-07-chronic-refill-windows-design.md) ·
+> Workbook mapping: [29-6 pack columns](../docs/decisions/29-6-drug-workbook-pack-column-mapping.md)
+>
+> Two corrections were made against this document during the build, both reported rather than silently
+> resolved: **§2's routing premise** — `cpt_code.category` holds the CPT taxonomy (Category I/II/III/PLA/MAAA),
+> not the section, so it cannot drive routing — and **§2's overlapping ranges**, where Medicine (90281–99607)
+> and E/M (99202–99499) intersect, making every office-visit code both a Procedure order and a Referral when
+> read literally. See ADR-0038 §2.
 
 Seven adjustments across the encounter, the drug master and the prescription model. Two are cosmetic, five are structural. The chronic-prescription model (§5) is the one that touches money, benefit limits and dispensing, and its four open questions are now decided.
 

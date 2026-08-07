@@ -428,7 +428,9 @@ public static class ProfilePolicies
             ["doctor"] = Doctor(),
             ["nurse"] = Clinician(),
             ["lab_tech"] = Diagnostics(),
+            // 29.1 — both spellings map to the SAME projection for the rename window (design 45 §1).
             ["imaging_tech"] = Diagnostics(),
+            ["radiology_tech"] = Diagnostics(),
             ["pharmacist"] = Pharmacy(),
             ["pharmacy_supervisor"] = Pharmacy(),
             ["medical_approval"] = MedicalApproval(),

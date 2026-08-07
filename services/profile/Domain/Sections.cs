@@ -204,6 +204,9 @@ public sealed record EncountersSection(IReadOnlyList<EncounterRow> Items)
 public sealed record InvestigationRow(
     string OrderRef, Guid LineId, string Category, DateTimeOffset OrderedOn, string Status,
     string? ProviderName, string? ResultSummary, bool Restricted, string? SensitivityLevel,
+    /// <summary>29.2 — Lab / Radiology / Procedure, so the history can be read by kind (design 45 §3).
+    /// A routing label, not clinical content; the section, its gate and its projection are unchanged.</summary>
+    string OrderType,
     /// <summary>The encounter this order was raised on, so one visit's orders can be told from the rest of
     /// the member's history. An id only — it carries no clinical content.</summary>
     Guid? EncounterId = null);

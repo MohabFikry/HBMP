@@ -35,13 +35,17 @@ export type Permission =
   | "branch.roster"
   | "branch.licences"
   | "branch.inventory"
-  // Lab / imaging
+  // Lab / radiology
   | "lab.queue"
   | "lab.consume"
   | "lab.result.upload"
-  | "imaging.queue"
-  | "imaging.consume"
-  | "imaging.result.upload"
+  | "radiology.queue"
+  | "radiology.consume"
+  | "radiology.result.upload"
+  // 29.2b — the EXTERNAL delivering provider (physiotherapy centres, dialysis units, outside clinics).
+  | "procedure.queue"
+  | "procedure.deliver"
+  | "procedure.report"
   // Pharmacy
   | "pharmacy.queue"
   | "pharmacy.dispense"
@@ -137,7 +141,8 @@ export type Role =
   | "doctor"
   | "nurse"
   | "lab"
-  | "imaging"
+  | "radiology"
+  | "procedure_provider"
   | "pharmacy"
   | "medical_approval"
   | "beneficiary_mgmt"
@@ -207,7 +212,10 @@ export const rolePermissions: Record<Role, Permission[]> = {
   ],
   nurse: ["emr.read", "vitals.write", "results.inbox", "appointments.read"],
   lab: ["lab.queue", "lab.consume", "lab.result.upload"],
-  imaging: ["imaging.queue", "imaging.consume", "imaging.result.upload"],
+  radiology: ["radiology.queue", "radiology.consume", "radiology.result.upload"],
+  // 29.2b (design 45 §2b) — deliberately NARROW. A delivering centre records sessions and reports back; it
+  // holds no result-upload, no prescription and no order-composition permission at all.
+  procedure_provider: ["procedure.queue", "procedure.deliver", "procedure.report"],
   pharmacy: ["pharmacy.queue", "pharmacy.dispense", "pharmacy.substitution"],
   medical_approval: ["approvals.worklist", "approvals.register", "approvals.decide", "approvals.manual", "approvals.emergency", "approvals.sla"],
   // Beneficiary management owns the MEMBERSHIP book: who is enrolled, in which group, on which plan, and

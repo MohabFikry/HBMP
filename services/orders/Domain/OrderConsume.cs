@@ -1,8 +1,14 @@
 namespace Mersal.Orders.Domain;
 
 /// <summary>Which order types a fulfilling provider role may act on (min-necessary capability, 11-permission-matrix):
-/// a lab tech fulfils Lab orders, an imaging tech fulfils Imaging orders. Anything else is out of that role's lane
-/// and must be refused — the queue never surfaces it and consume rejects it with an audited 403.</summary>
+/// a lab tech fulfils Lab orders, a radiology tech fulfils Radiology orders. Anything else is out of that role's lane
+/// and must be refused — the queue never surfaces it and consume rejects it with an audited 403.
+///
+/// <para>29.1 — both spellings of the radiology role and both spellings of the order type resolve here for the
+/// duration of the rename window (design 45 §1). A principal reaching this point has already been expanded by
+/// <c>LegacyRoleAliases</c>, so in practice only the order-type side matters; it is written explicitly anyway,
+/// because a capability map that silently answers "no" is indistinguishable from a correct refusal, and this
+/// one decides whether a technician can work.</para></summary>
 public static class ProviderCapability
 {
     public static IReadOnlySet<OrderType> ForRoles(IEnumerable<string> roles)
@@ -11,12 +17,14 @@ public static class ProviderCapability
         foreach (var r in roles)
         {
             if (string.Equals(r, "lab_tech", StringComparison.Ordinal)) caps.Add(OrderType.Lab);
-            else if (string.Equals(r, "imaging_tech", StringComparison.Ordinal)) caps.Add(OrderType.Imaging);
+            else if (string.Equals(r, "radiology_tech", StringComparison.Ordinal)
+                  || string.Equals(r, "imaging_tech", StringComparison.Ordinal)) caps.Add(OrderType.Radiology);
         }
         return caps;
     }
 
-    public static bool CanFulfil(IEnumerable<string> roles, OrderType type) => ForRoles(roles).Contains(type);
+    public static bool CanFulfil(IEnumerable<string> roles, OrderType type) =>
+        ForRoles(roles).Contains(OrderTypes.Canonical(type));
 }
 
 /// <summary>Why a consume request was refused (mapped to problem+json at the edge). <c>None</c> means it passed

@@ -84,6 +84,34 @@ public static class CptSections
     public static bool IsKnown(string section) => Bodies.ContainsKey(section);
 
     /// <summary>
+    /// 29.2 — the section a single code belongs to, the inverse of <see cref="PatternFor"/>.
+    ///
+    /// <para>Needed because <see cref="CptRouting"/> asks "what does ordering THIS code create", which is a
+    /// question about one code rather than a filter over many. Evaluated in a fixed order with
+    /// <see cref="EvaluationAndManagement"/> and <see cref="Pathology"/> BEFORE the ranges that would
+    /// otherwise swallow them: E/M's 99202–99499 sits inside Medicine's 99xxx block, and pathology's 88xxx
+    /// inside laboratory's 8xxxx. The <see cref="Bodies"/> patterns are mutually exclusive by construction, so
+    /// the order is defensive rather than load-bearing — but the two carve-outs are exactly where a future
+    /// edit to one pattern would silently reroute the other, and rerouting E/M turns a referral into a
+    /// procedure order that no one ever closes the loop on.</para>
+    ///
+    /// <para>An unrecognised or absent code returns <see cref="Other"/> — never a clinical section. Guessing
+    /// a section for a code the catalogue does not know would put it in a queue on the strength of its digits.</para>
+    /// </summary>
+    public static string SectionOf(string? code)
+    {
+        var c = code?.Trim();
+        if (string.IsNullOrEmpty(c)) return Other;
+
+        foreach (var section in new[]
+                 { EvaluationAndManagement, Pathology, Anesthesia, Surgery, Imaging, Laboratory, Medicine, Other })
+        {
+            if (System.Text.RegularExpressions.Regex.IsMatch(c, $"^({Bodies[section]})$")) return section;
+        }
+        return Other;
+    }
+
+    /// <summary>
     /// One anchored regex matching the codes of every named section, or <c>null</c> when none is named or
     /// none is recognised — which the caller must read as "do not filter", never as "match nothing".
     /// </summary>

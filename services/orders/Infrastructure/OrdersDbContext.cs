@@ -16,6 +16,41 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
     public DbSet<ReportAccessRequest> ReportAccessRequests => Set<ReportAccessRequest>();   // 14.7
     public DbSet<ReportAccessGrant> ReportAccessGrants => Set<ReportAccessGrant>();          // 14.7
 
+    /// <summary>
+    /// 29.2 — a line's <c>RequestedQuantity</c> defaults to what was ordered.
+    ///
+    /// <para>Not a fudge to satisfy <c>ck_order_line_ordered_within_requested</c>, but the DEFINITION: for a
+    /// line created without a distinct approval step, what was asked for and what may be delivered are the
+    /// same number. The two only diverge when an approval NARROWS the entitlement
+    /// (<c>ProcedureSessions.ApplyApproval</c>), and that is an explicit act on an existing row.</para>
+    ///
+    /// <para>Applied here, once, rather than at each writer, because the alternative is a required field that
+    /// every present and future call site must remember — and the failure mode when one forgets is a CHECK
+    /// violation at save time, i.e. an order a doctor cannot place. A default that is correct by definition
+    /// belongs at the choke point; a default that is a guess would not belong anywhere.</para>
+    /// </summary>
+    private void DefaultRequestedQuantities()
+    {
+        foreach (var entry in ChangeTracker.Entries<OrderLine>())
+        {
+            if (entry.State is EntityState.Added && entry.Entity.RequestedQuantity <= 0)
+                entry.Entity.RequestedQuantity = entry.Entity.QuantityOrdered;
+        }
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        DefaultRequestedQuantities();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        DefaultRequestedQuantities();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.AddOutbox("orders");
@@ -30,6 +65,13 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
             e.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
             e.Property(x => x.OrderingBranchId).HasColumnName("ordering_branch_id");   // phase 14.4
             e.Property(x => x.SensitivityLevel).HasConversion<string>().HasColumnName("sensitivity_level");   // phase 14.6
+            e.Property(x => x.AssignedProviderId).HasColumnName("assigned_provider_id");        // 29.2b
+            e.Property(x => x.SharedClinicalContext).HasColumnName("shared_clinical_context");  // 29.2b
+            e.Property(x => x.SharedContextBy).HasColumnName("shared_context_by");
+            e.Property(x => x.SharedContextAt).HasColumnName("shared_context_at");
+            e.Property(x => x.CompletionReport).HasColumnName("completion_report");            // 29.2b
+            e.Property(x => x.CompletionReportedBy).HasColumnName("completion_reported_by");
+            e.Property(x => x.CompletionReportedAt).HasColumnName("completion_reported_at");
             e.HasIndex(x => x.OrderNo).IsUnique();
             e.HasIndex(x => new { x.BeneficiaryId, x.Status });
             e.HasIndex(x => x.OrderingBranchId);
@@ -48,6 +90,8 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
             e.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
             e.Property(x => x.ExaminationTypeId).HasColumnName("examination_type_id");   // phase 14.6
             e.Property(x => x.SensitivityLevel).HasConversion<string>().HasColumnName("sensitivity_level");   // phase 14.6
+            e.Property(x => x.ProcedureTypeCode).HasColumnName("procedure_type_code");   // 29.2
+            e.Property(x => x.RequestedQuantity).HasColumnName("requested_quantity");    // 29.2
             e.Ignore(x => x.QuantityRemaining);
             e.HasIndex(x => x.OrderId);
         });

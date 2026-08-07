@@ -61,17 +61,17 @@ public static class InteropPolicies
         // Patient (beneficiary demographics/identifiers) — the roles that look a beneficiary up natively. Finance
         // is intentionally EXCLUDED (it reaches financial context via Coverage, not full demographics).
         Read(Patient, "reception", "doctor", "nurse", "case_manager", "call_center",
-                      "pharmacist", "lab_tech", "imaging_tech", "medical_approval", "medical_director"),
+                      "pharmacist", "lab_tech", "imaging_tech", "radiology_tech", "medical_approval", "medical_director"),
         // Coverage (policy/coverage/limits — financial context). Finance + eligibility/coordination roles.
         Read(Coverage, "reception", "finance", "case_manager", "call_center", "claims_officer", "medical_director"),
         // ServiceRequest (investigation orders / referrals) — ordering + fulfilling roles.
-        Read(ServiceRequest, "doctor", "nurse", "lab_tech", "imaging_tech", "case_manager"),
+        Read(ServiceRequest, "doctor", "nurse", "lab_tech", "imaging_tech", "radiology_tech", "case_manager"),
         // MedicationRequest (prescriptions) — prescriber + dispenser.
         Read(MedicationRequest, "doctor", "nurse", "pharmacist"),
         // DiagnosticReport (results) — clinician + the fulfilling lab/imaging.
-        Read(DiagnosticReport, "doctor", "lab_tech", "imaging_tech"),
+        Read(DiagnosticReport, "doctor", "lab_tech", "imaging_tech", "radiology_tech"),
         // Observation (vitals + result values) — clinical + fulfilling roles.
-        Read(Observation, "doctor", "nurse", "lab_tech", "imaging_tech"),
+        Read(Observation, "doctor", "nurse", "lab_tech", "imaging_tech", "radiology_tech"),
         // Encounter — clinical + coordination.
         Read(Encounter, "doctor", "nurse", "case_manager"),
         // Condition (DIAGNOSIS) — clinical + approval oversight ONLY. Finance/Reception/Pharmacy/Lab are absent

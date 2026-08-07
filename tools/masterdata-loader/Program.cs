@@ -120,6 +120,8 @@ if (!dryRun)
     await DbUpsert.UpsertCptAsync(db, cpt, cptReport, default);
     await DbUpsert.UpsertAtcAsync(db, atc, atcReport, default);      // parents-before-children, before drugs
     await DbUpsert.UpsertDrugsAsync(db, drugs, drugReport, default);
+    // 29.7 — DERIVED, never authored: recomputed on every load, right after the prices land.
+    await DbUpsert.RecomputeLowestPriceAsync(db, DateTimeOffset.UtcNow, drugReport, default);
     // A drug whose uuid was ADOPTED from an earlier load keeps its own id, so the links — built against the
     // id derived from the source row — have to be re-pointed at what was actually persisted. Same step the
     // indications take below, and for the same reason: the foreign key is real.
@@ -160,6 +162,45 @@ Directory.CreateDirectory(reportDir);
 var reportPath = Path.Combine(reportDir, $"load-report-{release}.txt");
 await File.WriteAllLinesAsync(reportPath, reports.Select(r => r.ToString()));
 Console.WriteLine($"\nreport written: {reportPath}");
+
+// --- 29.6: pack-data coverage (design 45 §6) -----------------------------------------------------------
+// "Rows missing a required field set unit_data_incomplete and are LISTED in the load report — not silently
+// defaulted." The counts are the report; the point of printing them is that a drop in coverage after a
+// workbook refresh is visible rather than discovered as a NotChecked at a dispensing counter.
+{
+    var withUnit = drugs.Count(d => !string.IsNullOrWhiteSpace(d.PrescribingUnit));
+    var withPack = drugs.Count(d => d.PackSize is > 0);
+    var withSplit = drugs.Count(d => d.IsPackSplittable is not null);
+    var complete = drugs.Count(d => !d.UnitDataIncomplete);
+    var total = drugs.Count;
+    string Pct(int n) => total == 0 ? "n/a" : $"{100.0 * n / total:F1}%";
+
+    Console.WriteLine();
+    Console.WriteLine("=== 29.6 pack-data coverage (design 45 §6) ===");
+    Console.WriteLine($"  prescribing_unit    {withUnit,7:N0} / {total:N0}  ({Pct(withUnit)})");
+    Console.WriteLine($"  pack_size           {withPack,7:N0} / {total:N0}  ({Pct(withPack)})");
+    Console.WriteLine($"  is_pack_splittable  {withSplit,7:N0} / {total:N0}  ({Pct(withSplit)})");
+    Console.WriteLine($"  ALL THREE (usable)  {complete,7:N0} / {total:N0}  ({Pct(complete)})");
+    Console.WriteLine($"  unit_data_incomplete{total - complete,7:N0} — these report NotChecked NAMING the missing field,");
+    Console.WriteLine( "                               never a guessed quantity (invariant 8).");
+}
+
+// --- 29.2: CPT routing reconciliation (design 45 §2) ---------------------------------------------------
+// "The routing map must be built from the LOADED VALUES and reconciled against the ranges above; where they
+// disagree the range wins and the discrepancy is REPORTED rather than silently resolved."
+//
+// Emitted with the load rather than as a one-off script, because the thing it reconciles — which codes exist
+// and what category they carry — changes every time the catalogue is reloaded. A reconciliation run once at
+// design time answers for a catalogue that no longer exists.
+{
+    var routingReport = CptRoutingReconciliation.Build(cpt.Select(c => (c.Code, c.Category)));
+    Console.WriteLine();
+    Console.WriteLine(CptRoutingReconciliation.Format(routingReport));
+
+    var routingPath = Path.Combine(reportDir, $"cpt-routing-reconciliation-{release}.txt");
+    await File.WriteAllTextAsync(routingPath, CptRoutingReconciliation.Format(routingReport));
+    Console.WriteLine($"routing reconciliation written: {routingPath}");
+}
 
 // --- Audit the load run (source files + checksums + counts + actor) via libs/audit-client ---
 var outbox = new InMemoryAuditOutbox();

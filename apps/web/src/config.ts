@@ -105,6 +105,11 @@ export const OIDC = {
     "masterdata:read " +
     "note:read note:write notification:read orders:consume orders:read " +
     "orders:write patient:read patient:write pharmacy:dispense pharmacy:read policy:admin policy:read " +
+    // 29.2b — the external delivering provider (design 45 §2b). DISTINCT from orders:consume on purpose:
+    // granting a physiotherapy centre orders:consume would leave a domain rule inside one service as the only
+    // thing between it and the whole investigation queue. Requested here for everyone; only
+    // procedure_provider is granted it, so asking is not receiving.
+    "procedure:consume procedure:read " +
     "policy:supervise policy:write " +
     // 14.5 sized this scope to the need rather than granting reception the whole provider directory: the
     // booking screen reads specialty and doctor from provider-service under the CALLER's token. It was
@@ -190,8 +195,23 @@ const ROLE_MAP: Array<[string, Role]> = [
   ["doctor", "doctor"],
   ["nurse", "nurse"],
   ["lab_tech", "lab"],
-  ["imaging_tech", "imaging"],
+  // 29.1 (design 45 §1) — BOTH spellings map to the radiology portal for the dual-accept window.
+  //
+  // This is the SPA's own dual-accept and it cannot be inherited from the server: libs/auth's
+  // LegacyRoleAliases expands roles when a SERVICE parses a token, but the SPA reads the raw `roles` claim
+  // out of the token itself. So a technician who was signed in across the deploy holds a token saying
+  // `imaging_tech`, and without this line roleFromClaimRoles finds no match, fail-closes to null, and shows
+  // them "No portal assigned" — a correct login and a complete portal, presented as an account with no role.
+  // That exact failure is documented twenty lines above for `branch_coordinator`; this is the same bug, and
+  // the reason the rename ships with a window rather than a find-and-replace.
+  //
+  // `imaging_tech` goes at the CONTRACT step, with the rest of the dual-accept surface —
+  // docs/runbooks/radiology-rename.md.
+  ["radiology_tech", "radiology"],
+  ["imaging_tech", "radiology"],
   ["pharmacist", "pharmacy"],
+  // 29.2b — the external delivering provider (design 45 §2b).
+  ["procedure_provider", "procedure_provider"],
   ["reception", "reception"],
 ];
 

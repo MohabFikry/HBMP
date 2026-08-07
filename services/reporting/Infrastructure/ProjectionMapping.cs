@@ -118,9 +118,17 @@ public static class ProjectionMapping
                 break;
 
             case "OrderLinesConsumed":
-                // Lab vs Radiology is decided by the ORDER TYPE, and orders calls imaging "Imaging".
+                // Lab vs Radiology is decided by the ORDER TYPE.
                 // Through the same additive rule as the aliases: a publisher that starts sending `modality`
                 // itself is authoritative about its own event, and this must not clobber it.
+                //
+                // 29.1 — THIS IS THE IN-FLIGHT-OUTBOX HALF of the design-45 §1 rename, and it is why no
+                // reporting change was needed at the switch. The outbox is durable by design, so
+                // OrderLinesConsumed events enqueued while orders still said "Imaging" are relayed AFTER the
+                // deploy that made it say "Radiology". Both spellings land on the same modality: the legacy
+                // value is translated, the canonical one passes through. Covered by
+                // ProjectionFeedTests.Order_type_maps_to_modality_under_both_spellings — delete that test and
+                // this becomes a silent dimension split, with a month's radiology volume in two buckets.
                 if (!fields.ContainsKey("modality") && fields.TryGetValue("orderType", out var orderType))
                     fields["modality"] = orderType.Equals("Imaging", StringComparison.OrdinalIgnoreCase)
                         ? "Radiology" : orderType;
