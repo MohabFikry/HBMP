@@ -728,5 +728,56 @@ Prompt: `HBMP-Design/claude-code-prompts/phase-29-encounter-and-chronic-prescrib
   invariant-registry entries each with named tests, the rename runbook, the window-model spec and the
   workbook-mapping note.
 
+## Phase 30 — amending and cancelling signed orders ✅
+
+Design: `HBMP-Design/46-order-amendment-and-cancellation.md` · ADR-0039 ·
+`docs/phase-30-gate-0-audit.md`, `docs/phase-30-gate-3-notes.md`, `docs/phase-30-gate-5-notes.md`
+
+- **30.0 audit.** Reported per order kind before building. Three findings changed the plan: lab, radiology and
+  OP procedure are ONE table discriminated by `order_type`, not three; the fulfilment queues are LIVE QUERIES
+  rather than read models, so cancellation propagates in the same transaction; and
+  `tools/ci/check-event-symmetry.py` does not exist, so the "~40 orphaned events" figure is an unverified
+  claim from a prompt and "symmetry gate green" could not be an acceptance criterion.
+- **30.1 supersede-and-cancel.** Line-level version chain, coded reason vocabulary, append-only amendment
+  ledger. "Nothing signed is mutated" is a TRIGGER; "nothing is deleted" is a REVOKED privilege. **Found two
+  defects predating the phase:** neither `PartiallyUsed → Cancelled` nor `PartiallyDispensed → Cancelled`
+  existed, so a partly-fulfilled order or prescription could not be cancelled AT ALL — design 46 §3's opening
+  example, unreachable. Both roll-ups would also have stranded a superseded line as live.
+- **30.2 the guarded transition.** One atomic statement; the conflict names what happened, when and by whom;
+  the mirror refuses a consume/dispense on a withdrawn line with the reason and the corrected line's id.
+  Concurrency proven on the existing harnesses.
+- **30.3 chronic amendment.** Brainstormed the window model first. Nothing is moved and nothing is copied: the
+  original keeps its schedule, its uncollected windows take a terminal `Superseded`, the successor gets a
+  fresh one. **Reducing below the chronic definition is reported, never decided.**
+- **30.4 authorisation scope.** ONE comparator — the subset predicate moved down into `libs/amendment` and
+  approvals' `ValidatePartialScope` now calls it. Re-approval reuses the event the original routing used.
+- **30.5 propagation.** Four events with a named subscriber (the care timeline). Two cases turned out
+  structural and were recorded rather than built around: the provider queue and claims.
+- **30.5b order notes.** The doc-38 model on a different subject. The Internal-note projection is asserted
+  over the SERIALIZED payload, and the external provider reads through their own portal.
+- **30.5c the timeline opens at check-in.** `checked_in_at` did not exist; `updated_at` is overwritten by
+  every later transition, so waiting time could not honestly be derived. Three cases kept distinct.
+- **30.6 authority, dialog, two therapies.** Denial tests for reception, call centre, pharmacist and lab tech.
+  Occupational and Speech Therapy are a migration and nothing else — `ProcedureTypeIsDataNotCodeTests` proves
+  no source file branches on a type NAME.
+- **30.7 docs.** ADR-0039, 10 invariant-registry entries each with named tests, doc 23 §2b/§3b, three phase
+  notes.
+
+### Two gaps found and closed
+
+- **Phase 29's chronic prescribing was never wired.** No endpoint set `kind='Chronic'`, no refill window was
+  ever created, the sweeper ran hourly against an empty table — while all 66 allocation tests passed. Closed:
+  submit builds the schedule, the counter meters against it. `INV-CHRONIC-PRESCRIBING-IS-REACHABLE` exists
+  because a green suite says code is correct, never that it is *called*.
+- **`GET /investigation-orders/queue` returned 500** on the call the bench screen makes — non-nullable
+  `page`/`pageSize` — and no test could reach it because the fixture's lab client held less scope than a real
+  `lab_tech` token. Both fixed.
+
+### Not done in phase 30
+
+- Wiring the amend dialog into DoctorEncounter and the worklists; surfacing waiting time on screen.
+- Pharmacy's notes endpoints (`pharmacy.rx_note` is correct, unwired schema — flagged in its own header).
+- `tools/ci/check-event-symmetry.py`, still outstanding from phase 22.
+
 - Docker/Compose, Helm, OpenTofu: **not yet installed** (Docker needs root). Tier 1 infra authored in `infra/compose`; run once Docker is installed.
 - Repo initialized in place at `/home/mohab/Mersal` with `HBMP-Design/` as a subfolder.

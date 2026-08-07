@@ -1907,3 +1907,156 @@ invariants:
       - Mersal.Auth.Tests.LegacyRoleAliasTests.Aliasing_grants_no_role_that_was_not_already_on_the_token
       - Mersal.Auth.Tests.TokenContractByteCompatTests.A_token_minted_before_the_radiology_switch_still_authorises_a_radiology_tech
       - Mersal.Reporting.Tests.ProjectionFeedTests.Order_type_maps_to_modality_under_both_spellings
+
+  # ---- Phase 30 — amendment and cancellation of signed orders (design 46) ------------------------------
+
+  - id: INV-SIGNED-RECORDS-SUPERSEDED-NOT-MUTATED
+    statement: >-
+      A signed order or prescription line is never edited in place and never deleted. Amend inserts a new
+      version and marks the original Superseded; cancel transitions it; both carry a coded reason and an
+      actor. Cancelled and superseded rows stay visible in history.
+    source: 46-order-amendment-and-cancellation.md §1, §9.1
+    severity: Critical
+    # Editing the row destroys the answer to "what was actually prescribed on the 4th?", which is the
+    # question asked when something goes wrong. Enforced by a DATABASE TRIGGER rather than by the endpoint:
+    # a repair script, a future handler or a psql session walks straight past a 409.
+    tests:
+      - Mersal.Orders.Tests.SignedLineIsImmutableTests.The_runtime_role_cannot_EDIT_what_was_ordered
+      - Mersal.Orders.Tests.SignedLineIsImmutableTests.The_runtime_role_cannot_DELETE_a_signed_line_or_its_order
+      - Mersal.Orders.Tests.SignedLineIsImmutableTests.A_cancelled_line_can_never_be_reinstated
+      - Mersal.Orders.Tests.SignedLineIsImmutableTests.A_line_cannot_leave_the_live_set_without_saying_who_why_and_when
+      - Mersal.Orders.Tests.CancelVsConsumeRaceTests.Amend_supersedes_without_ever_mutating_the_original
+
+  - id: INV-CONSUMED-PORTION-IMMUTABLE
+    statement: >-
+      Amendment applies only to the not-yet-consumed remainder. A superseding line carries the consumed or
+      dispensed accumulator forward unchanged, and a new total below what was already delivered is refused.
+    source: 46-order-amendment-and-cancellation.md §3, §4, §9.2
+    severity: Critical
+    # Without the carry-forward, a line with 10 of 30 dispensed and amended to 20 would offer 20 MORE rather
+    # than 10 — an over-supply that looks correct on every screen.
+    tests:
+      - Mersal.Pharmacy.Tests.CancelVsDispenseRaceTests.Amend_carries_the_dispensed_quantity_forward_and_never_rewrites_the_original
+      - Mersal.Orders.Tests.CancelVsConsumeRaceTests.An_amendment_below_what_was_already_consumed_is_refused
+      - Mersal.Amendment.Tests.LineAmendabilityTests.A_new_quantity_BELOW_what_was_consumed_is_refused_because_it_implies_un_dispensing
+      - Mersal.Amendment.Tests.LineAmendabilityTests.A_FULLY_consumed_line_cannot_be_cancelled_because_it_is_fact
+
+  - id: INV-CANCEL-DISPENSE-SINGLE-WINNER
+    statement: >-
+      The state check and the write are ONE guarded transition. N parallel cancels racing N consumes or
+      dispenses of the same line produce exactly one winner and one consistent end state; the loser is told
+      what happened, not merely that something did; a replayed cancel applies once.
+    source: 46-order-amendment-and-cancellation.md §2, §9.3
+    severity: Critical
+    # "Not yet consumed" is not a state you can read and then act on. A doctor told only "someone else
+    # changed this" retries, and a retry after a dispense is how a cancelled-then-dispensed drug happens.
+    tests:
+      - Mersal.Orders.Tests.CancelVsConsumeRaceTests.A_cancel_racing_a_consume_produces_exactly_one_winner
+      - Mersal.Orders.Tests.CancelVsConsumeRaceTests.Parallel_cancels_of_one_line_let_exactly_one_win
+      - Mersal.Orders.Tests.CancelVsConsumeRaceTests.The_loser_is_told_exactly_what_happened_and_who_did_it
+      - Mersal.Orders.Tests.CancelVsConsumeRaceTests.A_replayed_cancel_applies_once_and_returns_the_original
+      - Mersal.Pharmacy.Tests.CancelVsDispenseRaceTests.A_cancel_racing_a_dispense_produces_exactly_one_winner
+      - Mersal.Pharmacy.Tests.CancelVsDispenseRaceTests.Dispensing_a_cancelled_line_fails_with_the_reason_and_the_actor
+
+  - id: INV-CHRONIC-REALLOCATION-SUMS
+    statement: >-
+      A chronic re-allocation sums EXACTLY to the new total — dispensed plus the remaining windows — with the
+      rounding done once at the total and never per window. Dispensed windows are byte-identical afterwards.
+    source: 46-order-amendment-and-cancellation.md §4, §9.4; 45 §5
+    severity: Critical
+    # The failure is silent: every individual window looks like a sensible number and only the sum is wrong.
+    # 100 split three ways and rounded per window is 34+34+34 = 102, which over-supplies the patient.
+    tests:
+      - Mersal.Prescribing.Tests.ChronicAmendmentTests.The_allocation_ALWAYS_sums_exactly_to_the_new_total
+      - Mersal.Prescribing.Tests.ChronicAmendmentTests.An_indivisible_remainder_is_spread_by_largest_remainder_and_still_sums
+      - Mersal.Prescribing.Tests.ChronicAmendmentTests.Shortening_90_days_to_60_leaves_ONE_remaining_window_of_90_and_a_total_of_180
+      - Mersal.Pharmacy.Tests.ChronicAmendmentPersistenceTests.Shortening_a_started_script_supersedes_the_line_and_leaves_the_collected_window_untouched
+      - Mersal.Pharmacy.Tests.ChronicAmendmentPersistenceTests.Extending_re_allocates_the_remainder_across_the_new_windows_and_still_sums
+
+  - id: INV-OUT-OF-SCOPE-AMENDMENT-RETURNS-TO-AUTHORISATION
+    statement: >-
+      An amendment INSIDE the approved scope keeps the authorisation and troubles nobody; one BEYOND it
+      returns the order to pending authorisation and tells approvals, with a before and after.
+    source: 46-order-amendment-and-cancellation.md §5, §9.5
+    severity: Critical
+    # Costly in both directions: treat everything as re-approvable and the queue floods, which teaches
+    # reviewers to rubber-stamp; treat nothing as re-approvable and you have built a way to obtain an
+    # approval for one thing and dispense another.
+    tests:
+      - Mersal.Orders.Tests.AmendmentAuthorizationScopeTests.An_OUT_OF_SCOPE_increase_returns_the_order_to_pending_authorisation
+      - Mersal.Orders.Tests.AmendmentAuthorizationScopeTests.An_IN_SCOPE_reduction_keeps_the_authorisation_and_troubles_nobody
+      - Mersal.Orders.Tests.AmendmentAuthorizationScopeTests.An_UNGATED_order_is_never_sent_for_approval_however_far_it_is_amended
+      - Mersal.Amendment.Tests.AuthorizationScopeTests.Changing_the_code_leaves_the_approved_scope_even_when_the_quantity_falls
+
+  - id: INV-CANCELLATION-UPDATES-PROVIDER-QUEUE
+    statement: >-
+      A cancelled or amended line leaves the fulfilling provider's queue. Propagation is a change to what the
+      queue returns, not a notification about it.
+    source: 46-order-amendment-and-cancellation.md §6, §9.6
+    severity: Critical
+    # The failure mode is a cancelled order still sitting in the lab's queue because only an email was sent.
+    # The queue is a live query over the owning service's own table, so the line leaves in the SAME
+    # TRANSACTION — asserted with no wait and no poll, so a future move to a projection fails here.
+    tests:
+      - Mersal.Orders.Tests.CancellationLeavesTheProviderQueueTests.A_cancelled_line_is_gone_from_the_bench_queue_with_no_consumer_in_between
+      - Mersal.Orders.Tests.CancellationLeavesTheProviderQueueTests.Cancelling_every_open_line_removes_the_order_from_the_queue_entirely
+      - Mersal.Orders.Tests.CancellationLeavesTheProviderQueueTests.An_AMENDED_line_leaves_the_queue_and_its_successor_takes_its_place
+
+  - id: INV-ORDER-NOTE-NEVER-WIDENS-THE-GATE
+    statement: >-
+      An order note is append-only, signed and cancellable but never deletable, and an external provider
+      never receives an Internal note — asserted over the serialized payload. Adding a note is never an
+      amendment.
+    source: 46-order-amendment-and-cancellation.md §7b, §9.9-§9.11
+    severity: Critical
+    # An external centre seeing a clinician's internal reasoning would widen the deliberately narrow
+    # projection built for them in 45 §2b — and "the screen does not show it" is not a control.
+    tests:
+      - Mersal.Orders.Tests.OrderNoteProjectionTests.An_external_provider_receives_NO_TRACE_of_an_Internal_note_in_the_raw_payload
+      - Mersal.Orders.Tests.OrderNoteProjectionTests.Adding_a_note_neither_supersedes_the_line_nor_re_triggers_authorisation
+      - Mersal.Orders.Tests.OrderNoteProjectionTests.Cancelling_a_note_marks_it_and_keeps_it_visible
+      - Mersal.Amendment.Tests.NoteAudienceTests.The_external_provider_NEVER_sees_an_Internal_note
+
+  - id: INV-TIMELINE-NEVER-INVENTS-A-CHECK-IN
+    statement: >-
+      The encounter timeline opens at Checked in. A missing check-in is stated as missing and never rendered
+      as a zero wait; a check-in timestamped after the visit started is shown as recorded and flagged, never
+      reordered.
+    source: 46-order-amendment-and-cancellation.md §7c
+    severity: High
+    # Absence of a record is not evidence the step happened. A fabricated zero would be averaged into the
+    # clinic manager's waiting-time figure, and silently sorting bad timestamps into a tidy story is how you
+    # lose the ability to notice the process is broken.
+    tests:
+      - Mersal.Emr.Tests.VisitOpeningRulesTests.NO_CHECK_IN_RECORDED_is_its_own_case_and_never_a_zero_wait
+      - Mersal.Emr.Tests.VisitOpeningRulesTests.A_check_in_recorded_AFTER_the_visit_started_is_flagged_not_reordered
+      - Mersal.Emr.Tests.VisitOpeningRulesTests.The_arithmetic_holds_ACROSS_MIDNIGHT
+      - Mersal.Emr.Tests.VisitOpeningRulesTests.The_arithmetic_holds_ACROSS_A_TIMEZONE_OFFSET
+      - Mersal.Emr.Tests.CareTimelineTests.The_encounter_timeline_answers_for_the_visit_itself
+
+  - id: INV-PROCEDURE-TYPE-IS-DATA-NOT-CODE
+    statement: >-
+      Session-based behaviour follows the is_session_based FLAG and never a procedure type's NAME, so adding
+      a therapy is an INSERT rather than a release.
+    source: 46-order-amendment-and-cancellation.md §8; 45 §2
+    severity: High
+    # A comparison against a type name would compile, pass every functional test, and silently make the next
+    # therapy a code change again — which is the conversation the flag exists to have only once.
+    tests:
+      - Mersal.MasterData.Tests.ProcedureTypeIsDataNotCodeTests.No_source_file_branches_on_a_PROCEDURE_TYPE_NAME
+      - Mersal.MasterData.Tests.ProcedureTypeIsDataNotCodeTests.The_two_new_therapies_are_seeded_as_session_based
+
+  - id: INV-CHRONIC-PRESCRIBING-IS-REACHABLE
+    statement: >-
+      A chronic prescription written through the API creates its refill windows, and the counter meters a
+      collection against them. The machinery is called, not merely correct.
+    source: 45-encounter-and-prescription-adjustments.md §5; docs/phase-30-gate-3-notes.md
+    severity: Critical
+    # This exists because the opposite happened: phase 29 built the allocation, the schema, the sweeper and
+    # 66 passing tests, and no endpoint ever called any of it. A green suite says the code is correct, never
+    # that it is REACHED — so these assertions go in through HTTP and start from "windows exist at all".
+    tests:
+      - Mersal.Pharmacy.Tests.ChronicPrescribingIsWiredTests.Writing_a_chronic_script_CREATES_ITS_REFILL_WINDOWS
+      - Mersal.Pharmacy.Tests.ChronicPrescribingIsWiredTests.The_COUNTER_refuses_a_collection_outside_its_window_and_names_the_date
+      - Mersal.Pharmacy.Tests.ChronicPrescribingIsWiredTests.An_ACUTE_script_is_unchanged_and_carries_no_schedule
+      - Mersal.Pharmacy.Tests.ChronicPrescribingIsWiredTests.An_unknown_or_inactive_refill_frequency_is_refused_rather_than_producing_no_windows

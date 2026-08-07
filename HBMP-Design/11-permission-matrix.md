@@ -1183,6 +1183,35 @@ Every cell here must agree with [10-role-matrix.md §5–7](10-role-matrix.md). 
 
 ---
 
+## 8b. Amendment and cancellation of signed orders (Phase 30, [design 46](46-order-amendment-and-cancellation.md))
+
+**No new scopes.** Stated explicitly because the phase-30 gate asks for a decision either way rather than
+silence.
+
+Amending or withdrawing a signed line is the same authority as writing one — it is the prescriber correcting
+their own clinical decision, not a new capability — so the endpoints reuse `orders:write` / `rx:write` and the
+existing `OrdersPolicies.Create` / `PharmacyPolicies.RxCreate` rules, which already require the `doctor` role
+and a live **treating relationship**. Notes read under `orders:read` and write under `orders:write`; the
+external centre reads its own notes through the provider portal under `procedure:read`.
+
+A dedicated `orders:amend` scope was considered and rejected. It would have to be granted to exactly the roles
+that already hold `orders:write`, so it adds a second thing to keep in step with the first and nothing else —
+and the failure mode of drift between them is a doctor who can write an order they cannot then correct.
+
+| Who | May amend or withdraw? | Enforced by |
+|---|---|---|
+| The **authoring prescriber** | Yes | role `doctor` + `orders:write` + treating relationship |
+| **Another treating clinician** | Yes, with a coded reason | the same rule — cover happens, and a doctor who has gone home must not block a correction |
+| A **non-treating** clinician | **No** | the ABAC treating-relationship condition, not a role check |
+| **Reception**, the **call centre** | **No** | role |
+| The **fulfilling provider** (lab, radiology, pharmacy, centre) | **No** | role — a pharmacy that disagrees raises a clarification; it does not edit a prescription |
+| Anyone, on an **expired** order | **No** | the order's own validity — it is expired, not amendable, and the approval team can revalidate it |
+
+Every refusal above has a named denial test (`Mersal.Orders.Tests.AmendmentAuthorityTests`), because a rule
+inherited by reuse is a rule nobody has proven.
+
+---
+
 ## 9. Cross-references
 - Narrative role definitions & SoD table → **[10-role-matrix.md](10-role-matrix.md)**
 - Enforcement points (gateway/service/RLS/field), Zero Trust, step-up, break-glass → **[18-security-model.md](18-security-model.md)**

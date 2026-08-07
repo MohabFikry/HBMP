@@ -409,6 +409,77 @@ paths:
       summary: Get order
       security: [ { oauth2: [ orders.write ] } ]
       responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/InvestigationOrder' } } } } }
+  # ---- 30.1-30.6 amendment and cancellation (design 46) ------------------------------------------------
+  # Amendment is at LINE level, because the amendable scope is whatever has not been consumed. The two
+  # order-level /cancel routes are rewritten onto this path — same routes, scopes and ABAC gates.
+  /investigation-orders/amendment-reasons:
+    get:
+      summary: The coded amendment/cancellation vocabulary, bilingual, for the reason picker
+      security: [ { oauth2: [ orders.read ] } ]
+      responses: { '200': { description: OK } }
+  /investigation-orders/{orderId}/lines/{lineId}/cancel:
+    post:
+      summary: Withdraw ONE line (guarded, idempotent)
+      description: >
+        ONE atomic statement guarded on status + xmin. 409 names WHAT happened, WHEN and BY WHOM — a bare
+        conflict gets retried, and a retry after a dispense is how a cancelled-then-dispensed drug happens.
+        The coded reason is mandatory; free text is additional.
+      security: [ { oauth2: [ orders.write ] } ]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '200': { description: Withdrawn }
+        '409': { description: Not amendable — already delivered, withdrawn, amended, or the order expired }
+        '422': { description: Unknown reason code, or the Idempotency-Key was reused for a different request }
+  /investigation-orders/{orderId}/lines/{lineId}/amend:
+    post:
+      summary: Supersede ONE line with a new version
+      description: >
+        The signed row is never edited. A new version is inserted carrying the consumed accumulator forward,
+        and the original steps aside pointing at it. A new quantity below what was already delivered is
+        refused. The response says whether the change returned the order to pending authorisation.
+      security: [ { oauth2: [ orders.write ] } ]
+      responses:
+        '200': { description: Superseded }
+        '422': { description: Below the delivered quantity, no change, or an unknown reason code }
+  /investigation-orders/{orderId}/cancel-lines:
+    post:
+      summary: Withdraw every still-cancellable line, reporting partial success plainly
+      description: >
+        207 for a genuinely mixed result, naming each line and why it could not be withdrawn. 409 when
+        nothing could be — a 200 with an empty list reads as "done" and the doctor walks away believing an
+        order was withdrawn that is still live.
+      security: [ { oauth2: [ orders.write ] } ]
+      responses:
+        '200': { description: All lines withdrawn }
+        '207': { description: Partial — some lines were already delivered }
+        '409': { description: Nothing was cancellable }
+  /investigation-orders/{orderId}/lines/{lineId}/notes:
+    get:
+      summary: The line's notes, class-projected for the caller
+      security: [ { oauth2: [ orders.read ] } ]
+      responses: { '200': { description: OK } }
+    post:
+      summary: Write a note (append-only, signed, never edited)
+      security: [ { oauth2: [ orders.write ] } ]
+      responses: { '201': { description: Created }, '422': { description: Empty, over 500 characters, or an unknown visibility } }
+  /investigation-orders/notes/{noteId}/cancel:
+    post:
+      summary: Withdraw a note — marks it, never deletes it
+      security: [ { oauth2: [ orders.write ] } ]
+      responses: { '200': { description: Withdrawn, still visible } }
+  /prescriptions/{rxId}/lines/{lineId}/amend-schedule:
+    post:
+      summary: Amend a CHRONIC script's duration and/or frequency
+      description: >
+        Dispensed windows keep their quantities exactly; the remainder is re-allocated and still sums to the
+        new total. The recomputed preview is returned on EVERY outcome including the refusals, because a
+        prescriber deciding whether to convert a script to acute needs the numbers that decision turns on.
+      security: [ { oauth2: [ rx.write ] } ]
+      responses:
+        '200': { description: Amended }
+        '422': { description: Below the dispensed amount, no longer chronic (confirm convertToAcute), or the quantity could not be computed }
+
   /investigation-orders/{id}/consume:
     post:
       summary: Atomically consume an order line (idempotent)

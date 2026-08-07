@@ -349,7 +349,36 @@ Indexes: `UNIQUE(order_no)`; `(beneficiary_id, status)`; partial `(expires_at) W
 | `requested_quantity` | `numeric(14,3)` | No | | 29.2 — what the doctor ASKED FOR, pinned at creation. Distinct from `quantity_ordered`, which is what may be DELIVERED and comes from the APPROVED scope | Internal | |
 | `quantity_ordered` | `numeric(14,3)` | No | | | Internal | > 0 |
 | `quantity_consumed` | `numeric(14,3)` | No | | Accumulator | Internal | `CHECK (0 ≤ consumed ≤ ordered)` |
-| `status` | `varchar(16)` | No | | | Internal | enum: Active/PartiallyUsed/Completed/Cancelled |
+| `status` | `varchar(16)` | No | | | Internal | enum: Active/PartiallyUsed/Completed/Cancelled/**Superseded** |
+| `version_no` | `int` | No | | 30.1 — 1 for the original; increments on each amendment | Internal | |
+| `supersedes_id` | `uuid` | Yes | FK | The row this one replaces. NULL on v1 | Internal | FK → `order_line` |
+| `superseded_by_id` | `uuid` | Yes | FK | The row that replaced this one | Internal | `CHECK ((status='Superseded') = (superseded_by_id IS NOT NULL))` |
+| `root_line_id` | `uuid` | No | | The FIRST version in the chain; itself on v1. Makes "every version of this line" one indexed query | Internal | |
+| `amendment_reason_code` | `varchar(32)` | Yes | FK | CODED, from `amendment_reason` | Internal | FK; mandatory on Cancelled/Superseded |
+| `amendment_reason_text` | `varchar(300)` | Yes | | Free text, ADDITIONAL and never instead of the code | Internal | |
+| `amended_by` / `amended_at` | `uuid` / `timestamptz` | Yes | | | Internal | `CHECK`: a line leaving the live set names who, why and when |
+
+> **30.1 — the clinical columns above `status` are FROZEN by `trg_order_line_signed`.** `code_system`, `code`,
+> `description`, `quantity_ordered`, `requested_quantity`, `procedure_type_code`, `examination_type_id` and
+> `sensitivity_level` can never be edited in place, by any path including psql. `quantity_consumed` and
+> `status` stay writable: that is the accumulator moving forward, not the record changing. DELETE is refused
+> by a **revoked privilege** rather than a trigger — every service runs as `hbmp_app`, so the application
+> cannot attempt one (ADR-0039).
+
+### 7.2b `amendment_reason` · `line_amendment` (30.1)
+
+`amendment_reason(code, name_en, name_ar, applies_to, is_active, sort_order)` — the coded vocabulary, seeded
+IDENTICALLY in `orders` and `pharmacy`. Two copies rather than one shared table so the FK is real and
+cancelling never depends on another service being reachable; `AmendmentReasonSeedTests` fails the build if
+they drift.
+
+`line_amendment` — APPEND-ONLY (trigger), one row per applied cancel/amend, keyed by a **UNIQUE**
+`idempotency_key`: the same duplicate-proof anchor `order_fulfillment` and `dispense_event` use, so a
+double-tapped cancel writes one record. Carries `action` (Cancel/Amend), `from_status`, `to_status`,
+`new_line_id`, the coded reason, the actor and their display name.
+
+`pharmacy.prescription_line` carries the same eight amendment columns and the same trigger
+(`trg_rx_line_signed`), freezing drug, dose, route, frequency, quantity, duration and refills.
 
 ### 7.3 `order_fulfillment` (append-only)
 
