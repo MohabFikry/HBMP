@@ -91,8 +91,31 @@ scope. Do NOT build a third thing.
   resolved. Emit the reconciliation as loader/migration output.
 - Expose GET /api/v1/orderable-services?q=&kind= returning the code plus the vehicle it will create, so
   the UI can show the doctor what will happen before they commit.
+
+PROCEDURE TYPE + SESSIONS (../45 §2 "Procedure type, and session-based delivery"):
+- masterdata.procedure_type(code, name_en, name_ar, is_session_based bool, default_sessions int NULL,
+  max_sessions int NULL, allowed_cpt_scopes jsonb, is_active, sort_order) — MASTER DATA, administered
+  like refill_frequency. Seed: Physiotherapy(session-based), MinorSurgery, InjectionInfusion,
+  Dialysis(session-based), WoundCare, Rehabilitation(session-based), DiagnosticProcedure, Other.
+  Adding "Hydrotherapy" must be a DATA change, not a release.
+- SESSIONS FOLLOW THE FLAG, NOT THE NAME. The composer shows a "number of sessions" field when the
+  selected type has is_session_based = true. DO NOT write `if (type === 'Physiotherapy')` — dialysis and
+  rehabilitation are session-based too, and hard-coding guarantees this conversation twice more.
+- SESSIONS ARE THE ORDER LINE QUANTITY. Not a parallel counter. Ten sessions = quantity 10, consumed one
+  at a time by the existing atomic/idempotent consume with the remainder staying active. Reuse it.
+- VALIDATE TYPE AGAINST CODE: each type's allowed_cpt_scopes constrains which CPT codes it may
+  accompany; a Physiotherapy type on a minor-surgery code is refused 422 with a clear message. An
+  unvalidated type field is decorative and makes every report built on it quietly wrong.
+- SESSIONS AUTHORISED != SESSIONS REQUESTED: if the doctor requests 10 and approvals partially approve 6,
+  the deliverable count is 6. The session count MUST flow from the APPROVED scope, never the requested
+  one. The platform already models partial approval — add the test, this is the easiest thing here to
+  get backwards.
+- Order carries a validity; sessions undelivered at expiry are FORFEITED and the order closes as
+  partially fulfilled rather than lingering open. Consistent with the chronic-window decision.
 ACCEPTANCE: a Surgery code creates a Procedure order through the SAME consume/authorise/claim path as a
-lab order; an E/M code creates a Referral with loop-closure required; the reconciliation report exists.
+lab order; an E/M code creates a Referral with loop-closure required; selecting a session-based type
+reveals the sessions field and a non-session type does not; a type/code mismatch is refused; a partial
+approval of 10→6 yields 6 deliverable sessions; the reconciliation report exists.
 ```
 
 ## Gate 2b — External Provider Portal (physiotherapy centres and outside clinics)
@@ -120,10 +143,15 @@ THE FIRST COMMIT. ProviderScoped reach already exists in libs/authz — use it. 
 - CLINICAL CONTEXT IS AN EXPLICIT DISCLOSURE: the ordering doctor CHOOSES what referral reason / context
   travels with the order. A physiotherapist genuinely needs to know why they are treating someone, but
   that is a clinician's deliberate disclosure, not a blanket grant. Record the choice; audit it.
-- MULTI-SESSION DELIVERY: the order carries a session count and is consumed session by session — this is
-  the EXISTING partial-fulfilment invariant (atomic, idempotent, remainder stays active). Reuse the
-  consume path and its concurrency proofs; do not write a second one. Each session records attendance,
-  the delivering practitioner, and an optional note.
+- MULTI-SESSION DELIVERY, ONE AT A TIME: the order arrives with N APPROVED sessions and the centre
+  consumes them one by one as delivered — the EXISTING partial-fulfilment invariant (atomic, idempotent,
+  remainder stays active). Reuse the consume path and its concurrency proofs; do not write a second one.
+  Each consume records date, delivering practitioner, attendance and an optional note, and carries its
+  OWN IDEMPOTENCY KEY PER SESSION — a double-tapped "record session" must not burn two of a
+  beneficiary's six approved visits. Add the replay test.
+  Show progress plainly ("4 of 6 sessions delivered") in BOTH the centre's queue and the ordering
+  doctor's worklist. Benefit is consumed PER SESSION as delivered, consistent with the chronic decision.
+  Sessions undelivered at the order's expiry are forfeited; the order closes as partially fulfilled.
 - LOOP CLOSURE: completion returns a report to the ordering doctor. For a REFERRAL this is MANDATORY —
   an open referral loop is the classic outpatient safety failure and the state machine already models
   closure. Surface open loops in the doctor's worklist.
@@ -315,7 +343,8 @@ ACCEPTANCE: docs true; registry entries have named tests; ADR merged.
 ## Done when
 - [ ] Radiology rename complete across role, scopes, enums, events, routes and strings, via expand → backfill → switch → contract; a pre-switch token still authorises and a pre-switch outbox event is still consumed during the window; the audit chain verifies unbroken with old rows behind a display alias; the token-contract test is green against both fixtures.
 - [ ] Surgery/Medicine create `Procedure` orders through the existing consume/authorise/claim path; **E/M creates a Referral** with mandatory loop closure; the CPT routing map is reconciled against the published ranges with a report.
-- [ ] External Provider Portal live: provider A cannot see provider B's rows (test written first); multi-session consumption is atomic, idempotent and leaves the remainder active; referral loops close with a report; the payload carries no diagnosis beyond the doctor's chosen context; identity needs a second identifier and is audited.
+- [ ] Procedure **type** is master data with `is_session_based`; the sessions field follows the flag, not the name; type/code mismatch is refused; a 10→6 partial approval yields **6** deliverable sessions.
+- [ ] External Provider Portal live: provider A cannot see provider B's rows (test written first); sessions consume **one at a time**, atomic and idempotent with a per-session key (a replayed session does not burn two); progress shown in both views; unused sessions forfeited at expiry; referral loops close with a report; the payload carries no diagnosis beyond the doctor's chosen context; identity needs a second identifier and is audited.
 - [ ] Encounter and History both carry OP Procedures with sibling gating.
 - [ ] One service-history endpoint and one component serve every tab; restricted results are existence-only with request-access; three states distinct; every open audited; trends shown where permitted.
 - [ ] Acute/Chronic toggle; chronic requires > 1 month and a frequency; frequency is supervisor-configurable master data.

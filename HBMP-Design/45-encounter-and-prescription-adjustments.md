@@ -103,11 +103,17 @@ An external centre is not a Mersal clinician. Minimum-necessary applies with a n
 
 The referral reason is the important nuance: a physiotherapist genuinely needs to know *why* they are treating someone, so the ordering doctor selects what clinical context travels with the referral. That is a deliberate disclosure by a clinician, not a blanket grant — and it is auditable as such.
 
-### Multi-session delivery
+### Multi-session delivery — one session at a time
 
-Physiotherapy is not one visit. An order carries a **session count**, and the centre consumes it session by session — which is exactly the platform's existing partial-fulfilment invariant: *consume is atomic and idempotent; partial fulfilment leaves the remainder active*. No new mechanism, and the same concurrency proofs apply.
+A session-based order arrives at the centre with **N approved sessions**, and the centre consumes them **one by one** as they are delivered. No new mechanism: this is the platform's existing partial-fulfilment invariant — *consume is atomic and idempotent; partial fulfilment leaves the remainder active* — with the same concurrency proofs.
 
-Each session records attendance, the practitioner who delivered it, and optionally a note. Completion closes the loop: a report back to the ordering doctor, which for a **referral** is mandatory — an open referral loop is the classic patient-safety failure in outpatient care, and the state machine already models closure.
+Each consume records the date, the delivering practitioner, attendance, and an optional note, and carries its **own idempotency key per session** — a double-tapped "record session" must not burn two of a beneficiary's six approved visits. Both views show progress plainly: *"4 of 6 sessions delivered"*, in the centre's queue and in the ordering doctor's worklist.
+
+**Benefit is consumed per session, as delivered** — consistent with the chronic-prescription decision. A course abandoned after two sessions charges two.
+
+**Unused sessions expire with the order.** The order carries a validity; sessions not delivered by then are forfeited and the order closes as partially fulfilled, rather than lingering open indefinitely. A twelve-month-old physiotherapy course is not a course.
+
+Completion closes the loop: a report back to the ordering doctor, which for a **referral** is mandatory — an open referral loop is the classic patient-safety failure in outpatient care, and the state machine already models closure.
 
 ### Identity at the counter
 
