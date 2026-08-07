@@ -107,6 +107,11 @@ public sealed class PrescriptionDispenseWindow
     /// then?" is unanswerable.</summary>
     public DateTimeOffset? MissedAt { get; set; }
 
+    /// <summary>30.3 — the amendment that replaced this window (pharmacy 0014). Set only on <c>Superseded</c>
+    /// rows: a window the prescriber's duration or frequency change made obsolete. NOT <c>Missed</c> (the
+    /// patient did not fail to attend) and NOT <c>Cancelled</c> (nobody withdrew the medicine).</summary>
+    public Guid? SupersededByAmendmentId { get; set; }
+
     /// <summary>xmin — the sweeper and the counter both write this row, and exactly one must win.</summary>
     public uint RowVersion { get; set; }
 }

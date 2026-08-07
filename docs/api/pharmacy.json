@@ -522,6 +522,48 @@
         }
       }
     },
+    "/api/v1/prescriptions/{rxId}/lines/{lineId}/amend-schedule": {
+      "post": {
+        "tags": [
+          "Mersal.Pharmacy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "rxId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "lineId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AmendChronicScheduleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/prescriptions/{rxId}/cancel-lines": {
       "post": {
         "tags": [
@@ -603,6 +645,31 @@
   },
   "components": {
     "schemas": {
+      "AmendChronicScheduleRequest": {
+        "type": "object",
+        "properties": {
+          "durationDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "frequencyMonths": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "reasonCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "reasonText": {
+            "type": "string",
+            "nullable": true
+          },
+          "convertToAcute": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
       "AmendRxLineRequest": {
         "type": "object",
         "properties": {

@@ -13,6 +13,14 @@ namespace Mersal.Pharmacy.Api;
 public sealed record CancelRxLineRequest(string ReasonCode, string? ReasonText);
 public sealed record AmendRxLineRequest(decimal QuantityPrescribed, string ReasonCode, string? ReasonText);
 public sealed record CancelRxLinesRequest(string ReasonCode, string? ReasonText);
+
+/// <summary>30.3 — amend a CHRONIC script's duration and/or frequency (design 46 §4). Dose and times-per-day
+/// are deliberately absent: changing those is a different prescription, not a rescheduling of this one.</summary>
+public sealed record AmendChronicScheduleRequest(
+    int DurationDays, int FrequencyMonths, string ReasonCode, string? ReasonText,
+    /// <summary>The prescriber's EXPLICIT confirmation that shortening below the chronic definition converts
+    /// the script to acute. Absent, that case is reported and nothing is written.</summary>
+    bool ConvertToAcute = false);
 public sealed record RxLineCancelReport(Guid PrescriptionLineId, string? DrugName, bool Cancelled, string? Refusal);
 
 /// <summary>
@@ -105,6 +113,93 @@ public static class RxAmendmentEndpoints
         }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
 
         // ---- Cancel every still-cancellable line, reporting partial success plainly --------------------
+        // ---- Amend a chronic script's duration / frequency ---------------------------------------------
+        v1.MapPost("/{rxId:guid}/lines/{lineId:guid}/amend-schedule", async Task<IResult> (
+            Guid rxId, Guid lineId, AmendChronicScheduleRequest req, HttpRequest http, PharmacyDbContext db,
+            PharmacyGate gate, ChronicAmendExecutor executor, IAuditClient audit, IOutbox outbox,
+            IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        {
+            var idem = http.Headers["Idempotency-Key"].ToString();
+            if (string.IsNullOrWhiteSpace(idem))
+                return Results.Problem(statusCode: 400, title: "Idempotency-Key header is required",
+                    type: "urn:hbmp:idempotency-required");
+
+            var rx = await db.Prescriptions.AsNoTracking().FirstOrDefaultAsync(p => p.PrescriptionId == rxId, ct);
+            if (rx is null) return NotFound();
+            if (await gate.CheckAsync(PharmacyPolicies.RxCreate, "prescription", rxId.ToString(),
+                    rx.BeneficiaryId, http.Headers.Authorization.ToString(), ct) is { } denied)
+                return denied!;
+
+            var actor = Guid.TryParse(me.Principal?.Subject, out var a) ? a : Guid.Empty;
+            var result = await executor.AmendScheduleAsync(
+                rxId, lineId, idem,
+                new ChronicAmendRequest(req.DurationDays, req.FrequencyMonths, req.ConvertToAcute),
+                new AmendReason(req.ReasonCode, req.ReasonText), actor, me.Principal?.DisplayName,
+                clock.GetUtcNow(), EarlyToleranceDays,
+                insideTransaction: async (p, line, record, innerCt) =>
+                {
+                    await outbox.EnqueueAsync(RxAmendmentEvents.LineAmended, RxAmendmentEvents.DomainStream,
+                        RxAmendmentEvents.Domain(p, line, record, record.NewLineId), innerCt);
+                    await outbox.EnqueueAsync(RxAmendmentEvents.LineAmended, RxAmendmentEvents.NotificationQueue,
+                        RxAmendmentEvents.Notification(p, line, record), innerCt);
+                }, ct);
+
+            await AuditAsync(audit, me, lineId, "Superseded", req.ReasonCode, result.Outcome, ct);
+
+            // THE PREVIEW is returned on every outcome, including the refusals. Design 46 §10 requires the
+            // recomputed schedule to be shown BEFORE confirming, and a prescriber deciding whether to convert
+            // a script to acute needs the numbers that decision turns on — "75 units over 25 days" — not a
+            // bare 422.
+            var preview = result.Reallocation is null ? null : new
+            {
+                newTotal = result.Reallocation.NewTotal,
+                alreadyDispensed = result.Reallocation.AlreadyDispensed,
+                remainingWindows = result.Reallocation.RemainingWindows,
+                verdict = result.Reallocation.Outcome.ToString(),
+            };
+
+            return result.Outcome switch
+            {
+                AmendOutcome.Applied or AmendOutcome.Replayed => Results.Ok(new
+                {
+                    rxId, prescriptionLineId = lineId, amendmentId = result.AmendmentId,
+                    newLineId = result.NewLineId, preview,
+                    replayed = result.Outcome == AmendOutcome.Replayed,
+                }),
+                AmendOutcome.BelowDispensed => Results.Json(new
+                {
+                    type = "urn:hbmp:amend-below-dispensed", title = "below-dispensed", preview,
+                    detail = "The new duration yields a total below what has already been handed over, which "
+                           + "would imply un-dispensing it.",
+                }, statusCode: 422),
+                AmendOutcome.NoChange when result.Reallocation?.Outcome == Prescribing.AmendmentOutcome.NoLongerChronic =>
+                    Results.Json(new
+                    {
+                        type = "urn:hbmp:no-longer-chronic", title = "no-longer-chronic", preview,
+                        detail = "A duration of one month or less is not a chronic script. Confirm "
+                               + "convertToAcute to convert it — the patient was told to collect in windows, "
+                               + "and the change is recorded.",
+                    }, statusCode: 422),
+                AmendOutcome.NoChange => Results.Json(new
+                {
+                    type = "urn:hbmp:quantity-not-checked", title = "quantity-not-checked", preview,
+                    detail = "The quantity could not be recomputed because the drug master does not carry "
+                           + "the pack information. Absence of data is never a clean result.",
+                }, statusCode: 422),
+                AmendOutcome.NotFound or AmendOutcome.LineNotFound => NotFound(),
+                AmendOutcome.Expired => Results.Problem(statusCode: 409, title: "prescription-expired",
+                    type: "urn:hbmp:rx-expired"),
+                AmendOutcome.AlreadyTerminal or AmendOutcome.Conflict => Results.Problem(
+                    statusCode: 409, title: "line-not-amendable", type: "urn:hbmp:line-not-amendable",
+                    detail: Describe(result.Conflict)),
+                AmendOutcome.RxNotAmendable => Results.Problem(statusCode: 409,
+                    title: "prescription-not-amendable", type: "urn:hbmp:rx-not-amendable"),
+                AmendOutcome.InvalidReason => Results.Problem(statusCode: 422, title: "invalid-reason-code",
+                    type: "urn:hbmp:invalid-reason-code"),
+                _ => Results.Problem(statusCode: 409, title: "amendment-failed"),
+            };
+        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+
         v1.MapPost("/{rxId:guid}/cancel-lines", async Task<IResult> (
             Guid rxId, CancelRxLinesRequest req, HttpRequest http, PharmacyDbContext db, PharmacyGate gate,
             AmendExecutor executor, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me,
@@ -174,6 +269,11 @@ public static class RxAmendmentEndpoints
                     : Results.Ok(new { rxId, cancelled, lines = reports });
         }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
     }
+
+    /// <summary>Design 45 §5's default. Held here rather than read from system_config for the same reason the
+    /// sweeper does not read it either: no production path writes windows yet (see docs/phase-30-gate-3-notes.md),
+    /// so a configurable value with no configured consumer would be a decoration.</summary>
+    private const int EarlyToleranceDays = 5;
 
     private static IResult NotFound() =>
         Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");

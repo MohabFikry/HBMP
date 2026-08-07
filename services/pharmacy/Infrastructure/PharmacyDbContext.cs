@@ -80,6 +80,7 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
             e.Property(x => x.DispensedQuantity).HasColumnName("dispensed_quantity");
             e.Property(x => x.BlockedReason).HasColumnName("blocked_reason");
             e.Property(x => x.MissedAt).HasColumnName("missed_at");
+            e.Property(x => x.SupersededByAmendmentId).HasColumnName("superseded_by_amendment_id");  // 30.3
             // xmin: the sweeper and the counter both write this row, and exactly one must win.
             e.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
             e.HasIndex(x => new { x.PrescriptionLineId, x.WindowNo }).IsUnique();
