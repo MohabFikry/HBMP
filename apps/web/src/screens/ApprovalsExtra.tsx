@@ -48,8 +48,8 @@ export function ApprovalsSla() {
   const cols: Column<TatSummary["byStatus"][number]>[] = [
     { key: "status", header: t(S.status), cell: (r) => r.status },
     { key: "count", header: t(S.count), cell: (r) => <span className="tnum">{r.count}</span> },
-    { key: "avg", header: t(S.avg), cell: (r) => <span className="tnum">{fmt.number(Math.round(r.avgMinutes))}</span> },
-    { key: "p95", header: t(S.p95), cell: (r) => <span className="tnum">{fmt.number(Math.round(r.p95Minutes))}</span> },
+    { key: "avg", header: t(S.avg), cell: (r) => fmt.number(Math.round(r.avgMinutes)), numeric: true },
+    { key: "p95", header: t(S.p95), cell: (r) => fmt.number(Math.round(r.p95Minutes)), numeric: true },
     { key: "breaches", header: t(S.breaches), cell: (r) => <span className="tnum">{r.breaches}</span> },
   ];
   return (

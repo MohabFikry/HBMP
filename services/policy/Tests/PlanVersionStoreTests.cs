@@ -387,6 +387,53 @@ public class PlanVersionStoreTests
     }
 
     [SkippableFact]
+    public async Task An_activation_swap_survives_whichever_row_is_updated_first()
+    {
+        Skip.If(Db is null, "POLICY_TEST_DB not set — DB integration test skipped.");
+        Guid planId;
+        Guid incomingId;
+        await using (var db = Ctx())
+        {
+            planId = await SeedPlan(db);
+            // The incumbent runs open-ended, which is what an Active version normally looks like.
+            db.PlanVersions.Add(Version(planId, 1, new(2026, 1, 1), null, PlanVersionStatus.Active));
+            var incoming = Version(planId, 2, new(2026, 8, 4), null, PlanVersionStatus.Draft);
+            incomingId = incoming.PlanVersionId;
+            db.PlanVersions.Add(incoming);
+            await db.SaveChangesAsync();
+        }
+        try
+        {
+            await using var db = Ctx();
+            var outgoing = await db.PlanVersions.SingleAsync(v => v.PlanId == planId && v.VersionNo == 1);
+            var incoming = await db.PlanVersions.SingleAsync(v => v.PlanVersionId == incomingId);
+
+            // Activation, with the INCOMING row promoted first. That ordering leaves two open-ended non-Draft
+            // versions for the duration of one statement — which is exactly what a per-row check rejects, and
+            // exactly what the deferred check tolerates because it is never committed.
+            //
+            // This is not hypothetical: which row EF updates first is not the handler's choice, so the real
+            // amendment succeeded on one plan and answered 409 OVERLAPPING_VERSION on the next, describing a
+            // conflicting version that does not exist.
+            incoming.Status = PlanVersionStatus.Active;
+            // ck_plan_version_activation: an Active version records who activated it and when. Set here for
+            // the same reason the handler sets it — an activation with no actor is not an activation.
+            incoming.ActivatedAt = DateTimeOffset.UtcNow;
+            incoming.ActivatedBy = Guid.NewGuid();
+            outgoing.EffectiveTo = incoming.EffectiveFrom;
+            outgoing.Status = PlanVersionStatus.Superseded;
+            await db.SaveChangesAsync();
+
+            var rows = await db.PlanVersions.Where(v => v.PlanId == planId)
+                .OrderBy(v => v.VersionNo).ToListAsync();
+            rows[0].Status.Should().Be(PlanVersionStatus.Superseded);
+            rows[0].EffectiveTo.Should().Be(new DateOnly(2026, 8, 4));
+            rows[1].Status.Should().Be(PlanVersionStatus.Active);
+        }
+        finally { await Cleanup(planId); }
+    }
+
+    [SkippableFact]
     public async Task Drafts_are_exempt_from_the_overlap_rule()
     {
         Skip.If(Db is null, "POLICY_TEST_DB not set — DB integration test skipped.");

@@ -10,12 +10,19 @@ namespace Mersal.Pharmacy.Infrastructure;
 /// <summary>Validates a prescription-line drug id against masterdata-service. HTTP impl in Api; tests inject a fake.</summary>
 public interface IDrugValidator
 {
-    Task<bool> DrugExistsAsync(Guid drugId, string? bearerToken, CancellationToken ct = default);
+    /// <summary>
+    /// Resolve a drug to its catalogue NAME, or null when master data does not hold it.
+    ///
+    /// <para>This replaced a <c>DrugExistsAsync</c> boolean. Submission needs both facts — is this a real
+    /// product, and what is it called — and asking only the weaker one is why a prescription carried a drug
+    /// uuid and nothing a pharmacist could read. Returning the name answers existence too: null is "no".</para>
+    /// </summary>
+    Task<string?> DrugNameAsync(Guid drugId, string? bearerToken, CancellationToken ct = default);
 }
 
 public sealed class AllowAllDrugValidator : IDrugValidator
 {
-    public Task<bool> DrugExistsAsync(Guid drugId, string? bearerToken, CancellationToken ct = default) => Task.FromResult(true);
+    public Task<string?> DrugNameAsync(Guid drugId, string? bearerToken, CancellationToken ct = default) => Task.FromResult<string?>("Test drug");
 }
 
 /// <summary>Advisory prescribe-time screening (US-033): interaction across the Rx's drugs + allergy conflicts vs
@@ -40,13 +47,10 @@ public interface IFormularyService
     Task<IReadOnlyList<Guid>> ApprovedAlternativesAsync(Guid drugId, string? bearerToken, CancellationToken ct = default);
 }
 
-/// <summary>Resolves a beneficiary id from a policy / passport / member number (phase 6.1 search) via
-/// patient-service. Best-effort and fail-safe (a lookup failure yields no match rather than leaking). HTTP impl in
-/// Api; tests inject a fake. Rx-number and beneficiary-id searches do not need it.</summary>
-public interface IBeneficiaryResolver
-{
-    Task<Guid?> ResolveAsync(string? policyNo, string? passport, string? memberNo, string? bearerToken, CancellationToken ct = default);
-}
+// The beneficiary resolver, its outcome enum and its result struct moved to libs/beneficiary-lookup when
+// orders needed the same lookup (27.8). Two counters asking "who is this member" must answer identically,
+// including on the failure paths — which are the ones that matter, and the ones a second implementation
+// would drift on first.
 
 /// <summary>Issues the next monotonic business key for a year from a named counter table (rx_seq / referral_seq).</summary>
 public sealed class SequenceIssuer(PharmacyDbContext db)

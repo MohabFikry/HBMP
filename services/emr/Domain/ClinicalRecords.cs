@@ -72,12 +72,50 @@ public sealed class Allergy
     public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid BeneficiaryId { get; set; }
     public Guid AllergenId { get; set; }
+    /// <summary>
+    /// The allergen's name as masterdata gave it at the moment of recording (migration 0020).
+    ///
+    /// <para>A snapshot, not a join: the record should say what the clinician selected and saw, and the
+    /// context bar that displays it cannot afford a per-read fan-out. NULL only for rows written before
+    /// 0020 — readers render "(unspecified)" rather than inventing a name.</para>
+    /// </summary>
+    public string? AllergenDisplay { get; set; }
     public string? Reaction { get; set; }
     public AllergySeverity Severity { get; set; } = AllergySeverity.Mild;
     public AllergyStatus Status { get; set; } = AllergyStatus.Active;
     public string RecordedBy { get; set; } = default!;
     public DateTimeOffset RecordedAt { get; set; }
     public bool IsDeleted { get; set; }
+}
+
+/// <summary>
+/// Standing clinical facts about a PERSON rather than about a visit (migration 0021). One row per
+/// beneficiary; blood group is the first and, today, the only one.
+///
+/// <para>Separate from <see cref="Vital"/> because it is not an observation with a time series, and separate
+/// from the patient-service demographic record because it is clinical: writing it needs emr:write and a
+/// treating relationship, reading it goes through the same gate as an allergy.</para>
+/// </summary>
+public sealed class BeneficiaryClinical
+{
+    public Guid BeneficiaryId { get; set; }
+    public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
+    /// <summary>ABO + Rh as displayed — one of <see cref="BloodGroups.All"/>. Null means never recorded,
+    /// which readers must show as "not recorded" and never as an absence of risk.</summary>
+    public string? BloodGroup { get; set; }
+    public string? RecordedBy { get; set; }
+    public DateTimeOffset? RecordedAt { get; set; }
+}
+
+/// <summary>The closed set of blood groups, matching the CHECK constraint in migration 0021. A plain string
+/// list rather than an enum: the eight values ARE their display strings, and an enum would need members named
+/// APos/ONeg plus a two-way map whose only purpose is to undo itself.</summary>
+public static class BloodGroups
+{
+    public static readonly string[] All = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
+
+    public static bool IsValid(string? value) =>
+        value is not null && Array.Exists(All, g => string.Equals(g, value, StringComparison.Ordinal));
 }
 
 /// <summary>Medication history (§6.7), held at the beneficiary level. <see cref="DrugId"/> → masterdata.drug.</summary>

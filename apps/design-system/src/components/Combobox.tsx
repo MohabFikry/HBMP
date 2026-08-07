@@ -201,7 +201,7 @@ export function Combobox({
 
       {/* Rendered only while open, so the closed control contributes nothing to the a11y tree or hit-testing. */}
       {open && (
-        <ul ref={listRef} id={listId} role="listbox" className="mrs-combo-list"
+        <ul ref={listRef} id={listId} role="listbox" className="mrs-combo-list mrs-scroll"
             aria-label={aria["aria-label"]} aria-labelledby={aria["aria-labelledby"]}>
           {matches.length === 0 && (
             // A silent empty popup reads as a broken control. Not an option, so it is never selectable.

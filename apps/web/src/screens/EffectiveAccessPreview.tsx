@@ -62,17 +62,20 @@ export function EffectiveAccessPreview({ membershipId, keys, loading, error }: E
       data-membership={membershipId}
       style={{ padding: "var(--sp5)" }}
     >
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <caption className="muted" style={{ textAlign: "start", marginBottom: "var(--sp3)" }}>
+      {/* `.mini-table`, not a hand-rolled one. This was the app's fifth table vocabulary and the only one
+          written in inline styles — invisible to every search for a table class, and drawing its own header
+          row with none of the platform's treatment. */}
+      <table className="mini-table">
+        <caption className="muted mini-table-cap">
           {lang === "ar"
             ? "كل صلاحية ومصدرها — الأدوار والاستثناءات ومبرراتها."
             : "Every key and where it comes from — roles, overrides, and the reasons behind them."}
         </caption>
         <thead>
           <tr>
-            <th scope="col" style={{ textAlign: "start" }}>{lang === "ar" ? "الصلاحية" : "Key"}</th>
-            <th scope="col" style={{ textAlign: "start" }}>{lang === "ar" ? "المصدر" : "Source"}</th>
-            <th scope="col" style={{ textAlign: "start" }}>{lang === "ar" ? "السبب" : "Reason"}</th>
+            <th scope="col">{lang === "ar" ? "الصلاحية" : "Key"}</th>
+            <th scope="col">{lang === "ar" ? "المصدر" : "Source"}</th>
+            <th scope="col">{lang === "ar" ? "السبب" : "Reason"}</th>
           </tr>
         </thead>
         <tbody>

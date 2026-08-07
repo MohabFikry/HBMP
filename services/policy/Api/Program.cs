@@ -201,6 +201,11 @@ v1.MapPost("/policies/{policyId:guid}/coverages", async (Guid policyId, CreateCo
         coverageId = cov.CoverageId, beneficiaryId = cov.BeneficiaryId, category = cat.Code,
         status = cov.Status.ToString(), policyNo = policy.PolicyNo,
         effectiveFrom = cov.EffectiveFrom, effectiveTo = cov.EffectiveTo,
+        // 19.2b — see the note on the enrolment-driven publisher in MembershipCommands. Null here is honest:
+        // a coverage created directly through this endpoint was not written against a plan version, and a
+        // guess would be priced as fact. No plan either, for the same reason.
+        planId = (Guid?)null,
+        planVersionId = cov.SourcePlanVersionId,
         limits = cov.Limits.Select(l => new { limitType = l.LimitType.ToString(), l.LimitValue, l.ConsumedValue }),
     }, ct);
     foreach (var l in cov.Limits)

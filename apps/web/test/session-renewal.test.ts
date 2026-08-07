@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OidcAuthClient } from "../src/auth/oidcClient";
-import { clearTokens, getRefreshToken, getToken, setRefreshToken, setToken } from "../src/auth/tokenStore";
+import { clearTokens, getRefreshToken, getToken, setRefreshToken, setScopeRequest, setToken } from "../src/auth/tokenStore";
+import { OIDC } from "../src/config";
 import { activeBranchHeader, setActiveBranch } from "../src/api/activeBranch";
 import { getRaw } from "../src/api/http";
 
@@ -130,5 +131,69 @@ describe("W2 — X-Active-Branch", () => {
     const headers = fetchMock.mock.calls[0]![1]!.headers as Record<string, string>;
     // Absent, not empty: an empty header would be a branch id of "" for the server to reject.
     expect(headers["X-Active-Branch"]).toBeUndefined();
+  });
+});
+
+/**
+ * The sign-out-on-every-refresh regression.
+ *
+ * A staleness guard required the access token to carry EVERY scope the SPA requests. The issuer grants the
+ * INTERSECTION of the request with the user's role entitlement — deliberately, so that asking is not
+ * receiving — so a reception token carries 15 of the 80 scopes requested and the widest role in the system
+ * carries 21. The guard was therefore false for every user who has ever signed in: `restore()` cleared the
+ * tokens on every page load, and the same call in `renew()` wiped a healthy session sixty seconds before its
+ * token expired, with the timeout logout following at five minutes.
+ *
+ * These two tests use a token with a REAL scope claim — narrow, role-filtered, exactly what the live issuer
+ * mints. The suite that shipped the bug fabricated tokens carrying the whole request list, which no issuer
+ * here can produce, and stayed green throughout.
+ */
+describe("a reload holding a role-narrow token", () => {
+  // What `reception` actually receives, read off a live sign-in.
+  const NARROW = "openid offline_access appointment:read appointment:write patient:read eligibility:check";
+
+  function scopedJwt(expSecondsFromNow: number): string {
+    const payload = {
+      sub: "u-1", exp: Math.floor(Date.now() / 1000) + expSecondsFromNow,
+      roles: ["reception"], name: "Reham", scope: NARROW,
+    };
+    const b64 = (o: unknown) => btoa(JSON.stringify(o)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    return `${b64({ alg: "RS256" })}.${b64(payload)}.sig`;
+  }
+
+  it("stays signed in", async () => {
+    setToken(scopedJwt(300));
+    setScopeRequest(OIDC.scope);
+
+    const session = await new OidcAuthClient().restore();
+
+    expect(session).not.toBeNull();
+    expect(session!.userId).toBe("u-1");
+    // The token survives too — a restore that returned a session while clearing the credential behind it
+    // would 401 every request, which is the harder failure to read.
+    expect(getToken()).not.toBeNull();
+  });
+
+  it("renews without the renewal destroying it", async () => {
+    setToken(scopedJwt(-10));
+    setRefreshToken("refresh-1");
+    setScopeRequest(OIDC.scope);
+    vi.stubGlobal("fetch", vi.fn(() =>
+      Promise.resolve(tokenResponse({ access_token: scopedJwt(300), refresh_token: "refresh-2" }))));
+
+    const session = await new OidcAuthClient().renew();
+
+    expect(session).not.toBeNull();
+    expect(getRefreshToken()).toBe("refresh-2");
+  });
+
+  it("re-authorises when the app's OWN request list has moved on", async () => {
+    // The case the guard exists for, and the only one detectable from here: signed in before a scope joined
+    // `config.ts`. Discarded so the next step is a fresh authorisation asking with the current list.
+    setToken(scopedJwt(300));
+    setScopeRequest(OIDC.scope.split(" ").filter((s) => s !== "masterdata:read").join(" "));
+
+    expect(await new OidcAuthClient().restore()).toBeNull();
+    expect(getToken()).toBeNull();
   });
 });

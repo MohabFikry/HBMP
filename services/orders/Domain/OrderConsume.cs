@@ -21,7 +21,14 @@ public static class ProviderCapability
 
 /// <summary>Why a consume request was refused (mapped to problem+json at the edge). <c>None</c> means it passed
 /// validation and may be applied.</summary>
-public enum ConsumeError { None, InvalidQuantity, LineNotFound, AlreadyUsed, OverConsume, OrderNotConsumable }
+public enum ConsumeError
+{
+    None, InvalidQuantity, LineNotFound, AlreadyUsed, OverConsume, OrderNotConsumable,
+    /// <summary>Past its validity window. Distinct from <see cref="OrderNotConsumable"/> because the recovery
+    /// is different and specific: an expired order can be revalidated by the approval team, whereas a
+    /// cancelled one is finished.</summary>
+    OrderExpired,
+}
 
 public sealed record ConsumeLineRequest(Guid OrderLineId, decimal Quantity);
 
@@ -31,11 +38,27 @@ public sealed record ConsumeLineRequest(Guid OrderLineId, decimal Quantity);
 /// the atomic/idempotent/duplicate-proof guarantees are enforced at the datastore (unique key + xmin + CHECK).</summary>
 public static class OrderConsume
 {
-    public static ConsumeError Validate(InvestigationOrder order, IReadOnlyList<ConsumeLineRequest> requests)
+    public static ConsumeError Validate(
+        InvestigationOrder order, IReadOnlyList<ConsumeLineRequest> requests, DateTimeOffset? now = null)
     {
         if (requests.Count == 0) return ConsumeError.LineNotFound;
         if (order.Status is not (OrderStatus.Active or OrderStatus.PartiallyUsed))
             return ConsumeError.OrderNotConsumable;
+
+        /*
+         * PAST ITS VALIDITY WINDOW.
+         *
+         * This rule did not exist. `expires_at` was in the schema from migration 0001, the index on it too,
+         * and nothing ever checked it here — so once orders started carrying an expiry, an order could lapse
+         * and still be fulfilled, and the whole mechanism was decoration. pharmacy's dispense rule has always
+         * compared the date; this is the missing twin.
+         *
+         * Checked against the CLOCK and not only against the status, because the expiry sweeper runs hourly:
+         * between lapsing and being swept an order still reads Active, and a status-only test would leave an
+         * hour a day in which expired orders are fulfillable.
+         */
+        if (now is { } clock && order.ExpiresAt is { } expiry && expiry <= clock)
+            return ConsumeError.OrderExpired;
 
         foreach (var req in requests)
         {

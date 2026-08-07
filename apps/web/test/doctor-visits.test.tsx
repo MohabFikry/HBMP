@@ -74,7 +74,10 @@ describe("Doctor visits (US-030 / 23 §1)", () => {
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/clinician/encounter?encounter=enc-77"));
   });
 
-  it("offers no Start visit for a patient who has not arrived, and marks the row Pending", async () => {
+  it("shows Start visit DISABLED for a patient who has not arrived", async () => {
+    // It used to render the word "Pending" where every other row had a button, so "can I start this visit
+    // yet?" had to be inferred from the ABSENCE of a control — and the Status column two cells to the left
+    // was already saying "Booked". One control in two states answers it directly.
     renderVisits(fakeApi({
       appointments: vi.fn().mockResolvedValue([
         row({ checkedIn: false, checkInEligible: true, startVisitEligible: false,
@@ -82,7 +85,24 @@ describe("Doctor visits (US-030 / 23 §1)", () => {
       ]),
     }));
 
-    expect(await screen.findByText(/^pending$/i)).toBeInTheDocument();
+    const start = await screen.findByRole("button", { name: /start visit/i });
+    expect(start).toBeDisabled();
+    // A disabled control with no explanation is the commonest way an interface stops making sense.
+    expect(start).toHaveAttribute("title", expect.stringMatching(/checks this patient in/i));
+    expect(screen.queryByText(/^pending$/i)).not.toBeInTheDocument();
+  });
+
+  it("offers nothing to start on a visit that is already finished", async () => {
+    // Neither startable nor awaiting check-in — completed, cancelled, no-show. A permanently dead button on
+    // a finished visit is worse than no button: it implies an action that will never become available.
+    renderVisits(fakeApi({
+      appointments: vi.fn().mockResolvedValue([
+        row({ checkedIn: false, checkInEligible: false, startVisitEligible: false,
+              status: { kind: "neu", label: { en: "Completed", ar: "مكتمل" } } }),
+      ]),
+    }));
+
+    await screen.findByRole("button", { name: /timeline/i });
     expect(screen.queryByRole("button", { name: /start visit/i })).not.toBeInTheDocument();
   });
 
@@ -214,6 +234,11 @@ describe("Encounter workspace deep link", () => {
           // The panel renders PatientContextBar, which reads the profile header. Stubbed so the deep-link
           // assertion is not tangled up with the context bar's own fetch.
           patientProfile: vi.fn().mockResolvedValue({ beneficiaryId: "ben-9", servedAt: "2026-08-01T09:00:00Z", sections: [] }),
+          // Same reason: MemberClinicalPanel sits under the context bar and reads the member's standing
+          // clinical facts on mount. An empty record is the honest stub — nothing has been recorded here.
+          memberClinicalRecord: vi.fn().mockResolvedValue({
+            beneficiaryId: "ben-9", bloodGroup: null, bloodGroupRecordedAt: null, allergies: [],
+          }),
         } as unknown as ApiClient}
       >
         <MemoryRouter

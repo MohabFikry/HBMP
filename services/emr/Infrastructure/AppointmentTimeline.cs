@@ -39,7 +39,8 @@ public static class AppointmentTimeline
                        row_snapshot ->> 'updated_by'       AS updated_by,
                        row_snapshot ->> 'created_by'       AS created_by,
                        row_snapshot ->> 'scheduled_start'  AS scheduled_start,
-                       row_snapshot ->> 'note'             AS note
+                       row_snapshot ->> 'note'             AS note,
+                       row_snapshot ->> 'doctor_id'        AS doctor_id
                   FROM emr.appointment_history
                  WHERE appointment_id = {0}
                  ORDER BY history_id
@@ -92,6 +93,12 @@ public static class AppointmentTimeline
                 steps.Add(new TimelineRow(Rescheduled, snap.ChangedAt, snap.UpdatedBy));
             else if (snap.Note != previous.Note)
                 steps.Add(new TimelineRow(NoteEdited, snap.ChangedAt, snap.UpdatedBy));
+            // A move to a different practitioner WITHOUT a time change — the desk swapping the clinician on a
+            // session that keeps its slot. Checked after the reschedule branch, not before, because a move to
+            // another doctor's slot changes both and the desk asked "when is this now?" first; one step per
+            // act, named for the act the reader is looking for.
+            else if (snap.DoctorId != previous.DoctorId)
+                steps.Add(new TimelineRow(DoctorChanged, snap.ChangedAt, snap.UpdatedBy));
             else
                 continue;   // nothing the timeline speaks about changed
 
@@ -111,9 +118,13 @@ public static class AppointmentTimeline
     /// and the UI labels them separately.</summary>
     public const string Rescheduled = "Rescheduled";
     public const string NoteEdited = "NoteEdited";
+    /// <summary>The appointment was moved to a different practitioner. A separate act from a reschedule: a
+    /// patient told "same time, different doctor" is being told something a `Rescheduled` step does not
+    /// say.</summary>
+    public const string DoctorChanged = "DoctorChanged";
 
     /// <summary>Raw shape read out of the history snapshot (public so the collapse rule is testable).</summary>
     public sealed record HistoryProjection(
         string? Status, DateTimeOffset ChangedAt, string? UpdatedBy, string? CreatedBy,
-        string? ScheduledStart = null, string? Note = null);
+        string? ScheduledStart = null, string? Note = null, string? DoctorId = null);
 }

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { cx } from "../lib/cx";
 import { useTheme } from "../theme/ThemeProvider";
 
@@ -9,6 +10,27 @@ export interface KpiCardProps {
   delta?: string;
   /** Direction of the delta — drives icon + accessible text, not color alone. */
   direction?: "up" | "down";
+  /**
+   * A glyph for the subject the figure counts.
+   *
+   * <p><b>Decorative, and marked as such.</b> The label already names the figure in words; the icon lets a
+   * desk find the right card by shape at a glance, on a board of three or seven identical white tiles. It is
+   * therefore rendered `aria-hidden` — announcing "calendar, Appointments, 8" adds a word that carries no
+   * information the label does not already give, and status is never encoded by the icon alone.</p>
+   */
+  icon?: ReactNode;
+  /**
+   * Recolours the hairline and the icon tile to say what KIND of figure this is.
+   *
+   * <p><b>It marks the subject, never the reading.</b> A no-show card is `bad` whether it says 0 or 40 —
+   * the tone identifies the category so a desk can find the one card it dreads on a row of identical white
+   * tiles. Wiring it to the VALUE instead would paint a card red for a quiet morning, which is the platform's
+   * own forbidden pattern in miniature: a colour claiming something the number does not say.</p>
+   *
+   * <p>That is also why the big value stays in body colour in every tone. Nothing here carries state by hue
+   * alone — the uppercase label names the figure in words, and the tone only reinforces it.</p>
+   */
+  tone?: "brand" | "ok" | "warn" | "bad";
   className?: string;
 }
 
@@ -16,11 +38,14 @@ export interface KpiCardProps {
  * KPI card (0B §10b): brand→accent gradient top hairline, uppercase micro-label, 34px tabular numerals,
  * delta as a bordered pill with a ▲/▼ glyph (direction encoded by glyph + text, not hue alone).
  */
-export function KpiCard({ label, value, delta, direction, className }: KpiCardProps) {
+export function KpiCard({ label, value, delta, direction, icon, tone, className }: KpiCardProps) {
   const { lang } = useTheme();
   return (
-    <div className={cx("mrs-card", "mrs-kpi", className)}>
-      <div className="mrs-kpi-lab">{label}</div>
+    <div className={cx("mrs-card", "mrs-kpi", tone && tone !== "brand" && `mrs-kpi--${tone}`, className)}>
+      <div className="mrs-kpi-lab">
+        {icon && <span className="mrs-kpi-icon" aria-hidden="true">{icon}</span>}
+        {label}
+      </div>
       <div className="mrs-kpi-val">{value}</div>
       {delta && (
         <div className={cx("mrs-kpi-delta", direction)}>

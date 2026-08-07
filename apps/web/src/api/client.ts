@@ -1,4 +1,9 @@
 import type {
+  RxPricing,
+  AuthorizationItem,
+  InvestigationOrder,
+  OrderPricing,
+  SubstitutionRequest,
   AccessReviewCampaign,
   AccessSession,
   BranchScopeGrant,
@@ -30,7 +35,17 @@ import type {
   Beneficiary360,
   BreakGlassGrant,
   CheckInResult,
+  AllergenOption,
+  AddAllergyRequest,
+  AllergyRecord,
+  BloodGroup,
+  MemberClinicalRecord,
   DrugRef,
+  PrescribableDrug,
+  PrescriptionDraftLine,
+  PrescriptionSubmitResult,
+  LineAcknowledgement,
+  ValidationResult,
   EmergencyResult,
   ManualAuthInput,
   ManualAuthResult,
@@ -98,9 +113,27 @@ import type {
   RoleScopeGrant,
   ReportAccessRequestRow,
   PatientProfile,
+  CptRef,
+  CptSection,
+  InvestigationDraftLine,
+  InvestigationOrderResult,
+  InvestigationOrderType,
+  OrderAcknowledgement,
+  OrderValidationResult,
+  ValidityExtensionRequest,
+  ValidityExtensionResult,
+  ValidityPolicyView,
   ProfileSectionKey,
   ProfileExportSummary,
   CopySummariesResult,
+  MasterDataEdit,
+  MasterDataAsOf,
+  DocumentValidityView,
+  SetDocumentValidity,
+  ApprovalRuleList,
+  SaveApprovalRule,
+  AutoDecisionSwitch,
+  SetAutoDecision,
 } from "@mersal/contracts";
 
 /**
@@ -171,6 +204,9 @@ export interface ApiClient {
   /** How this appointment reached its current status — booked, checked in, no-showed, cancelled — with who and
    * when. Operational history from emr, NOT the audit store (which needs audit:read). */
   appointmentTimeline(appointmentId: string): Promise<TimelineStep[]>;
+  /** The care episode of one VISIT (ADR-0031) — the encounter workspace's own history, and the source the
+   *  order and prescription dialogs filter by reference to show what happened to one transaction. */
+  encounterTimeline(encounterId: string): Promise<TimelineStep[]>;
   /** Start the visit for a checked-in appointment (CheckedIn → an open encounter). Server-gated: the caller
    * must be the assigned practitioner, or the appointment must name none. Returns the encounter id. */
   startVisit(appointmentId: string, beneficiaryId: string): Promise<{ encounterId: string }>;
@@ -252,9 +288,55 @@ export interface ApiClient {
   /** Record vitals on an encounter (nurse triage, US-030) — treating-gated server-side. */
   recordVitals(encounterId: string, readings: VitalInput[]): Promise<VitalsResult>;
 
+  // Standing clinical facts — blood group + allergies, held on the MEMBER's file, not on a visit.
+  /**
+   * Blood group and the recorded allergy list, in one gated read.
+   *
+   * One call and not two on purpose: each gated emr read writes a PHI-read audit event, so splitting them
+   * would record a clinician's single glance at a patient as two separate accesses in the review.
+   *
+   * An empty `allergies` array means NOBODY HAS RECORDED ANY — never that the patient has none. Callers
+   * render the two differently or they are lying to a prescriber.
+   */
+  memberClinicalRecord(beneficiaryId: string): Promise<MemberClinicalRecord>;
+  /** The masterdata allergen catalogue — the picker's options. Small and static; fetched once on open. */
+  allergenCatalogue(): Promise<AllergenOption[]>;
+  /** Record an allergy on the member's file (emr:write + treating relationship, enforced server-side). */
+  addAllergy(beneficiaryId: string, req: AddAllergyRequest): Promise<AllergyRecord>;
+  /**
+   * Set the member's blood group.
+   *
+   * A PUT because a person has one: recording it a second time is a correction, not a second fact. The
+   * server keeps both values in the audit trail, since a CHANGED blood group is the entry a reviewer wants.
+   */
+  setBloodGroup(beneficiaryId: string, bloodGroup: BloodGroup): Promise<void>;
+
   // Lab / imaging — queue + consume (Phase 5)
   labQueue(kind: "lab" | "imaging"): Promise<LabOrder[]>;
+  /**
+   * Find a patient's investigation orders by order number, or by TWO of their identifiers (27.8).
+   *
+   * <p>The same shape as `pharmacySearch`, through the same shared beneficiary lookup, so a bench and a
+   * counter answer "who is this member" identically — including on the failure paths, which are the ones
+   * that matter.</p>
+   */
+  labSearch(
+    kind: "lab" | "imaging",
+    by: { orderNo?: string; cardNumber?: string; memberNo?: string; passport?: string },
+  ): Promise<LabOrder[]>;
   consume(req: ConsumeRequest): Promise<ConsumeResult>;
+  /** One order with every line on it — what the order page is built from (ADR-0034). */
+  investigationOrder(orderNo: string): Promise<InvestigationOrder | null>;
+  /**
+   * What the order costs and how it splits between member and payer.
+   *
+   * Separate from the order itself because it is a different question with a different failure mode: the
+   * order is always knowable, the price often is not. Callers MUST honour `determinate` — a `false` means
+   * the amounts are unknown, NOT zero.
+   */
+  orderPricing(orderId: string, performNow?: Record<string, number>): Promise<OrderPricing>;
+  /** Ask the approval team whether another examination may stand in. Returns the AUTH- number raised. */
+  requestSubstitution(req: SubstitutionRequest, idempotencyKey?: string): Promise<{ authNo: string }>;
   /** Consumed lines this provider still owes a result on (US-042). */
   awaitingResult(kind: "lab" | "imaging"): Promise<ResultTask[]>;
   /** Attach a result value to a consumed line (US-042). */
@@ -262,13 +344,127 @@ export interface ApiClient {
 
   // Pharmacy — dispense (Phase 6)
   pharmacyQueue(): Promise<Prescription[]>;
+  /**
+   * The dispensing counter's lookup: one member's dispensable prescriptions.
+   *
+   * By Rx number alone, or by TWO of the member's identifiers — a card number on its own resolves nobody,
+   * because it is printed on something that gets shared and photographed. The server refuses a single
+   * identifier with 422 and answers 503 when it cannot reach the patient directory, so "no prescriptions"
+   * only ever means no prescriptions.
+   */
+  pharmacySearch(by: { rxNo?: string; cardNumber?: string; memberNo?: string; passport?: string }): Promise<Prescription[]>;
   dispense(req: DispenseRequest): Promise<DispenseResult>;
+  /**
+   * What the prescription costs and how it splits between member and payer.
+   *
+   * Separate from the prescription itself because it is a different question with a different failure mode:
+   * the prescription is always knowable, the price often is not. Callers MUST honour `determinate` — a
+   * `false` means the amounts are unknown, not zero.
+   */
+  prescriptionPricing(
+    prescriptionId: string,
+    /**
+     * What is about to be handed over, by line id. Omit to price the whole prescription.
+     *
+     * <p>The share is quoted on THIS, not scaled from the whole-prescription figure: the split runs a
+     * deductible before a copay before coinsurance, so the member's share of 7 units is not half their share
+     * of 14. Only the server may compose it — `libs/benefit-pricing` is the one place that answer is
+     * allowed to come from, so that the amount a member is told at the counter and the amount their claim is
+     * charged cannot diverge.</p>
+     */
+    dispenseNow?: Record<string, number>,
+  ): Promise<RxPricing>;
+  /**
+   * Active ingredient by drug id, from master data. Missing ids are absent from the map.
+   *
+   * A client-side join, the same shape as `icdTitles` and `branchLabels`: the molecule a product contains is
+   * master data's fact, and answering it from pharmacy-service would make pharmacy a second place that says
+   * what a drug is.
+   *
+   * THROWS when the catalogue cannot be reached. An empty map means "no ingredient recorded"; a rejection
+   * means "we could not ask", and a caller that cannot tell them apart will render an outage as a fact about
+   * the medicine.
+   */
+  drugIngredients(drugIds: readonly string[]): Promise<Map<string, string>>;
   /** Formulary lookup for substitutions (US-052): search drugs, then list a drug's approved alternatives. */
   searchDrugs(query: string): Promise<DrugRef[]>;
   drugAlternatives(drugId: string): Promise<DrugRef[]>;
 
+  // Prescribing workspace (phase 26, design 43 §6)
+  /**
+   * Typeahead over the CURRENT market list, by trade name OR active ingredient.
+   *
+   * A prescriber searches by whichever name they know: "augmentin" and "amoxicillin" must both reach the
+   * same product. Returns real drug uuids — the modal this replaced sent the ATC code string where the API
+   * expects a Guid.
+   */
+  searchPrescribableDrugs(query: string): Promise<PrescribableDrug[]>;
+  /**
+   * Step 1 — advisory validation while composing (design 43 §5).
+   *
+   * Its verdict is DISPLAY STATE ONLY. The server re-evaluates from scratch on submit and reads nothing
+   * this returned, so a client that lied about the outcome changes nothing.
+   */
+  validatePrescription(req: {
+    encounterId: string;
+    lines: PrescriptionDraftLine[];
+    diagnosisIcdCodes: string[];
+  }): Promise<ValidationResult>;
+  /** Submit. Every warning must carry an acknowledgement with a reason, or the server refuses with 422. */
+  submitPrescription(req: {
+    encounterId: string;
+    lines: PrescriptionDraftLine[];
+    diagnosisIcdCodes: string[];
+    acknowledgements: LineAcknowledgement[];
+  }): Promise<PrescriptionSubmitResult>;
+
+  // Investigation ordering workspace — the lab / imaging counterpart of the prescribing trio above.
+  /**
+   * CPT typeahead for the section being ordered from.
+   *
+   * Section, NOT the stored `category`: the taxonomy field says "Category I" for both a chest x-ray and a
+   * blood count, so it cannot separate the Labs tab from the Imaging tab. The numeric range can.
+   */
+  /** Typeahead over the CPT catalogue, narrowed to the sections a tab orders from (Labs spans two). */
+  searchCpt(query: string, sections: readonly CptSection[]): Promise<CptRef[]>;
+  /**
+   * Ask the approval team to revalidate an expired prescription or order.
+   *
+   * A 409 is an ANSWER — one is already open for this item — not a failure to ask.
+   */
+  requestValidityExtension(req: ValidityExtensionRequest): Promise<ValidityExtensionResult>;
+  /** The tenant's four validity periods, with their bounds and whether each was actually chosen. */
+  validityPolicy(): Promise<ValidityPolicyView>;
+  /** Set one. Applies to prescriptions and orders written from now on; existing ones keep their expiry. */
+  setValidityPolicy(artefact: string, days: number): Promise<void>;
+  /** Step 1 — advisory while composing. Its verdict is display state; the create path re-derives everything. */
+  validateInvestigationOrder(req: {
+    encounterId: string;
+    orderType: InvestigationOrderType;
+    lines: InvestigationDraftLine[];
+    diagnosisIcdCodes: string[];
+  }): Promise<OrderValidationResult>;
+  /** Step 2 — one order carrying every composed line. */
+  submitInvestigationOrder(req: {
+    encounterId: string;
+    orderType: InvestigationOrderType;
+    lines: InvestigationDraftLine[];
+    acknowledgements: OrderAcknowledgement[];
+  }): Promise<InvestigationOrderResult>;
+
   // Approvals — worklist + decision (Phase 7)
-  approvalWorklist(): Promise<ApprovalItem[]>;
+  /**
+   * The approval team's list.
+   *
+   * `kind` defaults to `Review` — the work queue, meaning "these are waiting for you". Pass `Fulfilment` for
+   * the register of what has actually been handed over at counters and benches, or `All` for both. The
+   * default is deliberate (ADR-0034): a few hundred dispenses a day landing in the inbox would drown the
+   * twelve requests that need a decision, and a queue that is mostly noise stops being read.
+   */
+  approvalWorklist(kind?: "Review" | "Fulfilment" | "All"): Promise<ApprovalItem[]>;
+  /** What was actually delivered against an authorization. Empty for a review request — nothing has been
+   *  delivered against a question that has not been answered. */
+  authorizationItems(authorizationId: string): Promise<AuthorizationItem[]>;
   approvalReview(approvalId: string): Promise<ApprovalReview>;
   decide(req: DecisionRequest): Promise<DecisionResult>;
   // Approvals — break-glass + SLA (Phase 7.3)
@@ -314,6 +510,28 @@ export interface ApiClient {
   sodMatrix(): Promise<SodConflict[]>;
   accessReviewCampaigns(): Promise<AccessReviewCampaign[]>;
   breakGlassGrants(): Promise<BreakGlassGrant[]>;
+  /** The tenant's auto-decision kill switch (ADR-0035 §5.3). Never touched reads `enabled: false`. */
+  autoDecisionSwitch(): Promise<AutoDecisionSwitch>;
+  /** Turn auto-decision on or off. A reason is required in both directions, and it is audited. */
+  setAutoDecision(req: SetAutoDecision): Promise<AutoDecisionSwitch>;
+  /** The engine's routing and SLA rules, plus the queues a routing rule may target (ADR-0035 §5). */
+  approvalRules(family?: "Routing" | "Sla" | "Preauth" | "AutoApprove"): Promise<ApprovalRuleList>;
+  /** Publish a rule. Supplying `supersedesRuleId` closes the prior version rather than editing it. */
+  saveApprovalRule(req: SaveApprovalRule): Promise<{ id: string; versionNo: number }>;
+  /** The tenant's document validity policy — every kind answered whether configured or not (ADR-0035 §6). */
+  adminDocumentValidity(): Promise<DocumentValidityView>;
+  /** Set a cadence, thresholds, or both. Omitting one leaves it untouched rather than clearing it. */
+  adminSetDocumentValidity(req: SetDocumentValidity): Promise<void>;
+  /**
+   * Append a new effective-dated version of a master-data code (ADR-0035 §4).
+   *
+   * <p>Never an update. The prior version's window closes and a new one opens, so a record written last March
+   * still resolves the code as it read last March — which is the whole reason master-data edits go through
+   * this governance path instead of a write on masterdata-service.</p>
+   */
+  adminMasterDataUpsert(edit: MasterDataEdit): Promise<{ id: string; code: string; versionNo: number }>;
+  /** The version in force at an instant — the "what did this mean then" read behind the editor's diff. */
+  adminMasterDataAsOf(system: string, code: string, at: string): Promise<MasterDataAsOf>;
   adminMasterData(): Promise<MasterDataVersion[]>;
   adminSystemConfig(): Promise<SystemConfigEntry[]>;
 

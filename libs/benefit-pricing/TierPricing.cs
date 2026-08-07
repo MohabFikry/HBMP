@@ -78,7 +78,26 @@ public sealed record TierPricing(
 /// <summary>Why pricing could not be produced. Distinguished rather than collapsed to null, because each one
 /// needs a different response: a missing tier is a network gap, a missing price is a plan gap, and telling a
 /// beneficiary "covered" in either case would be a guess.</summary>
-public enum TierPricingFailure { None, TierUnresolved, NotPricedAtTier }
+public enum TierPricingFailure
+{
+    None,
+    /// <summary>The provider resolves to no tier — a network-administration gap.</summary>
+    TierUnresolved,
+    /// <summary>The version genuinely does not price this category at this tier — a plan gap.</summary>
+    NotPricedAtTier,
+    /// <summary>
+    /// The question could not be ASKED: policy-service refused, failed or did not answer.
+    /// </summary>
+    /// <remarks>
+    /// Distinguished from <see cref="NotPricedAtTier"/> because the two are opposite kinds of statement and
+    /// were being collapsed into one. The cost-share route was gated on <c>policy:read</c>, which a
+    /// pharmacist does not hold, so every quote at a counter took a 403 — and the caller reported it as "the
+    /// plan does not price pharmacy at this tier", which is a claim about the member's benefit made on the
+    /// strength of a permission error. A failed read is never a finding; that is the same rule the clinical
+    /// checks follow (ADR-0033) and it applies to money for the same reason.
+    /// </remarks>
+    Unavailable,
+}
 
 /// <summary>The result, carrying the reason when there is no pricing.</summary>
 public readonly record struct TierPricingResult(TierPricing? Pricing, TierPricingFailure Failure)
@@ -114,8 +133,20 @@ public sealed class TierPricingService(INetworkTierResolver tiers, IBenefitCostS
         var tier = await tiers.ResolveAsync(request.Tier, bearerToken, ct);
         if (tier is null) return TierPricingResult.Failed(TierPricingFailure.TierUnresolved);
 
-        var terms = await costShare.GetAsync(
-            request.PlanVersionId, request.BenefitCategoryCode, tier.NetworkTierId, bearerToken, ct);
+        BenefitCostShare? terms;
+        try
+        {
+            terms = await costShare.GetAsync(
+                request.PlanVersionId, request.BenefitCategoryCode, tier.NetworkTierId, bearerToken, ct);
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
+        {
+            // "We could not ask" is not "the answer is no". The source returns null ONLY for a 404, which is
+            // the authored answer that this tier is unpriced; everything else lands here and is reported as
+            // unavailable so the caller can say so instead of inventing a benefit fact.
+            return TierPricingResult.Failed(TierPricingFailure.Unavailable);
+        }
+
         if (terms is null) return TierPricingResult.Failed(TierPricingFailure.NotPricedAtTier);
 
         var split = CostShareCalculator.Split(request.AllowedAmount, terms.ToTerms());

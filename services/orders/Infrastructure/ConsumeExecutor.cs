@@ -9,6 +9,9 @@ namespace Mersal.Orders.Infrastructure;
 public enum ConsumeOutcome
 {
     Applied, Replayed, Conflict, NotFound, AlreadyUsed, OverConsume, OrderNotConsumable, LineNotFound, InvalidQuantity,
+    /// <summary>Past its validity window. Its own outcome, not folded into OrderNotConsumable, because the
+    /// technician's recovery is specific: ask the approval team to revalidate it.</summary>
+    OrderExpired,
     /// <summary>18.A3 — the header is empty, over-length, or contains the reserved <c>::</c> separator.</summary>
     InvalidIdempotencyKey,
     /// <summary>18.A3 — the key was already used for a DIFFERENT request body. Answering it with the
@@ -59,7 +62,7 @@ public sealed class ConsumeExecutor(OrdersDbContext db)
                 ? new ConsumeResult(ConsumeOutcome.Replayed, order, prior)
                 : ConsumeResult.Fail(ConsumeOutcome.IdempotencyKeyReuse);
 
-        var error = OrderConsume.Validate(order, requests);
+        var error = OrderConsume.Validate(order, requests, now);
         if (error != ConsumeError.None) return ConsumeResult.Fail(Map(error));
 
         var fulfillments = new List<OrderFulfillment>();
@@ -162,6 +165,7 @@ public sealed class ConsumeExecutor(OrdersDbContext db)
         ConsumeError.AlreadyUsed => ConsumeOutcome.AlreadyUsed,
         ConsumeError.OverConsume => ConsumeOutcome.OverConsume,
         ConsumeError.OrderNotConsumable => ConsumeOutcome.OrderNotConsumable,
+        ConsumeError.OrderExpired => ConsumeOutcome.OrderExpired,
         _ => ConsumeOutcome.InvalidQuantity,
     };
 

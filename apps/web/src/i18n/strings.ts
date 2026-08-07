@@ -185,10 +185,12 @@ export const L = {
     ar: "لم تكن نشطًا. لأسباب أمنية، سيتم تسجيل خروجك قريبًا ما لم تتابع.",
   },
   // Login
-  loginTitle: { en: "Sign in to Mersal HBMP", ar: "تسجيل الدخول إلى مرسال HBMP" },
+  loginTitle: { en: "Sign in", ar: "تسجيل الدخول" },
+  // One short line, left-aligned with the heading. The old copy ran to two centred lines and said three
+  // things at a moment when somebody wants to type a username.
   loginSub: {
-    en: "Single sign-on with multi-factor authentication. You'll land on your role's portal only.",
-    ar: "دخول موحّد مع مصادقة متعددة العوامل. ستصل إلى بوابة دورك فقط.",
+    en: "Use your Mersal single sign-on to continue.",
+    ar: "استخدم الدخول الموحّد لمرسال للمتابعة.",
   },
   chooseRole: { en: "Role (demo sign-in)", ar: "الدور (دخول تجريبي)" },
   mfaLabel: { en: "Authenticator code", ar: "رمز المصادقة" },
@@ -198,6 +200,121 @@ export const L = {
   // Names the platform's own issuer. It said "via Keycloak" until phase 19 — long after ADR-0015 retired
   // Keycloak — so the screen told every operator their credentials were going somewhere they were not.
   signInVia: { en: "Secure sign-in via Mersal ID", ar: "تسجيل دخول آمن عبر هوية مرسال" },
+
+  // ---- 28.4: the sign-in happens HERE now (ADR-0036). Every string authored in both locales. ----
+  usernameLabel: { en: "Username", ar: "اسم المستخدم" },
+  passwordLabel: { en: "Password", ar: "كلمة المرور" },
+  // ONE message for an unknown username, a wrong password and a deactivated account. The server already
+  // refuses to tell them apart; saying more here would rebuild the enumeration oracle in the browser.
+  signInInvalid: {
+    en: "That username and password don't match. Check them and try again.",
+    ar: "اسم المستخدم أو كلمة المرور غير صحيحة. تحقق منهما وحاول مجدداً.",
+  },
+  // Told deliberately (ADR-0036 §5.2): the alternative sends someone to reset a password that was never
+  // wrong, and a reset does not unlock the account — they would lose the password AND stay locked out.
+  signInLocked: {
+    en: "This account is temporarily locked after too many attempts.",
+    ar: "تم قفل هذا الحساب مؤقتاً بعد عدد كبير من المحاولات.",
+  },
+  signInLockedWait: { en: "Try again in about {n} minutes.", ar: "حاول مجدداً بعد حوالي {n} دقيقة." },
+  // "We could not ask" is never rendered as "your password is wrong".
+  signInUnavailable: {
+    en: "Sign-in is unavailable right now. This is not a problem with your password — please try again shortly.",
+    ar: "تسجيل الدخول غير متاح حالياً. هذه ليست مشكلة في كلمة المرور — يرجى المحاولة بعد قليل.",
+  },
+  signInNoMembership: {
+    en: "Your account is not active in any organization. Contact your administrator.",
+    ar: "حسابك غير مُفعّل في أي منظمة. تواصل مع المسؤول.",
+  },
+
+  twoFactorTitle: { en: "Two-step verification", ar: "التحقق بخطوتين" },
+  twoFactorSub: {
+    en: "Enter the 6-digit code from your authenticator app.",
+    ar: "أدخل الرمز المكوّن من 6 أرقام من تطبيق المصادقة.",
+  },
+  twoFactorCode: { en: "Authenticator code", ar: "رمز المصادقة" },
+  twoFactorUseRecovery: { en: "Use a recovery code instead", ar: "استخدم رمز استرداد بدلاً من ذلك" },
+  twoFactorUseCode: { en: "Use my authenticator app", ar: "استخدم تطبيق المصادقة" },
+  twoFactorRecoveryLabel: { en: "Recovery code", ar: "رمز الاسترداد" },
+  twoFactorInvalid: { en: "That code wasn't accepted. Try again.", ar: "لم يتم قبول هذا الرمز. حاول مجدداً." },
+
+  membershipTitle: { en: "Choose an organization", ar: "اختر منظمة" },
+  membershipSub: {
+    en: "Your account is active in more than one. This session will act for the one you pick.",
+    ar: "حسابك مُفعّل في أكثر من واحدة. ستعمل هذه الجلسة نيابة عن التي تختارها.",
+  },
+  membershipContinue: { en: "Continue", ar: "متابعة" },
+
+  signInBack: { en: "Back", ar: "رجوع" },
+  signInWorking: { en: "Signing in…", ar: "جارٍ تسجيل الدخول…" },
+  signInHelp: {
+    en: "Need access? Contact your administrator.",
+    ar: "بحاجة إلى صلاحية؟ تواصل مع المسؤول.",
+  },
+  signInForgot: { en: "Forgot password?", ar: "نسيت كلمة المرور؟" },
+
+  // ---- 28.8: the sign-in hero. Decorative copy, still authored in both locales. ----
+  heroKicker: { en: "Mersal Foundation", ar: "مؤسسة مرسال" },
+  // Two lines on purpose — "One platform." lands, then the promise. The break is markup, not a newline in
+  // the string: a \n would collapse in HTML and an Arabic translation may want to break elsewhere.
+  heroHeadlineLead: { en: "One platform.", ar: "منصة واحدة." },
+  heroHeadlineRest: {
+    en: "Every stakeholder. Every step of care.",
+    ar: "كل صاحب مصلحة. كل خطوة في الرعاية.",
+  },
+  heroLede: {
+    en: "The Healthcare Benefit Management Platform for Mersal Foundation. Eligibility, care and approvals in one auditable, bilingual record.",
+    ar: "منصة إدارة المنافع الصحية لمؤسسة مرسال. الأهلية والرعاية والموافقات في سجل واحد قابل للتدقيق وثنائي اللغة.",
+  },
+  rememberDevice: { en: "Remember this device", ar: "تذكّر هذا الجهاز" },
+  toggleLanguage: { en: "Switch language", ar: "تغيير اللغة" },
+  toggleTheme: { en: "Switch theme", ar: "تغيير السمة" },
+
+  // ---- 28.6: self-service password reset (ADR-0036 §6) ----
+  forgotTitle: { en: "Reset your password", ar: "إعادة تعيين كلمة المرور" },
+  forgotSub: {
+    en: "Enter your username and we'll send a reset link to the email on your account.",
+    ar: "أدخل اسم المستخدم وسنرسل رابط إعادة التعيين إلى البريد المسجّل على حسابك.",
+  },
+  forgotSubmit: { en: "Send reset link", ar: "إرسال رابط إعادة التعيين" },
+  // Deliberately vague about whether the account exists — the server answers the same either way, and a
+  // precise message here would be a free account-existence oracle costing an attacker nothing.
+  forgotSent: {
+    en: "If that account exists, a reset link is on its way. The link works once and expires in 30 minutes.",
+    ar: "إذا كان هذا الحساب موجوداً، فسيصلك رابط إعادة التعيين. يعمل الرابط مرة واحدة وينتهي خلال 30 دقيقة.",
+  },
+  // The vagueness stops at delivery. Never "we've emailed you" when nothing could be emailed.
+  forgotUnavailable: {
+    en: "Password reset isn't available on this system yet. Contact your administrator to have it reset for you.",
+    ar: "إعادة تعيين كلمة المرور غير متاحة بعد على هذا النظام. تواصل مع المسؤول لإعادة تعيينها لك.",
+  },
+
+  resetTitle: { en: "Choose a new password", ar: "اختر كلمة مرور جديدة" },
+  resetSub: {
+    en: "This link works once. Pick a password you haven't used here before.",
+    ar: "هذا الرابط يعمل مرة واحدة. اختر كلمة مرور لم تستخدمها هنا من قبل.",
+  },
+  resetNewPassword: { en: "New password", ar: "كلمة المرور الجديدة" },
+  resetConfirmPassword: { en: "Confirm new password", ar: "تأكيد كلمة المرور الجديدة" },
+  resetSubmit: { en: "Set new password", ar: "تعيين كلمة المرور" },
+  resetMismatch: { en: "The two passwords don't match.", ar: "كلمتا المرور غير متطابقتين." },
+  resetInvalidLink: {
+    en: "That reset link is no longer valid. Links expire after 30 minutes and can be used only once — request a new one.",
+    ar: "هذا الرابط لم يعد صالحاً. تنتهي الروابط بعد 30 دقيقة وتُستخدم مرة واحدة فقط — اطلب رابطاً جديداً.",
+  },
+  // Said BEFORE the fields, not after the deed.
+  resetEndsSessions: {
+    en: "Setting a new password signs you out everywhere.",
+    ar: "تعيين كلمة مرور جديدة سيُنهي جلساتك على كل الأجهزة.",
+  },
+  resetKeepsTwoFactor: {
+    en: "It does not turn off two-step verification — you'll still need your authenticator code.",
+    ar: "لن يُلغي ذلك التحقق بخطوتين — ستظل بحاجة إلى رمز المصادقة.",
+  },
+  resetDone: {
+    en: "Your password is set and every other session has ended. Sign in with the new password.",
+    ar: "تم تعيين كلمة المرور وانتهت كل الجلسات الأخرى. سجّل الدخول بكلمة المرور الجديدة.",
+  },
   // 403 / 404
   forbiddenTitle: { en: "You don't have access to this page", ar: "ليس لديك صلاحية الوصول لهذه الصفحة" },
   forbiddenBody: {

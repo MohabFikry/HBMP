@@ -65,8 +65,8 @@ export function ClaimsWorklist() {
     { key: "claimNo", header: t(S.claimNo), cell: (r) => <span className="tnum">{r.claimNo}</span> },
     { key: "origin", header: t(S.origin), cell: (r) => r.origin },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "claimed", header: t(S.claimed), cell: (r) => <span className="tnum">{fmt.money(r.claimedAmount)}</span> },
-    { key: "net", header: t(S.net), cell: (r) => <span className="tnum">{fmt.money(r.netPayable)}</span> },
+    { key: "claimed", header: t(S.claimed), cell: (r) => fmt.money(r.claimedAmount), numeric: true },
+    { key: "net", header: t(S.net), cell: (r) => fmt.money(r.netPayable), numeric: true },
     { key: "serviceFrom", header: t(S.serviceFrom), cell: (r) => <span className="tnum">{fmt.date(r.serviceDateFrom)}</span> },
     { key: "submitted", header: t(S.submitted), cell: (r) => <span className="tnum">{fmt.date(r.submittedAt)}</span> },
   ];
@@ -107,8 +107,8 @@ export function ClaimsReconciliation() {
     { key: "origin", header: t(S.origin), cell: (r) => r.origin },
     { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.code}</span> },
     { key: "serviceDate", header: t(S.serviceDate), cell: (r) => <span className="tnum">{fmt.date(r.serviceDate)}</span> },
-    { key: "billed", header: t(S.billed), cell: (r) => <span className="tnum">{fmt.money(r.billedAmount)}</span> },
-    { key: "allowed", header: t(S.allowed), cell: (r) => <span className="tnum">{fmt.money(r.allowedAmount)}</span> },
+    { key: "billed", header: t(S.billed), cell: (r) => fmt.money(r.billedAmount), numeric: true },
+    { key: "allowed", header: t(S.allowed), cell: (r) => fmt.money(r.allowedAmount), numeric: true },
     { key: "bucket", header: t(S.bucket), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
   ];
   return (

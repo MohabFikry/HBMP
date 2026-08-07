@@ -67,6 +67,8 @@ app.MapUsers();          // 8b.1 grant/revoke/de-provision + access matrix (SoD-
 app.MapAccessReview();   // 8b.1 access-review campaigns (recertify/revoke/auto-expire)
 app.MapPolicyConfig();   // 8b.1 session/device policy + staged policy proposals
 app.MapGovernance();     // 8b.2 master-data versioning + template linter + system config
+app.MapValidityPolicy(); // how long a prescription / lab / imaging order stays actionable
+app.MapDocumentValidity(); // ADR-0035 §6 — how long a document is good for, and how early its lapse is warned
 app.MapPlatform();       // 8b.3 tenant admin + break-glass lifecycle + governance dashboards
 app.MapBranchAssignments(); // 14.2 staff↔branch assignment + active-branch context
 app.MapPayerAssignments();  // 19.5 user↔payer restriction + GET /me/payers (read by IPayerDirectory)

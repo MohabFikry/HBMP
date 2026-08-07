@@ -110,23 +110,58 @@ public static class Worklist
         }).RequireAuthorization(HbmpPolicies.Scope("auth:ingest"));
 
         // ---- Worklist inbox (min-necessary projection). ----
+        //
+        // `kind` DEFAULTS TO Review, and that default is the design (ADR-0034 Decision 3). The reviewer inbox
+        // is a work queue: it means "these are waiting for you". A few hundred dispenses a day landing in it
+        // would drown the twelve that need a decision, and the natural response to a queue that is mostly
+        // noise is to stop reading it. Fulfilments are a REGISTER — a different question, asked deliberately,
+        // by passing kind=Fulfilment. `kind=All` returns both for anyone who genuinely wants everything.
         v1.MapGet("/", async (
-            string? status, string? priority, bool? slaBreached, bool? unassigned,
+            string? status, string? priority, bool? slaBreached, bool? unassigned, string? kind,
             ApprovalsDbContext db, ApprovalsGate gate, TimeProvider clock, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(ApprovalsPolicies.List, null, "worklist", ct);
             if (denied is not null) return denied;
 
+            var all = string.Equals(kind, "All", StringComparison.OrdinalIgnoreCase);
+            var wanted = Enum.TryParse<AuthKind>(kind, ignoreCase: true, out var k) ? k : AuthKind.Review;
+
             var q = db.Authorizations.AsNoTracking().AsQueryable();
+            if (!all) q = q.Where(a => a.Kind == wanted);
+
             if (Enum.TryParse<AuthStatus>(status, out var st)) q = q.Where(a => a.Status == st);
             if (Enum.TryParse<AuthPriority>(priority, out var pr)) q = q.Where(a => a.Priority == pr);
             if (slaBreached == true) q = q.Where(a => a.SlaBreached);
             if (unassigned == true) q = q.Where(a => a.AssignedReviewerId == null);
 
             var now = clock.GetUtcNow();
-            var items = await q.OrderBy(a => a.SlaDueAt ?? DateTimeOffset.MaxValue).ThenBy(a => a.SubmittedAt)
-                .Take(200).ToListAsync(ct);
-            return Results.Ok(items.Select(a => WorklistItemView.From(a, now)));
+            // A work queue is read most-urgent-first; a register is read newest-first. Fulfilments carry no
+            // SLA due date at all, so the review ordering would pile every one of them at the end in the
+            // order they were dispensed months ago.
+            var ordered = !all && wanted == AuthKind.Fulfilment
+                ? q.OrderByDescending(a => a.SubmittedAt)
+                : q.OrderBy(a => a.SlaDueAt ?? DateTimeOffset.MaxValue).ThenBy(a => a.SubmittedAt);
+            var rows = await ordered.Take(200).ToListAsync(ct);
+            return Results.Ok(rows.Select(a => WorklistItemView.From(a, now)));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"));
+
+        // ---- What was actually delivered against this authorization (ADR-0034). ----
+        // Empty for a review request, which is the honest answer: nothing has been delivered against a
+        // question that has not been answered.
+        v1.MapGet("/{id:guid}/items", async (
+            Guid id, ApprovalsDbContext db, ApprovalsGate gate, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync(ApprovalsPolicies.List, id.ToString(), "worklist", ct);
+            if (denied is not null) return denied;
+
+            if (!await db.Authorizations.AsNoTracking().AnyAsync(a => a.AuthorizationId == id, ct))
+                return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+            var items = await db.Items.AsNoTracking()
+                .Where(i => i.AuthorizationId == id)
+                .OrderBy(i => i.FulfilledAt)
+                .ToListAsync(ct);
+            return Results.Ok(items.Select(AuthorizationItemView.From));
         }).RequireAuthorization(HbmpPolicies.Scope("auth:read"));
 
         // ---- Worklist detail (min-necessary — still NO clinical payload; that is /review only). ----
@@ -142,7 +177,7 @@ public static class Worklist
 
         // ---- Assign: pick up a request (Submitted → UnderReview), start the SLA timer. ----
         v1.MapPost("/{id:guid}/assign", async (
-            Guid id, ApprovalsDbContext db, ApprovalsGate gate, SlaOptions sla,
+            Guid id, ApprovalsDbContext db, ApprovalsGate gate, SlaOptions sla, RuleApplication engine,
             IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
             var denied = await gate.CheckAsync(ApprovalsPolicies.Assign, id.ToString(), "assign", ct);
@@ -161,7 +196,15 @@ public static class Worklist
             var before = auth.Status;
             auth.Status = AuthStatus.UnderReview;
             auth.AssignedReviewerId = reviewerId;
-            auth.SlaDueAt = sla.DueFrom(auth.Priority, now);
+
+            // ADR-0035 §5.4. The engine may change WHERE this sits and HOW LONG the reviewer has — nothing
+            // else. `SlaOptions.DueFrom` stays the fallback: a request whose rules could not be read keeps
+            // the priority-based deadline rather than losing one, because a request with no deadline is worse
+            // than a request with a generic one.
+            var outcome = await engine.ForAsync(auth, now, ct);
+            auth.RoutedQueue = outcome.Queue;
+            auth.RoutedByRule = outcome.RoutedByRule;
+            auth.SlaDueAt = outcome.SlaHours is { } h ? now.AddHours(h) : sla.DueFrom(auth.Priority, now);
             auth.UpdatedAt = now;
 
             await using var tx = await db.Database.BeginTransactionAsync(ct);
@@ -178,6 +221,9 @@ public static class Worklist
                     tenantId = auth.TenantId,
                     authorizationId = auth.AuthorizationId, auth.AuthNo, reviewerId,
                     slaDueAt = auth.SlaDueAt, priority = auth.Priority.ToString(),
+                    // Carried on the event so a consumer can see WHY this landed where it did without
+                    // re-deriving it against a rule set that may since have moved on.
+                    queue = auth.RoutedQueue, routedByRule = auth.RoutedByRule,
                 }, ct);
             await tx.CommitAsync(ct);
 

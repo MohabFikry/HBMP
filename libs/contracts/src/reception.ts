@@ -61,6 +61,17 @@ export const zAppointmentRow = z.object({
    * the three readers holds.
    */
   noteBy: z.string().nullish(),
+  /**
+   * The author in WORDS, snapshotted when the note was written (emr 0022).
+   *
+   * `noteBy` is a subject id, and it is what the note dialog was rendering — "Written by
+   * c18b985c-cc5f-42eb-8b79-e41b7b84f975", which answers "who told us this?" with a string nobody at a desk
+   * can act on. Both are carried: the id is the authoritative link, this is what the reader is shown.
+   *
+   * Null for notes written before 0022. Readers say "unknown" rather than falling back to the id — a uuid on
+   * screen is not attribution, and the whole purpose of these fields is somebody to ask.
+   */
+  noteByName: z.string().nullish(),
   noteAt: z.string().nullish(),
   /**
    * The patient's display name, where the server has one — it is captured at CHECK-IN, so an arrived patient

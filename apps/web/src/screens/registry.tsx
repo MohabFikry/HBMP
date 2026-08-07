@@ -21,6 +21,7 @@ const RegistrationApprovals = lazy(() => import("./BeneficiaryPortal").then((m) 
 const DoctorEncounter = lazy(() => import("./DoctorEncounter").then((m) => ({ default: m.DoctorEncounter })));
 // 18.C2 (W4) — the sensitive-result approver inbox, shared by the Doctor and Medical Director portals.
 const ReportAccessInbox = lazy(() => import("./ReportAccessInbox").then((m) => ({ default: m.ReportAccessInbox })));
+const ValidityPolicyAdmin = lazy(() => import("./ValidityPolicyAdmin").then((m) => ({ default: m.ValidityPolicyAdmin })));
 // Clinician worklists (Phase 4) — my patients / orders / prescriptions / results inbox share one chunk.
 const DoctorPatients = lazy(() => import("./ClinicianWorklists").then((m) => ({ default: m.DoctorPatients })));
 const DoctorOrders = lazy(() => import("./ClinicianWorklists").then((m) => ({ default: m.DoctorOrders })));
@@ -33,9 +34,15 @@ const LabQueue = lazy(() => import("./LabQueue").then((m) => ({ default: m.LabQu
 // Lab/imaging result upload (Phase 5.3) — one chunk, parameterised by capability.
 const ResultUpload = lazy(() => import("./ResultUpload").then((m) => ({ default: m.ResultUpload })));
 const PharmacyDispense = lazy(() => import("./PharmacyDispense").then((m) => ({ default: m.PharmacyDispense })));
+const PrescriptionPage = lazy(() => import("./pharmacy/PrescriptionPage").then((m) => ({ default: m.PrescriptionPage })));
+// ADR-0034 — the bench's counterpart of the prescription page. Its own chunk: the queue is opened many times
+// a day and this is opened once per patient, so folding them together would make the common case heavier.
+const InvestigationOrderPage = lazy(() => import("./lab/InvestigationOrderPage").then((m) => ({ default: m.InvestigationOrderPage })));
 // Pharmacy substitutions (Phase 6.3) — formulary lookup of policy-approved alternatives.
 const Substitutions = lazy(() => import("./Substitutions").then((m) => ({ default: m.Substitutions })));
 const ApprovalsWorklist = lazy(() => import("./ApprovalsWorklist").then((m) => ({ default: m.ApprovalsWorklist })));
+// ADR-0034 — the register of every authorization, including what was actually delivered at counters/benches.
+const ApprovalsRegister = lazy(() => import("./ApprovalsRegister").then((m) => ({ default: m.ApprovalsRegister })));
 // Approvals break-glass + SLA (Phase 7.3) — manual auth / emergency approve / TAT board share one chunk.
 const ApprovalsManual = lazy(() => import("./ApprovalsExtra").then((m) => ({ default: m.ApprovalsManual })));
 const ApprovalsEmergency = lazy(() => import("./ApprovalsExtra").then((m) => ({ default: m.ApprovalsEmergency })));
@@ -77,6 +84,9 @@ const AdminUsers = lazy(() => import("./AdminConsole").then((m) => ({ default: m
 const AdminPolicies = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminPolicies })));
 const AdminTenants = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminTenants })));
 const AdminGovernance = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminGovernance })));
+const ApprovalEngineAdmin = lazy(() => import("./ApprovalEngineAdmin").then((m) => ({ default: m.ApprovalEngineAdmin })));
+const DocumentValidityAdmin = lazy(() => import("./DocumentValidityAdmin").then((m) => ({ default: m.DocumentValidityAdmin })));
+const MasterListAdmin = lazy(() => import("./MasterListAdmin").then((m) => ({ default: m.MasterListAdmin })));
 const AdminMasterData = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminMasterData })));
 const AdminConfig = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminConfig })));
 // Policy administration (Phase 19.6) — four chunks rather than one, because the portal's sections are used by
@@ -148,6 +158,8 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/nurse/vitals": () => <NurseVitals />,
   "/nurse/results": () => <NurseResults />,
   // 3. Lab / imaging — queue + consume.
+  // The /queue paths stay resolvable even though the rail no longer offers them: a bookmark or a link in
+  // somebody's notes should land on the bench rather than on a 404. Same treatment /pharmacy/queue got.
   "/lab/queue": () => <LabQueue kind="lab" />,
   "/imaging/queue": () => <LabQueue kind="imaging" />,
   "/lab/consume": () => <LabQueue kind="lab" />,
@@ -160,6 +172,7 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/pharmacy/substitutions": () => <Substitutions />,
   // 5. Approvals — worklist + decision (US-060).
   "/approvals/worklist": () => <ApprovalsWorklist />,
+  "/approvals/authorizations": () => <ApprovalsRegister />,
   "/approvals/manual": () => <ApprovalsManual />,
   "/approvals/emergency": () => <ApprovalsEmergency />,
   "/approvals/sla": () => <ApprovalsSla />,
@@ -168,6 +181,13 @@ export const SCREENS: Record<string, () => ReactNode> = {
   // case the escalation path exists for, so it cannot live only under /clinician.
   "/clinician/result-access": () => <ReportAccessInbox />,
   "/director/result-access": () => <ReportAccessInbox />,
+  "/director/validity": () => <ValidityPolicyAdmin />,
+  // ADR-0035 §3. The same screen is NOT re-used from the admin portal — that one is read-only, and this is
+  // the editor. `portalForRole` gives one portal per role, so a second door is how the director reaches an
+  // authority they already held (`admin:edit-masterdata`) and had no route to.
+  "/director/master-lists": () => <MasterListAdmin />,
+  "/director/document-validity": () => <DocumentValidityAdmin />,
+  "/director/engine": () => <ApprovalEngineAdmin />,
   // 6. Executive dashboard (US-073) — director scope.
   "/director/dashboards": () => <ExecutiveDashboard scope="director" />,
   "/director/oversight": () => <DirectorReport section="oversight" />,
@@ -255,6 +275,19 @@ export function screenFor(fullPath: string): (() => ReactNode) | undefined {
   // the SPA hides is a route the SPA can be persuaded to unhide.
   const patient = fullPath.match(/^\/patients\/([^/]+)$/);
   if (patient) return () => <PatientProfile beneficiaryId={decodeURIComponent(patient[1])} />;
+
+  // One prescription, on its own page. It has a URL so a pharmacist who reloads — or who hands the screen to
+  // a colleague mid-shift — lands back on the prescription they were dispensing rather than an empty search.
+  // Keyed by the Rx NUMBER rather than the uuid: that is the reference printed on the paper in the patient's
+  // hand, so the address bar and the prescription agree.
+  const rx = fullPath.match(/^\/pharmacy\/rx\/([^/]+)$/);
+  if (rx) return () => <PrescriptionPage rxNo={decodeURIComponent(rx[1])} />;
+
+  // The bench's counterpart, on the same terms and keyed by the ORDER NUMBER for the same reason — that is
+  // what is printed on the paper the patient handed over. Mounted under both /lab and /imaging because they
+  // are the same screen for two capabilities, and a technician's portal base is not the order's business.
+  const order = fullPath.match(/^\/(?:lab|imaging)\/order\/([^/]+)$/);
+  if (order) return () => <InvestigationOrderPage orderNo={decodeURIComponent(order[1])} />;
 
   // The notifications inbox is the same screen under every portal base (/reception/notifications,
   // /clinician/notifications, …) — map them all to one component rather than enumerating each.

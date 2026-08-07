@@ -29,6 +29,9 @@ public static partial class IdentifierValidation
             IdentifierType.RefugeeID => AlnumDash(4, 30).IsMatch(v),
             // MemberNo is issued by us (MRS-M-YYYY-NNNNNN); not user-submitted at registration.
             IdentifierType.MemberNo => MemberNo().IsMatch(v),
+            // 26.6 — the number printed on the physical card. Delegates to the SAME rule the registration
+            // path uses, so one card cannot be spelled two ways depending on which route validated it.
+            IdentifierType.CardNumber => PersonFieldValidation.IsValidCardNumber(v),
             _ => false,
         };
         if (!ok) error = $"'{value}' is not a valid {type}";

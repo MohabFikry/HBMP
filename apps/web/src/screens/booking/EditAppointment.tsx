@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
-import { Button, Icon, InlineAlert, Modal, TextareaField } from "@mersal/design-system";
-import type { AppointmentDay, AppointmentRow, BookableSlot, Localized } from "@mersal/contracts";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Button, Icon, InlineAlert, Modal, Select, TextareaField } from "@mersal/design-system";
+import type {
+  AppointmentDay, AppointmentRow, BookableSlot, DoctorAvailability, Localized, Practitioner,
+} from "@mersal/contracts";
 import { useApi } from "../../api/ApiProvider";
 import { BookingTimePicker, monthKey } from "./BookingTimePicker";
 import { NOTE_MAX } from "./BookingForm";
+import { bookableDoctors } from "./bookableDoctors";
 
 const S = {
   edit: { en: "Edit appointment", ar: "تعديل الموعد" },
@@ -20,6 +23,16 @@ const S = {
   },
   notesTooLong: { en: "Notes must be 500 characters or fewer.", ar: "يجب ألا تتجاوز الملاحظات 500 حرف." },
   newTime: { en: "Move to a different time (optional)", ar: "النقل إلى وقت آخر (اختياري)" },
+  doctor: { en: "Doctor", ar: "الطبيب" },
+  doctorHelp: {
+    en: "Changing the doctor shows that doctor's free times — pick one to move the appointment.",
+    ar: "تغيير الطبيب يعرض أوقاته المتاحة — اختر وقتاً لنقل الموعد.",
+  },
+  doctorAny: { en: "Any doctor at this clinic", ar: "أي طبيب في هذه العيادة" },
+  doctorNoSlots: {
+    en: "That doctor has no free time in this month. Try another month, or another doctor.",
+    ar: "لا يوجد وقت متاح لهذا الطبيب في هذا الشهر. جرّب شهراً آخر أو طبيباً آخر.",
+  },
   save: { en: "Save changes", ar: "حفظ التغييرات" },
   keep: { en: "Discard", ar: "تجاهل" },
   nothing: { en: "Nothing has been changed.", ar: "لم يتغير شيء." },
@@ -68,6 +81,11 @@ export function EditAppointmentButton({
   const [month, setMonth] = useState(() => monthKey(new Date(row.scheduledStart)));
   const [slots, setSlots] = useState<BookableSlot[]>([]);
   const [days, setDays] = useState<AppointmentDay[]>([]);
+  // The practitioner the times are being shown FOR. Starts as the appointment's own; "" means the whole
+  // clinic, which is how a desk finds the earliest time regardless of who holds it.
+  const [doctorId, setDoctorId] = useState<string>(row.doctorId ?? "");
+  const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
+  const [availability, setAvailability] = useState<DoctorAvailability[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Localized | null>(null);
 
@@ -86,9 +104,11 @@ export function EditAppointmentButton({
     const to = new Date(Date.UTC(y, m, 0, 12)).toISOString();
     let live = true;
     void Promise.all([
-      api.openSlots(row.providerId!, row.locationId!, from, to, row.doctorId ?? undefined)
+      // Filtered by the CHOSEN doctor, not by the appointment's original one — that filter was what made the
+      // doctor unchangeable: the picker could only ever offer slots the current doctor already held.
+      api.openSlots(row.providerId!, row.locationId!, from, to, doctorId || undefined)
         .catch(() => [] as BookableSlot[]),
-      api.appointmentDays(row.providerId!, row.locationId!, from, to, row.doctorId ?? undefined)
+      api.appointmentDays(row.providerId!, row.locationId!, from, to, doctorId || undefined)
         .catch(() => [] as AppointmentDay[]),
     ]).then(([sl, dd]) => {
       if (!live) return;
@@ -96,7 +116,25 @@ export function EditAppointmentButton({
       setDays(dd);
     });
     return () => { live = false; };
-  }, [api, open, movable, month, row.providerId, row.locationId, row.doctorId]);
+  }, [api, open, movable, month, row.providerId, row.locationId, doctorId]);
+
+  // Who else could hold this appointment. Read once the dialog opens, and degraded to an empty list rather
+  // than blocking the edit: a note correction must not depend on the practitioner directory being reachable.
+  useEffect(() => {
+    if (!open || !movable) return;
+    let live = true;
+    void Promise.all([
+      api.practitioners({ branchId: row.branchId ?? undefined, type: "Doctor" }).catch(() => [] as Practitioner[]),
+      api.doctorAvailability(row.branchId ?? undefined).catch(() => [] as DoctorAvailability[]),
+    ]).then(([ps, av]) => {
+      if (!live) return;
+      setPractitioners(ps);
+      setAvailability(av);
+    });
+    return () => { live = false; };
+  }, [api, open, movable, row.branchId]);
+
+  const doctors = useMemo(() => bookableDoctors(practitioners, availability), [practitioners, availability]);
 
   useEffect(() => load(), [load]);
 
@@ -144,6 +182,11 @@ export function EditAppointmentButton({
       <Modal
         open={open}
         onOpenChange={setOpen}
+        // WIDE. The body holds a month calendar beside a column of times, and at the default width the two
+        // were squeezed into a strip barely wider than the calendar itself — the times column ended up
+        // narrower than the timestamps it lists, and the whole dialog scrolled vertically to show a layout
+        // that is meant to be read side by side.
+        wide
         title={t(S.title)}
         description={t(S.body)}
         footer={
@@ -153,8 +196,8 @@ export function EditAppointmentButton({
           </>
         }
       >
-        <div className="stack-3">
-          <p style={{ margin: 0 }}>
+        <div className="edit-appt">
+          <p className="edit-appt-who">
             <strong>{row.beneficiaryName ?? row.beneficiary.token}</strong>
           </p>
 
@@ -170,6 +213,31 @@ export function EditAppointmentButton({
           {movable ? (
             <section aria-label={t(S.newTime)}>
               <h4 className="section-h">{t(S.newTime)}</h4>
+              {/*
+                Changing the doctor is a RESCHEDULE, not a separate save.
+
+                There is no "assign this doctor" call and there should not be: an appointment's practitioner
+                is whoever holds the slot it sits in, so moving it to another doctor means moving it into one
+                of THEIR slots. Presenting it as a filter over the times makes that true by construction —
+                the desk cannot produce an appointment whose named doctor and whose session disagree, which
+                is exactly the row the server used to be able to write.
+              */}
+              <div className="book-field">
+                <span className="mrs-label" id={`ea-doc-${row.id}`}>{t(S.doctor)}</span>
+                <Select
+                  aria-labelledby={`ea-doc-${row.id}`}
+                  value={doctorId}
+                  onChange={(next) => { setDoctorId(next); setSlotId(null); }}
+                  options={[
+                    { value: "", label: t(S.doctorAny) },
+                    ...doctors.map((d) => ({ value: d.id, label: t(d.name) })),
+                  ]}
+                />
+                <span className="mrs-help">{t(S.doctorHelp)}</span>
+              </div>
+              {doctorId && slots.length === 0 && (
+                <InlineAlert tone="info">{t(S.doctorNoSlots)}</InlineAlert>
+              )}
               <BookingTimePicker
                 days={days}
                 slots={slots}

@@ -334,6 +334,17 @@ public sealed class MembershipCommands(
                     policyNo = policy.PolicyNo,
                     effectiveFrom = coverage.EffectiveFrom,
                     effectiveTo = coverage.EffectiveTo,
+                    // 19.2b — the plan the coverage belongs to, and the version it was written under.
+                    //
+                    // BOTH, because they answer different questions. The VERSION is provenance: what the
+                    // member's cover was projected from, and the fallback when nothing better can be
+                    // resolved. The PLAN is what lets a downstream quote resolve the version in force ON THE
+                    // SERVICE DATE — which is the rule the whole effective-dated layer exists for, and which
+                    // `CoverageDetailEndpoints` already applies. Publishing only the version pinned every
+                    // future quote to the terms in force the day the member enrolled, so an amendment could
+                    // never reach anybody already on the plan.
+                    planId = version.PlanId,
+                    planVersionId = coverage.SourcePlanVersionId,
                     waitingPeriodEndsOn = rule is null ? null : WaitingPeriod.EndsOnFor(rule, enrollment.EffectiveFrom),
                     limits = coverage.Limits.Select(l => new
                     {

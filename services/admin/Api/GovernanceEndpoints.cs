@@ -44,6 +44,18 @@ public static class GovernanceEndpoints
             if (!req.SystemValid) return ProblemResults.Invalid("unknown-code-system");
             if (string.IsNullOrWhiteSpace(req.Rationale)) return ProblemResults.Invalid("rationale-required");
 
+            // ADR-0035 §4. The clinical-governance grant reaches the clinical vocabularies; it does not carry
+            // on into the administrative ones. Answered here rather than in the ABAC rule because the rule
+            // decides "may this role edit master data", and this is the narrower "which of it" — an ABAC
+            // condition per code system would be eight rules saying almost the same thing.
+            if (!MasterDataGovernance.MayEdit(gate.Principal?.Roles, req.SystemEnum))
+            {
+                return Results.Problem(statusCode: 403, title: "code-system-out-of-scope",
+                    type: "urn:hbmp:code-system-out-of-scope",
+                    detail: $"{req.System} is not a clinical code system. Clinical governance edits ICD-10, CPT, "
+                        + "LOINC and ATC; the administrative vocabularies stay with the platform administrators.");
+            }
+
             var v = await svc.UpsertMasterDataAsync(AdminContracts.Actor(gate.Principal!), req.SystemEnum, req.Code,
                 req.Attributes, req.Rationale, req.Retired, ct);
             return Results.Created($"/api/v1/admin/master-data/{req.System}/{req.Code}",
@@ -54,7 +66,7 @@ public static class GovernanceEndpoints
         g.MapGet("/master-data/{system}/{code}/as-of", async (string system, string code, DateTimeOffset at,
             AdminGate gate, GovernanceService svc, CancellationToken ct) =>
         {
-            var denied = await gate.CheckAsync(AdminPolicies.ReadAccess, ct);
+            var denied = await gate.CheckAsync(AdminPolicies.ReadMasterData, ct);
             if (denied is not null) return denied;
             if (!Enum.TryParse<CodeSystem>(system, ignoreCase: true, out var sys)) return ProblemResults.Invalid("unknown-code-system");
 
@@ -65,7 +77,7 @@ public static class GovernanceEndpoints
         // List the master-data versions currently in force (effective_to IS NULL) — the governance read surface.
         g.MapGet("/master-data", async (AdminGate gate, AdminDbContext db, CancellationToken ct) =>
         {
-            var denied = await gate.CheckAsync(AdminPolicies.ReadAccess, ct);
+            var denied = await gate.CheckAsync(AdminPolicies.ReadMasterData, ct);
             if (denied is not null) return denied;
             var rows = await db.MasterDataVersions.AsNoTracking()
                 .Where(v => v.EffectiveTo == null)

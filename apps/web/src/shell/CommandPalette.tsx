@@ -143,7 +143,7 @@ export function CommandPalette({ open, onClose, sections, portalBase, onNavigate
           value={query}
           onChange={(e) => setQuery(e.currentTarget.value)}
         />
-        <ul id={listId} role="listbox" aria-label={t(S.title)} className="cmdk-list">
+        <ul id={listId} role="listbox" aria-label={t(S.title)} className="cmdk-list mrs-scroll">
           {results.map((s, i) => (
             <li
               key={s.key}

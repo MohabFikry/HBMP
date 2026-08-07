@@ -56,6 +56,10 @@ const G = {
   product: { en: "Benefit Product", ar: "منتج المنافع" },
   membership: { en: "Membership", ar: "العضوية" },
   branch: { en: "Clinic Management", ar: "إدارة العيادة" },
+  // ADR-0035 — the parameters a supervisor sets that generate their own workload. Its own group rather than
+  // folded into Oversight: overseeing the queue and setting the rules that fill it are different acts, and a
+  // supervisor looking for "where do I change this" should not have to read past their dashboards.
+  governance: { en: "Governance", ar: "الحوكمة" },
 } satisfies Record<string, Localized>;
 
 /**
@@ -157,8 +161,11 @@ export const PORTALS: PortalDef[] = [
     title: { en: "Laboratory", ar: "المختبر" },
     eyebrow: { en: "Laboratory", ar: "المختبر" },
     sections: [
-      { key: "queue", path: "queue", label: { en: "Order Queue", ar: "قائمة الطلبات" }, group: G.fulfillment, icon: "flask", permission: "lab.queue" },
-      { key: "consume", path: "consume", label: { en: "Consume Order", ar: "تنفيذ الطلب" }, group: G.fulfillment, icon: "ok", permission: "lab.consume" },
+      // 27.8 — "Order Queue" was removed, not renamed: it and "Consume Order" both routed to the SAME
+      // component, so the rail offered one screen twice under two names. The same duplication the pharmacy
+      // rail had. What is left is the bench, which now opens on a search for one patient rather than on a
+      // browse of every patient's orders.
+      { key: "consume", path: "consume", label: { en: "Perform Order", ar: "تنفيذ الطلب" }, group: G.fulfillment, icon: "flask", permission: "lab.consume" },
       { key: "result", path: "result", label: { en: "Upload Result", ar: "رفع النتيجة" }, group: G.fulfillment, icon: "doc", permission: "lab.result.upload" },
     ],
   },
@@ -168,8 +175,11 @@ export const PORTALS: PortalDef[] = [
     title: { en: "Imaging", ar: "الأشعة" },
     eyebrow: { en: "Imaging", ar: "الأشعة" },
     sections: [
-      { key: "queue", path: "queue", label: { en: "Order Queue", ar: "قائمة الطلبات" }, group: G.fulfillment, icon: "flask", permission: "imaging.queue" },
-      { key: "consume", path: "consume", label: { en: "Consume Order", ar: "تنفيذ الطلب" }, group: G.fulfillment, icon: "ok", permission: "imaging.consume" },
+      // 27.8 — "Order Queue" was removed, not renamed: it and "Consume Order" both routed to the SAME
+      // component, so the rail offered one screen twice under two names. The same duplication the pharmacy
+      // rail had. What is left is the bench, which now opens on a search for one patient rather than on a
+      // browse of every patient's orders.
+      { key: "consume", path: "consume", label: { en: "Perform Order", ar: "تنفيذ الطلب" }, group: G.fulfillment, icon: "flask", permission: "imaging.consume" },
       { key: "result", path: "result", label: { en: "Upload Result", ar: "رفع النتيجة" }, group: G.fulfillment, icon: "doc", permission: "imaging.result.upload" },
     ],
   },
@@ -179,8 +189,10 @@ export const PORTALS: PortalDef[] = [
     title: { en: "Pharmacy", ar: "الصيدلية" },
     eyebrow: { en: "Pharmacy", ar: "الصيدلية" },
     sections: [
-      { key: "queue", path: "queue", label: { en: "Prescription Queue", ar: "قائمة الوصفات" }, group: G.dispensing, icon: "pill", permission: "pharmacy.queue" },
-      { key: "dispense", path: "dispense", label: { en: "Dispense", ar: "الصرف" }, group: G.dispensing, icon: "ok", permission: "pharmacy.dispense" },
+      // "Prescription Queue" was removed, not renamed: it and "Dispense" both routed to the SAME component,
+      // so the rail offered one screen twice under two names. The remaining entry is the dispensing counter,
+      // which now opens on a search rather than on a browse of every patient's prescriptions.
+      { key: "dispense", path: "dispense", label: { en: "Dispense", ar: "الصرف" }, group: G.dispensing, icon: "pill", permission: "pharmacy.dispense" },
       { key: "substitutions", path: "substitutions", label: { en: "Substitutions", ar: "البدائل" }, group: G.dispensing, icon: "refer", permission: "pharmacy.substitution" },
     ],
   },
@@ -191,6 +203,9 @@ export const PORTALS: PortalDef[] = [
     eyebrow: { en: "Medical Approval", ar: "الموافقة الطبية" },
     sections: [
       { key: "worklist", path: "worklist", label: { en: "Worklist", ar: "قائمة العمل" }, group: G.approvals, icon: "check2", permission: "approvals.worklist" },
+      // The register, alongside the queue but never inside it: one says "decide this", the other says "this
+      // happened". ADR-0034 — a few hundred dispenses a day in the inbox would drown the decisions.
+      { key: "authorizations", path: "authorizations", label: { en: "Authorizations", ar: "التفويضات" }, group: G.approvals, icon: "doc", permission: "approvals.register" },
       { key: "manual", path: "manual", label: { en: "Manual Authorization", ar: "تفويض يدوي" }, group: G.approvals, icon: "plus", permission: "approvals.manual" },
       { key: "emergency", path: "emergency", label: { en: "Emergency / Override", ar: "طارئ / تجاوز" }, group: G.approvals, icon: "triangle", permission: "approvals.emergency" },
       { key: "sla", path: "sla", label: { en: "SLA / TAT Board", ar: "لوحة الاستجابة" }, group: G.insights, icon: "chart", permission: "approvals.sla" },
@@ -408,6 +423,19 @@ export const PORTALS: PortalDef[] = [
       // 18.C2 (W4): the ESCALATION path for sensitive-result release — 37 §6 lets the Medical Director decide
       // when the authoring doctor is unavailable, which is the case the whole mechanism exists to cover.
       { key: "result-access", path: "result-access", label: { en: "Result Access Requests", ar: "طلبات الوصول للنتائج" }, group: G.oversight, icon: "clock", permission: "director.escalations" },
+      // How long a prescription or an order stays actionable. It sits under oversight rather than with the
+      // platform settings because it is a clinical safety judgement whose consequence — every extension
+      // request a short window produces — lands in this same person's approval queue.
+      { key: "validity", path: "validity", label: { en: "Validity Periods", ar: "مدد الصلاحية" }, group: G.oversight, icon: "clock", permission: "director.oversight" },
+      // ADR-0035 §3 — governance. The supervisor sets the parameters that generate their own workload, and
+      // a mis-mapped clinical code is one of them: it misroutes a diagnosis into this same approval queue.
+      { key: "master-lists", path: "master-lists", label: { en: "Master Lists", ar: "القوائم المرجعية" }, group: G.governance, icon: "folder", permission: "director.masterlists" },
+      // ADR-0035 §6 — beside Validity Periods rather than under it: one is how long a clinical DECISION stays
+      // actionable, the other how long a DOCUMENT stays current. Different judgements, different consequences.
+      { key: "document-validity", path: "document-validity", label: { en: "Document Validity", ar: "صلاحية المستندات" }, group: G.governance, icon: "doc", permission: "director.oversight" },
+      // ADR-0035 §5 — routing and SLA rules. Its own permission because authoring the rule that shapes a
+      // thousand cases is a different power from deciding one; a reviewer holds neither key.
+      { key: "engine", path: "engine", label: { en: "Approvals Engine", ar: "محرك الموافقات" }, group: G.governance, icon: "toggle", permission: "director.engine" },
     ],
   },
 ];

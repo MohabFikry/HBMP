@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   zApprovalItem,
+  zAuthorizationItem,
+  zInvestigationOrder,
   zApprovalReview,
   zConsumeResult,
   zDecisionResult,
@@ -39,6 +41,10 @@ import {
   zBookingResult,
   zBreakGlassGrant,
   zMasterDataVersion,
+  zMasterDataAsOf,
+  zDocumentValidityView,
+  zApprovalRuleList,
+  zAutoDecisionSwitch,
   zSystemConfigEntry,
   zBeneficiaryDocument,
   zRegistrationThreadEntry,
@@ -79,6 +85,17 @@ import {
   zResultTask,
   zResultUpload,
   zDrugRef,
+  zPrescribableDrug,
+  zCptRef,
+  zOrderValidationResult,
+  zValidityExtensionResult,
+  zValidityPolicyView,
+  zInvestigationOrderResult,
+  zValidationResult,
+  zPrescriptionSubmitResult,
+  zAllergenOption,
+  zAllergyRecord,
+  zMemberClinicalRecord,
   zTatSummary,
   zManualAuthResult,
   zEmergencyResult,
@@ -92,6 +109,7 @@ import {
   type ConsumeRequest,
   type DecisionRequest,
   type DispenseRequest,
+  type RxPricing,
   type ExportRequest,
   type Localized,
   type PlaceOrderRequest,
@@ -100,7 +118,11 @@ import {
   type RoleScopeGrant,
   type ReportAccessRequestRow,
 } from "@mersal/contracts";
-import type { BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, DiagnosisRank } from "@mersal/contracts";
+import type { BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, DiagnosisRank, MasterDataEdit, SetDocumentValidity, SaveApprovalRule, ApprovalRule, SetAutoDecision} from "@mersal/contracts";
+import type { CptSection, InvestigationDraftLine, InvestigationOrderType, OrderAcknowledgement, OrderFinding, ValidityExtensionRequest } from "@mersal/contracts";
+import type { PrescriptionDraftLine, LineAcknowledgement, Finding } from "@mersal/contracts";
+import type { AddAllergyRequest, AllergenOption, BloodGroup, MemberClinicalRecord } from "@mersal/contracts";
+import type { InvestigationOrder, OrderPricing, SubstitutionRequest } from "@mersal/contracts";
 import type { ApiClient, ApiScenario } from "./client";
 import { ApiError } from "./http";
 
@@ -133,6 +155,18 @@ const NOTIFICATION_FIXTURE = [
 ];
 const NOW = "2026-07-22T08:30:00Z";
 
+/** The masterdata allergen seed (its migration 0002), abbreviated to the categories the picker groups by. */
+const DEV_ALLERGENS: AllergenOption[] = [
+  { allergenId: "alg-penicillin", code: "ALG-PENICILLIN", name: "Penicillins", category: "Drug" },
+  { allergenId: "alg-sulfa", code: "ALG-SULFA", name: "Sulfonamides", category: "Drug" },
+  { allergenId: "alg-nsaid", code: "ALG-NSAID", name: "NSAIDs", category: "Drug" },
+  { allergenId: "alg-cephalo", code: "ALG-CEPHALO", name: "Cephalosporins", category: "Drug" },
+  { allergenId: "alg-iodine", code: "ALG-IODINE", name: "Iodine / Contrast media", category: "Drug" },
+  { allergenId: "alg-peanut", code: "ALG-PEANUT", name: "Peanuts", category: "Food" },
+  { allergenId: "alg-shellfish", code: "ALG-SHELLFISH", name: "Shellfish", category: "Food" },
+  { allergenId: "alg-latex", code: "ALG-LATEX", name: "Latex", category: "Environmental" },
+];
+
 /**
  * A handful of real ICD-10 codes for the encounter workspace's assessment picker. Deliberately a short list
  * of PRESENTING complaints a general clinic actually sees, not a random slice of the catalogue: the demo is
@@ -148,6 +182,26 @@ const DEV_ICD = [
   { code: "M54.5", title: "Low back pain" },
   { code: "R51", title: "Headache" },
 ];
+
+/**
+ * Which CPT section a code belongs to — the dev mirror of masterdata's `CptSections`.
+ *
+ * Ranges only, no lookup table, because that is what the service does: a section is a pure function of the
+ * code. Kept deliberately in step with the server's regexes; the fixture exists to behave like the thing it
+ * stands in for, and a demo that sections codes differently teaches the wrong thing about the tabs.
+ */
+function devCptSection(code: string): CptSection {
+  if (!/^\d{5}$/.test(code)) return "Other";
+  const n = Number(code);
+  if (n < 2000) return "Anesthesia";
+  if (n < 70000) return "Surgery";
+  if (n < 80000) return "Imaging";
+  if (n < 88000) return "Laboratory";
+  if (n < 89000) return "Pathology";
+  if (n < 90000) return "Laboratory";
+  if (n >= 99200 && n < 99500) return "EvaluationAndManagement";
+  return "Medicine";
+}
 
 /**
  * The dev beneficiary whose profile answers with the three withheld states (Restricted / Unavailable /
@@ -435,6 +489,38 @@ function ok<T>(schema: z.ZodType<T>, data: unknown): T {
  * the loading state, `fault` renders a screen straight into empty/error, and a repeated Idempotency-Key
  * returns `replayed: true` instead of double-applying (proving the consume/dispense/decide contract).
  */
+/**
+ * The demo plan's cost share: an EGP 50 deductible still to meet, then 20% coinsurance.
+ *
+ * <p><b>The deductible is here on purpose.</b> A flat percentage would make the member's share linear in the
+ * amount, and a screen that scaled the whole-prescription figure by "7 of 14" would then look correct in
+ * development and be wrong against the real engine — `libs/money` runs a deductible before a copay before
+ * coinsurance, so half a prescription does not cost half the share. The fixture models the same shape so the
+ * dev counter reproduces the behaviour the server has rather than a friendlier version of it.</p>
+ */
+function devCostShare(amount: number): { member: number; payer: number } {
+  const deductible = Math.min(amount, 50);
+  const member = Number((deductible + (amount - deductible) * 0.2).toFixed(2));
+  return { member, payer: Number((amount - member).toFixed(2)) };
+}
+
+/** The value of what is about to be handed over / performed, from a line-id → quantity basis. */
+function devBasis(
+  lines: { id: string; unit: number | null; whole: number }[],
+  now: Record<string, number> | undefined,
+): { amount: number; unpriced: boolean; onNow: boolean } {
+  if (!now) return { amount: 0, unpriced: false, onNow: false };
+  let amount = 0;
+  let unpriced = false;
+  for (const l of lines) {
+    const q = now[l.id] ?? 0;
+    if (q <= 0) continue;
+    if (l.unit === null) unpriced = true;
+    else amount += l.unit * q;
+  }
+  return { amount: Number(amount.toFixed(2)), unpriced, onNow: amount > 0 };
+}
+
 export class DevApiClient implements ApiClient {
   private seenKeys = new Set<string>();
   private labProgress = new Map<string, number>(); // orderId → panelsDone
@@ -527,7 +613,12 @@ export class DevApiClient implements ApiClient {
           branchName: "Dokki",
           rowVersion: 1,
           note: r.note ?? null,
-          noteBy: r.note ? "Nada Reception" : null,
+          // A SUBJECT ID here, not a name — because that is what the server sends. This fixture used to put
+          // "Nada Reception" in `noteBy`, so the note dialog looked correct in fixture mode and rendered a raw
+          // uuid against the real API. A fixture that is kinder than the server hides exactly the defect it
+          // ought to surface first.
+          noteBy: r.note ? "c18b985c-cc5f-42eb-8b79-e41b7b84f975" : null,
+          noteByName: r.note ? "Nada Reception" : null,
           noteAt: r.note ? "2026-07-22T08:05:00Z" : null,
           // Only the CHECKED-IN row carries a name, exactly as the server behaves: the name is captured at
           // check-in, so a booked-but-not-arrived appointment genuinely has none.
@@ -563,6 +654,33 @@ export class DevApiClient implements ApiClient {
           { status: "CheckedIn", at: "2026-07-22T08:55:00Z", by: null, byName: null },
           // An actor whose name could not be resolved (deactivated, or another tenant) — the id still shows.
           { status: "Completed", at: "2026-07-22T09:40:00Z", by: "129d2a05-8c27-43c7-aae2-f2cc4c7fda30", byName: null },
+        ]),
+      [],
+    );
+  }
+  /**
+   * The visit's own care episode (ADR-0031). Every step carries the ORD-/RX- reference of the transaction it
+   * belongs to, which is what lets one order's dialog show only its own history — so the fixture spans two
+   * orders and a prescription rather than one of each, or the filtering would look like it worked when it
+   * was simply showing everything.
+   */
+  encounterTimeline(_encounterId: string) {
+    void _encounterId;
+    return this.gate(
+      () =>
+        ok(z.array(zTimelineStep), [
+          { status: "VisitStarted", at: "2026-07-22T09:00:00Z", by: "0cccc773-ce39-495c-bcac-0e67d746b7e9", byName: "Dr Karim Abdel-Latif", source: "emr", reference: "ENC-2026-000231" },
+          { status: "VitalsRecorded", at: "2026-07-22T09:05:00Z", by: null, byName: null, source: "emr", reference: "ENC-2026-000231" },
+          { status: "DiagnosisCoded", at: "2026-07-22T09:12:00Z", by: "0cccc773-ce39-495c-bcac-0e67d746b7e9", byName: "Dr Karim Abdel-Latif", source: "emr", reference: "ENC-2026-000231" },
+          { status: "OrderPlaced", at: "2026-07-22T09:15:00Z", by: "0cccc773-ce39-495c-bcac-0e67d746b7e9", byName: "Dr Karim Abdel-Latif", source: "orders", reference: "ORD-2026-000118" },
+          { status: "OrderSentForApproval", at: "2026-07-22T09:15:30Z", by: null, byName: null, source: "orders", reference: "ORD-2026-000118" },
+          { status: "PrescriptionWritten", at: "2026-07-22T09:20:00Z", by: "0cccc773-ce39-495c-bcac-0e67d746b7e9", byName: "Dr Karim Abdel-Latif", source: "pharmacy", reference: "RX-2026-000202" },
+          // A DIFFERENT order — present so a dialog filtered to ORD-2026-000118 has something to exclude.
+          { status: "OrderPlaced", at: "2026-07-22T09:25:00Z", by: "0cccc773-ce39-495c-bcac-0e67d746b7e9", byName: "Dr Karim Abdel-Latif", source: "orders", reference: "ORD-2026-000120" },
+          { status: "SampleConsumed", at: "2026-07-22T10:05:00Z", by: "129d2a05-8c27-43c7-aae2-f2cc4c7fda30", byName: null, source: "orders", reference: "ORD-2026-000118" },
+          { status: "ResultReported", at: "2026-07-22T11:30:00Z", by: null, byName: null, source: "orders", reference: "ORD-2026-000118" },
+          { status: "MedicineDispensed", at: "2026-07-22T12:10:00Z", by: null, byName: null, source: "pharmacy", reference: "RX-2026-000202" },
+          { status: "VisitEnded", at: "2026-07-22T12:30:00Z", by: "0cccc773-ce39-495c-bcac-0e67d746b7e9", byName: "Dr Karim Abdel-Latif", source: "emr", reference: "ENC-2026-000231" },
         ]),
       [],
     );
@@ -638,34 +756,88 @@ export class DevApiClient implements ApiClient {
   listPatients() {
     return this.gate(
       () =>
+        // A worklist of ENCOUNTERS, which is why Amal appears three times: she has been seen three times by
+        // this doctor, at two different branches. The fixture is deliberately shaped that way — "My Patients"
+        // folds these to one row per person, and a fixture with one encounter each would have let the version
+        // that listed every visit as a separate patient look correct.
         ok(z.array(zPatientListItem), [
           {
-            id: "MRS-M-10231",
+            id: "ENC-2026-000231",
             beneficiaryId: "aaaaaaaa-0000-0000-0000-000000000231",
             name: loc("Amal Hassan", "أمل حسن"),
-            mrn: "MRN-10231",
+            mrn: "ENC-2026-000231",
             treating: true,
             lastVisit: "2026-07-01",
             status: { kind: "ok", label: loc("In consultation", "في الكشف") },
+            branchId: "bbbbbbbb-0000-0000-0000-000000000001",
+            branchName: "Maadi",
           },
           {
-            id: "MRS-M-10555",
+            id: "ENC-2026-000198",
+            beneficiaryId: "aaaaaaaa-0000-0000-0000-000000000231",
+            name: loc("Amal Hassan", "أمل حسن"),
+            mrn: "ENC-2026-000198",
+            treating: true,
+            lastVisit: "2026-05-14",
+            status: { kind: "neu", label: loc("Completed", "مكتمل") },
+            branchId: "bbbbbbbb-0000-0000-0000-000000000002",
+            branchName: "Nasr City",
+          },
+          {
+            id: "ENC-2026-000160",
+            beneficiaryId: "aaaaaaaa-0000-0000-0000-000000000231",
+            name: loc("Amal Hassan", "أمل حسن"),
+            mrn: "ENC-2026-000160",
+            treating: true,
+            lastVisit: "2026-03-02",
+            status: { kind: "neu", label: loc("Completed", "مكتمل") },
+            branchId: "bbbbbbbb-0000-0000-0000-000000000001",
+            branchName: "Maadi",
+          },
+          {
+            id: "ENC-2026-000555",
             beneficiaryId: "aaaaaaaa-0000-0000-0000-000000000555",
             name: loc("Yusuf Haddad", "يوسف حداد"),
-            mrn: "MRN-10555",
+            mrn: "ENC-2026-000555",
             treating: true,
             lastVisit: "2026-06-20",
             status: { kind: "info", label: loc("Waiting", "بالانتظار") },
+            branchId: "bbbbbbbb-0000-0000-0000-000000000002",
+            branchName: "Nasr City",
+          },
+          {
+            // A WALK-IN: no appointment, so no branch. The panel says so rather than inventing one.
+            id: "ENC-2026-000601",
+            beneficiaryId: "aaaaaaaa-0000-0000-0000-000000000601",
+            name: loc("Mariam Fouad", "مريم فؤاد"),
+            mrn: "ENC-2026-000601",
+            treating: true,
+            lastVisit: "2026-06-28",
+            status: { kind: "neu", label: loc("Completed", "مكتمل") },
+            branchId: null,
+            branchName: null,
           },
         ]),
       [],
     );
   }
-  getEncounter(patientId: string) {
+  /**
+   * The argument is the ENCOUNTER id from the URL; `patientId` is the BENEFICIARY.
+   *
+   * It used to echo the encounter id straight back into `patientId`, which the live client never does — there
+   * it is `e.beneficiaryId`. The encounter workspace's Prescriptions and Labs tabs filter the clinician's own
+   * lists with `r.beneficiary.id === encounter.patientId`, so against this fixture that comparison was an
+   * encounter id against a beneficiary id: never equal, both tabs permanently empty, and every column on
+   * those two tables — including any newly added one — invisible in the demo build and in the route sweep.
+   */
+  getEncounter(encounterId: string) {
+    void encounterId;
     return this.gate(() =>
       ok(zEncounter, {
         id: "ENC-88120",
-        patientId,
+        // Amal Hassan — the same beneficiary the orders and prescriptions fixtures are written against, so
+        // the tabs actually hold rows.
+        patientId: "aaaaaaaa-0000-0000-0000-000000000231",
         patientName: loc("Amal Hassan", "أمل حسن"),
         openedAt: NOW,
         signed: false,
@@ -745,18 +917,48 @@ export class DevApiClient implements ApiClient {
   }
 
   ordersMine(status?: string) {
+    const ACTIVE = { kind: "info" as const, label: loc("Active", "نشط") };
+    const DONE = { kind: "ok" as const, label: loc("Completed", "مكتمل") };
+    // The beneficiary ids are the SAME ones `listPatients` returns, so the worklist's patient-name join has
+    // something to resolve against — a fixture whose ids matched nothing would render the masked-token
+    // fallback on every row and make the named column look broken in dev.
+    //
+    // ord-3 is deliberately MULTI-LINE with one undescribed code: the detail dialog's "test name not
+    // recorded" state is then exercised in dev and in the a11y sweep rather than only in production.
     const rows = [
-      { id: "ord-1", line: "ln-1", no: "ORD-2026-000118", tok: "•••4821", type: "Lab", code: "80053", n: 1, st: { kind: "info" as const, label: loc("Active", "نشط") }, key: "Active", at: "2026-07-22T08:10:00Z" },
+      {
+        id: "ord-1", line: "ln-1", no: "ORD-2026-000118", ben: "aaaaaaaa-0000-0000-0000-000000000231",
+        tok: "•••4821", type: "Lab", st: ACTIVE, key: "Active", at: "2026-07-22T08:10:00Z",
+        exp: "2026-08-21T08:10:00Z",
+        lines: [{ id: "ln-1", code: "80053", codeSystem: "CPT", description: "Comprehensive metabolic panel",
+                  quantityOrdered: 1, quantityConsumed: 0, status: ACTIVE }],
+      },
       // ord-2 is a psychiatry-panel result → sensitivity-restricted (14.7); resultDetail returns existence-only.
-      { id: "ord-2", line: "ln-2", no: "ORD-2026-000119", tok: "•••7710", type: "Imaging", code: "71046", n: 1, st: { kind: "ok" as const, label: loc("Completed", "مكتمل") }, key: "Completed", at: "2026-07-21T14:00:00Z" },
-      { id: "ord-3", line: "ln-3", no: "ORD-2026-000120", tok: "•••2093", type: "Lab", code: "85025", n: 2, st: { kind: "ok" as const, label: loc("Completed", "مكتمل") }, key: "Completed", at: "2026-07-20T09:30:00Z" },
+      {
+        id: "ord-2", line: "ln-2", no: "ORD-2026-000119", ben: "aaaaaaaa-0000-0000-0000-000000000555",
+        tok: "•••7710", type: "Imaging", st: DONE, key: "Completed", at: "2026-07-21T14:00:00Z", exp: null,
+        lines: [{ id: "ln-2", code: "71046", codeSystem: "CPT", description: "Chest X-ray, 2 views",
+                  quantityOrdered: 1, quantityConsumed: 1, status: DONE }],
+      },
+      {
+        id: "ord-3", line: "ln-3", no: "ORD-2026-000120", ben: "aaaaaaaa-0000-0000-0000-000000000601",
+        tok: "•••2093", type: "Lab", st: DONE, key: "Completed", at: "2026-07-20T09:30:00Z",
+        exp: "2026-08-19T09:30:00Z",
+        lines: [
+          { id: "ln-3", code: "85025", codeSystem: "CPT", description: "Complete blood count with differential",
+            quantityOrdered: 1, quantityConsumed: 1, status: DONE },
+          { id: "ln-4", code: "84443", codeSystem: "CPT", description: null,
+            quantityOrdered: 2, quantityConsumed: 1, status: { kind: "part" as const, label: loc("Partially used", "مُستخدم جزئياً") } },
+        ],
+      },
     ].filter((r) => !status || r.key === status);
     return this.gate(
       () =>
         ok(z.array(zOrderRow), rows.map((r) => ({
-          id: r.id, orderNo: r.no, beneficiary: { id: r.id, token: r.tok },
-          orderType: r.type, primaryCode: r.code, lineCount: r.n, status: r.st, requestedAt: r.at,
-          firstLineId: r.line,
+          id: r.id, orderNo: r.no, beneficiary: { id: r.ben, token: r.tok },
+          orderType: r.type, primaryCode: r.lines[0].code, lineCount: r.lines.length,
+          status: r.st, requestedAt: r.at, firstLineId: r.line, expiresAt: r.exp, lines: r.lines,
+          encounterId: "ENC-2026-000231",
         }))),
       [],
     );
@@ -833,8 +1035,41 @@ export class DevApiClient implements ApiClient {
     return this.gate(
       () =>
         ok(z.array(zRxRow), [
-          { id: "rx-1", beneficiary: { id: "rx-1", token: "•••4821" }, lineCount: 2, status: { kind: "ok", label: loc("Approved", "معتمدة") }, submittedAt: "2026-07-22T08:15:00Z" },
-          { id: "rx-2", beneficiary: { id: "rx-2", token: "•••2093" }, lineCount: 1, status: { kind: "part", label: loc("Partially dispensed", "صُرفت جزئياً") }, submittedAt: "2026-07-21T10:00:00Z" },
+          {
+            id: "rx-1", rxNo: "RX-2026-000202", beneficiary: { id: "aaaaaaaa-0000-0000-0000-000000000231", token: "•••4821" },
+            lineCount: 2, status: { kind: "ok", label: loc("Approved", "معتمدة") },
+            submittedAt: "2026-07-22T08:15:00Z", expiresAt: "2026-08-21T08:15:00Z",
+            encounterId: "ENC-2026-000231",
+            prescriber: loc("Dr Karim Abdel-Latif", "د. كريم عبد اللطيف"),
+            lines: [
+              {
+                id: "rx-1-l1", drug: loc("Amoxicillin 500mg capsule", "أموكسيسيلين 500مجم كبسولة"),
+                dose: "500 mg", route: "PO", frequency: "TDS",
+                quantityPrescribed: 21, quantityDispensed: 0, refillsAllowed: 0,
+                status: { kind: "info", label: loc("Active", "نشطة") },
+              },
+              // Written before the drug-name snapshot: the fixture carries the gap so the "not recorded"
+              // rendering is exercised in dev and in tests, rather than only ever appearing in production.
+              {
+                id: "rx-1-l2", drug: null, dose: null, route: "PO", frequency: "OD",
+                quantityPrescribed: 30, quantityDispensed: 0, refillsAllowed: 1,
+                status: { kind: "info", label: loc("Active", "نشطة") },
+              },
+            ],
+          },
+          {
+            id: "rx-2", rxNo: "RX-2026-000198", beneficiary: { id: "aaaaaaaa-0000-0000-0000-000000000555", token: "•••2093" },
+            lineCount: 1, status: { kind: "part", label: loc("Partially dispensed", "صُرفت جزئياً") },
+            submittedAt: "2026-07-21T10:00:00Z", prescriber: null, encounterId: "ENC-2026-000231",
+            lines: [
+              {
+                id: "rx-2-l1", drug: loc("Metformin 500mg tablet", "ميتفورمين 500مجم قرص"),
+                dose: "500 mg", route: "PO", frequency: "BD",
+                quantityPrescribed: 60, quantityDispensed: 30, refillsAllowed: 2,
+                status: { kind: "part", label: loc("Partially dispensed", "صُرفت جزئياً") },
+              },
+            ],
+          },
         ]),
       [],
     );
@@ -844,7 +1079,88 @@ export class DevApiClient implements ApiClient {
     return this.gate(() => ok(zVitalsResult, { encounterId, recorded: readings.length }));
   }
 
+  // ---- Standing clinical facts: blood group + allergies -------------------
+  //
+  // Held in a mutable map keyed by beneficiary, so a recorded allergy is VISIBLE on the next read. A dev
+  // client that accepts a write and then returns the same fixture makes the round trip look broken in demo
+  // and, worse, lets a test assert "the POST resolved" while the panel it is meant to prove still renders
+  // the old list.
+  //
+  // The default entry is deliberately EMPTY. "No allergies recorded" is the state the UI most needs to get
+  // right — it is not the same claim as "this patient has no allergies" — so it is the one the demo opens on
+  // rather than a state a developer has to construct.
+  private readonly clinical = new Map<string, MemberClinicalRecord>();
+
+  private clinicalFor(beneficiaryId: string): MemberClinicalRecord {
+    const existing = this.clinical.get(beneficiaryId);
+    if (existing) return existing;
+    const fresh: MemberClinicalRecord = {
+      beneficiaryId, bloodGroup: null, bloodGroupRecordedAt: null, allergies: [],
+    };
+    this.clinical.set(beneficiaryId, fresh);
+    return fresh;
+  }
+
+  memberClinicalRecord(beneficiaryId: string) {
+    return this.gate(
+      () => ok(zMemberClinicalRecord, this.clinicalFor(beneficiaryId)),
+      ok(zMemberClinicalRecord, { beneficiaryId, bloodGroup: null, bloodGroupRecordedAt: null, allergies: [] }),
+    );
+  }
+
+  allergenCatalogue() {
+    // The masterdata seed (its migration 0002), abbreviated. Real uuids are not needed in dev, but the
+    // SHAPE is: a Drug-category allergen is what prescribe-time screening resolves against ATC.
+    return this.gate(
+      () => DEV_ALLERGENS.map((a) => ok(zAllergenOption, a)),
+      [],
+    );
+  }
+
+  addAllergy(beneficiaryId: string, req: AddAllergyRequest) {
+    return this.gate(() => {
+      const option = DEV_ALLERGENS.find((a) => a.allergenId === req.allergenId);
+      const record = ok(zAllergyRecord, {
+        allergyId: `AL-${this.clinicalFor(beneficiaryId).allergies.length + 1}`,
+        allergenId: req.allergenId,
+        // The server resolves the name from master data and never trusts a client-supplied one. Mirrored
+        // here so the dev path exercises the same rule: an unknown id yields no name, not a made-up one.
+        allergen: option?.name ?? null,
+        reaction: req.reaction?.trim() ? req.reaction.trim() : null,
+        severity: req.severity,
+        status: req.status,
+      });
+      const current = this.clinicalFor(beneficiaryId);
+      this.clinical.set(beneficiaryId, { ...current, allergies: [...current.allergies, record] });
+      return record;
+    });
+  }
+
+  setBloodGroup(beneficiaryId: string, bloodGroup: BloodGroup): Promise<void> {
+    return this.gate(() => {
+      const current = this.clinicalFor(beneficiaryId);
+      this.clinical.set(beneficiaryId, { ...current, bloodGroup, bloodGroupRecordedAt: NOW });
+      return undefined;
+    });
+  }
+
   // ---- Lab / imaging -----------------------------------------------------
+  /**
+   * The bench's member search. Filters the same fixture the queue uses, so the two cannot disagree about an
+   * order — and models the REFUSALS, which is where the real behaviour lives: one identifier is a 422, an
+   * unreachable directory is a 503, and only "matched nobody" is an empty list.
+   */
+  async labSearch(kind: "lab" | "imaging", by: { orderNo?: string; cardNumber?: string; memberNo?: string; passport?: string }) {
+    const rows = await this.labQueue(kind);
+    const orderNo = (by.orderNo ?? "").trim();
+    if (orderNo) return rows.filter((r) => r.orderNo.toLowerCase() === orderNo.toLowerCase());
+
+    const supplied = [by.cardNumber, by.memberNo, by.passport].filter((v) => (v ?? "").trim() !== "");
+    if (supplied.length < 2) throw new ApiError("http", "two-identifiers-required", 422, { type: "urn:hbmp:two-identifiers-required" });
+    // The fixture has one member, so two identifiers resolve to all of their orders.
+    return rows;
+  }
+
   labQueue(kind: "lab" | "imaging") {
     return this.gate(() => {
       const base =
@@ -860,6 +1176,9 @@ export class DevApiClient implements ApiClient {
                 placedAt: NOW,
                 panelsTotal: 3,
                 panelsDone: this.labProgress.get("ORD-55012") ?? 0,
+                orderNo: "ORD-2026-055012",
+                expiresAt: "2026-12-31T21:00:00.000Z",
+                expired: false,
               },
               {
                 id: "ORD-55019",
@@ -871,6 +1190,25 @@ export class DevApiClient implements ApiClient {
                 placedAt: NOW,
                 panelsTotal: 1,
                 panelsDone: this.labProgress.get("ORD-55019") ?? 0,
+                orderNo: "ORD-2026-055019",
+                expiresAt: "2026-12-31T21:00:00.000Z",
+                expired: false,
+              },
+              // Lapsed. Present in the queue rather than filtered out — a technician with the patient in
+              // front of them and an empty list has nothing to tell them, and the recovery is two minutes.
+              {
+                id: "ORD-55003",
+                kind: "lab" as const,
+                test: { system: "CPT" as const, code: "80053", label: loc("Comprehensive metabolic panel", "لوحة أيضية شاملة") },
+                patient: { id: "MRS-M-10231", token: "A.H · •••4821" },
+                priority: "routine" as const,
+                status: { kind: "bad" as const, label: loc("Expired", "منتهٍ") },
+                placedAt: "2026-06-01T09:00:00.000Z",
+                panelsTotal: 1,
+                panelsDone: 0,
+                orderNo: "ORD-2026-055003",
+                expiresAt: "2026-06-11T21:00:00.000Z",
+                expired: true,
               },
             ]
           : [
@@ -884,11 +1222,167 @@ export class DevApiClient implements ApiClient {
                 placedAt: NOW,
                 panelsTotal: 1,
                 panelsDone: this.labProgress.get("ORD-77003") ?? 0,
+                orderNo: "ORD-2026-077003",
+                expiresAt: "2026-12-31T21:00:00.000Z",
+                expired: false,
+              },
+              // The imaging side has a lapsed one too — the two queues must not diverge in what they can show.
+              {
+                id: "ORD-77009",
+                kind: "imaging" as const,
+                test: { system: "CPT" as const, code: "70450", label: loc("CT head, without contrast", "أشعة مقطعية للرأس بدون صبغة") },
+                patient: { id: "MRS-M-10555", token: "Y.H · •••7702" },
+                priority: "routine" as const,
+                status: { kind: "bad" as const, label: loc("Expired", "منتهٍ") },
+                placedAt: "2026-06-02T09:00:00.000Z",
+                panelsTotal: 1,
+                panelsDone: 0,
+                orderNo: "ORD-2026-077009",
+                expiresAt: "2026-06-12T21:00:00.000Z",
+                expired: true,
               },
             ];
       return ok(z.array(zLabOrder), base);
     }, []);
   }
+  /**
+   * The lines on one order (ADR-0034). The queue collapses an order to its first test and a panel count;
+   * the order page has to show every line, because ordered / consumed / remaining are what a bench works
+   * from and a single "3 panels" figure hides which three.
+   */
+  private static readonly ORDER_LINES: Record<
+    string,
+    { id: string; test: { system: "LOINC" | "CPT"; code: string; label: ReturnType<typeof loc> }; quantityOrdered: number }[]
+  > = {
+    "ORD-2026-055012": [
+      { id: "OL-55012-1", test: { system: "LOINC", code: "58410-2", label: loc("Complete blood count", "تعداد دم كامل") }, quantityOrdered: 1 },
+      { id: "OL-55012-2", test: { system: "LOINC", code: "4537-7", label: loc("Erythrocyte sedimentation rate", "سرعة الترسيب") }, quantityOrdered: 1 },
+      { id: "OL-55012-3", test: { system: "LOINC", code: "1988-5", label: loc("C-reactive protein", "بروتين سي التفاعلي") }, quantityOrdered: 1 },
+    ],
+    "ORD-2026-055019": [
+      { id: "OL-55019-1", test: { system: "LOINC", code: "2345-7", label: loc("Glucose", "سكر الدم") }, quantityOrdered: 1 },
+    ],
+    "ORD-2026-055003": [
+      { id: "OL-55003-1", test: { system: "CPT", code: "80053", label: loc("Comprehensive metabolic panel", "لوحة أيضية شاملة") }, quantityOrdered: 1 },
+    ],
+    "ORD-2026-077003": [
+      { id: "OL-77003-1", test: { system: "CPT", code: "71046", label: loc("Chest X-ray", "أشعة صدر") }, quantityOrdered: 1 },
+    ],
+    "ORD-2026-077009": [
+      { id: "OL-77009-1", test: { system: "CPT", code: "70450", label: loc("CT head, without contrast", "أشعة مقطعية للرأس بدون صبغة") }, quantityOrdered: 1 },
+    ],
+  };
+
+  async investigationOrder(orderNo: string): Promise<InvestigationOrder | null> {
+    const rows = [...(await this.labQueue("lab")), ...(await this.labQueue("imaging"))];
+    const head = rows.find((o) => o.orderNo === orderNo);
+    if (!head) return null;
+
+    // The panel counter is spent across the lines in order, which is how a bench actually works through one.
+    let done = head.panelsDone;
+    const lines = (DevApiClient.ORDER_LINES[orderNo] ?? []).map((l) => {
+      const consumed = Math.min(l.quantityOrdered, done);
+      done -= consumed;
+      return {
+        id: l.id,
+        test: l.test,
+        quantityOrdered: l.quantityOrdered,
+        quantityConsumed: consumed,
+        status: consumed >= l.quantityOrdered
+          ? { kind: "ok" as const, label: loc("Performed", "تم التنفيذ") }
+          : { kind: "info" as const, label: loc("Outstanding", "قيد التنفيذ") },
+      };
+    });
+
+    return ok(zInvestigationOrder, {
+      id: head.id,
+      orderNo: head.orderNo,
+      kind: head.kind,
+      patient: head.patient,
+      status: head.status,
+      placedAt: head.placedAt,
+      expiresAt: head.expiresAt,
+      expired: head.expired,
+      lines,
+    });
+  }
+
+  /**
+   * Three states, on purpose, because a bench meets all three.
+   *
+   * <p>ORD-…055012 prices completely. ORD-…055019 has a list price but no member split — the plan does not
+   * price this category at this tier. ORD-…077009 has no catalogue price at all, so even the total is
+   * unknown. None of the three is ever rendered as 0.00, which is the behaviour these fixtures exist to keep
+   * a screen honest about.</p>
+   */
+  async orderPricing(orderId: string, performNow?: Record<string, number>): Promise<OrderPricing> {
+    const rows = [...(await this.labQueue("lab")), ...(await this.labQueue("imaging"))];
+    const head = rows.find((o) => o.id === orderId);
+    const defs = DevApiClient.ORDER_LINES[head?.orderNo ?? ""] ?? [];
+    const unpriced = head?.orderNo === "ORD-2026-077009";
+
+    const lines = defs.map((l, i) => {
+      const unit = unpriced ? null : [180, 95.5, 240][i % 3];
+      return {
+        orderLineId: l.id,
+        codeSystem: l.test.system,
+        code: l.test.code,
+        description: l.test.label.en,
+        quantityOrdered: l.quantityOrdered,
+        quantityConsumed: 0,
+        unitPriceEgp: unit,
+        lineTotalEgp: unit === null ? null : Number((unit * l.quantityOrdered).toFixed(2)),
+      };
+    });
+
+    if (unpriced) {
+      return {
+        lines, currency: "EGP", totalEgp: null, memberShareEgp: null, payerShareEgp: null,
+        determinate: false,
+        reason: "At least one examination on this order has no list price, so the total cannot be stated. "
+          + "Quoting the priced lines alone would understate what the member owes.",
+        tierCode: null, isCovered: null,
+        quotedOnEgp: null, quotedOnPerformNow: false,
+      };
+    }
+
+    const total = Number(lines.reduce((s, l) => s + (l.lineTotalEgp ?? 0), 0).toFixed(2));
+
+    // What the split is quoted on: the quantities at the bench once any have been entered, the whole order
+    // before that. A basis of nothing falls back rather than quoting a zero.
+    const basis = devBasis(
+      lines.map((l) => ({ id: l.orderLineId, unit: l.unitPriceEgp, whole: l.lineTotalEgp ?? 0 })),
+      performNow,
+    );
+    const quotedOn = basis.onNow ? basis.amount : total;
+
+    if (head?.orderNo === "ORD-2026-055019") {
+      return {
+        lines, currency: "EGP", totalEgp: total, memberShareEgp: null, payerShareEgp: null,
+        determinate: false,
+        reason: "The member's share could not be quoted — the plan does not price this examination category "
+          + "at this provider's network tier. The total above is the full list price.",
+        tierCode: null, isCovered: null,
+        quotedOnEgp: quotedOn, quotedOnPerformNow: basis.onNow,
+      };
+    }
+
+    const { member, payer } = devCostShare(quotedOn);
+    return {
+      lines, currency: "EGP", totalEgp: total,
+      memberShareEgp: member, payerShareEgp: payer,
+      determinate: true, reason: null, tierCode: "IN-NETWORK", isCovered: true,
+      quotedOnEgp: quotedOn, quotedOnPerformNow: basis.onNow,
+    };
+  }
+
+  requestSubstitution(req: SubstitutionRequest) {
+    return this.gate(() => {
+      void req;
+      return { authNo: "AUTH-2026-000488" };
+    });
+  }
+
   consume(req: ConsumeRequest) {
     return this.gate(() => {
       const replayed = this.seenKeys.has(req.idempotencyKey);
@@ -897,7 +1391,12 @@ export class DevApiClient implements ApiClient {
       let done = this.labProgress.get(req.orderId) ?? 0;
       if (!replayed) {
         this.seenKeys.add(req.idempotencyKey);
-        done = Math.min(total, done + req.panels);
+        // The order page names lines and quantities; the queue names a panel count. Both land on the same
+        // counter, so a page and a queue reading the same order agree about how much is left.
+        const added = req.lines?.length
+          ? req.lines.reduce((s, l) => s + l.quantity, 0)
+          : req.panels;
+        done = Math.min(total, done + added);
         this.labProgress.set(req.orderId, done);
       }
       return ok(zConsumeResult, {
@@ -941,14 +1440,246 @@ export class DevApiClient implements ApiClient {
     ].filter((d) => d.name.en.toLowerCase().includes(query.toLowerCase()));
     return this.gate(() => ok(z.array(zDrugRef), all), []);
   }
+  /**
+   * Approved alternatives for a drug — the same ATC-5 class the real formulary answers with.
+   *
+   * <p>Keyed on the ATC code as well as the internal id, because the dispensing fixture identifies its lines
+   * by ATC ("J01CA04") while the Substitutions screen uses catalogue ids. Answering only the latter meant the
+   * counter's substitute control found nothing for every prescription in the demo — a working feature that
+   * looked like a broken one, and worse, one whose empty list was indistinguishable from "no alternative is
+   * approved for this medicine".</p>
+   */
+  /** Ingredients for the fixture drugs. Two trade names sharing one molecule, because that is the
+   *  duplication a pharmacist is actually checking for. */
+  drugIngredients(drugIds: readonly string[]) {
+    const byId: Record<string, string> = {
+      "d-amox-500": "amoxicillin",
+      "d-amox-250": "amoxicillin",
+      "d-amox-susp": "amoxicillin",
+      "d-metformin-500": "metformin",
+      "d-metformin-850": "metformin",
+      "d-metformin-xr": "metformin",
+      "d-augmentin-1g": "amoxicillin + clavulanic acid",
+      "d-paracetamol-500": "paracetamol",
+    };
+    const out = new Map<string, string>();
+    for (const id of drugIds) {
+      const found = byId[id];
+      // Absent, not blank: an unrecorded ingredient is a state the screen names, and 2,786 real catalogue
+      // products are in it.
+      if (found) out.set(id, found);
+    }
+    return this.gate(() => out, new Map<string, string>());
+  }
+
   drugAlternatives(drugId: string) {
-    const alts = drugId.startsWith("d-amox")
-      ? [
-          { drugId: "d-amox-250", name: loc("Amoxicillin 250mg caps", "أموكسيسيلين 250مجم"), atcCode: "J01CA04", form: "Capsule", strength: "250mg" },
-          { drugId: "d-amox-susp", name: loc("Amoxicillin 125mg/5ml susp", "أموكسيسيلين شراب"), atcCode: "J01CA04", form: "Suspension", strength: "125mg/5ml" },
-        ]
-      : [];
+    const byClass: Record<string, { drugId: string; name: ReturnType<typeof loc>; atcCode: string; form: string; strength: string }[]> = {
+      J01CA04: [
+        { drugId: "d-amox-250", name: loc("Amoxicillin 250mg caps", "أموكسيسيلين 250مجم"), atcCode: "J01CA04", form: "Capsule", strength: "250mg" },
+        { drugId: "d-amox-susp", name: loc("Amoxicillin 125mg/5ml susp", "أموكسيسيلين شراب"), atcCode: "J01CA04", form: "Suspension", strength: "125mg/5ml" },
+      ],
+      A10BA02: [
+        { drugId: "d-metformin-850", name: loc("Metformin 850mg tabs", "ميتفورمين 850مجم"), atcCode: "A10BA02", form: "Tablet", strength: "850mg" },
+        { drugId: "d-metformin-xr", name: loc("Metformin XR 500mg", "ميتفورمين ممتد 500مجم"), atcCode: "A10BA02", form: "Tablet", strength: "500mg" },
+      ],
+    };
+    const alts = drugId.startsWith("d-amox") ? byClass.J01CA04 : (byClass[drugId] ?? []);
     return this.gate(() => ok(z.array(zDrugRef), alts), []);
+  }
+
+
+  // ---- Prescribing workspace (phase 26) ----------------------------------
+  //
+  // POPULATED from the start, deliberately. An axe run against an empty screen proves the empty state is
+  // accessible and nothing else — the combobox options, the five per-line status cues and the expanded
+  // warning panels are exactly the surface that needs checking, and none of them render without data.
+  //
+  // Modelled on the real Egyptian drug list: trade name and active ingredient differ (Augmentin /
+  // amoxicillin+clavulanic acid), which is the whole reason the search covers both, and one product carries
+  // no indication data at all — 1,019 real products are in that state.
+  private static readonly PRESCRIBABLE = [
+    {
+      drugId: "11111111-0000-4000-8000-000000000001",
+      tradeName: loc("Augmentin 1g 14 f.c. tabs", "أوجمنتين 1جم"),
+      activeIngredient: "amoxicillin + clavulanic acid",
+      strength: "1g", form: "tablet", priceEgp: 210, atcCode: "J01CR02", hasIndicationData: true,
+    },
+    {
+      drugId: "11111111-0000-4000-8000-000000000002",
+      tradeName: loc("Amoxil 500mg caps", "أموكسيل 500مجم"),
+      activeIngredient: "amoxicillin",
+      strength: "500mg", form: "capsule", priceEgp: 43.5, atcCode: "J01CA04", hasIndicationData: true,
+    },
+    {
+      drugId: "11111111-0000-4000-8000-000000000003",
+      tradeName: loc("Glucophage 500mg", "جلوكوفاج 500مجم"),
+      activeIngredient: "metformin",
+      strength: "500mg", form: "tablet", priceEgp: 28, atcCode: "A10BA02", hasIndicationData: true,
+    },
+    {
+      // No indication data — the check must report "not checked", never "OK".
+      drugId: "11111111-0000-4000-8000-000000000004",
+      tradeName: loc("Vero 4 30 tablets", "فيرو 4"),
+      activeIngredient: "diosmin + hesperidin",
+      strength: "300mg", form: "tablet", priceEgp: 90, hasIndicationData: false,
+    },
+  ];
+
+  searchPrescribableDrugs(query: string) {
+    const q = query.trim().toLowerCase();
+    const hits = DevApiClient.PRESCRIBABLE.filter(
+      (d) =>
+        d.tradeName.en.toLowerCase().includes(q) ||
+        d.tradeName.ar.includes(query.trim()) ||
+        (d.activeIngredient ?? "").toLowerCase().includes(q),
+    );
+    return this.gate(() => ok(z.array(zPrescribableDrug), hits), []);
+  }
+
+  /**
+   * A handful of real CPT codes per section, so the dev fixture exercises the section split rather than
+   * returning the same list to both tabs.
+   */
+  private static readonly CPT: { code: string; description: string }[] = [
+    { code: "71046", description: "Radiologic examination, chest; 2 views" },
+    { code: "70450", description: "Computed tomography, head or brain; without contrast material" },
+    { code: "76700", description: "Ultrasound, abdominal, real time; complete" },
+    { code: "85025", description: "Blood count; complete (CBC), automated, with automated differential" },
+    { code: "80053", description: "Comprehensive metabolic panel" },
+    { code: "83036", description: "Hemoglobin; glycosylated (A1c)" },
+    // A panel and one of its components, with the panel's REAL description — which cites the component codes,
+    // as CPT panel descriptions do. That pairing is what makes the search ranking observable rather than
+    // assumed: typing "82947" matches the glucose code AND the panel's text, and the panel sorts first by
+    // code. A doctor reading a code off a request form should get the code they typed, not the panels that
+    // mention it.
+    { code: "82947", description: "Glucose; quantitative, blood (except reagent strip)" },
+    {
+      code: "80048",
+      description:
+        "Basic metabolic panel (Calcium, total) This panel must include the following: Calcium, total (82310) "
+        + "Carbon dioxide (bicarbonate) (82374) Chloride (82435) Creatinine (82565) Glucose (82947) "
+        + "Potassium (84132) Sodium (84295) Urea nitrogen (BUN) (84520)",
+    },
+    // Pathology (88xxx), which the Labs tab reaches and the Laboratory section alone does not. Without one
+    // of these the fixture cannot tell "Labs asks for two sections" from "Labs asks for Laboratory".
+    { code: "88305", description: "Level IV — Surgical pathology, gross and microscopic examination" },
+    { code: "88175", description: "Cytopathology, cervical or vaginal, with screening by automated system" },
+  ];
+
+  validityPolicy() {
+    return this.gate(() =>
+      ok(zValidityPolicyView, {
+        defaultDays: 10,
+        minDays: 1,
+        maxDays: 365,
+        items: [
+          // Deliberately mixed: two chosen, two still on the platform default, so the screen's distinction
+          // between "set" and "nobody has looked at this" is exercised rather than assumed.
+          { artefact: "Prescription" as const, days: 14, configured: true, updatedAt: "2026-07-20T09:00:00Z" },
+          { artefact: "LabOrder" as const, days: 10, configured: false, updatedAt: null },
+          { artefact: "ImagingOrder" as const, days: 30, configured: true, updatedAt: "2026-07-18T11:00:00Z" },
+          { artefact: "ProcedureOrder" as const, days: 10, configured: false, updatedAt: null },
+        ],
+      }),
+    );
+  }
+
+  async setValidityPolicy(artefact: string, days: number) {
+    void artefact; void days;
+    await this.gate(() => ok(z.object({}), {}));
+  }
+
+  requestValidityExtension(req: ValidityExtensionRequest) {
+    void req;
+    return this.gate(() =>
+      ok(zValidityExtensionResult, {
+        authorizationId: "auth-ext-1",
+        authNo: "AUTH-2026-000271",
+        status: "Submitted",
+      }),
+    );
+  }
+
+  searchCpt(query: string, sections: readonly CptSection[]) {
+    const q = query.trim().toLowerCase();
+    // The same rules masterdata applies, on the same shape of data — a fixture that searched more loosely
+    // than the service would make the demo pass where the live catalogue fails, which is exactly how the
+    // case-sensitive ICD code search survived: every portal test ran against a kinder client.
+    const inSection = (code: string) => sections.some((s) => devCptSection(code) === s);
+    const codeHit = (c: { code: string }) => c.code.toLowerCase().startsWith(q);
+    const textHit = (c: { description: string }) => c.description.toLowerCase().includes(q);
+    const hits = DevApiClient.CPT.filter((c) => inSection(c.code) && (codeHit(c) || textHit(c)));
+    // Digit-led queries rank code matches first, worded queries rank descriptions first.
+    const leads = /^\d/.test(q) ? codeHit : textHit;
+    const ranked = [...hits].sort(
+      (a, b) => Number(leads(b)) - Number(leads(a)) || a.code.localeCompare(b.code),
+    );
+    return this.gate(() => ok(z.array(zCptRef), ranked), []);
+  }
+
+  validateInvestigationOrder(req: {
+    encounterId: string;
+    orderType: InvestigationOrderType;
+    lines: InvestigationDraftLine[];
+    diagnosisIcdCodes: string[];
+  }) {
+    return this.gate(() => ok(zOrderValidationResult, devOrderValidation(req.orderType, req.lines, req.diagnosisIcdCodes)), {
+      validationId: "ov-empty", overallState: "NotChecked" as const, findings: [], lineStates: {},
+    });
+  }
+
+  submitInvestigationOrder(req: {
+    encounterId: string;
+    orderType: InvestigationOrderType;
+    lines: InvestigationDraftLine[];
+    acknowledgements: OrderAcknowledgement[];
+  }) {
+    void req.acknowledgements;
+    return this.gate(() =>
+      ok(zInvestigationOrderResult, {
+        orderId: "ord-new",
+        orderNo: "ORD-2026-000901",
+        status: req.orderType === "Imaging" ? "PendingApproval" : "Active",
+        requiresApproval: req.orderType === "Imaging",
+      }),
+    );
+  }
+
+  validatePrescription(req: {
+    encounterId: string;
+    lines: PrescriptionDraftLine[];
+    diagnosisIcdCodes: string[];
+  }) {
+    return this.gate(() => ok(zValidationResult, devValidation(req.lines, req.diagnosisIcdCodes)), {
+      validationId: "v-empty", ranAt: new Date(0).toISOString(), engineVersion: "26.4",
+      overallState: "NotChecked" as const, findings: [], lineStates: {},
+    });
+  }
+
+  submitPrescription(req: {
+    encounterId: string;
+    lines: PrescriptionDraftLine[];
+    diagnosisIcdCodes: string[];
+    acknowledgements: LineAcknowledgement[];
+  }) {
+    const result = devValidation(req.lines, req.diagnosisIcdCodes);
+    // The fixture mirrors the server rule rather than rubber-stamping: a warning with no acknowledgement is
+    // refused. A fixture that always succeeded would let the gating regress without a test noticing.
+    const unacknowledged = result.findings.filter(
+      (f) =>
+        f.requiresAcknowledgement &&
+        !req.acknowledgements.some((a) => a.lineId === f.lineId && a.findingKind === f.kind),
+    );
+    if (unacknowledged.length > 0) {
+      return Promise.reject(new Error("unacknowledged-warning"));
+    }
+    if (result.findings.some((f) => f.isBlocking)) {
+      return Promise.reject(new Error("blocked-by-benefit-rule"));
+    }
+    return this.gate(
+      () => ok(zPrescriptionSubmitResult, { prescriptionId: "rx-dev-1", rxNo: "RX-2026-000001", status: "Submitted" }),
+      { prescriptionId: "", rxNo: "", status: "" },
+    );
   }
 
   // ---- Pharmacy ----------------------------------------------------------
@@ -958,34 +1689,164 @@ export class DevApiClient implements ApiClient {
       return ok(z.array(zPrescription), [
         {
           id: "RX-33110",
+          rxNo: "RX-2026-033110",
           patient: { id: "MRS-M-10231", token: "A.H · •••4821" },
           prescriber: { label: loc("Dr. N. Fahmy", "د. ن. فهمي") },
           submittedAt: NOW,
+          expiresAt: "2026-12-31T21:00:00.000Z",
+          expired: false,
+          // A real ICD code, because the counter resolves it to a title through master data — a fixture code
+          // that resolves to nothing would test the fallback and never the join.
+          diagnosisCodes: ["J01.0"],
+          primaryIcdCode: "J01.0",
           status: { kind: "info", label: loc("Submitted", "مُرسلة") },
           lines: [
             {
               id: "RXL-1",
-              drug: { system: "ATC", code: "J01CA04", label: loc("Amoxicillin 500mg", "أموكسيسيلين ٥٠٠ملغ") },
+              drug: { system: "ATC", code: "d-amox-500", label: loc("Amoxicillin 500mg", "أموكسيسيلين ٥٠٠ملغ") },
               quantity: 21,
               dispensed: disp("RX-33110", "RXL-1"),
-              dose: "1 cap × 3/day",
+              dose: "1 capsule",
+              route: "Oral",
+              frequency: "TDS",
+              durationDays: 7,
+              activeIngredient: "amoxicillin",
+              // NOT set. The server leaves this null on the dispensing view and the counter joins the price
+              // from /pricing; a fixture that fills it in models a payload no service sends and hides the
+              // join it exists to exercise.
+              unitPriceEgp: null,
               status: { kind: "info", label: loc("Pending", "معلّقة") },
               outOfStock: false,
             },
             {
               id: "RXL-2",
-              drug: { system: "ATC", code: "R05CB", label: loc("Guaifenesin syrup", "شراب جوايفينيسين") },
+              drug: { system: "ATC", code: "d-guaifenesin", label: loc("Guaifenesin syrup", "شراب جوايفينيسين") },
               quantity: 1,
               dispensed: disp("RX-33110", "RXL-2"),
-              dose: "10 ml × 3/day",
+              dose: "10 ml",
+              route: "Oral",
+              frequency: "TDS",
+              // Not recorded, on purpose. The counter has to render an ABSENT duration as absent — a blank
+              // cell reads as a one-day course, and only one of those is a reason to ring the prescriber.
+              durationDays: null,
+              activeIngredient: null,
+              unitPriceEgp: null,
               status: { kind: "warn", label: loc("Out of stock", "غير متوفر") },
               outOfStock: true,
+            },
+          ],
+        },
+        // Lapsed. It is HERE rather than filtered out, which is the whole point of the change that put it
+        // on screen: a search that hides an expired prescription tells a pharmacist the member has nothing,
+        // when in fact they have something that has run out of date and can be extended.
+        {
+          id: "RX-33044",
+          rxNo: "RX-2026-033044",
+          patient: { id: "MRS-M-10231", token: "A.H · •••4821" },
+          prescriber: { label: loc("Dr. N. Fahmy", "د. ن. فهمي") },
+          submittedAt: "2026-06-01T09:00:00.000Z",
+          expiresAt: "2026-06-11T21:00:00.000Z",
+          expired: true,
+          diagnosisCodes: ["E11.9"],
+          primaryIcdCode: "E11.9",
+          status: { kind: "bad", label: loc("Expired", "منتهية") },
+          lines: [
+            {
+              id: "RXL-3",
+              drug: { system: "ATC", code: "d-metformin-500", label: loc("Metformin 500mg", "ميتفورمين ٥٠٠ملغ") },
+              quantity: 60,
+              dispensed: 0,
+              route: "Oral",
+              frequency: "BD",
+              durationDays: 30,
+              activeIngredient: "metformin",
+              unitPriceEgp: null,
+              dose: "1 tab × 2/day",
+              status: { kind: "neu", label: loc("Not dispensed", "لم تُصرف") },
+              outOfStock: false,
             },
           ],
         },
       ]);
     }, []);
   }
+
+  /**
+   * The counter's lookup. The fixture answers on the Rx number, the member number or the card number, so the
+   * demo exercises the real shape; the SERVER is what enforces the two-identifier rule, and a dev client
+   * that enforced it too would hide a regression in the endpoint rather than reveal one.
+   */
+  async pharmacySearch(by: { rxNo?: string; cardNumber?: string; memberNo?: string; passport?: string }) {
+    const all = await this.pharmacyQueue();
+    // `??` does NOT fall through an empty string, and the screen sends all four fields with the unfilled
+    // ones as "". So `by.rxNo ?? by.memberNo` was always "" whenever the pharmacist searched by member
+    // number, and the fixture answered every identifier search with nothing — a demo that looked like a
+    // working screen finding no prescriptions.
+    const needle = [by.rxNo, by.memberNo, by.cardNumber, by.passport]
+      .map((v) => (v ?? "").trim())
+      .find((v) => v.length > 0)
+      ?.toLowerCase() ?? "";
+    if (!needle) return [];
+    return all.filter((p) =>
+      p.rxNo.toLowerCase().includes(needle) || p.patient.id.toLowerCase().includes(needle));
+  }
+
+  /**
+   * A worked cost share for the demo counter.
+   *
+   * <p>One prescription is deliberately left INDETERMINATE. The tiles' hardest requirement is that they
+   * never render an unknown split as 0.00 — at a counter a zero reads as "free" — so the demo has to be able
+   * to show that state, not only the happy one.</p>
+   */
+  async prescriptionPricing(
+    prescriptionId: string, dispenseNow?: Record<string, number>,
+  ): Promise<RxPricing> {
+    const all = await this.pharmacyQueue();
+    const rx = all.find((p) => p.id === prescriptionId);
+    const lines = (rx?.lines ?? []).map((l, i) => {
+      const unit = [42.5, 128, 96.75][i % 3];
+      return {
+        prescriptionLineId: l.id,
+        drugId: l.drug.code,
+        drugName: l.drug.label.en,
+        quantityPrescribed: l.quantity,
+        quantityDispensed: l.dispensed,
+        unitPriceEgp: unit,
+        lineTotalEgp: Number((unit * l.quantity).toFixed(2)),
+      };
+    });
+    const total = Number(lines.reduce((s, l) => s + (l.lineTotalEgp ?? 0), 0).toFixed(2));
+
+    // What the split is quoted on: the quantities at the counter once any have been entered, the whole
+    // prescription before that. A basis of nothing falls back rather than quoting a zero — see `devCostShare`.
+    const basis = devBasis(
+      lines.map((l) => ({ id: l.prescriptionLineId, unit: l.unitPriceEgp, whole: l.lineTotalEgp ?? 0 })),
+      dispenseNow,
+    );
+    const quotedOn = basis.onNow ? basis.amount : total;
+
+    if (rx?.rxNo?.endsWith("44")) {
+      return {
+        lines, currency: "EGP", totalEgp: total,
+        memberShareEgp: null, payerShareEgp: null,
+        determinate: false,
+        reason: "The member's share could not be quoted — the plan does not price pharmacy at this "
+          + "provider's network tier. The total above is the full list price.",
+        tierCode: null, isCovered: null,
+        quotedOnEgp: quotedOn, quotedOnDispenseNow: basis.onNow,
+      };
+    }
+
+    const { member, payer } = devCostShare(quotedOn);
+    return {
+      lines, currency: "EGP", totalEgp: total,
+      memberShareEgp: member,
+      payerShareEgp: payer,
+      determinate: true, reason: null, tierCode: "IN-NETWORK", isCovered: true,
+      quotedOnEgp: quotedOn, quotedOnDispenseNow: basis.onNow,
+    };
+  }
+
   dispense(req: DispenseRequest) {
     return this.gate(() => {
       const replayed = this.seenKeys.has(req.idempotencyKey);
@@ -1011,10 +1872,110 @@ export class DevApiClient implements ApiClient {
   }
 
   // ---- Approvals ---------------------------------------------------------
-  approvalWorklist() {
+  /**
+   * The fulfilment register (ADR-0034) — what counters and benches actually handed over.
+   *
+   * <p>Kept apart from the review fixtures rather than mixed in, because that is exactly how the server
+   * treats them: `kind` defaults to Review so a few hundred dispenses a day cannot drown the handful of
+   * requests that need a decision.</p>
+   */
+  private static readonly FULFILMENTS = [
+    {
+      id: "AUTH-7101",
+      patient: { id: "MRS-M-10231", token: "A.H · •••4821" },
+      service: { system: "ATC", code: "J01CR02", label: loc("Augmentin 1g", "أوجمنتين 1جم") },
+      requestedBy: loc("Nile Pharmacy", "صيدلية النيل"),
+      priority: "routine" as const,
+      // No SLA on a fulfilment: nothing waited on anybody.
+      sla: null,
+      status: { kind: "ok" as const, label: loc("Issued", "صادرة") },
+      submittedAt: NOW,
+      estimatedCost: "—",
+      source: "Prescription" as const,
+      itemReference: "RX-2026-000410",
+      extensionReason: null,
+      kind: "Fulfilment" as const,
+    },
+    {
+      id: "AUTH-7102",
+      patient: { id: "MRS-M-10555", token: "Y.H · •••7702" },
+      service: { system: "LOINC", code: "58410-2", label: loc("Complete blood count", "تعداد دم كامل") },
+      requestedBy: loc("Cairo Central Lab", "معمل القاهرة المركزي"),
+      priority: "routine" as const,
+      // No SLA on a fulfilment: nothing waited on anybody.
+      sla: null,
+      status: { kind: "ok" as const, label: loc("Issued", "صادرة") },
+      submittedAt: NOW,
+      estimatedCost: "—",
+      source: "OrderLine" as const,
+      itemReference: "ORD-2026-055012",
+      extensionReason: null,
+      kind: "Fulfilment" as const,
+    },
+  ];
+
+  /**
+   * What was delivered against one authorization.
+   *
+   * <p>AUTH-7101 carries a SUBSTITUTION, which is the case worth seeing: the prescriber wrote one product,
+   * the counter handed over another, and both are on the row. The prescription itself still says what the
+   * prescriber wrote — that is the whole point of the authorization being a separate document.</p>
+   */
+  authorizationItems(authorizationId: string) {
+    const byAuth: Record<string, unknown[]> = {
+      "AUTH-7101": [
+        {
+          itemId: "AI-7101-1",
+          sourceLineId: "RXL-1",
+          orderedCode: "d-augmentin-1g",
+          orderedLabel: "Augmentin 1g 14 f.c. tabs",
+          fulfilledCode: "d-amox-clav-generic",
+          fulfilledLabel: "Amoxicillin+Clavulanic acid 1g tabs",
+          quantity: 14,
+          substituted: true,
+          substitutionReason: "Prescribed brand is out of stock this morning; same active ingredient dispensed.",
+          fulfilledAt: NOW,
+        },
+        {
+          itemId: "AI-7101-2",
+          sourceLineId: "RXL-2",
+          orderedCode: "d-paracetamol-500",
+          orderedLabel: "Paracetamol 500mg tabs",
+          fulfilledCode: "d-paracetamol-500",
+          fulfilledLabel: "Paracetamol 500mg tabs",
+          quantity: 20,
+          substituted: false,
+          substitutionReason: null,
+          fulfilledAt: NOW,
+        },
+      ],
+      "AUTH-7102": [
+        {
+          itemId: "AI-7102-1",
+          sourceLineId: "OL-55012-1",
+          orderedCode: "58410-2",
+          orderedLabel: "Complete blood count",
+          fulfilledCode: "58410-2",
+          fulfilledLabel: "Complete blood count",
+          quantity: 1,
+          substituted: false,
+          substitutionReason: null,
+          fulfilledAt: NOW,
+        },
+      ],
+    };
+    return this.gate(() => ok(z.array(zAuthorizationItem), byAuth[authorizationId] ?? []), []);
+  }
+
+  approvalWorklist(kind: "Review" | "Fulfilment" | "All" = "Review") {
+    if (kind === "Fulfilment") {
+      return this.gate(() => ok(z.array(zApprovalItem), DevApiClient.FULFILMENTS), []);
+    }
+    const extra = kind === "All" ? DevApiClient.FULFILMENTS : [];
     return this.gate(
       () =>
         ok(z.array(zApprovalItem), [
+          ...extra,
           {
             id: "AUTH-9001",
             patient: { id: "MRS-M-10231", token: "A.H · •••4821" },
@@ -1025,6 +1986,10 @@ export class DevApiClient implements ApiClient {
             status: { kind: "info", label: loc("Awaiting review", "بانتظار المراجعة") },
             submittedAt: NOW,
             estimatedCost: "EGP 6,500",
+            source: "OrderLine" as const,
+            itemReference: null,
+            extensionReason: null,
+            kind: "Review" as const,
           },
           {
             id: "AUTH-9002",
@@ -1036,6 +2001,27 @@ export class DevApiClient implements ApiClient {
             status: { kind: "warn", label: loc("SLA breached", "تجاوز المهلة") },
             submittedAt: "2026-07-21T09:00:00Z",
             estimatedCost: "EGP 18,000",
+            source: "OrderLine" as const,
+            itemReference: null,
+            extensionReason: null,
+            kind: "Review" as const,
+          },
+          // A validity-extension request. It carries no service code and no cost — which is exactly why the
+          // queue has to say what KIND it is, or a reviewer opens it looking for both.
+          {
+            id: "AUTH-9003",
+            patient: { id: "MRS-M-10231", token: "A.H · •••4821" },
+            service: { system: "CPT", code: "—", label: loc("Validity extension", "تمديد الصلاحية") },
+            requestedBy: loc("Nile Pharmacy", "صيدلية النيل"),
+            priority: "routine",
+            sla: { dueAt: "2026-07-22T16:00:00Z", breached: false, minutesRemaining: 420 },
+            status: { kind: "info", label: loc("Awaiting review", "بانتظار المراجعة") },
+            submittedAt: NOW,
+            estimatedCost: "—",
+            source: "ValidityExtension" as const,
+            itemReference: "RX-2026-000312",
+            extensionReason: "Patient is mid-course and could not travel before it lapsed.",
+            kind: "Review" as const,
           },
         ]),
       [],
@@ -2094,14 +3080,178 @@ export class DevApiClient implements ApiClient {
   }
 
   adminMasterData() {
-    return this.gate(
-      () => ok(z.array(zMasterDataVersion), [
-        { id: "MDV-1", system: "ICD10", code: "E11.9", versionNo: 2, retired: false, effectiveFrom: "2026-01-01T00:00:00Z", rationale: "Annual ICD refresh" },
-        { id: "MDV-2", system: "ATC", code: "A10BA02", versionNo: 1, retired: false, effectiveFrom: "2026-01-01T00:00:00Z", rationale: "Initial load" },
-      ]),
-      [],
+    return this.gate(() => ok(z.array(zMasterDataVersion), this.mdVersions), []);
+  }
+  /**
+   * Append a version, in memory.
+   *
+   * <p>Models the real semantics rather than a success stub: the code's version number goes UP and the prior
+   * entry stays in `mdVersions`. A dev client that returned `{ ok: true }` would let an editor that quietly
+   * overwrote history look correct here and be wrong against the server — which is the trap the `lineId`
+   * pricing bug fell into, where the fixture agreed with the client instead of with the wire.</p>
+   */
+  private mdVersions: { id: string; system: string; code: string; versionNo: number; retired: boolean; effectiveFrom: string; rationale?: string }[] = [
+    { id: "MDV-1", system: "Icd10", code: "E11.9", versionNo: 2, retired: false, effectiveFrom: "2026-01-01T00:00:00Z", rationale: "Annual ICD refresh" },
+    { id: "MDV-2", system: "Atc", code: "A10BA02", versionNo: 1, retired: false, effectiveFrom: "2026-01-01T00:00:00Z", rationale: "Initial load" },
+  ];
+
+  adminMasterDataUpsert(edit: MasterDataEdit) {
+    return this.gate(() => {
+      const prior = this.mdVersions.find((v) => v.system === edit.system && v.code === edit.code);
+      const versionNo = (prior?.versionNo ?? 0) + 1;
+      const id = `MDV-${this.mdVersions.length + 1}`;
+      this.mdVersions = [
+        ...this.mdVersions.filter((v) => !(v.system === edit.system && v.code === edit.code)),
+        { id, system: edit.system, code: edit.code, versionNo, retired: edit.retired,
+          effectiveFrom: new Date().toISOString(), rationale: edit.rationale },
+      ];
+      return { id, code: edit.code, versionNo };
+    });
+  }
+
+  adminMasterDataAsOf(system: string, code: string, at: string) {
+    // `at` is unread here on purpose: the fixture holds one version per code, so there is nothing to resolve
+    // against a date. The SERVER resolves properly — pretending to here would invent a history the dev client
+    // does not have and hide the difference.
+    void at;
+    return this.gate(() =>
+      ok(zMasterDataAsOf, {
+        id: this.mdVersions.find((v) => v.system === system && v.code === code)?.id ?? "MDV-0",
+        versionNo: this.mdVersions.find((v) => v.system === system && v.code === code)?.versionNo ?? 1,
+        // A plausible attribute set so the editor's diff has two sides to compare.
+        attributes: { title: "Type 2 diabetes mellitus without complications", chronic: true, billable: true },
+        effectiveFrom: "2026-01-01T00:00:00Z",
+        effectiveTo: null,
+      }),
     );
   }
+
+  /**
+   * The document policy, in memory. Mixed configured/unconfigured on purpose: "365 because we chose 365" and
+   * "365 because nobody has looked" are different states, and a fixture where everything is configured would
+   * let a screen that never renders the distinction look finished.
+   */
+  private docValidity = [
+    { kind: "RefugeeId", key: "document-validity.refugee-id.days", days: 730, warnDays: [90, 60, 30], configured: true, warnConfigured: false, identity: true, updatedAt: "2026-07-01T00:00:00Z" },
+    { kind: "NationalId", key: "document-validity.national-id.days", days: 365, warnDays: [90, 60, 30], configured: false, warnConfigured: false, identity: true, updatedAt: null },
+    { kind: "Passport", key: "document-validity.passport.days", days: 3650, warnDays: [180, 90], configured: true, warnConfigured: true, identity: true, updatedAt: "2026-06-12T00:00:00Z" },
+    { kind: "UnhcrNo", key: "document-validity.unhcr-no.days", days: 365, warnDays: [90, 60, 30], configured: false, warnConfigured: false, identity: true, updatedAt: null },
+    { kind: "PractitionerLicence", key: "document-validity.practitioner-licence.days", days: 365, warnDays: [90, 60, 30], configured: false, warnConfigured: false, identity: false, updatedAt: null },
+    { kind: "FacilityAccreditation", key: "document-validity.facility-accreditation.days", days: 1095, warnDays: [90, 60, 30], configured: true, warnConfigured: false, identity: false, updatedAt: "2026-05-02T00:00:00Z" },
+    { kind: "ProviderContract", key: "document-validity.provider-contract.days", days: 365, warnDays: [90, 60, 30], configured: false, warnConfigured: false, identity: false, updatedAt: null },
+  ];
+
+  /**
+   * The engine's rules, in memory.
+   *
+   * <p>The fixture carries a SUPERSEDED version on purpose (`effectiveTo` set). A screen that only ever saw
+   * live rules would have no way to show "why did this go there last week", which is most of what the
+   * effective dating is for.</p>
+   */
+  private rules: ApprovalRule[] = [
+    { id: "R-1", family: "Routing", priority: 10,
+      predicate: JSON.stringify({ priority: "Emergency" }), action: JSON.stringify({ queue: "escalation" }),
+      effectiveFrom: "2026-07-01T00:00:00Z", effectiveTo: null, versionNo: 2, enabled: true,
+      authoredBy: "medical_director", rationale: "Emergencies go to the on-call desk, not the general queue." },
+    { id: "R-0", family: "Routing", priority: 10,
+      predicate: JSON.stringify({ priority: "Emergency" }), action: JSON.stringify({ queue: "clinical" }),
+      effectiveFrom: "2026-05-01T00:00:00Z", effectiveTo: "2026-07-01T00:00:00Z", versionNo: 1, enabled: true,
+      authoredBy: "medical_director", rationale: "Initial routing." },
+    { id: "R-2", family: "Routing", priority: 50,
+      predicate: JSON.stringify({ source: "Prescription" }), action: JSON.stringify({ queue: "pharmacy" }),
+      effectiveFrom: "2026-07-01T00:00:00Z", effectiveTo: null, versionNo: 1, enabled: true,
+      authoredBy: "medical_director", rationale: "Pharmacy questions are answered by the pharmacy reviewers." },
+    { id: "R-3", family: "Sla", priority: 10,
+      predicate: JSON.stringify({ priority: "Emergency" }), action: JSON.stringify({ hours: 1 }),
+      effectiveFrom: "2026-07-01T00:00:00Z", effectiveTo: null, versionNo: 1, enabled: true,
+      authoredBy: "medical_director", rationale: "An emergency that waits four hours is not being treated as one." },
+    // A pre-auth trigger. Narrow on purpose — a catch-all here would gate every act of care on the platform,
+    // and the server refuses one.
+    { id: "R-4", family: "Preauth", priority: 10,
+      predicate: JSON.stringify({ benefitCategory: "IMAGING", amountAtLeast: 5000 }),
+      action: JSON.stringify({ reason: "Imaging over EGP 5,000 is reviewed before it is performed." }),
+      effectiveFrom: "2026-07-01T00:00:00Z", effectiveTo: null, versionNo: 1, enabled: true,
+      authoredBy: "medical_director", rationale: "High-cost imaging was the largest source of retrospective denials." },
+  ];
+
+  /** OFF by default, like a tenant that has never touched it — which is the state that matters most. */
+  private autoSwitch = {
+    enabled: false,
+    reason: "Auto-decision has never been turned on for this tenant.",
+    updatedBy: null as string | null,
+    updatedAt: null as string | null,
+    hardMaximumEgp: 5000,
+  };
+
+  autoDecisionSwitch() {
+    return this.gate(() => ok(zAutoDecisionSwitch, this.autoSwitch));
+  }
+
+  setAutoDecision(req: SetAutoDecision) {
+    return this.gate(() => {
+      this.autoSwitch = {
+        ...this.autoSwitch,
+        enabled: req.enabled,
+        reason: req.reason,
+        updatedBy: "medical_director",
+        updatedAt: new Date().toISOString(),
+      };
+      return ok(zAutoDecisionSwitch, this.autoSwitch);
+    });
+  }
+
+  approvalRules(family?: "Routing" | "Sla" | "Preauth" | "AutoApprove") {
+    return this.gate(() => ok(zApprovalRuleList, {
+      rules: family ? this.rules.filter((r) => r.family === family) : this.rules,
+      queues: ["clinical", "default", "escalation", "high-cost", "imaging", "pharmacy"],
+      defaultQueue: "default",
+    }));
+  }
+
+  saveApprovalRule(req: SaveApprovalRule) {
+    return this.gate(() => {
+      const now = new Date().toISOString();
+      const prior = req.supersedesRuleId
+        ? this.rules.find((r) => r.id === req.supersedesRuleId && r.effectiveTo === null)
+        : undefined;
+      // Supersede, never overwrite — the same semantics the server has, so a screen that quietly edited
+      // history would look correct here and be wrong against the wire.
+      if (prior) prior.effectiveTo = now as never;
+      const id = `R-${this.rules.length + 1}`;
+      this.rules = [...this.rules, {
+        id, family: req.family, priority: req.priority,
+        predicate: JSON.stringify(req.predicate), action: JSON.stringify(req.action),
+        effectiveFrom: now, effectiveTo: null as never, versionNo: (prior?.versionNo ?? 0) + 1,
+        enabled: req.enabled, authoredBy: "medical_director", rationale: req.rationale,
+      }];
+      return { id, versionNo: (prior?.versionNo ?? 0) + 1 };
+    });
+  }
+
+  adminDocumentValidity() {
+    return this.gate(() => ok(zDocumentValidityView, {
+      tenant: "11111111-1111-1111-1111-111111111111",
+      defaultDays: 365, minDays: 1, maxDays: 3650, defaultWarnDays: [90, 60, 30],
+      items: this.docValidity,
+    }));
+  }
+
+  adminSetDocumentValidity(req: SetDocumentValidity) {
+    return this.gate(() => {
+      this.docValidity = this.docValidity.map((d) =>
+        d.kind !== req.kind ? d : {
+          ...d,
+          days: req.days ?? d.days,
+          warnDays: req.warnDays ?? d.warnDays,
+          // Setting it makes it CONFIGURED, which is the state the screen distinguishes.
+          configured: req.days !== undefined ? true : d.configured,
+          warnConfigured: req.warnDays !== undefined ? true : d.warnConfigured,
+          updatedAt: new Date().toISOString(),
+        });
+      return undefined as void;
+    });
+  }
+
   adminSystemConfig() {
     return this.gate(
       () => ok(z.array(zSystemConfigEntry), [
@@ -2264,3 +3414,278 @@ const DEV_MEMBERSHIPS = [
     activatedAt: "2026-02-01T08:00:00Z", endedAt: null,
   },
 ];
+
+/**
+ * A fixture validation engine that mirrors the SERVER's five-state semantics (phase 26).
+ *
+ * It exists so the workspace can be exercised — and axe-checked — against every state the real engine can
+ * produce, including the two that are not answers. A fixture that returned "Ok" for everything would make
+ * the whole point of the phase untestable in the UI.
+ *
+ * The rules it reproduces:
+ *   - no diagnosis recorded            -> NotChecked, never Ok
+ *   - drug carries no indication data  -> NotChecked, never a mismatch
+ *   - indication matched at CATEGORY level ("E11.9" satisfies "E11")
+ *   - off-label                        -> Warning, never Blocked
+ *   - two lines sharing an ingredient  -> Warning on both (the duplication the ingredient line guards)
+ *   - allergy source down for one drug -> Unavailable
+ *   - benefit                          -> NotChecked in phase 26 (the seam), Blocked for the demo exclusion
+ */
+function devValidation(lines: PrescriptionDraftLine[], diagnoses: string[]) {
+  const findings: Finding[] = [];
+  const provenance = {
+    sourceName: "Drug indication list (ATC + drug class)",
+    sourceVersion: "egyptian-drug-list_5",
+    checkedAt: new Date(0).toISOString(),
+    caveat: "Indications are mapped at ATC level 4 by clinical review, not from a published dataset.",
+  };
+  const categories = diagnoses.map((d) => d.trim().toUpperCase().slice(0, 3));
+  const indicated: Record<string, string[]> = {
+    "11111111-0000-4000-8000-000000000001": ["J01", "J15", "J18", "N39"],
+    "11111111-0000-4000-8000-000000000002": ["J01", "J02", "J03"],
+    "11111111-0000-4000-8000-000000000003": ["E11"],
+  };
+
+  /**
+   * Which demo drug's label names which other demo drug, standing in for the openFDA text scan.
+   *
+   * Deliberately NOT symmetric, because real labels are not: manufacturers document interactions from their
+   * own product's point of view, and often only the older drug's label mentions the newer one. The live
+   * check reads both labels for exactly this reason, and a fixture that paired them symmetrically would
+   * hide the case the two-direction scan exists to catch.
+   */
+  const LABEL_INTERACTIONS: Record<string, string[]> = {
+    "11111111-0000-4000-8000-000000000001": ["11111111-0000-4000-8000-000000000003"],
+  };
+
+  const add = (
+    lineId: string, drugId: string | undefined, kind: Finding["kind"], state: Finding["state"],
+    en: string, ar: string, extra: Partial<Finding> = {},
+  ) => {
+    // NULL, not undefined, for every absent optional — because that is what the real service sends.
+    // System.Text.Json WRITES nullable properties as `null` rather than omitting them, and a fixture that
+    // used `undefined` instead was the reason the whole suite passed green while the live screen failed
+    // contract parsing on the first response. A fixture whose SHAPE differs from the server is a fixture
+    // that tests the wrong thing.
+    findings.push({
+      lineId, drugId, kind, state, messageEn: en, messageAr: ar,
+      severity: null, relatedLineId: null,
+      requiresAcknowledgement: state === "Warning", isBlocking: state === "Blocked",
+      ...provenance, ...extra,
+    });
+  };
+
+  for (const line of lines) {
+    const drug = line.drug;
+    if (!drug) continue;
+
+    // --- indication ---
+    if (diagnoses.length === 0) {
+      add(line.lineId, drug.drugId, "Indication", "NotChecked",
+        "Not checked — no diagnosis recorded on this encounter.",
+        "لم يتم التحقق — لا يوجد تشخيص مسجل في هذه الزيارة.");
+    } else if (!drug.hasIndicationData) {
+      add(line.lineId, drug.drugId, "Indication", "NotChecked",
+        "Not checked — no indication data is recorded for this medicine.",
+        "لم يتم التحقق — لا توجد بيانات دواعي استعمال مسجلة لهذا الدواء.");
+    } else if ((indicated[drug.drugId] ?? []).some((c) => categories.includes(c))) {
+      add(line.lineId, drug.drugId, "Indication", "Ok",
+        "Listed indication.", "من دواعي الاستعمال المسجلة.");
+    } else {
+      add(line.lineId, drug.drugId, "Indication", "Warning",
+        "Not a listed indication for the recorded diagnosis. Off-label use may be appropriate; give a reason to proceed.",
+        "ليس من دواعي الاستعمال المسجلة للتشخيص المدوَّن. يرجى ذكر السبب للمتابعة.");
+    }
+
+    // --- interaction: two lines sharing an active ingredient ---
+    const twin = lines.find(
+      (o) =>
+        o.lineId !== line.lineId && o.drug &&
+        (o.drug.activeIngredient ?? "?").split(" + ")[0] === (drug.activeIngredient ?? "!").split(" + ")[0],
+    );
+    if (twin) {
+      add(line.lineId, drug.drugId, "Interaction", "Warning",
+        `Duplicate active ingredient with ${twin.drug!.tradeName.en}.`,
+        `تكرار للمادة الفعالة مع ${twin.drug!.tradeName.ar}.`,
+        { severity: "Major", relatedLineId: twin.lineId, sourceName: "Mersal interaction list" });
+    } else {
+      add(line.lineId, drug.drugId, "Interaction", "Ok",
+        "No interaction found (checked against 512 known pairs).",
+        "لم يتم العثور على تداخلات (تم التحقق مقابل 512 زوجًا معروفًا).",
+        { sourceName: "Mersal interaction list", caveat: "Checked against Mersal's own interaction list; coverage is partial." });
+    }
+
+    // --- allergy: this product's source is deliberately down, to exercise Unavailable ---
+    if (drug.drugId.endsWith("0004")) {
+      add(line.lineId, drug.drugId, "Allergy", "Unavailable",
+        "Allergy check unavailable — the allergy record could not be reached.",
+        "تعذّر التحقق من الحساسية — تعذر الوصول إلى سجل الحساسية.",
+        { sourceName: null, sourceVersion: null, checkedAt: null, caveat: null });
+    } else {
+      add(line.lineId, drug.drugId, "Allergy", "Ok",
+        "No conflict with the recorded allergies.", "لا يوجد تعارض مع الحساسية المسجلة.",
+        { sourceName: "EMR allergy record" });
+    }
+
+    // --- interaction, second source: manufacturer label text, live from openFDA ---
+    //
+    // Additive, not a replacement. It answers with different authority and different provenance, and it may
+    // WARN but never reassure — a label's interactions section is prose, not a complete list, so a silence
+    // from it is not a negative result.
+    const otherDrugs = lines.filter((o) => o.lineId !== line.lineId && o.drug);
+    if (otherDrugs.length > 0) {
+      const named = otherDrugs.find((o) => LABEL_INTERACTIONS[drug.drugId]?.includes(o.drug!.drugId));
+      if (named) {
+        add(line.lineId, drug.drugId, "Interaction", "Warning",
+          `The ${(drug.activeIngredient ?? drug.tradeName.en).toUpperCase()} label names `
+          + `${named.drug!.activeIngredient ?? named.drug!.tradeName.en} in its interactions section, and `
+          + `${named.drug!.tradeName.en} is on this prescription. Read the manufacturer's wording below and `
+          + "give a reason to proceed.",
+          `تذكر نشرة ${drug.activeIngredient ?? drug.tradeName.ar} المادة `
+          + `${named.drug!.activeIngredient ?? named.drug!.tradeName.ar} ضمن قسم التداخلات الدوائية، `
+          + `و${named.drug!.tradeName.ar} موجود في هذه الوصفة. يرجى قراءة نص الشركة المصنِّعة أدناه `
+          + "(بالإنجليزية) وذكر السبب للمتابعة.",
+          {
+            severity: null, relatedLineId: named.lineId,
+            sourceName: "openFDA drug label (U.S. FDA)", sourceVersion: "live",
+            referenceText: "Concomitant use of drugs that increase bleeding risk, antibiotics, antifungals, "
+              + "and inhibitors and inducers of CYP2C9, 1A2, or 3A4 may increase the INR and the risk of "
+              + "bleeding.",
+            caveat: "U.S. FDA product labelling, matched by active ingredient. Labels are narrative, not a "
+              + "complete interaction list, and describe U.S. products.",
+          });
+      } else {
+        add(line.lineId, drug.drugId, "Interaction", "NotChecked",
+          "No interaction named in the manufacturer labels for the medicines on this prescription. This is "
+          + "not an all-clear: a label's interactions section is written as prose, not as a complete list, "
+          + "so an interaction can exist without being named.",
+          "لم يُذكر أي تداخل في نشرات الشركات المصنِّعة للأدوية في هذه الوصفة. وهذا لا يعني الخلو من "
+          + "التداخلات: فقسم التداخلات في النشرة مكتوب كنص وصفي وليس قائمة كاملة، وقد يوجد تداخل دون ذكره.",
+          { sourceName: "openFDA drug label (U.S. FDA)", sourceVersion: "live" });
+      }
+    }
+
+    // --- dose: no structured rules exist, so the label's own dosing is shown for reference only ---
+    add(line.lineId, drug.drugId, "DoseDuration", "NotChecked",
+      "Dose not checked — no dosing rule is configured for this medicine. The manufacturer's labelled dosing "
+      + `for ${(drug.activeIngredient ?? drug.tradeName.en).toUpperCase()} is shown below for reference — it `
+      + "has NOT been compared with what you prescribed.",
+      "لم يتم التحقق من الجرعة — لا توجد قاعدة جرعات مُهيأة لهذا الدواء. فيما يلي جرعات النشرة المعتمدة "
+      + "للاطلاع فقط (بالإنجليزية) — ولم تتم مقارنتها بما وصفته.",
+      {
+        sourceName: "openFDA drug label (U.S. FDA)", sourceVersion: "live",
+        referenceText: "Individualize the dosing regimen for each patient and adjust based on response. "
+          + "The usual adult dose is one tablet every 8 hours; do not exceed the maximum daily dose.",
+      });
+
+    // --- benefit: the seam. Blocked only for the demo exclusion, to exercise the state. ---
+    add(line.lineId, drug.drugId, "Benefit", "NotChecked",
+      "Benefit rules are evaluated on submission, not while prescribing.",
+      "يتم تقييم قواعد التغطية عند الإرسال وليس أثناء وصف الدواء.",
+      { sourceName: "Mersal benefit rules", sourceVersion: "not-yet-configured" });
+  }
+
+  const rank: Finding["state"][] = ["Blocked", "Unavailable", "Warning", "NotChecked", "Ok"];
+  const worst = (subset: Finding[]) =>
+    rank.find((r) => subset.some((f) => f.state === r)) ?? "NotChecked";
+
+  const lineStates: Record<string, Finding["state"]> = {};
+  for (const line of lines) {
+    lineStates[line.lineId] = worst(findings.filter((f) => f.lineId === line.lineId));
+  }
+
+  return {
+    validationId: "v-dev-1",
+    ranAt: new Date(0).toISOString(),
+    engineVersion: "26.4",
+    overallState: worst(findings),
+    findings,
+    lineStates,
+  };
+}
+
+/**
+ * Dev-fixture checks for an investigation order — the same five states the server produces.
+ *
+ * <p>It mirrors the real engine's SHAPE rather than guessing at its verdicts: an unknown code blocks, a
+ * wrong-section code blocks, a repeated code within the same draft warns, and the indication check reports
+ * NotChecked because no procedure-indication reference exists. A fixture that returned a clean pass for
+ * everything would let the workspace's own "unanswered" rendering go untested — which is the part most worth
+ * testing, since a check that did not run must never look like one that passed.</p>
+ */
+function devOrderValidation(
+  orderType: InvestigationOrderType,
+  lines: InvestigationDraftLine[],
+  diagnoses: string[],
+) {
+  const findings: OrderFinding[] = [];
+  const seen = new Map<string, number>();
+  for (const l of lines) {
+    const code = l.test?.code ?? "";
+    if (!code) {
+      findings.push({
+        lineId: l.lineId, kind: "Code", state: "Blocked",
+        message: loc("No test has been chosen for this line.", "لم يتم اختيار فحص لهذا السطر."),
+        requiresAcknowledgement: false, isBlocking: true, sourceName: null, caveat: null,
+      });
+      continue;
+    }
+    findings.push({
+      lineId: l.lineId, kind: "Code", state: "Ok",
+      message: loc("In the procedure catalogue.", "موجود في كتالوج الإجراءات."),
+      requiresAcknowledgement: false, isBlocking: false, sourceName: "masterdata:cpt", caveat: null,
+    });
+
+    const radiology = /^7\d{4}$/.test(code);
+    const laboratory = /^8\d{4}$/.test(code);
+    if ((orderType === "Lab" && radiology) || (orderType === "Imaging" && laboratory)) {
+      findings.push({
+        lineId: l.lineId, kind: "Section", state: "Blocked",
+        message: loc(
+          `'${code}' belongs to another section. It would reach a queue that cannot perform it.`,
+          `الكود '${code}' من قسم آخر، وسيصل إلى قائمة عمل لا يمكنها تنفيذه.`),
+        requiresAcknowledgement: false, isBlocking: true, sourceName: null, caveat: null,
+      });
+    }
+
+    const count = (seen.get(code) ?? 0) + 1;
+    seen.set(code, count);
+    if (count > 1) {
+      findings.push({
+        lineId: l.lineId, kind: "Duplicate", state: "Warning",
+        message: loc(
+          "This test is already on this order.", "هذا الفحص مطلوب بالفعل ضمن هذا الطلب."),
+        requiresAcknowledgement: true, isBlocking: false, sourceName: null, caveat: null,
+      });
+    }
+
+    findings.push({
+      lineId: l.lineId, kind: "Indication", state: "NotChecked",
+      message: diagnoses.length === 0
+        ? loc("No diagnosis is recorded on this encounter, so nothing can be checked against.",
+              "لا يوجد تشخيص مسجل في هذه الزيارة، لذلك لا يوجد ما يمكن التحقق مقابله.")
+        : loc("No procedure-indication reference is loaded, so this test has not been checked against the recorded diagnoses.",
+              "لا يوجد مرجع لدواعي إجراء الفحوصات، لذلك لم يتم التحقق من هذا الفحص مقابل التشخيصات المسجلة."),
+      requiresAcknowledgement: false, isBlocking: false, sourceName: null, caveat: null,
+    });
+  }
+
+  const worst = (states: string[]) =>
+    states.includes("Blocked") ? "Blocked"
+      : states.includes("Warning") ? "Warning"
+      : states.includes("Unavailable") ? "Unavailable"
+      : states.includes("NotChecked") ? "NotChecked"
+      : "Ok";
+
+  const lineStates: Record<string, string> = {};
+  for (const l of lines) {
+    lineStates[l.lineId] = worst(findings.filter((f) => f.lineId === l.lineId).map((f) => f.state));
+  }
+
+  return {
+    validationId: "ov-1",
+    overallState: worst(findings.map((f) => f.state)),
+    findings,
+    lineStates,
+  };
+}

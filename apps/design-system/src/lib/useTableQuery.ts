@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Column, SortDir } from "../components/DataTable";
 import type { FilterGroup } from "../components/TableToolbar";
 import { sortRows, type SortValue } from "./sortRows";
@@ -19,6 +19,17 @@ export interface TableFilterSpec<Row> {
   initial?: string | null;
   /** Suppress the per-option counts. Default is to show them. */
   hideCounts?: boolean;
+  /**
+   * Extra controls belonging to THIS group, rendered immediately after its chips.
+   *
+   * A FUNCTION of the current selection, not a node, because the case that needs it is a custom date range:
+   * two date fields that exist only while the "Custom" chip is pressed. `TableToolbar` has taken a plain
+   * `extra` node since the appointments board, but that board owns its own filter state and can therefore
+   * decide for itself when to render them. A group driven by `useTableQuery` cannot — the selection lives in
+   * here — so the spec would have had to be rebuilt from a value it has no way to read, or the fields would
+   * have to be permanently on screen next to a chip that claims to reveal them.
+   */
+  extra?: (value: string | null) => ReactNode;
 }
 
 export interface UseTableQueryOptions<Row> {
@@ -239,6 +250,7 @@ export function useTableQuery<Row>({
         label: o.label,
         count: f.hideCounts ? undefined : base.filter((r) => f.match(r, o.value)).length,
       })),
+      extra: f.extra?.(filterValues[f.key] ?? null),
     };
   });
 

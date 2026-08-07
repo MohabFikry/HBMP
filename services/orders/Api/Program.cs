@@ -1,3 +1,4 @@
+using Mersal.BeneficiaryLookup;
 using System.Text.Json.Serialization;
 using Mersal.Audit.Client;
 using Mersal.Auth;
@@ -6,6 +7,7 @@ using Mersal.Data;
 using Mersal.Events;
 using Mersal.Orders.Api;
 using Mersal.Orders.Infrastructure;
+using Mersal.Validity;
 using Mersal.Time;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Metrics;
@@ -34,6 +36,19 @@ builder.Services.AddHttpClient<ICodeValidator, HttpCodeValidator>(c =>
 // 14.6 — examination-type sensitivity resolved + pinned at order creation (fail-closed).
 builder.Services.AddHttpClient<IExaminationTypeResolver, HttpExaminationTypeResolver>(c =>
     c.BaseAddress = new Uri(builder.Configuration["MasterData:BaseUrl"] ?? "http://masterdata-service:8080"));
+// ADR-0034 — the bench's cost quote. The catalogue supplies what an examination costs; eligibility supplies
+// the member/payer split through libs/benefit-pricing, the SAME path claims adjudicates with. Named clients
+// rather than typed ones because OrderPricing composes two calls and owns neither contract.
+builder.Services.AddHttpClient("masterdata", c =>
+    c.BaseAddress = new Uri(builder.Configuration["MasterData:BaseUrl"] ?? "http://masterdata-service:8080"));
+// 27.8 — the bench's member search resolves identifiers through patient-service, exactly as the dispensing
+// counter does. A NAMED client because the shared resolver asks the factory for "patient" by name; without
+// this registration it would get a client with no BaseAddress and throw on a relative URL — an exception the
+// resolver deliberately does not catch, because a misconfigured host is not a fail-safe "member not found".
+builder.Services.AddHttpClient("patient", c =>
+    c.BaseAddress = new Uri(builder.Configuration["Patient:BaseUrl"] ?? "http://patient-service:8080"));
+builder.Services.AddHttpClient("eligibility", c =>
+    c.BaseAddress = new Uri(builder.Configuration["Eligibility:BaseUrl"] ?? "http://eligibility-service:8080"));
 builder.Services.AddHttpClient<ITreatingRelationshipClient, HttpTreatingRelationshipClient>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Emr:BaseUrl"] ?? "http://emr-service:8080"));
 // Result reports are stored in document-service (scanned, CMK blob); we keep only the returned blob ref.
@@ -44,6 +59,10 @@ builder.Services.AddHttpClient<IReportDocumentClient, HttpReportDocumentClient>(
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<BranchScopeState>();
 builder.Services.AddHttpClient<IBranchDirectory, HttpBranchDirectory>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Admin:BaseUrl"] ?? "http://admin-service:8080"));
+// How long a lab / imaging / procedure order stays actionable, set by clinical governance in admin-service.
+// Read with the ORDERING CLINICIAN's token: the endpoint is authenticated-only and discloses four integers.
+builder.Services.AddHttpClient<IValidityPolicySource, HttpValidityPolicySource>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Admin:BaseUrl"] ?? "http://admin-service:8080"));
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("orders-service"))
@@ -57,6 +76,8 @@ builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Ad
 // it, so grants stayed Active for ever: the read path filtered them out, but the grant list shown to a
 // patient or the DPO said people still held access they had lost, and the expiry was never audited.
 builder.Services.AddHostedService<ReportAccessExpirySweeper>();
+// Lab / imaging / procedure orders lapse the same way prescriptions do — see OrderExpirySweeper.
+builder.Services.AddHostedService<OrderExpirySweeper>();
 
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
@@ -66,6 +87,8 @@ builder.Services.AddSwaggerGen();
 // "through startup and able to serve". A dependency check here would pull the pod out of rotation for a
 // condition the service already surfaces per-request, turning a partial degradation into a total outage.
 builder.Services.AddHealthChecks();
+
+builder.Services.AddHbmpBeneficiaryLookup();  // 27.8 — the bench searches the way the counter does
 
 var app = builder.Build();
 app.UseHbmpTransportSecurity(); // HSTS + HTTPS redirect outside Development (16.5, H8)
@@ -116,8 +139,11 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "or
 app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 app.MapOrders();
+app.MapValidateOrder();   // step 1 — advisory checks while composing (the ordering workspace)
 app.MapQueue();      // phase 5.1 provider queue + search
 app.MapConsume();    // phase 5.2 atomic idempotent consume
+app.MapOrderPricing(); // ADR-0034 — what the order costs and how it splits (never a zero for an unknown)
+app.MapExtendValidity();   // approvals calls this when a validity-extension request is approved
 app.MapResults();    // phase 5.3 result upload + routing
 app.MapReportAccess(); // phase 14.7 sensitive-result release requests + grants
 app.MapProfileInvestigations(); // 20.2 — the profile's investigations section, sensitivity-gated PER LINE here

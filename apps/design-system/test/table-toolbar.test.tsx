@@ -178,6 +178,27 @@ describe("TableToolbar", () => {
     expect(screen.getByLabelText(/search/i)).toHaveValue("hana");
   });
 
+  it("keeps the group's visible label in normal flow, not in the legend", () => {
+    // A rendered <legend> is laid out against the top of its fieldset's BOX rather than in flow. The moment a
+    // group carried an `extra` — the appointments board's date range, a label-over-control pair some 30px
+    // taller than a chip — the fieldset grew and "WHEN" rose with it, while SEARCH, FROM, TO and STATUS stayed
+    // on the label line below. Nothing was misaligned by accident; the legend was measuring a different box.
+    //
+    // jsdom performs no layout, so what is pinned here is the STRUCTURE that fixed it: the legend carries the
+    // accessible name only, and a span carries the visible one.
+    const { container } = renderDS(<Harness />);
+
+    const legend = container.querySelector("fieldset > legend");
+    expect(legend).toHaveClass("sr-only");
+
+    const visible = container.querySelector(".mrs-toolbar-grouplabel");
+    expect(visible).toHaveTextContent(/status/i);
+    // aria-hidden, so the group is announced once rather than twice.
+    expect(visible).toHaveAttribute("aria-hidden", "true");
+    // ...and the group is still named, which is the thing the legend was there for.
+    expect(screen.getByRole("group", { name: /status/i })).toBeInTheDocument();
+  });
+
   it("has no serious/critical a11y violations", async () => {
     const { container } = renderDS(<Harness />);
     expect(await axe(container, { rules: { "color-contrast": { enabled: false } } })).toHaveNoViolations();

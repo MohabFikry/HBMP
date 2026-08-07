@@ -172,7 +172,10 @@ export function LimitMeters({ caption, rows }: { caption: string; rows: MeterRow
           );
         })}
       </div>
-      <table className="sr-only">
+      {/* `mini-table sr-only`, matching the chart alternative on the executive dashboard: hidden today, but
+          a table that is only ever one prop away from being shown should not be the one table with no
+          treatment at all. */}
+      <table className="mini-table sr-only">
         <caption>{caption}</caption>
         <thead>
           <tr>

@@ -4,6 +4,60 @@ namespace Mersal.Admin.Domain;
 public enum CodeSystem { Icd10, Cpt, Loinc, Atc, Drug, DrugInteraction, Allergen, Formulary }
 
 /// <summary>
+/// Which code systems clinical governance may edit, and which stay with the platform administrators.
+/// </summary>
+/// <remarks>
+/// <para>
+/// ADR-0035 §4 opened this as a question and answered it this way: the Medical Director holds master-data
+/// editing on the principle that <b>they absorb the consequence of getting it wrong</b> — a mis-mapped ICD
+/// code misroutes a diagnosis into their own approval queue, a wrong ATC entry breaks the interaction check
+/// their reviewers rely on. That argument reaches exactly as far as the clinical vocabularies and no further.
+/// A director does not live with the consequence of a wrong formulary tier or a wrong allergen grouping in
+/// the same way, and "they can already edit some of it" is not a reason to hand over the rest.
+/// </para>
+/// <para>
+/// <b>This narrows nobody's existing access.</b> <c>super_admin</c> keeps every system. The list exists so a
+/// role that was granted the action for clinical reasons cannot quietly acquire administrative reach with it.
+/// </para>
+/// </remarks>
+public static class MasterDataGovernance
+{
+    /// <summary>The clinical vocabularies: a diagnosis, a procedure, a lab analyte, a drug class.</summary>
+    public static readonly IReadOnlySet<CodeSystem> ClinicalSystems =
+        new HashSet<CodeSystem> { CodeSystem.Icd10, CodeSystem.Cpt, CodeSystem.Loinc, CodeSystem.Atc };
+
+    /// <summary>Roles whose master-data authority is bounded to <see cref="ClinicalSystems"/>.</summary>
+    private static readonly IReadOnlySet<string> ClinicalOnlyRoles =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "medical_director" };
+
+    /// <summary>Roles that reach every system.</summary>
+    private static readonly IReadOnlySet<string> UnboundedRoles =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "super_admin" };
+
+    /// <summary>
+    /// May this caller edit this system?
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Takes the caller's whole role SET, not one role: a principal may hold several, and asking about one of
+    /// them would answer a different question depending on which. An unbounded role anywhere in the set wins
+    /// — holding <c>super_admin</c> as well as <c>medical_director</c> is more authority, never less.
+    /// </para>
+    /// <para>
+    /// Unknown roles are NOT rejected here. The ABAC gate has already decided whether the caller may edit
+    /// master data at all; this is the narrower second question, and repeating the first one would put the
+    /// same decision in two places, which is how the two come to disagree.
+    /// </para>
+    /// </remarks>
+    public static bool MayEdit(IReadOnlySet<string>? roles, CodeSystem system)
+    {
+        if (roles is null || roles.Count == 0) return true;
+        if (roles.Any(UnboundedRoles.Contains)) return true;
+        return !roles.Any(ClinicalOnlyRoles.Contains) || ClinicalSystems.Contains(system);
+    }
+}
+
+/// <summary>
 /// An effective-dated version of a single master-data code (FR-MDM-007). A governance edit APPENDS a new version
 /// (closing the prior version's <see cref="EffectiveTo"/>) — it never mutates history, so an order/prescription
 /// resolves to the version in force at ITS time. Attributes are held as a JSON snapshot so every code system reuses

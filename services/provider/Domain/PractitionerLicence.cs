@@ -46,19 +46,42 @@ public static class PractitionerLicence
         licenseExpiry is { } expiry ? expiry.DayNumber - asOf.DayNumber : null;
 
     /// <summary>
-    /// The warning thresholds, following the existing <c>ProviderCredentialExpiring</c> precedent: 90, 60 and
-    /// 30 days out, then the day itself. Descending so the first match is the widest window not yet passed.
+    /// The warning thresholds when nobody has configured any: 90, 60 and 30 days out.
     /// </summary>
-    public static readonly IReadOnlyList<int> WarningDays = [90, 60, 30];
+    /// <remarks>
+    /// <para>
+    /// This was the ONLY answer until ADR-0035 §6 — a compiled-in constant, which meant the one number a
+    /// Medical Director most obviously owns was the one they could not touch. It is now the fallback rather
+    /// than the rule, and it deliberately still reads 90/60/30: moving a value into configuration must change
+    /// who may set it and change nothing about what happens by default, or any later surprise becomes
+    /// impossible to attribute.
+    /// </para>
+    /// <para>
+    /// Descending so the first match is the widest window not yet passed.
+    /// </para>
+    /// </remarks>
+    public static readonly IReadOnlyList<int> WarningDays = Mersal.Validity.DocumentValidityPolicy.DefaultWarnDays;
 
     /// <summary>The threshold this licence crosses ON <paramref name="asOf"/>, or null on every other day.
     /// Exact-day matching is what makes the sweeper idempotent without a "last warned" column: running it
     /// twice in one day emits the same threshold and the consumer dedupes on the event id, while running it
     /// on the following day emits nothing until the next threshold.</summary>
-    public static int? WarningThresholdCrossedOn(DateOnly? licenseExpiry, DateOnly asOf)
+    public static int? WarningThresholdCrossedOn(DateOnly? licenseExpiry, DateOnly asOf) =>
+        WarningThresholdCrossedOn(licenseExpiry, asOf, WarningDays);
+
+    /// <summary>
+    /// The same question against a CONFIGURED set of thresholds (ADR-0035 §6).
+    /// </summary>
+    /// <remarks>
+    /// The overload exists so the sweeper can pass the tenant's own thresholds while every other caller keeps
+    /// the defaults — rather than the domain reaching out to a config source, which would put an HTTP call
+    /// inside a pure function and make it untestable without a server.
+    /// </remarks>
+    public static int? WarningThresholdCrossedOn(
+        DateOnly? licenseExpiry, DateOnly asOf, IReadOnlyList<int> thresholds)
     {
         if (DaysUntilExpiry(licenseExpiry, asOf) is not { } days) return null;
-        return WarningDays.Contains(days) ? days : null;
+        return thresholds.Contains(days) ? days : null;
     }
 
     /// <summary>Human-readable refusal for the 422s, carrying the expiry date — the one fact that tells the

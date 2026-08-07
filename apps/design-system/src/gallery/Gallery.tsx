@@ -213,6 +213,8 @@ export function Gallery() {
           <KpiCard label="Visits today" value="148" delta="+12%" direction="up" />
           <KpiCard label="Avg approval TAT" value="6.2h" delta="−0.8h" direction="down" />
           <KpiCard label="Pending approvals" value="4" />
+          {/* A tone marks the SUBJECT of the figure, so it holds at zero as well as at forty. */}
+          <KpiCard label="No-shows" value="0" tone="bad" />
         </div>
       </Section>
 

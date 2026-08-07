@@ -50,7 +50,7 @@ export function Modal({
       {trigger && <Dialog.Trigger asChild>{trigger}</Dialog.Trigger>}
       <Dialog.Portal>
         <Dialog.Overlay className="mrs-overlay">
-          <Dialog.Content className="mrs-modal" data-wide={wide || undefined}>
+          <Dialog.Content className="mrs-modal mrs-scroll" data-wide={wide || undefined}>
             {/*
               Esc and an outside click already closed this — Radix gives both — but neither is VISIBLE, so a
               reference modal (the bulk column contract, a confirmation) offered a mouse or touch user no way

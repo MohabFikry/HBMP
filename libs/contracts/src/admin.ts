@@ -71,6 +71,51 @@ export const zMasterDataVersion = z.object({
 });
 export type MasterDataVersion = z.infer<typeof zMasterDataVersion>;
 
+/**
+ * The code systems clinical governance may edit (ADR-0035 §4).
+ *
+ * <p>The Medical Director holds master-data editing because they absorb the consequence of getting it wrong —
+ * a mis-mapped ICD code misroutes a diagnosis into their own approval queue. That argument reaches the
+ * clinical vocabularies and stops there, so the editor offers these four and the server refuses the rest.
+ * `super_admin` keeps every system; this narrows nobody's existing access.</p>
+ */
+export const CLINICAL_CODE_SYSTEMS = ["Icd10", "Cpt", "Loinc", "Atc"] as const;
+export type ClinicalCodeSystem = (typeof CLINICAL_CODE_SYSTEMS)[number];
+
+/**
+ * A proposed master-data edit.
+ *
+ * <p><b>An edit APPENDS a version; it never mutates one.</b> The prior version's window is closed and a new
+ * one opens, so a prescription written last March still resolves the code as it read last March. That is why
+ * there is no "id" here — you are not editing a row, you are stating what the code should mean from now on.</p>
+ */
+export const zMasterDataEdit = z.object({
+  system: z.enum(CLINICAL_CODE_SYSTEMS),
+  code: z.string().min(1),
+  /** The code's attributes, as a flat record. Shape varies by system, so it is not typed further here. */
+  attributes: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
+  /**
+   * Why. Mandatory, and enforced by the server independently.
+   *
+   * <p>This is what an auditor reads in three years when asking why an ATC entry changed the week a claim was
+   * denied. A blank rationale makes the version history a list of changes with no account of any of them.</p>
+   */
+  rationale: z.string().min(1),
+  /** Retire the code — recorded as a new version, never a delete. */
+  retired: z.boolean().default(false),
+});
+export type MasterDataEdit = z.infer<typeof zMasterDataEdit>;
+
+/** The version in force at a given instant — what a historical record resolves the code to. */
+export const zMasterDataAsOf = z.object({
+  id: zId,
+  versionNo: z.number().int(),
+  attributes: z.record(z.string(), z.unknown()),
+  effectiveFrom: zInstant,
+  effectiveTo: zInstant.nullish(),
+});
+export type MasterDataAsOf = z.infer<typeof zMasterDataAsOf>;
+
 /** A typed system-config entry currently in force (effective-dated, per-tenant or platform "*"). */
 export const zSystemConfigEntry = z.object({
   id: zId,
@@ -134,3 +179,49 @@ export const zReportAccessRequestRow = z.object({
   createdAt: zInstant,
 });
 export type ReportAccessRequestRow = z.infer<typeof zReportAccessRequestRow>;
+
+/**
+ * One document kind's validity policy (ADR-0035 §6).
+ *
+ * <p>Two numbers because they answer different questions. `days` is a renewal cadence — how long this kind of
+ * document is expected to stay current after it is issued, used to derive a review date when no expiry was
+ * recorded. `warnDays` is when somebody is told it is about to lapse; until ADR-0035 that was the hard-coded
+ * constant `[90, 60, 30]`, which meant the number a supervisor most obviously owns was the one they could not
+ * touch.</p>
+ *
+ * <p><b>`days` does not override a real expiry.</b> Mersal does not decide when a government-issued card
+ * lapses. Anything derived from the cadence is marked as derived, and a document with no expiry at all is
+ * UNKNOWN — never rendered as valid.</p>
+ */
+export const zDocumentValidityItem = z.object({
+  kind: z.string(),
+  key: z.string(),
+  days: z.number().int(),
+  warnDays: z.array(z.number().int()),
+  /** False = nobody has set this and the value shown is the platform default. Only one of those is a decision. */
+  configured: z.boolean(),
+  warnConfigured: z.boolean(),
+  /** True for documents whose lapse stops a BENEFICIARY being seen, rather than a provider practising. */
+  identity: z.boolean(),
+  updatedAt: zInstant.nullish(),
+});
+export type DocumentValidityItem = z.infer<typeof zDocumentValidityItem>;
+
+export const zDocumentValidityView = z.object({
+  tenant: z.string(),
+  defaultDays: z.number().int(),
+  /** Bounds supplied by the server so the screen and the endpoint cannot disagree about them. */
+  minDays: z.number().int(),
+  maxDays: z.number().int(),
+  defaultWarnDays: z.array(z.number().int()),
+  items: z.array(zDocumentValidityItem),
+});
+export type DocumentValidityView = z.infer<typeof zDocumentValidityView>;
+
+/** Set a cadence, thresholds, or both. Omitting one leaves it untouched rather than clearing it. */
+export const zSetDocumentValidity = z.object({
+  kind: z.string(),
+  days: z.number().int().optional(),
+  warnDays: z.array(z.number().int()).optional(),
+});
+export type SetDocumentValidity = z.infer<typeof zSetDocumentValidity>;

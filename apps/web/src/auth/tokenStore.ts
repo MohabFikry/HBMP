@@ -3,10 +3,14 @@
  * other tabs) with a sessionStorage mirror so a page reload within the tab restores it without a new
  * redirect. Fixture mode never sets a token, so `getToken()` returns null and `http.ts` sends no bearer.
  */
+import { clearDrafts } from "../screens/draftStore";
+
 const KEY = "mersal-access-token";
 const REFRESH_KEY = "mersal-refresh-token";
+const SCOPE_KEY = "mersal-token-scope-request";
 let current: string | null = null;
 let refresh: string | null = null;
+let scopeRequest: string | null = null;
 
 export function getToken(): string | null {
   if (current) return current;
@@ -61,9 +65,43 @@ export function setRefreshToken(token: string | null): void {
   }
 }
 
+/**
+ * The scope string the app ASKED FOR when this token was minted.
+ *
+ * Not the scopes the token carries — those are the issuer's answer, always a subset, and comparing them to
+ * anything the SPA knows is what made the previous staleness guard fire for every user on every reload. This
+ * records the QUESTION, so a later load can tell whether the app's own requirements have changed since.
+ */
+export function getScopeRequest(): string | null {
+  if (scopeRequest) return scopeRequest;
+  try {
+    scopeRequest = sessionStorage.getItem(SCOPE_KEY);
+  } catch {
+    /* ignore */
+  }
+  return scopeRequest;
+}
+
+export function setScopeRequest(scope: string | null): void {
+  scopeRequest = scope;
+  try {
+    if (scope) sessionStorage.setItem(SCOPE_KEY, scope);
+    else sessionStorage.removeItem(SCOPE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Drop both tokens. Used on logout and whenever a renewal is refused — never leave a dead pair behind for
- * the next attempt to retry with. */
+ * the next attempt to retry with.
+ *
+ * The workspace drafts go with them. A half-composed prescription is clinical content sitting in a browser
+ * store on a machine a clinic shares, and the end of a session is exactly when it stops being the current
+ * user's — the next person at that workstation must not be able to reload into someone else's unsent order.
+ */
 export function clearTokens(): void {
   setToken(null);
   setRefreshToken(null);
+  setScopeRequest(null);
+  clearDrafts();
 }

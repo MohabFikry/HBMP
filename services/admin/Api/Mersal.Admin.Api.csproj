@@ -8,6 +8,7 @@
     <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" />
     <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
     <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
+    <ProjectReference Include="..\..\..\libs\validity\Mersal.Validity.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />

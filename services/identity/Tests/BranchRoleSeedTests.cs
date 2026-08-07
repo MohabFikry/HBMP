@@ -84,7 +84,7 @@ public class BranchRoleSeedTests
     }
 
     [SkippableFact]
-    public async Task The_branch_roles_resolve_receptions_twelve_plus_the_four()
+    public async Task The_branch_roles_resolve_receptions_thirteen_plus_the_four()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
         await using var db = IdentityTestDb.NewContext();
@@ -95,6 +95,13 @@ public class BranchRoleSeedTests
             "reception:search", "reception:read", "eligibility:check", "appointment:read", "appointment:write",
             "patient:read", "practitioner:read", "note:read", "profile:read", "callcentre:history:read",
             "notification:read", "claims:reimburse:submit",
+            // 26.1 — reception's thirteenth. masterdata-service was authenticated but unscoped until phase 26,
+            // so this reach existed already and simply had no name. It is not new authority: these roles hold
+            // profile:read, and the profile view resolves ICD codes to titles through masterdata
+            // (ProfileSectionViews.tsx). Withholding it would degrade every profile they open to raw codes —
+            // silently, because that lookup deliberately swallows its own failure rather than taking a
+            // clinical section down. Reference data carries no PHI and is tenant-free.
+            "masterdata:read",
             "branch:practitioner:write", "branch:roster:write", "branch:inventory:read", "branch:inventory:write",
         };
 

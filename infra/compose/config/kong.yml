@@ -35,6 +35,9 @@ services:
           - /api/v1/atc-classes
           - /api/v1/drugs
           - /api/v1/drug-interactions
+          # 26.3 — the drug↔ICD indication lookup the prescribing validation reads. /api/v1/drugs already
+          # covers /drugs/search (26.2) by prefix; this is a resource of its own and needs its own path.
+          - /api/v1/drug-indications
           - /api/v1/allergens
           - /api/v1/allergies
           - /api/v1/examination-types
@@ -55,6 +58,12 @@ services:
           - "~/api/v1/beneficiaries/[^/]+/medication-history/.*"
           # 20.2 — the seam the patient profile's PMH + encounters sections read.
           - "~/api/v1/beneficiaries/[^/]+/profile-context$"
+          # Standing clinical facts — blood group + allergies in one gated read, and the write that sets a
+          # blood group. Both MUST be listed: patient-service holds the /beneficiaries catch-all below, so
+          # an emr sub-resource that is not named here is not "unrouted", it is silently answered by the
+          # wrong service — a 404 from patient-service that reads exactly like a missing endpoint in emr.
+          - "~/api/v1/beneficiaries/[^/]+/clinical-record$"
+          - "~/api/v1/beneficiaries/[^/]+/blood-group$"
         regex_priority: 200
         strip_path: false
       - name: emr-routes
@@ -233,6 +242,12 @@ services:
       - name: approvals-routes
         paths: ["/api/v1/authorizations"]
         strip_path: false
+      # ADR-0035 §5 — the supervisor authors the engine's routing/SLA rules. Its own route rather than a
+      # widened prefix: /api/v1/approval-rules is a governance surface behind `auth:configure`, and folding
+      # it into the authorizations path would make one route cover two very different audiences.
+      - name: approvals-engine-rules
+        paths: ["/api/v1/approval-rules"]
+        strip_path: false
 
   # --- notification-service ---
   - name: notification-service
@@ -346,9 +361,30 @@ services:
       # 18.C2 (audit R2 W5): /identity was unroutable, so the in-app user/role/scope admin that closes C3
       # could not be reached from the SPA at all and the admin console went on editing the legacy
       # admin-service projection instead of the real identity store.
+      #
+      # 28.2 — `preserve_host: true` ON EVERY ROUTE OF THIS SERVICE. It is a ROUTE property in Kong, not a
+      # service one; setting it on the service is not ignored, it refuses to parse and the gateway will not
+      # start at all (found the hard way — every route 502'd until it was moved here).
+      #
+      # Kong rewrites Host to the upstream by default, so identity-service saw `identity-service:8080`, and
+      # OpenIddict derives its ENDPOINT urls from the request — unlike `issuer`, which is pinned. The
+      # discovery document therefore advertised
+      # `authorization_endpoint: http://identity-service:8080/connect/authorize`: a container hostname no
+      # browser can resolve, published as the address to send users to.
+      #
+      # Pre-existing and invisible. Our own client hand-builds its URLs and never reads discovery, and the one
+      # entry point that answered correctly was the direct :8090 port — the port 28.2 stops using. The
+      # document was right on the path nothing used and wrong on the path everything now takes.
+      #
+      # `issuer` is unaffected either way: it is pinned via Issuer__PublicUrl (the ID2088 fix), which is
+      # exactly why it stayed correct here while every endpoint beside it did not.
+      #
+      # Scoped to this service on purpose. The domain APIs do not build absolute URLs from the request, so
+      # preserving Host for them would be a change with no purpose and some risk.
       - name: identity-admin-routes
         paths: ["/identity"]
         strip_path: false
+        preserve_host: true
         # The admin surface is a normal protected API and carries the edge check like any other route.
         plugins: *edge_jwt
       # 21.6 — the phase-21 user & access surfaces, listed explicitly rather than left to the /identity
@@ -367,6 +403,7 @@ services:
           - "/identity/admin/access-review"    # 21.5 access-review snapshot (JSON + CSV, audited export)
           - "/identity/me"                     # 21.5 self-service sessions + login history
         strip_path: false
+        preserve_host: true
         # Same reasoning as identity-admin-routes: protected admin/self-service APIs, edge check attached.
         plugins: *edge_jwt
       # 18.B3 (S8) — the ONE surface with NO edge jwt: these routes are how a caller OBTAINS a token
@@ -384,6 +421,7 @@ services:
       - name: identity-oidc-routes
         paths: ["/connect", "/.well-known"]
         strip_path: false
+        preserve_host: true
 
 # 18.B3 (audit R2 S8) — EDGE authentication. Until now Kong did routing, CORS and correlation ids only:
 # an unauthenticated request was proxied all the way to a service and rejected there. Every service does

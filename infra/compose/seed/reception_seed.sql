@@ -14,20 +14,21 @@ ON CONFLICT (beneficiary_id) DO UPDATE SET
   status = EXCLUDED.status, primary_phone = EXCLUDED.primary_phone, national_id = EXCLUDED.national_id,
   passport = EXCLUDED.passport, refugee_id = EXCLUDED.refugee_id, unhcr_no = EXCLUDED.unhcr_no, updated_at = now();
 
+-- benefit_category holds the canonical CODE (22 §11), never a display name: it is matched, not shown.
 INSERT INTO eligibility.coverage_projection
   (coverage_id, beneficiary_id, benefit_category, policy_no, status, effective_from, effective_to, limits_json, updated_at)
 VALUES
-  ('c1000000-0000-4000-8000-000000000001', 'a1000000-0000-4000-8000-000000000001', 'Outpatient', 'POL-2026-0001', 'Active', DATE '2026-01-01', DATE '2026-12-31',
+  ('c1000000-0000-4000-8000-000000000001', 'a1000000-0000-4000-8000-000000000001', 'CONSULT',    'POL-2026-0001', 'Active', DATE '2026-01-01', DATE '2026-12-31',
      '[{"limitType":"AnnualAmount","limitValue":50000,"consumedValue":12400}]'::jsonb, now()),
-  ('c1000000-0000-4000-8000-000000000002', 'a1000000-0000-4000-8000-000000000001', 'Pharmacy',   'POL-2026-0001', 'Active', DATE '2026-01-01', DATE '2026-12-31',
+  ('c1000000-0000-4000-8000-000000000002', 'a1000000-0000-4000-8000-000000000001', 'PHARMACY',   'POL-2026-0001', 'Active', DATE '2026-01-01', DATE '2026-12-31',
      '[{"limitType":"AnnualAmount","limitValue":15000,"consumedValue":3200}]'::jsonb, now()),
-  ('c1000000-0000-4000-8000-000000000003', 'a1000000-0000-4000-8000-000000000002', 'Outpatient', 'POL-2026-0002', 'Active', DATE '2026-01-01', DATE '2026-12-31',
+  ('c1000000-0000-4000-8000-000000000003', 'a1000000-0000-4000-8000-000000000002', 'CONSULT',    'POL-2026-0002', 'Active', DATE '2026-01-01', DATE '2026-12-31',
      '[{"limitType":"AnnualAmount","limitValue":50000,"consumedValue":0}]'::jsonb, now()),
-  ('c1000000-0000-4000-8000-000000000004', 'a1000000-0000-4000-8000-000000000002', 'Labs',       'POL-2026-0002', 'Active', DATE '2026-01-01', DATE '2026-12-31',
+  ('c1000000-0000-4000-8000-000000000004', 'a1000000-0000-4000-8000-000000000002', 'LAB',        'POL-2026-0002', 'Active', DATE '2026-01-01', DATE '2026-12-31',
      '[{"limitType":"VisitCount","limitValue":20,"consumedValue":4}]'::jsonb, now()),
-  ('c1000000-0000-4000-8000-000000000005', 'a1000000-0000-4000-8000-000000000003', 'Outpatient', 'POL-2026-0003', 'Suspended', DATE '2026-01-01', DATE '2026-12-31',
+  ('c1000000-0000-4000-8000-000000000005', 'a1000000-0000-4000-8000-000000000003', 'CONSULT',    'POL-2026-0003', 'Suspended', DATE '2026-01-01', DATE '2026-12-31',
      '[{"limitType":"AnnualAmount","limitValue":50000,"consumedValue":48000}]'::jsonb, now()),
-  ('c1000000-0000-4000-8000-000000000006', 'a1000000-0000-4000-8000-000000000004', 'Outpatient', 'POL-2026-0004', 'Active', DATE '2026-01-01', DATE '2026-12-31',
+  ('c1000000-0000-4000-8000-000000000006', 'a1000000-0000-4000-8000-000000000004', 'CONSULT',    'POL-2026-0004', 'Active', DATE '2026-01-01', DATE '2026-12-31',
      '[{"limitType":"AnnualAmount","limitValue":50000,"consumedValue":9800}]'::jsonb, now())
 ON CONFLICT (coverage_id) DO UPDATE SET
   benefit_category = EXCLUDED.benefit_category, policy_no = EXCLUDED.policy_no, status = EXCLUDED.status,

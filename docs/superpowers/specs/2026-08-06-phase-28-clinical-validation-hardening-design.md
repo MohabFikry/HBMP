@@ -309,20 +309,28 @@ assertion that the five-state model has not regressed.
 
 ---
 
-## Gates 3, 5–11 — after review
+## Gates 3, 5–11 — status
 
-Summarised here so the spec is complete; each is designed in full when it is built.
+All eleven gates were built. See
+[ADR-0037](../../adr/0037-ingredient-level-clinical-rules-and-severity-tiering.md) for the decisions and
+`docs/BUILD-STATUS.md` for what remains.
 
 | Gate | Shape |
 |---|---|
-| **3** Ingredient-level interactions | `interaction_rule` keyed per D1, unordered-pair unique, mechanism/effect/management bilingual, mandatory citation. Evaluation resolves products to ingredient sets, expands ATC ancestors, matches across the cartesian product, dedupes by rule. Seeded from the ONC/NLM high-priority list. Coverage stated in the UI. |
-| **5** Duplicate therapy | New `CheckKind.Duplication`. Same ingredient across lines (including inside combinations) and same ATC-4 class. Major above a configured combined-dose ceiling, Moderate otherwise. Removes the `if (a.DrugId == b.DrugId) continue;` skip at `PrescriptionValidator.cs:168`. |
-| **6** Mechanism / consequence / management | Structured fields on every finding class, not only interactions. The management line renders prominently, never inside a collapsed `<details>`. |
-| **7** ICD hierarchy | `icd_code.parent_code` + `node_kind` + a closure table. **The source already carries this**: `Raw Files/ICD10_2019_full.csv` has `Parent_Code`, `Chapter_Code` and `Block_Code` columns, and `IcdCsvRow` binds four of its nine columns. Block ranges (`J00-J06`) expand to member categories at load time. Matching becomes descendant-or-self; the inverse case reports as "possible, less specific". The duplicate normaliser at `PrescriptionValidator.cs:106-110` is deleted, asserted by an architecture test. |
-| **8** Age and weight | `ValidationRequest` gains patient context, fetched server-side through Gate 2's endpoint. Stale weight (>90d adult, >30d child) is not a current weight. Missing input ⇒ `NotChecked` naming it. Renal function is explicitly `Unknown` — lab results are `result_value text` and there is no structured eGFR to read. Age comes from patient-service, which pharmacy already has a client for; only the derived age crosses into the engine, never the date of birth. |
-| **9** Drug–disease contraindications | `drug_disease_contraindication` keyed to Gate 7's hierarchy. Pregnancy per D3. Classic pairs seeded with citations. FDA letter categories are **not** modelled — they were replaced by narrative labelling in 2015, so the model carries a statement and its source. |
-| **10** Indication-keyed dosing | `dosing_rule` on (subject, indication scope, population, route), most-specific-match selection, weight-based rules capped at the adult maximum. The recommended range displays beside the entered dose with its citation — which informs the override rather than merely obstructing it. |
-| **11** Docs, registry, ADR | ADR-0028. Clinical governance enforced by constraint: no active clinical rule without a named pharmacist reviewer and a citation. |
+| **3** ✅ Ingredient-level interactions | `interaction_rule` keyed per D1, unordered-pair unique, mechanism/effect/management bilingual, mandatory citation. Evaluation resolves products to ingredient sets, expands ATC ancestors, matches across the cartesian product, dedupes by rule. Seeded from the ONC/NLM high-priority list. Coverage stated in the UI. |
+| **5** ✅ Duplicate therapy | New `CheckKind.Duplication`. Same ingredient across lines (including inside combinations) and same ATC-4 class. Major above a configured combined-dose ceiling, Moderate otherwise. Removes the `if (a.DrugId == b.DrugId) continue;` skip at `PrescriptionValidator.cs:168`. |
+| **6** ✅ Mechanism / consequence / management | Structured fields on every finding class, not only interactions. The management line renders prominently, never inside a collapsed `<details>`. |
+| **7** ✅ ICD hierarchy | `icd_code.parent_code` + `node_kind` + a closure table. **The source already carries this**: `Raw Files/ICD10_2019_full.csv` has `Parent_Code`, `Chapter_Code` and `Block_Code` columns, and `IcdCsvRow` binds four of its nine columns. Block ranges (`J00-J06`) expand to member categories at load time. Matching becomes descendant-or-self; the inverse case reports as "possible, less specific". The duplicate normaliser at `PrescriptionValidator.cs:106-110` is deleted, asserted by an architecture test. |
+| **8** ✅ Age and weight | `ValidationRequest` gains patient context, fetched server-side through Gate 2's endpoint. Stale weight (>90d adult, >30d child) is not a current weight. Missing input ⇒ `NotChecked` naming it. Renal function is explicitly `Unknown` — lab results are `result_value text` and there is no structured eGFR to read. Age comes from patient-service, which pharmacy already has a client for; only the derived age crosses into the engine, never the date of birth. |
+| **9** ✅ Drug–disease contraindications | `drug_disease_contraindication` keyed to Gate 7's hierarchy. Pregnancy per D3. Classic pairs seeded with citations. FDA letter categories are **not** modelled — they were replaced by narrative labelling in 2015, so the model carries a statement and its source. |
+| **10** ✅ Indication-keyed dosing | `dosing_rule` on (subject, indication scope, population, route), most-specific-match selection, weight-based rules capped at the adult maximum. The recommended range displays beside the entered dose with its citation — which informs the override rather than merely obstructing it. |
+| **11** ✅ Docs, registry, ADR | Landed as **ADR-0037** (0028 was already taken). Clinical governance enforced by constraint: `ck_interaction_rule_reviewed`, `ck_allergen_mapping_reviewed`, `citation NOT NULL`. Nine invariants registered with named tests. |
+
+**Legend:** ✅ built and tested.
+
+**Coverage is partial by construction, and every check says so.** 13 interaction rules, 8 contraindication
+rules, 8 dosing rules, 15 mapped allergens. Outside those, each check reports what it could not evaluate
+rather than passing the line — which is the whole safety argument for shipping a curated list at all.
 
 ---
 

@@ -590,7 +590,7 @@ function SeriesCard({ series, onDrill }: { series: AnalyticsSeries; onDrill?: (b
 
       {/* ALWAYS in the DOM. Not sr-only here — it is the content of the card, and a sighted user reading the
           exact figures should not have to hunt for them either. */}
-      <div className="pol-tablewrap">
+      <div className="pol-tablewrap mrs-scroll mrs-scroll-focusable" tabIndex={0}>
         <table className="pol-costshare">
           <caption className="sr-only">{title}</caption>
           <thead>
@@ -675,8 +675,8 @@ function DrillPanel({ drill, onClose }: { drill: { band: string; rows: OutlierRo
         emptyLabel={t(S.empty)}
         columns={[
           { key: "member", header: t(S.memberRef), cell: (r) => r.enrollmentId.slice(0, 8) },
-          { key: "limit", header: t(S.limit), cell: (r) => fmt.money(r.limit) },
-          { key: "consumed", header: t(S.consumed), cell: (r) => fmt.money(r.consumed) },
+          { key: "limit", header: t(S.limit), cell: (r) => fmt.money(r.limit), numeric: true },
+          { key: "consumed", header: t(S.consumed), cell: (r) => fmt.money(r.consumed), numeric: true },
         ]}
       />
       <Button variant="ghost" onClick={onClose}>

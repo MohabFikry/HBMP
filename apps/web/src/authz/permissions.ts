@@ -48,6 +48,9 @@ export type Permission =
   | "pharmacy.substitution"
   // Approvals
   | "approvals.worklist"
+  // ADR-0034 — the REGISTER (every authorization, including what counters and benches delivered), as
+  // distinct from the worklist, which is the queue of things waiting for a decision.
+  | "approvals.register"
   | "approvals.decide"
   | "approvals.manual"
   | "approvals.emergency"
@@ -120,6 +123,12 @@ export type Permission =
   | "director.oversight"
   | "director.quality"
   | "director.escalations"
+  // ADR-0035 — clinical governance the supervisor holds. Its own key rather than reusing `admin.masterdata`:
+  // that one means "the platform-admin view of every code system", and this one means "the four clinical
+  // vocabularies, editable". Sharing a key would give whoever holds either the reach of both.
+  | "director.masterlists"
+  // ADR-0035 §5 — author the engine's routing/SLA rules. NOT held by medical_approval.
+  | "director.engine"
   // Cross-cutting — every role has an in-app inbox (self-service, server row-filtered by recipient).
   | "notification.read";
 
@@ -200,7 +209,7 @@ export const rolePermissions: Record<Role, Permission[]> = {
   lab: ["lab.queue", "lab.consume", "lab.result.upload"],
   imaging: ["imaging.queue", "imaging.consume", "imaging.result.upload"],
   pharmacy: ["pharmacy.queue", "pharmacy.dispense", "pharmacy.substitution"],
-  medical_approval: ["approvals.worklist", "approvals.decide", "approvals.manual", "approvals.emergency", "approvals.sla"],
+  medical_approval: ["approvals.worklist", "approvals.register", "approvals.decide", "approvals.manual", "approvals.emergency", "approvals.sla"],
   // Beneficiary management owns the MEMBERSHIP book: who is enrolled, in which group, on which plan, and
   // what they have used. It does NOT own the benefit product — no payers, no plan versions — because the
   // person enrolling a member must not also be the person who decides what that plan pays for.
@@ -289,7 +298,7 @@ export const rolePermissions: Record<Role, Permission[]> = {
   // `admin.programs` is super-admin only: enablement is set by Mersal programme administration, and a tenant
   // that can switch on its own programmes is not gated at all (design 40 §4, A4).
   super_admin: ["admin.users", "admin.policies", "admin.masterdata", "admin.tenants", "admin.audit", "admin.config", "admin.access", "admin.programs"],
-  medical_director: ["director.dashboards", "director.oversight", "director.quality", "director.escalations", "approvals.sla"],
+  medical_director: ["director.dashboards", "director.oversight", "director.quality", "director.escalations", "director.masterlists", "director.engine", "approvals.sla"],
 };
 
 /**

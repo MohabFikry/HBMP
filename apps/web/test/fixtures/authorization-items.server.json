@@ -1,0 +1,14 @@
+[
+    {
+        "itemId": "30fac744-d220-4314-bb3e-3473e809ffc0",
+        "sourceLineId": "4413fd9e-0cef-49eb-87e8-c6e6ba30c92a",
+        "orderedCode": "40d0c6a8-d75d-46d7-8f84-094908c1d551",
+        "orderedLabel": "plavictonal 75mg 20 f.c. tab 75 mg tablet",
+        "fulfilledCode": "913fa07b-a575-4864-bf5d-47af712a7885",
+        "fulfilledLabel": "angosmooth 75mg 30 f.c. tabs",
+        "quantity": 1.0,
+        "substituted": true,
+        "substitutionReason": "Prescribed brand is out of stock this morning; same active ingredient dispensed.",
+        "fulfilledAt": "2026-08-04T19:12:25.504564+00:00"
+    }
+]

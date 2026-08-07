@@ -13,7 +13,14 @@ public sealed class ApprovalsDbContext(DbContextOptions<ApprovalsDbContext> opti
 
     public DbSet<Authorization> Authorizations => Set<Authorization>();
     public DbSet<AuthorizationDecision> Decisions => Set<AuthorizationDecision>();
+    public DbSet<AuthorizationItem> Items => Set<AuthorizationItem>();
     public DbSet<ProcessedRequest> ProcessedRequests => Set<ProcessedRequest>();
+    /// <summary>The fulfilment consumer's dedupe ledger — event ids only, no tenant data (ADR-0034).</summary>
+    public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
+    /// <summary>The engine's effective-dated routing and SLA rules (ADR-0035 §5).</summary>
+    public DbSet<ApprovalRule> Rules => Set<ApprovalRule>();
+    /// <summary>The tenant's auto-decision kill switch. NO ROW MEANS OFF (ADR-0035 §5.3).</summary>
+    public DbSet<AutoDecisionSwitch> AutoDecisionSwitches => Set<AutoDecisionSwitch>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -24,6 +31,7 @@ public sealed class ApprovalsDbContext(DbContextOptions<ApprovalsDbContext> opti
         {
             e.ToTable("authorization");
             e.HasKey(x => x.AuthorizationId);
+            e.Property(x => x.Kind).HasConversion<string>().HasColumnName("kind");
             e.Property(x => x.Source).HasConversion<string>().HasColumnName("source");
             e.Property(x => x.Priority).HasConversion<string>().HasColumnName("priority");
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
@@ -36,6 +44,42 @@ public sealed class ApprovalsDbContext(DbContextOptions<ApprovalsDbContext> opti
             e.HasIndex(x => x.BeneficiaryId);
             e.HasIndex(x => x.IdempotencyKey);
             e.HasMany(x => x.Decisions).WithOne().HasForeignKey(d => d.AuthorizationId);
+            e.HasMany(x => x.Items).WithOne().HasForeignKey(i => i.AuthorizationId);
+        });
+
+        b.Entity<ApprovalRule>(e =>
+        {
+            e.ToTable("rule");
+            e.HasKey(x => x.RuleId);
+            e.Property(x => x.Family).HasConversion<string>().HasColumnName("family");
+            e.Property(x => x.PredicateJson).HasColumnType("jsonb");
+            e.Property(x => x.ActionJson).HasColumnType("jsonb");
+            // The order the evaluator reads them in, so the database returns them already sorted and the two
+            // cannot disagree about which of two same-priority rules comes first.
+            e.HasIndex(x => new { x.TenantId, x.Family, x.Priority, x.RuleId });
+        });
+
+        b.Entity<AutoDecisionSwitch>(e =>
+        {
+            e.ToTable("auto_decision_switch");
+            e.HasKey(x => x.TenantId);
+        });
+
+        b.Entity<AuthorizationItem>(e =>
+        {
+            e.ToTable("authorization_item");
+            e.HasKey(x => x.ItemId);
+            e.Property(x => x.Quantity).HasColumnType("numeric(12,3)");
+            // The idempotency anchor: a redelivered dispense under a NEW event id still cannot double-post.
+            e.HasIndex(x => new { x.TenantId, x.FulfilmentRef }).IsUnique();
+            e.HasIndex(x => x.AuthorizationId);
+            e.Ignore(x => x.Substituted);
+        });
+
+        b.Entity<ProcessedEvent>(e =>
+        {
+            e.ToTable("processed_event");
+            e.HasKey(x => x.EventId);
         });
 
         b.Entity<AuthorizationDecision>(e =>
@@ -53,6 +97,14 @@ public sealed class ApprovalsDbContext(DbContextOptions<ApprovalsDbContext> opti
             e.HasKey(x => x.IdempotencyKey);
         });
     }
+}
+
+/// <summary>Transport-level dedupe row — a redelivered broker message is a no-op (ADR-0034). No tenant data,
+/// so no RLS: it holds event ids and a timestamp.</summary>
+public sealed class ProcessedEvent
+{
+    public Guid EventId { get; set; }
+    public DateTimeOffset ProcessedAt { get; set; }
 }
 
 /// <summary>Idempotency ledger row — a replayed Idempotency-Key returns the prior result (no second decision).</summary>

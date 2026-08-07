@@ -29,8 +29,17 @@ const fromEnv = (value: string | undefined, fallback: string): string =>
  * spelling silently downgraded the app to fixture mode against a fully working backend. */
 export const LIVE = ["1", "true"].includes((env.VITE_LIVE ?? "").trim().toLowerCase());
 
-/** Base URL for the API gateway (Kong). All service calls are `${API_BASE}/<path>`. */
-export const API_BASE = fromEnv(env.VITE_API_BASE, "http://localhost:8000/api/v1");
+/**
+ * The origin this bundle is running on, or `""` where there is no document (node, some test runners).
+ *
+ * Everything below defaults to a RELATIVE path so the browser resolves it against this origin. That is the
+ * 28.2 change: the SPA, the API and the issuer are one origin, reached through the app's own nginx (deployed)
+ * or the Vite dev proxy (development). See ADR-0036 §4 for the three separate things that depend on it.
+ */
+const SELF_ORIGIN = typeof window !== "undefined" && window.location ? window.location.origin : "";
+
+/** Base URL for the API gateway (Kong), same-origin by default. All service calls are `${API_BASE}/<path>`. */
+export const API_BASE = fromEnv(env.VITE_API_BASE, "/api/v1");
 
 /**
  * The gateway ORIGIN, without the `/api/v1` prefix. 18.C2 (audit R2 W5): identity-service serves the in-app
@@ -40,11 +49,22 @@ export const API_BASE = fromEnv(env.VITE_API_BASE, "http://localhost:8000/api/v1
 export const GATEWAY_BASE = API_BASE.replace(/\/api\/v1\/?$/, "");
 
 export const OIDC = {
-  /** The in-app issuer (identity-service, OpenIddict), as the *browser* reaches it (must match token `iss`).
-   * Phase 17.5: this replaced Keycloak — endpoints are `/connect/*` and JWKS is at `/.well-known/jwks`. */
-  authority: fromEnv(env.VITE_OIDC_AUTHORITY, "http://localhost:8090"),
+  /**
+   * The in-app issuer (identity-service, OpenIddict), as the *browser* reaches it.
+   * Phase 17.5: this replaced Keycloak — endpoints are `/connect/*` and JWKS is at `/.well-known/jwks`.
+   *
+   * **28.2: this is now the app's OWN origin, and that is the point.** It used to be `http://localhost:8090`
+   * while the app served from `:5173`, so signing in navigated the browser to a visibly different host.
+   *
+   * It no longer needs to equal the token's `iss`. OpenIddict pins the issuer identifier via
+   * `Issuer:PublicUrl` — the fix for ID2088, where tokens minted at `:8090` were rejected when the same
+   * request arrived through Kong at `:8000` — so `iss` is a constant the server states, not something derived
+   * from whichever host the request came in on. That is what makes this move cheap: no service that pins
+   * `Auth__ValidIssuers` is touched.
+   */
+  authority: fromEnv(env.VITE_OIDC_AUTHORITY, SELF_ORIGIN),
   clientId: fromEnv(env.VITE_OIDC_CLIENT_ID, "hbmp-web"),
-  redirectUri: fromEnv(env.VITE_OIDC_REDIRECT, "http://localhost:5173/"),
+  redirectUri: fromEnv(env.VITE_OIDC_REDIRECT, SELF_ORIGIN ? `${SELF_ORIGIN}/` : "http://localhost:5173/"),
   /**
    * The full space-delimited scope set the SPA requests: exactly `IdentityContract.InteractiveScopes` plus
    * `openid` and `offline_access`. The services enforce a scope PER endpoint (e.g. `finance:read`);
@@ -63,7 +83,10 @@ export const OIDC = {
     // appointment:reserve is the call centre's booking power WITHOUT check-in/no-show. Requested here for
     // everyone; the token only ever carries what the caller's ROLE grants, so asking is not receiving.
     "appointment:reserve appointment:write " +
-    "audit:read auth:decide auth:emergency auth:manual auth:override auth:read auth:review " +
+    "audit:read auth:configure auth:decide auth:emergency auth:manual auth:override auth:read auth:request-extension " +
+    // ADR-0034 — the bench asks whether another examination may stand in. Granted to lab_tech/imaging_tech
+    // only; a pharmacist resolves the same question against the formulary without asking anyone.
+    "auth:request-substitution auth:review " +
     // 25.1 — the branch-management authorities (design 42 §1). Requested for everyone, granted only to
     // branch_coordinator / clinics_manager: asking is not receiving. Sized to a clinic precisely so that a
     // coordinator never needs provider:write, which is network-wide and also unmasks licence numbers.
@@ -74,7 +97,13 @@ export const OIDC = {
     "claims:adjudicate claims:adjust claims:appeal claims:batch claims:decide claims:export claims:ingest " +
     "claims:read claims:reconcile claims:reimburse:submit claims:review claims:settle claims:submit " +
     "document:write eligibility:check emr:read emr:write encounter:write finance:approve finance:export " +
-    "finance:read finance:write note:read note:write notification:read orders:consume orders:read " +
+    "finance:read finance:write " +
+    // 26.1 — the reference catalogue. masterdata-service was authenticated but unscoped; every screen that
+    // resolves an ICD, ATC, drug or allergen code now needs this in the token. Listed here as well as in the
+    // issuer for the reason `practitioner:read` records below: a scope added to one and not the other signs
+    // in cleanly and 403s on the read the feature exists to make.
+    "masterdata:read " +
+    "note:read note:write notification:read orders:consume orders:read " +
     "orders:write patient:read patient:write pharmacy:dispense pharmacy:read policy:admin policy:read " +
     "policy:supervise policy:write " +
     // 14.5 sized this scope to the need rather than granting reception the whole provider directory: the
@@ -87,6 +116,39 @@ export const OIDC = {
     "reception:read reception:search referral:write reporting:export reporting:read reporting:read-financial " +
     "rx:read rx:write",
 };
+
+/**
+ * Do the app, the issuer and the redirect target all live on ONE origin? (ADR-0036 §4, phase 28.2.)
+ *
+ * ============================================================================================================
+ * WHY THIS IS CHECKED RATHER THAN INTENDED
+ * ============================================================================================================
+ * `infra/compose/config/kong.yml` has routed `/connect` and `/.well-known` to the issuer since phase 17, with
+ * a comment saying it is done *"so the SPA reaches one origin"*. The SPA then pointed at `:8090` anyway, for
+ * two years, because nothing compared the two. An intention recorded in a comment is not a constraint.
+ *
+ * What a violation costs is worse than the misconfiguration it looks like. The issuer's session cookies are
+ * `SameSite=Strict`, so a cross-origin login POST has its cookie dropped by the browser: the sign-in returns
+ * success and the authorize that follows reports `login_required`. Nothing is logged, nothing 500s, and the
+ * user is told their credentials are wrong.
+ *
+ * A blank value is NOT a violation — it means "resolve against this document", which is same-origin by
+ * definition and is the default. Only an explicitly configured foreign origin is.
+ */
+export function loginOriginsAgree(authority: string, redirectUri: string, appOrigin: string): boolean {
+  const originOf = (value: string): string | null => {
+    if (!value.trim()) return null;                     // relative ⇒ this origin, by definition
+    try {
+      return new URL(value, appOrigin || "http://localhost").origin;
+    } catch {
+      return null;
+    }
+  };
+  const app = appOrigin.trim() ? new URL(appOrigin).origin : null;
+  return [originOf(authority), originOf(redirectUri)]
+    .filter((o): o is string => o !== null)
+    .every((o) => app === null || o === app);
+}
 
 /**
  * Maps an issuer role (the token's flat lower-case `roles` claim) to the SPA's portal {@link Role}. The

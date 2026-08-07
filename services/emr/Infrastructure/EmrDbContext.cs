@@ -21,6 +21,8 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
     public DbSet<Vital> Vitals => Set<Vital>();
     public DbSet<Allergy> Allergies => Set<Allergy>();
     public DbSet<MedicationHistory> MedicationHistories => Set<MedicationHistory>();
+    /// <summary>Standing per-person clinical facts — blood group today (migration 0021).</summary>
+    public DbSet<BeneficiaryClinical> BeneficiaryClinical => Set<BeneficiaryClinical>();
 
     /// <summary>25.4 — leave, holidays, closures and ad-hoc clinics (design 42 §4). The exception layer the
     /// weekly recurring rule never had; without it the only way to stop slots was to delete the rule.</summary>
@@ -54,6 +56,7 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             e.Property(x => x.BeneficiaryName).HasColumnName("beneficiary_name");               // 14.5 (0013)
             e.Property(x => x.NoteBy).HasColumnName("note_by");                                 // 14.5 (0014)
             e.Property(x => x.NoteAt).HasColumnName("note_at");
+            e.Property(x => x.NoteByName).HasColumnName("note_by_name").HasMaxLength(160);      // 0022
             e.HasIndex(x => new { x.BranchId, x.ScheduledStart });
             e.HasIndex(x => new { x.DoctorId, x.ScheduledStart });
         });
@@ -188,6 +191,12 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             e.Property(x => x.Severity).HasConversion<string>().HasColumnName("severity");
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
             e.HasIndex(x => x.BeneficiaryId);
+        });
+
+        b.Entity<BeneficiaryClinical>(e =>
+        {
+            e.ToTable("beneficiary_clinical");
+            e.HasKey(x => x.BeneficiaryId);   // one row per person — the PK IS the beneficiary
         });
 
         b.Entity<MedicationHistory>(e =>

@@ -1,0 +1,23 @@
+{
+    "lines": [
+        {
+            "prescriptionLineId": "9f6cb762-a855-467d-aa3e-8a0b134f694f",
+            "drugId": "000dc5cd-7844-44d2-8448-f4cf6307dbf7",
+            "drugName": "esmopump 20 mg 14 e.c.tabs 20 mg tablet",
+            "quantityPrescribed": 14.0,
+            "quantityDispensed": 4.0,
+            "unitPriceEgp": 162.0,
+            "lineTotalEgp": 2268.0
+        }
+    ],
+    "currency": "EGP",
+    "totalEgp": 2268.0,
+    "memberShareEgp": 613.6,
+    "payerShareEgp": 1654.4,
+    "determinate": true,
+    "reason": null,
+    "tierCode": "T1",
+    "isCovered": true,
+    "quotedOnEgp": 2268.0,
+    "quotedOnDispenseNow": false
+}

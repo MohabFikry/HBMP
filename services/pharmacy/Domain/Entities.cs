@@ -17,12 +17,34 @@ public sealed class Prescription
     public Guid BeneficiaryId { get; set; }
     public Guid EncounterId { get; set; }
     public Guid PrescriberId { get; set; }
+    /// <summary>The prescriber's display name, snapshot at submission (migration 0006). NULL for rows
+    /// written before it — readers say "(not recorded)" rather than showing the uuid.</summary>
+    public string? PrescriberName { get; set; }
     public Guid? AuthorizationId { get; set; }
     public RxStatus Status { get; set; } = RxStatus.Draft;
     public DateTimeOffset? SubmittedAt { get; set; }
     public DateTimeOffset? ExpiresAt { get; set; }
+
+    /// <summary>The approvals authorization that put this prescription back in date, if any. Doubles as the
+    /// idempotency key for the apply — a retried callback for the same authorization grants no second period.</summary>
+    public Guid? ValidityExtendedBy { get; set; }
+    public DateTimeOffset? ValidityExtendedAt { get; set; }
     public string? IdempotencyKey { get; set; }
     public string? CreatedBy { get; set; }
+
+    /// <summary>26.4 — the encounter's primary diagnosis at prescribing time, for quick filtering.</summary>
+    public string? PrimaryIcdCode { get; set; }
+
+    /// <summary>
+    /// 26.4 — the encounter's recorded ICD codes AS AT prescribing time, as a JSON array.
+    /// </summary>
+    /// <remarks>
+    /// A snapshot, not a join. The indication check is a statement about what was known when the
+    /// prescription was written; if a diagnosis is corrected next week, the record of what was actually
+    /// checked must not change to match.
+    /// </remarks>
+    public string? DiagnosisSnapshot { get; set; }
+
     public uint RowVersion { get; set; }
     public List<PrescriptionLine> Lines { get; set; } = [];
 }
@@ -33,12 +55,24 @@ public sealed class PrescriptionLine
     public string TenantId { get; set; } = "";            // RLS tenant scope (ADR-0011)
     public Guid PrescriptionId { get; set; }
     public Guid DrugId { get; set; }
+    /// <summary>The product's name as master data gave it when this was prescribed (migration 0006) —
+    /// trade name, strength and form, because that is what identifies the box on the shelf. NULL for rows
+    /// written before it; a dispensing screen shows "(not recorded)", never the uuid.</summary>
+    public string? DrugName { get; set; }
     public string? Dose { get; set; }
     public string? Route { get; set; }
     public string? Frequency { get; set; }
     public decimal QuantityPrescribed { get; set; }
     public decimal QuantityDispensed { get; set; }       // accumulator, 0 ≤ dispensed ≤ prescribed (phase 6)
     public int RefillsAllowed { get; set; }
+
+    /// <summary>
+    /// 26.4 — treatment length in days. New in phase 26: the line carried dose, route, frequency and
+    /// quantity but no duration, and duration is what makes a daily-dose ceiling or a treatment-length
+    /// limit checkable at all.
+    /// </summary>
+    public int? DurationDays { get; set; }
+
     public RxLineStatus Status { get; set; } = RxLineStatus.Active;
     public uint RowVersion { get; set; }                 // xmin — optimistic-concurrency guard on dispense (phase 6)
 
@@ -66,6 +100,18 @@ public sealed class DispenseEvent
     public DateOnly ExpiryDate { get; set; }
     public Guid? SubstitutedDrugId { get; set; }             // phase 6.3 — policy-approved alternative actually dispensed
     public string? SubstitutionReason { get; set; }
+    /// <summary>
+    /// What the pharmacist recorded about THIS handover — collection arrangements, a replaced lot, who
+    /// collected on the patient's behalf.
+    /// </summary>
+    /// <remarks>
+    /// Not a clinical note and never read by the clinical checks. It rides on the dispense because it
+    /// describes that act at that counter, not the prescriber's decision — and because a pharmacist who needs
+    /// to tell a PRESCRIBER something has the out-of-stock notice, the substitution reason and the approval
+    /// team. Capped at 500 characters by the database (migration 0011): this table is append-only, so a field
+    /// with no ceiling is one somebody eventually pastes a clinical history into, permanently.
+    /// </remarks>
+    public string? Note { get; set; }
     public DateTimeOffset DispensedAt { get; set; }
     public Guid DispensedBy { get; set; }
 }
@@ -99,4 +145,56 @@ public static class RxNo
 public static class ReferralNo
 {
     public static string Format(int year, int sequence) => $"REF-{year:D4}-{sequence:D6}";
+}
+
+/// <summary>
+/// 26.4 — an append-only record of one validation run (doc 43 §5).
+/// </summary>
+/// <remarks>
+/// Never updated and never deleted. It is the evidence of what the prescriber was shown at step 1 and what
+/// the server concluded at step 2 — and since the two evaluate independently, a divergence between them is
+/// normal and must be inspectable rather than resolved silently.
+/// </remarks>
+public sealed class PrescriptionValidationRun
+{
+    public Guid ValidationId { get; set; }
+    public string TenantId { get; set; } = "";
+
+    /// <summary>Null for a draft run: the doctor validates while composing, before anything is submitted.</summary>
+    public Guid? PrescriptionId { get; set; }
+
+    public Guid EncounterId { get; set; }
+    public Guid BeneficiaryId { get; set; }
+    public DateTimeOffset RanAt { get; set; }
+    public string? RanBy { get; set; }
+
+    /// <summary>"Step1" (advisory, client-facing) or "Step2" (authoritative, server-side on submit).</summary>
+    public string Step { get; set; } = "Step1";
+
+    public string EngineVersion { get; set; } = default!;
+    public string OverallState { get; set; } = default!;
+
+    /// <summary>The findings, serialized. Stored whole so a later reviewer sees exactly what was produced.</summary>
+    public string Findings { get; set; } = "[]";
+}
+
+/// <summary>
+/// 26.4 — a clinician's recorded reason for proceeding past a warning (doc 43 §1 rule 3).
+/// </summary>
+/// <remarks>
+/// Overrides are expected and recorded, not prevented: blocking a prescriber on automated advice of
+/// uncertain provenance would be the greater harm. The reason is mandatory because an acknowledgement with
+/// no reason is a click, and a click is not a justification — it is also what the approver later reads.
+/// </remarks>
+public sealed class PrescriptionLineOverride
+{
+    public Guid OverrideId { get; set; }
+    public string TenantId { get; set; } = "";
+    public Guid PrescriptionId { get; set; }
+    public Guid LineId { get; set; }
+    public string FindingKind { get; set; } = default!;
+    public string? FindingRef { get; set; }
+    public string Reason { get; set; } = default!;
+    public string AcknowledgedBy { get; set; } = default!;
+    public DateTimeOffset AcknowledgedAt { get; set; }
 }

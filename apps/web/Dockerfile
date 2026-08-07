@@ -40,7 +40,38 @@ ENV VITE_API_BASE=$VITE_API_BASE \
 RUN pnpm --filter @mersal/web build
 
 FROM nginx:1.27-alpine AS runtime
-COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
+# 28.2 — a TEMPLATE, not a finished conf. The nginx image runs envsubst over /etc/nginx/templates/*.template
+# at startup, which is how the gateway upstream and the CSP become deployment configuration instead of
+# something baked into an image.
+#
+# NGINX_ENVSUBST_FILTER is not optional: without it envsubst substitutes every ${VAR} it finds a match for,
+# and nginx's own $host / $remote_addr / $uri would be replaced by whatever the container happens to have in
+# its environment. Restricting it to our two names means an unrelated env var can never rewrite the proxy.
+COPY apps/web/nginx.conf.template /etc/nginx/templates/default.conf.template
+
+# The Content-Security-Policy for the app's own origin (ADR-0036 §8.1).
+#
+# `script-src 'self'` is the directive that matters, and it is why this ships BEFORE the SPA login: after that
+# change a password is typed into this origin, so an injected script could keylog it rather than having to
+# forge a convincing login form first.
+#
+# `style-src` keeps 'unsafe-inline', a deliberate and much narrower concession: Radix's dialog pulls in
+# react-remove-scroll, which injects a <style> element at runtime to lock the body, and without it every modal
+# in the application loses its scroll lock. Inline STYLE is not the vector above — that one is script-src, and
+# script-src is given no such exception.
+#
+# The two fonts.* origins are here because index.html loads Inter and Cairo from Google. That deserves
+# revisiting on its own merits for an on-prem-first platform serving refugees — every page load reports the
+# client's IP to a third party, and an air-gapped deployment renders with no fonts at all — but self-hosting
+# them is a separate change and is NOT smuggled in here.
+#
+# `blob:` on img-src and frame-src is load-bearing: documents and member photos are fetched as authorized,
+# audited streams and rendered from object URLs rather than from bearer links. A deployment whose blob store
+# hands the browser a signed URL directly must add that origin here, or the preview fails — and it would fail
+# as "document unavailable", which is a lie about the document rather than about the policy.
+ENV NGINX_ENVSUBST_FILTER="^(KONG_UPSTREAM|CSP_POLICY)" \
+    KONG_UPSTREAM="http://kong:8000" \
+    CSP_POLICY="default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; frame-src 'self' blob:; worker-src 'self' blob:; connect-src 'self'"
 COPY --from=build /repo/apps/web/dist /usr/share/nginx/html
 EXPOSE 8080
 # nginx:alpine already runs worker processes unprivileged; the image's default entrypoint is kept.

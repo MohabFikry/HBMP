@@ -122,15 +122,29 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
             appt.SlotId = newSlotId;              // releasing the old slot is implicit (nothing else holds it)
             appt.ScheduledStart = newSlot.SlotStart;
             appt.ScheduledEnd = newSlot.SlotEnd;
+            // THE DOCTOR MOVES WITH THE SLOT.
+            //
+            // It did not, and the omission was invisible while the only way to reschedule was to pick another
+            // slot belonging to the same doctor — the UI filtered the picker by the appointment's own doctor,
+            // so the two could never disagree. The moment a desk can move a patient to a DIFFERENT
+            // practitioner, an appointment left pointing at its old doctor while sitting in a new doctor's
+            // slot is a row that contradicts itself: the board names one clinician and the session belongs to
+            // another, and the patient is called by neither.
+            //
+            // Assigned rather than coalesced: a slot with no doctor is a clinic-level session, and inheriting
+            // the previous doctor onto it would assert a clinician who is not the one holding the slot.
+            appt.DoctorId = newSlot.DoctorId;
             appt.UpdatedAt = now;
             appt.UpdatedBy = actor;
             ApplyIfMatch(appt, ifMatch);
             try
             {
                 await db.SaveChangesAsync(ct);
+                // ONCE. This line was written twice, so every reschedule enqueued `ApptRescheduled` twice —
+                // and consumer dedupe could not save it, because each enqueue mints its own event id, so the
+                // two are indistinguishable from two genuine reschedules to every subscriber downstream.
                 if (insideTransaction is not null) await insideTransaction(appt, ct);
-                if (insideTransaction is not null) await insideTransaction(appt, ct);
-            await tx.CommitAsync(ct);
+                await tx.CommitAsync(ct);
                 return new TransitionResult(TransitionOutcome.Ok, appt);
             }
             catch (DbUpdateConcurrencyException) { await tx.RollbackAsync(ct); return TransitionResult.Fail(TransitionOutcome.PreconditionFailed); }

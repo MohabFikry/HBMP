@@ -20,8 +20,32 @@ psql -h localhost -p 55432 -U hbmp -d hbmp -v ON_ERROR_STOP=1 -f tools/dev/<scri
 | 3 | `seed-dev-clinic.sql` | 25 beneficiaries with policies, coverage, eligibility projections, a fortnight of slots, appointments and call history. |
 | 4 | `seed-branch-management.sql` | Makes every branch-management alert path demonstrable: an expiring licence, an expired one, a roster exception, low stock, and expired batches in quarantine. |
 | 5 | `seed-doctor-account.sql` | Makes the `doctor` login a real practitioner — specialty, two branches, roster, and a day's clinic in mixed states. |
+| 6 | `seed-provider-bound-accounts.sql` | Binds every provider-scoped login to a provider that exists: `pharmacist`, `lab_tech`, `imaging_tech`, `provider_admin`. Adds Nile Pharmacy (PRV-0004), Cairo Central Laboratory (PRV-0005) and Nile Imaging Centre (PRV-0006), and queues one Imaging order so that queue is not empty on arrival. |
 
-Steps 2–5 are idempotent; step 1 is not, and it is the destructive one.
+Steps 2–6 are idempotent; step 1 is not, and it is the destructive one.
+
+**A login without a provider is a login that cannot work.** Steps 5 and 6 exist for one reason: several roles
+are scoped to something the base seed leaves empty — a doctor is matched to appointments by practitioner id;
+a pharmacist, a lab tech, an imaging tech and a provider admin each act on behalf of a provider. The failure
+does not look like missing data, it looks like a permissions bug, because the gate's honest answer ("you are
+not associated with a dispensing pharmacy") describes a person who works nowhere.
+
+**identity-service now says so at startup.** It derives the provider-scoped roles from the authorization
+rules themselves (`libs/authz/ProviderScopedRoles.cs`) and logs each active membership that holds one and is
+bound to nothing:
+
+```
+docker compose logs identity-service | grep -i provider-binding
+```
+
+It warns rather than refusing to start — identity is what every other login depends on, and taking the
+platform down over a misconfigured pharmacist would be worse than the 403 it is predicting. It is also how
+`provider_admin` was found: three of these four roles were fixed by hand first, and the fourth surfaced only
+once the set was computed instead of listed. **If the check names a role this file does not handle, add it
+here** rather than starting a second file — that duplication is how the fourth one stayed hidden.
+
+**Claims are stamped at sign-in.** After running 5–6, sign the affected account out and back in. A session
+opened beforehand carries the old, provider-less token and will keep being refused until it expires.
 
 **Structure is not test payload.** Reset the business data, keep the organisation. An earlier pass regenerated
 the branches with invented codes and uuids, which broke every screenshot, saved URL and frontend fixture that

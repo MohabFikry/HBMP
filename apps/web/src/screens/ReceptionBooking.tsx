@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Button, Card, Icon, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
+import { Button, Card, Icon, InlineAlert, InputField, Modal, StatusChip } from "@mersal/design-system";
 import type { EligibilityHit, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useWrite } from "../api/useWrite";
@@ -22,6 +22,14 @@ const S = {
   noMatches: { en: "No matching beneficiary.", ar: "لا يوجد مستفيد مطابق." },
   change: { en: "Change", ar: "تغيير" },
   choose: { en: "Choose", ar: "اختيار" },
+  /** The results dialog. Opened only when the search is AMBIGUOUS — see `runSearch`. */
+  matchesTitle: { en: "Choose a patient", ar: "اختر المريض" },
+  matchesSub: {
+    en: "More than one beneficiary matches. Select the right one to continue.",
+    ar: "أكثر من مستفيد مطابق. اختر الصحيح للمتابعة.",
+  },
+  matchesCount: { en: "matches", ar: "نتائج" },
+  cancelPick: { en: "Cancel", ar: "إلغاء" },
   book: { en: "Book appointment", ar: "احجز الموعد" },
   booked: { en: "Appointment booked", ar: "تم حجز الموعد" },
   bookedAt: { en: "Booked for", ar: "محجوز في" },
@@ -35,6 +43,56 @@ const S = {
     ar: "غير نشط — لا يمكن الحجز. راجع مدير الحالة.",
   },
 } satisfies Record<string, Localized>;
+
+
+/**
+ * One search result. The WHOLE ROW is the control.
+ *
+ * <p>It was a row of text with a "Choose" button pinned to its end, so the target was a 70px button at the
+ * far edge while the thing being chosen — the name — sat at the other. A `<button>` wrapping the row makes
+ * the target the row, which is what people aim at anyway, and it costs nothing in accessibility: it is still
+ * one control with one accessible name, still reachable by Tab, still activated by Enter and Space.</p>
+ *
+ * <p><b>A row that cannot be chosen is not a button.</b> Not a disabled one either — a disabled control is
+ * still announced as a control, and the desk would keep aiming at it. It renders as plain text with the
+ * reason beside it, which is the answer to the question they were about to ask.</p>
+ */
+function HitRow({
+  hit, t, onChoose,
+}: {
+  hit: EligibilityHit;
+  t: (l: Localized) => string;
+  onChoose: (hit: EligibilityHit) => void;
+}) {
+  const identity = (
+    <span className="book-hit-id">
+      <strong>{t(hit.name)}</strong> <span className="tnum muted">{hit.cardNumber}</span>
+      {hit.status && <StatusChip kind={hit.status.kind} label={t(hit.status.label)} />}
+    </span>
+  );
+
+  // Stopped HERE, at the moment the person is found, rather than at submit. A desk that picks a suspended
+  // member, chooses a doctor and a time, and is then refused has spent the patient's turn at the counter on a
+  // booking that could never have completed — and the server does refuse it (422 urn:hbmp:member-not-active),
+  // so the only question is how early they are told.
+  if (hit.bookable === false) {
+    return (
+      <li className="book-hit book-hit--blocked">
+        {identity}
+        <span className="muted">{t(S.notBookable)}</span>
+      </li>
+    );
+  }
+
+  return (
+    <li className="book-hit">
+      <button type="button" className="book-hit-pick" onClick={() => onChoose(hit)}>
+        {identity}
+        <span className="book-hit-go" aria-hidden="true"><Icon name="chevron" width={16} height={16} /></span>
+      </button>
+    </li>
+  );
+}
 
 /**
  * Reception booking (US-020, 14.5).
@@ -66,6 +124,7 @@ export function ReceptionBooking() {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<Localized | null>(null);
   const [patient, setPatient] = useState<EligibilityHit | null>(null);
+  const [picking, setPicking] = useState(false);
 
   // Step 2 — the shared form reports its whole selection at once, so this screen never sees a half-updated
   // specialty/doctor/time chain.
@@ -89,7 +148,12 @@ export function ReceptionBooking() {
     setSearching(true);
     setSearchError(null);
     try {
-      setHits(await api.searchEligibility(term));
+      const found = await api.searchEligibility(term);
+      setHits(found);
+      // Ambiguity is what the dialog is FOR. One match answers the question on the spot and stays inline;
+      // several is a decision, and a decision made against a list wedged between the search box and the next
+      // step of the form is one made in the wrong place.
+      setPicking(found.length > 1);
     } catch (err) {
       // 401/403 read differently from "nothing found" — say which one happened.
       setSearchError(readErrorMessage(err));
@@ -174,7 +238,7 @@ export function ReceptionBooking() {
   return (
     <>
       <PageHeader title={t(S.title)} />
-      <Card as="section" style={{ padding: "var(--sp5)" }}>
+      <Card as="section" className="book-card" style={{ padding: "var(--sp5)" }}>
         <p className="muted">{t(S.branchNote)}</p>
 
         {/* ── 1. Patient ─────────────────────────────────────────────── */}
@@ -202,31 +266,38 @@ export function ReceptionBooking() {
             </form>
             {searchError && <InlineAlert tone="bad">{t(searchError)}</InlineAlert>}
             {hits && hits.length === 0 && <p role="status">{t(S.noMatches)}</p>}
-            {hits && hits.length > 0 && (
+            {/* Exactly one match stays inline: it is an answer, not a decision, and a dialog to confirm the
+                only possible choice is a click that buys nothing. Several open the picker below. */}
+            {hits && hits.length === 1 && (
               <ul className="book-hits">
-                {hits.map((h) => (
-                  <li key={h.id}>
-                    <span>
-                      {t(h.name)} <span className="tnum muted">{h.cardNumber}</span>
-                      {h.status && <> <StatusChip kind={h.status.kind} label={t(h.status.label)} /></>}
-                    </span>
-                    {/* Stopped HERE, at the moment the person is found, rather than at submit. A desk that
-                        picks a suspended member, chooses a doctor and a time, and is then refused has spent
-                        the patient's turn at the counter on a booking that could never have completed — and
-                        the server does refuse it (422 urn:hbmp:member-not-active), so the only question is
-                        how early they are told. */}
-                    {h.bookable === false ? (
-                      <span className="row-actions">
-                        <span className="muted">{t(S.notBookable)}</span>
-                      </span>
-                    ) : (
-                      <Button variant="secondary" size="sm" onClick={() => setPatient(h)}>
-                        {t(S.choose)}
-                      </Button>
-                    )}
-                  </li>
-                ))}
+                <HitRow hit={hits[0]} t={t} onChoose={setPatient} />
               </ul>
+            )}
+            {hits && hits.length > 1 && (
+              <Modal
+                open={picking}
+                onOpenChange={setPicking}
+                title={t(S.matchesTitle)}
+                description={`${hits.length} ${t(S.matchesCount)} — ${t(S.matchesSub)}`}
+                footer={<Button variant="secondary" onClick={() => setPicking(false)}>{t(S.cancelPick)}</Button>}
+              >
+                <ul className="book-hits book-hits--picker">
+                  {hits.map((h) => (
+                    <HitRow
+                      key={h.id}
+                      hit={h}
+                      t={t}
+                      onChoose={(picked) => { setPatient(picked); setPicking(false); }}
+                    />
+                  ))}
+                </ul>
+              </Modal>
+            )}
+            {/* Reopening costs one click rather than re-running the search — the results are still here. */}
+            {hits && hits.length > 1 && !picking && (
+              <Button variant="secondary" size="sm" onClick={() => setPicking(true)}>
+                {`${t(S.matchesTitle)} (${hits.length})`}
+              </Button>
             )}
           </>
         )}

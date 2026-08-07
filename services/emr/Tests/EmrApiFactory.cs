@@ -47,6 +47,13 @@ public sealed class EmrApiFactory : WebApplicationFactory<Program>
     /// gate; a licence suite sets it to move the boundary around the date under test.</summary>
     public DateOnly? DoctorLicenceExpiry { get; set; }
 
+    /// <summary>
+    /// Whether master data recognises the codes a write refers to. True (the default) is the shipped
+    /// accept-everything validator; false models "masterdata does not hold this code", which is how the
+    /// fail-closed refusals are exercised — an allergen with no name is refused rather than recorded.
+    /// </summary>
+    public bool ValidateCodes { get; set; } = true;
+
     public InMemoryOutbox Outbox { get; private set; } = default!;
 
     public string Tenant { get; } = "t-api-" + Guid.NewGuid().ToString("N")[..10];
@@ -70,7 +77,8 @@ public sealed class EmrApiFactory : WebApplicationFactory<Program>
             s.AddSingleton<IMemberStatusProvider>(new FakeMemberStatus(this));
             s.RemoveAll<IClinicalCodeValidator>();
             // The shipped accept-everything validator; code validation now has its own suite in masterdata.
-            s.AddSingleton<IClinicalCodeValidator>(new AllowAllClinicalCodeValidator());
+            s.AddSingleton<IClinicalCodeValidator>(
+                ValidateCodes ? new AllowAllClinicalCodeValidator() : new RecognisesNothingValidator());
             s.RemoveAll<IPractitionerBranchDirectory>();
             s.AddSingleton<IPractitionerBranchDirectory>(new FakePractitionerBranches(this));
             s.RemoveAll<IBranchDirectory>();
@@ -90,17 +98,18 @@ public sealed class EmrApiFactory : WebApplicationFactory<Program>
     }
 
     /// <summary>Reception: books, reschedules, cancels, checks in. No clinical write.</summary>
-    public HttpClient ReceptionClient() => As(EmrTestAuth.ReceptionSub, "reception",
-        "appointment:write appointment:reserve appointment:read");
+    public HttpClient ReceptionClient(string? displayName = null) => As(EmrTestAuth.ReceptionSub, "reception",
+        "appointment:write appointment:reserve appointment:read", displayName: displayName);
 
     /// <summary>A treating doctor: opens encounters and writes the clinical record.</summary>
     public HttpClient DoctorClient() => As(EmrTestAuth.DoctorSub, "doctor",
         "emr:read emr:write encounter:write appointment:read appointment:write appointment:reserve");
 
-    public HttpClient As(string sub, string role, string scopes, Guid? branchId = null)
+    public HttpClient As(string sub, string role, string scopes, Guid? branchId = null, string? displayName = null)
     {
         var c = CreateClient();
         c.DefaultRequestHeaders.Add("X-Test-Sub", sub);
+        if (displayName is not null) c.DefaultRequestHeaders.Add("X-Test-Name", displayName);
         c.DefaultRequestHeaders.Add("X-Test-Role", role);
         c.DefaultRequestHeaders.Add("X-Test-Scope", scopes);
         c.DefaultRequestHeaders.Add("X-Test-Tenant", Tenant);
@@ -172,6 +181,9 @@ public sealed class EmrTestAuth(
             foreach (var r in role.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries))
                 claims.Add(new Claim("role", r));
         if (Request.Headers.TryGetValue("X-Test-Scope", out var scope)) claims.Add(new Claim("scope", scope.ToString()));
+        // 0022 — the `name` claim, so a test can exercise the display-name snapshot on a written note. Without
+        // it every principal here is nameless, which is exactly the shape that put a uuid on screen.
+        if (Request.Headers.TryGetValue("X-Test-Name", out var displayName)) claims.Add(new Claim("name", displayName.ToString()));
         if (Request.Headers.TryGetValue("X-Test-Tenant", out var tenant)) claims.Add(new Claim("tenant_id", tenant.ToString()));
         if (Request.Headers.ContainsKey("X-Test-Mfa")) claims.Add(new Claim("amr", "otp"));
         claims.Add(new Claim("features", ProgramFeatures.Emr));
@@ -180,4 +192,21 @@ public sealed class EmrTestAuth(
         return Task.FromResult(AuthenticateResult.Success(
             new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName)));
     }
+}
+
+/// <summary>
+/// A validator that recognises no code at all — the "masterdata does not hold this" case.
+///
+/// <para>The counterpart to <c>AllowAllClinicalCodeValidator</c>. Writes are supposed to FAIL CLOSED against
+/// an unknown code, and the accept-everything default cannot demonstrate that; without this, every refusal
+/// path in the clinical write endpoints was unreachable from a test.</para>
+/// </summary>
+internal sealed class RecognisesNothingValidator : IClinicalCodeValidator
+{
+    public Task<bool> IcdExistsAsync(string icdCode, string? bearerToken, CancellationToken ct = default) => Task.FromResult(false);
+    public Task<string?> AllergenNameAsync(Guid allergenId, string? bearerToken, CancellationToken ct = default) => Task.FromResult<string?>(null);
+    public Task<bool> DrugExistsAsync(Guid drugId, string? bearerToken, CancellationToken ct = default) => Task.FromResult(false);
+    /// <summary>LOINC is optional and accepted-and-recorded platform-wide; unchanged here so this fake
+    /// differs from the default in exactly the way it claims to.</summary>
+    public Task<bool> LoincValidAsync(string? loincCode, string? bearerToken, CancellationToken ct = default) => Task.FromResult(true);
 }

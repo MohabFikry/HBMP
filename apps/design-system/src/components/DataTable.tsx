@@ -28,6 +28,29 @@ export interface Column<Row> {
    * Pinning it means the columns that can be read at a glance are the ones that scroll.
    */
   stickyEnd?: boolean;
+  /**
+   * This column holds a number — money, a quantity, a count, a percentage.
+   *
+   * <p>Aligns the cell AND its header to the end and sets tabular figures, so the digits stack. A money
+   * column is read by scanning DOWN it, and that scan only works when `9.50` and `12,400.00` end in the same
+   * place; left-aligned they start together and finish apart, so the eye has to measure each string instead
+   * of reading a shape.</p>
+   *
+   * <p>A flag rather than a job for each `cell` renderer, because that is how it went wrong the first time:
+   * thirteen of the app's fifty-six money renders wrapped their value in `.tnum`, which sets the figure width
+   * and nothing else, on a `<span>` inside a cell still aligned to the start. The fix was applied and the
+   * column stayed ragged. Alignment belongs to the cell, and the cell belongs to the table.</p>
+   *
+   * <p>The HEADER moves with it. A right-aligned column under a left-aligned heading reads as a mistake, and
+   * on a narrow column the heading ends up nowhere near the figures it names.</p>
+   *
+   * <p><b>Not simply "contains digits".</b> A case number, an MRN, an order reference and a date are all made
+   * of numerals and none of them belongs here: they are read left-to-right like words, and pushing them to
+   * the right edge would break the alignment of the column they sit beside. Those columns want `.tnum` on the
+   * value — equal-width figures so a list of IDs scans cleanly — and nothing else. `numeric` is for a
+   * quantity you would COMPARE down the column.</p>
+   */
+  numeric?: boolean;
 }
 
 export type SortDir = "ascending" | "descending" | "none";
@@ -216,7 +239,7 @@ export function DataTable<Row>({
       `group`, not `region`: a dozen section tables on the patient profile would otherwise add a dozen
       landmarks to the page and drown the ones that mean something.
     */
-    <div className="mrs-wl-scroll" tabIndex={0} role="group" aria-label={caption}>
+    <div className="mrs-wl-scroll mrs-scroll mrs-scroll-focusable" tabIndex={0} role="group" aria-label={caption}>
       {/*
         18.D3 (U6) — an interactive worklist is a GRID, not a table.
         `aria-selected` on a <tr> inside an implicit role="table" is invalid ARIA: the attribute is simply
@@ -252,7 +275,7 @@ export function DataTable<Row>({
                 key={c.key}
                 aria-sort={c.sortable ? (isSorted ? activeDir : "none") : undefined}
                 scope="col"
-                className={cx(c.stickyEnd && "mrs-stickyend")}
+                className={cx(c.stickyEnd && "mrs-stickyend", c.numeric && "mrs-num")}
               >
                 {/* Sortable now needs only `sortable` — not `sortable && onSort`. Requiring a handler meant a
                     column marked sortable rendered as inert text whenever the caller had not wired one, so
@@ -329,7 +352,7 @@ export function DataTable<Row>({
                   <td
                     key={c.key}
                     role={interactive ? "gridcell" : undefined}
-                    className={cx(c.stickyEnd && "mrs-stickyend")}
+                    className={cx(c.stickyEnd && "mrs-stickyend", c.numeric && "mrs-num")}
                   >
                     {c.cell(row)}
                   </td>

@@ -4,6 +4,7 @@ using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Events;
 using Mersal.Identity.Api;
+using Mersal.Email;
 using Mersal.Identity.Api.Auth;
 using Mersal.Identity.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -18,7 +19,13 @@ builder.Services.AddIdentityInfrastructure(builder.Configuration);
 builder.Services.AddMersalIssuer(builder.Configuration, builder.Environment);
 // 18.B3 (S3) — named policies for the admin surface + the catalog (see IdentityAdminPolicies).
 builder.Services.AddIdentityAdminPolicies(builder.Configuration);
-builder.Services.AddIssuerRateLimits();   // 18.B3 (S9) — per-route limits on the credential endpoints
+// 18.B3 (S9) — per-route limits on the credential endpoints. Since 28.1 the partition is the CLIENT's
+// address recovered from the forwarded chain (ClientAddressResolver, registered here), because behind the
+// gateway RemoteIpAddress is the gateway and the limit was one shared bucket for the whole platform.
+builder.Services.AddIssuerRateLimits(builder.Configuration);
+// 28.5 — SMTP, so a password-reset link can actually be delivered. With no Email:Host the registered sender
+// reports IsConfigured == false and REFUSES to send, rather than logging a success nobody receives.
+builder.Services.AddHbmpEmail(builder.Configuration);
 
 // ── Data Protection: the key ring that encrypts anti-forgery tokens ───────────────────────────────────────
 // This was never configured, so ASP.NET Core fell back to an EPHEMERAL, in-process key ring. Two consequences,
@@ -188,6 +195,12 @@ app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 app.MapConnect();  // 17.2 — /connect/{authorize,token,userinfo,login,logout}
 app.MapAccount();  // 17.3 — /connect/{2fa,enroll-2fa} login UI + TOTP 2FA + recovery codes
+// 28.3 — /connect/session/* : the first-party sign-in API the SPA drives (ADR-0036 §5). It sets the SAME
+// cookie MapAccount's forms do and mints nothing; the token still comes from the unchanged PKCE flow.
+app.MapSessionApi();
+// 28.6 — /connect/password/{forgot,reset}. Self-service reset (ADR-0036 §6). Refuses with 503 rather than
+// reporting a send when no email transport is configured.
+app.MapPasswordReset();
 app.MapAdmin();    // 17.4 — /identity/admin/* user+role+scope admin (bearer admin scope + MFA, audited)
 app.MapSessions(); // 21.5 — /identity/me/sessions + /identity/admin/users/{id}/sessions|login-history
 app.MapAccessReview(); // 21.5 — /identity/admin/access-review/{tenant} (JSON + CSV, audited as an export)
@@ -237,11 +250,38 @@ cat.MapGet("/user-labels", async (string? subjectIds, HttpContext http, Identity
         .Where(g => g is not null).Select(g => g!.Value).Distinct().Take(200).ToList();
     if (ids.Count == 0) return Results.Ok(Array.Empty<object>());
 
-    var rows = await db.Users.AsNoTracking()
+    // ---- what an "actor id" actually IS -------------------------------------------------------------------
+    //
+    // Two kinds, and this endpoint has to answer for both.
+    //
+    // Records written before 21.5 stamped the USER id. Since 21.5 the platform stamps `created_by`/`updated_by`
+    // from the ACTIVE MEMBERSHIP (`TenantOwned`, design 40 §6) — deliberately, because the same person may act
+    // in two organisations and "u-1234 changed this" cannot say which hat they were wearing.
+    //
+    // This endpoint was written against the first shape and never taught the second, so from the day 21.5
+    // landed every newly-written actor id stopped resolving. It failed SILENTLY: the caller degrades an
+    // unresolved id to "Unknown user", so a timeline showed real names for its old steps and "Unknown user"
+    // for everything recent — which reads as data rot rather than as a lookup that no longer matches.
+    //
+    // Both are answered, keyed by the id the caller ASKED about, so no caller has to know which kind it holds.
+    // Still tenant-scoped, still display names only.
+    var byUser = await db.Users.AsNoTracking()
         .Where(u => ids.Contains(u.Id) && u.TenantId == tenant)
         .Select(u => new { subjectId = u.Id, displayName = u.DisplayName ?? u.UserName })
         .ToListAsync(ct);
-    return Results.Ok(rows);
+
+    var byMembership = await db.Memberships.AsNoTracking()
+        .Where(m => ids.Contains(m.MembershipId) && m.TenantId == tenant)
+        .Join(db.Users.AsNoTracking(), m => m.UserId, u => u.Id, (m, u) => new
+        {
+            subjectId = m.MembershipId,
+            displayName = u.DisplayName ?? u.UserName,
+        })
+        .ToListAsync(ct);
+
+    // A membership id and a user id cannot collide (both are v4 GUIDs from different tables), so the union
+    // needs no precedence rule — but it is de-duplicated anyway rather than trusting that.
+    return Results.Ok(byUser.Concat(byMembership).DistinctBy(r => r.subjectId).ToList());
 });
 
 // The scope union a user with these roles would receive — the exact seam the 17.2 issuer uses for the

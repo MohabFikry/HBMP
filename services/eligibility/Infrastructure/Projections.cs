@@ -41,6 +41,18 @@ public sealed class CoverageProjection
     /// waiting period is told Eligible.</summary>
     public DateOnly? WaitingPeriodEndsOn { get; set; }
 
+    /// <summary>19.2b — the plan version this coverage was written under, for cost-share pricing.
+    /// NULL means the version is unknown, and cost share must then be reported as indeterminate rather than
+    /// priced at zero: a zero reads as "free" to the person being told.
+    /// <para>PROVENANCE, and the fallback. The version actually priced against is the one in force on the
+    /// SERVICE DATE — see <see cref="PlanId"/>.</para></summary>
+    public Guid? PlanVersionId { get; set; }
+
+    /// <summary>The plan this coverage belongs to, so the version in force on the service date can be
+    /// resolved. Without it, a quote is pinned to the terms in force the day the member enrolled and no
+    /// amendment can ever reach them.</summary>
+    public Guid? PlanId { get; set; }
+
     public string LimitsJson { get; set; } = "[]";         // List<LimitStateDto>
     public DateTimeOffset UpdatedAt { get; set; }
 }

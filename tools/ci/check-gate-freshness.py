@@ -47,6 +47,11 @@ REQUIRED_GATES = [
     # reports coverage.
     "openapi-generate",
     "openapi-drift",
+    # 28.2 — one origin for the app, the API and the issuer. Listed here for the same reason openapi-drift is:
+    # what it guards fails SILENTLY. A cross-origin login has its SameSite=Strict session cookie dropped by
+    # the browser, so the sign-in reports success and the next authorize reports login_required — the user is
+    # told their password is wrong. If this gate stopped running, nothing else would notice.
+    "login-origin",
 ]
 
 

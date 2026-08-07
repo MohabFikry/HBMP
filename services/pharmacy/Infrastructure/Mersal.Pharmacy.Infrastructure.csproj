@@ -2,6 +2,7 @@
   <PropertyGroup><RootNamespace>Mersal.Pharmacy.Infrastructure</RootNamespace></PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Pharmacy.Domain.csproj" />
+    <ProjectReference Include="../../../libs/clinical-validation/Mersal.ClinicalValidation.csproj" />
     <ProjectReference Include="../../../libs/time/Mersal.Time.csproj" />
     <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
     <ProjectReference Include="../../../libs/data/Mersal.Data.csproj" />
@@ -13,4 +14,7 @@
     <PackageReference Include="EFCore.NamingConventions" />
   </ItemGroup>
   <ItemGroup><None Update="Migrations/*.sql" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\libs\beneficiary-lookup\Mersal.BeneficiaryLookup.csproj" />
+  </ItemGroup>
 </Project>

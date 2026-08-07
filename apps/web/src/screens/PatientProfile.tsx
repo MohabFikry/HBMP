@@ -76,6 +76,8 @@ const STR = {
   branch: { en: "Branch", ar: "الفرع" },
   nationality: { en: "Nationality", ar: "الجنسية" },
   years: { en: "{n} yrs", ar: "{n} سنة" },
+  bloodGroup: { en: "Blood group", ar: "فصيلة الدم" },
+  bloodGroupUnknown: { en: "Blood group not recorded", ar: "فصيلة الدم غير مسجّلة" },
   ageApprox: { en: "approx.", ar: "تقريبي" },
   language: { en: "Preferred language", ar: "اللغة المفضلة" },
   phone: { en: "Phone", ar: "الهاتف" },
@@ -556,6 +558,7 @@ export function ProfileIdentity({
   onOpen,
   chips,
   actions,
+  bloodGroup,
 }: {
   data: ProfileHeader;
   onOpen?: () => void;
@@ -563,6 +566,18 @@ export function ProfileIdentity({
   chips?: ReactNode;
   /** Trailing controls, pinned to the end of the block. */
   actions?: ReactNode;
+  /**
+   * ABO + Rh, from the ALERTS section rather than from `data`.
+   *
+   * It is not on `ProfileHeader` because it is not administrative: the header comes from patient-service,
+   * which reception, the call centre and finance all read, and blood group is clinical data that arrives
+   * from emr behind the treating gate. Passed in as a prop so the field crosses into this block without the
+   * contract implying it was ever part of the demographic record.
+   *
+   * `undefined` = the caller does not supply it (a worklist strip); `null` = supplied and NOT RECORDED,
+   * which is rendered explicitly. The two are different and the middle one is the dangerous one.
+   */
+  bloodGroup?: string | null;
 }) {
   const { lang } = useTheme();
   const t = useLoc();
@@ -575,9 +590,21 @@ export function ProfileIdentity({
     ? t(STR.years).replace("{n}", String(age)) + (data.birthDateIsApproximate ? ` (${t(STR.ageApprox)})` : "")
     : data.ageBand ?? null;
 
-  const facts: { key: string; icon: IconName; label: Localized; value: string }[] = [];
+  const facts: { key: string; icon: IconName; label: Localized; value: string; unknown?: boolean }[] = [];
   if (ageText) facts.push({ key: "age", icon: "calendar", label: STR.age, value: ageText });
   if (data.sex) facts.push({ key: "sex", icon: "sex", label: STR.sex, value: data.sex });
+  // Blood group sits with the other identity facts because that is where a clinician looks for it, and it
+  // is rendered EVEN WHEN UNRECORDED — as "—", muted, with the state spelled out for a screen reader.
+  //
+  // Omitting the unknown case would have been tidier and is the wrong call: a strip showing six facts and
+  // silently dropping the seventh invites a reader to assume the seventh was never relevant. Blood group is
+  // one of the few facts whose ABSENCE a clinician has to act on, so absence gets a slot of its own.
+  if (bloodGroup !== undefined) {
+    facts.push({
+      key: "blood", icon: "droplet", label: STR.bloodGroup,
+      value: bloodGroup ?? "—", unknown: !bloodGroup,
+    });
+  }
   if (data.nationalityCode) {
     facts.push({ key: "nat", icon: "globe", label: STR.nationality, value: data.nationalityCode });
   }
@@ -632,12 +659,25 @@ export function ProfileIdentity({
       {facts.length > 0 && (
         <ul className="profile-idfacts">
           {facts.map((f) => (
-            <li key={f.key} title={`${t(f.label)}: ${f.value}`}>
+            <li
+              key={f.key}
+              className={f.unknown ? "profile-idfact--unknown" : undefined}
+              title={`${t(f.label)}: ${f.value}`}
+            >
               <Icon name={f.icon} width={16} height={16} aria-hidden="true" />
               {/* The icon is decorative, so the FACT still needs naming for a screen reader — otherwise the
                   strip reads as a bare list of values with nothing saying what any of them is. */}
               <span className="sr-only">{t(f.label)}: </span>
-              <span>{f.value}</span>
+              {/* An em dash is not readable aloud as "not recorded", so the unknown case says so in words
+                  and hides the dash — the dash is the SIGHTED shorthand for the same sentence. */}
+              {f.unknown ? (
+                <>
+                  <span className="sr-only">{t(STR.bloodGroupUnknown)}</span>
+                  <span aria-hidden="true">{f.value}</span>
+                </>
+              ) : (
+                <span>{f.value}</span>
+              )}
             </li>
           ))}
         </ul>
@@ -934,6 +974,8 @@ export function PatientContextBar({
   beneficiaryId,
   namedAllergens = false,
   actions,
+  showBloodGroup = false,
+  reloadKey = 0,
 }: {
   beneficiaryId: string;
   /**
@@ -947,6 +989,23 @@ export function PatientContextBar({
   namedAllergens?: boolean;
   /** Trailing controls, pinned to the end of the strip (the encounter workspace's patient-file entry). */
   actions?: ReactNode;
+  /**
+   * Show blood group among the identity facts, including when it is not recorded.
+   *
+   * Opt-in for the same reason `namedAllergens` is. On a worklist or an approval queue it is one more fact
+   * to skim past; in a room with the patient it is one a clinician may have to act on, and its ABSENCE is
+   * the case worth showing rather than hiding.
+   */
+  showBloodGroup?: boolean;
+  /**
+   * Change this to force a re-read.
+   *
+   * The strip caches its profile call keyed on the beneficiary, which is right — it renders on every
+   * clinical screen and must not re-fetch on every render. But a screen that WRITES the facts the strip
+   * displays (the encounter records allergies and blood group) then leaves it showing the pre-write picture
+   * of the exact thing that was just corrected. A nonce is how that screen says "this is now stale".
+   */
+  reloadKey?: number;
 }) {
   const api = useApi();
   const t = useLoc();
@@ -955,7 +1014,7 @@ export function PatientContextBar({
   const openProfile = useOpenProfile();
   const state = useAsync(
     useCallback(() => api.patientProfile(beneficiaryId, ["header", "alerts"]), [api, beneficiaryId]),
-    [beneficiaryId],
+    [beneficiaryId, reloadKey],
   );
 
   // The bar renders nothing until it has an answer, and nothing if the header was withheld. A context bar
@@ -983,6 +1042,9 @@ export function PatientContextBar({
         data={data}
         onOpen={() => openProfile(beneficiaryId)}
         actions={actions}
+        // `?? null` matters: when the alerts section is withheld or failed, `alertData` is null and the
+        // strip must still show "not recorded" rather than dropping the fact — `undefined` would drop it.
+        bloodGroup={showBloodGroup ? alertData?.bloodGroup ?? null : undefined}
         chips={
           <>
             {named.map((a) => (

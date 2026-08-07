@@ -93,13 +93,27 @@ public sealed record AlertsSection(
     IReadOnlyList<AllergyAlert> Allergies,
     IReadOnlyList<FlagAlert>? CriticalFlags,
     IReadOnlyList<FlagAlert>? InteractionWarnings,
-    IReadOnlyList<FlagAlert>? OperationalFlags)
+    IReadOnlyList<FlagAlert>? OperationalFlags,
+    /// <summary>
+    /// ABO + Rh, or null when nobody has recorded one (emr migration 0021).
+    ///
+    /// <para>It rides in the ALERTS section rather than the header because of where it comes from and who
+    /// may see it. The header is assembled from patient-service's administrative record, which reception,
+    /// the call centre and finance all read; blood group is clinical and comes from emr behind the same gate
+    /// as the allergy list — the very call that fills this section. Putting it in the header would have
+    /// meant either a second gated fetch on the platform's most-loaded strip, or moving PHI into the
+    /// administrative record to avoid one.</para>
+    /// </summary>
+    string? BloodGroup = null)
 {
     /// <summary><c>allergy</c> — labs and pharmacies get the allergy list and nothing else: contrast reactions
-    /// and drug-allergy checking are their job; a no-show flag or an eligibility warning is not.</summary>
+    /// and drug-allergy checking are their job; a no-show flag or an eligibility warning is not.
+    ///
+    /// <para>Blood group survives this projection. A lab is precisely the caller that has a use for it, and
+    /// it is the same category of fact as the allergy list this variant exists to pass through.</para></summary>
     public AlertsSection Project(string? variant) => variant switch
     {
-        ProfileVariants.Allergy => new(Allergies, null, null, null),
+        ProfileVariants.Allergy => new(Allergies, null, null, null, BloodGroup),
         _ => this,
     };
 }

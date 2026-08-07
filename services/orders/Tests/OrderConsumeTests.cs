@@ -23,6 +23,47 @@ public class OrderConsumeTests
     };
 
     [Fact]
+    public void An_expired_order_cannot_be_fulfilled()
+    {
+        var l1 = Line(1);
+        var order = Order(OrderStatus.Active, l1);
+        var now = DateTimeOffset.UtcNow;
+        order.ExpiresAt = now.AddDays(-1);
+
+        // This rule DID NOT EXIST. `expires_at` was in the schema from migration 0001, the index on it too,
+        // and nothing here ever compared it — so once orders began carrying an expiry, one could lapse and
+        // still be fulfilled, and the whole mechanism was decoration.
+        OrderConsume.Validate(order, [new ConsumeLineRequest(l1.OrderLineId, 1)], now)
+            .Should().Be(ConsumeError.OrderExpired);
+    }
+
+    [Fact]
+    public void Expiry_is_judged_by_the_clock_not_by_the_status()
+    {
+        var l1 = Line(1);
+        // Status still ACTIVE — the hourly sweeper has not reached it yet. That gap is up to an hour a day
+        // in which a status-only test would let expired orders through.
+        var order = Order(OrderStatus.Active, l1);
+        var now = DateTimeOffset.UtcNow;
+        order.ExpiresAt = now.AddMinutes(-5);
+
+        OrderConsume.Validate(order, [new ConsumeLineRequest(l1.OrderLineId, 1)], now)
+            .Should().Be(ConsumeError.OrderExpired);
+    }
+
+    [Fact]
+    public void An_order_still_inside_its_window_is_unaffected()
+    {
+        var l1 = Line(1);
+        var order = Order(OrderStatus.Active, l1);
+        var now = DateTimeOffset.UtcNow;
+        order.ExpiresAt = now.AddDays(3);
+
+        OrderConsume.Validate(order, [new ConsumeLineRequest(l1.OrderLineId, 1)], now)
+            .Should().Be(ConsumeError.None);
+    }
+
+    [Fact]
     public void Partial_consume_leaves_remainder_active_and_order_partially_used()
     {
         var l1 = Line(1); var l2 = Line(1);

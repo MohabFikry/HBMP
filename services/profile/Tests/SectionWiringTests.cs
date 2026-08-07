@@ -36,7 +36,10 @@ public class SectionWiringTests
         ("policy", @"^/api/v1/beneficiaries/[^/]+/administrative-360$", "services/policy/Api/CoverageDetailEndpoints.cs", "administrative-360"),
         ("policy", @"^/api/v1/enrollments/[^/?]+/coverage-details$", "services/policy/Api/CoverageDetailEndpoints.cs", "coverage-details"),
         ("policy", @"^/api/v1/enrollments/[^/?]+/timeline", "services/policy/Api/TimelineEndpoints.cs", "/timeline"),
-        ("emr", @"^/api/v1/beneficiaries/[^/]+/allergies$", "services/emr/Api/ClinicalRecords.cs", "/allergies"),
+        // Blood group + allergies in ONE gated read, so the alerts section costs one PHI-read audit event
+        // rather than two. `/allergies` still exists and is still served — pharmacy-service calls it for
+        // prescribe-time screening, where the allergy list is all that is wanted.
+        ("emr", @"^/api/v1/beneficiaries/[^/]+/clinical-record$", "services/emr/Api/ClinicalRecords.cs", "clinical-record"),
         ("emr", @"^/api/v1/beneficiaries/[^/]+/profile-context$", "services/emr/Api/ProfileContext.cs", "profile-context"),
         ("orders", @"^/api/v1/investigation-orders/for-beneficiary/[^/?]+", "services/orders/Api/ProfileInvestigations.cs", "investigation-orders/for-beneficiary"),
         ("pharmacy", @"^/api/v1/prescriptions/for-beneficiary/[^/?]+", "services/pharmacy/Api/ProfileSections.cs", "prescriptions/for-beneficiary"),

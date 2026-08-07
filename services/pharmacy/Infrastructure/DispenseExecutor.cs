@@ -39,6 +39,7 @@ public sealed class DispenseExecutor(PharmacyDbContext db)
     public async Task<DispenseResult> DispenseAsync(
         Guid prescriptionId, Guid lineId, string idempotencyKey, Guid dispensingPharmacyId, Guid actorId,
         decimal quantity, string batchNo, DateOnly expiryDate, Guid? substitutedDrugId, string? substitutionReason,
+        string? note,
         DateTimeOffset now,
         Func<Prescription, DispenseEvent, CancellationToken, Task>? insideTransaction = null,
         CancellationToken ct = default)
@@ -71,6 +72,7 @@ public sealed class DispenseExecutor(PharmacyDbContext db)
             Quantity = quantity, IdempotencyKey = idempotencyKey, RequestHash = requestHash,
             BatchNo = batchNo, ExpiryDate = expiryDate,
             SubstitutedDrugId = substitutedDrugId, SubstitutionReason = substitutionReason,
+            Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim(),
             DispensedAt = now, DispensedBy = actorId,
         };
         db.DispenseEvents.Add(evt);

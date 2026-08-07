@@ -14,6 +14,9 @@ namespace Mersal.Identity.Api.Auth;
 /// </summary>
 public static class IssuerSetup
 {
+    /// <summary>The named token provider the password-reset link is signed with (28.6).</summary>
+    public const string PasswordResetTokenProvider = "MersalPasswordReset";
+
     public static IServiceCollection AddMersalIssuer(
         this IServiceCollection services, IConfiguration config, IWebHostEnvironment env)
     {
@@ -21,7 +24,24 @@ public static class IssuerSetup
         // AddIdentityInfrastructure; re-acquire the builder to add the sign-in + TOTP/recovery providers.
         new IdentityBuilder(typeof(ApplicationUser), typeof(ApplicationRole), services)
             .AddSignInManager()
-            .AddDefaultTokenProviders();
+            .AddDefaultTokenProviders()
+            // 28.6 — a password-reset token with its OWN lifespan (ADR-0036 §6.1).
+            //
+            // A NAMED provider, not a lowering of DataProtectionTokenProviderOptions.TokenLifespan. That
+            // setting is GLOBAL: shortening the reset window to 30 minutes through it would silently shorten
+            // email confirmation, change-email and every other data-protection token to 30 minutes as a side
+            // effect — a change nobody made, in features nobody was looking at.
+            .AddTokenProvider<DataProtectorTokenProvider<ApplicationUser>>(PasswordResetTokenProvider);
+
+        // 30 minutes. Long enough to walk to a phone and read an inbox, short enough that a link forwarded,
+        // logged by a mail gateway, or left in a browser history is dead by the time anybody finds it.
+        services.Configure<DataProtectionTokenProviderOptions>(
+            PasswordResetTokenProvider, o => o.TokenLifespan = TimeSpan.FromMinutes(30));
+
+        // Point the RESET flow at it. Without this line the named provider exists and nothing uses it —
+        // `GeneratePasswordResetTokenAsync` would keep issuing a default-lifespan token and the 30 minutes
+        // above would be a number in a config file with no effect anywhere.
+        services.Configure<IdentityOptions>(o => o.Tokens.PasswordResetTokenProvider = PasswordResetTokenProvider);
 
         // The four Identity cookies SignInManager expects (application is the primary; the two-factor +
         // external cookies are used by the 17.3 login flow).
@@ -64,6 +84,12 @@ public static class IssuerSetup
             o.Cookie.SecurePolicy = env.IsDevelopment() ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
             o.Cookie.SameSite = SameSiteMode.Strict;
             o.FormFieldName = "__hbmp_csrf";
+            // 28.3 — a HEADER name as well as a form field. The server-rendered pages post a form and use the
+            // field; the SPA posts JSON and has no form to put a hidden input in. Without this the API could
+            // not present a token at all, and the only ways out are both bad: drop antiforgery on the JSON
+            // endpoints (the enrolment CSRF in AccountPages is account takeover, not an inconvenience), or
+            // make the SPA send form-encoded bodies to keep a defence working by accident.
+            o.HeaderName = "X-HBMP-CSRF";
         });
 
         services.AddScoped<TokenPrincipalFactory>();
@@ -120,6 +146,10 @@ public static class IssuerSetup
 
         services.AddHostedService<ClientSeeder>();
         services.AddHostedService<UserSeeder>(); // demo staff accounts (dev-only; 17.6 cutover)
+        // Registered unconditionally, not behind the demo-seeding flag: a real deployment can provision a
+        // pharmacist with no provider just as easily as the seeder did, and the symptom — a login that works
+        // until it reaches its own portal — is equally opaque there.
+        services.AddHostedService<ProviderBindingCheck>();
         return services;
     }
 }

@@ -64,6 +64,20 @@ are audited.
 - `GET /investigation-orders/{orderId}/lines/{lineId}/result` (scope `orders:read`) — **min-necessary**: readable
   only by the ordering doctor (treating) or the approval team; anyone else is denied + audited.
 
+### What the bench sees, and what consuming issues (ADR-0034)
+
+- `GET /investigation-orders/{orderId}/pricing` (scope `orders:read`) — what the order costs and how it splits.
+  The split is **not** computed here: it comes from `eligibility/check` through `libs/benefit-pricing`, the same
+  path claims adjudicates with, so the figure a member is quoted and the figure their claim is charged cannot
+  diverge. Catalogue prices come from `masterdata /examination-types/prices/by-codes`, keyed on CODE because an
+  order line always carries one and only carries an `examination_type_id` if it was written after phase 14.6.
+  **Nothing is ever quoted at zero when it is unknown** — a missing price, an unresolvable tier or a plan that
+  does not price LAB/IMAGING all produce `determinate: false` plus a reason. Today that is every order: no
+  examination carries a price and no plan version prices either category.
+- Consuming a line **issues a fulfilment authorization** (approvals-service). A second, approvals-shaped copy of
+  the consume event is enqueued to `approvals.fulfilments` inside the consume transaction — its own queue, because
+  `orders.events` is point-to-point and policy-service already consumes it to move the benefit accumulator.
+
 ## Domain
 
 - `investigation_order` (`ORD-YYYY-NNNNNN`; status per 23-state-machines §2; `expires_at` validity window; xmin

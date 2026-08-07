@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Authz;
+using Mersal.Email;
 using Mersal.Identity.Domain;
 using Mersal.Identity.Infrastructure;
 using Microsoft.AspNetCore.Authentication;
@@ -138,22 +139,63 @@ public static class AdminEndpoints
             return Results.Ok(new { id, isActive = false });
         });
 
-        g.MapPost("/users/{id:guid}/reset-password", async (HttpContext http, Guid id, ResetPasswordRequest req,
-            UserManager<ApplicationUser> users, IAuditClient audit) =>
+        // ---- 28.7 — an administrator ISSUES A LINK. They no longer choose the password. ----------------------
+        //
+        // ============================================================================================================
+        // WHY THE OLD SHAPE HAD TO GO
+        // ============================================================================================================
+        // This took `{ "newPassword": "..." }`, so the administrator CHOSE and therefore KNEW the credential, and
+        // there was no moment at which only its owner did. Shipping self-service reset (28.6) while leaving that
+        // in place would answer "is a password a secret only its owner knows?" both ways at once.
+        //
+        // It also produced a password that had to be communicated somehow — by phone, by chat, on paper — and
+        // every one of those channels outlives the moment. A link that expires in 30 minutes and dies on first
+        // use does not.
+        //
+        // What an administrator keeps is the ABILITY TO START a reset for somebody who cannot start their own.
+        // What they lose is knowledge of the result. That is the whole change.
+        g.MapPost("/users/{id:guid}/reset-password", async (
+            HttpContext http, Guid id, AdminResetRequest? req,
+            UserManager<ApplicationUser> users, IEmailSender email, IConfiguration config,
+            IAuditClient audit, ILoggerFactory logs) =>
         {
             var (me, err) = await Guard(http, "admin:write");
             if (err is not null) return err;
 
             var user = await users.FindByIdAsync(id.ToString());
             if (user is null) return Results.Problem(statusCode: 404, title: "not-found");
-            var token = await users.GeneratePasswordResetTokenAsync(user);
-            var reset = await users.ResetPasswordAsync(user, token, req.NewPassword);
-            if (!reset.Succeeded)
-                return Results.Problem(statusCode: 422, title: "reset-failed", detail: string.Join("; ", reset.Errors.Select(e => e.Description)));
-            await users.UpdateSecurityStampAsync(user);
 
-            await Audit(audit, me, "identity.user", id.ToString(), AuditAction.Update, "UserPasswordReset", null);
-            return Results.Ok(new { id });
+            // Unlike the self-service endpoint, this one may be BLUNT. The caller is an authenticated
+            // administrator who already holds the user id, so "this account has no email address" tells them
+            // nothing they could not already learn and is exactly what they need in order to do something
+            // else about it. Vagueness here would be security theatre with a real cost.
+            if (!email.IsConfigured)
+                return Results.Problem(statusCode: 503, title: "email-not-configured",
+                    detail: "No email transport is configured, so a reset link cannot be delivered.");
+            if (string.IsNullOrWhiteSpace(user.Email))
+                return Results.Problem(statusCode: 422, title: "no-email-address",
+                    detail: "This account has no email address, so a reset link cannot be sent to it.");
+
+            try
+            {
+                await PasswordResetEndpoints.SendResetLinkAsync(
+                    users, email, config, user, req?.Lang, http.RequestAborted);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Told, not swallowed. An administrator who believes they have started a reset and has not is
+                // worse off than one who knows it failed — they will wait for a call that never comes.
+                logs.CreateLogger("Mersal.Identity.Api.Auth.AdminEndpoints")
+                    .LogError(ex, "Administrative password-reset link could not be sent for {UserId}.", id);
+                return Results.Problem(statusCode: 502, title: "send-failed",
+                    detail: "The reset link could not be sent. Nothing has changed on the account.");
+            }
+
+            // The ADMINISTRATOR is the actor and the user is the subject — the opposite of the self-service
+            // event, and the distinction is the point of recording it: a reset somebody else started is a
+            // different fact from one you started yourself.
+            await Audit(audit, me, "identity.user", id.ToString(), AuditAction.Update, "UserPasswordResetLinkSent", null);
+            return Results.Ok(new { id, resetLinkSent = true });
         });
 
         // ---- Role → scope matrix (data) --------------------------------------------------------------------
@@ -605,6 +647,13 @@ public static class AdminEndpoints
         public IReadOnlyList<string> Roles { get; init; } = Roles ?? [];
     }
     public sealed record SetRolesRequest(IReadOnlyList<string> Roles);
-    public sealed record ResetPasswordRequest(string NewPassword);
+    /// <summary>
+    /// 28.7 — an administrative reset carries a LANGUAGE, not a password.
+    ///
+    /// <para>`ResetPasswordRequest(string NewPassword)` is gone rather than deprecated. A record left in place
+    /// is a shape somebody re-wires later; the endpoint that took it now issues a link, and there is nothing
+    /// left for a new password to mean.</para>
+    /// </summary>
+    public sealed record AdminResetRequest(string? Lang);
     public sealed record SetRoleScopesRequest(IReadOnlyList<string> Scopes);
 }

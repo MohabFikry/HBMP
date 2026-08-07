@@ -70,6 +70,9 @@ Resources map to microservices (see [0A](0A-DESIGN-FOUNDATIONS.md)). Object-leve
 | `diagnosis` | emr | `diagnosis` |
 | `order` (lab/imaging/procedure) | orders | indication, `lab_result`/`imaging_result` |
 | `prescription` | orders | `prescription` |
+| `prescription_validation` *(26.4)* | pharmacy | `diagnosis`, `prescription` — the findings name the drugs AND the diagnoses they were checked against |
+| `prescription_line_override` *(26.4)* | pharmacy | `prescription` — the prescriber's free-text clinical reason for proceeding past a warning |
+| `masterdata_catalogue` *(26.1)* | masterdata | none — public medical reference data (ICD/CPT/LOINC/ATC/drugs/indications/interactions/allergens), tenant-free and carrying no PHI |
 | `lab_result` | orders | `lab_result` |
 | `imaging_result` | orders | `imaging_result` |
 | `approval_case` | approvals | attached clinical evidence |
@@ -97,6 +100,84 @@ Resources map to microservices (see [0A](0A-DESIGN-FOUNDATIONS.md)). Object-leve
 | `caller_verification` *(Phase 15)* | callcentre | `verified_identifiers` — **which identifier *types* were confirmed, never the values** — plus result, `failure_reason`, verifier, timestamp |
 
 ---
+
+### 2b. `masterdata:read` — the reference catalogue (26.1)
+
+Added in phase 26.1, and it **reverses a position recorded in code**: masterdata-service served its whole
+catalogue behind a bare authenticated check, and its own authorization suite argued that this was correct.
+
+The grant is deliberately **broad — every role that holds any scope**. That is not an oversight and it does
+not weaken anything: a diagnosis code means the same thing to a doctor, a pharmacist and a claims officer,
+the catalogue is tenant-free, and withholding it would break their screens while protecting nothing. Roles
+holding `profile:read` need it too — the patient profile resolves ICD codes to titles through masterdata,
+and without the scope every profile silently degrades to raw codes.
+
+What the scope buys is not restriction:
+
+- reference-data reach becomes a **stated, reviewable, revocable line in this matrix** rather than an
+  unstated consequence of holding any token at all;
+- a **service, integration or partner token must ask** for the catalogue instead of receiving it by default,
+  and the set of codes a platform carries is a fingerprint of what it treats;
+- phase 27's `approval_supervisor` has something real to be granted.
+
+There is deliberately **no `masterdata:write`**. Master data changes through admin-service's governed,
+effective-dated, audited path (8b.2), never through this service.
+
+> **Consequence worth knowing:** every service sets `Auth:ProtectedScopeRequiresMfa=true`, so scope-gating
+> the catalogue also imposes MFA on it. This is consistent rather than a regression — any session that can
+> reach `emr:read` is already MFA-backed.
+
+### 2c. `auth:request-substitution` and the authorization register (ADR-0034)
+
+Two grants land together, and the second is the one that widens a disclosure surface.
+
+**`auth:request-substitution`** — held by `lab_tech` and `imaging_tech`. It authorizes exactly one endpoint,
+`POST /authorizations/substitution-requests`, whose body names an order line, a reason, and optionally a
+proposed code. It carries **no decision authority**: the request lands `Submitted` in the approval team's
+normal queue with the normal SLA clock, and `auth:decide` is not granted here.
+
+Pharmacists are deliberately **not** granted it. They already resolve the same question at the counter
+against a real formulary — the drug's ATC-5 class — and pharmacy-service already routes an off-formulary
+request to approvals on its own. A second way to ask would be a second answer to keep in step with the first.
+
+The scope exists at all because **examinations have no equivalence set anywhere in master data**:
+`examination_type` records a category and a sensitivity, and neither says that one test may stand in for
+another. Offering a technician a list derived from the category would put "any radiology procedure" behind a
+button, which is a technician prescribing.
+
+**The authorization register** — `GET /authorizations?kind=Fulfilment` and `GET /authorizations/{id}/items`,
+both under the existing `auth:read`. This is a **widening**: the approval team could previously see only the
+requests they were asked to decide, and everything the platform authorized by rule rather than by review —
+which is almost everything — was invisible to a team accountable for what the payer pays.
+
+It is bounded three ways. The item projection carries **codes, labels, quantities and, only where the
+delivered code differs from the written one, the substituting pharmacist's reason** — no diagnosis, no note,
+no indication; the schema has no field that could carry one. The reason is the same bounded exception §3.2
+already makes for a validity-extension request: it is logistics written by a pharmacist and is the entire
+substance of what a reviewer is looking at, and routing them through the PHI-audited clinical review view to
+read one sentence would add an audited access to a patient's record for a question that is not about the
+patient. And the **default is unchanged** — `kind` defaults to `Review`, so the reviewer inbox does not fill
+with dispenses; the register is a deliberate ask on its own screen.
+
+### 2d. `policy:price-lookup` — the pricing slice, not the plan book
+
+An ACTION, not a scope: satisfied by `policy:read` **or** `eligibility:check`, and it authorizes exactly two
+routes — `GET /plans/{id}/version-at` and `GET /plan-versions/{id}/cost-share`.
+
+Both sat behind `policy:read`, which is the entire benefit product: every payer, every plan, every version
+and every rule on the platform. A pharmacist quoting at a counter does not hold it and should not — the same
+over-grant `practitioner:read` was split out of `provider:read` to avoid.
+
+**What that cost, until it was found.** The shared pricing path forwards the fulfiller's own token, so every
+quote made at a counter took a 403 — and the client could not tell that refusal apart from "this plan does
+not price pharmacy at the resolved tier", so a permission error was reported to a patient as a fact about
+their benefit. It stayed invisible because the sentence was ALSO true: no plan version had a pharmacy rule,
+so a broken route and a correct answer looked identical from outside.
+
+No new scope was minted. `eligibility:check` is already the scope for "what does this member pay for this
+category at this provider", which is precisely the question these two routes serve; a third grant naming the
+same question would be one more thing to reason about and one more place to revoke (identity 0025 made this
+argument for the pharmacist, and 0026 for the bench).
 
 ## 3. Object-level permission matrix
 

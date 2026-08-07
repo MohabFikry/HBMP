@@ -11,7 +11,7 @@ async function noViolations(el: HTMLElement) {
 describe("axe — portal shell & login (a11y gate)", () => {
   it("login screen has no serious/critical violations", async () => {
     const { container } = renderApp("/login");
-    await screen.findByRole("heading", { name: "Sign in to Mersal HBMP" });
+    await screen.findByRole("heading", { name: "Sign in" });
     await noViolations(container);
   });
 

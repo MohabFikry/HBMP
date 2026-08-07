@@ -11,6 +11,15 @@ export interface LogoProps {
   className?: string;
   /** Height in px for the lockup variant. */
   height?: number;
+  /**
+   * Render the DARK-surface lockup regardless of the active theme (28.8).
+   *
+   * The asset is chosen by theme because, until now, every surface the lockup sat on followed the theme. The
+   * login hero does not: it is a deep teal panel in BOTH themes, and the light lockup's teal wordmark sits at
+   * about 2:1 on it — the same illegibility the dark asset was created to fix, arriving from the other
+   * direction. This is a per-SURFACE choice, which is what the two assets were always really about.
+   */
+  onDark?: boolean;
 }
 
 /**
@@ -18,7 +27,7 @@ export interface LogoProps {
  * "FOUNDATION" beneath) is rendered from a scalable SVG; a text fallback ("Mersal") keeps the shell
  * from breaking if the asset fails to load. RTL/LTR both supported — the mark itself is direction-neutral.
  */
-export function Logo({ variant = "mark", wordmark, className, height = 44 }: LogoProps) {
+export function Logo({ variant = "mark", wordmark, className, height = 44, onDark }: LogoProps) {
   const { theme } = useTheme();
   if (variant === "lockup") {
     return (
@@ -32,7 +41,7 @@ export function Logo({ variant = "mark", wordmark, className, height = 44 }: Log
           * was not available: these are `<text fill="…">` inside an `<img>`, so the page cannot reach them.
           */}
         <img
-          src={theme === "dark" ? logoLockupDark : logoLockup}
+          src={onDark || theme === "dark" ? logoLockupDark : logoLockup}
           alt="Mersal Foundation"
           height={height}
           style={{ height, width: "auto", display: "block" }}

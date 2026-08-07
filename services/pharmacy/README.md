@@ -84,6 +84,19 @@ investigation results — this service exposes none, and the pharmacy policy bun
   consuming the line (accumulator untouched, quantity stays available); emits `RxLineOutOfStock` to notify the
   prescriber + beneficiary (delivered by notification-service in phase 8) and audits.
 
+### What dispensing issues (ADR-0034)
+
+A dispense **issues a fulfilment authorization** in approvals-service: a record of what was actually handed
+over, separate from the prescription. A second, approvals-shaped copy of the dispense event is enqueued to
+`approvals.fulfilments` inside the dispense transaction — its own queue, because `pharmacy.events` is
+point-to-point and policy-service already consumes it to move the benefit accumulator, and asynchronous
+because an authorization that cannot be issued must never be able to fail a dispense.
+
+The copy carries the PRESCRIBED drug as `orderedCode` and the substitute (when there is one) as
+`fulfilledCode`, in two separate fields. `prescription_line.drug_id` is never written by this path and there
+is nowhere for it to be written to: a substitution changes what the authorization records, never what the
+prescriber decided.
+
 ## Domain
 
 - `prescription` (`RX-YYYY-NNNNNN`; status per §3; xmin RowVersion) + `prescription_line` (`drug_id` →

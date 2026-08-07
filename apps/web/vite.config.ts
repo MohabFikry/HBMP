@@ -21,6 +21,23 @@ export default defineConfig(({ mode }) => ({
   // host is pinned to 127.0.0.1 to MATCH playwright.config's url. Vite's default binds localhost, which
   // resolves to ::1 first on some hosts — the server would then be up and the probe still timing out.
   preview: { port: 4173, strictPort: true, host: "127.0.0.1" },
+  // ONE ORIGIN IN DEVELOPMENT TOO (ADR-0036 §4, phase 28.2).
+  //
+  // The deployed image proxies these four prefixes to the gateway from its own nginx (apps/web/nginx.conf
+  // .template). Without the same arrangement here, `vite dev` would be the one environment where the SPA and
+  // the issuer are cross-origin — and the thing that breaks there is the SameSite=Strict session cookie,
+  // which does not fail loudly: the sign-in succeeds and the next authorize reports login_required, reading
+  // as a credential problem rather than as a missing proxy.
+  //
+  // A dev/prod split in *authentication topology* is the split most likely to be discovered in production.
+  server: {
+    proxy: {
+      "/api": { target: "http://localhost:8000", changeOrigin: false },
+      "/connect": { target: "http://localhost:8000", changeOrigin: false },
+      "/identity": { target: "http://localhost:8000", changeOrigin: false },
+      "/.well-known": { target: "http://localhost:8000", changeOrigin: false },
+    },
+  },
   test: {
     globals: true,
     environment: "jsdom",

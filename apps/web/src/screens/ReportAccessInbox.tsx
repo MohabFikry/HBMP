@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useFormat } from "../i18n/useFormat";
-import { Button, Card, DataTable, StatusChip, type Column } from "@mersal/design-system";
+import { Button, Card, DataTableView, StatusChip, useTableQuery, type Column, type TableFilterSpec } from "@mersal/design-system";
 import type { Localized, ReportAccessRequestRow } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
@@ -22,6 +22,12 @@ import { AsyncSection, PageHeader, useLoc } from "./_shared";
 const S = {
   title: { en: "Result Access Requests", ar: "طلبات الوصول إلى النتائج" },
   empty: { en: "No requests awaiting a decision.", ar: "لا توجد طلبات بانتظار القرار." },
+  noMatches: {
+    en: "No requests match. Change the search or clear the filters.",
+    ar: "لا توجد طلبات مطابقة. عدّل البحث أو أزل عوامل التصفية.",
+  },
+  search: { en: "Search", ar: "بحث" },
+  searchHint: { en: "Requester, member, purpose or reason", ar: "مقدّم الطلب أو المستفيد أو الغرض أو المبرر" },
   requester: { en: "Requested by", ar: "مقدّم الطلب" },
   member: { en: "Member", ar: "المستفيد" },
   purpose: { en: "Purpose", ar: "الغرض" },
@@ -77,13 +83,24 @@ export function ReportAccessInbox() {
   }
 
   const cols: Column<ReportAccessRequestRow>[] = [
-    { key: "requester", header: t(S.requester), cell: (r) => <span>{r.requestedBy}{r.requestedForRole ? ` · ${r.requestedForRole}` : ""}</span> },
-    { key: "member", header: t(S.member), cell: (r) => <span className="tnum">{r.beneficiaryToken}</span> },
-    { key: "purpose", header: t(S.purpose), cell: (r) => <StatusChip kind="info" label={r.purposeCode} /> },
+    { key: "requester", header: t(S.requester), cell: (r) => <span>{r.requestedBy}{r.requestedForRole ? ` · ${r.requestedForRole}` : ""}</span>,
+      sortable: true, sortValue: (r) => r.requestedBy },
+    { key: "member", header: t(S.member), cell: (r) => <span className="tnum">{r.beneficiaryToken}</span>,
+      sortable: true, sortValue: (r) => r.beneficiaryToken },
+    { key: "purpose", header: t(S.purpose), cell: (r) => <StatusChip kind="info" label={r.purposeCode} />,
+      sortable: true, sortValue: (r) => r.purposeCode },
+    // Free prose, and the one column nobody orders a queue by.
     { key: "justification", header: t(S.justification), cell: (r) => <span>{r.justification}</span> },
-    { key: "ttl", header: t(S.ttl), cell: (r) => <span className="tnum">{r.requestedTtlHours ? `${r.requestedTtlHours} ${t(S.hours)}` : "—"}</span> },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "raised", header: t(S.raised), cell: (r) => <span className="tnum">{fmt.dateTime(r.createdAt)}</span> },
+    // A DURATION — a quantity compared down the column, so it right-aligns with tabular figures. The unit
+    // rides in the cell because "6" alone under "Requested for" is not an answer.
+    { key: "ttl", header: t(S.ttl), cell: (r) => (r.requestedTtlHours ? `${r.requestedTtlHours} ${t(S.hours)}` : "—"),
+      numeric: true, sortable: true, sortValue: (r) => r.requestedTtlHours ?? 0 },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />,
+      sortable: true, sortValue: (r) => r.status.label.en },
+    // Sorts on the ISO instant, not the rendered stamp — `fmt.dateTime` renders Arabic-Indic digits under the
+    // Arabic locale, and sorting those orders the queue by glyph.
+    { key: "raised", header: t(S.raised), cell: (r) => <span className="tnum">{fmt.dateTime(r.createdAt)}</span>,
+      sortable: true, sortValue: (r) => r.createdAt },
     {
       key: "actions",
       header: t(S.actions),
@@ -106,6 +123,73 @@ export function ReportAccessInbox() {
     },
   ];
 
+  /**
+   * Both groups are derived from the ROWS rather than declared.
+   *
+   * `purposeCode` is an open vocabulary the server owns — a hardcoded option list would show chips for
+   * purposes nobody has requested and silently hide the one that arrived last week. Status is closed in
+   * principle but has exactly two live values here (the inbox is pending-only), and deriving it keeps the two
+   * groups honest in the same way. Both match on the stable half of the pair: the raw code, and the English
+   * label — matching the localized one would break the filter the moment the portal is switched to Arabic.
+   */
+  // Memoized because the filter groups are DERIVED from it: `state.data ?? []` is a fresh empty array on every
+  // render while the request is in flight, which would rebuild the options — and with them the chip counts —
+  // on each one.
+  const rows = useMemo(() => state.data ?? [], [state.data]);
+  const filters: TableFilterSpec<ReportAccessRequestRow>[] = useMemo(() => {
+    const distinct = (pick: (r: ReportAccessRequestRow) => string): string[] =>
+      [...new Set(rows.map(pick).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    const purposes = distinct((r) => r.purposeCode);
+    const statuses = distinct((r) => r.status.label.en);
+    const groups: TableFilterSpec<ReportAccessRequestRow>[] = [];
+    // A group with one option filters nothing — every row already matches it — so it is chrome that costs a
+    // click to discover. It appears once the queue actually holds two kinds.
+    if (purposes.length > 1) {
+      groups.push({
+        key: "purpose",
+        label: t(S.purpose),
+        options: purposes.map((p) => ({ value: p, label: p })),
+        match: (r, value) => r.purposeCode === value,
+      });
+    }
+    if (statuses.length > 1) {
+      groups.push({
+        key: "status",
+        label: t(S.status),
+        options: statuses.map((s) => ({
+          value: s,
+          // The row already carries the localized label beside the English one; re-deriving it from the first
+          // matching row is what keeps an Arabic portal from showing an English chip.
+          label: t(rows.find((r) => r.status.label.en === s)!.status.label),
+        })),
+        match: (r, value) => r.status.label.en === value,
+      });
+    }
+    return groups;
+  }, [rows, t]);
+
+  const query = useTableQuery<ReportAccessRequestRow>({
+    rows,
+    columns: cols,
+    // Everything an approver would type: who asked, the token off the request, the purpose code, and the
+    // words of the justification itself — which is the field they are actually weighing.
+    searchText: (r) => [
+      r.requestedBy, r.requestedForRole, r.beneficiaryToken, r.purposeCode, r.justification,
+      r.status.label.en, r.status.label.ar,
+    ].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.searchHint),
+    filters,
+    // Smaller than the usual 10: every row carries a reason field and three decision buttons, so ten of them
+    // is a page nobody can see the end of.
+    pageSize: 8,
+    // Oldest first. This is a queue with an expiry on it — a request that sits undecided until it lapses is
+    // the failure mode this screen exists to prevent, so the one closest to lapsing is the one on top.
+    initialSortKey: "raised",
+    initialSortDir: "ascending",
+    persistKey: "doctor-result-access",
+  });
+
   return (
     <>
       <PageHeader title={t(S.title)} />
@@ -116,7 +200,16 @@ export function ReportAccessInbox() {
           {error ?? ""}
         </p>
         <AsyncSection<ReportAccessRequestRow[]> state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.empty}>
-          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => r.requestId} caption={t(S.title)} />}
+          {() => (
+            <DataTableView
+              query={query}
+              columns={cols}
+              rowKey={(r) => r.requestId}
+              caption={t(S.title)}
+              emptyLabel={t(S.empty)}
+              noMatchesLabel={t(S.noMatches)}
+            />
+          )}
         </AsyncSection>
       </Card>
     </>

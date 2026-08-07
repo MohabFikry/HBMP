@@ -34,9 +34,20 @@ public static class IdentityContract
     public static readonly IReadOnlyList<string> Scopes =
     [
         "admin:read", "admin:write", "admin:break-glass",
+        // 26.1 — the reference catalogue (ICD/CPT/LOINC/ATC/drugs/indications/interactions/allergens).
+        // Granted broadly and on purpose: a diagnosis code means the same thing to every clinical role, so
+        // this restricts nobody. It exists so reference-data reach is a stated line in the role matrix that
+        // can be withdrawn, and so a service or integration token has to ask for the catalogue rather than
+        // receive it by virtue of holding any token at all. There is no masterdata:write — master data
+        // changes through admin-service's governed, effective-dated path (8b.2).
+        "masterdata:read",
         "orders:read", "orders:consume", "orders:write",
         "pharmacy:read", "pharmacy:dispense",
         "auth:read", "auth:review", "auth:decide", "auth:emergency", "auth:override", "auth:manual", "auth:ingest",
+        // ADR-0035 §5 — author the engine's routing/SLA rules. Separate from auth:decide on purpose.
+        "auth:configure",
+        "auth:request-extension",   // fulfillers ask for an expired prescription / order to be revalidated
+        "auth:request-substitution",// a technician asks whether another examination may stand in for the one ordered
         "reception:search",
         "emr:read", "emr:write", "encounter:write",
         "rx:write", "patient:read", "patient:write", "eligibility:check",

@@ -1221,7 +1221,7 @@ function FamilyModal({
       {view !== null && alone && <InlineAlert tone="info">{t(S.familyAlone)}</InlineAlert>}
 
       {view !== null && !alone && (
-        <div className="pol-tablewrap">
+        <div className="pol-tablewrap mrs-scroll mrs-scroll-focusable" tabIndex={0}>
           <table className="pol-grid" data-testid="family-table">
             <caption className="sr-only">{t(S.familyTitle)}</caption>
             <thead>
@@ -1557,7 +1557,7 @@ function CoverageTab({ coverage }: { coverage: MemberCoverageDetail | null }) {
           {t(S.versionDrift)} ({t(S.enrolledUnder)} {coverage.enrolledUnderPlanVersionId?.slice(0, 8)})
         </InlineAlert>
       )}
-      <div className="pol-tablewrap">
+      <div className="pol-tablewrap mrs-scroll mrs-scroll-focusable" tabIndex={0}>
         <table className="pol-grid">
           <caption className="sr-only">{t(S.tabCoverage)}</caption>
           <thead>
@@ -1616,7 +1616,7 @@ function CostShareGrid({ category }: { category: CategoryCoverageDetail }) {
   return (
     <div>
       {category.limitDiffersFromPlan && <InlineAlert tone="info">{t(S.limitDiffers)}</InlineAlert>}
-      <div className="pol-tablewrap">
+      <div className="pol-tablewrap mrs-scroll mrs-scroll-focusable" tabIndex={0}>
         <table className="pol-costshare">
           <caption>
             {t(S.costShare)} — {category.benefitCategoryCode}
@@ -1924,7 +1924,7 @@ function MembershipDialog({
               <InlineAlert tone="info">
                 {t(preview.consumptionPolicy === "CarryForward" ? S.carryHint : S.resetHint)}
               </InlineAlert>
-              <div className="pol-tablewrap">
+              <div className="pol-tablewrap mrs-scroll mrs-scroll-focusable" tabIndex={0}>
                 <table className="pol-costshare">
                   <caption className="sr-only">{t(S.carryPreview)}</caption>
                   <thead>
@@ -1961,7 +1961,7 @@ function MembershipDialog({
                 <div data-testid="carry-dropped">
                   <h4>{t(S.dropped)}</h4>
                   <InlineAlert tone="warn">{t(S.droppedHint)}</InlineAlert>
-                  <div className="pol-tablewrap">
+                  <div className="pol-tablewrap mrs-scroll mrs-scroll-focusable" tabIndex={0}>
                     <table className="pol-costshare">
                       <caption className="sr-only">{t(S.dropped)}</caption>
                       <thead>
@@ -2002,7 +2002,7 @@ function MembershipDialog({
       {applied && (
         <div data-testid="carry-result" aria-live="polite">
           <h4>{t(S.carryResult)}</h4>
-          <div className="pol-tablewrap">
+          <div className="pol-tablewrap mrs-scroll mrs-scroll-focusable" tabIndex={0}>
             <table className="pol-costshare">
               <caption className="sr-only">{t(S.carryResult)}</caption>
               <thead>

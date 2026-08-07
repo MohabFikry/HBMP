@@ -19,8 +19,23 @@ public sealed class HttpClinicalCodeValidator(HttpClient http, IMemoryCache cach
     public Task<bool> IcdExistsAsync(string icdCode, string? bearerToken, CancellationToken ct = default) =>
         ExistsAsync($"icd:{icdCode}", $"/api/v1/icd-codes/{Uri.EscapeDataString(icdCode)}/exists", bearerToken, ct);
 
-    public Task<bool> AllergenExistsAsync(Guid allergenId, string? bearerToken, CancellationToken ct = default) =>
-        ExistsAsync($"allergen:{allergenId}", $"/api/v1/allergens/{allergenId}/exists", bearerToken, ct);
+    /// <summary>Resolves the allergen and returns its name (null = not in master data). Same fail-closed rule
+    /// as the existence checks: a 5xx or transport error propagates, so the write is rejected rather than
+    /// persisted with an unvalidated allergen and no name.</summary>
+    public async Task<string?> AllergenNameAsync(Guid allergenId, string? bearerToken, CancellationToken ct = default)
+    {
+        var cacheKey = $"allergen-name:{allergenId}";
+        if (cache.TryGetValue<string>(cacheKey, out var cached) && cached is not null) return cached;
+
+        using var req = Authorized(HttpMethod.Get, $"/api/v1/allergens/{allergenId}", bearerToken);
+        using var resp = await http.SendAsync(req, ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();   // fail closed on 5xx/transport
+        var body = await resp.Content.ReadFromJsonAsync<AllergenDto>(Json, ct);
+        var name = string.IsNullOrWhiteSpace(body?.Name) ? null : body!.Name;
+        if (name is not null) cache.Set(cacheKey, name, Ttl);   // cache only hits (immutable master data)
+        return name;
+    }
 
     public Task<bool> DrugExistsAsync(Guid drugId, string? bearerToken, CancellationToken ct = default) =>
         ExistsAsync($"drug:{drugId}", $"/api/v1/drugs/by-id/{drugId}/exists", bearerToken, ct);
@@ -32,14 +47,7 @@ public sealed class HttpClinicalCodeValidator(HttpClient http, IMemoryCache cach
     {
         if (cache.TryGetValue<bool>(cacheKey, out var cached) && cached) return true;
 
-        using var req = new HttpRequestMessage(HttpMethod.Get, path);
-        if (!string.IsNullOrWhiteSpace(bearerToken))
-        {
-            var token = bearerToken.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
-                ? bearerToken["Bearer ".Length..] : bearerToken;
-            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        }
-
+        using var req = Authorized(HttpMethod.Get, path, bearerToken);
         using var resp = await http.SendAsync(req, ct);
         if (resp.StatusCode == HttpStatusCode.NotFound) return false;
         resp.EnsureSuccessStatusCode();   // fail closed on 5xx/transport — endpoint rejects the write
@@ -49,5 +57,20 @@ public sealed class HttpClinicalCodeValidator(HttpClient http, IMemoryCache cach
         return exists;
     }
 
+    /// <summary>One request, with the caller's bearer token forwarded — masterdata applies `masterdata:read`
+    /// to the USER, not to emr-service, so a token dropped here becomes a 401 that reads like an outage.</summary>
+    private static HttpRequestMessage Authorized(HttpMethod method, string path, string? bearerToken)
+    {
+        var req = new HttpRequestMessage(method, path);
+        if (!string.IsNullOrWhiteSpace(bearerToken))
+        {
+            var token = bearerToken.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+                ? bearerToken["Bearer ".Length..] : bearerToken;
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
+        return req;
+    }
+
     private sealed record ExistsDto(bool Exists);
+    private sealed record AllergenDto(Guid AllergenId, string? Code, string? Name);
 }

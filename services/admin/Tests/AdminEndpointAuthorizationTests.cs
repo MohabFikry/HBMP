@@ -80,6 +80,27 @@ public class AdminEndpointAuthorizationTests : IClassFixture<AdminEndpointAuthor
             "nurses the mechanism exists for, and it discloses nothing they do not already hold.",
     };
 
+    /// <summary>
+    /// Admin routes that are authenticated but carry no admin scope because they are REFERENCE reads —
+    /// non-PHI operational facts that every clinical service must resolve while holding a CLINICIAN's token.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="SelfScoped"/> deliberately: those answer only about the caller, these
+    /// answer about the tenant. Both are exemptions and both need the reason written down, but conflating
+    /// them would let a future entry inherit an argument that does not apply to it.
+    /// </remarks>
+    private static readonly Dictionary<string, string> PlatformReference = new(StringComparer.Ordinal)
+    {
+        ["/api/v1/admin/validity-policy"] =
+            "How long a prescription or an investigation order stays actionable. pharmacy-service and " +
+            "orders-service must resolve this on the WRITE path, while holding the prescriber's or the " +
+            "ordering clinician's token — neither of whom has admin:read, and neither of whom could be given " +
+            "it without handing a doctor the account-administration surface. The response is four integers " +
+            "and their bounds: no patient data, no configuration beyond the numbers already printed on the " +
+            "prescription the patient is holding. The WRITE side is gated on AdminPolicies.EditValidityPolicy " +
+            "(Medical Director / Super Admin), which is where the actual authority sits.",
+    };
+
     [Fact]
     public void Every_admin_route_names_an_admin_scope_policy()
     {
@@ -87,7 +108,7 @@ public class AdminEndpointAuthorizationTests : IClassFixture<AdminEndpointAuthor
         // staff member — a lab technician, a pharmacist — reach the role-binding surface.
         var weak = _host.Endpoints()
             .Where(e => Path(e).StartsWith("/api/v1/admin", StringComparison.Ordinal))
-            .Where(e => !SelfScoped.ContainsKey(Path(e)))
+            .Where(e => !SelfScoped.ContainsKey(Path(e)) && !PlatformReference.ContainsKey(Path(e)))
             .Where(e => !e.Metadata.GetOrderedMetadata<IAuthorizeData>()
                 .Any(a => a.Policy is { } p && p.Contains("admin:", StringComparison.Ordinal)))
             .Select(Path).Distinct().ToList();

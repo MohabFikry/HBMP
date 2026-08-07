@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Encodings.Web;
+using Mersal.Approvals.Api;
 using Mersal.Approvals.Infrastructure;
 using Mersal.Authz;
 using Mersal.Events;
@@ -49,6 +50,10 @@ public sealed class ApprovalsApiFactory : WebApplicationFactory<Program>
                 .AddScheme<AuthenticationSchemeOptions, ApprovalsTestAuth>(ApprovalsTestAuth.SchemeName, _ => { });
             s.RemoveAll<IClinicalContextProvider>();
             s.AddSingleton<IClinicalContextProvider>(new NoClinicalContext());
+            // The callback into pharmacy / orders. Stubbed to succeed so decision tests exercise the DECISION
+            // path; the refusal-on-failure behaviour is proved directly in ValidityExtensionTests.
+            s.RemoveAll<IValidityExtensionApplier>();
+            s.AddSingleton(Applier);
             s.RemoveAll<IHostedService>();
         });
     }
@@ -69,6 +74,26 @@ public sealed class ApprovalsApiFactory : WebApplicationFactory<Program>
     public HttpClient DirectorClient() => As(
         ApprovalsTestAuth.DirectorSub, "medical_director",
         "auth:read auth:list auth:review auth:decide auth:emergency auth:override auth:manual");
+
+    /// <summary>A pharmacist at a bound pharmacy — may ASK for an extension and nothing else.</summary>
+    public HttpClient PharmacistClient(string? providerId = null)
+    {
+        var c = As("22222222-2222-2222-2222-222222222222", "pharmacist", "auth:request-extension");
+        c.DefaultRequestHeaders.Add("X-Test-Provider", providerId ?? "44444444-4444-4444-4444-444444444444");
+        return c;
+    }
+
+    /// <summary>A lab technician at a bound lab — may ASK about a different examination and nothing else.</summary>
+    public HttpClient TechnicianClient(string? providerId = null)
+    {
+        var c = As("55555555-5555-5555-5555-555555555555", "lab_tech", "auth:request-substitution");
+        c.DefaultRequestHeaders.Add("X-Test-Provider", providerId ?? "44444444-4444-4444-4444-444444444444");
+        return c;
+    }
+
+    /// <summary>The callback into pharmacy / orders. Succeeds by default so decision tests exercise the
+    /// DECISION path; a test that is about the callback failing substitutes its own.</summary>
+    public IValidityExtensionApplier Applier { get; init; } = new NoopValidityExtensionApplier();
 
     public HttpClient As(string sub, string role, string scopes, string? features = null)
     {
@@ -94,6 +119,7 @@ public sealed class ApprovalsApiFactory : WebApplicationFactory<Program>
             "  (SELECT authorization_id FROM approvals.authorization WHERE tenant_id = {0}); " +
             "DELETE FROM approvals.processed_request WHERE authorization_id IN " +
             "  (SELECT authorization_id FROM approvals.authorization WHERE tenant_id = {0}); " +
+            "DELETE FROM approvals.authorization_item WHERE tenant_id = {0}; " +
             "DELETE FROM approvals.authorization WHERE tenant_id = {0}; " +
             "SET session_replication_role = origin;", Tenant);
     }
@@ -131,6 +157,9 @@ public sealed class ApprovalsTestAuth(
                 claims.Add(new Claim("role", r));
         if (Request.Headers.TryGetValue("X-Test-Scope", out var scope)) claims.Add(new Claim("scope", scope.ToString()));
         if (Request.Headers.TryGetValue("X-Test-Tenant", out var tenant)) claims.Add(new Claim("tenant_id", tenant.ToString()));
+        // Provider-scoped roles (pharmacist, lab_tech, imaging_tech) carry theirs on the membership; a
+        // validity-extension request is raised on behalf of that provider, so the tests need one.
+        if (Request.Headers.TryGetValue("X-Test-Provider", out var provider)) claims.Add(new Claim("provider_id", provider.ToString()));
         if (Request.Headers.ContainsKey("X-Test-Mfa")) claims.Add(new Claim("amr", "otp"));
 
         if (Request.Headers.TryGetValue("X-Test-Features", out var features))

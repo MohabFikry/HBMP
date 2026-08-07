@@ -1,0 +1,22 @@
+{
+    "lines": [
+        {
+            "orderLineId": "382fefa7-f497-4c95-a00c-1c95b74fd0cc",
+            "codeSystem": "LOINC",
+            "code": "58410-2",
+            "description": "Complete blood count",
+            "quantityOrdered": 1.0,
+            "quantityConsumed": 0.0,
+            "unitPriceEgp": null,
+            "lineTotalEgp": null
+        }
+    ],
+    "currency": "EGP",
+    "totalEgp": null,
+    "memberShareEgp": null,
+    "payerShareEgp": null,
+    "determinate": false,
+    "reason": "At least one examination on this order has no list price, so the total cannot be stated. Quoting the priced lines alone would understate what the member owes.",
+    "tierCode": null,
+    "isCovered": null
+}

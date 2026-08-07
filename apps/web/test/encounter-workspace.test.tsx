@@ -48,6 +48,14 @@ function fakeApi(over: Partial<ApiClient> = {}): ApiClient {
     ordersMine: vi.fn().mockResolvedValue([]),
     prescriptionsMine: vi.fn().mockResolvedValue([]),
     recordVitals: vi.fn().mockResolvedValue({ encounterId: "enc-77", recorded: 1 }),
+    // MemberClinicalPanel reads the member's standing clinical facts on open, directly beneath the context
+    // strip. Empty is the honest default: nothing recorded, which the panel says in so many words.
+    memberClinicalRecord: vi.fn().mockResolvedValue({
+      beneficiaryId: "ben-9", bloodGroup: null, bloodGroupRecordedAt: null, allergies: [],
+    }),
+    allergenCatalogue: vi.fn().mockResolvedValue([]),
+    addAllergy: vi.fn(),
+    setBloodGroup: vi.fn().mockResolvedValue(undefined),
     // The history's encounters table resolves branch labels and practitioner names in the browser (emr owns
     // neither). Omitting these is an unhandled rejection inside the table, not a failure.
     branchLabels: vi.fn().mockResolvedValue(new Map()),
@@ -438,8 +446,135 @@ describe("Encounter workspace (US-031)", () => {
     expect(ordersMine).not.toHaveBeenCalled();
     expect(prescriptionsMine).not.toHaveBeenCalled();
 
-    await userEvent.setup().click(screen.getByRole("tab", { name: /orders/i }));
+    // Each of the three now fetches only its own list. Opening Prescriptions must not pull the lab and
+    // imaging worklist, and opening Labs must not pull the prescriptions.
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "Prescriptions" }));
+    await waitFor(() => expect(prescriptionsMine).toHaveBeenCalled());
+    expect(ordersMine).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("tab", { name: "Labs" }));
     await waitFor(() => expect(ordersMine).toHaveBeenCalled());
+  });
+
+  /** One prescription for ben-9, with a fully-recorded line and one written before the name snapshot. */
+  function rxRow(over: Record<string, unknown> = {}) {
+    return {
+      id: "47f2a33f-d49d-4bbf-97b1-1bb8b35287af",
+      rxNo: "RX-2026-000312",
+      beneficiary: { id: "ben-9", token: "•••4821" },
+      lineCount: 2,
+      status: { kind: "ok", label: { en: "Approved", ar: "معتمدة" } },
+      submittedAt: "2026-08-03T09:40:00Z",
+      expiresAt: undefined,
+      prescriber: { en: "Dr Karim Abdel-Latif", ar: "د. كريم عبد اللطيف" },
+      lines: [
+        {
+          id: "l1", drug: { en: "Augmentin 600mg vial", ar: "أوجمنتين 600مجم" },
+          dose: "1 g", route: "PO", frequency: "BD",
+          quantityPrescribed: 14, quantityDispensed: 0, refillsAllowed: 0,
+          status: { kind: "info", label: { en: "Active", ar: "نشطة" } },
+        },
+        {
+          id: "l2", drug: null, dose: null, route: "PO", frequency: "OD",
+          quantityPrescribed: 30, quantityDispensed: 0, refillsAllowed: 1,
+          status: { kind: "info", label: { en: "Active", ar: "نشطة" } },
+        },
+      ],
+      ...over,
+    };
+  }
+
+  it("references a prescription by its Rx number, never by the internal id", async () => {
+    const prescriptionsMine = vi.fn().mockResolvedValue([rxRow()]);
+    renderWorkspace(fakeApi({ prescriptionsMine }));
+
+    await userEvent.setup().click(await screen.findByRole("tab", { name: "Prescriptions" }));
+
+    // The uuid was printed under a heading that says "Reference", which makes it read as one. It is not:
+    // the pharmacy, the patient's paper copy and every phone call use RX-2026-000312.
+    expect(await screen.findByText("RX-2026-000312")).toBeInTheDocument();
+    expect(screen.queryByText("47f2a33f-d49d-4bbf-97b1-1bb8b35287af")).toBeNull();
+  });
+
+  it("opens the prescription as written, without a second fetch", async () => {
+    const user = userEvent.setup();
+    const prescriptionsMine = vi.fn().mockResolvedValue([rxRow()]);
+    renderWorkspace(fakeApi({ prescriptionsMine }));
+
+    await user.click(await screen.findByRole("tab", { name: "Prescriptions" }));
+    await user.click(await screen.findByRole("button", { name: "View prescription RX-2026-000312" }));
+
+    const dialog = within(await screen.findByRole("dialog"));
+    // The sig is what makes this worth opening: the table above says "2 lines", not what they were.
+    expect(dialog.getByText("Augmentin 600mg vial")).toBeInTheDocument();
+    expect(dialog.getByText("1 g")).toBeInTheDocument();
+    expect(dialog.getByText("BD")).toBeInTheDocument();
+    expect(dialog.getByText("Dr Karim Abdel-Latif")).toBeInTheDocument();
+
+    // Everything came from the row already on screen. A dialog that re-fetched would add one audited PHI
+    // read per glance to this patient's trail.
+    expect(prescriptionsMine).toHaveBeenCalledTimes(1);
+  });
+
+  it("says a medication was not recorded rather than printing the word 'Medication'", async () => {
+    const user = userEvent.setup();
+    renderWorkspace(fakeApi({ prescriptionsMine: vi.fn().mockResolvedValue([rxRow()]) }));
+
+    await user.click(await screen.findByRole("tab", { name: "Prescriptions" }));
+    await user.click(await screen.findByRole("button", { name: "View prescription RX-2026-000312" }));
+
+    const dialog = within(await screen.findByRole("dialog"));
+    // Line 2 predates the drug-name snapshot. The name of the field where its value belongs reads as data,
+    // and nobody downstream can tell it apart from one — so the gap is named as a gap.
+    expect(dialog.getByText("Medication not recorded")).toBeInTheDocument();
+    expect(dialog.queryByText(/^Medication$/)).toBeNull();
+  });
+
+  it("shows what was prescribed apart from what has been dispensed", async () => {
+    const user = userEvent.setup();
+    const rx = rxRow({
+      lines: [{
+        id: "l1", drug: { en: "Metformin 500mg", ar: "ميتفورمين" },
+        dose: "500 mg", route: "PO", frequency: "BD",
+        quantityPrescribed: 60, quantityDispensed: 30, refillsAllowed: 2,
+        status: { kind: "part", label: { en: "Partially dispensed", ar: "صُرفت جزئياً" } },
+      }],
+    });
+    renderWorkspace(fakeApi({ prescriptionsMine: vi.fn().mockResolvedValue([rx]) }));
+
+    await user.click(await screen.findByRole("tab", { name: "Prescriptions" }));
+    await user.click(await screen.findByRole("button", { name: "View prescription RX-2026-000312" }));
+
+    // 60 written, 30 handed over. Never folded into a single "30 remaining": this dialog answers what was
+    // PRESCRIBED, and a reader checking their own dose against it must see the figure they wrote.
+    const dialog = within(await screen.findByRole("dialog"));
+    const prescribed = dialog.getByText("Quantity prescribed").closest(".rxv-cell")!;
+    expect(within(prescribed as HTMLElement).getByText("60")).toBeInTheDocument();
+    const dispensed = dialog.getByText("Dispensed to date").closest(".rxv-cell")!;
+    expect(within(dispensed as HTMLElement).getByText("30")).toBeInTheDocument();
+  });
+
+  it("names each row's view button by its own prescription", async () => {
+    const user = userEvent.setup();
+    const rows = [rxRow(), rxRow({ id: "rx-b", rxNo: "RX-2026-000275" })];
+    renderWorkspace(fakeApi({ prescriptionsMine: vi.fn().mockResolvedValue(rows) }));
+
+    await user.click(await screen.findByRole("tab", { name: "Prescriptions" }));
+    // Three identically-named buttons in a column is a screen reader hearing "View prescription" three
+    // times with nothing to say which row it is on.
+    expect(await screen.findByRole("button", { name: "View prescription RX-2026-000312" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View prescription RX-2026-000275" })).toBeInTheDocument();
+  });
+
+  it("has no a11y violations with a prescription open", async () => {
+    const user = userEvent.setup();
+    const { container } = renderWorkspace(fakeApi({ prescriptionsMine: vi.fn().mockResolvedValue([rxRow()]) }));
+
+    await user.click(await screen.findByRole("tab", { name: "Prescriptions" }));
+    await user.click(await screen.findByRole("button", { name: "View prescription RX-2026-000312" }));
+    await screen.findByRole("dialog");
+    expect(await axe(container, { rules: { "color-contrast": { enabled: false } } })).toHaveNoViolations();
   });
 
   it("splits the history into encounters, investigations and prescriptions, in one fetch", async () => {
@@ -471,9 +606,10 @@ describe("Encounter workspace (US-031)", () => {
     const historyCall = patientProfile.mock.calls.find((c) => c[1]?.includes("encounters"));
     expect(historyCall?.[1]).toEqual(["encounters", "investigations", "prescriptions"]);
 
-    await user.click(screen.getByRole("tab", { name: "Investigations" }));
+    const historyTabs = within(screen.getByRole("tabpanel", { name: /history/i }));
+    await user.click(historyTabs.getByRole("tab", { name: "Investigations" }));
     expect(await screen.findByText("ORD-1")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Prescriptions" }));
+    await user.click(historyTabs.getByRole("tab", { name: "Prescriptions" }));
     expect(await screen.findByText("Amoxicillin 500mg")).toBeInTheDocument();
   });
 
@@ -481,5 +617,133 @@ describe("Encounter workspace (US-031)", () => {
     const { container } = renderWorkspace(fakeApi());
     await screen.findByRole("textbox", { name: "Subjective" });
     expect(await axe(container, { rules: { "color-contrast": { enabled: false } } })).toHaveNoViolations();
+  });
+});
+
+/**
+ * Closing a visit over work that was composed and never sent.
+ *
+ * ============================================================================================================
+ * WHY THIS IS A GATE AND NOT A NUDGE
+ * ============================================================================================================
+ * Prescribing is not required to finish a consultation — plenty of visits end without one, and the rule here
+ * is emphatically NOT "you must prescribe". But a prescription that was composed, checked, and had its
+ * warnings answered in writing, and then never sent, is not a decision not to prescribe. It is a decision that
+ * was made and lost: the doctor believes the patient is collecting medicine, the pharmacy has never heard of
+ * it, and the encounter is now signed and locked, so the record of the visit says nothing was prescribed at
+ * all. Nobody finds out until the patient does.
+ *
+ * So: send it, or discard it. Both are one click.
+ */
+describe("unsent work blocks the close", () => {
+  /** A client that can compose and check a prescription, on top of the encounter fixture. */
+  function prescribingApi() {
+    return fakeApi({
+      getEncounter: vi.fn().mockResolvedValue(encounter({
+        diagnoses: [{ id: "dx-1", system: "ICD-10", code: "J01.90", rank: "Primary",
+                      label: { en: "Acute sinusitis, unspecified", ar: "التهاب جيوب حاد" } }],
+      })),
+      searchPrescribableDrugs: vi.fn().mockResolvedValue([
+        {
+          drugId: "d-1",
+          tradeName: { en: "Augmentin 1g", ar: "أوجمنتين ١ جم" },
+          activeIngredient: "amoxicillin + clavulanic acid",
+          strength: "1g", form: "Tablet", priceEgp: 90, hasIndicationData: true,
+        },
+      ]),
+      validatePrescription: vi.fn().mockResolvedValue({
+        validationId: "v-1", overallState: "Ok", findings: [], lineStates: {},
+      }),
+      searchCpt: vi.fn().mockResolvedValue([
+        { code: "85025", description: "Blood count; complete (CBC), automated" },
+      ]),
+    });
+  }
+
+  /** Compose one prescription line in the Prescriptions tab and come back to the note. */
+  async function composePrescription(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole("tab", { name: /prescriptions/i }));
+    // BY ITS LABEL. A bare `combobox` role also matches every `<select>` on the screen — the vitals rail has
+    // several — and typing into one of those silently does nothing.
+    const box = await screen.findByRole("combobox", { name: "Medicine" });
+    await user.type(box, "augmentin");
+    await user.click((await screen.findAllByRole("option"))[0]);
+    await screen.findByText(/Augmentin/);
+    await user.click(screen.getByRole("tab", { name: /soap note/i }));
+  }
+
+  it("refuses to finalize while a composed prescription has not been sent, and names the tab", async () => {
+    const user = userEvent.setup();
+    const api = prescribingApi();
+    renderWorkspace(api);
+
+    await user.type(await screen.findByRole("textbox", { name: "Plan" }), "Amoxicillin, five days");
+    // Everything else is in order — primary diagnosis recorded, note written — so the button is live.
+    expect(screen.getByRole("button", { name: /save & finalize/i })).toBeEnabled();
+
+    await composePrescription(user);
+
+    // The composer is in a tab the doctor is no longer looking at, which is exactly why the reason has to
+    // name it rather than say "unsent work".
+    await waitFor(() => expect(screen.getByRole("button", { name: /save & finalize/i })).toBeDisabled());
+    expect(screen.getByText(/Composed but not sent: Prescriptions/)).toBeInTheDocument();
+    expect(api.signEncounterNote).not.toHaveBeenCalled();
+  });
+
+  it("lets the visit close once the composed prescription is discarded", async () => {
+    const user = userEvent.setup();
+    const api = prescribingApi();
+    renderWorkspace(api);
+
+    await user.type(await screen.findByRole("textbox", { name: "Plan" }), "Supportive care only");
+    await composePrescription(user);
+    await waitFor(() => expect(screen.getByRole("button", { name: /save & finalize/i })).toBeDisabled());
+
+    // Discard is the half of the rule that makes it fair: the gate can only insist on "sent or discarded" if
+    // discarding is something the screen actually offers.
+    await user.click(screen.getByRole("tab", { name: /prescriptions/i }));
+    await user.click(screen.getByRole("button", { name: /^discard$/i }));
+    const confirm = await screen.findByRole("dialog");
+    await user.click(within(confirm).getByRole("button", { name: /^discard$/i }));
+
+    await user.click(screen.getByRole("tab", { name: /soap note/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /save & finalize/i })).toBeEnabled());
+    expect(screen.queryByText(/Composed but not sent/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /save & finalize/i }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: /sign & close visit/i }));
+    await waitFor(() => expect(api.signEncounterNote).toHaveBeenCalled());
+  });
+
+  it("applies the same rule to a composed lab order, and names Labs", async () => {
+    const user = userEvent.setup();
+    const api = prescribingApi();
+    renderWorkspace(api);
+
+    await user.type(await screen.findByRole("textbox", { name: "Plan" }), "Bloods today");
+    expect(screen.getByRole("button", { name: /save & finalize/i })).toBeEnabled();
+
+    // Three composers feed this gate and each is wired separately — a right rule pointed at the wrong key
+    // reports clean forever, which is the one way a safety check fails without anyone noticing.
+    await user.click(screen.getByRole("tab", { name: /^labs$/i }));
+    await user.type(await screen.findByRole("combobox", { name: "Test" }), "cbc");
+    await user.click((await screen.findAllByRole("option"))[0]);
+    await screen.findByText(/CPT 85025/);
+    await user.click(screen.getByRole("tab", { name: /soap note/i }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /save & finalize/i })).toBeDisabled());
+    expect(screen.getByText(/Composed but not sent: Labs/)).toBeInTheDocument();
+  });
+
+  it("does not ask for a prescription that was never started", async () => {
+    const user = userEvent.setup();
+    const api = prescribingApi();
+    renderWorkspace(api);
+
+    // The rule is "do not leave one half-done", never "you must prescribe". A visit that ends without one
+    // closes exactly as it did before any of this existed.
+    await user.type(await screen.findByRole("textbox", { name: "Plan" }), "Reassurance, review if worse");
+    expect(screen.getByRole("button", { name: /save & finalize/i })).toBeEnabled();
+    expect(screen.queryByText(/Composed but not sent/)).not.toBeInTheDocument();
   });
 });

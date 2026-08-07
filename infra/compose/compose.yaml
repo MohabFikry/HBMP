@@ -71,6 +71,26 @@ services:
       Issuer__PublicUrl: "http://localhost:8090/"
       Issuer__WebRedirectUri: "http://localhost:5173/"
       Issuer__WebPostLogoutUri: "http://localhost:5173/"
+      # 28.1 — how many proxies sit between the browser and this service. Kong alone today, so 1.
+      #
+      # Stated rather than defaulted, because it is the number the credential rate limiter counts back through
+      # to find the CLIENT, and both ways of getting it wrong are invisible at runtime: one too few and every
+      # caller collapses onto the gateway's address again (ten sign-in attempts a minute for the whole
+      # platform, exhaustible by anyone), one too many and a caller picks their own bucket by writing a header.
+      # It becomes 2 when the SPA's own nginx fronts the gateway so the browser sees one origin (ADR-0036 §4).
+      # 28.2 raised this from 1 to 2: the SPA's own nginx now fronts the gateway, so browser → nginx → Kong →
+      # here is two proxies. Left at 1 the chain's last entry is NGINX's address, and every browser client
+      # collapses onto it — the platform-wide sign-in outage of 28.1, restored by a change that never
+      # mentioned rate limiting.
+      Forwarding__TrustedHops: "2"
+      # 28.5 — SMTP for the password-reset link. Tier 1 points at the local Mailpit sink; a deployed tier
+      # points these at the real relay and nothing in the code changes. Security__None is spelled out here
+      # BECAUSE it is wrong everywhere else — the default is StartTls, and plain SMTP has to be asked for.
+      Email__Host: "mailpit"
+      Email__Port: "1025"
+      Email__Security: "None"
+      Email__FromAddress: "no-reply@mersal.local"
+      Email__FromName: "Mersal HBMP"
       Issuer__ServiceClientSecret: "${IDENTITY_SERVICE_SECRET}"
       Issuer__DemoPassword: "${IDENTITY_DEMO_PASSWORD}"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
@@ -199,6 +219,25 @@ services:
     networks: [hbmp]
 
   # ---------------------------------------------------------------- OpenSearch (search)
+  # --- mailpit: a Tier-1 SMTP sink, so the password-reset link is actually deliverable (28.5) ---
+  #
+  # Not a nicety. Before this, the platform's only email provider wrote a LOG LINE and returned success, so a
+  # reset screen would have said "we have sent you a link" while nothing was sent — a failed operation
+  # rendered as a clean result, on the one screen a locked-out person reaches when nothing else works.
+  # Mailpit accepts SMTP and shows what arrived at :8025; a real relay replaces it in the deployed tiers via
+  # the same Email__* settings, and NOTHING in the code changes when it does.
+  #
+  # It stores mail in memory and is bound to localhost. No credential in a reset link ever leaves this host.
+  mailpit:
+    image: axllent/mailpit:v1.20
+    <<: *restart
+    environment:
+      MP_MAX_MESSAGES: "500"
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    ports: ["127.0.0.1:8025:8025"]
+    networks: [hbmp]
+
   opensearch:
     image: opensearchproject/opensearch:2.15.0
     <<: *restart
@@ -504,6 +543,7 @@ services:
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
       Auth__ValidIssuers__0: "http://localhost:8090/"
+      Admin__BaseUrl: "http://admin-service:8080"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
     ports: ["127.0.0.1:8098:8080"]
@@ -525,6 +565,7 @@ services:
       Auth__RequireHttpsMetadata: "false"
       Auth__ProtectedScopeRequiresMfa: "false"
       Auth__ValidIssuers__0: "http://localhost:8090/"
+      Admin__BaseUrl: "http://admin-service:8080"
       Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       # One gated drug, so the medication approval path EXISTS in this environment. `GatedDrugIds` ships empty
       # and `HighCostThreshold` ships at 0, which means every prescription auto-approves and the whole
@@ -793,20 +834,33 @@ services:
     # Dockerfile's blank ARG defaults and shipped an EMPTY OIDC authority and client id. Sign-in could not
     # start, and the misconfiguration was invisible from both the build log and the running container.
     #
-    # The browser reaches Kong at :8000 and the issuer at :8090 — both host-side origins, because these are
-    # baked into the bundle the BROWSER runs, not resolved inside the compose network. The issuer is reached
-    # directly rather than through the gateway because the token's `iss` must be the issuer as the browser
-    # sees it; identity-service allows this origin via CORS (services/identity/Api/Program.cs).
+    # 28.2 — ONE ORIGIN. These are all RELATIVE now, so the browser resolves them against http://localhost:5173
+    # and this container's nginx proxies /api, /connect, /.well-known and /identity to Kong (ADR-0036 §4).
+    #
+    # What this replaced: VITE_API_BASE at :8000 and VITE_OIDC_AUTHORITY at :8090 — three origins for one
+    # application, so signing in navigated the browser to a visibly different host. The old comment here said
+    # the issuer had to be reached directly "because the token's `iss` must be the issuer as the browser sees
+    # it". That stopped being true when OpenIddict's issuer was pinned via Issuer__PublicUrl (the ID2088 fix,
+    # a few lines up in this same file): `iss` is now a constant the server states, so it is unaffected by
+    # which host the request arrived on, and nothing that validates it needs to change.
+    #
+    # VITE_OIDC_REDIRECT stays ABSOLUTE: it is sent to the issuer as `redirect_uri` and compared byte-for-byte
+    # against the registered client, so it must be the URL the browser will actually land on.
     build:
       context: ../..
       dockerfile: apps/web/Dockerfile
       args:
-        VITE_API_BASE: "http://localhost:8000/api/v1"
-        VITE_OIDC_AUTHORITY: "http://localhost:8090"
+        VITE_API_BASE: "/api/v1"
+        VITE_OIDC_AUTHORITY: ""
         VITE_OIDC_CLIENT_ID: "hbmp-web"
         VITE_OIDC_REDIRECT: "http://localhost:5173/"
         # "1", not "true" — config.ts now accepts either, but this is the spelling the Dockerfile documents.
         VITE_LIVE: "1"
+    environment:
+      # RUNTIME env, correctly — these are nginx's, not Vite's. The distinction cost a whole debugging session
+      # once already (see the build-args note above): VITE_* under `environment:` reaches nginx, which ignores
+      # them, and the bundle keeps whatever was baked at build time.
+      KONG_UPSTREAM: "http://kong:8000"
     <<: *restart
     # The image's nginx listens on 8080 (apps/web/nginx.conf + Dockerfile EXPOSE), not 80 — mapping to :80
     # published a port nothing was bound to, so :5173 reset the connection with the container "Up".

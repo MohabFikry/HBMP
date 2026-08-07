@@ -262,7 +262,10 @@ ON CONFLICT (beneficiary_id) DO UPDATE
 
 INSERT INTO eligibility.coverage_projection
   (coverage_id, beneficiary_id, benefit_category, policy_no, status, effective_from, effective_to, limits_json, tenant_id)
-SELECT c.coverage_id, c.beneficiary_id, bc.name, 'POL-2026-0001', c.status, c.effective_from, c.effective_to,
+-- bc.CODE, not bc.name. This column is MATCHED against what callers send to /eligibility/check, and the
+-- vocabulary is the closed canonical set (22 §11). Seeding the display name here made the engine answer
+-- "no active coverage for LAB" to every member holding laboratory cover — see eligibility migration 0006.
+SELECT c.coverage_id, c.beneficiary_id, bc.code, 'POL-2026-0001', c.status, c.effective_from, c.effective_to,
        jsonb_build_array(jsonb_build_object(
          'limitType', cl.limit_type, 'limitValue', cl.limit_value, 'consumedValue', cl.consumed_value)),
        c.tenant_id

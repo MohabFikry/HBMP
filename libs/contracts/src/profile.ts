@@ -71,6 +71,18 @@ export const zProfileAlerts = z.object({
     reaction: z.string().optional(),
     severity: z.string(),
   })),
+  /**
+   * ABO + Rh, or absent when nobody has recorded one.
+   *
+   * It arrives on ALERTS rather than on the header because that is where it comes from: emr, behind the
+   * clinical gate, in the same call as the allergy list. The header is built from the administrative record
+   * that reception and the call centre also read, and blood group does not belong there.
+   *
+   * `.nullish()` — the server sends `"bloodGroup": null` for a patient nobody has typed. `.optional()`
+   * accepts `undefined` and REJECTS `null`, which is the exact mismatch that made every prescribing
+   * validation response fail to parse in phase 26.
+   */
+  bloodGroup: z.string().nullish(),
   criticalFlags: z.array(z.object({ kind: z.string(), label: z.string(), tone: z.string() })).optional(),
   interactionWarnings: z.array(z.object({ kind: z.string(), label: z.string(), tone: z.string() })).optional(),
   operationalFlags: z.array(z.object({ kind: z.string(), label: z.string(), tone: z.string() })).optional(),

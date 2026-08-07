@@ -35,6 +35,11 @@ public sealed class InvestigationOrder
     public OrderStatus Status { get; set; } = OrderStatus.Requested;
     public DateTimeOffset RequestedAt { get; set; }
     public DateTimeOffset? ExpiresAt { get; set; }
+
+    /// <summary>The approvals authorization that put this order back in date, if any. Doubles as the
+    /// idempotency key for the apply — a retried callback for the same authorization grants no second period.</summary>
+    public Guid? ValidityExtendedBy { get; set; }
+    public DateTimeOffset? ValidityExtendedAt { get; set; }
     public string? IdempotencyKey { get; set; }
     public string? CreatedBy { get; set; }
     public uint RowVersion { get; set; }                 // xmin optimistic-concurrency token

@@ -58,6 +58,14 @@ public sealed class Appointment
     public string? NoteBy { get; set; }
     public DateTimeOffset? NoteAt { get; set; }
 
+    /// <summary>The author's display name, captured at the moment the note was written (0022).
+    /// <para>A SNAPSHOT, never joined — 19.3's rule for signatures, and 0020's for allergen names. Without it
+    /// the dialog rendered the raw subject id, which answers "who told us this?" with a string nobody at a
+    /// desk can act on. <see cref="NoteBy"/> stays as the authoritative identity; this is only what the reader
+    /// is shown. NULL for notes written before 0022, which readers say as "unknown" rather than inventing.
+    /// </para></summary>
+    public string? NoteByName { get; set; }
+
     /// <summary>The patient's display name, captured at BOOKING from the request (0013).
     /// <para>Minimum-necessary and a SNAPSHOT: a display name only, and deliberately not kept in sync with
     /// patient-service — it is what the appointment was booked under, and a name that silently changed

@@ -96,26 +96,46 @@ export function TableToolbar({ search, filters = [], children, className }: Tabl
         // A fieldset + legend, so a screen-reader user hears "Status: Booked, pressed" rather than an
         // unattributed row of buttons whose meaning was only ever conveyed by their position on screen.
         <fieldset key={group.key} className="mrs-toolbar-group">
-          <legend>{group.label}</legend>
+          {/*
+            The legend carries the accessible name and NOTHING visual.
+
+            A rendered `<legend>` is laid out at the top of its fieldset's box, not in normal flow — so the
+            moment a group's `extra` made the fieldset taller (the date range is a label-over-control pair,
+            roughly 30px taller than a chip), "WHEN" floated to the top of that taller box while SEARCH, FROM,
+            TO and STATUS stayed on the label line below it. Nothing was misaligned by accident; the legend
+            was simply measuring a different box from every other label in the bar.
+
+            Splitting the two — legend for the screen reader, a span for the eye — is what makes the visible
+            label an ordinary flow item that can sit directly above its chips. The span is aria-hidden so the
+            group's name is announced once, not twice.
+          */}
+          <legend className="sr-only">{group.label}</legend>
           <div className="mrs-chipset">
-            {group.options.map((o) => {
-              const active = group.value === o.value;
-              return (
-                <button
-                  key={o.value}
-                  type="button"
-                  className={cx("mrs-filterchip", active && "mrs-on")}
-                  aria-pressed={active}
-                  // Pressing the active chip clears the filter — the first thing anyone tries, and without it
-                  // a single-select group is a trap you cannot get out of once you have chosen.
-                  onClick={() => group.onChange(active ? null : o.value)}
-                >
-                  {active && <Icon name="ok" width={12} height={12} aria-hidden="true" />}
-                  <span>{o.label}</span>
-                  {o.count !== undefined && <span className="mrs-chipcount tnum">{o.count}</span>}
-                </button>
-              );
-            })}
+            {/* Label over chips, so the pair is the same label-over-control shape as the search box and as
+                anything a caller passes in `extra` — which is what puts every label in the bar on one line. */}
+            <div className="mrs-toolbar-chipcol">
+              <span className="mrs-toolbar-grouplabel" aria-hidden="true">{group.label}</span>
+              <div className="mrs-toolbar-chips">
+                {group.options.map((o) => {
+                  const active = group.value === o.value;
+                  return (
+                    <button
+                      key={o.value}
+                      type="button"
+                      className={cx("mrs-filterchip", active && "mrs-on")}
+                      aria-pressed={active}
+                      // Pressing the active chip clears the filter — the first thing anyone tries, and without
+                      // it a single-select group is a trap you cannot get out of once you have chosen.
+                      onClick={() => group.onChange(active ? null : o.value)}
+                    >
+                      {active && <Icon name="ok" width={12} height={12} aria-hidden="true" />}
+                      <span>{o.label}</span>
+                      {o.count !== undefined && <span className="mrs-chipcount tnum">{o.count}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             {/* Inside the chipset so it wraps with the chips and shares their baseline. */}
             {group.extra}
           </div>

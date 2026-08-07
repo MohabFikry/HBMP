@@ -78,11 +78,17 @@ function Labelled({
 }
 
 /** Text input with always-visible label, helper/error tied via aria-describedby, aria-invalid on error. */
-export function InputField({ label, help, error, className, id, ...rest }: InputFieldProps) {
+export function InputField({ label, help, error, className, id, hideLabel, ...rest }: InputFieldProps) {
   const auto = useId();
   const base = id ?? auto;
   return (
-    <Labelled label={label} help={help} error={error} base={base} className={className} requiredMark={rest.required}>
+    // `hideLabel` was declared on FieldBase, honoured by Labelled, and passed on by SelectField ALONE — so on
+    // an InputField it fell into `...rest` and landed on the DOM node as an unknown attribute. A prop the
+    // shared base documents has to work on every field that inherits it, or the contract is a suggestion.
+    <Labelled
+      label={label} help={help} error={error} base={base} className={className}
+      requiredMark={rest.required} hideLabel={hideLabel}
+    >
       <input
         id={base}
         className="mrs-control"
@@ -144,11 +150,14 @@ export function SelectField({
 }
 
 /** Multiline field — same a11y contract as InputField. */
-export function TextareaField({ label, help, error, className, id, ...rest }: TextareaFieldProps) {
+export function TextareaField({ label, help, error, className, id, hideLabel, ...rest }: TextareaFieldProps) {
   const auto = useId();
   const base = id ?? auto;
   return (
-    <Labelled label={label} help={help} error={error} base={base} className={className} requiredMark={rest.required}>
+    <Labelled
+      label={label} help={help} error={error} base={base} className={className}
+      requiredMark={rest.required} hideLabel={hideLabel}
+    >
       <textarea
         id={base}
         className="mrs-control"

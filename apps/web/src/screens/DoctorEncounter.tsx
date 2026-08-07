@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Button,
   Card,
-  DataTable,
+  DataTableView,
   Icon,
   InlineAlert,
   InputField,
@@ -10,10 +10,10 @@ import {
   SelectField,
   StatusChip,
   Tabs,
-  TextareaField,
+  useTableQuery,
   useToast,
 } from "@mersal/design-system";
-import type { Column, IconName } from "@mersal/design-system";
+import type { Column, IconName, TableFilterSpec } from "@mersal/design-system";
 import type {
   DiagnosisRank,
   Encounter,
@@ -22,6 +22,7 @@ import type {
   Localized,
   OrderRow,
   PatientListItem,
+  InvestigationOrderType,
   RxRow,
   Soap,
   VitalInput,
@@ -29,10 +30,16 @@ import type {
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
 import { PatientContextBar } from "./PatientProfile";
+import { MemberClinicalPanel } from "./encounter/MemberClinicalPanel";
+import { PrescriptionDetailModal } from "./encounter/PrescriptionDetailModal";
 import { SectionView } from "./ProfileSectionViews";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/http";
-import { AsyncSection, PageHeader, useBackTarget, useLoc, useOpenProfile } from "./_shared";
+import { AsyncSection, PageHeader, useBackTarget, useLoc, useOpenProfile, useWhenFilter } from "./_shared";
+import { draftKeys, useUnsentDrafts } from "./draftStore";
+import { PrescribingWorkspace } from "./prescribing/PrescribingWorkspace";
+import { InvestigationWorkspace } from "./investigations/InvestigationWorkspace";
+import { EncounterTimelineButton } from "./VisitTimeline";
 import { useFormat } from "../i18n/useFormat";
 
 /**
@@ -59,9 +66,27 @@ const S = {
   lastVisit: { en: "Started", ar: "بدأت" },
   state: { en: "State", ar: "الحالة" },
   pickPatient: { en: "Open a patient to document their encounter.", ar: "افتح مريضاً لتوثيق زيارته." },
+  search: { en: "Search", ar: "بحث" },
+  pickerSearchHint: { en: "Name, encounter or state", ar: "الاسم أو الزيارة أو الحالة" },
+  pickerNoMatches: {
+    en: "No patients match. Change the search or clear the filters.",
+    ar: "لا يوجد مرضى مطابقون. عدّل البحث أو أزل عوامل التصفية.",
+  },
+  // The three encounter states, worded exactly as the chips in the State column.
+  encInProgress: { en: "In progress", ar: "جارٍ" },
+  encCompleted: { en: "Completed", ar: "مكتمل" },
+  encCancelled: { en: "Cancelled", ar: "ملغى" },
 
   tabNote: { en: "SOAP note", ar: "ملاحظة SOAP" },
-  tabOrders: { en: "Orders", ar: "الطلبات" },
+  tabPrescriptions: { en: "Prescriptions", ar: "الوصفات" },
+  tabLabs: { en: "Labs", ar: "المختبر" },
+  tabImaging: { en: "Imaging", ar: "الأشعة" },
+  labsFor: { en: "Lab orders for this patient", ar: "طلبات المختبر لهذا المريض" },
+  imagingFor: { en: "Imaging orders for this patient", ar: "طلبات الأشعة لهذا المريض" },
+  noLabs: { en: "You have raised no lab orders for this patient.", ar: "لم تطلب أي فحوصات مختبر لهذا المريض." },
+  noImaging: { en: "You have raised no imaging orders for this patient.", ar: "لم تطلب أي فحوصات أشعة لهذا المريض." },
+  orderLab: { en: "Order a lab test", ar: "طلب فحص مختبر" },
+  orderImaging: { en: "Order imaging", ar: "طلب أشعة" },
   tabHistory: { en: "History", ar: "السجل" },
   histEncounters: { en: "Encounters", ar: "الزيارات" },
   histInvestigations: { en: "Investigations", ar: "الفحوصات" },
@@ -147,6 +172,10 @@ const S = {
     en: "The note is signed — a coded diagnosis can no longer be retracted here.",
     ar: "الملاحظة موقّعة — لا يمكن سحب التشخيص من هنا.",
   },
+  unsentWork: {
+    en: "Composed but not sent: {items}. Send each one or discard it before closing the visit.",
+    ar: "مُعدّ ولم يُرسل: {items}. أرسل كلاً منها أو احذفه قبل إغلاق الزيارة.",
+  },
   confirmFinalize: { en: "Finalize this encounter?", ar: "إنهاء هذه الزيارة؟" },
   confirmFinalizeBody: {
     en: "This signs the note and closes the visit. The appointment moves to Completed and leaves your day list. After this, corrections can only be added as an addendum — nothing can be changed in place.",
@@ -180,7 +209,19 @@ const S = {
   colLines: { en: "Lines", ar: "البنود" },
   colWhen: { en: "Raised", ar: "التاريخ" },
   colStatus: { en: "Status", ar: "الحالة" },
+  colView: { en: "View", ar: "عرض" },
+  colTimeline: { en: "Timeline", ar: "المسار الزمني" },
+  // The Rx number is appended to this at the call site. Every row's button would otherwise carry the same
+  // accessible name, so a screen-reader user tabbing the column hears "View prescription" once per row with
+  // nothing to tell them which one they are on.
+  viewRx: { en: "View prescription", ar: "عرض الوصفة" },
   historyEmpty: { en: "No earlier encounters on this patient's file.", ar: "لا توجد زيارات سابقة في ملف هذا المريض." },
+  visitTimeline: { en: "Visit timeline", ar: "مسار الزيارة" },
+  when: { en: "When", ar: "الفترة" },
+  noMatchesWhen: {
+    en: "Nothing in that period. Choose a wider one, or clear the filter.",
+    ar: "لا يوجد شيء في هذه الفترة. اختر فترة أوسع أو أزل عامل التصفية.",
+  },
 } satisfies Record<string, Localized>;
 
 /**
@@ -200,9 +241,21 @@ const REFERENCE: Record<string, { low: number; high: number }> = {
   spo2: { low: 95, high: 100 },
 };
 
+/**
+ * Where the workspace's Back control goes when there is no origin to return to — after a RELOAD, or on a link
+ * opened in a fresh tab, both of which destroy `location.state` and reset the history index together.
+ *
+ * The doctor's own patient list, because that is what this screen is always opened FROM in one hop or two,
+ * and because the workspace is not in the nav rail: without this the only way off it was the rail's other
+ * entries, which is how a refresh turned into "I have to navigate somewhere else and come back".
+ *
+ * Module-level so its identity is stable — see `useBackTarget`.
+ */
+const BACK_FALLBACK = { path: "/clinician/patients", label: S.myPatients };
+
 export function DoctorEncounter() {
   const t = useLoc();
-  const back = useBackTarget();
+  const location = useLocation();
   const [params, setParams] = useSearchParams();
 
   // `?encounter=` — the encounter this screen was opened FOR, from a profile row or from "Start visit" on
@@ -213,9 +266,31 @@ export function DoctorEncounter() {
   // narrows the picker to that person's open encounters rather than guessing which one was meant.
   const beneficiaryId = params.get("beneficiaryId");
 
+  /*
+    The fallback applies to an OPEN encounter only.
+
+    `useBackTarget` shows nothing when there is neither an origin nor history, and the fallback exists so a
+    RELOADED workspace is not a dead end — the workspace is not in the nav rail, so without it a refresh
+    stranded the clinician there.
+
+    The PICKER is a different screen with the same route. It is a list, it is reachable from the rail, and on
+    it the fallback rendered a "My patients" control in the header that duplicated the rail entry two inches
+    to its left. A real origin still shows a real Back control on both — arriving from a patient file gives
+    one here exactly as before; what is gone is the invented one on a screen that never needed it.
+  */
+  const back = useBackTarget(undefined, encounterId ? BACK_FALLBACK : undefined);
+
+  /**
+   * Pick an encounter in the picker — same route, new `?encounter=`.
+   *
+   * The origin is CARRIED THROUGH. `setSearchParams` pushes a fresh history entry, and a fresh entry has no
+   * `location.state` unless one is given: arriving here from the patient file and then choosing a visit
+   * dropped the `from` that got you here, so Back fell through to `navigate(-1)` and landed on the picker you
+   * had just left rather than on the file you came from. Re-stating it keeps one journey one journey.
+   */
   const open = useCallback(
-    (id: string) => setParams({ encounter: id }, { replace: false }),
-    [setParams],
+    (id: string) => setParams({ encounter: id }, { replace: false, state: location.state }),
+    [setParams, location.state],
   );
 
   return (
@@ -247,11 +322,78 @@ function EncounterPicker({
   const patients = useAsync<PatientListItem[]>(() => api.listPatients(), []);
 
   const cols: Column<PatientListItem>[] = [
-    { key: "name", header: t(S.name), cell: (r) => <strong>{t(r.name)}</strong> },
-    { key: "mrn", header: t(S.mrn), cell: (r) => <span className="tnum">{r.mrn}</span> },
-    { key: "lastVisit", header: t(S.lastVisit), cell: (r) => <span className="tnum">{r.lastVisit ?? "—"}</span> },
-    { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    // The ENCOUNTER reference leads. This board lists VISITS, not people — the same patient holds several
+    // rows — so the reference is the column that tells two of their rows apart, and a list is read from the
+    // thing that identifies its rows.
+    { key: "mrn", header: t(S.mrn), cell: (r) => <span className="tnum">{r.mrn}</span>,
+      sortable: true, sortValue: (r) => r.mrn },
+    { key: "name", header: t(S.name), cell: (r) => <strong>{t(r.name)}</strong>,
+      sortable: true, sortValue: (r) => t(r.name) },
+    // Sorts on the ISO date rather than the rendered one, as everywhere else in the portal.
+    { key: "lastVisit", header: t(S.lastVisit), cell: (r) => <span className="tnum">{r.lastVisit ?? "—"}</span>,
+      sortable: true, sortValue: (r) => r.lastVisit ?? "" },
+    { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />,
+      sortable: true, sortValue: (r) => r.status.label.en },
+    /*
+      The visit's own history, without having to open the visit.
+
+      No `reference` filter: a row here IS one encounter, so the whole episode belongs in it — filtering on
+      the encounter's key would strip every step raised by an order or a prescription, which is most of what
+      happened. `context` names WHICH visit instead, because the dialog is headed "Visit timeline" and this
+      board holds one row per visit rather than one per patient.
+
+      The rows are clickable (a click opens the encounter), so the button stops its own click propagating —
+      `EncounterTimelineButton` owns that.
+    */
+    {
+      key: "timeline",
+      header: t(S.colTimeline),
+      cell: (r) => <EncounterTimelineButton encounterId={r.id} context={r.mrn} />,
+    },
   ];
+
+  // The rows this picker actually offers. Deep-linked with a `beneficiaryId`, that is one person's open
+  // encounters and the toolbar below would be a search box over three rows — so search and filter only appear
+  // when the picker is the full worklist it is on a bare visit to the workspace.
+  const rows = useMemo(() => filterRows(patients.data ?? [], beneficiaryId), [patients.data, beneficiaryId]);
+  const narrowedToOne = beneficiaryId !== null;
+  const when = useWhenFilter<PatientListItem>(t, encounterStartedAt);
+
+  const filters: TableFilterSpec<PatientListItem>[] = useMemo(() => (narrowedToOne ? [] : [
+    {
+      key: "state",
+      label: t(S.state),
+      // Matched on the ENGLISH label — the row carries its status only as a pre-resolved chip, and matching
+      // the localized half would break the filter the moment the portal is switched to Arabic.
+      options: [
+        { value: S.encInProgress.en, label: t(S.encInProgress) },
+        { value: S.encCompleted.en,  label: t(S.encCompleted) },
+        { value: S.encCancelled.en,  label: t(S.encCancelled) },
+      ],
+      match: (r, value) => r.status.label.en === value,
+    },
+    // Dated by when the visit STARTED. Deep-linked to one patient the picker holds a handful of rows and
+    // neither filter earns its place, which is why both hang off the same condition.
+    when,
+  ]), [t, narrowedToOne, when]);
+
+  const query = useTableQuery<PatientListItem>({
+    rows,
+    columns: cols,
+    searchText: narrowedToOne
+      ? undefined
+      : (r) => [r.name.en, r.name.ar, r.mrn, r.status.label.en, r.status.label.ar].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.pickerSearchHint),
+    filters,
+    pageSize: 10,
+    // Most recently seen first: a doctor arriving at the workspace is opening the consultation they just
+    // started far more often than one from last month.
+    initialSortKey: "lastVisit",
+    initialSortDir: "descending",
+    // Not persisted. Unlike the worklists this is a doorway, not a place — it is replaced by the workspace the
+    // moment a row is picked, so there is no "come back to where I was" to preserve.
+  });
 
   return (
     <Card as="section" style={{ padding: "var(--sp5)" }}>
@@ -261,12 +403,14 @@ function EncounterPicker({
         isEmpty={(d) => filterRows(d, beneficiaryId).length === 0}
         emptyLabel={S.emptyPatients}
       >
-        {(rows) => (
-          <DataTable
+        {() => (
+          <DataTableView
+            query={query}
             columns={cols}
-            rows={filterRows(rows, beneficiaryId)}
             rowKey={(r) => r.id}
             caption={t(S.myPatients)}
+            emptyLabel={t(S.emptyPatients)}
+            noMatchesLabel={t(S.pickerNoMatches)}
             interactive
             onSelect={(r) => onOpen(r.id)}
           />
@@ -309,6 +453,8 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
   // whether or not the doctor ever looks at them — three reads of clinical data, and three audited PHI
   // accesses, for a note that only needed the note.
   const [visited, setVisited] = useState<ReadonlySet<string>>(() => new Set(["note"]));
+  /** Bumped when an allergy or a blood group is recorded, so the context bar re-reads with the panel. */
+  const [clinicalNonce, setClinicalNonce] = useState(0);
   const openTab = (value: string) => {
     setTab(value);
     setVisited((prev) => (prev.has(value) ? prev : new Set([...prev, value])));
@@ -331,6 +477,40 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
   // Enforced here rather than in emr: emr's sign endpoint is shared with nursing and progress notes, which
   // carry no diagnosis at all, so the rule belongs to SOAP encounter documentation and not to signing.
   const hasPrimary = diagnoses.some((d) => d.rank === "Primary");
+
+  /**
+   * Work composed in a sibling tab and never sent.
+   *
+   * ==========================================================================================================
+   * WHY CLOSING THE VISIT WAITS ON IT
+   * ==========================================================================================================
+   * Writing a prescription is not required to finish a consultation — plenty of visits end without one. But a
+   * prescription that was COMPOSED, checked, and had its warnings answered in writing, and then never sent, is
+   * not a decision not to prescribe: it is a decision that was made and lost. The doctor believes the patient
+   * is collecting medicine; the pharmacy has never heard of it; and the encounter is signed and locked, so the
+   * record of the visit says nothing was prescribed at all. Nobody discovers this until the patient does.
+   *
+   * The rule is therefore not "you must prescribe" but "you must not leave one half-done": send it, or
+   * discard it. Both are one click, and Discard exists in each workspace precisely so this can be insisted on.
+   *
+   * Read through the draft store rather than from state here, because the composers live in OTHER TABS and
+   * hold their own — nothing in this component changes when one of them is filled in.
+   */
+  const draftTabs = useMemo(
+    () => [
+      { key: draftKeys.prescription(encounter.id), label: S.tabPrescriptions },
+      { key: draftKeys.order("Lab", encounter.id), label: S.tabLabs },
+      { key: draftKeys.order("Imaging", encounter.id), label: S.tabImaging },
+    ],
+    [encounter.id],
+  );
+  const unsentKeys = useUnsentDrafts(draftTabs.map((d) => d.key));
+  const unsent = draftTabs.filter((d) => unsentKeys.includes(d.key));
+  // Named, not counted. "1 unsent item" sends a doctor hunting through three tabs for it.
+  const unsentMessage: Localized = {
+    en: S.unsentWork.en.replace("{items}", unsent.map((u) => t(u.label)).join(", ")),
+    ar: S.unsentWork.ar.replace("{items}", unsent.map((u) => u.label.ar).join("، ")),
+  };
 
   const set = (key: keyof Soap) => (value: string) => {
     setSoap((prev) => ({ ...prev, [key]: value }));
@@ -369,6 +549,14 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
   async function finalize() {
     if (!hasPrimary) {
       setError(S.needPrimary);
+      setConfirming(false);
+      return;
+    }
+    // Checked here as well as on the button, and not as a belt-and-braces habit: the button reads a snapshot
+    // of the draft store, and this reads it at the moment of signing. If they ever disagree, the one that
+    // must win is the one closest to the irreversible act.
+    if (unsent.length > 0) {
+      setError(unsentMessage);
       setConfirming(false);
       return;
     }
@@ -413,16 +601,34 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
       <PatientContextBar
         beneficiaryId={encounter.patientId}
         namedAllergens
+        showBloodGroup
+        // The bar and the panel below read the same two facts by different routes — the bar through
+        // profile-service, the panel straight from emr. Recording an allergy has to move both, or the strip
+        // keeps showing the pre-write picture of exactly the thing that was just corrected.
+        reloadKey={clinicalNonce}
         actions={
-          <Button
-            variant="ghost"
-            size="sm"
-            leadingIcon={<Icon name="user" width={16} height={16} aria-hidden="true" />}
-            onClick={() => openProfile(encounter.patientId)}
-          >
-            {t(S.patientFile)}
-          </Button>
+          <>
+            {/* The visit's own history, beside the patient's file — "what has happened in this consultation"
+                is the question a doctor asks of the screen they are documenting it on. Same steps, same
+                rendering and same modal as the appointment timeline on the day board. */}
+            <EncounterTimelineButton encounterId={encounter.id} variant="ghost" label={S.visitTimeline} />
+            <Button
+              variant="ghost"
+              size="sm"
+              leadingIcon={<Icon name="user" width={16} height={16} aria-hidden="true" />}
+              onClick={() => openProfile(encounter.patientId)}
+            >
+              {t(S.patientFile)}
+            </Button>
+          </>
         }
+      />
+
+      {/* Directly under the identity block and still above the tabs: allergies are not a tab's worth of
+          detail to go and find, they are a precondition for everything the tabs let you do. */}
+      <MemberClinicalPanel
+        beneficiaryId={encounter.patientId}
+        onRecorded={() => setClinicalNonce((n) => n + 1)}
       />
 
       <div className="enc-layout">
@@ -473,10 +679,39 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
                   </div>
                 ),
               },
+              /*
+                THREE tabs where there was one.
+                A single "Orders" tab stacked the investigations table, the prescriptions table and the
+                prescribing composer on one scroll, so writing a prescription meant scrolling past a lab
+                table that had nothing to do with it — and the lab side had no composer at all, only a modal
+                with two hard-coded text boxes. Splitting them by what the doctor came to DO puts each
+                composer directly under the list it adds to, and lets the lab and imaging sides carry the
+                same multi-line, checked sequence prescribing already had.
+
+                Labs and imaging are separate rather than one "Investigations" tab because they are separate
+                ORDERS: one order has one type, it reaches one queue, and the CPT section it draws from
+                differs. A combined tab would have to ask the doctor which kind they meant.
+              */
               {
-                value: "orders",
-                label: t(S.tabOrders),
-                content: visited.has("orders") ? <OrdersTab encounter={encounter} /> : null,
+                value: "prescriptions",
+                label: t(S.tabPrescriptions),
+                content: visited.has("prescriptions")
+                  ? <PrescriptionsTab encounter={encounter} diagnoses={diagnoses} />
+                  : null,
+              },
+              {
+                value: "labs",
+                label: t(S.tabLabs),
+                content: visited.has("labs")
+                  ? <InvestigationsTab encounter={encounter} diagnoses={diagnoses} orderType="Lab" />
+                  : null,
+              },
+              {
+                value: "imaging",
+                label: t(S.tabImaging),
+                content: visited.has("imaging")
+                  ? <InvestigationsTab encounter={encounter} diagnoses={diagnoses} orderType="Imaging" />
+                  : null,
               },
               {
                 value: "history",
@@ -505,7 +740,7 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
                 <Button
                   variant="primary"
                   loading={busy === "final"}
-                  disabled={!hasContent || !hasPrimary}
+                  disabled={!hasContent || !hasPrimary || unsent.length > 0}
                   leadingIcon={<Icon name="lock" width={16} height={16} aria-hidden="true" />}
                   onClick={() => setConfirming(true)}
                 >
@@ -516,6 +751,9 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
                 {hasContent && !hasPrimary && (
                   <p className="muted" style={{ margin: 0, fontSize: "0.8125rem" }}>{t(S.needPrimary)}</p>
                 )}
+                {/* An ALERT rather than the quiet grey line above it. This one names work the doctor has
+                    already done and is about to lose, and it points at a tab they are not looking at. */}
+                {unsent.length > 0 && <InlineAlert tone="warn">{t(unsentMessage)}</InlineAlert>}
                 <Button
                   variant="secondary"
                   loading={busy === "draft"}
@@ -860,8 +1098,13 @@ function DiagnosisPicker({
       onOpenChange={setOpen}
       title={t(S.codePicker)}
       trigger={
+        // Ghost, matching "Visit timeline" and "Patient file" in the context bar directly above it. It was
+        // `secondary` — a bordered, filled control — so the workspace showed three actions of the same weight
+        // in the same column of the same screen drawn two different ways, and the odd one out was the one
+        // whose border made it look like the page's principal act. Nothing about adding a code is heavier
+        // than opening the patient's file.
         <Button
-          variant="secondary"
+          variant="ghost"
           size="sm"
           leadingIcon={<Icon name="plus" width={16} height={16} aria-hidden="true" />}
         >
@@ -893,7 +1136,7 @@ function DiagnosisPicker({
           onChange={(e) => setQuery(e.currentTarget.value)}
         />
         {/* aria-live so a screen-reader user learns the list changed under a field they are still typing in. */}
-        <ul className="icd-results" aria-live="polite" aria-busy={searching}>
+        <ul className="icd-results mrs-scroll" aria-live="polite" aria-busy={searching}>
           {results.map((r) => {
             const already = staged.some((x) => x.code === r.code);
             return (
@@ -1176,79 +1419,225 @@ function RecordVitalsModal({ encounterId, onRecorded }: { encounterId: string; o
   );
 }
 
-// ---------------------------------------------------------------- orders
+// ---------------------------------------------------------------- prescriptions / labs / imaging
+//
+// Three tabs, three components, one shape: the list of what this clinician has already raised for THIS
+// patient, then the composer that adds to it. The composer sits under its own list on purpose — the first
+// question a doctor asks before ordering something is whether they already ordered it.
 
-function OrdersTab({ encounter }: { encounter: Encounter }) {
+/** Stable accessors — an inline arrow would be a new identity each render and rebuild the filter's memo. */
+const rxSubmittedAt = (r: RxRow) => r.submittedAt;
+const orderRequestedAt = (r: OrderRow) => r.requestedAt;
+const encounterStartedAt = (r: PatientListItem) => r.lastVisit;
+
+/** Both tabs filter the clinician's own lists to this patient in the browser. */
+function forPatient<T extends { beneficiary: { id: string } }>(rows: T[] | null | undefined, patientId: string): T[] {
+  // Both endpoints already answer "mine"; narrowing further is a display concern, and asking a service for
+  // a second patient-scoped variant of a list it already returns would be a new seam for no new information.
+  return (rows ?? []).filter((r) => r.beneficiary.id === patientId);
+}
+
+function PrescriptionsTab({
+  encounter,
+  diagnoses,
+}: {
+  encounter: Encounter;
+  /**
+   * The encounter's LIVE diagnoses — the staged state, not `encounter.diagnoses`, which is whatever was
+   * loaded. The prescribe modal used to receive only an encounter id, so the indication check had nothing
+   * to compare against; passing the codes recorded a moment ago is the point.
+   */
+  diagnoses: EncounterDiagnosis[];
+}) {
   const api = useApi();
   const t = useLoc();
   const { date } = useFormat();
-  const orders = useAsync<OrderRow[]>(useCallback(() => api.ordersMine(), [api]), []);
   const rx = useAsync<RxRow[]>(useCallback(() => api.prescriptionsMine(), [api]), []);
+  const rxFor = useMemo(() => forPatient(rx.data, encounter.patientId), [rx.data, encounter.patientId]);
+  const [viewing, setViewing] = useState<RxRow | null>(null);
 
-  // Filtered to THIS patient in the browser, from the clinician's own lists. Both endpoints already answer
-  // "mine" — narrowing further is a display concern, and asking a service for a second, patient-scoped
-  // variant of a list it already returns would be a new seam for no new information.
-  const mineFor = useMemo(
-    () => (orders.data ?? []).filter((o) => o.beneficiary.id === encounter.patientId),
-    [orders.data, encounter.patientId],
-  );
-  const rxFor = useMemo(
-    () => (rx.data ?? []).filter((p) => p.beneficiary.id === encounter.patientId),
-    [rx.data, encounter.patientId],
-  );
-
-  const orderCols: Column<OrderRow>[] = [
-    { key: "orderNo", header: t(S.colRef), cell: (r) => <span className="tnum">{r.orderNo}</span> },
-    { key: "primaryCode", header: t(S.colTest), cell: (r) => `${r.orderType} · ${r.primaryCode}` },
-    { key: "requestedAt", header: t(S.colWhen), cell: (r) => <span className="tnum">{date(r.requestedAt)}</span> },
-    { key: "status", header: t(S.colStatus), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-  ];
   const rxCols: Column<RxRow>[] = [
-    { key: "id", header: t(S.colRef), cell: (r) => <span className="tnum">{r.id}</span> },
-    { key: "lineCount", header: t(S.colLines), cell: (r) => <span className="tnum">{r.lineCount}</span> },
-    { key: "submittedAt", header: t(S.colWhen), cell: (r) => <span className="tnum">{r.submittedAt ? date(r.submittedAt) : "—"}</span> },
-    { key: "status", header: t(S.colStatus), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    // The Rx REFERENCE, not the surrogate id. A doctor reads this column to match a prescription against
+    // what the pharmacy or the patient is quoting back, and neither of them has ever seen the uuid.
+    { key: "rxNo", header: t(S.colRef), cell: (r) => <span className="tnum">{r.rxNo}</span>,
+      sortable: true, sortValue: (r) => r.rxNo },
+    // A COUNT — a quantity compared down the column, so it right-aligns with tabular figures. `.tnum` on a
+    // span sets the figure width and leaves the column ragged; alignment lives on the cell.
+    { key: "lineCount", header: t(S.colLines), cell: (r) => r.lineCount,
+      numeric: true, sortable: true, sortValue: (r) => r.lineCount },
+    // Sorts on the ISO instant, not the rendered date — Arabic-Indic digits sort by glyph.
+    { key: "submittedAt", header: t(S.colWhen), cell: (r) => <span className="tnum">{r.submittedAt ? date(r.submittedAt) : "—"}</span>,
+      sortable: true, sortValue: (r) => r.submittedAt ?? "" },
+    { key: "status", header: t(S.colStatus), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />,
+      sortable: true, sortValue: (r) => r.status.label.en },
+    // What has happened to THIS prescription. Keyed on the encounter it was written in — which, on this tab,
+    // is the encounter the workspace is already open on.
+    {
+      key: "timeline",
+      header: t(S.colTimeline),
+      cell: (r) => (r.encounterId
+        ? <EncounterTimelineButton encounterId={r.encounterId} reference={r.rxNo} />
+        : <span className="muted">—</span>),
+    },
+    {
+      key: "view",
+      header: t(S.colView),
+      cell: (r) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="rxv-open"
+          aria-label={`${t(S.viewRx)} ${r.rxNo}`}
+          leadingIcon={<Icon name="eye" />}
+          onClick={() => setViewing(r)}
+        />
+      ),
+    },
   ];
+
+  /*
+    A DATE filter, sorting and paging — but still no search box.
+
+    The list is already narrowed to ONE patient by the tab it sits in, so a search over a dozen rows would be
+    the widest control on the tab answering a question the tab has already answered. The period is the other
+    thing entirely: a chronic patient accumulates prescriptions across years, and "what am I giving them at
+    the moment" is the question this table is opened for. Without it the answer sits under three pages of
+    history.
+  */
+  const when = useWhenFilter<RxRow>(t, rxSubmittedAt);
+  const rxFilters = useMemo(() => [when], [when]);
+  const rxQuery = useTableQuery<RxRow>({
+    rows: rxFor,
+    columns: rxCols,
+    filters: rxFilters,
+    pageSize: 8,
+    initialSortKey: "submittedAt",
+    initialSortDir: "descending",
+  });
 
   return (
     <div className="stack">
-      <div className="row-actions">
-        <PlaceOrderModal encounterId={encounter.id} t={t} />
-        <PrescribeModal encounterId={encounter.id} t={t} />
-      </div>
-      <Card as="section" style={{ padding: "var(--sp5)" }}>
-        <h3 className="section-h">{t(S.ordersFor)}</h3>
-        {mineFor.length === 0 ? (
-          <p className="muted" style={{ margin: 0 }}>{t(S.noOrders)}</p>
-        ) : (
-          <DataTable columns={orderCols} rows={mineFor} rowKey={(r) => r.id} caption={t(S.ordersFor)} />
-        )}
-      </Card>
       <Card as="section" style={{ padding: "var(--sp5)" }}>
         <h3 className="section-h">{t(S.rxFor)}</h3>
         {rxFor.length === 0 ? (
           <p className="muted" style={{ margin: 0 }}>{t(S.noRx)}</p>
         ) : (
-          <DataTable columns={rxCols} rows={rxFor} rowKey={(r) => r.id} caption={t(S.rxFor)} />
+          <DataTableView query={rxQuery} columns={rxCols} rowKey={(r) => r.id} caption={t(S.rxFor)}
+            noMatchesLabel={t(S.noMatchesWhen)} />
         )}
+
+        {/*
+          Composed INLINE rather than in a dialog. A prescription line carries five fields plus a per-line
+          status and an expanding findings panel; a modal narrow enough to sit over the encounter collapsed
+          all of it into a single stacked column, which is the layout the design's own option row is meant
+          to avoid.
+        */}
+        <div className="rx-compose">
+          <h4 className="section-h rx-compose-h">{t(S.prescribe)}</h4>
+          <PrescribingWorkspace
+            encounterId={encounter.id}
+            diagnosisIcdCodes={diagnoses.map((d) => d.code)}
+            // Re-read the list directly above the composer. Without this the prescription a doctor just
+            // wrote does not appear until the screen is reloaded — and "it is not in the list" is how a
+            // successful submit reads as a failed one.
+            onDone={rx.reload}
+          />
+        </div>
+      </Card>
+      <PrescriptionDetailModal rx={viewing} onOpenChange={(open) => !open && setViewing(null)} />
+    </div>
+  );
+}
+
+function InvestigationsTab({
+  encounter,
+  diagnoses,
+  orderType,
+}: {
+  encounter: Encounter;
+  diagnoses: EncounterDiagnosis[];
+  orderType: InvestigationOrderType;
+}) {
+  const api = useApi();
+  const t = useLoc();
+  const { date } = useFormat();
+  const orders = useAsync<OrderRow[]>(useCallback(() => api.ordersMine(), [api]), []);
+
+  // Split by TYPE as well as by patient: the imaging tab must not list a blood count. `ordersMine` returns
+  // both kinds because it is one worklist; which of them belongs on this tab is this screen's question.
+  const mineFor = useMemo(
+    () => forPatient(orders.data, encounter.patientId)
+      .filter((o) => o.orderType.toLowerCase() === orderType.toLowerCase()),
+    [orders.data, encounter.patientId, orderType],
+  );
+
+  const heading = orderType === "Imaging" ? S.imagingFor : S.labsFor;
+  const empty = orderType === "Imaging" ? S.noImaging : S.noLabs;
+  const composeHeading = orderType === "Imaging" ? S.orderImaging : S.orderLab;
+
+  const orderCols: Column<OrderRow>[] = [
+    { key: "orderNo", header: t(S.colRef), cell: (r) => <span className="tnum">{r.orderNo}</span>,
+      sortable: true, sortValue: (r) => r.orderNo },
+    // The order TYPE is the tab; repeating it in every row of a tab that only holds one kind is a column
+    // whose every cell says the same word.
+    { key: "primaryCode", header: t(S.colTest), cell: (r) => r.primaryCode,
+      sortable: true, sortValue: (r) => r.primaryCode },
+    // A COUNT, so it right-aligns on the cell with tabular figures — see the prescriptions tab.
+    { key: "lineCount", header: t(S.colLines), cell: (r) => r.lineCount,
+      numeric: true, sortable: true, sortValue: (r) => r.lineCount },
+    { key: "requestedAt", header: t(S.colWhen), cell: (r) => <span className="tnum">{date(r.requestedAt)}</span>,
+      sortable: true, sortValue: (r) => r.requestedAt },
+    { key: "status", header: t(S.colStatus), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />,
+      sortable: true, sortValue: (r) => r.status.label.en },
+    // What has happened to THIS order — placed, sent for approval, sample taken, result reported.
+    {
+      key: "timeline",
+      header: t(S.colTimeline),
+      cell: (r) => (r.encounterId
+        ? <EncounterTimelineButton encounterId={r.encounterId} reference={r.orderNo} />
+        : <span className="muted">—</span>),
+    },
+  ];
+
+  // A date filter, sorting and paging — no search box. Same reasoning as the prescriptions tab: the tab has
+  // already narrowed this to one patient and one order type, and the PERIOD is what is left to ask.
+  const when = useWhenFilter<OrderRow>(t, orderRequestedAt);
+  const orderFilters = useMemo(() => [when], [when]);
+  const orderQuery = useTableQuery<OrderRow>({
+    rows: mineFor,
+    columns: orderCols,
+    filters: orderFilters,
+    pageSize: 8,
+    initialSortKey: "requestedAt",
+    initialSortDir: "descending",
+  });
+
+  return (
+    <div className="stack">
+      <Card as="section" style={{ padding: "var(--sp5)" }}>
+        <h3 className="section-h">{t(heading)}</h3>
+        {mineFor.length === 0 ? (
+          <p className="muted" style={{ margin: 0 }}>{t(empty)}</p>
+        ) : (
+          <DataTableView query={orderQuery} columns={orderCols} rowKey={(r) => r.id} caption={t(heading)}
+            noMatchesLabel={t(S.noMatchesWhen)} />
+        )}
+
+        <div className="rx-compose">
+          <h4 className="section-h rx-compose-h">{t(composeHeading)}</h4>
+          <InvestigationWorkspace
+            encounterId={encounter.id}
+            orderType={orderType}
+            diagnosisIcdCodes={diagnoses.map((d) => d.code)}
+            onDone={orders.reload}
+          />
+        </div>
       </Card>
     </div>
   );
 }
 
-// ---------------------------------------------------------------- history
 
-/**
- * The patient's clinical history, in three registers.
- *
- * <b>One fetch, three tabs — not three screens.</b> A doctor asking "what has been done for this patient?"
- * moves between the visits, what was ordered and what was prescribed in the same breath; making each of them
- * a separate destination turns one question into three navigations and loses the place each time.
- *
- * Every list is a PROFILE section, gated by the design-39 §4 matrix exactly as it is on the patient file —
- * not a second, parallel history assembled here. One list of a patient's prescriptions, one authority over
- * who may read it, and a section this role may not see arrives withheld and renders as withheld.
- */
 function HistoryTab({ beneficiaryId }: { beneficiaryId: string }) {
   const api = useApi();
   const t = useLoc();
@@ -1297,138 +1686,3 @@ function HistoryTab({ beneficiaryId }: { beneficiaryId: string }) {
 
 // ---------------------------------------------------------------- write actions
 
-function PlaceOrderModal({ encounterId, t }: { encounterId: string; t: (l: Localized) => string }) {
-  const api = useApi();
-  const { toast } = useToast();
-  const [open, setOpen] = useState(false);
-  const [code, setCode] = useState("58410-2");
-  const [name, setName] = useState("Complete blood count");
-  const [urgent, setUrgent] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  async function submit() {
-    setBusy(true);
-    try {
-      const res = await api.placeOrder({
-        encounterId,
-        kind: "lab",
-        test: { system: "LOINC", code, label: { en: name, ar: name } },
-        priority: urgent ? "urgent" : "routine",
-      });
-      toast(t(res.requiresApproval ? S.orderApproval : S.orderOk), "ok");
-      setOpen(false);
-    } catch {
-      toast(t({ en: "Order failed", ar: "فشل الطلب" }), "bad");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal
-      open={open}
-      onOpenChange={setOpen}
-      title={t(S.placeOrder)}
-      trigger={
-        <Button
-          variant="secondary"
-          leadingIcon={<Icon name="flask" width={16} height={16} aria-hidden="true" />}
-        >
-          {t(S.placeOrder)}
-        </Button>
-      }
-      footer={
-        <>
-          <Button variant="ghost" onClick={() => setOpen(false)}>{t(S.cancel)}</Button>
-          <Button variant="primary" loading={busy} onClick={() => void submit()}>{t(S.submit)}</Button>
-        </>
-      }
-    >
-      <div className="stack">
-        <InputField label={t(S.orderTest)} value={code} onChange={(e) => setCode(e.currentTarget.value)} />
-        <InputField label={t(S.orderName)} value={name} onChange={(e) => setName(e.currentTarget.value)} />
-        <label className="check">
-          <input type="checkbox" checked={urgent} onChange={(e) => setUrgent(e.currentTarget.checked)} />
-          <span>{t(S.urgent)}</span>
-        </label>
-      </div>
-    </Modal>
-  );
-}
-
-function PrescribeModal({ encounterId, t }: { encounterId: string; t: (l: Localized) => string }) {
-  const api = useApi();
-  const { toast } = useToast();
-  const [open, setOpen] = useState(false);
-  const [code, setCode] = useState("J01CA04");
-  const [name, setName] = useState("Amoxicillin 500mg");
-  const [dose, setDose] = useState("1 cap × 3/day");
-  const [qty, setQty] = useState(21);
-  const [advisory, setAdvisory] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-
-  async function submit() {
-    setBusy(true);
-    setAdvisory([]);
-    try {
-      const res = await api.prescribe({
-        encounterId,
-        drug: { system: "ATC", code, label: { en: name, ar: name } },
-        dose,
-        quantity: qty,
-      });
-      if (res.advisories.length > 0) {
-        setAdvisory(res.advisories.map((a) => t(a)));
-      } else {
-        toast(t(S.rxOk), "ok");
-        setOpen(false);
-      }
-    } catch {
-      toast(t({ en: "Prescription failed", ar: "فشل الوصف" }), "bad");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal
-      open={open}
-      onOpenChange={setOpen}
-      title={t(S.prescribe)}
-      trigger={
-        <Button
-          variant="secondary"
-          leadingIcon={<Icon name="pill" width={16} height={16} aria-hidden="true" />}
-        >
-          {t(S.prescribe)}
-        </Button>
-      }
-      footer={
-        <>
-          <Button variant="ghost" onClick={() => setOpen(false)}>{t(S.cancel)}</Button>
-          <Button variant="primary" loading={busy} onClick={() => void submit()}>{t(S.submit)}</Button>
-        </>
-      }
-    >
-      <div className="stack">
-        <InputField label={t(S.drugCode)} value={code} onChange={(e) => setCode(e.currentTarget.value)} />
-        <InputField label={t(S.drugName)} value={name} onChange={(e) => setName(e.currentTarget.value)} />
-        <InputField label={t(S.dose)} value={dose} onChange={(e) => setDose(e.currentTarget.value)} />
-        <InputField
-          label={t(S.qty)}
-          type="number"
-          value={qty}
-          onChange={(e) => setQty(Number(e.currentTarget.value))}
-        />
-        {advisory.length > 0 && (
-          <TextareaField
-            label={t({ en: "Advisory — acknowledge to continue", ar: "تنبيه — أقر للمتابعة" })}
-            value={advisory.join("\n")}
-            readOnly
-            error={t({ en: "Clinical advisory raised — review before resubmitting.", ar: "تنبيه سريري — راجع قبل إعادة الإرسال." })}
-          />
-        )}
-      </div>
-    </Modal>
-  );
-}

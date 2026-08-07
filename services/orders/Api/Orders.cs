@@ -5,6 +5,7 @@ using Mersal.Authz;
 using Mersal.Events;
 using Mersal.Orders.Domain;
 using Mersal.Orders.Infrastructure;
+using Mersal.Validity;
 using Microsoft.EntityFrameworkCore;
 
 namespace Mersal.Orders.Api;
@@ -23,7 +24,8 @@ public static class OrdersEndpoints
         v1.MapPost("", async (
             CreateOrderRequest req, HttpRequest http, OrdersDbContext db, OrdersGate gate, ICodeValidator codes,
             IExaminationTypeResolver examTypes, OrderRoutingOptions routing, OrderNoIssuer orderNos, IAuditClient audit,
-            IOutbox outbox, IHbmpPrincipalAccessor me, BranchScopeState branch, TimeProvider clock, CancellationToken ct) =>
+            IOutbox outbox, IHbmpPrincipalAccessor me, BranchScopeState branch, IValidityPolicySource validity,
+            TimeProvider clock, CancellationToken ct) =>
         {
             var idem = http.Headers["Idempotency-Key"].ToString();
             if (string.IsNullOrWhiteSpace(idem))
@@ -52,6 +54,20 @@ public static class OrdersEndpoints
                 if (!await codes.IsValidAsync(line.CodeSystem, line.Code, bearer, ct))
                     return Results.Problem(statusCode: 422, title: "unknown-code", type: "urn:hbmp:unknown-code",
                         detail: $"{line.CodeSystem} code '{line.Code}' is not present in master data.");
+
+                // The SECTION rule, re-derived here rather than trusted from step 1. The composing screen
+                // shows it too, but that verdict is display state: a chest x-ray submitted on a lab order
+                // would land in a haematology worklist where nobody can perform it, and the only place that
+                // can actually be prevented is the write path.
+                var mismatched = req.OrderType switch
+                {
+                    OrderType.Lab when InvestigationChecks.IsRadiology(line.Code) => "a radiology procedure on a laboratory order",
+                    OrderType.Imaging when InvestigationChecks.IsLaboratory(line.Code) => "a laboratory procedure on an imaging order",
+                    _ => null,
+                };
+                if (mismatched is not null)
+                    return Results.Problem(statusCode: 422, title: "wrong-section", type: "urn:hbmp:wrong-section",
+                        detail: $"'{line.Code}' is {mismatched}. It would reach a queue that cannot perform it.");
             }
 
             // 14.6 — resolve + PIN examination-type sensitivity (fail-closed: unknown → 422).
@@ -69,12 +85,33 @@ public static class OrdersEndpoints
             var actor = me.Principal?.Subject;
             var providerId = Guid.TryParse(me.Principal?.ProviderId, out var pg) ? pg : Guid.Empty;
 
+            /*
+             * WHEN THIS ORDER STOPS BEING ACTIONABLE.
+             *
+             * `expires_at` and the ix_order_expiry index have been in migration 0001 since the beginning and
+             * nothing has ever written to them, so every investigation order this platform has issued is
+             * valid for ever. A lab or imaging request is a clinical question asked on a particular day; a
+             * technician acting on a six-month-old one is answering a question that may no longer be asked.
+             *
+             * Each order type carries its OWN configured period — a follow-up scan and a same-week blood
+             * panel do not go stale at the same rate. A client-supplied `ExpiresAt` may only shorten it;
+             * nobody grants themselves a longer window by putting a date in a request body.
+             */
+            var artefact = req.OrderType switch
+            {
+                OrderType.Lab => ValidityArtefact.LabOrder,
+                OrderType.Imaging => ValidityArtefact.ImagingOrder,
+                _ => ValidityArtefact.ProcedureOrder,
+            };
+            var policyExpiry = ValidityPolicy.ExpiryFor(now, await validity.DaysAsync(artefact, bearer, ct));
+            var expiresAt = req.ExpiresAt is { } requested && requested < policyExpiry ? requested : policyExpiry;
+
             var order = new InvestigationOrder
             {
                 OrderId = Guid.NewGuid(), OrderNo = await orderNos.NextAsync(now.Year, ct),
                 BeneficiaryId = req.BeneficiaryId, EncounterId = req.EncounterId, OrderingProviderId = providerId,
                 OrderingBranchId = branch.Context.ActiveBranchId,   // phase 14.4 — pin the raising branch
-                OrderType = req.OrderType, Status = OrderStatus.Requested, RequestedAt = now, ExpiresAt = req.ExpiresAt,
+                OrderType = req.OrderType, Status = OrderStatus.Requested, RequestedAt = now, ExpiresAt = expiresAt,
                 IdempotencyKey = idem, CreatedBy = actor,
                 Lines = req.Lines.Select(l => new OrderLine
                 {

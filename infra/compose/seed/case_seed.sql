@@ -14,13 +14,15 @@ INSERT INTO eligibility.member_projection
   ('66563510-421c-4c32-94fb-84a686ecf800','MRS-M-30003','Omar','Salim', 'Active','+201000030003', now())
 ON CONFLICT (beneficiary_id) DO UPDATE SET status = EXCLUDED.status, updated_at = EXCLUDED.updated_at;
 
+-- CONSULT, not 'Oncology'/'Chronic': the canonical set (22 §11) has no such categories, and this
+-- column is matched against it. A fixture's programme label does not belong in a closed vocabulary.
 INSERT INTO eligibility.coverage_projection
   (coverage_id, beneficiary_id, benefit_category, policy_no, status, effective_from, effective_to, limits_json, updated_at) VALUES
-  ('c5000000-0000-4000-8000-000000000001','fcfb5d88-2385-4ed3-8aba-cc37f38b1fbb','Oncology','POL-2026-ONC-01','Active', CURRENT_DATE - 120, CURRENT_DATE + 245,
+  ('c5000000-0000-4000-8000-000000000001','fcfb5d88-2385-4ed3-8aba-cc37f38b1fbb','CONSULT','POL-2026-ONC-01','Active', CURRENT_DATE - 120, CURRENT_DATE + 245,
      '[{"limitType":"Annual","limitValue":250000,"consumedValue":91500}]'::jsonb, now()),
-  ('c5000000-0000-4000-8000-000000000002','b8484913-7535-455b-af50-de32bb6574d8','Chronic','POL-2026-CHR-02','Active', CURRENT_DATE - 90,  CURRENT_DATE + 275,
+  ('c5000000-0000-4000-8000-000000000002','b8484913-7535-455b-af50-de32bb6574d8','CONSULT','POL-2026-CHR-02','Active', CURRENT_DATE - 90,  CURRENT_DATE + 275,
      '[{"limitType":"Annual","limitValue":60000,"consumedValue":18200}]'::jsonb, now()),
-  ('c5000000-0000-4000-8000-000000000003','66563510-421c-4c32-94fb-84a686ecf800','Outpatient','POL-2026-OUT-03','Active', CURRENT_DATE - 60, CURRENT_DATE + 305,
+  ('c5000000-0000-4000-8000-000000000003','66563510-421c-4c32-94fb-84a686ecf800','CONSULT','POL-2026-OUT-03','Active', CURRENT_DATE - 60, CURRENT_DATE + 305,
      '[{"limitType":"Annual","limitValue":40000,"consumedValue":9750}]'::jsonb, now())
 ON CONFLICT (coverage_id) DO UPDATE SET status = EXCLUDED.status, limits_json = EXCLUDED.limits_json, updated_at = EXCLUDED.updated_at;
 

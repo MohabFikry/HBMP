@@ -15,6 +15,8 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
     public DbSet<Referral> Referrals => Set<Referral>();
     public DbSet<PrescriptionAlert> PrescriptionAlerts => Set<PrescriptionAlert>();
     public DbSet<ProcessedRequest> ProcessedRequests => Set<ProcessedRequest>();
+    public DbSet<PrescriptionValidationRun> PrescriptionValidations => Set<PrescriptionValidationRun>();
+    public DbSet<PrescriptionLineOverride> PrescriptionLineOverrides => Set<PrescriptionLineOverride>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -27,6 +29,9 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
             e.HasKey(x => x.PrescriptionId);
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
             e.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
+            // Held as a JSON string on the entity; the column is jsonb, and without this EF sends text and
+            // Postgres refuses the insert outright.
+            e.Property(x => x.DiagnosisSnapshot).HasColumnType("jsonb");
             e.HasIndex(x => x.RxNo).IsUnique();
             e.HasIndex(x => new { x.BeneficiaryId, x.Status });
             e.HasIndex(x => x.IdempotencyKey);
@@ -70,6 +75,28 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
             e.ToTable("prescription_alert");
             e.HasKey(x => x.AlertId);
             e.HasIndex(x => x.PrescriptionId);
+        });
+
+        // Append-only, both of them: written once and never mutated. Nothing here declares an update path,
+        // and the audit story depends on that staying true.
+        b.Entity<PrescriptionValidationRun>(e =>
+        {
+            e.ToTable("prescription_validation");
+            e.HasKey(x => x.ValidationId);
+            e.Property(x => x.Findings).HasColumnType("jsonb");
+            e.Property(x => x.EngineVersion).HasMaxLength(32);
+            e.HasIndex(x => x.PrescriptionId);
+            e.HasIndex(x => new { x.EncounterId, x.RanAt });
+        });
+
+        b.Entity<PrescriptionLineOverride>(e =>
+        {
+            e.ToTable("prescription_line_override");
+            e.HasKey(x => x.OverrideId);
+            e.Property(x => x.Reason).HasMaxLength(300);
+            e.Property(x => x.FindingRef).HasMaxLength(200);
+            e.HasIndex(x => x.PrescriptionId);
+            e.HasIndex(x => x.LineId);
         });
 
         b.Entity<ProcessedRequest>(e =>

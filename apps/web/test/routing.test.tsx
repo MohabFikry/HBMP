@@ -60,7 +60,7 @@ describe("Permission-driven routing (US-070 / US-071)", () => {
 
   it("redirects an unauthenticated visitor to the login screen", async () => {
     renderApp("/finance/settlements");
-    expect(await screen.findByRole("heading", { name: "Sign in to Mersal HBMP" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
   });
 });
 
@@ -96,7 +96,7 @@ describe("Browser tab title (replaces the on-screen breadcrumb)", () => {
 describe("Login + MFA (US-070)", () => {
   it("blocks sign-in without a valid 6-digit MFA code, then lands on the portal", async () => {
     renderApp("/login");
-    await screen.findByRole("heading", { name: "Sign in to Mersal HBMP" });
+    await screen.findByRole("heading", { name: "Sign in" });
 
     // Select the pharmacy role.
     await userEvent.selectOptions(screen.getByLabelText("Role (demo sign-in)"), "pharmacy");
@@ -105,9 +105,10 @@ describe("Login + MFA (US-070)", () => {
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
     expect(await screen.findByText("A valid 6-digit code is required.")).toBeInTheDocument();
 
-    // Provide a valid code → lands on the pharmacy portal home.
+    // Provide a valid code → lands on the pharmacy portal home, which is now "Dispense". The rail used to
+    // carry a "Prescription Queue" entry as well, routed to the SAME component — one screen offered twice.
     await userEvent.type(screen.getByLabelText("Authenticator code"), "123456");
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
-    expect(await screen.findByRole("heading", { name: "Prescription Queue" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Dispense" })).toBeInTheDocument();
   });
 });

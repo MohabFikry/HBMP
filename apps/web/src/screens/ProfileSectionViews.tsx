@@ -500,11 +500,11 @@ function CoverageView({ data }: { data: ProfileCoverage }) {
     { key: "category", header: t(L.category), cell: (r) => r.category,
       sortable: true, sortValue: (r) => r.category },
     anyHas(rows, (r) => r.annualLimit) && {
-      key: "limit", header: t(L.annualLimit), cell: (r) => money(r.annualLimit),
+      key: "limit", header: t(L.annualLimit), cell: (r) => money(r.annualLimit), numeric: true,
       sortable: true, sortValue: (r) => r.annualLimit,
     },
     anyHas(rows, (r) => r.consumed) && {
-      key: "consumed", header: t(L.consumed), cell: (r) => money(r.consumed),
+      key: "consumed", header: t(L.consumed), cell: (r) => money(r.consumed), numeric: true,
       sortable: true, sortValue: (r) => r.consumed,
     },
     anyHas(rows, (r) => r.remaining) && {
@@ -1315,7 +1315,7 @@ function AuthorizationsView({ data }: { data: ProfileAuthorizations }) {
     },
     // Stripped for reception (`V(status)`): they tell a member "approved until the 30th", not what it cost.
     anyHas(rows, (r) => r.approvedAmount) && {
-      key: "approvedAmount", header: t(L.approvedAmount), cell: (r) => money(r.approvedAmount),
+      key: "approvedAmount", header: t(L.approvedAmount), cell: (r) => money(r.approvedAmount), numeric: true,
       sortable: true, sortValue: (r) => r.approvedAmount,
     },
     // Stripped for reception AND finance: the clinical reasoning is neither one's zone.
@@ -1532,15 +1532,15 @@ function FinancialView({ data }: { data: ProfileFinancial }) {
     { key: "claimNo", header: t(L.claimNo), cell: (r) => r.claimNo,
       sortable: true, sortValue: (r) => r.claimNo },
     anyHas(claims, (r) => r.billedAmount) && {
-      key: "billed", header: t(L.billed), cell: (r) => money(r.billedAmount),
+      key: "billed", header: t(L.billed), cell: (r) => money(r.billedAmount), numeric: true,
       sortable: true, sortValue: (r) => r.billedAmount,
     },
     anyHas(claims, (r) => r.approvedAmount) && {
-      key: "approved", header: t(L.approved), cell: (r) => money(r.approvedAmount),
+      key: "approved", header: t(L.approved), cell: (r) => money(r.approvedAmount), numeric: true,
       sortable: true, sortValue: (r) => r.approvedAmount,
     },
     anyHas(claims, (r) => r.memberShare) && {
-      key: "memberShare", header: t(L.memberShare), cell: (r) => money(r.memberShare),
+      key: "memberShare", header: t(L.memberShare), cell: (r) => money(r.memberShare), numeric: true,
       sortable: true, sortValue: (r) => r.memberShare,
     },
     { key: "status", header: t(L.status), cell: (r) => <Status status={r.status} />,
@@ -1741,7 +1741,7 @@ export function FallbackView({ data }: { data: unknown }) {
           is a screen that quietly asserts data does not exist. */}
       {nested.map(([k, v]) => (
         <Group key={k} heading={{ en: humanise(k), ar: humanise(k) }}>
-          <pre className="profile-raw">{JSON.stringify(v, null, 2)}</pre>
+          <pre className="profile-raw mrs-scroll mrs-scroll-focusable" tabIndex={0}>{JSON.stringify(v, null, 2)}</pre>
         </Group>
       ))}
     </div>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Card, DataTable, Icon, InlineAlert, KpiCard, StatusChip } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, KpiCard } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { AppointmentCounts, AppointmentRow, Localized, Practitioner, Specialty } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -121,6 +121,21 @@ export function ReceptionDashboard() {
     () => new Map((doctors.data ?? []).map((d) => [d.id, d])),
     [doctors.data],
   );
+  /**
+   * A doctor id → display name, or null when emr recorded none.
+   *
+   * <p>Lifted out of the visits column so the table and the schedule resolve a doctor the same way. They did
+   * it separately before — the schedule not at all — and two joins over one map is how the two halves of a
+   * screen start naming the same person differently.</p>
+   */
+  const doctorName = useMemo(
+    () => (doctorId?: string | null) => {
+      const d = doctorId ? doctorById.get(doctorId) : undefined;
+      return d ? t(d.name) : null;
+    },
+    [doctorById, t],
+  );
+
   const specialtyName = useMemo(() => {
     const m = new Map((specialties.data ?? []).map((s) => [s.code, s.name]));
     // The code is the honest fallback while the reference list loads — a dash would claim the doctor has no
@@ -143,10 +158,7 @@ export function ReceptionDashboard() {
     patientColumn({ t }),
     {
       key: "doctor", header: t(S.doctor), sortable: true,
-      cell: (r) => {
-        const d = r.doctorId ? doctorById.get(r.doctorId) : undefined;
-        return d ? t(d.name) : <span className="muted">{t(S.unnamedDoctor)}</span>;
-      },
+      cell: (r) => doctorName(r.doctorId) ?? <span className="muted">{t(S.unnamedDoctor)}</span>,
       sortValue: (r) => (r.doctorId ? doctorById.get(r.doctorId)?.name.en : undefined),
     },
     {
@@ -240,10 +252,25 @@ export function ReceptionDashboard() {
       {/* ── Cards ──────────────────────────────────────────────────────
           Counted server-side. Tallying the board here would be capped at its 200-row page and would
           undercount a busy day, in the direction nobody checks. */}
+      {/* The glyphs are decorative and marked so: the label names each figure in words, and the icon is what
+          lets the desk find the right tile by shape on a board of three identical white cards. */}
       <div className="dash-kpis">
-        <KpiCard label={t(S.cardTotal)} value={cardValue(counts.data?.total)} />
-        <KpiCard label={t(S.cardCheckedIn)} value={cardValue(counts.data?.checkedIn)} />
-        <KpiCard label={t(S.cardNoShow)} value={cardValue(counts.data?.noShow)} />
+        <KpiCard
+          label={t(S.cardTotal)} value={cardValue(counts.data?.total)}
+          icon={<Icon name="calendar" />}
+        />
+        <KpiCard
+          label={t(S.cardCheckedIn)} value={cardValue(counts.data?.checkedIn)}
+          icon={<Icon name="check2" />}
+        />
+        {/* The only one of the three that counts something going WRONG, and it looked exactly like the other
+            two. The tone marks the subject, not the figure — it stays red on a morning that reads 0, because
+            the desk finds this tile by colour and a card that changes identity with its value cannot be
+            found that way. The number itself stays in body colour for the same reason. */}
+        <KpiCard
+          label={t(S.cardNoShow)} value={cardValue(counts.data?.noShow)}
+          icon={<Icon name="cross" />} tone="bad"
+        />
       </div>
       {/*
         A failed count is SAID, not implied by a dash.
@@ -277,7 +304,7 @@ export function ReceptionDashboard() {
       <Card as="section" style={{ padding: "var(--sp3)", marginTop: "var(--sp4)" }}>
         <h2 className="section-h">{t(S.calendarHeading)}</h2>
         <AsyncSection<AppointmentRow[]> state={board} isEmpty={(d) => d.length === 0} emptyLabel={S.calendarEmpty}>
-          {(rows) => <DaySchedule rows={rows} />}
+          {(rows) => <DaySchedule rows={rows} doctorName={doctorName} />}
         </AsyncSection>
       </Card>
     </>
@@ -292,7 +319,13 @@ export function ReceptionDashboard() {
  * empty 11:00 renders as a visible gap — which is the answer to "can we fit a walk-in in?" and is exactly
  * what a list of only-the-booked-hours cannot show.
  */
-function DaySchedule({ rows }: { rows: AppointmentRow[] }) {
+function DaySchedule({
+  rows, doctorName,
+}: {
+  rows: AppointmentRow[];
+  /** The client-side doctor join, passed in rather than refetched — see the screen's header note. */
+  doctorName: (doctorId?: string | null) => string | null;
+}) {
   const t = useLoc();
   const fmt = useFormat();
 
@@ -322,20 +355,75 @@ function DaySchedule({ rows }: { rows: AppointmentRow[] }) {
     // Fixed height + scroll: a stretched range can be twenty-odd rows, and letting the schedule grow
     // unbounded pushes everything below it off the page. The band heights stay constant so an empty hour is
     // still visibly empty — that gap is the answer to "can we fit a walk-in in?".
-    <ol className="dash-day">
+    // aria-label so the schedule is addressable as a landmark in its own right — a bare <ol> among the
+    // page's other lists is "list" with nothing to tell it apart, by keyboard or by test.
+    <ol className="dash-day mrs-scroll mrs-scroll-focusable" tabIndex={0} aria-label={t(S.calendarHeading)}>
       {hours.map((h) => {
         const at = byHour.get(h) ?? [];
         return (
           <li key={h} className="dash-hour">
             <span className="dash-hour-label tnum">{String(h).padStart(2, "0")}:00</span>
             <div className="dash-hour-items">
-              {at.map((r) => (
-                <span key={r.id} className="dash-appt">
-                  <span className="tnum">{fmt.time(r.scheduledStart)}</span>
-                  <span>{r.beneficiaryName ?? r.beneficiary.token}</span>
-                  <StatusChip kind={r.status.kind} label={t(r.status.label)} />
-                </span>
-              ))}
+              {at.map((r) => {
+                const doctor = doctorName(r.doctorId);
+                return (
+                  /*
+                    One appointment.
+
+                    The accent bar carries the status as a second, non-textual channel — the status word is
+                    still written out beside it, because 21-accessibility-checklist forbids hue as the only
+                    carrier. Reading a band of eight chips for "who has arrived" is a scan down the left edge,
+                    which a pill in the middle of each chip cannot give you.
+
+                    The NAME leads, at full weight. It was the same size as the time and the status and sat
+                    third in the reading order behind both; the desk is looking for a person, and the time is
+                    already implied by the band the chip is sitting in.
+                  */
+                  <span key={r.id} className={`dash-appt dash-appt--${r.status.kind}`}>
+                    <span className="dash-appt-body">
+                      <span className="dash-appt-top">
+                        {/* `title` so a name too long for the chip is still readable on hover; the full
+                            string stays in the DOM either way, so assistive technology is never truncated. */}
+                        <span className="dash-appt-name" title={r.beneficiaryName ?? r.beneficiary.token}>
+                          {r.beneficiaryName ?? r.beneficiary.token}
+                        </span>
+                        {/* The status rides WITH the name rather than on the line below it, because the two
+                            are read as one answer — "Tarek Selim, booked". The bullet is a second, non-textual
+                            channel at the point of reading; the word stays, per 21-accessibility §non-color
+                            status, and the bullet is aria-hidden so it is never announced as a stray glyph. */}
+                        <span className="dash-appt-status">
+                          <span className="dash-appt-dot" aria-hidden="true" />
+                          {t(r.status.label)}
+                        </span>
+                      </span>
+                      {/*
+                        The two facts underneath, each behind the glyph for what it is. They were a status word
+                        and a name separated by a dot, which made the doctor's name look like a continuation of
+                        the status; the icons say which KIND of thing each one is before it is read.
+                      */}
+                      <span className="dash-appt-meta">
+                        <span className="dash-appt-fact">
+                          <Icon name="clock" className="dash-appt-ico" width={13} height={13} />
+                          <span className="tnum">{fmt.time(r.scheduledStart)}</span>
+                        </span>
+                        {/* The doctor answers "which room is this person going to", which is the question the
+                            desk asks straight after "who". Absent is said in words rather than left blank —
+                            an empty slot reads as a rendering fault. */}
+                        <span className="dash-appt-fact dash-appt-doctor">
+                          <Icon name="stethoscope" className="dash-appt-ico" width={13} height={13} />
+                          {/* Wrapped rather than left as a bare text node: `text-overflow` needs an element
+                              of its own to clip, and a loose text node inside a flex row is an anonymous box
+                              no rule can reach — so a long name would push the chip wide instead of
+                              ellipsing. */}
+                          <span className={`dash-appt-doctor-name${doctor ? "" : " muted"}`}>
+                            {doctor ?? t(S.unnamedDoctor)}
+                          </span>
+                        </span>
+                      </span>
+                    </span>
+                  </span>
+                );
+              })}
             </div>
           </li>
         );

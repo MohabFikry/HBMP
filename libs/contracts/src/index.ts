@@ -24,6 +24,8 @@ export * from "./reception";
 export * from "./clinician";
 export * from "./fulfillment";
 export * from "./formulary";
+export * from "./prescribing";
+export * from "./investigations";
 export * from "./approvals-extra";
 export * from "./report-view";
 export * from "./provider";

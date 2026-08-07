@@ -704,7 +704,7 @@ function DecisionModal({
       {write.error ? <InlineAlert tone="bad">{t(write.error.message)}</InlineAlert> : null}
 
       {bulk ? (
-        <ul className="reg-bulklist">
+        <ul className="reg-bulklist mrs-scroll mrs-scroll-focusable" tabIndex={0}>
           {items.map((i) => (
             <li key={i.beneficiary.id}>
               {i.beneficiary.givenName} {i.beneficiary.familyName}

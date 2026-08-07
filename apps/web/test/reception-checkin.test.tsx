@@ -179,9 +179,31 @@ describe("Reception day board — check-in and No-show (US-022)", () => {
 
     await screen.findByRole("table");
     expect(inTable().getByRole("button", { name: /check in/i })).toBeInTheDocument();
-    expect(inTable().queryByRole("button", { name: /no-show/i })).not.toBeInTheDocument();
-    // An empty cell reads as a broken screen; the desk is told why the action is absent.
-    expect(screen.getByText(/once the appointment window has passed/i)).toBeInTheDocument();
+
+    // PRESENT, and disabled. The button used to be hidden until the window passed, so it appeared out of
+    // nowhere partway through the morning and the desk had no idea where it would land; a control that is
+    // visible and visibly unusable teaches its own position.
+    const ns = inTable().getByRole("button", { name: /no-show/i });
+    expect(ns).toHaveAttribute("aria-disabled", "true");
+    // `aria-disabled`, not `disabled`: a disabled button leaves the tab order, and with it goes the only
+    // route a keyboard or screen-reader user has to the REASON — which is the entire point of showing the
+    // control early. "Deactivated" with no reason is the shape of message an operator stops reading.
+    expect(ns).not.toBeDisabled();
+    expect(ns).toHaveAttribute("title", expect.stringMatching(/once the appointment window has passed/i));
+  });
+
+  it("cannot be fired while it is deactivated", async () => {
+    // The half that matters. A control that LOOKS disabled and still calls the server on click is worse than
+    // one that was never shown — the desk would mark a no-show minutes before the platform allows it, and the
+    // server's refusal would arrive as an error nobody can explain.
+    const user = userEvent.setup();
+    const noShow = vi.fn();
+    renderBoard(fakeApi({ noShow, appointments: vi.fn().mockResolvedValue([row({ noShowEligible: false })]) }));
+
+    await screen.findByRole("table");
+    await user.click(inTable().getByRole("button", { name: /no-show/i }));
+
+    expect(noShow).not.toHaveBeenCalled();
   });
 
   it("shows No-show once eligible and sends the row version as If-Match", async () => {
@@ -282,7 +304,11 @@ describe("Reception board — search, filters and sort (14.5)", () => {
     renderBoard(fakeApi({ appointments: vi.fn().mockResolvedValue([rows[0]]) }));
     await screen.findByRole("table");
 
-    await user.click(screen.getByRole("button", { name: /^no-show$/i }));
+    // Scoped to the FILTER GROUP. The no-show row action is now always rendered — disabled until the window
+    // passes — so an unscoped query matches two buttons with the same name, and the one it would have picked
+    // is a coin toss between filtering the board and marking a patient absent.
+    await user.click(within(screen.getByRole("group", { name: /status/i }))
+      .getByRole("button", { name: /^no-show$/i }));
 
     // "No appointments booked for today" would tell the desk their bookings had vanished.
     expect(await screen.findByText(/no appointments match these filters/i)).toBeInTheDocument();

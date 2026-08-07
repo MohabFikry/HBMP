@@ -478,22 +478,111 @@ html[dir="rtl"] .mrs-search input {
   padding: var(--sp5) 0;
 }
 
+/* ---------- Scrolling ----------------------------------------------------
+ *
+ * One treatment for every region that scrolls INSIDE the page — dropdowns, panel bodies, in-card lists,
+ * modal bodies, wide tables. Two things it fixes, both of which every such region had.
+ *
+ * <b>Scroll chaining.</b> Only two containers in the whole app set `overscroll-behavior`, and both only on
+ * the x axis. Everywhere else, reaching the end of an inner list handed the remaining momentum to the page:
+ * scrolling to the bottom of a select dropdown carried on and scrolled the document behind it, which moves
+ * the field the dropdown is anchored to out from under the cursor. `contain` stops at the boundary. It does
+ * NOT trap the user — the outer surface still scrolls once the wheel stops and starts again.
+ *
+ * <b>The scrollbar itself.</b> Nothing styled one anywhere, so every scroll region rendered the platform
+ * default, and the two platforms disagree in opposite directions. On Windows and most Linux desktops that is
+ * a ~17px light-grey slab with square end caps, which inside a 288px dropdown is 6% of the width spent on
+ * furniture that matches nothing else on the page. On macOS it is an overlay bar that is INVISIBLE until you
+ * scroll — so a list that scrolls looks exactly like a list that does not, and the only way to discover the
+ * remaining options is to try. A thin, always-present, tokenised bar answers both: it costs less room than
+ * the Windows default and it is the affordance macOS omits.
+ *
+ * Declared twice on purpose. `scrollbar-width`/`scrollbar-color` are the standard properties (Firefox, and
+ * Chrome 121+); `::-webkit-scrollbar` is what Safari and older Chromium read. Neither alone covers the
+ * browsers this runs on.
+ *
+ * NOT applied to the page's own scroller or the navigation rail: a thin bar on the primary scroller of a
+ * long worklist is a real ergonomic loss, and the OS default is the right thing for the surface the user
+ * scrolls most.
+ */
+.mrs-scroll {
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.mrs-scroll::-webkit-scrollbar {
+  inline-size: 10px;
+  block-size: 10px;
+}
+.mrs-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.mrs-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--r-pill);
+  /* A transparent border painted over the thumb's own background inset it from the track, so the bar reads
+     as a floating pill rather than a full-bleed slab against the card's edge. */
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.mrs-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+  background-clip: content-box;
+}
+/* Both axes meeting in the corner — without this it renders as an unstyled grey square. */
+.mrs-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/*
+ * A scroll region a keyboard can reach.
+ *
+ * <p>A container that scrolls but holds no focusable child cannot be scrolled without a pointer — arrow keys
+ * go to the page instead (WCAG 2.1.1). The fix is a tab stop, and a tab stop MUST show where focus is: a
+ * silent one is worse than none, because the user cannot tell whether their arrow keys will move this region
+ * or the page. Same treatment `.mrs-wl-scroll` already uses, lifted out so it is not the data table's
+ * private arrangement.</p>
+ *
+ * <p>Deliberately NOT put on dropdowns, menus or listboxes. Those are already keyboard-operable through the
+ * control that owns them — arrow keys from the input move the active option and scroll it into view — and an
+ * extra tab stop in the middle of that would be a stop with nothing to do.</p>
+ */
+.mrs-scroll-focusable:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
+}
+
 /* ---------- Data table / worklist ---------- */
 /* Wide tables scroll horizontally *inside their own pane* rather than pushing the whole page into a
    horizontal scroll. The wrapper owns the overflow so the outer layout stays put as the viewport shrinks. */
+/*
+ * A wide table scrolls SIDEWAYS on its own and hands the page everything else.
+ *
+ * `.mrs-scroll` contains overscroll on both axes, which is right for a dropdown — reaching the end of a
+ * select's list must not carry on and scroll the document, because that moves the field the list is anchored
+ * to out from under the cursor. It is wrong for a table. A table is not an overlay floating above the page;
+ * it is a block IN the page, usually the tallest thing on it, and the wheel lands on it for most of the
+ * screen's area.
+ *
+ * `contain` blocks the chain even when this box has no vertical overflow to consume — which is the common
+ * case, since the table's height is its content — so the page simply stopped scrolling wherever the cursor
+ * happened to be over a table. The user's report was "no vertical scroll available, or the scroll is at the
+ * end"; both are the same rule refusing to pass the gesture on.
+ *
+ * So: `block: auto` restores the chain up the page, and `inline: contain` stays, because horizontal
+ * overscroll is what browsers map to back/forward navigation gestures — chaining that would let a sideways
+ * flick inside a claims table leave the page entirely.
+ */
 .mrs-wl-scroll {
   inline-size: 100%;
   max-inline-size: 100%;
   overflow-x: auto;
-  overscroll-behavior-x: contain;
+  overscroll-behavior-inline: contain;
+  overscroll-behavior-block: auto;
 }
-/* The pane is a tab stop (see DataTable.tsx) because it scrolls, so it needs to say where focus is — a
-   silent tab stop is worse than none, since the user cannot tell whether their arrow keys will scroll this
-   table or the page. `-3px` keeps the ring inside the pane rather than under the card's edge. */
-.mrs-wl-scroll:focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: -3px;
-}
+/* The focus ring for this pane now comes from `.mrs-scroll-focusable`, which the element also carries — the
+   reasoning that used to live here (a scrolling pane is a tab stop, and a silent tab stop is worse than none)
+   moved with it, because it applies to every scroll region and not only to a data table. */
 .mrs-wl {
   width: 100%;
   min-inline-size: max-content;
@@ -505,14 +594,37 @@ html[dir="rtl"] .mrs-search input {
   top: 0;
   background: var(--surface-2);
   text-align: start;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-size: var(--tbl-head-size);
+  font-weight: var(--tbl-head-weight);
+  letter-spacing: var(--tbl-head-tracking);
   text-transform: uppercase;
-  color: var(--text-3);
-  padding: 12px 16px;
+  color: var(--tbl-head-color);
+  padding: 12px var(--tbl-cell-pad-x);
   border-bottom: 1px solid var(--border);
   z-index: 5;
+  white-space: nowrap;
+}
+
+/*
+ * A cell holding a number.
+ *
+ * <p><b>Numbers align to their END, and they were not.</b> A money or quantity column is read by scanning
+ * DOWN it — "which of these claims is the large one", "does this add up" — and that scan only works when the
+ * digits stack. Left-aligned, `9.50` and `12,400.00` start in the same place and end in different ones, so
+ * the eye has to measure each string instead of reading a shape.</p>
+ *
+ * <p>The app got this half right in a way that looked entirely finished. Thirteen of fifty-six money renders
+ * wrapped the value in `.tnum` — but `.tnum` only sets `font-variant-numeric`, and it sat on a `<span>`
+ * inside a cell that is still `text-align: start`. So the digits were the right WIDTH and the column was
+ * still ragged: the fix was applied, and it did not do the thing it was for. Alignment has to live on the
+ * cell, which is why this is a cell class rather than a span class.</p>
+ *
+ * <p>`nowrap` because a wrapped figure is a different number to a reader glancing down the column — "1,240"
+ * broken across two lines reads as two values.</p>
+ */
+.mrs-num {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .mrs-wl th button.mrs-sort {
@@ -594,14 +706,35 @@ html[dir="rtl"] .mrs-search input {
   margin: 0;
   min-inline-size: 0;
 }
-.mrs-toolbar-group legend {
+/*
+  The group's VISIBLE label — a span, not the legend.
+
+  A rendered `<legend>` is laid out against the top of its fieldset's box rather than in normal flow. As soon
+  as a group carried an `extra` (the appointments board's date range, a label-over-control pair some 30px
+  taller than a chip) the fieldset grew, and "WHEN" went up with it while every other label in the bar stayed
+  on the label line. The legend now carries the accessible name only; this span is what the eye aligns to, and
+  it is an ordinary flow item sitting directly above its own chips.
+*/
+.mrs-toolbar-grouplabel {
   font-size: 11.5px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-3);
   font-weight: 600;
-  padding: 0;
+  display: block;
   margin-block-end: 6px;
+}
+/* Label over chips: the same shape as the search box and as any caller-supplied field, which is what lets
+   `align-items: flex-end` on the chipset line all three up. */
+.mrs-toolbar-chipcol {
+  flex: 0 0 auto;
+  min-inline-size: 0;
+}
+.mrs-toolbar-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp2);
 }
 .mrs-chipset {
   display: flex;
@@ -677,7 +810,7 @@ html[dir="rtl"] .mrs-search input {
   margin-top: 6px;
 }
 .mrs-wl td {
-  padding: 14px 16px;
+  padding: var(--tbl-cell-pad-y) var(--tbl-cell-pad-x);
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
@@ -685,7 +818,7 @@ html[dir="rtl"] .mrs-search input {
   border-bottom: 0;
 }
 .mrs-wl.mrs-compact td {
-  padding: 8px 16px;
+  padding: var(--tbl-cell-pad-y-tight) var(--tbl-cell-pad-x);
 }
 .mrs-row {
   cursor: pointer;
@@ -831,6 +964,62 @@ nav.mrs-rail {
   align-items: center;
   gap: 6px;
 }
+/*
+ * The subject glyph on a KPI label. Tinted and set on a soft brand wash so it reads as a marker rather than
+ * as another line of the label — at 12.5px an untinted icon beside uppercase text just looks like a
+ * mis-rendered character. `flex: none` keeps it square when the label wraps on a narrow tile.
+ */
+.mrs-kpi .mrs-kpi-icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  inline-size: 26px;
+  block-size: 26px;
+  border-radius: var(--r-sm);
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+}
+.mrs-kpi .mrs-kpi-icon svg {
+  inline-size: 15px;
+  block-size: 15px;
+}
+
+/*
+ * Toned KPI cards — the hairline and the icon tile only.
+ *
+ * The tone says what KIND of figure the tile counts, and the DEFAULT is the brand gradient above, so every
+ * card that does not ask for one is untouched. A no-shows tile carries `bad` at 0 exactly as it does at 40:
+ * the colour identifies the subject, not the reading. Painting the value would make the card announce a
+ * problem on a morning where nobody missed an appointment.
+ *
+ * The value therefore keeps `--text-1` in every tone, and the uppercase label still names the figure in
+ * words — 21-accessibility §non-color status, applied to a tile whose whole content is a number.
+ *
+ * The hairline fades toward the surface rather than running flat, matching the brand→accent gradient it
+ * replaces; a solid 3px bar reads heavier than the default and the row would stop looking like one family.
+ */
+.mrs-kpi--ok::before {
+  background: linear-gradient(90deg, var(--st-ok-fg), color-mix(in srgb, var(--st-ok-fg) 45%, var(--surface-1)));
+}
+.mrs-kpi--warn::before {
+  background: linear-gradient(90deg, var(--st-warn-fg), color-mix(in srgb, var(--st-warn-fg) 45%, var(--surface-1)));
+}
+.mrs-kpi--bad::before {
+  background: linear-gradient(90deg, var(--st-bad-fg), color-mix(in srgb, var(--st-bad-fg) 45%, var(--surface-1)));
+}
+.mrs-kpi--ok .mrs-kpi-icon {
+  color: var(--st-ok-fg);
+  background: color-mix(in srgb, var(--st-ok-fg) 12%, transparent);
+}
+.mrs-kpi--warn .mrs-kpi-icon {
+  color: var(--st-warn-fg);
+  background: color-mix(in srgb, var(--st-warn-fg) 12%, transparent);
+}
+.mrs-kpi--bad .mrs-kpi-icon {
+  color: var(--st-bad-fg);
+  background: color-mix(in srgb, var(--st-bad-fg) 12%, transparent);
+}
+
 .mrs-kpi .mrs-kpi-val {
   font-size: 34px;
   font-weight: 600;
@@ -907,7 +1096,9 @@ nav.mrs-rail {
   border-radius: var(--r-lg);
   box-shadow: var(--elev-3);
   width: min(520px, 92vw);
-  max-height: 88vh;
+  /* dvh: on mobile Safari the collapsing URL bar makes `vh` taller than the visible page, so the last rows
+     of an 88vh modal sat behind the toolbar with no way to scroll to them. */
+  max-height: 88dvh;
   overflow: auto;
   padding: var(--sp6);
 }
@@ -954,6 +1145,21 @@ nav.mrs-rail {
   border-radius: var(--r-md);
   padding: var(--sp4);
   margin-top: var(--sp3);
+}
+/*
+ * More air when the body follows the TITLE directly — that is, when the modal has no description.
+ *
+ * The single `--sp3` above was measured against a description: 12px under a muted paragraph reads as a gap.
+ * Under a 20px semibold heading the same 12px reads as a collision, because the heading has more optical
+ * weight and its own line-height sits tighter to the baseline. A modal that drops its description does not
+ * want the paragraph's spacing; it wants the heading's.
+ *
+ * The adjacent-sibling selector is what makes this automatic rather than a per-call-site fix — the appointment
+ * note dialog is simply the first modal to go without a description, and every one after it inherits the
+ * correct gap instead of the next person re-measuring it by eye.
+ */
+.mrs-modal > h2 + .mrs-modal-body {
+  margin-top: var(--sp5);
 }
 @keyframes mrs-fade {
   from {
@@ -1105,7 +1311,7 @@ nav.mrs-rail {
   inset-block-start: calc(100% + var(--sp1));
   inset-inline-start: 0;
   min-inline-size: 100%;
-  max-block-size: 288px;
+  max-block-size: var(--scroll-picker);
   overflow-y: auto;
   margin: 0;
   padding: var(--sp1);
@@ -1201,7 +1407,7 @@ nav.mrs-rail {
   inset-block-start: calc(100% + var(--sp1));
   inset-inline-start: 0;
   min-inline-size: 100%;
-  max-block-size: 288px;
+  max-block-size: var(--scroll-picker);
   overflow-y: auto;
   margin: 0;
   padding: var(--sp1);

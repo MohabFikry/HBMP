@@ -244,6 +244,42 @@ Corollary: the one-sentence guidance that prevents the failure (*"Use the templa
 
 Both bulk screens drive the same ingestion engine, so the contract is **one shared component** (`BulkTemplateActions`) fed by the server's template response. Two copies of a column table is how two doors into one registry come to describe different contracts.
 
+## 10d. Timelines — how a step names its actor and its moment
+
+Normative for **every** timeline in every portal: the appointment timeline, the care episode, the policy
+version history, and anything added later that renders a list of "what happened, when, by whom".
+
+### The three cases, and why they are three
+
+A step's actor is one of exactly three things, and they are said differently because they are different
+facts. Collapsing any two of them is how a timeline stops being worth opening.
+
+| The truth | What is rendered | Why not something else |
+|---|---|---|
+| Resolved to a person | the display name | — |
+| Recorded, but the directory cannot name it | **"Unknown user"**, raw id on `title` | It used to print eight hex characters of the subject id. That is not a name and nobody at a desk can act on it — it reads as a glitch where an answer belongs. The id stays reachable for whoever is holding a support ticket. |
+| Nothing was recorded | **"actor not recorded"** | Distinct from the above. "We know who and cannot resolve it" and "nobody was recorded" are different, and a reader deciding whom to ring needs to know which one they are looking at. |
+
+**Never fall back to a neighbouring actor.** Attributing a step to whoever booked the appointment claims they
+performed something they did not, and the timeline exists precisely to answer "who" — a plausible wrong answer
+defeats it more thoroughly than an honest absence.
+
+### The glyphs
+
+- The actor is preceded by the `user` glyph; the moment by `clock`. Both are 13px, `--text-3`, and
+  `aria-hidden`.
+- The words they replaced — "by" and "at" — **stay as `sr-only` text**. Without them a step announces a
+  timestamp and then a name with nothing to say what either is doing there; a sighted reader separates the two
+  facts by their icons and a listening one cannot.
+- The glyphs never carry state. A step's meaning is the status chip beside them, which keeps hue + icon +
+  shape + text per [§5 colour-blind-safe status](#color-blindsafe-status-system-normative-extends-0a-52).
+
+### Resolving names
+
+Ids are resolved in ONE request for the distinct actors on the timeline, never one per step — a rebooked
+appointment repeats the same actor several times. A failure to resolve degrades to "Unknown user" and never
+fails the timeline: knowing *when* a no-show was marked is worth more than knowing nobody's name.
+
 ## 11. Reference implementations
 Two working, single-file builds in this folder demonstrate the system — open either in a browser:
 

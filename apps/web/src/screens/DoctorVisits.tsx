@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Button, Card, DataTableView, InlineAlert, StatusChip, useTableQuery } from "@mersal/design-system";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Button, Card, DataTableView, Icon, InlineAlert, StatusChip, useTableQuery } from "@mersal/design-system";
 import type { Column, TableFilterSpec } from "@mersal/design-system";
 import type { AppointmentRow, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -39,11 +39,13 @@ const S = {
   actions: { en: "Actions", ar: "الإجراءات" },
   openFile: { en: "Patient file", ar: "ملف المريض" },
   startVisit: { en: "Start visit", ar: "بدء الزيارة" },
-  // One word, in the ACTIONS column, where the question is "what can I do with this row?" — the answer is
-  // "nothing yet". The sentence that used to be here ("Waiting for the desk to check this patient in")
-  // re-stated the Status column two cells to its left in longer form, and cost the widest part of the table
-  // to do it.
-  pending: { en: "Pending", ar: "قيد الانتظار" },
+  // The `title` on the DISABLED "Start visit" button — why it is not available yet. It is no longer a column
+  // of its own: the word "Pending" sat where every other row had a button, so "can I start this visit?" had
+  // to be inferred from the absence of a control rather than read off one.
+  awaitingCheckIn: {
+    en: "Available once reception checks this patient in.",
+    ar: "يتاح بعد تسجيل وصول المريض في الاستقبال.",
+  },
   notYours: {
     en: "This appointment is assigned to another practitioner.",
     ar: "هذا الموعد مسنَد إلى طبيب آخر.",
@@ -68,6 +70,7 @@ export function DoctorVisits() {
   const t = useLoc();
   const fmt = useFormat();   // 18.D2 (U7) — Cairo times, app locale
   const navigate = useNavigate();
+  const location = useLocation();
   // Separate from `navigate` because it also records the origin, so the profile's Back control returns to
   // this board rather than guessing from history.
   const openProfile = useOpenProfile();
@@ -88,7 +91,15 @@ export function DoctorVisits() {
     try {
       const { encounterId } = await api.startVisit(row.id, row.beneficiary.id);
       // Straight into the workspace: starting a visit and then hunting for it is two steps for one intent.
-      navigate(encounterId ? `/clinician/encounter?encounter=${encodeURIComponent(encounterId)}` : "/clinician/encounter");
+      //
+      // WITH the origin. Without it the workspace had no way back to this board at all — `useBackTarget`
+      // renders nothing when there is neither a `from` nor history behind the entry, and "Start visit" is the
+      // single most-used door into the workspace. The doctor finished a consultation and had to reach for the
+      // nav rail to get back to their own day.
+      navigate(
+        encounterId ? `/clinician/encounter?encounter=${encodeURIComponent(encounterId)}` : "/clinician/encounter",
+        { state: { from: `${location.pathname}${location.search}` } },
+      );
     } catch (e) {
       if (e instanceof ApiError && e.status === 403) {
         // The server refused the treating relationship. Say which refusal it was.
@@ -124,8 +135,16 @@ export function DoctorVisits() {
       // A real header, not "": an empty <th> has no accessible name, so a screen-reader user hears nothing
       // for the column their cursor is in (axe empty-table-header).
       header: t(S.openFile),
+      // Icon + primary, the platform's patient-file action (`patientFileColumn` on reception's boards). Those
+      // rows already carry a second primary — check-in — so the pairing with "Start visit" here is the same
+      // shape and not a hierarchy this screen invents.
       cell: (r) => (
-        <Button variant="secondary" size="sm" onClick={() => openProfile(r.beneficiary.id)}>
+        <Button
+          variant="primary"
+          size="sm"
+          leadingIcon={<Icon name="user" />}
+          onClick={() => openProfile(r.beneficiary.id)}
+        >
           {t(S.openFile)}
         </Button>
       ),
@@ -133,20 +152,42 @@ export function DoctorVisits() {
     {
       key: "actions",
       header: t(S.actions),
-      cell: (r) => (
-        <span className="row-actions">
-          <VisitTimelineButton row={r} />
-          {r.startVisitEligible ? (
-            <Button variant="primary" size="sm" loading={busy === r.id} onClick={() => void start(r)}>
+      cell: (r) => {
+        // ONE control, in two states, rather than a button on some rows and a word on others.
+        //
+        // A Booked row used to render the word "Pending" where every other row had a button. That said what
+        // the Status column two cells to its left already said, and it said it in the shape of a label — so
+        // the thing a doctor actually wants to know ("can I start this visit yet?") had to be inferred from
+        // the ABSENCE of a control. A disabled button answers it directly: the action is visibly there, and
+        // visibly not available yet.
+        //
+        // Disabled ONLY while the patient has not arrived. Once reception checks them in the same button
+        // lights up in place, which is the state change the doctor is waiting for.
+        const canStart = r.startVisitEligible;
+        // Neither startable nor awaiting check-in — completed, cancelled, no-show. Nothing to offer at all;
+        // a permanently dead button on a finished visit is worse than no button.
+        if (!canStart && !r.checkInEligible) return <span className="row-actions"><VisitTimelineButton row={r} /></span>;
+        return (
+          <span className="row-actions">
+            <VisitTimelineButton row={r} />
+            <Button
+              variant="primary"
+              size="sm"
+              leadingIcon={<Icon name="stethoscope" />}
+              loading={busy === r.id}
+              // `disabled`, which the DS renders with aria-disabled — the control keeps its place in the tab
+              // order and keeps announcing itself, so a screen-reader user hears that starting the visit is
+              // the action here and that it is not available yet. `title` says WHY, because a disabled
+              // control with no explanation is the most common way an interface stops making sense.
+              disabled={!canStart}
+              title={canStart ? undefined : t(S.awaitingCheckIn)}
+              onClick={canStart ? () => void start(r) : undefined}
+            >
               {t(S.startVisit)}
             </Button>
-          ) : r.checkInEligible ? (
-            // A Booked row is not the doctor's to act on yet. One quiet word rather than an empty cell, which
-            // a clinician reads as a broken screen.
-            <span className="muted">{t(S.pending)}</span>
-          ) : null}
-        </span>
-      ),
+          </span>
+        );
+      },
     },
   ];
 

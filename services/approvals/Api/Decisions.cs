@@ -139,6 +139,32 @@ public static class Decisions
         var reviewerId = Guid.TryParse(deps.Me.Principal?.Subject, out var rg) ? rg : Guid.Empty;
         var before = auth.Status;
 
+        /*
+         * A VALIDITY EXTENSION IS APPLIED BEFORE IT IS RECORDED.
+         *
+         * approvals owns the decision; pharmacy and orders own the thing decided about, and only they can
+         * move its expiry. So an approval has to travel — and the ORDER matters more than it looks.
+         *
+         * Recording first and calling after leaves an authorization that says Approved beside a prescription
+         * the counter still cannot dispense: the pharmacist is told yes by one screen and no by the next,
+         * with nothing on either to explain the disagreement. Doing it this way, the reviewer gets both or
+         * neither, and a failure is a 502 they can see and retry rather than a silent split.
+         *
+         * Nothing is refused for a REJECTION — there is nothing to apply, and a rejection must land even if
+         * pharmacy is unreachable.
+         */
+        DateTimeOffset? extendedTo = null;
+        if (auth.Source == AuthSource.ValidityExtension && AuthorizationWorkflow.ReleasesDownstream(decision))
+        {
+            var outcome = await deps.Extensions.ApplyAsync(auth, http.Headers.Authorization.ToString(), ct);
+            if (!outcome.Applied)
+                return Results.Problem(
+                    statusCode: 502, title: "extension-not-applied", type: "urn:hbmp:extension-not-applied",
+                    detail: outcome.Failure + " The decision has NOT been recorded — nothing has changed, and "
+                            + "this can be retried.");
+            extendedTo = outcome.NewExpiry;
+        }
+
         var row = new AuthorizationDecision
         {
             DecisionId = Guid.NewGuid(), AuthorizationId = auth.AuthorizationId, Decision = decision,
@@ -167,6 +193,10 @@ public static class Decisions
             IdempotencyKey = idem, Operation = $"decision:{decision}",
             AuthorizationId = auth.AuthorizationId, StatusCode = 200, CreatedAt = now,
         });
+        // The new expiry is part of the DECISION record, not only of the item — "what did approving this
+        // actually grant" has to be answerable from the ledger without calling another service.
+        if (extendedTo is { } newExpiry && row.ApprovedScope is null)
+            row.ApprovedScope = System.Text.Json.JsonSerializer.Serialize(new { extendedTo = newExpiry });
         await deps.Db.SaveChangesAsync(ct);
 
         var eventType = EventType(decision);
@@ -303,8 +333,9 @@ public static class Decisions
 /// take one injected object rather than a long parameter list.</summary>
 public sealed class DecisionDeps(
     ApprovalsDbContext db, ApprovalsGate gate, IAuditClient audit, IOutbox outbox,
-    IHbmpPrincipalAccessor me, TimeProvider clock)
+    IHbmpPrincipalAccessor me, TimeProvider clock, IValidityExtensionApplier extensions)
 {
+    public IValidityExtensionApplier Extensions { get; } = extensions;
     public ApprovalsDbContext Db { get; } = db;
     public ApprovalsGate Gate { get; } = gate;
     public IAuditClient Audit { get; } = audit;

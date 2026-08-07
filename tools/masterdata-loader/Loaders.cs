@@ -101,4 +101,120 @@ public static class Loaders
         atcReport.FinalCount = atcByCode.Count;
         return (drugReport, atcReport, atcByCode.Values.OrderBy(a => a.Level).ToList(), drugsByCode.Values.ToList());
     }
+
+    /// <summary>The result of loading the Egyptian drug-list workbook: drugs, ATC classes and indications.</summary>
+    public sealed record DrugListLoad(
+        LoadReport DrugReport,
+        LoadReport AtcReport,
+        LoadReport IndicationReport,
+        List<AtcClass> Atc,
+        List<Drug> Drugs,
+        List<DrugIndication> Indications);
+
+    /// <summary>
+    /// Loads "Master Lists/egyptian-drug-list_5.xlsx" — drugs, their ATC classification, and the drug↔ICD
+    /// indication link that does not exist anywhere else in the platform (doc 43 §6).
+    /// </summary>
+    /// <param name="knownIcdCodes">
+    /// Every ICD code already loaded into <c>masterdata.icd_code</c>. Indication codes are validated against
+    /// its 3-character categories and unmatched ones are <b>reported</b>, never silently dropped: a drug
+    /// whose indications all failed to resolve produces "not checked" forever, and that has to be visible
+    /// at load time rather than discovered by a prescriber.
+    /// </param>
+    public static DrugListLoad LoadDrugList(string path, string release, IEnumerable<string> knownIcdCodes)
+    {
+        var drugReport = new LoadReport("drug");
+        var atcReport = new LoadReport("atc_class");
+        var indicationReport = new LoadReport("drug_indication");
+
+        var categories = knownIcdCodes
+            .Select(MasterDataNormalize.IcdCategory)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var drugsByCode = new Dictionary<string, Drug>(StringComparer.Ordinal);
+        var atcByCode = new Dictionary<string, AtcClass>(StringComparer.Ordinal);
+        var indications = new List<DrugIndication>();
+
+        var unmatchedCodes = new Dictionary<string, int>(StringComparer.Ordinal);
+        var drugsWithNoIndicationData = 0;
+        var drugsLosingEveryIndication = new List<string>();
+        var missingStrength = 0;
+
+        foreach (var row in XlsxReader.ReadDrugList(path))
+        {
+            drugReport.Read++;
+            if (string.IsNullOrWhiteSpace(row.TradeNameEn)) { drugReport.Skip("blank-trade-name"); continue; }
+            if (string.IsNullOrWhiteSpace(row.SourceRowId)) { drugReport.Skip("blank-source-id"); continue; }
+
+            var drug = Mappers.ToDrugFromXlsx(row, release);
+            if (string.IsNullOrWhiteSpace(drug.DrugCode)) { drugReport.Skip("empty-drug-code"); continue; }
+            drugsByCode[drug.DrugCode] = drug;
+            if (drug.Strength is null) missingStrength++;
+
+            foreach (var atc in Mappers.ToAtcClasses(row, release))
+            {
+                atcReport.Read++;
+                if (atc.Level == 0) { atcReport.Skip("bad-atc-length"); continue; }
+                atcByCode[atc.AtcCode] = atc;
+            }
+
+            var parsed = Mappers.ToDrugIndications(row, drug.DrugId, release).ToList();
+            indicationReport.Read += parsed.Count;
+
+            if (parsed.Count == 0) { drugsWithNoIndicationData++; continue; }
+
+            var kept = 0;
+            foreach (var indication in parsed)
+            {
+                if (!categories.Contains(indication.IcdCode))
+                {
+                    indicationReport.Skip("icd-unmatched");
+                    unmatchedCodes[indication.IcdCode] = unmatchedCodes.GetValueOrDefault(indication.IcdCode) + 1;
+                    continue;
+                }
+                indications.Add(indication);
+                kept++;
+            }
+
+            // The dangerous case: the drug HAS indication data, but none of it resolved. Downstream this is
+            // indistinguishable from "no data", so it is named here rather than left to be inferred.
+            if (kept == 0) drugsLosingEveryIndication.Add($"{drug.DrugCode} ({string.Join('/', parsed.Select(p => p.IcdCode))})");
+        }
+
+        foreach (var d in drugsByCode.Values)
+        {
+            if (d.AtcCode is not null && !atcByCode.ContainsKey(d.AtcCode))
+            {
+                drugReport.Skip("atc-unmatched(kept, null-linked)");
+                d.AtcCode = null;
+            }
+        }
+
+        drugReport.FinalCount = drugsByCode.Count;
+        atcReport.FinalCount = atcByCode.Count;
+        indicationReport.FinalCount = indications.Count;
+
+        drugReport.Note($"name_ar: 0/{drugsByCode.Count} — the workbook carries no Arabic trade name; the combobox falls back to the English name.");
+        drugReport.Note($"strength: {drugsByCode.Count - missingStrength}/{drugsByCode.Count} populated (from 'Strength', falling back to 'Volume / Weight').");
+
+        indicationReport.Note($"{drugsWithNoIndicationData} drug(s) carry no indication data — these report \"not checked\", never \"OK\".");
+        if (unmatchedCodes.Count > 0)
+        {
+            var top = unmatchedCodes.OrderByDescending(kv => kv.Value).Take(20).Select(kv => $"{kv.Key}×{kv.Value}");
+            indicationReport.Note($"{unmatchedCodes.Count} distinct ICD category/ies did not resolve against masterdata.icd_code: {string.Join(", ", top)}");
+        }
+        if (drugsLosingEveryIndication.Count > 0)
+        {
+            indicationReport.Note(
+                $"{drugsLosingEveryIndication.Count} drug(s) had indication data where NONE of it resolved — they will report " +
+                $"\"not checked\" indefinitely: {string.Join("; ", drugsLosingEveryIndication.Take(10))}" +
+                (drugsLosingEveryIndication.Count > 10 ? ", …" : ""));
+        }
+
+        return new DrugListLoad(
+            drugReport, atcReport, indicationReport,
+            atcByCode.Values.OrderBy(a => a.Level).ToList(),
+            drugsByCode.Values.ToList(),
+            indications);
+    }
 }

@@ -390,7 +390,7 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
               <InlineAlert tone={recon.balances ? "ok" : "bad"}>
                 {recon.balances ? t(S.balanced) : t(S.unbalanced)}
               </InlineAlert>
-              <div className="pol-tablewrap">
+              <div className="pol-tablewrap mrs-scroll mrs-scroll-focusable" tabIndex={0}>
                 <table className="pol-costshare">
                   <caption className="sr-only">{t(S.reconcile)}</caption>
                   <tbody>

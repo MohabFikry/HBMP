@@ -235,6 +235,101 @@ read.MapGet("", async (string? identifierType, string? identifierValue, string? 
     return Results.Ok(new { page = p, pageSize = ps, items = disclosed });
 });
 
+// ================================================================ RESOLVE (26.6, doc 43 §7)
+//
+// GET /beneficiaries/resolve — find ONE beneficiary from the identifiers a counter can read off a document.
+//
+// THIS ENDPOINT DID NOT EXIST, AND WAS ALREADY BEING CALLED. pharmacy-service has called
+// `/api/v1/beneficiaries/resolve?policyNo=&passport=&memberNo=` since phase 6; the call 404'd, the client
+// swallowed it, and those search arms silently returned nothing. A client calling a non-existent endpoint
+// and failing quietly is worse than an absent feature, because the feature looks present.
+//
+// TWO IDENTIFIERS ARE REQUIRED, and the reason is specific to what a card is. A card number is printed on
+// something that gets shared, photographed and reused — it is a lookup key, not an authenticator (doc 43 §7,
+// D5). One number should not be enough to pull up a person.
+//
+// NOTE ON PROVENANCE: doc 43 D5 says to reuse "the call-centre ≥2-identifier rule, already built and
+// tested". It no longer exists. Phase 15's threshold was deliberately deleted along with the on-screen
+// challenge it belonged to — VerificationPolicy's own comment explains that a minimum on a set nobody
+// submits is "the shape of a control" rather than a control. So the rule is implemented here, against the
+// identifiers this endpoint actually receives, rather than reused from something that would not have run.
+read.MapGet("/resolve", async (
+    string? cardNumber, string? memberNo, string? passport, string? nationalId, string? unhcrNo, string? dateOfBirth,
+    PatientDbContext db, BeneficiaryReadGuard guard, CancellationToken ct) =>
+{
+    // Which identifier TYPES were supplied. Types only — the values are never logged or echoed back, the
+    // same privacy rule phase 15 applied to verification.
+    var supplied = new List<string>();
+    if (!string.IsNullOrWhiteSpace(cardNumber)) supplied.Add("CardNumber");
+    if (!string.IsNullOrWhiteSpace(memberNo)) supplied.Add("MemberNo");
+    if (!string.IsNullOrWhiteSpace(passport)) supplied.Add("Passport");
+    if (!string.IsNullOrWhiteSpace(nationalId)) supplied.Add("NationalID");
+    if (!string.IsNullOrWhiteSpace(unhcrNo)) supplied.Add("UNHCRNo");
+    if (!string.IsNullOrWhiteSpace(dateOfBirth)) supplied.Add("DateOfBirth");
+
+    if (supplied.Count < 2)
+    {
+        return Results.Problem(
+            statusCode: 422, title: "two-identifiers-required", type: "urn:hbmp:two-identifiers-required",
+            detail: "Resolving a beneficiary requires at least two identifiers. "
+                    + "A card number alone is a lookup key, not proof of identity.");
+    }
+
+    var q = db.Beneficiaries.AsNoTracking().Where(x => !x.IsDeleted);
+
+    if (!string.IsNullOrWhiteSpace(cardNumber))
+    {
+        // Normalized on both sides, so "#A-1234", "a 1234" and "A1234" resolve to the one card rather than
+        // to nothing — the same normalization the uniqueness index was built on.
+        var card = PersonFieldValidation.NormalizeCardNumber(cardNumber);
+        q = q.Where(x => x.CardNumber != null && EF.Functions.ILike(x.CardNumber, card));
+    }
+    if (!string.IsNullOrWhiteSpace(memberNo))
+    {
+        var member = IdentifierValidation.Normalize(memberNo);
+        q = q.Where(x => x.MemberNo != null && EF.Functions.ILike(x.MemberNo, member));
+    }
+    if (!string.IsNullOrWhiteSpace(dateOfBirth) && DateOnly.TryParse(dateOfBirth, out var dob))
+    {
+        q = q.Where(x => x.BirthDate == dob);
+    }
+
+    foreach (var (value, type) in new[]
+             {
+                 (passport, IdentifierType.Passport),
+                 (nationalId, IdentifierType.NationalID),
+                 (unhcrNo, IdentifierType.UNHCRNo),
+             })
+    {
+        if (string.IsNullOrWhiteSpace(value)) continue;
+        var norm = IdentifierValidation.Normalize(value);
+        var ids = db.Identifiers
+            .Where(i => i.IdentifierType == type && i.IdentifierValue == norm && !i.IsDeleted)
+            .Select(i => i.BeneficiaryId);
+        q = q.Where(x => ids.Contains(x.BeneficiaryId));
+    }
+
+    // Every supplied identifier must match the SAME person — the filters are ANDed above. Two identifiers
+    // that each match a different beneficiary resolve to nobody, which is the correct answer.
+    var matches = await q.Include(x => x.Identifiers).Include(x => x.Contacts).Take(2).ToListAsync(ct);
+
+    // Ambiguity is not a match. Returning the first of two would be a coin toss over whose record is opened.
+    if (matches.Count != 1)
+    {
+        return Results.Problem(
+            statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found",
+            detail: matches.Count > 1 ? "More than one beneficiary matches those identifiers." : null);
+    }
+
+    var b = matches[0];
+    if (await guard.AuthorizeAsync(b, ct) is { } denied) return denied;
+
+    // Audited as a PHI read, through the same guard as every other disclosure, tagged with the identifier
+    // TYPES used and never their values.
+    var disclosed = await guard.DiscloseAsync(b, $"resolve[{string.Join('+', supplied)}]", ct);
+    return Results.Ok(new { beneficiaryId = b.BeneficiaryId, matchedOn = supplied, beneficiary = disclosed });
+});
+
 // GET /beneficiaries/{id} — engine-authorized, tenant-scoped, audited, field-projected (18.B3 / S6).
 read.MapGet("/{id:guid}", async (Guid id, PatientDbContext db, BeneficiaryReadGuard guard, CancellationToken ct) =>
 {

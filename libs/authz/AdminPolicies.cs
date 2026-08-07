@@ -31,10 +31,38 @@ public static class AdminPolicies
     /// <summary>Effective-dated master-data edit (ICD/CPT/LOINC/Drug/ATC/interactions/allergens/formulary).
     /// Restricted to clinical governance (FR-MDM-008).</summary>
     public const string EditMasterData = "admin:edit-masterdata";
+    /// <summary>
+    /// READ the governed master-data versions — the list, and a code as-of a date.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Its own action rather than <see cref="ReadAccess"/>, which is held by the platform admins alone and
+    /// also gates the access matrix, the SoD matrix, break-glass and the access-review campaigns. A Medical
+    /// Director reading the ICD table is not a Medical Director reading who can do what on the platform, and
+    /// one action covering both would have to choose which of those two audiences to be wrong about.
+    /// </para>
+    /// <para>
+    /// It exists because ADR-0035 §4 gave clinical governance the master-data EDITOR while the list behind it
+    /// still answered to the admin-only read — an editor over a list its own author could not open. Granting
+    /// the write and forgetting the read is the same defect as granting the authority and giving it no door,
+    /// which is the thing that ADR set out to fix.
+    /// </para>
+    /// </remarks>
+    public const string ReadMasterData = "admin:read-masterdata";
     /// <summary>Manage bilingual notification templates (PHI-safe linter enforced).</summary>
     public const string EditTemplate = "admin:edit-template";
     /// <summary>Manage tenant/platform system configuration (typed, validated, effective-dated).</summary>
     public const string EditConfig = "admin:edit-config";
+    /// <summary>
+    /// Set how long a prescription or an investigation order stays actionable before it expires.
+    ///
+    /// <para>A SEPARATE action from <see cref="EditConfig"/>, and deliberately held by clinical governance
+    /// rather than by the platform admins. How long a prescription remains safe to dispense is a clinical
+    /// judgement about how fast a patient's condition moves, not a system setting — the Medical Director who
+    /// supervises the approval queue is the person who lives with the consequence of getting it wrong, and
+    /// is the one the extension requests land on when it is too short.</para>
+    /// </summary>
+    public const string EditValidityPolicy = "admin:edit-validity-policy";
 
     // ---- Phase 8b.3 tenant/provider governance, break-glass, dashboards ----
     /// <summary>Manage tenants + platform-wide config (Super Admin only — FR-IAM-008).</summary>
@@ -100,7 +128,24 @@ public static class AdminPolicies
         // Admin is NOT a master-data editor. Master data is a global reference surface → tenant null (global).
         new PolicyRule
         {
+            Action = ReadMasterData, ResourceType = Resource,
+            // The editors, plus the platform admins who already read everything else here.
+            Roles = Set("medical_director", "org_admin", "super_admin"), Scopes = Set("admin:read"),
+            RequiredConditions = [AbacConditions.TenantMatch],
+            Sensitive = true,
+        },
+        new PolicyRule
+        {
             Action = EditMasterData, ResourceType = Resource,
+            Roles = Set("medical_director", "super_admin"), Scopes = Set("admin:write"),
+            RequiredConditions = [AbacConditions.TenantMatch],
+            Sensitive = true,
+        },
+        // Validity periods — clinical governance (Medical Director) + Super Admin. Same audience as master
+        // data for the same reason: it is a clinical safety parameter that happens to be stored as config.
+        new PolicyRule
+        {
+            Action = EditValidityPolicy, ResourceType = Resource,
             Roles = Set("medical_director", "super_admin"), Scopes = Set("admin:write"),
             RequiredConditions = [AbacConditions.TenantMatch],
             Sensitive = true,

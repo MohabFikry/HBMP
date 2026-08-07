@@ -15,6 +15,7 @@
     <ProjectReference Include="../Infrastructure/Mersal.Orders.Infrastructure.csproj" />
     <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
     <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" />
+    <ProjectReference Include="..\..\..\libs\validity\Mersal.Validity.csproj" />
   </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
 </Project>

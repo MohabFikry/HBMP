@@ -30,11 +30,25 @@ const S = {
   checkedIn: { en: "Checked in", ar: "تم الوصول" },
   openFile: { en: "Patient file", ar: "ملف المريض" },
   noShow: { en: "No-show", ar: "لم يحضر" },
+  /**
+   * The no-show action is not available yet.
+   *
+   * `noShowOff` is what the desk SEES — compact, in the danger tone, sitting where the button would be.
+   * `noShowHint` is why, and it survives as the control's `title`: "deactivated" without a reason is the
+   * shape of message an operator reads twice and then stops reading, and the reason is the whole answer —
+   * it becomes available on its own, with no action needed from anyone.
+   */
+  noShowOff: { en: "No-show deactivated", ar: "«لم يحضر» معطّل" },
   noShowHint: {
     en: "Available once the appointment window has passed.",
     ar: "يتاح بعد انقضاء وقت الموعد.",
   },
   actions: { en: "Actions", ar: "الإجراءات" },
+  // Headers for the two icon-only columns. An icon column with no header reads as a rendering fault, and the
+  // icons themselves are only labelled per-row (they name WHICH appointment, so a screen reader can tell a
+  // table of identical pencils apart).
+  editCol: { en: "Edit", ar: "تعديل" },
+  cancelCol: { en: "Cancel", ar: "إلغاء" },
   needsReassign: { en: "Doctor unavailable", ar: "الطبيب غير متاح" },
   needsReassignWhy: {
     en: "The assigned doctor no longer works at this clinic — call the patient to reassign or rebook.",
@@ -178,7 +192,16 @@ export function ReceptionAppointments() {
     ...doctorColumns(deps),
     ...timeAndStatusColumns(deps),
     noteColumn(deps),
-    patientFileColumn(t, openProfile),
+    /*
+      ONE COLUMN PER ACTION, not one column holding all of them.
+
+      Edit and cancel used to sit at the end of a flex row whose contents varied by row: a Booked appointment
+      carries Check in and No-show, a checked-in one carries neither, a no-show carries nothing at all. So the
+      two icons landed at a different x on almost every row and the eye had nothing to run down. No amount of
+      alignment INSIDE the cell could fix that — a grid aligns within its own box, and each of these boxes is
+      a separate table cell. The table's own columns are the only thing that aligns across rows, so the
+      actions became columns.
+    */
     {
       key: "actions",
       header: t(S.actions),
@@ -204,36 +227,72 @@ export function ReceptionAppointments() {
               {t(S.checkIn)}
             </Button>
           )}
-          {/* Shown only while the server says it is allowed — the desk is never offered a refusal. */}
-          {r.noShowEligible && (
-            <Button variant="secondary" size="sm" leadingIcon={<Icon name="cross" />}
-                    loading={desk.busy === `ns:${r.id}`}
-                    onClick={() => void desk.run(`ns:${r.id}`, () => api.noShow(r.id, r.rowVersion))}>
-              {t(S.noShow)}
-            </Button>
-          )}
-          {/* A Booked row whose window has not passed: say WHY there is no no-show button rather than
-              leaving an empty cell the receptionist reads as a broken screen. */}
-          {r.checkInEligible && !r.noShowEligible && <span className="muted">{t(S.noShowHint)}</span>}
-          {/* Last in the row, and a confirmation away: cancelling releases the slot and may hand it straight
-              to the waitlist, so a single mis-click in a dense table must not be able to do it. */}
-          {/* Edit sits beside cancel: they are the two amendments to an appointment that is still going to
-              happen, and both are recorded on its timeline. */}
-          <EditAppointmentButton row={r} t={t} onSaved={state.reload} />
-          <CancelAppointmentButton
-            row={r}
-            t={t}
-            onCancel={(reason) => desk.run(`cx:${r.id}`, () => api.cancelAppointment(r.id, reason, r.rowVersion))}
-          />
         </span>
       ),
     },
+    {
+      key: "edit",
+      header: t(S.editCol),
+      cell: (r) => <EditAppointmentButton row={r} t={t} onSaved={state.reload} />,
+    },
+    {
+      key: "cancel",
+      header: t(S.cancelCol),
+      // A confirmation away: cancelling releases the slot and may hand it straight to the waitlist, so a
+      // single mis-click in a dense table must not be able to do it.
+      cell: (r) => (
+        <CancelAppointmentButton
+          row={r}
+          t={t}
+          onCancel={(reason) => desk.run(`cx:${r.id}`, () => api.cancelAppointment(r.id, reason, r.rowVersion))}
+        />
+      ),
+    },
+    {
+      key: "noshow",
+      header: t(S.noShow),
+      /*
+        THE BUTTON IS ALWAYS THERE, and disabled until the window has passed.
+
+        It was hidden and then replaced by a chip, so the control appeared out of nowhere partway through the
+        morning and the desk had no idea where it would land. A control that is present and visibly unusable
+        teaches its own position; one that materialises does not.
+
+        `aria-disabled`, not `disabled`. A `disabled` button is removed from the tab order, and with it goes
+        the only route a keyboard or screen-reader user has to the REASON — which is the whole point of
+        showing it early. This stays focusable, announces itself as disabled, and carries the reason as its
+        description. The click handler is simply not attached, so it cannot fire.
+      */
+      cell: (r) => {
+        if (!r.checkInEligible && !r.noShowEligible) return null;
+        const ready = r.noShowEligible;
+        return (
+          <Button
+            variant="secondary" size="sm" leadingIcon={<Icon name="cross" />}
+            aria-disabled={ready ? undefined : true}
+            title={ready ? undefined : t(S.noShowHint)}
+            loading={ready && desk.busy === `ns:${r.id}`}
+            onClick={ready
+              ? () => void desk.run(`ns:${r.id}`, () => api.noShow(r.id, r.rowVersion))
+              : undefined}
+          >
+            {t(S.noShow)}
+          </Button>
+        );
+      },
+    },
+    // Last column by request. It is the only control here that LEAVES the board — everything else amends the
+    // appointment in place — so it reads better as the end of the row than as something to step over.
+    patientFileColumn(t, openProfile),
   ];
 
   return (
     <>
       <PageHeader title={t(S.apptTitle)} />
-      <Card as="section" style={{ padding: "var(--sp3)" }}>
+      {/* sp5, not sp3. At 12px the toolbar, the range notice and the table's header row all but touched the
+          card's edge, so the card read as a border drawn around the content rather than as a surface holding
+          it — and every other worklist card in the app is set at sp5, so this one was the odd one out. */}
+      <Card as="section" style={{ padding: "var(--sp5)" }}>
         <TableToolbar
           search={{ label: t(S.search), value: query, onChange: setQuery, placeholder: t(S.searchHint) }}
           filters={[
@@ -263,7 +322,11 @@ export function ReceptionAppointments() {
 
         {/* Chosen "Custom" but not yet finished filling it in — say what is still showing rather than
             leaving the board looking filtered when it is not. */}
-        {when === "custom" && !customActive && <InlineAlert tone="info">{t(S.rangeIncomplete)}</InlineAlert>}
+        {when === "custom" && !customActive && (
+          <div className="board-notice">
+            <InlineAlert tone="info">{t(S.rangeIncomplete)}</InlineAlert>
+          </div>
+        )}
 
         <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.apptEmpty}>
           {(rows) => {

@@ -463,6 +463,8 @@ public static class AppointmentsModule
                 // Attribution rides WITH the note: stamped only when there is one, so an appointment with no
                 // note does not claim an author for it.
                 NoteBy = note is null ? null : actor,
+                // 0022 — the name alongside the id, snapshotted here rather than resolved on read.
+                NoteByName = note is null ? null : me.Principal?.DisplayName,
                 NoteAt = note is null ? null : now,
                 IdempotencyKey = idem, CreatedBy = actor, CreatedAt = now, UpdatedAt = now,
             };
@@ -791,6 +793,7 @@ public static class AppointmentsModule
             // Cleared along with the note: attribution for a note that no longer exists would be a claim
             // about text nobody can read.
             appt.NoteBy = note is null ? null : me.Principal?.Subject;
+            appt.NoteByName = note is null ? null : me.Principal?.DisplayName;
             appt.NoteAt = note is null ? null : editedAt;
             appt.UpdatedAt = editedAt;
             appt.UpdatedBy = me.Principal?.Subject;

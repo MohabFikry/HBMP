@@ -50,6 +50,14 @@ export const iconPaths = {
   phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z"/>',
   /** Move between two things — a plan change, where the member goes one way and nothing comes back. */
   swap: '<path d="M4 8h13"/><path d="m13 4 4 4-4 4"/><path d="M20 16H7"/><path d="m11 12-4 4 4 4"/>',
+  /**
+   * REPLACE this one with another — the substitution control at a dispensing counter.
+   *
+   * Two opposed arrows with HALF heads — a single barb each, rather than `swap`'s full chevrons. The half
+   * head is the conventional "exchange these two" mark, and at 18px the lighter barb keeps the glyph legible
+   * where two full chevrons crowd into a smudge.
+   */
+  replace: '<path d="M3 9h15"/><path d="m14 5 4 4"/><path d="M21 15H6"/><path d="m10 19-4-4"/>',
   /** A container something is filed into — the member group. */
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
   /** A state that can be moved between positions — the beneficiary's status. */
@@ -65,6 +73,17 @@ export const iconPaths = {
    * unmistakably different from an ordinary result, "looks different on every machine" is the wrong property.
    */
   lock: '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+
+  /**
+   * The clinician an appointment is assigned to.
+   *
+   * NOT `user`, which already means "open this person's file" wherever it appears next to a name — and the
+   * name beside this glyph is a doctor's, not a patient's. On a schedule chip that carries both a patient and
+   * a clinician, one person-shaped glyph for the second of them would read as a link to the first.
+   */
+  stethoscope:
+    '<path d="M5 3v6a6 6 0 0 0 12 0V3"/><path d="M3 3h4M15 3h4"/>'
+    + '<path d="M11 15v2a4 4 0 0 0 8 0v-2"/><circle cx="19" cy="13" r="2"/>',
 
   // ---- Vital signs -------------------------------------------------------------------------------------
   // One glyph per measurement, and none of them borrowed from the status family above.

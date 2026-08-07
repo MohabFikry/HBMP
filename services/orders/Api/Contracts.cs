@@ -48,11 +48,22 @@ public sealed record QueueLineResponse(Guid OrderLineId, string CodeSystem, stri
 
 public sealed record QueueItemResponse(
     Guid OrderId, string OrderNo, string OrderType, Guid BeneficiaryId, string Status, DateTimeOffset RequestedAt,
+    DateTimeOffset? ExpiresAt,
+    /// <summary>
+    /// Past its validity window, computed against the clock rather than read from <c>Status</c>.
+    ///
+    /// <para>The expiry sweeper runs hourly, so between lapsing and being swept the row still says Active.
+    /// A queue that trusted the status would offer a technician an order the consume rule refuses. The rule
+    /// compares the date; this makes the SCREEN agree with it.</para>
+    /// </summary>
+    bool Expired,
     IReadOnlyList<QueueLineResponse> Lines)
 {
     /// <summary>Projects only the still-available lines (Active/PartiallyUsed) of an order the caller may fulfil.</summary>
-    public static QueueItemResponse From(InvestigationOrder o) => new(
+    public static QueueItemResponse From(InvestigationOrder o, DateTimeOffset now) => new(
         o.OrderId, o.OrderNo, o.OrderType.ToString(), o.BeneficiaryId, o.Status.ToString(), o.RequestedAt,
+        o.ExpiresAt,
+        o.Status == OrderStatus.Expired || (o.ExpiresAt is { } exp && exp <= now),
         o.Lines.Where(l => l.Status is OrderLineStatus.Active or OrderLineStatus.PartiallyUsed)
                .Select(l => new QueueLineResponse(l.OrderLineId, l.CodeSystem.ToString(), l.Code, l.Description, l.QuantityRemaining))
                .ToList());

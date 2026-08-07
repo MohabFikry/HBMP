@@ -64,7 +64,10 @@ async function choose(user: ReturnType<typeof userEvent.setup>, name: RegExp, op
 async function pickPatient(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/search by name/i), "Omar");
   await user.click(screen.getByRole("button", { name: /^search$/i }));
-  await user.click(await screen.findByRole("button", { name: /^choose$/i }));
+  // The ROW is the button now, so its accessible name is the row's own content — the patient, which is what
+  // the operator aims at anyway. There was a "Choose" button pinned to the far edge of the row, as far from
+  // the name being chosen as the layout allowed.
+  await user.click(await screen.findByRole("button", { name: /omar khalil/i }));
 }
 
 /** The times for the chosen day — scoped to the Time section, since the day strip is radios too. */
@@ -108,6 +111,26 @@ describe("Reception booking (US-020) — eligibility gate", () => {
     return screen.findByText("Yusuf Haddad");
   }
 
+  it("opens the results in a dialog when the search is AMBIGUOUS, and not when it is not", async () => {
+    // Several matches is a DECISION, and a decision made against a list wedged between the search box and the
+    // next step of the form is one made in the wrong place — it also ran straight into "2. Appointment", so
+    // two steps read as one block.
+    const user = userEvent.setup();
+    await search(user, new MixedStatusApi({ latencyMs: 0 }));
+    expect(await screen.findByRole("dialog", { name: /choose a patient/i })).toBeInTheDocument();
+  });
+
+  it("answers a single match inline rather than opening a dialog to confirm the only option", async () => {
+    // A dialog to confirm the one possible choice is a click that buys nothing.
+    const user = userEvent.setup();
+    renderNode(<ReceptionBooking />, new BookingApi({ latencyMs: 0 }) as unknown as ApiClient);
+    await user.type(screen.getByLabelText(/search by name/i), "Omar");
+    await user.click(screen.getByRole("button", { name: /^search$/i }));
+
+    expect(await screen.findByRole("button", { name: /omar khalil/i })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("shows each result's status, so the desk learns it at the moment of the search", async () => {
     const user = userEvent.setup();
     await search(user, new MixedStatusApi({ latencyMs: 0 }));
@@ -123,14 +146,15 @@ describe("Reception booking (US-020) — eligibility gate", () => {
     await search(user, new MixedStatusApi({ latencyMs: 0 }));
 
     const suspended = (await screen.findByText("Yusuf Haddad")).closest("li")!;
-    // Not merely disabled — absent. And the reason is stated, because "why can't I book them?" is the next
-    // question the operator has to answer to the person in front of them.
-    expect(within(suspended).queryByRole("button", { name: /^choose$/i })).not.toBeInTheDocument();
+    // Not merely disabled — NOT A CONTROL AT ALL. A disabled button is still announced as a button and the
+    // desk keeps aiming at it; this row is plain text with the reason beside it, because "why can't I book
+    // them?" is the next question the operator has to answer to the person in front of them.
+    expect(within(suspended).queryByRole("button")).not.toBeInTheDocument();
     expect(within(suspended).getByText(/cannot be booked/i)).toBeInTheDocument();
 
-    // The active one is unaffected.
+    // The active one is unaffected — and the whole row is what you press, not a button at its far edge.
     const active = (await screen.findByText("Omar Khalil")).closest("li")!;
-    expect(within(active).getByRole("button", { name: /^choose$/i })).toBeInTheDocument();
+    expect(within(active).getByRole("button", { name: /omar khalil/i })).toBeInTheDocument();
   });
 
   it("treats an ABSENT status as not bookable — default-deny, not default-allow", async () => {

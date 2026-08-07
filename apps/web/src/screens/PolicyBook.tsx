@@ -129,8 +129,8 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
               header: t(S.window),
               cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`,
             },
-            { key: "members", header: t(S.members), cell: (r) => fmt.number(r.memberCount) },
-            { key: "plans", header: t(S.plans), cell: (r) => fmt.number(r.planCount) },
+            { key: "members", header: t(S.members), cell: (r) => fmt.number(r.memberCount), numeric: true },
+            { key: "plans", header: t(S.plans), cell: (r) => fmt.number(r.planCount), numeric: true },
             {
               key: "used",
               header: t(S.used),
@@ -202,7 +202,7 @@ function PolicyPlansTab({ api, policyId }: { api: PolicyApi; policyId: string })
             ),
           },
           { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}` },
-          { key: "members", header: t(S.members), cell: (r) => fmt.number(r.memberCount) },
+          { key: "members", header: t(S.members), cell: (r) => fmt.number(r.memberCount), numeric: true },
           { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
         ]}
       />
@@ -326,8 +326,8 @@ export function ScopeUtilizationPanel({
                 density="compact"
                 columns={[
                   { key: "member", header: t(S.memberNo), cell: (r) => r.memberNo },
-                  { key: "consumed", header: t(S.totalConsumed), cell: (r) => fmt.money(r.totalConsumed) },
-                  { key: "limit", header: t(S.totalLimit), cell: (r) => (r.anyUnlimited ? "∞" : fmt.money(r.totalLimit)) },
+                  { key: "consumed", header: t(S.totalConsumed), cell: (r) => fmt.money(r.totalConsumed), numeric: true },
+                  { key: "limit", header: t(S.totalLimit), cell: (r) => (r.anyUnlimited ? "∞" : fmt.money(r.totalLimit)), numeric: true },
                   { key: "pct", header: t(S.used), cell: (r) => (r.percentUsed != null ? `${Math.round(r.percentUsed)}%` : "—") },
                 ]}
               />

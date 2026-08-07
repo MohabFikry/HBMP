@@ -3,6 +3,8 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { AppShell } from "../shell/AppShell";
 import { LoginPage } from "../pages/LoginPage";
+import { ForgotPasswordPage } from "../pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "../pages/ResetPasswordPage";
 import { SectionPage } from "../pages/SectionPage";
 import { Forbidden, NotFound, NoPortal } from "./Forbidden";
 import { ALL_ROUTES, portalForRole } from "../portals/catalog";
@@ -111,6 +113,10 @@ export function AppRouter() {
   return (
     <Routes>
       <Route path="/login" element={session ? <Navigate to={home} replace /> : <LoginPage />} />
+      {/* 28.6 — reachable WITHOUT a session, which is the whole point: the person using them cannot sign in.
+          A signed-in visitor is sent home rather than shown a reset form they reached by accident. */}
+      <Route path="/forgot-password" element={session ? <Navigate to={home} replace /> : <ForgotPasswordPage />} />
+      <Route path="/reset-password" element={session ? <Navigate to={home} replace /> : <ResetPasswordPage />} />
       <Route path="/*" element={session ? <AuthedApp /> : <Navigate to="/login" replace />} />
     </Routes>
   );

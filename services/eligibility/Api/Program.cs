@@ -21,6 +21,11 @@ builder.Services.AddHbmpBusinessCalendar();   // 18.A3 — Africa/Cairo business
 // 19.1b — the SHARED tier-pricing path. Same composition and same libs/money split claims adjudicates with,
 // so the amount quoted at the counter and the amount billed cannot diverge.
 builder.Services.AddHbmpTierPricing(builder.Configuration);
+// 19.2b — which plan version's terms apply on the SERVICE DATE. policy-service owns the effective-dating
+// rules and exposes the resolver; a local copy would be a second place for the two to disagree about what a
+// member is entitled to.
+builder.Services.AddHttpClient<IPlanVersionInForce, HttpPlanVersionInForce>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Policy:BaseUrl"] ?? "http://policy-service:8080"));
 builder.Services.AddHbmpAuditClient("eligibility-service");
 builder.Services.AddHbmpAuthorization();
 builder.Services.AddHbmpBreakGlass(builder.Configuration); // live break-glass elevation (16.6, H5)
@@ -64,7 +69,8 @@ var v1 = app.MapGroup("/api/v1/eligibility").RequireAuthorization(HbmpPolicies.S
 // POST /eligibility/check — cache-first decision; every check is an audited PHI read.
 v1.MapPost("/check", async (
     EligibilityCheckRequest req, EligibilityChecker checker, IAuditClient audit,
-    TierPricingService pricing, IBusinessCalendar calendar, HttpContext http,
+    TierPricingService pricing, IPlanVersionInForce planVersions, IBusinessCalendar calendar,
+    EligibilityDbContext db, HttpContext http,
     IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(req.BenefitCategory))
@@ -77,9 +83,42 @@ v1.MapPost("/check", async (
     CostSharePreviewResponse? preview = null;
     var effectivelyGated = req.ServiceRequiresPreAuth ?? false;
 
-    // No plan version, no quote. The member→plan link lands in 19.2b; until then a caller that cannot
-    // name the version gets the verdict without a cost share rather than a number derived from nothing.
-    if (req.ProviderId is { } providerId && req.PlanVersionId is { } planVersionId)
+    // 19.2b — resolve the member's plan version when the caller cannot name one.
+    //
+    // Until this existed the check read "no plan version, no quote", and no caller on the platform could
+    // supply one, so the shared pricing path was unreachable in production.
+    //
+    // THE VERSION IN FORCE ON THE SERVICE DATE, not the one the member enrolled under. The first cut used the
+    // coverage's `plan_version_id` — which is PROVENANCE, what the cover was projected from — and that pinned
+    // every future quote to the terms in force the day they enrolled: amend the plan and nobody already on it
+    // ever sees the change. The rule the effective-dated layer actually encodes, and which
+    // `CoverageDetailEndpoints` already applies, is one rule that gets both cases right: February's care
+    // prices at February's version, today's care at today's.
+    //
+    // The projected version stays as the FALLBACK, for a coverage created outside the enrolment path (no
+    // plan) or when policy-service cannot be reached. A caller-supplied version still wins outright: claims
+    // re-adjudicating an old service date knows better than any projection.
+    var coverage = await db.Coverages.AsNoTracking()
+        // ILike is belt-and-braces on top of eligibility migration 0006, which fixed the projection to hold
+        // the canonical CODE and now CHECK-constrains it. The engine compares with OrdinalIgnoreCase; a
+        // case-sensitive SQL match here would resolve nothing and every quote would come back indeterminate
+        // for a reason that has nothing to do with the member's cover.
+        .Where(c => c.BeneficiaryId == req.BeneficiaryId
+                    && EF.Functions.ILike(c.BenefitCategory, req.BenefitCategory))
+        .Select(c => new { c.PlanId, c.PlanVersionId })
+        .FirstOrDefaultAsync(ct);
+
+    var resolvedPlanVersionId = req.PlanVersionId;
+    if (resolvedPlanVersionId is null && coverage?.PlanId is { } planId)
+    {
+        resolvedPlanVersionId = await planVersions.InForceAsync(
+            planId, req.ServiceDate ?? calendar.Today(), http.Request.Headers.Authorization.FirstOrDefault(), ct);
+    }
+    resolvedPlanVersionId ??= coverage?.PlanVersionId;
+
+    // No plan version, no quote — still. A member whose coverage carries no version is not priced at zero;
+    // the verdict is returned without a cost share, and the preview says why.
+    if (req.ProviderId is { } providerId && resolvedPlanVersionId is { } planVersionId)
     {
         var serviceDate = req.ServiceDate ?? calendar.Today();
         tierContext = new EligibilityTierContext(providerId, serviceDate, req.LocationId);
@@ -112,9 +151,18 @@ v1.MapPost("/check", async (
             preview = new CostSharePreviewResponse(
                 null, null, IsCoveredAtTier: false, RequiresPreauthAtTier: true,
                 Determinate: false,
-                Reason: priced.Failure == TierPricingFailure.TierUnresolved
-                    ? "No network tier could be resolved for this provider on this service date."
-                    : "This plan version does not price this benefit category at the resolved tier.",
+                // Three failures, three sentences. They were two, and the collapse mattered: a policy-service
+                // refusal or outage was reported as "this plan does not price this category", which is a
+                // claim about the member's benefit made on the strength of an error.
+                Reason: priced.Failure switch
+                {
+                    TierPricingFailure.TierUnresolved =>
+                        "No network tier could be resolved for this provider on this service date.",
+                    TierPricingFailure.Unavailable =>
+                        "The plan's cost share could not be read, so the member's share is unknown. This is "
+                        + "NOT a report that the service is free or uncovered.",
+                    _ => "This plan version does not price this benefit category at the resolved tier.",
+                },
                 null, null, null, null, false, null, null, null);
         }
     }

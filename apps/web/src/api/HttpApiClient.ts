@@ -9,6 +9,10 @@ import {
   zApprovalReview,
   zBreakGlassGrant,
   zMasterDataVersion,
+  zMasterDataAsOf,
+  zDocumentValidityView,
+  zApprovalRuleList,
+  zAutoDecisionSwitch,
   zSystemConfigEntry,
   zProviderSummary,
   zProviderLocation,
@@ -29,6 +33,10 @@ import {
   zConsumeResult,
   zDecisionResult,
   zDispenseResult,
+  zRxPricing,
+  zAuthorizationItem,
+  zInvestigationOrder,
+  zOrderPricing,
   zEligibilityHit,
   zEligibilityResult,
   zEncounter,
@@ -53,6 +61,14 @@ import {
   zResultTask,
   zResultUpload,
   zDrugRef,
+  zPrescribableDrug,
+  zValidationResult,
+  zCptRef,
+  zOrderValidationResult,
+  zValidityExtensionResult,
+  zValidityPolicyView,
+  zInvestigationOrderResult,
+  zPrescriptionSubmitResult,
   zTatSummary,
   zManualAuthResult,
   zEmergencyResult,
@@ -101,7 +117,17 @@ import {
   zAppointmentDay,
   zAppointmentCounts,
 } from "@mersal/contracts";
-import type { BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, CreatePractitionerInput, PractitionerAttachFailure } from "@mersal/contracts";
+import type {
+  BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, CreatePractitionerInput, PractitionerAttachFailure,
+  MasterDataEdit,
+  SetDocumentValidity,
+  SaveApprovalRule,
+  SetAutoDecision,
+} from "@mersal/contracts";
+import type { PrescriptionDraftLine, LineAcknowledgement, AddAllergyRequest, BloodGroup } from "@mersal/contracts";
+import type { CptSection, InvestigationDraftLine, InvestigationOrderType, OrderAcknowledgement, ValidityExtensionRequest } from "@mersal/contracts";
+import type { SubstitutionRequest } from "@mersal/contracts";
+import { zAllergenOption, zAllergyRecord, zMemberClinicalRecord } from "@mersal/contracts";
 import type { ApiClient } from "./client";
 import { ApiError, getRaw, postRaw, putRaw, patchRaw, deleteRaw, postForm, parseOr, getAbsolute, postAbsolute, deleteAbsolute } from "./http";
 import { GATEWAY_BASE } from "../config";
@@ -128,6 +154,25 @@ const neutral = (s: unknown) => ({ en: String(s ?? ""), ar: String(s ?? "") });
 
 /** A translated UI string the API layer has to supply because the service sends no label at all. */
 const t = (en: string, ar: string) => ({ en, ar });
+
+/** masterdata-service serialises `AllergenCategory` as an ordinal — mapped by position, per Entities.cs. */
+const ALLERGEN_CATEGORY = ["Drug", "Food", "Environmental"] as const;
+
+/**
+ * emr's AllergyResponse → the portal's AllergyRecord.
+ *
+ * `allergenDisplay` is left NULL when emr has none (a row recorded before its migration 0020) rather than
+ * substituted with the uuid or the reaction. The component renders "(unspecified)" in the reader's own
+ * language; inventing a substance name in the API layer would put a word in a clinician's mouth.
+ */
+const toAllergyRecord = (a: any) => ({
+  allergyId: a?.allergyId,
+  allergenId: a?.allergenId,
+  allergen: a?.allergenDisplay ?? null,
+  reaction: a?.reaction ?? null,
+  severity: a?.severity ?? "Mild",
+  status: a?.status ?? "Active",
+});
 /** Pre-format a numeric amount as the contract's display string, e.g. 12400 -> "EGP 12,400". */
 /**
  * 18.D2 (audit R2 U7) — the API layer now returns a NUMBER; formatting happens at render.
@@ -212,6 +257,25 @@ function cairoToday(): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit",
   }).format(new Date());
+}
+
+/**
+ * `?dispense=<lineId>:<qty>` / `?perform=<lineId>:<qty>`, repeated — the basis a cost share is quoted on.
+ *
+ * <p>Zero and negative entries are dropped rather than sent. A line the counter has not touched is not part
+ * of what is being handed over, and sending it as `:0` would be indistinguishable on the wire from a line
+ * someone deliberately zeroed — which the server would have to treat the same way regardless. Dropping it
+ * here keeps the query as short as the answer is.</p>
+ *
+ * <p>An empty basis produces an empty string, so the caller asks the whole-prescription question rather than
+ * asking for a quote on nothing. That distinction is the reason the tiles never read "Patient pays EGP 0.00"
+ * on a screen where nothing has been entered yet.</p>
+ */
+function basisQuery(param: string, basis?: Record<string, number>): string {
+  const parts = Object.entries(basis ?? {})
+    .filter(([id, q]) => id && Number.isFinite(q) && q > 0)
+    .map(([id, q]) => `${param}=${encodeURIComponent(`${id}:${q}`)}`);
+  return parts.length === 0 ? "" : `?${parts.join("&")}`;
 }
 
 /** One practitioner row → the contract shape. Shared by the list and the create path. */
@@ -329,16 +393,52 @@ const orderStatus = (s: unknown) => {
 const orderLineByOrderId = new Map<string, string>();
 /** encounterId → raw beneficiaryId, cached from getEncounter so doctor write actions can address orders/pharmacy. */
 const encounterBeneficiary = new Map<string, string>();
-/** Map a pharmacy prescription/line status → a resolved bilingual StatusKind for the dispensing queue. */
-const rxStatus = (s: unknown) => {
+/**
+ * Map a pharmacy prescription/line status → a resolved bilingual StatusKind.
+ *
+ * ============================================================================================================
+ * "APPROVED" MEANS A PERSON APPROVED IT
+ * ============================================================================================================
+ * `RxStatus.Approved` is reached two ways (doc 23 §3, "approve / no-gate", actor "Approval Team / auto"):
+ *
+ *   1. The approval team decided it, and an authorization records that decision.
+ *   2. `RxRoutingPolicy` found no gate, and the SUBMIT path set it outright — `if (!route.RequiresApproval)
+ *      rx.Status = RxStatus.Approved` (pharmacy Prescriptions.cs). Nobody reviewed anything.
+ *
+ * Both used to render the same chip. A prescriber reading their own worklist was told a reviewer had passed
+ * a prescription that no reviewer had ever seen — and "approved" is not a decorative word in a benefit
+ * platform: it is the claim that a clinical and financial gate was cleared by someone accountable for it.
+ *
+ * So the two are separated by the thing that actually distinguishes them — whether an authorization exists:
+ *
+ *   Submitted            → "Awaiting approval"   the gate is open and the team has not decided yet
+ *   Approved, no auth    → "Verified"            the system checked it; it is dispensable; nobody approved it
+ *   Approved, with auth  → "Approved"            the approval team decided it
+ *   PartiallyDispensed   → "Partially dispensed"
+ *   Dispensed            → "Dispensed"           the pharmacy handed it over
+ *
+ * The STATE MACHINE is untouched — `Approved` is still `Approved` on the wire and in the database, and doc 23
+ * still governs the transitions. This is a labelling fix, which is the right size for the defect: the states
+ * were correct and their names were not.
+ */
+const rxStatus = (s: unknown, authorizationId?: unknown) => {
   const k = String(s ?? "Approved");
-  const map: Record<string, { kind: "ok" | "info" | "part" | "neu"; label: { en: string; ar: string } }> = {
-    Approved: { kind: "info", label: { en: "Approved", ar: "معتمدة" } },
+  const map: Record<string, { kind: "ok" | "info" | "part" | "neu" | "warn"; label: { en: string; ar: string } }> = {
+    Draft: { kind: "neu", label: { en: "Draft", ar: "مسودة" } },
+    // The gated state. `warn` rather than `info`: this one is WAITING ON SOMEONE, and a prescriber scanning
+    // for what is stuck needs it to stand out from the rows that are simply progressing.
+    Submitted: { kind: "warn", label: { en: "Awaiting approval", ar: "بانتظار الموافقة" } },
+    Approved: { kind: "info", label: { en: "Verified", ar: "تم التحقق" } },
+    Rejected: { kind: "neu", label: { en: "Rejected", ar: "مرفوضة" } },
     Active: { kind: "info", label: { en: "Active", ar: "نشطة" } },
     PartiallyDispensed: { kind: "part", label: { en: "Partially dispensed", ar: "صُرفت جزئياً" } },
     Dispensed: { kind: "ok", label: { en: "Dispensed", ar: "صُرفت" } },
+    Expired: { kind: "neu", label: { en: "Expired", ar: "منتهية" } },
     Cancelled: { kind: "neu", label: { en: "Cancelled", ar: "ملغاة" } },
   };
+  // A real decision by the approval team — the ONLY thing entitled to the word "approved".
+  if (k === "Approved" && authorizationId)
+    return { kind: "ok" as const, label: { en: "Approved", ar: "معتمدة" } };
   return map[k] ?? map.Approved;
 };
 
@@ -357,7 +457,9 @@ const drugCoded = (drugId: unknown) => {
   const d = DEMO_DRUG_LABELS[String(drugId)];
   return d
     ? { system: "ATC" as const, code: d.atc, label: { en: d.en, ar: d.ar } }
-    : { system: "ATC" as const, code: String(drugId ?? "").slice(0, 8), label: t("Medication", "دواء") };
+    // "Medication" was the label here, which is the name of the field standing where its value belongs — the
+    // exact defect the prescriber column had. A pharmacist reading it cannot tell it from a product name.
+    : { system: "ATC" as const, code: String(drugId ?? "").slice(0, 8), label: t("Medication not recorded", "الدواء غير مسجّل") };
 };
 /** prescriptionId → its line ids (in order), cached from the queue so dispense can target concrete lines. */
 const rxLineIds = new Map<string, string[]>();
@@ -514,6 +616,7 @@ export class HttpApiClient implements ApiClient {
         // Null, not "", when absent — the board renders a note affordance only when there is a note to open.
         note: a.note ?? null,
         noteBy: a.noteBy ?? null,
+        noteByName: a.noteByName ?? null,
         noteAt: a.noteAt ?? null,
         beneficiaryName: a.beneficiaryName ?? null,
         doctorId: a.doctorId ?? null,
@@ -604,7 +707,25 @@ export class HttpApiClient implements ApiClient {
   }
 
   async appointmentTimeline(appointmentId: string) {
-    const r = (await getRaw(`/appointments/${encodeURIComponent(appointmentId)}/timeline`)) as any[];
+    return this.readTimeline(`/appointments/${encodeURIComponent(appointmentId)}/timeline`);
+  }
+
+  /**
+   * The care episode of ONE visit (ADR-0031) — what the encounter workspace, and every order and prescription
+   * raised in it, shows as its history.
+   *
+   * Identical in shape to the appointment timeline, and read through the same helper, because they are the
+   * same list seen from two ends: the appointment's own view reaches the visit's steps from the booking down,
+   * this one reads them directly. A doctor inside the workspace has no appointment id to hand — a walk-in has
+   * no appointment at all — which is why reaching them the long way round was not an option.
+   */
+  async encounterTimeline(encounterId: string) {
+    return this.readTimeline(`/encounters/${encodeURIComponent(encounterId)}/timeline`);
+  }
+
+  /** Fetch a timeline and put NAMES to its actor ids. Shared so both timelines resolve actors identically. */
+  private async readTimeline(path: string) {
+    const r = (await getRaw(path)) as any[];
     const steps = r ?? [];
 
     // Put names to the actor ids. One request for the DISTINCT ids on this timeline, not one per step — a
@@ -702,6 +823,24 @@ export class HttpApiClient implements ApiClient {
   // full clinical detail (diagnoses/SOAP/vitals) that no other zone may see.
   async listPatients() {
     const r = (await getRaw(`/encounters/mine`)) as any[];
+
+    // Put names to the branches on this worklist — one request for the distinct ids, and a failure leaves the
+    // name null rather than failing the list. Identical to the day board's lookup and for the same reason:
+    // branch names sit behind provider:read, which a doctor does not hold, so they come from the label-only
+    // endpoint instead of from provider-service.
+    const branchIds = [...new Set((r ?? []).map((e: any) => e.branchId).filter(Boolean).map(String))];
+    const branchNames = new Map<string, string>();
+    if (branchIds.length > 0) {
+      try {
+        const rows = (await getRaw(`/branch-labels?branchIds=${encodeURIComponent(branchIds.join(","))}`)) as any[];
+        for (const row of rows ?? []) {
+          if (row?.branchId && row?.nameEn) branchNames.set(String(row.branchId), String(row.nameEn));
+        }
+      } catch {
+        // Unnamed is better than no worklist.
+      }
+    }
+
     return (r ?? []).map((e: any) =>
       parseOr(zPatientListItem, {
         id: e.encounterId,
@@ -716,6 +855,8 @@ export class HttpApiClient implements ApiClient {
         treating: true,
         lastVisit: e.startedAt ? String(e.startedAt).slice(0, 10) : null,
         status: encounterStatus(e.status),
+        branchId: e.branchId ?? null,
+        branchName: e.branchId ? branchNames.get(String(e.branchId)) ?? null : null,
       }),
     );
   }
@@ -772,9 +913,13 @@ export class HttpApiClient implements ApiClient {
         spo2: v("SpO2"),
         measuredAt: vitals[0]?.measuredAt ?? null,
       },
+      // The SUBSTANCE, which is what an allergy chip is for. This read `a.reaction ?? "Allergen"` — so a
+      // penicillin allergy recorded with a reaction of "rash" displayed as "rash", and one recorded without
+      // a reaction displayed as the literal word "Allergen". emr has carried `allergenDisplay` since its
+      // migration 0020; `reaction` stays as the fallback for rows recorded before it.
       allergies: (r?.allergies ?? []).map((a: any) => ({
         id: a.allergyId,
-        substance: neutral(a.reaction ?? "Allergen"),
+        substance: neutral(a.allergenDisplay ?? a.reaction ?? "Allergen"),
         severity: String(a.severity ?? "mild").toLowerCase(),
       })),
       diagnoses: (r?.diagnoses ?? []).map((d: any) => ({
@@ -871,6 +1016,140 @@ export class HttpApiClient implements ApiClient {
       requiresApproval: String(r?.status ?? "").toLowerCase() === "pendingapproval",
     });
   }
+  /**
+   * Ask the approval team to revalidate an expired prescription or investigation order.
+   *
+   * Raises a request and nothing else — the scope behind it carries no decision authority. A 409 means one
+   * is already open for this item, which is an ANSWER (someone already asked) and not a failure.
+   */
+  async requestValidityExtension(req: ValidityExtensionRequest) {
+    const r = (await postRaw(`/authorizations/validity-extensions`, req, crypto.randomUUID())) as any;
+    return parseOr(zValidityExtensionResult, {
+      authorizationId: r?.authorizationId ?? "",
+      authNo: String(r?.authNo ?? ""),
+      status: String(r?.status ?? ""),
+    });
+  }
+
+  // ---- Validity periods (Medical Director) -------------------------------------------------------------
+
+  /**
+   * The tenant's four validity periods.
+   *
+   * The endpoint answers for EVERY artefact whether or not a row exists, so this client never has to decide
+   * what a missing key means — that decision is made once, server-side, and is the platform default.
+   */
+  async validityPolicy() {
+    const r = (await getRaw(`/admin/validity-policy`)) as any;
+    return parseOr(zValidityPolicyView, {
+      defaultDays: Number(r?.defaultDays ?? 10),
+      minDays: Number(r?.minDays ?? 1),
+      maxDays: Number(r?.maxDays ?? 365),
+      items: ((r?.items ?? []) as any[]).map((i: any) => ({
+        artefact: i.artefact,
+        days: Number(i.days ?? 10),
+        configured: !!i.configured,
+        updatedAt: i.updatedAt ?? null,
+      })),
+    });
+  }
+
+  async setValidityPolicy(artefact: string, days: number) {
+    await putRaw(`/admin/validity-policy`, { artefact, days });
+  }
+
+  // ---- Investigation ordering workspace: CPT typeahead + validate + multi-line submit ------------------
+  //
+  // The counterpart of the prescribing trio below. What it replaces was a modal with two text inputs
+  // pre-filled with a hard-coded LOINC code and the words "Complete blood count" — one line, no catalogue,
+  // no checks, and a 422 the first time anyone changed the code to something real.
+
+  /**
+   * CPT typeahead, narrowed to the SECTION the tab is ordering from.
+   *
+   * `section` is a code-range fact resolved by masterdata (70000-79999 radiology, 80000-89999 laboratory),
+   * not the stored `category` — which is the CPT taxonomy and would put a chest x-ray and a blood count in
+   * the same bucket.
+   */
+  async searchCpt(query: string, sections: readonly CptSection[]) {
+    const q = query.trim();
+    if (q.length < 2) return [];
+    // A comma-separated list, because the Labs tab is two sections. The ORDER of the 20 rows is decided
+    // server-side — code-led for a query that starts with a digit, description-led otherwise — and re-sorting
+    // here would throw that away, since a page of 20 is already the top 20 of a much longer ranked list.
+    const r = (await getRaw(
+      `/cpt-codes?section=${encodeURIComponent(sections.join(","))}&q=${encodeURIComponent(q)}&pageSize=20`,
+    )) as any;
+    return ((r?.items ?? []) as any[]).map((c: any) =>
+      parseOr(zCptRef, { code: String(c.code ?? ""), description: String(c.description ?? "") }),
+    );
+  }
+
+  /** Step 1 — advisory. Display state only; the create path re-derives everything and reads none of it. */
+  async validateInvestigationOrder(req: {
+    encounterId: string;
+    orderType: InvestigationOrderType;
+    lines: InvestigationDraftLine[];
+    diagnosisIcdCodes: string[];
+  }) {
+    const beneficiaryId = encounterBeneficiary.get(req.encounterId) ?? req.encounterId;
+    const r = (await postRaw(`/investigation-orders/validate`, {
+      beneficiaryId,
+      encounterId: req.encounterId,
+      orderType: req.orderType,
+      diagnosisIcdCodes: req.diagnosisIcdCodes,
+      lines: req.lines.map((l) => ({
+        lineId: l.lineId, code: l.test?.code ?? null, description: l.test?.description ?? null, quantity: l.quantity,
+      })),
+    })) as any;
+    return parseOr(zOrderValidationResult, {
+      validationId: r?.validationId ?? crypto.randomUUID(),
+      overallState: r?.overallState ?? "NotChecked",
+      findings: ((r?.findings ?? []) as any[]).map((f: any) => ({
+        lineId: f.lineId,
+        kind: f.kind,
+        state: f.state,
+        // The service sends both languages per finding; neither is machine-translated at render.
+        message: { en: String(f.messageEn ?? ""), ar: String(f.messageAr ?? f.messageEn ?? "") },
+        requiresAcknowledgement: !!f.requiresAcknowledgement,
+        isBlocking: !!f.isBlocking,
+        sourceName: f.sourceName ?? null,
+        caveat: f.caveat ?? null,
+      })),
+      lineStates: r?.lineStates ?? {},
+    });
+  }
+
+  /** Step 2 — one order, every line, one Idempotency-Key. */
+  async submitInvestigationOrder(req: {
+    encounterId: string;
+    orderType: InvestigationOrderType;
+    lines: InvestigationDraftLine[];
+    acknowledgements: OrderAcknowledgement[];
+  }) {
+    const beneficiaryId = encounterBeneficiary.get(req.encounterId) ?? req.encounterId;
+    // Keyed on the composed CONTENT, so a double-click is one order while a genuinely different second
+    // order for the same encounter is not silently swallowed as a replay.
+    const idem = `ord:${req.encounterId}:${req.orderType}:${req.lines.map((l) => `${l.test?.code}x${l.quantity}`).join(",")}`;
+    const r = (await postRaw(`/investigation-orders`, {
+      beneficiaryId,
+      encounterId: req.encounterId,
+      orderType: req.orderType,
+      lines: req.lines.map((l) => ({
+        codeSystem: "CPT",
+        code: l.test?.code ?? "",
+        description: [l.test?.description, l.note.trim()].filter(Boolean).join(" — "),
+        quantityOrdered: l.quantity,
+      })),
+    }, idem)) as any;
+    return parseOr(zInvestigationOrderResult, {
+      orderId: r?.orderId ?? "",
+      orderNo: String(r?.orderNo ?? ""),
+      status: String(r?.status ?? ""),
+      requiresApproval: String(r?.status ?? "").toLowerCase() === "pendingapproval",
+    });
+  }
+
   // Write an e-prescription (US-033). Keyed on beneficiary (from the encounter cache) + Idempotency-Key. The
   // prescription line references a master-data drug id; the coded drug's `code` carries that reference.
   async prescribe(req: PrescribeRequest) {
@@ -912,6 +1191,23 @@ export class HttpApiClient implements ApiClient {
         status: orderStatus(o.status),
         requestedAt: o.requestedAt ?? new Date().toISOString(),
         firstLineId: lines[0]?.orderLineId ?? lines[0]?.lineId ?? undefined,
+        expiresAt: o.expiresAt ?? null,
+        // Already on the wire (`OrderResponse.EncounterId`) and previously discarded. It is the key the care
+        // timeline is read by, so an order can show what has happened to it.
+        encounterId: o.encounterId ?? null,
+        // Carried through rather than reduced to a count. The server has always sent them; keeping only
+        // `lines[0].code` is what left the worklist able to say an order had four tests and not which four.
+        lines: lines.map((l: any) => ({
+          id: l.orderLineId ?? l.lineId,
+          code: String(l.code ?? "—"),
+          codeSystem: String(l.codeSystem ?? ""),
+          // Null, not "": an undescribed code is a stated absence, and an empty string renders as a blank
+          // cell that reads like a fault.
+          description: l.description ?? null,
+          quantityOrdered: Number(l.quantityOrdered ?? 1),
+          quantityConsumed: Number(l.quantityConsumed ?? 0),
+          status: orderStatus(l.status),
+        })),
       });
     });
   }
@@ -986,10 +1282,32 @@ export class HttpApiClient implements ApiClient {
     return (r ?? []).map((p: any) =>
       parseOr(zRxRow, {
         id: p.prescriptionId,
+        rxNo: p.rxNo,
         beneficiary: { id: p.beneficiaryId, token: caseToken({ beneficiaryId: p.beneficiaryId }) },
         lineCount: (p.lines ?? []).length,
-        status: rxStatus(p.status),
+        // The authorization decides whether this reads "Approved" or "Verified" — see `rxStatus`.
+        status: rxStatus(p.status, p.authorizationId),
         submittedAt: p.submittedAt ?? undefined,
+        expiresAt: p.expiresAt ?? undefined,
+        // Already on the wire (`PrescriptionResponse.EncounterId`) and previously discarded. It is the key
+        // the care timeline is read by, so a prescription can show what has happened to it.
+        encounterId: p.encounterId ?? null,
+        // `neutral()`, not a translation — a person's name is not translated. Null stays null all the way to
+        // the screen, which words the absence itself; the mapper does not get to decide how it reads.
+        prescriber: p.prescriberName ? neutral(p.prescriberName) : null,
+        // Carried through from the SAME response rather than fetched when the reader opens one. The lines
+        // were always in this payload and were being thrown away at `lineCount`.
+        lines: ((p.lines ?? []) as any[]).map((l: any) => ({
+          id: l.prescriptionLineId,
+          drug: l.drugName ? neutral(l.drugName) : null,
+          dose: l.dose ?? null,
+          route: l.route ?? null,
+          frequency: l.frequency ?? null,
+          quantityPrescribed: Number(l.quantityPrescribed ?? 0),
+          quantityDispensed: Number(l.quantityDispensed ?? 0),
+          refillsAllowed: Math.trunc(Number(l.refillsAllowed ?? 0)),
+          status: rxStatus(l.status),
+        })),
       }),
     );
   }
@@ -1005,32 +1323,181 @@ export class HttpApiClient implements ApiClient {
     return parseOr(zVitalsResult, { encounterId, recorded });
   }
 
+  // ---- Standing clinical facts: blood group + allergies (emr migrations 0020/0021) --------------------
+  //
+  // These live on the MEMBER, not on the visit, so every path here is /beneficiaries/{id}/… . emr gates each
+  // one on a treating relationship and audits it as a PHI read or a clinical write; nothing below re-checks
+  // that, because a client-side permission check is a display hint and never a control.
+
+  async memberClinicalRecord(beneficiaryId: string) {
+    const r = (await getRaw(`/beneficiaries/${encodeURIComponent(beneficiaryId)}/clinical-record`)) as any;
+    return parseOr(zMemberClinicalRecord, {
+      beneficiaryId: r?.beneficiaryId ?? beneficiaryId,
+      bloodGroup: r?.bloodGroup ?? null,
+      bloodGroupRecordedAt: r?.bloodGroupRecordedAt ?? null,
+      allergies: (r?.allergies ?? []).map(toAllergyRecord),
+    });
+  }
+
+  async allergenCatalogue() {
+    const r = (await getRaw(`/allergens`)) as any[];
+    return (r ?? []).map((a: any) =>
+      parseOr(zAllergenOption, {
+        allergenId: a.allergenId,
+        code: String(a.code ?? ""),
+        name: String(a.name ?? ""),
+        // masterdata-service is the one service that never registered a JsonStringEnumConverter, so its
+        // enums come over as ORDINALS. Mapped by position against Domain/Entities.cs AllergenCategory
+        // rather than left as a number, because "category: 2" is not something a UI can group by.
+        category: ALLERGEN_CATEGORY[Number(a.category)] ?? "Drug",
+      }),
+    );
+  }
+
+  async addAllergy(beneficiaryId: string, req: AddAllergyRequest) {
+    const r = (await postRaw(`/beneficiaries/${encodeURIComponent(beneficiaryId)}/allergies`, {
+      allergenId: req.allergenId,
+      // Empty string and "no reaction recorded" are different claims; only the second is true of a blank box.
+      reaction: req.reaction?.trim() ? req.reaction.trim() : null,
+      severity: req.severity,
+      status: req.status,
+    })) as any;
+    return parseOr(zAllergyRecord, toAllergyRecord(r));
+  }
+
+  async setBloodGroup(beneficiaryId: string, bloodGroup: BloodGroup) {
+    await putRaw(`/beneficiaries/${encodeURIComponent(beneficiaryId)}/blood-group`, { bloodGroup });
+  }
+
   // Lab / Imaging (Phase 5, US-040) — the orders service exposes ONE capability-filtered provider queue at
   // /investigation-orders/queue (a lab_tech sees Lab orders, an imaging_tech Imaging — by role, not URL). We
   // flatten each order to one row using its first available line as the `test`, cache that line id so consume
   // can target it, and default priority to routine (the fulfillment queue does not carry a clinical priority).
+  /**
+   * Find a patient's investigation orders (27.8).
+   *
+   * <p>Search-first, exactly as the dispensing counter is. The bench's real question is "what do I have for
+   * THIS patient", and browsing the tenant's queue to reach one order puts other patients' orders on screen
+   * to get there.</p>
+   *
+   * <p>An ORDER NUMBER identifies the order on its own — it is the reference on the paper in the patient's
+   * hand. A CARD NUMBER does not identify a person, so it takes a second identifier alongside it; the server
+   * enforces that and the screen explains it.</p>
+   */
+  async labSearch(kind: "lab" | "imaging", by: { orderNo?: string; cardNumber?: string; memberNo?: string; passport?: string }) {
+    const q = Object.entries(by)
+      .filter(([, v]) => (v ?? "").trim() !== "")
+      .map(([k, v]) => `${k}=${encodeURIComponent(String(v).trim())}`)
+      .join("&");
+    const r = (await getRaw(`/investigation-orders/search?${q}`)) as any[];
+    return (r ?? [])
+      .filter((o: any) => String(o.orderType ?? "").toLowerCase() === kind)
+      .map((o: any) => this.toLabOrder(o, kind));
+  }
+
   async labQueue(kind: "lab" | "imaging") {
     const r = (await getRaw(`/investigation-orders/queue?page=1&pageSize=50`)) as any[];
     return (r ?? [])
       .filter((o: any) => String(o.orderType ?? "").toLowerCase() === kind)
-      .map((o: any) => {
+      .map((o: any) => this.toLabOrder(o, kind));
+  }
+
+  /** One queue/search row → the contract shape. Shared so the two reads cannot describe an order differently. */
+  private toLabOrder(o: any, kind: "lab" | "imaging") {
+    {
+      {
         const lines: any[] = o.lines ?? [];
         const line = lines[0] ?? {};
         if (line.orderLineId) orderLineByOrderId.set(String(o.orderId), String(line.orderLineId));
-        const remaining = lines.reduce((acc, l) => acc + Math.max(0, Math.round(Number(l.quantityRemaining ?? 1))), 0);
+        const remaining = lines.reduce((acc: number, l: any) => acc + Math.max(0, Math.round(Number(l.quantityRemaining ?? 1))), 0);
         return parseOr(zLabOrder, {
           id: o.orderId,
           kind,
           test: { system: codeSystem(line.codeSystem), code: line.code ?? "—", label: neutral(line.description ?? line.code ?? "") },
           patient: { id: o.beneficiaryId, token: caseToken({ beneficiaryId: o.beneficiaryId }) },
           priority: "routine",
-          status: orderStatus(o.status),
+          // Same rule as the dispensing counter: the service computes `expired` against the clock, and the
+          // displayed state follows the FLAG, not the status the sweeper has yet to catch up with.
+          status: o.expired
+            ? { kind: "bad" as const, label: t("Expired", "منتهي") }
+            : orderStatus(o.status),
           placedAt: o.requestedAt ?? new Date().toISOString(),
           panelsTotal: Math.max(1, remaining),
           panelsDone: 0,
+          orderNo: String(o.orderNo ?? ""),
+          expiresAt: o.expiresAt ?? null,
+          expired: !!o.expired,
         });
-      });
+      }
+    }
   }
+  /**
+   * One order with every line on it (ADR-0034).
+   *
+   * <p>Found by ORDER NUMBER, because that is the reference printed on the paper in the patient's hand and
+   * the one a technician can read back. It searches the fulfilment queue the caller is already entitled to,
+   * so this discloses nothing the queue does not — it just stops collapsing the order to its first line.</p>
+   */
+  async investigationOrder(orderNo: string) {
+    const rows = (await getRaw(`/investigation-orders/search?orderNo=${encodeURIComponent(orderNo)}`)) as any[];
+    const o = (rows ?? []).find((x: any) => String(x.orderNo ?? "") === orderNo) ?? (rows ?? [])[0];
+    if (!o) return null;
+
+    const kind = String(o.orderType ?? "").toLowerCase() === "imaging" ? "imaging" : "lab";
+    return parseOr(zInvestigationOrder, {
+      id: o.orderId,
+      orderNo: String(o.orderNo ?? orderNo),
+      kind,
+      patient: { id: o.beneficiaryId, token: caseToken({ beneficiaryId: o.beneficiaryId }) },
+      // The FLAG, not the status — the expiry sweeper runs hourly, so a lapsed order still reads Active
+      // between lapsing and being swept, and consume would refuse what the page had offered.
+      status: o.expired ? { kind: "bad" as const, label: t("Expired", "منتهي") } : orderStatus(o.status),
+      placedAt: o.requestedAt ?? new Date().toISOString(),
+      expiresAt: o.expiresAt ?? null,
+      expired: !!o.expired,
+      lines: (o.lines ?? []).map((l: any) => {
+        const ordered = Number(l.quantityOrdered ?? l.quantity ?? 1);
+        const remaining = Number(l.quantityRemaining ?? ordered);
+        return {
+          id: l.orderLineId,
+          test: { system: codeSystem(l.codeSystem), code: l.code ?? "—", label: neutral(l.description ?? l.code ?? "") },
+          quantityOrdered: ordered,
+          // Derived, because the queue projection reports what is LEFT rather than what is done. Clamped at
+          // zero: a negative "consumed" on screen is worse than an approximate one.
+          quantityConsumed: Math.max(0, ordered - remaining),
+          status: orderStatus(l.status),
+        };
+      }),
+    });
+  }
+
+  async orderPricing(orderId: string, performNow?: Record<string, number>) {
+    return parseOr(
+      zOrderPricing,
+      await getRaw(
+        `/investigation-orders/${encodeURIComponent(orderId)}/pricing${basisQuery("perform", performNow)}`,
+      ),
+    );
+  }
+
+  async requestSubstitution(req: SubstitutionRequest, idempotencyKey?: string) {
+    const r = (await postRaw(
+      `/authorizations/substitution-requests`,
+      {
+        orderId: req.orderId,
+        orderLineId: req.orderLineId,
+        orderReference: req.orderReference,
+        beneficiaryId: req.beneficiaryId,
+        orderedCode: req.orderedCode,
+        orderedLabel: req.orderedLabel ?? null,
+        proposedCode: req.proposedCode ?? null,
+        reason: req.reason,
+      },
+      idempotencyKey ?? crypto.randomUUID(),
+    )) as any;
+    return { authNo: String(r?.authNo ?? "") };
+  }
+
   // Result upload (Phase 5.3, US-042) — the "awaiting result" worklist is the provider's consumed-but-unreported
   // lines; a result posts as multipart form (resultValue and/or a report file — this screen sends the value).
   async awaitingResult(kind: "lab" | "imaging") {
@@ -1055,8 +1522,14 @@ export class HttpApiClient implements ApiClient {
     return parseOr(zResultUpload, { orderId, lineId, uploaded: true });
   }
   async consume(req: ConsumeRequest) {
+    // Per-line when the caller named lines (the order page), else the queue's cached first line. A page that
+    // shows three panels separately must be able to consume the two that were actually performed.
     const orderLineId = orderLineByOrderId.get(String(req.orderId));
-    const body = { lines: orderLineId ? [{ orderLineId, quantity: req.panels }] : [] };
+    const body = {
+      lines: req.lines?.length
+        ? req.lines.map((l) => ({ orderLineId: l.lineId, quantity: l.quantity }))
+        : orderLineId ? [{ orderLineId, quantity: req.panels }] : [],
+    };
     const r = (await postRaw(`/investigation-orders/${encodeURIComponent(req.orderId)}/consume`, body, req.idempotencyKey)) as any;
     const lines: any[] = r?.lines ?? [];
     const total = lines.reduce((acc, l) => acc + Math.round(Number(l.quantityOrdered ?? l.quantityRemaining ?? 1)), 0);
@@ -1077,28 +1550,117 @@ export class HttpApiClient implements ApiClient {
   // batch/expiry are required by the service but not collected by this screen, so we supply a dev batch + a
   // one-year expiry per line. Line ids are cached from the queue so dispense can target them.
   async pharmacyQueue() {
-    const r = (await getRaw(`/prescriptions/queue`)) as any[];
-    return (r ?? []).map((p: any) => {
+    return this.toPrescriptions((await getRaw(`/prescriptions/queue`)) as any[]);
+  }
+
+  /**
+   * The dispensing counter's lookup: one member's dispensable prescriptions.
+   *
+   * By Rx NUMBER on its own — the prescription's own reference identifies it — or by TWO of the member's
+   * identifiers. A card number alone resolves nobody, deliberately: it is printed on something that gets
+   * shared, photographed and reused, so it is a lookup key and not proof of identity (doc 43 §7 D5). The
+   * server enforces that; sending one identifier answers 422 rather than a silent empty list.
+   */
+  async pharmacySearch(by: { rxNo?: string; cardNumber?: string; memberNo?: string; passport?: string }) {
+    const q = new URLSearchParams();
+    if (by.rxNo?.trim()) q.set("rxNo", by.rxNo.trim());
+    if (by.cardNumber?.trim()) q.set("cardNumber", by.cardNumber.trim());
+    if (by.memberNo?.trim()) q.set("memberNo", by.memberNo.trim());
+    if (by.passport?.trim()) q.set("passport", by.passport.trim());
+    return this.toPrescriptions((await getRaw(`/prescriptions/search?${q.toString()}`)) as any[]);
+  }
+
+  /**
+   * One mapping for the queue and the search, because they return the same view.
+   *
+   * Everything displayed here now comes from the SERVER. It used to invent three of them: the prescriber was
+   * the literal word "Prescriber", the drug fell back to the literal word "Medication", and the title used
+   * the internal uuid because nothing read `rxNo`. A screen that prints the name of a field where its value
+   * belongs is not a placeholder — it reads as data, and a pharmacist cannot tell it apart from one.
+   */
+  private toPrescriptions(rows: any[]) {
+    return (rows ?? []).map((p: any) => {
       const lines: any[] = p.lines ?? [];
       rxLineIds.set(String(p.prescriptionId), lines.map((l) => String(l.prescriptionLineId)));
       return parseOr(zPrescription, {
         id: p.prescriptionId,
+        rxNo: String(p.rxNo ?? ""),
         patient: { id: p.beneficiaryId, token: caseToken({ beneficiaryId: p.beneficiaryId }) },
-        prescriber: { label: t("Prescriber", "الطبيب الواصف") },
+        // `neutral()`, not a translation: a person's name is not translated, and neither is a drug's trade
+        // name. Null means the row predates the snapshot (pharmacy migration 0006) — said in words rather
+        // than back-filled with a uuid.
+        prescriber: {
+          label: p.prescriberName
+            ? neutral(p.prescriberName)
+            : t("Prescriber not recorded", "الطبيب الواصف غير مسجّل"),
+        },
         submittedAt: p.submittedAt ?? new Date().toISOString(),
-        status: rxStatus(p.status),
+        expiresAt: p.expiresAt ?? null,
+        // Straight from the service, which computes it against the clock. Not re-derived here: the sweeper
+        // runs hourly, so a lapsed prescription's STATUS still reads Approved until it catches up, and a
+        // screen that trusted the status would offer to dispense something the server refuses.
+        expired: !!p.expired,
+        diagnosisCodes: (p.diagnosisCodes ?? []).map(String),
+        primaryIcdCode: p.primaryIcdCode ?? null,
+        status: p.expired
+          ? { kind: "bad" as const, label: t("Expired", "منتهية") }
+          : rxStatus(p.status),
         lines: lines.map((l) => ({
           id: l.prescriptionLineId,
-          drug: drugCoded(l.drugId),
+          // The FULL drug id. It was sliced to eight characters — a display shortening applied to a field
+          // nothing displays and three things use as an identity: the ingredient join, the approved-
+          // alternatives lookup behind the substitute control, and the drugId sent on submission. So the
+          // counter reported "active ingredient not recorded" for every medicine in the catalogue, and the
+          // substitute modal asked master data about a drug whose id was a prefix of a real one.
+          drug: l.drugName
+            ? { system: "ATC" as const, code: String(l.drugId ?? ""), label: neutral(l.drugName) }
+            : drugCoded(l.drugId),
           quantity: Math.max(1, Math.round(Number(l.quantityPrescribed ?? 1))),
           dispensed: Math.round(Number(l.quantityDispensed ?? 0)),
-          dose: [l.dose, l.route, l.frequency].filter(Boolean).join(" · "),
+          // The dose ALONE now. Route, frequency and duration travel as their own fields so the counter can
+          // lay them out as the distinct facts they are; joining them into one string here left the screen
+          // unable to say "duration not recorded" without parsing its own display text back apart.
+          dose: String(l.dose ?? ""),
+          route: l.route ?? null,
+          frequency: l.frequency ?? null,
+          durationDays: l.durationDays ?? null,
+          // Filled by the caller's joins — the ingredient from master data, the price from the pricing
+          // endpoint. Null here rather than absent, so a screen that skips the joins still parses.
+          activeIngredient: null,
+          unitPriceEgp: null,
           status: rxStatus(l.status),
           outOfStock: false,
         })),
       });
     });
   }
+  /**
+   * Active ingredient by drug id, from master data.
+   *
+   * <p>A CLIENT-SIDE JOIN, deliberately — the same shape as `icdTitles` and `branchLabels`, and for the same
+   * reason. The molecule a product contains is master data's fact, and teaching pharmacy-service to answer it
+   * would make pharmacy a second place that says what a drug is. The browser already holds an authorised read
+   * of both, so it joins them.</p>
+   *
+   * <p>Missing ids are simply absent from the map: 2,786 of 31,651 catalogue products record no ingredient,
+   * and the caller falls back to saying so rather than repeating the trade name.</p>
+   */
+  async drugIngredients(drugIds: readonly string[]) {
+    const ids = [...new Set(drugIds.filter(Boolean))];
+    if (ids.length === 0) return new Map<string, string>();
+    // NOT caught here any more. A swallowed failure returned an empty map, and an empty map is
+    // indistinguishable from "the catalogue records no ingredient for these" — so a masterdata outage
+    // rendered as a negative finding about every medicine on the prescription. The caller decides what to
+    // show, and it can only decide if it is told the read failed.
+    const r = (await postRaw(`/drugs/ingredients/by-ids`, { drugIds: ids })) as any;
+    const out = new Map<string, string>();
+    for (const item of (r?.items ?? []) as any[]) {
+      const name = item.scientificName ?? item.activeIngredient ?? null;
+      if (item.drugId && name) out.set(String(item.drugId), String(name));
+    }
+    return out;
+  }
+
   // Formulary substitutions (Phase 6.3, US-052) — master data is reference-only (auth, no scope). Search drugs
   // by name, then list a drug's policy-approved alternatives (same ATC-5 substance). Bilingual name from AR
   // where master data has it, else the EN name echoed (no machine translation).
@@ -1114,6 +1676,83 @@ export class HttpApiClient implements ApiClient {
       }),
     );
   }
+
+  // ---- Prescribing workspace (phase 26, design 43 §6) ----------------------------------------------
+  //
+  // One field over trade name AND active ingredient: a prescriber searches by whichever name they know.
+  // The uuid is carried from here all the way to submission — `prescribe()` above sent `req.drug.code`,
+  // the ATC STRING, where the API expects a Guid, so that path could never work against real data.
+  async searchPrescribableDrugs(query: string) {
+    const r = (await getRaw(`/drugs/search?q=${encodeURIComponent(query)}&pageSize=20`)) as any;
+    return ((r?.items ?? []) as any[]).map((d: any) =>
+      parseOr(zPrescribableDrug, {
+        drugId: d.drugId,
+        tradeName: {
+          en: String(d.tradeName ?? ""),
+          // No Arabic trade name exists in the Egyptian drug list, so the English name is echoed rather
+          // than rendering an empty option. Not machine-translated.
+          ar: String(d.tradeNameAr ?? d.tradeName ?? ""),
+        },
+        activeIngredient: d.activeIngredient ?? undefined,
+        strength: d.strength ?? undefined,
+        form: d.form ?? undefined,
+        priceEgp: typeof d.priceEgp === "number" ? d.priceEgp : undefined,
+        atcCode: d.atcCode ?? undefined,
+        hasIndicationData: Boolean(d.hasIndicationData),
+      }),
+    );
+  }
+
+  async validatePrescription(req: {
+    encounterId: string;
+    lines: PrescriptionDraftLine[];
+    diagnosisIcdCodes: string[];
+  }) {
+    const beneficiaryId = encounterBeneficiary.get(req.encounterId) ?? req.encounterId;
+    const r = (await postRaw(`/prescriptions/validate`, {
+      beneficiaryId,
+      encounterId: req.encounterId,
+      lines: rxLines(req.lines),
+      diagnosisIcdCodes: req.diagnosisIcdCodes,
+    })) as any;
+    return parseOr(zValidationResult, {
+      validationId: r?.validationId ?? "",
+      ranAt: String(r?.ranAt ?? ""),
+      engineVersion: String(r?.engineVersion ?? ""),
+      overallState: r?.overallState ?? "NotChecked",
+      findings: (r?.findings ?? []) as unknown[],
+      lineStates: (r?.lineStates ?? {}) as Record<string, string>,
+    });
+  }
+
+  async submitPrescription(req: {
+    encounterId: string;
+    lines: PrescriptionDraftLine[];
+    diagnosisIcdCodes: string[];
+    acknowledgements: LineAcknowledgement[];
+  }) {
+    const beneficiaryId = encounterBeneficiary.get(req.encounterId) ?? req.encounterId;
+    // Keyed on the composed line set, so a retry of the SAME prescription replays rather than duplicating,
+    // while an edited one is a new submission.
+    const idem = `rx:${req.encounterId}:${req.lines.map((l) => `${l.drug?.drugId}x${l.quantity}`).join(",")}`;
+    const r = (await postRaw(`/prescriptions`, {
+      beneficiaryId,
+      encounterId: req.encounterId,
+      lines: rxLines(req.lines),
+      diagnosisIcdCodes: req.diagnosisIcdCodes,
+      acknowledgements: req.acknowledgements.map((a) => ({
+        clientLineId: a.lineId,
+        findingKind: a.findingKind,
+        reason: a.reason,
+      })),
+    }, idem)) as any;
+    return parseOr(zPrescriptionSubmitResult, {
+      prescriptionId: r?.prescriptionId ?? "",
+      rxNo: String(r?.rxNo ?? ""),
+      status: String(r?.status ?? ""),
+    });
+  }
+
   async drugAlternatives(drugId: string) {
     const r = (await getRaw(`/drugs/by-id/${encodeURIComponent(drugId)}/alternatives`)) as any;
     return ((r?.drugs ?? []) as any[]).map((d: any) =>
@@ -1132,7 +1771,20 @@ export class HttpApiClient implements ApiClient {
     for (const line of req.lines) {
       last = await postRaw(
         `/prescriptions/${encodeURIComponent(req.prescriptionId)}/lines/${encodeURIComponent(line.lineId)}/dispense`,
-        { quantity: line.quantity, batchNo: `DEV-${String(req.prescriptionId).slice(0, 8)}`, expiryDate: expiry },
+        {
+          quantity: line.quantity,
+          batchNo: `DEV-${String(req.prescriptionId).slice(0, 8)}`,
+          expiryDate: expiry,
+          // The server has accepted these since phase 6.3 and nothing sent them, so a substitution chosen at
+          // the counter was recorded as a straight dispense of the ORIGINAL drug — the patient went home with
+          // one molecule and the record said another.
+          substitutedDrugId: line.substitute?.code,
+          substitutionReason: line.substitutionReason,
+          // The counter's note travels with EVERY line of this dispense. It describes the handover, not one
+          // medicine, and a note recorded against only the first line would be lost the moment somebody read
+          // the second.
+          note: req.note,
+        },
         `${req.idempotencyKey}:${line.lineId}`,
       );
     }
@@ -1147,11 +1799,23 @@ export class HttpApiClient implements ApiClient {
     });
   }
 
+  async prescriptionPricing(prescriptionId: string, dispenseNow?: Record<string, number>) {
+    return parseOr(
+      zRxPricing,
+      await getRaw(
+        `/prescriptions/${encodeURIComponent(prescriptionId)}/pricing${basisQuery("dispense", dispenseNow)}`,
+      ),
+    );
+  }
+
   // Approvals (Phase 7, US-060) — the worklist is GET /authorizations/ (min-necessary: codes + SLA, NO clinical
   // payload — that is /review only, audited as a PHI read). Decisions are per-type endpoints, not one /decision;
   // a decision needs the request UnderReview, so decide assigns first (idempotent-ish) then routes by kind.
-  async approvalWorklist() {
-    const r = (await getRaw(`/authorizations/`)) as any[];
+  async approvalWorklist(kind: "Review" | "Fulfilment" | "All" = "Review") {
+    // Defaulting to Review matches the server's default and is the same argument (ADR-0034): the inbox is a
+    // work queue, and a few hundred dispenses a day landing in it would drown the requests that need a
+    // decision. The register is asked for deliberately.
+    const r = (await getRaw(`/authorizations/?kind=${encodeURIComponent(kind)}`)) as any[];
     const now = Date.now();
     return (r ?? []).map((a: any) => {
       const dueMs = a.slaDueAt ? Date.parse(a.slaDueAt) : now;
@@ -1163,17 +1827,47 @@ export class HttpApiClient implements ApiClient {
         service: { system: "CPT", code, label: neutral(code) },
         requestedBy: t("Provider", "مقدم الخدمة"),
         priority: String(a.priority ?? "routine").toLowerCase(),
-        sla: {
-          dueAt: a.slaDueAt ?? submittedAt,
-          breached: !!a.slaBreached,
-          minutesRemaining: Math.round((dueMs - now) / 60000),
-        },
+        // A fulfilment authorization has no SLA — nothing waited on anybody. The due date used to be
+        // fabricated from the submission time when the server sent none, which put a countdown on settled
+        // work: a clock ticking towards a deadline that does not exist.
+        sla: a.slaDueAt
+          ? { dueAt: a.slaDueAt, breached: !!a.slaBreached, minutesRemaining: Math.round((dueMs - now) / 60000) }
+          : a.kind === "Fulfilment"
+            ? null
+            : { dueAt: submittedAt, breached: !!a.slaBreached, minutesRemaining: Math.round((dueMs - now) / 60000) },
         status: authStatus(a.status),
         submittedAt,
         estimatedCost: "—",
+        source: a.source ?? "Manual",
+        itemReference: a.itemReference ?? null,
+        extensionReason: a.extensionReason ?? null,
+        // A server that predates ADR-0034 sends no `kind`, and everything it can send IS a review request —
+        // so the fallback is the truth for that server rather than a guess.
+        kind: a.kind === "Fulfilment" ? "Fulfilment" : "Review",
       });
     });
   }
+
+  async authorizationItems(authorizationId: string) {
+    const r = (await getRaw(`/authorizations/${encodeURIComponent(authorizationId)}/items`)) as any[];
+    return (r ?? []).map((i: any) =>
+      parseOr(zAuthorizationItem, {
+        itemId: i.itemId,
+        sourceLineId: i.sourceLineId ?? null,
+        orderedCode: i.orderedCode ?? "—",
+        orderedLabel: i.orderedLabel ?? null,
+        fulfilledCode: i.fulfilledCode ?? i.orderedCode ?? "—",
+        fulfilledLabel: i.fulfilledLabel ?? null,
+        quantity: Number(i.quantity ?? 0),
+        // Trusted from the server, which derives it from the two codes rather than storing it — so the flag
+        // cannot disagree with the codes beside it.
+        substituted: !!i.substituted,
+        substitutionReason: i.substitutionReason ?? null,
+        fulfilledAt: i.fulfilledAt ?? new Date().toISOString(),
+      }),
+    );
+  }
+
   async approvalReview(approvalId: string) {
     const a = (await getRaw(`/authorizations/${encodeURIComponent(approvalId)}/review`)) as any;
     const codes: string[] = a?.serviceCodes ?? [];
@@ -2224,6 +2918,113 @@ export class HttpApiClient implements ApiClient {
 
   // Governance reads (Phase 8b.2) — the master-data versions + typed system-config currently in force. Reference
   // configuration, not PHI; every admin read is audited server-side.
+  /**
+   * Append a new effective-dated version of a master-data code.
+   *
+   * <p>A POST, not a PUT, because it CREATES a version rather than replacing one — the prior version's window
+   * closes and history stays resolvable. The 403 for a non-clinical system is not handled here: it carries a
+   * problem type the screen renders, and swallowing it would leave a supervisor staring at a form that did
+   * nothing.</p>
+   */
+  async adminMasterDataUpsert(edit: MasterDataEdit) {
+    const r = (await postRaw(`/admin/master-data`, {
+      system: edit.system,
+      code: edit.code,
+      attributes: edit.attributes,
+      rationale: edit.rationale,
+      retired: edit.retired,
+    })) as any;
+    return {
+      id: String(r?.versionId ?? ""),
+      code: String(r?.code ?? edit.code),
+      versionNo: Number(r?.versionNo ?? 0),
+    };
+  }
+
+  /** The version in force at an instant — the "what did this code mean then" read behind the diff. */
+  async adminMasterDataAsOf(system: string, code: string, at: string) {
+    const r = (await getRaw(
+      `/admin/master-data/${encodeURIComponent(system)}/${encodeURIComponent(code)}/as-of?at=${encodeURIComponent(at)}`,
+    )) as any;
+    // `attributesJson` is a STRING on the wire — the server stores the snapshot as JSON text. Parsed here so
+    // the screen never has to know that, and defaulted to {} rather than throwing: a malformed snapshot is a
+    // version that cannot be diffed, not a page that cannot load.
+    let attributes: Record<string, unknown> = {};
+    try {
+      attributes = JSON.parse(String(r?.attributesJson ?? "{}"));
+    } catch { attributes = {}; }
+    return parseOr(zMasterDataAsOf, {
+      id: r?.versionId ?? "",
+      versionNo: Number(r?.versionNo ?? 0),
+      attributes,
+      effectiveFrom: r?.effectiveFrom ?? new Date().toISOString(),
+      effectiveTo: r?.effectiveTo ?? null,
+    });
+  }
+
+  /** The tenant's document validity policy — every kind answered, configured or not (ADR-0035 §6). */
+  async adminDocumentValidity() {
+    return parseOr(zDocumentValidityView, await getRaw(`/admin/document-validity`));
+  }
+
+  /**
+   * Set a cadence, thresholds, or both.
+   *
+   * <p>A PUT with only the field being changed: omitting one leaves it untouched. Sending both every time
+   * would make an untouched threshold list a fresh write with the supervisor's name on it, which is a
+   * decision they did not make.</p>
+   */
+  async adminSetDocumentValidity(req: SetDocumentValidity) {
+    await putRaw(`/admin/document-validity`, {
+      kind: req.kind,
+      ...(req.days === undefined ? {} : { days: req.days }),
+      ...(req.warnDays === undefined ? {} : { warnDays: req.warnDays }),
+    });
+  }
+
+  /** The engine's rules, plus the queues a routing rule may target (ADR-0035 §5). */
+  async approvalRules(family?: "Routing" | "Sla" | "Preauth" | "AutoApprove") {
+    const r = (await getRaw(`/approval-rules/${family ? `?family=${family}` : ""}`)) as any;
+    return parseOr(zApprovalRuleList, {
+      rules: (r?.rules ?? []).map((x: any) => ({
+        id: x.ruleId ?? x.id ?? "",
+        family: x.family,
+        priority: Number(x.priority ?? 0),
+        predicate: String(x.predicate ?? "{}"),
+        action: String(x.action ?? "{}"),
+        effectiveFrom: x.effectiveFrom,
+        effectiveTo: x.effectiveTo ?? null,
+        versionNo: Number(x.versionNo ?? 1),
+        enabled: Boolean(x.enabled),
+        authoredBy: String(x.authoredBy ?? ""),
+        rationale: String(x.rationale ?? ""),
+      })),
+      queues: r?.queues ?? [],
+      defaultQueue: String(r?.defaultQueue ?? "default"),
+    });
+  }
+
+  /**
+   * Publish a rule.
+   *
+   * <p>A POST because it CREATES a version. Supplying `supersedesRuleId` closes the prior version's window
+   * rather than editing it, so a request routed last Tuesday stays explainable against last Tuesday's rules.</p>
+   */
+  async saveApprovalRule(req: SaveApprovalRule) {
+    const r = (await postRaw(`/approval-rules/`, req)) as any;
+    return { id: String(r?.ruleId ?? ""), versionNo: Number(r?.versionNo ?? 1) };
+  }
+
+  /** The tenant's auto-decision kill switch. A tenant that never touched it reads `enabled: false`. */
+  async autoDecisionSwitch() {
+    return parseOr(zAutoDecisionSwitch, await getRaw(`/approval-rules/auto-decision`));
+  }
+
+  /** Turn auto-decision on or off. A reason is required in BOTH directions. */
+  async setAutoDecision(req: SetAutoDecision) {
+    return parseOr(zAutoDecisionSwitch, await putRaw(`/approval-rules/auto-decision`, req));
+  }
+
   async adminMasterData() {
     const r = (await getRaw(`/admin/master-data`)) as any[];
     return (Array.isArray(r) ? r : []).map((v: any) =>
@@ -2464,4 +3265,25 @@ function membershipStatusChip(status: string) {
     default:
       return { kind: "neu" as const, label: { en: status || "Unknown", ar: status || "غير معروفة" } };
   }
+}
+
+/**
+ * Draft lines → the wire shape the pharmacy API expects.
+ *
+ * `clientLineId` is how a finding and its acknowledgement name a line before the server has minted one.
+ * `drugId` is the REAL uuid; sending anything else here is the defect this workspace was built to fix.
+ */
+function rxLines(lines: PrescriptionDraftLine[]) {
+  return lines
+    .filter((l) => l.drug !== null)
+    .map((l) => ({
+      drugId: l.drug!.drugId,
+      dose: l.dose,
+      route: "Oral",
+      frequency: "Daily",
+      quantityPrescribed: l.quantity,
+      refillsAllowed: 0,
+      durationDays: l.durationDays,
+      clientLineId: l.lineId,
+    }));
 }

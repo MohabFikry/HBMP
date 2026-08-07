@@ -128,7 +128,7 @@ export function noteColumn({ t }: Pick<ColumnDeps, "t">): Column<AppointmentRow>
   return {
     key: "note",
     header: t(S.note),
-    cell: (r) => <AppointmentNoteButton note={r.note} by={r.noteBy} at={r.noteAt} />,
+    cell: (r) => <AppointmentNoteButton note={r.note} by={r.noteByName} at={r.noteAt} />,
   };
 }
 
@@ -179,7 +179,16 @@ export function CancelAppointmentButton({
   return (
     <>
       <Button
+        // GHOST, carrying the danger colour — no frame.
+        //
+        // It was teal beside the edit pencil, so the one control on the row that releases a slot and may hand
+        // it straight to the waitlist looked exactly like the one that amends a note. The outlined `danger`
+        // variant fixed the colour and introduced a box: a red rectangle repeated down every row of a dense
+        // table draws a second grid over the one the table already has, and a warning that appears on every
+        // row stops being read as a warning at all. The colour alone carries it, and the confirmation dialog
+        // behind it is what actually makes a mis-click safe.
         variant="ghost"
+        className="row-cancel"
         size="sm"
         // Icon-only, so it needs a name — and the name says WHICH appointment, because a table of identical
         // "Cancel appointment" buttons is unusable with a screen reader.

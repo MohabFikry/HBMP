@@ -71,6 +71,41 @@ describe("Reception dashboard", () => {
     expect(screen.getByText("15:00")).toBeInTheDocument();
   });
 
+  it("names the doctor on every appointment in the schedule, not only in the visits table", async () => {
+    renderNode(<ReceptionDashboard />);
+
+    // "Who is this person seeing" is the question the desk asks straight after "who is this" — and the
+    // schedule, which is where the desk actually looks when someone walks in, did not answer it at all.
+    // Joined from the SAME map the table uses, so the two halves of the screen cannot name a doctor
+    // differently.
+    const schedule = within(await screen.findByRole("list", { name: /schedule/i }));
+    await waitFor(() => expect(schedule.getAllByText("Hana Mansour").length).toBeGreaterThan(0));
+  });
+
+  it("says an appointment has no named doctor rather than leaving the slot blank", async () => {
+    const api = new DevApiClient({ latencyMs: 0 });
+    const original = api.appointments.bind(api);
+    (api as unknown as { appointments: unknown }).appointments = async (...args: unknown[]) => {
+      const rows = await (original as (...a: unknown[]) => Promise<any[]>)(...args);
+      return rows.map((r) => ({ ...r, doctorId: null }));
+    };
+    renderNode(<ReceptionDashboard />, api as unknown as ApiClient);
+
+    // A blank where a name belongs reads as a rendering fault, and the desk cannot tell it from a name that
+    // failed to load. emr genuinely records no doctor on some bookings; that is a fact and it is stated.
+    const schedule = within(await screen.findByRole("list", { name: /schedule/i }));
+    await waitFor(() => expect(schedule.getAllByText(/no named doctor/i).length).toBeGreaterThan(0));
+  });
+
+  it("keeps the status as WORDS beside the colour, never as colour alone", async () => {
+    renderNode(<ReceptionDashboard />);
+
+    // The accent bar down the left edge is what makes "who has arrived" a scan rather than a read. It is a
+    // SECOND channel: 21-accessibility-checklist — hue may reinforce a state, never carry it.
+    const schedule = within(await screen.findByRole("list", { name: /schedule/i }));
+    await waitFor(() => expect(schedule.getAllByText(/checked in/i).length).toBeGreaterThan(0));
+  });
+
   it("opens a booking note from the visits row", async () => {
     const user = userEvent.setup();
     const api = new DevApiClient({ latencyMs: 0 });

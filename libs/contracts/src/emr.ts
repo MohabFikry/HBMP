@@ -21,6 +21,19 @@ export const zPatientListItem = z.object({
   treating: z.boolean(),
   lastVisit: zDate.nullable(),
   status: zStatus,
+  /**
+   * Where this encounter happened — the branch of the appointment it was started from.
+   *
+   * An encounter has no branch of its own: it records CARE, and the place comes from the booking. So a
+   * walk-in that was never booked has neither id nor name, and that null is a fact about the visit rather
+   * than a gap in the response.
+   *
+   * The name is resolved client-side through the label-only `/branch-labels` lookup, because branch names
+   * live behind `provider:read` and a doctor does not hold it. It stays null when that lookup fails —
+   * an unnamed branch is better than no worklist.
+   */
+  branchId: zId.nullable(),
+  branchName: z.string().nullable(),
 });
 export type PatientListItem = z.infer<typeof zPatientListItem>;
 
@@ -41,6 +54,74 @@ export type Vitals = z.infer<typeof zVitals>;
 
 export const zAllergy = z.object({ id: zId, substance: zLocalized, severity: z.enum(["mild", "moderate", "severe"]) });
 export type Allergy = z.infer<typeof zAllergy>;
+
+// ---------------------------------------------------------------- recording allergies + blood group
+//
+// The beneficiary-level clinical record, as the encounter workspace writes it. Distinct from `zAllergy`
+// above, which is the read-only copy embedded in an encounter: recording one needs the masterdata allergen
+// id, the status and the reaction, none of which a display chip carries.
+
+/** ABO + Rh. Eight values, closed set — mirrors the CHECK constraint in emr migration 0021. */
+export const zBloodGroup = z.enum(["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]);
+export type BloodGroup = z.infer<typeof zBloodGroup>;
+
+export const zAllergySeverity = z.enum(["Mild", "Moderate", "Severe"]);
+export type AllergySeverity = z.infer<typeof zAllergySeverity>;
+
+export const zAllergyStatus = z.enum(["Active", "Inactive", "Resolved"]);
+export type AllergyStatus = z.infer<typeof zAllergyStatus>;
+
+/** A row of the masterdata allergen catalogue — what the picker offers. */
+export const zAllergenOption = z.object({
+  allergenId: zId,
+  code: z.string(),
+  name: z.string(),
+  /** Drug / Food / Environmental. Drug-class allergens are the ones prescribe-time screening resolves. */
+  category: z.enum(["Drug", "Food", "Environmental"]),
+});
+export type AllergenOption = z.infer<typeof zAllergenOption>;
+
+/**
+ * One allergy as recorded in the member's file.
+ *
+ * `allergen` is the substance's NAME, snapshot by emr at the moment of recording (its migration 0020). It is
+ * nullish for rows written before that migration — the UI says "(unspecified)" rather than showing the uuid,
+ * because a safety strip that displays an identifier has stopped communicating.
+ */
+export const zAllergyRecord = z.object({
+  allergyId: zId,
+  allergenId: zId,
+  allergen: z.string().nullish(),
+  reaction: z.string().nullish(),
+  severity: zAllergySeverity,
+  status: zAllergyStatus,
+});
+export type AllergyRecord = z.infer<typeof zAllergyRecord>;
+
+/**
+ * The standing clinical facts a clinician needs before acting: blood group and the allergy list.
+ *
+ * <b>`allergies: []` does not mean "no allergies".</b> It means nobody has recorded any, and the two are
+ * different clinical claims — the same distinction the prescribing workspace draws between `Ok` and
+ * `NotChecked`, and the reason its allergy check reports NotChecked at zero recorded allergens rather than
+ * reporting a clean screen. Callers must render absence as absence.
+ */
+export const zMemberClinicalRecord = z.object({
+  beneficiaryId: zId,
+  bloodGroup: zBloodGroup.nullish(),
+  bloodGroupRecordedAt: zInstant.nullish(),
+  allergies: z.array(zAllergyRecord),
+});
+export type MemberClinicalRecord = z.infer<typeof zMemberClinicalRecord>;
+
+/** Record a new allergy against the member's file. */
+export const zAddAllergyRequest = z.object({
+  allergenId: zId,
+  reaction: z.string().max(120).nullish(),
+  severity: zAllergySeverity,
+  status: zAllergyStatus,
+});
+export type AddAllergyRequest = z.infer<typeof zAddAllergyRequest>;
 
 export const zSoap = z.object({
   subjective: z.string(),

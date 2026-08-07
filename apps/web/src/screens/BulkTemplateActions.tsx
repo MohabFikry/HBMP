@@ -146,7 +146,7 @@ export function BulkTemplateActions({ jobType, template, open, onOpenChange }: B
         wide
       >
         {template ? (
-          <div className="bulk-columns" data-testid="expected-columns-table">
+          <div className="bulk-columns mrs-scroll mrs-scroll-focusable" tabIndex={0} data-testid="expected-columns-table">
             <table className="pol-costshare">
               <caption className="sr-only">{t(S.columns)}</caption>
               <thead>

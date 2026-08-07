@@ -156,7 +156,7 @@ function ContractsPanel({ providerId, t, api }: { providerId: string; t: (l: Loc
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
     { key: "from", header: t(S.from), cell: (r) => <span className="tnum">{fmt.date(r.effectiveFrom)}</span> },
     { key: "to", header: t(S.to), cell: (r) => <span className="tnum">{r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}</span> },
-    { key: "lines", header: t(S.lines), cell: (r) => <span className="tnum">{r.serviceLines}</span> },
+    { key: "lines", header: t(S.lines), cell: (r) => r.serviceLines, numeric: true },
   ];
   return (
     <Card as="section" style={{ padding: "var(--sp3)" }}>

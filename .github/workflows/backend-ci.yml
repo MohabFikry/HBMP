@@ -179,6 +179,17 @@ jobs:
         continue-on-error: true
         run: python3 tools/ci/check-spa-scopes.py
 
+      # 28.2 — the SPA, the API and the issuer must share one origin. kong.yml has routed /connect there since
+      # phase 17 "so the SPA reaches one origin", and the SPA pointed somewhere else anyway for two years,
+      # because nothing compared them. What a violation costs is a login that reports success and an authorize
+      # that reports login_required: the browser silently drops a SameSite=Strict cookie, and the user is told
+      # their password is wrong.
+      - name: "gate: one origin for app, API and issuer (ADR-0036 §4)"
+        id: gate_login_origin
+        if: always()
+        continue-on-error: true
+        run: python3 tools/ci/check-login-origin.py
+
       - name: "gate: integration DPIA / data-sharing (13.3)"
         id: gate_dpia
         if: always()
@@ -389,6 +400,7 @@ jobs:
             migration-compat=${{ steps.gate_migration_compat.outcome }}
             kong-route-coverage=${{ steps.gate_kong.outcome }}
             spa-scopes=${{ steps.gate_spa_scopes.outcome }}
+            login-origin=${{ steps.gate_login_origin.outcome }}
             integration-dpia=${{ steps.gate_dpia.outcome }}
             coverage-exclusions=${{ steps.gate_coverage_exclusions.outcome }}
             floor-monotonicity=${{ steps.gate_floor_monotonicity.outcome }}

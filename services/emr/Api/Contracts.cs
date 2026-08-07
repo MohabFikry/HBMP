@@ -14,11 +14,22 @@ public sealed record EncounterResponse(
     /// and null there for a walk-in that was never booked. It is NOT fetched from patient-service: the value
     /// is emr's own <c>appointment.beneficiary_name</c>, captured at booking (0013) — the same column the day
     /// board reads. emr holds no beneficiary demographics and does not acquire any here.</para></summary>
-    string? BeneficiaryName = null)
+    string? BeneficiaryName = null,
+    /// <summary>The Mersal branch this encounter took place at.
+    ///
+    /// <para>Sourced the same way, on the same endpoint, and for the same reason as <see cref="BeneficiaryName"/>:
+    /// from the encounter's own <c>appointment.branch_id</c>. An encounter carries no branch of its own — a
+    /// visit inherits the place from the appointment it was started from — so a WALK-IN that was never booked
+    /// has none, and null here means precisely that rather than "not known".</para>
+    ///
+    /// <para>The ID and not the name. Branch names live behind <c>provider:read</c>, which a doctor does not
+    /// hold; the client puts names to them through the label-only <c>/branch-labels</c> lookup, exactly as the
+    /// day board already does.</para></summary>
+    Guid? BranchId = null)
 {
-    public static EncounterResponse From(Encounter e, string? beneficiaryName = null) => new(
+    public static EncounterResponse From(Encounter e, string? beneficiaryName = null, Guid? branchId = null) => new(
         e.EncounterId, e.EncounterNo, e.BeneficiaryId, e.AppointmentId, e.ProviderId, e.Status.ToString(),
-        e.StartedAt, beneficiaryName);
+        e.StartedAt, beneficiaryName, branchId);
 }
 
 public sealed record QueueItemResponse(
@@ -83,7 +94,11 @@ public sealed record AppointmentResponse(
     // 14.5 (0014) — who wrote the note and when. Shown where the note is READ, because a clinician acting on
     // "the sister will interpret" needs to know whether that was agreed this morning or at a booking made six
     // weeks ago, and who to ask.
-    string? NoteBy = null, DateTimeOffset? NoteAt = null)
+    string? NoteBy = null, DateTimeOffset? NoteAt = null,
+    // 0022 — the author in WORDS. NoteBy is the subject id and reached the screen as one, which answers
+    // "who told us this?" with a uuid. Both are carried: the id is the authoritative link, the name is what
+    // the reader is shown. Null on notes written before 0022 — readers say "unknown", never the id.
+    string? NoteByName = null)
 {
     /// <summary>Project an appointment. <paramref name="now"/> is required to answer
     /// <see cref="NoShowEligible"/>: the 15-minute grace period after the scheduled end is a SERVER rule, and a
@@ -95,7 +110,7 @@ public sealed record AppointmentResponse(
         a.AppointmentType.ToString(), a.Status.ToString(), a.ScheduledStart, a.ScheduledEnd,
         a.ReferralRef, a.OriginEncounterId, a.RowVersion, a.BranchId, a.DoctorId,
         now is { } t && AppointmentWorkflow.CanNoShow(a, t, AppointmentWorkflow.NoShowGrace),
-        a.Note, name, a.ReassignmentNeededAt is not null, a.NoteBy, a.NoteAt);
+        a.Note, name, a.ReassignmentNeededAt is not null, a.NoteBy, a.NoteAt, a.NoteByName);
 }
 
 public sealed record SlotResponse(

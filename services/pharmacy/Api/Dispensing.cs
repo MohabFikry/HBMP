@@ -6,6 +6,7 @@ using Mersal.Pharmacy.Domain;
 using Mersal.Pharmacy.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Mersal.Time;
+using Mersal.BeneficiaryLookup;
 
 namespace Mersal.Pharmacy.Api;
 
@@ -29,27 +30,31 @@ public static class DispensingEndpoints
             var denied = await gate.AuthorizeSearchAsync(ct);
             if (denied is not null) return denied;
 
-            var items = await Dispensable(db, clock.GetUtcNow()).OrderBy(p => p.SubmittedAt).Take(100).ToListAsync(ct);
+            var queueNow = clock.GetUtcNow();
+            var items = await Dispensable(db, queueNow).OrderBy(p => p.SubmittedAt).Take(100).ToListAsync(ct);
             await AuditRead(audit, me, "queue", items.Count);
-            return Results.Ok(items.Select(DispensableRxView.From));
+            return Results.Ok(items.Select(p => DispensableRxView.From(p, queueNow)));
         }).RequireAuthorization(HbmpPolicies.Scope("pharmacy:read"));
 
         // ---- 6.1 Search: only dispensable prescriptions, projected to dispensing-relevant fields ----
         v1.MapGet("/search", async (
             PharmacyDbContext db, DispensingGate gate, IBeneficiaryResolver resolver, IAuditClient audit,
             IHbmpPrincipalAccessor me, HttpRequest http, TimeProvider clock,
-            string? rxNo, string? patientIdentifier, string? policyNo, string? passport, string? memberNo,
+            string? rxNo, string? patientIdentifier, string? cardNumber, string? passport, string? memberNo,
             CancellationToken ct) =>
         {
             var denied = await gate.AuthorizeSearchAsync(ct);
             if (denied is not null) return denied;
 
             if (string.IsNullOrWhiteSpace(rxNo) && string.IsNullOrWhiteSpace(patientIdentifier) &&
-                string.IsNullOrWhiteSpace(policyNo) && string.IsNullOrWhiteSpace(passport) && string.IsNullOrWhiteSpace(memberNo))
-                return Results.Problem(statusCode: 400, title: "search requires rxNo, patientIdentifier, policyNo, passport or memberNo",
+                string.IsNullOrWhiteSpace(cardNumber) && string.IsNullOrWhiteSpace(passport) && string.IsNullOrWhiteSpace(memberNo))
+                return Results.Problem(statusCode: 400, title: "search requires rxNo, patientIdentifier, cardNumber, passport or memberNo",
                     type: "urn:hbmp:search-criteria-required");
 
-            var q = Dispensable(db, clock.GetUtcNow());
+            // Expired prescriptions are INCLUDED here — see Outstanding(). The counter must be able to
+            // see that a lapsed prescription exists in order to request an extension against it.
+            var now = clock.GetUtcNow();
+            var q = Outstanding(db);
 
             if (!string.IsNullOrWhiteSpace(rxNo))
                 q = q.Where(p => p.RxNo == rxNo);
@@ -59,15 +64,38 @@ public static class DispensingEndpoints
                 return Results.Ok(Array.Empty<DispensableRxView>());   // unknown identifier form → nothing
             else
             {
-                // policy / passport / member number → resolve to a beneficiary via patient-service (fail-safe).
-                var resolved = await resolver.ResolveAsync(policyNo, passport, memberNo, http.Headers.Authorization.ToString(), ct);
-                if (resolved is null) return Results.Ok(Array.Empty<DispensableRxView>());
-                q = q.Where(p => p.BeneficiaryId == resolved.Value);
+                // card / passport / member number → resolve to a beneficiary via patient-service.
+                // TWO identifiers are required (doc 43 §7 D5): a card number is printed on something that
+                // gets shared, photographed and reused, so one number must not open a person's record.
+                //
+                // Each outcome answers a different question, and only ONE of them is "no prescriptions".
+                // This used to return an empty list for all of them, so a pharmacist whose token could not
+                // read patient-service was told a member with three live prescriptions had none.
+                var resolution = await resolver.ResolveAsync(cardNumber, passport, memberNo, http.Headers.Authorization.ToString(), ct);
+                switch (resolution.Outcome)
+                {
+                    case ResolveOutcome.TooFewIdentifiers:
+                        return Results.Problem(
+                            statusCode: 422, title: "two-identifiers-required", type: "urn:hbmp:two-identifiers-required",
+                            detail: "Searching by card number, passport or member number requires at least two of "
+                                    + "them. A card number alone is a lookup key, not proof of identity.");
+                    case ResolveOutcome.Unavailable:
+                        return Results.Problem(
+                            statusCode: 503, title: "patient-directory-unavailable", type: "urn:hbmp:patient-directory-unavailable",
+                            detail: "The patient directory could not be reached, so these identifiers could not be "
+                                    + "resolved. This is NOT a report that the member has no prescriptions.");
+                    case ResolveOutcome.NotFound:
+                        // A real answer: those identifiers match nobody. An empty list is correct here.
+                        return Results.Ok(Array.Empty<DispensableRxView>());
+                    default:
+                        q = q.Where(p => p.BeneficiaryId == resolution.BeneficiaryId!.Value);
+                        break;
+                }
             }
 
             var items = await q.OrderBy(p => p.SubmittedAt).Take(100).ToListAsync(ct);
             await AuditRead(audit, me, "search", items.Count);
-            return Results.Ok(items.Select(DispensableRxView.From));
+            return Results.Ok(items.Select(p => DispensableRxView.From(p, now)));
         }).RequireAuthorization(HbmpPolicies.Scope("pharmacy:read"));
 
         // ---- 6.1 Open one prescription for dispensing — enforces the reject rule with a clear reason ----
@@ -81,7 +109,8 @@ public static class DispensingEndpoints
             var rx = await db.Prescriptions.AsNoTracking().Include(p => p.Lines).FirstOrDefaultAsync(p => p.PrescriptionId == id, ct);
             if (rx is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
-            var reject = RejectReason(rx, clock.GetUtcNow());
+            var openNow = clock.GetUtcNow();
+            var reject = RejectReason(rx, openNow);
             if (reject is not null)
             {
                 await audit.EmitAsync(new AuditEventDraft
@@ -94,13 +123,14 @@ public static class DispensingEndpoints
             }
 
             await AuditRead(audit, me, "open", rx.Lines.Count);
-            return Results.Ok(DispensableRxView.From(rx));
+            return Results.Ok(DispensableRxView.From(rx, openNow));
         }).RequireAuthorization(HbmpPolicies.Scope("pharmacy:read"));
 
         // ---- 6.2 + 6.3 Dispense a line: atomic + idempotent + no-reuse, with batch/expiry + approved substitution ----
         v1.MapPost("/{rxId:guid}/lines/{lineId:guid}/dispense", async (
             Guid rxId, Guid lineId, DispenseRequest req, HttpRequest http, PharmacyDbContext db, DispenseExecutor executor,
-            DispensingGate gate, IFormularyService formulary, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me,
+            DispensingGate gate, IFormularyService formulary, IClinicalValidationPorts catalogue,
+            IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me,
             TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
         {
             var idem = http.Headers["Idempotency-Key"].ToString();
@@ -145,8 +175,18 @@ public static class DispensingEndpoints
             var pharmacy = Guid.TryParse(me.Principal?.ProviderId, out var pg) ? pg : Guid.Empty;
             var actor = Guid.TryParse(me.Principal?.Subject, out var ag) ? ag : Guid.Empty;
 
+            // The substitute's catalogue NAME, resolved here — OUTSIDE the dispense transaction and only when
+            // there is a substitution. The authorization the counter is about to issue records what was
+            // handed over, and an id alone makes the approval team look up a GUID to find out what a patient
+            // received. A lookup failure leaves the label null and the id still recorded: a display string is
+            // never worth failing a dispense over.
+            var substituteName = req.SubstitutedDrugId is { } named && named != lineHead.DrugId
+                ? (await catalogue.DrugNamesAsync([named], bearer, ct)).GetValueOrDefault(named)
+                : null;
+
             var result = await executor.DispenseAsync(rxId, lineId, idem, pharmacy, actor,
-                req.Quantity, req.BatchNo, req.ExpiryDate, req.SubstitutedDrugId, req.SubstitutionReason, clock.GetUtcNow(),
+                req.Quantity, req.BatchNo, req.ExpiryDate, req.SubstitutedDrugId, req.SubstitutionReason,
+                req.Note, clock.GetUtcNow(),
                 insideTransaction: async (rx, evt, c) =>
                 {
                     // 18.A1: carry tenant + beneficiary + benefit category + service date so policy-service
@@ -172,6 +212,55 @@ public static class DispensingEndpoints
                             evt.BatchNo,
                             idempotencyKey = idem,
                         }, c);
+                    /*
+                     * ADR-0034 — the SECOND, APPROVALS-SHAPED COPY. What is handed over at the counter is
+                     * not the prescription: it is a separate authorized act, and this is what makes it one.
+                     *
+                     * Its own queue, not `pharmacy.events`. That transport is point-to-point and
+                     * policy-service already consumes it to move the benefit accumulator; a second consumer
+                     * there would COMPETE for messages, and the accumulator would silently stop advancing for
+                     * every dispense approvals happened to win.
+                     *
+                     * Inside the transaction, through the durable outbox, so the record cannot be lost — and
+                     * asynchronous, so an approvals outage can never refuse a patient their medicine.
+                     *
+                     * `orderedCode` is the PRESCRIBED drug and stays the prescribed drug. The substitute goes
+                     * in `fulfilledCode`. The prescription is not written to on this path and has nowhere to
+                     * be written to.
+                     */
+                    var dispensedLine = rx.Lines.FirstOrDefault(l => l.PrescriptionLineId == lineId);
+                    await outbox.EnqueueAsync("FulfilmentRecorded", "approvals.fulfilments",
+                        new
+                        {
+                            tenantId = rx.TenantId,
+                            beneficiaryId = rx.BeneficiaryId,
+                            providerId = pharmacy == Guid.Empty ? (Guid?)null : pharmacy,
+                            encounterId = rx.EncounterId,
+                            source = "Prescription",
+                            sourceRef = rxId.ToString(),
+                            sourceNo = rx.RxNo,
+                            benefitCategory = "PHARMACY",
+                            actorUserId = me.Principal?.Subject,
+                            fulfilledAt = evt.DispensedAt,
+                            items = new[]
+                            {
+                                new
+                                {
+                                    // The dispense id, not the Idempotency-Key: the key is the CLIENT's
+                                    // choice and a second client could reuse one, whereas this row exists
+                                    // exactly once per thing actually handed over.
+                                    fulfilmentRef = evt.DispenseId.ToString(),
+                                    sourceLineId = lineId,
+                                    orderedCode = lineHead.DrugId.ToString(),
+                                    orderedLabel = dispensedLine?.DrugName,
+                                    fulfilledCode = (evt.SubstitutedDrugId ?? lineHead.DrugId).ToString(),
+                                    fulfilledLabel = evt.SubstitutedDrugId is null ? dispensedLine?.DrugName : substituteName,
+                                    quantity = evt.Quantity,
+                                    substitutionReason = evt.SubstitutedDrugId is null ? null : evt.SubstitutionReason,
+                                },
+                            },
+                        }, c);
+
                     if (rx.Status == RxStatus.Dispensed)
                         await outbox.EnqueueAsync("RxDispensed", "pharmacy.events", new
                         {
@@ -203,10 +292,10 @@ public static class DispensingEndpoints
                         DecisionReasonCode = $"rx:{rxId};line:{lineId};qty:{req.Quantity};batch:{req.BatchNo};expiry:{req.ExpiryDate};" +
                                              $"sub:{req.SubstitutedDrugId?.ToString() ?? "-"};key:{idem}",
                     }, ct);
-                    return Results.Ok(DispenseResponse.From(result.Prescription!, result.Event!, replayed: false));
+                    return Results.Ok(DispenseResponse.From(result.Prescription!, result.Event!, replayed: false, clock.GetUtcNow()));
 
                 case DispenseOutcome.Replayed:
-                    return Results.Ok(DispenseResponse.From(result.Prescription!, result.Event!, replayed: true));
+                    return Results.Ok(DispenseResponse.From(result.Prescription!, result.Event!, replayed: true, clock.GetUtcNow()));
 
                 case DispenseOutcome.NotFound:
                     return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
@@ -305,9 +394,30 @@ public static class DispensingEndpoints
     /// <summary>Dispensable prescriptions the pharmacist may act on: status Approved/PartiallyDispensed, within the
     /// validity window, with ≥1 line that still has remaining quantity. Diagnoses/notes are never stored here.</summary>
     private static IQueryable<Prescription> Dispensable(PharmacyDbContext db, DateTimeOffset now) =>
+        Outstanding(db).Where(p => p.ExpiresAt == null || p.ExpiresAt > now);
+
+    /// <summary>
+    /// Everything still awaiting the counter, EXPIRED INCLUDED — what a member search must answer with.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The search used to filter on the validity window, so an expired prescription came back as an empty
+    /// list: the pharmacist was told this member has nothing, when in fact they have something that has
+    /// lapsed and can be extended. That is the same defect as the resolver returning <c>null</c> for a
+    /// permission failure — a true statement ("nothing dispensable") standing in for a false one ("nothing").
+    /// The distinction matters most here, because the patient is at the counter and the recovery is a
+    /// two-minute extension request rather than a wasted journey back to a doctor.
+    /// </para>
+    /// <para>
+    /// Expired rows are RETURNED, not dispensable. <see cref="RejectReason"/> still refuses them and the
+    /// domain rule in <c>Dispensing.CanDispense</c> is untouched; the view carries <c>Expired</c> so the
+    /// screen says so in words.
+    /// </para>
+    /// </remarks>
+    private static IQueryable<Prescription> Outstanding(PharmacyDbContext db) =>
         db.Prescriptions.AsNoTracking().Include(p => p.Lines)
-            .Where(p => p.Status == RxStatus.Approved || p.Status == RxStatus.PartiallyDispensed)
-            .Where(p => p.ExpiresAt == null || p.ExpiresAt > now)
+            .Where(p => p.Status == RxStatus.Approved || p.Status == RxStatus.PartiallyDispensed
+                        || p.Status == RxStatus.Expired)
             .Where(p => p.Lines.Any(l => (l.Status == RxLineStatus.Active || l.Status == RxLineStatus.PartiallyDispensed)
                                          && l.QuantityDispensed < l.QuantityPrescribed));
 

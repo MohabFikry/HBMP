@@ -5,6 +5,7 @@ using Mersal.Authz;
 using Mersal.Orders.Api;
 using Mersal.Orders.Domain;
 using Mersal.Orders.Infrastructure;
+using Mersal.Validity;
 using Mersal.Events;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
@@ -67,6 +68,10 @@ public sealed class OrdersApiFactory : WebApplicationFactory<Program>
             services.AddSingleton<ICodeValidator>(new FakeCodeValidator(this));
             services.RemoveAll<ITreatingRelationshipClient>();
             services.AddSingleton<ITreatingRelationshipClient>(new FakeTreatingRelationship(this));
+            // The platform default, without reaching admin-service. The expiry is still STAMPED on every
+            // order these tests create, so a regression that stopped setting one is still caught.
+            services.RemoveAll<IValidityPolicySource>();
+            services.AddSingleton<IValidityPolicySource>(new DefaultValidityPolicySource());
             services.RemoveAll<IExaminationTypeResolver>();
             services.AddSingleton<IExaminationTypeResolver>(new FakeExaminationTypes());
             services.RemoveAll<IReportDocumentClient>();

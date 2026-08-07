@@ -103,6 +103,63 @@ public class CareTimelineTests
         finally { await CleanupAsync(app, encId); }
     }
 
+    /// <summary>
+    /// <c>GET /encounters/{id}/timeline</c> — the visit's OWN episode.
+    ///
+    /// <para>The steps were being written by six services and read by exactly one screen, the appointment
+    /// timeline, which reaches them the long way round: from the booking DOWN to the encounter it produced.
+    /// <c>CareTimelineWriter.ForEncounterAsync</c> existed for this and nothing ever called it — so the
+    /// encounter workspace, the screen a doctor is looking at WHILE the visit happens, could not show the
+    /// history of the visit it was documenting. A walk-in has no appointment at all and so had no route to
+    /// its own steps by any path.</para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_encounter_timeline_answers_for_the_visit_itself()
+    {
+        Skip.If(EmrApiFactory.Db is null, "EMR_TEST_DB not set — DB integration test skipped.");
+        await using var app = new EmrApiFactory();
+        var (encId, apptId, benId) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        try
+        {
+            await SeedAsync(app, encId, apptId, benId);
+            using var doctor = app.DoctorClient();
+
+            (await doctor.PostAsJsonAsync($"/api/v1/encounters/{encId}/diagnoses",
+                new { icdCode = "J01.0", diagnosisRank = "Primary", clinicalStatus = "Active" }, Web))
+                .StatusCode.Should().Be(HttpStatusCode.Created);
+
+            var timeline = await doctor.GetFromJsonAsync<List<JsonElement>>($"/api/v1/encounters/{encId}/timeline")
+                ?? throw new InvalidOperationException("the encounter timeline answered with no body");
+            var steps = timeline.Select(s => s.GetProperty("status").GetString()).ToList();
+
+            steps.Should().Contain(CareSteps.VisitStarted);
+            steps.Should().Contain(CareSteps.DiagnosisCoded);
+            // Newest first, as the appointment timeline is: whoever opens one is asking what JUST happened.
+            timeline.Select(s => s.GetProperty("at").GetDateTimeOffset()).Should().BeInDescendingOrder();
+        }
+        finally { await CleanupAsync(app, encId); }
+    }
+
+    /// <summary>The same gate as reading the encounter's clinical record. A timeline of a visit names the
+    /// acts performed on a patient, so it cannot be looser than the record it describes — and reception,
+    /// which may legitimately read the APPOINTMENT timeline, holds no treating relationship here.</summary>
+    [SkippableFact]
+    public async Task The_encounter_timeline_is_refused_to_a_caller_without_the_clinical_gate()
+    {
+        Skip.If(EmrApiFactory.Db is null, "EMR_TEST_DB not set — DB integration test skipped.");
+        await using var app = new EmrApiFactory();
+        var (encId, apptId, benId) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        try
+        {
+            await SeedAsync(app, encId, apptId, benId);
+            using var reception = app.ReceptionClient();
+
+            var res = await reception.GetAsync($"/api/v1/encounters/{encId}/timeline");
+            res.StatusCode.Should().BeOneOf(HttpStatusCode.Forbidden, HttpStatusCode.Unauthorized);
+        }
+        finally { await CleanupAsync(app, encId); }
+    }
+
     /// <summary>A checked-in appointment with an open visit against it, and the VisitStarted step the
     /// encounter endpoint would have written — seeded directly because these tests do not go through
     /// POST /encounters (which needs the member-status gate to pass).</summary>

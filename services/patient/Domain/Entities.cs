@@ -5,7 +5,17 @@ namespace Mersal.Patient.Domain;
 
 public enum BeneficiaryStatus { Pending, Active, Suspended, Expired, Blocked, Inactive }
 
-public enum IdentifierType { NationalID, Passport, RefugeeID, UNHCRNo, MemberNo }
+/// <summary>
+/// The identifier kinds a beneficiary can be found by.
+/// </summary>
+/// <remarks>
+/// 26.6 added <see cref="CardNumber"/>. The column existed on <c>beneficiary</c> since phase 1 and was
+/// unique among live rows, but no search filter reached it and the enum had no member — so "look the patient
+/// up by the number on their card", which is how a pharmacy counter actually works, could not be expressed
+/// at all. It is deliberately LAST: a card number is printed on something that gets shared, photographed and
+/// reused, so it is a lookup key and never an authenticator (doc 43 §7).
+/// </remarks>
+public enum IdentifierType { NationalID, Passport, RefugeeID, UNHCRNo, MemberNo, CardNumber }
 
 public enum ContactType { Phone, Email, Address, EmergencyContact }
 
