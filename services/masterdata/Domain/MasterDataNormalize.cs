@@ -1,4 +1,5 @@
 using System.Globalization;
+using Mersal.ClinicalCodes;
 using System.Text;
 
 namespace Mersal.MasterData.Domain;
@@ -7,7 +8,56 @@ namespace Mersal.MasterData.Domain;
 public static class MasterDataNormalize
 {
     /// <summary>Trim + upper-case an ICD-10 code (dotted format preserved, e.g. "e11.9" → "E11.9").</summary>
-    public static string Icd(string raw) => raw.Trim().ToUpperInvariant();
+    /// <remarks>
+    /// Delegates to <see cref="IcdCodes"/>, which is the platform's ONE implementation (design 44 §6). It
+    /// used to be defined here and copied again inside PrescriptionValidator; two implementations of a
+    /// matching rule diverge, and the divergence surfaces as an indication check disagreeing with the
+    /// catalogue that fed it rather than as a failing test.
+    /// </remarks>
+    public static string Icd(string raw) => IcdCodes.Normalize(raw);
+
+    /// <summary>
+    /// The 3-character ICD-10 <b>category</b> of a code — "E11.9" → "E11", "E119" → "E11", "E11" → "E11".
+    /// </summary>
+    /// <remarks>
+    /// Drug indications are recorded at category level (every code in the Egyptian drug list is a
+    /// 3-character category), while a recorded diagnosis is specific. Comparing the two by equality makes
+    /// the indication check report "not a listed indication" on nearly every prescription — a warning that
+    /// always fires is a warning clinicians learn to dismiss. Both sides go through here before comparison.
+    /// </remarks>
+    public static string IcdCategory(string raw) => IcdCodes.Category(raw);
+
+    /// <summary>
+    /// A deterministic uuid for a drug, derived from its id in the source file.
+    /// </summary>
+    /// <remarks>
+    /// The loader previously minted <c>Guid.NewGuid()</c> per row and relied on the upsert matching an
+    /// existing <c>drug_code</c> to preserve ids. That holds only while the trade-name text is byte-stable:
+    /// any drift in the source spelling mints a fresh uuid and orphans every drug_indication, interaction
+    /// and prescription line pointing at the old one. Deriving the id from the source row id makes a reload
+    /// stable by construction instead of by luck.
+    /// <para>
+    /// Namespaced-and-hashed in the shape of RFC 9562 §5.8 (version 8, custom). SHA-256 is used as a
+    /// distribution function over an identifier here, not as a security primitive.
+    /// </para>
+    /// </remarks>
+    public static Guid DrugId(string sourceRowId)
+    {
+        // Namespace prefix keeps drug ids disjoint from any other id space derived the same way.
+        var input = Encoding.UTF8.GetBytes($"mersal:masterdata:drug:{sourceRowId.Trim()}");
+        var hash = System.Security.Cryptography.SHA256.HashData(input);
+
+        var bytes = hash[..16];
+        bytes[6] = (byte)((bytes[6] & 0x0F) | 0x80);   // version 8
+        bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80);   // RFC 4122 variant
+
+        // Guid(byte[]) reads the first three groups little-endian on all platforms; build the fields
+        // explicitly so the same input yields the same uuid text everywhere.
+        var a = (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
+        var b = (short)((bytes[4] << 8) | bytes[5]);
+        var c = (short)((bytes[6] << 8) | bytes[7]);
+        return new Guid(a, b, c, bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]);
+    }
 
     /// <summary>Trim + upper-case a CPT code.</summary>
     public static string Cpt(string raw) => raw.Trim().ToUpperInvariant();

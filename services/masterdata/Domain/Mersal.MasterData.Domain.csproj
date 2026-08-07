@@ -1,3 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><RootNamespace>Mersal.MasterData.Domain</RootNamespace></PropertyGroup>
+  <!--
+    The platform's single ingredient normaliser. masterdata decomposes a product into the molecules it
+    contains — which is what lets an allergy, an interaction or a duplicate-therapy rule be keyed on an
+    ingredient rather than on tens of thousands of trade names — and it must reach the same answer the
+    prescribing engine does. Shared library, not a second copy: see the note in Mersal.Ingredients.csproj.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../../../libs/ingredients/Mersal.Ingredients.csproj" />
+    <ProjectReference Include="../../../libs/clinical-codes/Mersal.ClinicalCodes.csproj" />
+  </ItemGroup>
 </Project>

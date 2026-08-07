@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Mersal.ClinicalCodes</RootNamespace>
+    <AssemblyName>Mersal.ClinicalCodes</AssemblyName>
+  </PropertyGroup>
+  <!--
+    ICD-10 code handling, in ONE place. Design 44 §6 is explicit about why: the dot-normalisation existed
+    twice — once in MasterDataNormalize, once copied inside PrescriptionValidator — and "two implementations
+    of a matching rule will diverge" is not a prediction, it is what always happens. The divergence would be
+    silent, and it would surface as an indication check quietly disagreeing with the catalogue that fed it.
+
+    Dependency-free and I/O-free, like Mersal.Ingredients, so both the reference catalogue and the
+    prescribing engine can reference it without either depending on the other.
+  -->
+</Project>
