@@ -230,3 +230,28 @@ public static class OrderNo
 {
     public static string Format(int year, int sequence) => $"ORD-{year:D4}-{sequence:D6}";
 }
+
+/// <summary>
+/// 30.5b — a note on an order line (design 46 §7b, orders 0015). The doc-38 notes model on a different
+/// subject: append-only (enforced by a trigger), signed with a SNAPSHOT of the author, cancellable but never
+/// deletable, and class-projected so an external provider never receives an <c>Internal</c> note.
+/// </summary>
+public sealed class OrderNote
+{
+    public Guid NoteId { get; set; }
+    public string TenantId { get; set; } = "";
+    public string SubjectType { get; set; } = "OrderLine";
+    public Guid SubjectId { get; set; }
+    /// <summary>The line's CHAIN. A note written on v1 is about the clinical intent, which survives an
+    /// amendment, so reads resolve by root and the note stays visible on v2.</summary>
+    public Guid RootLineId { get; set; }
+    public string Visibility { get; set; } = "ToFulfiller";
+    public string Body { get; set; } = default!;
+    public Guid AuthorUserId { get; set; }
+    public string AuthorDisplayName { get; set; } = default!;
+    public DateTimeOffset AuthoredAt { get; set; }
+    public string Status { get; set; } = "Active";
+    public Guid? CancelledBy { get; set; }
+    public DateTimeOffset? CancelledAt { get; set; }
+    public string? CancelReason { get; set; }
+}

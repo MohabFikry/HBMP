@@ -426,6 +426,38 @@
         }
       }
     },
+    "/api/v1/procedure-orders/{orderId}/lines/{lineId}/notes": {
+      "get": {
+        "tags": [
+          "Mersal.Orders.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "lineId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/procedure-orders/{orderId}/report": {
       "post": {
         "tags": [
@@ -533,6 +565,111 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ConsumeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/investigation-orders/{orderId}/lines/{lineId}/notes": {
+      "get": {
+        "tags": [
+          "Mersal.Orders.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "lineId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Mersal.Orders.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "lineId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WriteNoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/investigation-orders/notes/{noteId}/cancel": {
+      "post": {
+        "tags": [
+          "Mersal.Orders.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "noteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelNoteRequest"
               }
             }
           },
@@ -955,6 +1092,16 @@
         },
         "additionalProperties": false
       },
+      "CancelNoteRequest": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "CancelOrderLinesRequest": {
         "type": "object",
         "properties": {
@@ -1214,6 +1361,20 @@
             "items": {
               "type": "string"
             },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "WriteNoteRequest": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "nullable": true
+          },
+          "visibility": {
+            "type": "string",
             "nullable": true
           }
         },

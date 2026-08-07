@@ -151,6 +151,7 @@ app.MapQueue();      // phase 5.1 provider queue + search
 app.MapProcedureProvider();   // 29.2b external delivering provider portal (design 45 §2b)
 app.MapServiceHistory();      // 29.4 one service-history endpoint for every tab (design 45 §4)
 app.MapConsume();    // phase 5.2 atomic idempotent consume
+app.MapOrderNotes(); // 30.5b — append-only, class-projected notes on an order line (design 46 §7b)
 app.MapAmendment();  // 30.2 — cancel/amend a signed order at LINE level (design 46 §1-§3)
 app.MapOrderPricing(); // ADR-0034 — what the order costs and how it splits (never a zero for an unknown)
 app.MapExtendValidity();   // approvals calls this when a validity-extension request is approved

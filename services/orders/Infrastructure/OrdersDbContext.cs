@@ -16,6 +16,7 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
     public DbSet<ReportAccessRequest> ReportAccessRequests => Set<ReportAccessRequest>();   // 14.7
     public DbSet<ReportAccessGrant> ReportAccessGrants => Set<ReportAccessGrant>();          // 14.7
     public DbSet<LineAmendmentRecord> LineAmendments => Set<LineAmendmentRecord>();          // 30.1
+    public DbSet<OrderNote> OrderNotes => Set<OrderNote>();                                  // 30.5b
 
     /// <summary>
     /// 29.2 — a line's <c>RequestedQuantity</c> defaults to what was ordered.
@@ -134,6 +135,23 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
             e.Property(x => x.RequestHash).HasColumnName("request_hash");
             e.HasIndex(x => x.IdempotencyKey).IsUnique();
             e.HasIndex(x => x.OrderLineId);
+        });
+
+        // 30.5b — order-line notes (orders 0015).
+        b.Entity<OrderNote>(e =>
+        {
+            e.ToTable("order_note");
+            e.HasKey(x => x.NoteId);
+            e.Property(x => x.SubjectType).HasColumnName("subject_type");
+            e.Property(x => x.SubjectId).HasColumnName("subject_id");
+            e.Property(x => x.RootLineId).HasColumnName("root_line_id");
+            e.Property(x => x.AuthorUserId).HasColumnName("author_user_id");
+            e.Property(x => x.AuthorDisplayName).HasColumnName("author_display_name");
+            e.Property(x => x.AuthoredAt).HasColumnName("authored_at");
+            e.Property(x => x.CancelledBy).HasColumnName("cancelled_by");
+            e.Property(x => x.CancelledAt).HasColumnName("cancelled_at");
+            e.Property(x => x.CancelReason).HasColumnName("cancel_reason");
+            e.HasIndex(x => x.RootLineId);
         });
 
         b.Entity<OrderFulfillment>(e =>

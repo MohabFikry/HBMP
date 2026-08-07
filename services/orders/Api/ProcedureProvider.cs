@@ -1,3 +1,4 @@
+using Mersal.Amendment;
 using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Auth.Authorization;
@@ -212,6 +213,41 @@ public static class ProcedureProviderEndpoints
                     type: "urn:hbmp:session-not-recorded"),
             };
         }).RequireAuthorization(HbmpPolicies.Scope("procedure:consume"));
+
+        // ---- The notes on a line this centre holds (30.5b, design 46 §7b) ---------------------------------
+        //
+        // Read HERE and not through /investigation-orders, because an external provider is not inside the
+        // clinical gate — design 45 §2b built this portal for exactly that reason. The projection is the
+        // same shared rule the clinician's route uses, so "who can read this" still has ONE answer.
+        v1.MapGet("/{orderId:guid}/lines/{lineId:guid}/notes", async Task<IResult> (
+            Guid orderId, Guid lineId, OrdersDbContext db, ProcedureProviderGate gate, IAuditClient audit,
+            IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        {
+            var order = await Owned(db, gate.CallerProviderId).FirstOrDefaultAsync(o => o.OrderId == orderId, ct);
+            if (gate.AuthorizeOrder(order) is { } denied) return denied;
+
+            var line = order!.Lines.FirstOrDefault(l => l.OrderLineId == lineId);
+            if (line is null) return Results.Problem(statusCode: 404, title: "Not Found",
+                type: "https://mersal.foundation/problems/not-found");
+
+            var notes = await db.OrderNotes.AsNoTracking()
+                .Where(n => n.RootLineId == line.RootLineId)
+                .OrderByDescending(n => n.AuthoredAt).ToListAsync(ct);
+
+            // FILTERED BEFORE SERIALIZATION. A note this centre may not read never reaches the payload, so
+            // there is nothing on the wire to leak — not the body, and not the fact that it exists.
+            var visible = NoteAudience
+                .Readable(notes, n => Enum.Parse<NoteVisibility>(n.Visibility), NoteReader.Fulfiller)
+                .Select(n => new
+                {
+                    n.NoteId, orderLineId = n.SubjectId, n.Visibility, n.Body,
+                    n.AuthorDisplayName, n.AuthoredAt, n.Status, n.CancelledAt, n.CancelReason,
+                })
+                .ToList();
+
+            await AuditRead(audit, me, "procedure-notes", visible.Count);
+            return Results.Ok(visible);
+        }).RequireAuthorization(HbmpPolicies.Scope("procedure:read"));
 
         // ---- Close the loop --------------------------------------------------------------------------------
         v1.MapPost("/{orderId:guid}/report", async (

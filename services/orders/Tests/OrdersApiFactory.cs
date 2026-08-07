@@ -145,7 +145,10 @@ public sealed class OrdersApiFactory : WebApplicationFactory<Program>
         if (Db is null) return;
         await using var db = Ctx();
         await db.Database.ExecuteSqlRawAsync(
-            // 30.1 — the amendment ledger references the lines, so it goes first.
+            // 30.5b — notes reference the lines; 30.1 — so does the amendment ledger. Both go first.
+            "DELETE FROM orders.order_note WHERE subject_id IN " +
+            "  (SELECT order_line_id FROM orders.order_line WHERE order_id IN " +
+            "     (SELECT order_id FROM orders.investigation_order WHERE tenant_id = {0})); " +
             "DELETE FROM orders.line_amendment WHERE order_id IN " +
             "  (SELECT order_id FROM orders.investigation_order WHERE tenant_id = {0}); " +
             "DELETE FROM orders.order_fulfillment WHERE order_line_id IN " +
