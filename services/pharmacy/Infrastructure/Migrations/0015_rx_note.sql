@@ -1,5 +1,11 @@
 -- pharmacy-service — 0015 notes on a prescription line (phase 30 Gate 5b, design 46 §7b).
 --
+-- ⚠ NOT YET WIRED. This table is created and correct, and NOTHING IN pharmacy-service WRITES OR READS IT
+-- YET — the entity, the endpoints and the projection are orders-side only as of 30.5b. That is the same
+-- shape of gap phase 29's chronic prescribing turned out to have (docs/phase-30-gate-3-notes.md), so it is
+-- stated here rather than left to be discovered: an empty table with a trigger and an RLS policy looks
+-- finished from every angle except the one that matters.
+--
 -- The medication twin of orders 0015. Read that file's header for the reasoning — it is the doc-38 notes
 -- model (policy 0009) on a different subject, per owning service so the FK is real and writing a note never
 -- depends on another service being reachable. What follows is the same shape on prescription_line.
