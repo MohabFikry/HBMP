@@ -120,10 +120,19 @@ public sealed class OrdersApiFactory : WebApplicationFactory<Program>
     /// <summary>The ordering doctor: creates and reads, and may not consume (that is the lab's action).</summary>
     public HttpClient DoctorClient() => As(OrdersTestAuth.DoctorSub, "doctor", "orders:write orders:read");
 
-    /// <summary>A lab at a specific provider — the consume caller, isolated to its own provider's orders.</summary>
+    /// <summary>
+    /// A lab at a specific provider — the consume caller, isolated to its own provider's orders.
+    ///
+    /// <para>30.5 — <c>provider:read</c> ADDED, because a real <c>lab_tech</c> token carries it
+    /// (identity.role_scope) and <c>ProviderPolicies.QueueRead</c> requires it. Without it this client could
+    /// consume but never read the bench queue, so no test could reach that endpoint — which is why a 500 on
+    /// it survived from phase 5 to phase 30. A fixture that grants LESS than the real token silently puts
+    /// endpoints out of reach; one that grants more hides authorization defects. This now mirrors the
+    /// issuer.</para>
+    /// </summary>
     public HttpClient LabClient(Guid providerId)
     {
-        var c = As(OrdersTestAuth.LabSub, "lab_tech", "orders:consume orders:read");
+        var c = As(OrdersTestAuth.LabSub, "lab_tech", "orders:consume orders:read provider:read");
         c.DefaultRequestHeaders.Add("X-Test-Provider", providerId.ToString());
         return c;
     }

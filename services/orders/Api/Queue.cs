@@ -21,13 +21,18 @@ public static class QueueEndpoints
         // ---- Queue: available work for the caller's capability ----
         v1.MapGet("/queue", async (
             HttpContext http, OrdersDbContext db, FulfillmentGate gate, IAuditClient audit, IHbmpPrincipalAccessor me,
-            TimeProvider clock, int page, int pageSize, CancellationToken ct) =>
+            // NULLABLE, and that is the fix for a real defect: these were non-nullable `int`, so a caller
+            // hitting GET /queue with no query string — which is the natural call, and what the bench screen
+            // makes — got a 500 from the model binder instead of the first page. The Page() helper below has
+            // always clamped and defaulted them; nothing ever let it, because the request never got that far.
+            // The procedure-centre queue (ProcedureProvider.cs) has always used the nullable form.
+            TimeProvider clock, int? page, int? pageSize, CancellationToken ct) =>
         {
             var denied = await gate.AuthorizeQueueAsync(ct);
             if (denied is not null) return denied;
 
             var caps = ProviderCapability.ForRoles(me.Principal!.Roles).ToHashSet();
-            var (p, ps) = Page(page, pageSize);
+            var (p, ps) = Page(page ?? 1, pageSize ?? 25);
 
             var items = await AvailableOrders(db, caps)
                 .OrderBy(o => o.RequestedAt).Skip((p - 1) * ps).Take(ps)

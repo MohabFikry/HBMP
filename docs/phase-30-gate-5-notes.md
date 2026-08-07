@@ -70,16 +70,24 @@ This is the third time this session a source-scanning guard has caught a helper 
 (`OutboxAtomicityTests` was the first). The pattern is worth naming: **a shared helper is the wrong tool for
 anything a build-time scan is asserting about a call site.**
 
-## Observation, not diagnosed: `GET /investigation-orders/queue` returns 500 under the orders test factory
+## Diagnosed and fixed: `GET /investigation-orders/queue` returned 500
 
-Reading the bench queue as a lab principal from `OrdersApiFactory` produces a 500. The consume endpoint
-behind the same `FulfillmentGate` works in the same factory, so it is not the gate.
+It was **two defects that hid each other**, and the second is why the first survived from phase 5 to phase 30.
 
-**I did not diagnose the cause**, and the queue-propagation tests therefore assert against
-`Queue.AvailableOrders`'s predicate restated in the test rather than through HTTP — with a source-reading
-test that fails if the endpoint's filter drifts from the restated copy. Asserting through a broken endpoint
-would have proved nothing about cancellation while appearing to.
+**The production bug.** The handler declared `int page, int pageSize` — non-nullable, no defaults. A call with
+no query string, which is the natural one and the one the bench screen makes, died in the model binder before
+the handler ran. The `Page()` helper directly below it has always clamped and defaulted both values; nothing
+ever let it. The procedure-centre queue (`ProcedureProvider.cs`) has always used the nullable form, which is
+why that one worked. Fixed: `int? page, int? pageSize`.
 
-Worth knowing alongside it: **no test has ever exercised this endpoint over HTTP.** `/consume` is covered,
-the procedure-centre queue is covered, the lab bench queue is not — so whether this is a factory gap or a
-production fault is currently unknown, and that is itself the finding.
+**The fixture that kept it unreachable.** `OrdersApiFactory.LabClient` granted `orders:consume orders:read`.
+A real `lab_tech` token carries `provider:read` as well (`identity.role_scope`), and
+`ProviderPolicies.QueueRead` requires it — so the fixture's technician could consume but could never read a
+queue. No test could reach the endpoint to find the 500.
+
+That is the more useful half of the finding. **A fixture that grants LESS than the real token silently puts
+endpoints out of reach**, and the gap reads as "no coverage here" rather than as "this cannot be called". The
+mirror mistake — granting more — hides authorization defects instead. `LabClient` now mirrors the issuer.
+
+The propagation tests assert through the real endpoint, and one of them exists solely to make the regression
+explicit: `The_bench_queue_answers_a_call_with_no_query_string`.

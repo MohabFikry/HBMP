@@ -15,13 +15,12 @@ namespace Mersal.Orders.Tests;
 /// invariant 6 is satisfied structurally rather than eventually, which is stronger than an event could make
 /// it. These tests are what make that claim checkable rather than merely asserted in a comment.</para>
 ///
-/// <para><b>What is asserted, and what is not.</b> The cancel goes through the real endpoint; the queue is
-/// then read with <c>Queue.AvailableOrders</c>'s predicate, restated here, rather than through
-/// <c>GET /investigation-orders/queue</c>. That endpoint returns <b>500</b> under this factory for a lab
-/// principal — a pre-existing fault unrelated to amendment, recorded in docs/phase-30-gate-5-notes.md — and
-/// asserting through a broken endpoint would prove nothing about cancellation while looking like it did. A
-/// restated predicate is a copy, and copies drift, so the last test here reads the endpoint's source and
-/// fails if it stops saying the same thing.</para>
+/// <para><b>Asserted through the real endpoint.</b> An earlier version of this file read
+/// <c>Queue.AvailableOrders</c>' predicate restated in the test, because <c>GET /queue</c> answered 500. That
+/// turned out to be a genuine defect in the endpoint — non-nullable <c>page</c>/<c>pageSize</c>, so the
+/// natural call with no query string never reached the handler — and a fixture whose lab client held less
+/// scope than a real <c>lab_tech</c> token. Both are fixed, so these assertions now go over HTTP, which is
+/// what the acceptance criterion asks for.</para>
 /// </summary>
 [Collection("orders-db")]
 public class CancellationLeavesTheProviderQueueTests(OrdersApiFactory f) : IClassFixture<OrdersApiFactory>
@@ -100,46 +99,42 @@ public class CancellationLeavesTheProviderQueueTests(OrdersApiFactory f) : IClas
         finally { await f.CleanupAsync(); }
     }
 
-    [Fact]
-    public void The_restated_filter_still_matches_the_endpoints()
+    [SkippableFact]
+    public async Task The_bench_queue_answers_a_call_with_no_query_string()
     {
-        // Guards the guard. The predicates below are a COPY of Queue.AvailableOrders, and a copy drifts — if
-        // the endpoint's filter changed, these tests would keep passing while asserting something the queue
-        // no longer does.
-        var source = File.ReadAllText(Path.Combine(RepoRoot(), "services/orders/Api/Queue.cs"));
-
-        source.Should().Contain(
-            "o.Status == OrderStatus.Active || o.Status == OrderStatus.PartiallyUsed",
-            "the queue's head-status filter changed; update the restated predicate in this file");
-        source.Should().Contain(
-            "l.Status == OrderLineStatus.Active || l.Status == OrderLineStatus.PartiallyUsed",
-            "the queue's line-status filter changed; update the restated predicate in this file");
+        // THE REGRESSION. `GET /queue` took non-nullable page/pageSize, so the natural call — the one the
+        // bench screen makes — died in the model binder with a 500 before the handler ran. The Page() helper
+        // had always clamped and defaulted them; nothing ever let it. Unreachable to every existing test,
+        // because the fixture's lab client also lacked the provider:read a real lab_tech token carries, so
+        // the defect survived from phase 5 to phase 30.
+        Skip.If(OrdersApiFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var res = await f.LabClient(Guid.NewGuid()).GetAsync("/api/v1/investigation-orders/queue");
+        res.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
     }
 
-    // ---- Queue.AvailableOrders, restated (see the class note) ------------------------------------------
+    // ---- the queue, over HTTP -------------------------------------------------------------------------
+
+    /// <summary>The bench queue AS A TECHNICIAN SEES IT — over HTTP, with no query string, which is the call
+    /// the screen makes and the one that used to 500.</summary>
+    private async Task<System.Text.Json.JsonElement> QueueAsync()
+    {
+        var res = await f.LabClient(Guid.NewGuid()).GetAsync("/api/v1/investigation-orders/queue");
+        res.IsSuccessStatusCode.Should().BeTrue(
+            $"a lab technician must be able to read their bench queue (got {res.StatusCode})");
+        return await res.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+    }
 
     private async Task<List<Guid>> QueuedLineIds()
     {
-        await using var db = OrdersApiFactory.Ctx();
-        return await db.OrderLines.AsNoTracking()
-            .Where(l => db.Orders.Any(o => o.OrderId == l.OrderId && o.TenantId == f.Tenant
-                        && (o.Status == OrderStatus.Active || o.Status == OrderStatus.PartiallyUsed
-                            || o.Status == OrderStatus.Expired)))
-            .Where(l => l.Status == OrderLineStatus.Active || l.Status == OrderLineStatus.PartiallyUsed)
-            .Select(l => l.OrderLineId).ToListAsync();
+        var ids = new List<Guid>();
+        foreach (var item in (await QueueAsync()).EnumerateArray())
+            foreach (var line in item.GetProperty("lines").EnumerateArray())
+                ids.Add(line.GetProperty("orderLineId").GetGuid());
+        return ids;
     }
 
-    private async Task<List<Guid>> QueuedOrderIds()
-    {
-        await using var db = OrdersApiFactory.Ctx();
-        return await db.Orders.AsNoTracking()
-            .Where(o => o.TenantId == f.Tenant)
-            .Where(o => o.Status == OrderStatus.Active || o.Status == OrderStatus.PartiallyUsed
-                        || o.Status == OrderStatus.Expired)
-            .Where(o => o.Lines.Any(l =>
-                l.Status == OrderLineStatus.Active || l.Status == OrderLineStatus.PartiallyUsed))
-            .Select(o => o.OrderId).ToListAsync();
-    }
+    private async Task<List<Guid>> QueuedOrderIds() =>
+        [.. (await QueueAsync()).EnumerateArray().Select(i => i.GetProperty("orderId").GetGuid())];
 
     private async Task<(Guid orderId, Guid lineId, Guid otherLineId)> SeedTwoLineActiveOrder(decimal quantity = 1)
     {
@@ -165,12 +160,5 @@ public class CancellationLeavesTheProviderQueueTests(OrdersApiFactory f) : IClas
         db.Orders.Add(order);
         await db.SaveChangesAsync();
         return (order.OrderId, a.OrderLineId, b.OrderLineId);
-    }
-
-    private static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "HbmpPlatform.sln"))) dir = dir.Parent;
-        return dir?.FullName ?? throw new InvalidOperationException("repo root not found");
     }
 }
