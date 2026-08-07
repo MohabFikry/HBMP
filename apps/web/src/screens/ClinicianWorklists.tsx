@@ -619,7 +619,15 @@ export function DoctorOrders() {
         </AsyncSection>
       </Card>
 
-      <OrderDetailModal order={viewing} onOpenChange={(open) => !open && setViewing(null)} />
+      {/*
+        30.6 — `onChanged` refetches. A withdrawn line that stays on the board is the same failure as one
+        that stays in the lab's queue: the doctor believes they acted and the screen still says otherwise.
+      */}
+      <OrderDetailModal
+        order={viewing}
+        onOpenChange={(open) => !open && setViewing(null)}
+        onChanged={state.reload}
+      />
     </>
   );
 }
@@ -848,7 +856,11 @@ export function DoctorPrescriptions() {
         </AsyncSection>
       </Card>
 
-      <PrescriptionDetailModal rx={viewing} onOpenChange={(open) => !open && setViewing(null)} />
+      <PrescriptionDetailModal
+        rx={viewing}
+        onOpenChange={(open) => !open && setViewing(null)}
+        onChanged={state.reload}
+      />
     </>
   );
 }

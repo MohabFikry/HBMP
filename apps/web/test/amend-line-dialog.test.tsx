@@ -151,3 +151,77 @@ describe("30.6 — amend/cancel dialog", () => {
     }
   });
 });
+
+/**
+ * 30.6 — the WIRING, which is what a component test alone cannot prove.
+ *
+ * <p>The dialog was written, type-checked, tested and axe-clean while no screen imported it — so Vite
+ * tree-shook it out and the shipped bundle contained none of it. That is the same shape of gap as phase 29's
+ * unreachable chronic machinery, and the lesson is identical: a green component test says the component is
+ * correct, never that anything opens it.</p>
+ */
+describe("30.6 — the detail dialogs actually reach the API", () => {
+  it("withdrawing a line from the ORDER dialog calls cancelOrderLine with the coded reason", async () => {
+    const { OrderDetailModal } = await import("../src/screens/encounter/OrderDetailModal");
+    const cancelOrderLine = vi.fn().mockResolvedValue(undefined);
+    const api = {
+      amendmentReasons: vi.fn().mockResolvedValue(REASONS),
+      cancelOrderLine,
+    } as any;
+
+    const order = {
+      id: "ord-1", orderNo: "ORD-2026-000118", orderType: "Lab", primaryCode: "80053",
+      lineCount: 1, beneficiary: { id: "ben-1", token: "•••4821" },
+      status: { kind: "info", label: { en: "Active", ar: "نشط" } },
+      requestedAt: "2026-08-07T09:00:00Z", expiresAt: null, encounterId: "enc-1",
+      lines: [{
+        id: "line-1", code: "80053", codeSystem: "CPT", description: "Comprehensive metabolic panel",
+        quantityOrdered: 1, quantityConsumed: 0,
+        status: { kind: "info", label: { en: "Active", ar: "نشط" } },
+      }],
+    } as any;
+
+    const user = userEvent.setup();
+    render(
+      <AppProviders authClient={new DevAuthClient()} apiClient={api}>
+        <OrderDetailModal order={order} onOpenChange={() => {}} />
+      </AppProviders>,
+    );
+
+    // The action is on the LINE, because that is the amendable unit (design 46 §3).
+    await user.click(await screen.findByRole("button", { name: /^withdraw$/i }));
+    await user.click(await screen.findByRole("combobox", { name: /reason/i }));
+    await user.click(await screen.findByRole("option", { name: /clinical change/i }));
+    await user.click(screen.getByRole("button", { name: /withdraw item/i }));
+
+    expect(cancelOrderLine).toHaveBeenCalledWith("ord-1", "line-1", "ClinicalChange", undefined);
+  });
+
+  it("a DELIVERED line offers the action disabled, with the reason beside it", async () => {
+    const { OrderDetailModal } = await import("../src/screens/encounter/OrderDetailModal");
+    const order = {
+      id: "ord-2", orderNo: "ORD-2026-000119", orderType: "Lab", primaryCode: "85025",
+      lineCount: 1, beneficiary: { id: "ben-1", token: "•••4821" },
+      status: { kind: "ok", label: { en: "Completed", ar: "مكتمل" } },
+      requestedAt: "2026-08-07T09:00:00Z", expiresAt: null, encounterId: "enc-1",
+      lines: [{
+        id: "line-2", code: "85025", codeSystem: "CPT", description: "Complete blood count",
+        quantityOrdered: 1, quantityConsumed: 1,
+        status: { kind: "ok", label: { en: "Completed", ar: "مكتمل" } },
+      }],
+    } as any;
+
+    render(
+      <AppProviders authClient={new DevAuthClient()} apiClient={{ amendmentReasons: vi.fn().mockResolvedValue([]) } as any}>
+        <OrderDetailModal order={order} onOpenChange={() => {}} />
+      </AppProviders>,
+    );
+
+    // PRESENT and disabled — never absent. A hidden control reads as a missing feature.
+    const withdraw = await screen.findByRole("button", { name: /^withdraw$/i });
+    expect(withdraw).toBeDisabled();
+    expect(screen.getByText(/delivered — cannot be changed/i)).toBeInTheDocument();
+    // And the explanation is tied to the control for a screen reader, not merely near it.
+    expect(withdraw).toHaveAttribute("aria-describedby", "lock-line-2");
+  });
+});

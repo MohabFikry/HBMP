@@ -4274,6 +4274,22 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
 
 /* `auto-fit` again rather than a fixed six: "Quantity prescribed" and "مرات الصرف المسموح بها" are nowhere
    near the same width, and a column count that fits one clips the other. */
+/*
+ * 30.6 — the per-line amend/cancel actions (design 46 §10).
+ *
+ * `flex-wrap` and a logical `gap` so the explanation sits BESIDE the disabled buttons on a wide viewport and
+ * beneath them on a narrow one — never clipped away. The whole point of this row is that the reason stays
+ * visible next to the control it explains; a layout that hides it at 360px reproduces the exact failure the
+ * disabled-not-hidden rule exists to prevent.
+ */
+.rxv-line-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp2);
+  margin-block-start: var(--sp3);
+}
+
 .rxv-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));

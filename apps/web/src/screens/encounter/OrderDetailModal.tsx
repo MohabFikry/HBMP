@@ -1,7 +1,11 @@
-import { Modal, StatusChip } from "@mersal/design-system";
-import type { Localized, OrderRow, OrderRowLine } from "@mersal/contracts";
+import { useCallback, useEffect, useState } from "react";
+import { Button, InlineAlert, Modal, StatusChip } from "@mersal/design-system";
+import type { AmendReasonOption, Localized, OrderRow, OrderRowLine } from "@mersal/contracts";
+import { useApi } from "../../api/ApiProvider";
 import { useFormat } from "../../i18n/useFormat";
 import { useLoc } from "../_shared";
+import { AmendLineDialog } from "../AmendLineDialog";
+import type { AmendAction, LineLockedReason } from "../AmendLineDialog";
 
 /**
  * The investigation order as it was raised, read back by the clinician who raised it.
@@ -38,18 +42,99 @@ const S = {
   ordered: { en: "Quantity ordered", ar: "الكمية المطلوبة" },
   performed: { en: "Performed to date", ar: "المنفَّذ حتى الآن" },
   noLines: { en: "This order has no lines.", ar: "لا يحتوي هذا الطلب على أسطر." },
+
+  // ---- 30.6 amend / cancel (design 46 §1-§3, §10) ----------------------------------------------------
+  withdraw: { en: "Withdraw", ar: "سحب" },
+  amend: { en: "Amend", ar: "تعديل" },
+  /** Shown BESIDE the disabled control, never instead of it — a hidden action reads as a missing feature. */
+  lockedConsumed: { en: "Delivered — cannot be changed", ar: "تم تنفيذه — لا يمكن تغييره" },
+  lockedWithdrawn: { en: "Withdrawn", ar: "مسحوب" },
+  lockedAmended: { en: "Replaced by a newer version", ar: "استُبدل بنسخة أحدث" },
+  lockedExpired: { en: "The order has expired", ar: "انتهت صلاحية الطلب" },
+  failed: {
+    en: "That change could not be applied. Nothing was altered — reopen the order to see its current state.",
+    ar: "تعذّر تطبيق التغيير. لم يُعدَّل شيء — أعد فتح الطلب لعرض حالته الحالية.",
+  },
 } satisfies Record<string, Localized>;
+
+/**
+ * Why this line cannot be changed, or null when it can.
+ *
+ * <p>Derived from what the row ALREADY carries — no extra request, and no second opinion about a rule the
+ * server also enforces. The server is authoritative; this only decides whether to offer the control, and it
+ * errs toward offering it: a wrongly-enabled button produces a specific 409 the doctor can read, while a
+ * wrongly-hidden one produces a doctor who believes the feature does not exist.</p>
+ */
+function lockOf(order: OrderRow, line: OrderRowLine): LineLockedReason | null {
+  const status = line.status.label.en;
+  if (status === "Completed" || status === "Performed") return { what: "Consumed" };
+  if (status === "Cancelled" || status === "Withdrawn") return { what: "Cancelled" };
+  if (status === "Superseded") return { what: "Superseded" };
+  if (order.expiresAt && new Date(order.expiresAt) <= new Date()) return { what: "Expired" };
+  return null;
+}
 
 export function OrderDetailModal({
   order,
   onOpenChange,
+  onChanged,
 }: {
   /** The order to show, or null when the dialog is closed. */
   order: OrderRow | null;
   onOpenChange: (open: boolean) => void;
+  /** Called after a line is withdrawn or amended, so the list behind can refetch. */
+  onChanged?: () => void;
 }) {
   const t = useLoc();
   const fmt = useFormat();
+  const api = useApi();
+
+  const [acting, setActing] = useState<{ line: OrderRowLine; action: AmendAction } | null>(null);
+  const [reasons, setReasons] = useState<AmendReasonOption[]>([]);
+  const [failed, setFailed] = useState(false);
+
+  // Fetched once the dialog is open, not on every row render: the vocabulary is the same for every line and
+  // a request per line would be seven requests to fill one picker.
+  useEffect(() => {
+    if (!order) return;
+    let live = true;
+    // Guarded, and the guard is not defensive clutter: this list is an ENRICHMENT of a dialog that must
+    // open regardless. A throw here — an older client, a transport failure — used to take down the whole
+    // encounter screen, which is a catastrophic response to a picker that could not be filled. An empty
+    // picker is honest and safe: the dialog already refuses to submit without a reason, so the worst case
+    // is a doctor who cannot withdraw, not one who withdraws without recording why.
+    Promise.resolve(api.amendmentReasons?.("order") ?? [])
+      .then((r) => { if (live) setReasons(r); })
+      .catch(() => { if (live) setReasons([]); });
+    return () => { live = false; };
+  }, [api, order]);
+
+  const confirm = useCallback(
+    async (input: { reasonCode: string; reasonText?: string; quantity?: number }) => {
+      if (!order || !acting) return;
+      setFailed(false);
+      try {
+        if (acting.action === "cancel") {
+          await api.cancelOrderLine(order.id, acting.line.id, input.reasonCode, input.reasonText);
+        } else {
+          await api.amendOrderLine(
+            order.id, acting.line.id, input.quantity ?? acting.line.quantityOrdered,
+            input.reasonCode, input.reasonText);
+        }
+        setActing(null);
+        onChanged?.();
+        onOpenChange(false);
+      } catch {
+        // The server refused — a race, an expiry, a scope. It answers with a SPECIFIC problem type; this
+        // says the safe thing (nothing changed) and sends the reader to the current state rather than
+        // guessing which refusal it was.
+        setFailed(true);
+        setActing(null);
+      }
+    },
+    [api, order, acting, onChanged, onOpenChange],
+  );
+
   if (!order) return null;
 
   return (
@@ -91,10 +176,26 @@ export function OrderDetailModal({
         // the patient is carrying to the bench.
         <ol className="rxv-lines">
           {order.lines.map((line, i) => (
-            <OrderLineCard key={line.id} line={line} index={i + 1} t={t} fmt={fmt} />
+            <OrderLineCard
+              key={line.id} line={line} index={i + 1} t={t} fmt={fmt}
+              lock={lockOf(order, line)}
+              onAct={(action) => { setFailed(false); setActing({ line, action }); }}
+            />
           ))}
         </ol>
       )}
+
+      {failed && <InlineAlert tone="bad">{t(S.failed)}</InlineAlert>}
+
+      <AmendLineDialog
+        open={acting !== null}
+        action={acting?.action ?? "cancel"}
+        lineLabel={acting ? `${acting.line.code} — ${acting.line.description ?? t(S.testMissing)}` : ""}
+        currentQuantity={acting?.line.quantityOrdered}
+        reasons={reasons}
+        onCancel={() => setActing(null)}
+        onConfirm={confirm}
+      />
     </Modal>
   );
 }
@@ -104,12 +205,21 @@ function OrderLineCard({
   index,
   t,
   fmt,
+  lock,
+  onAct,
 }: {
   line: OrderRowLine;
   index: number;
   t: (l: Localized) => string;
   fmt: ReturnType<typeof useFormat>;
+  lock: LineLockedReason | null;
+  onAct: (action: AmendAction) => void;
 }) {
+  const lockedWord =
+    lock?.what === "Consumed" ? S.lockedConsumed
+    : lock?.what === "Cancelled" ? S.lockedWithdrawn
+    : lock?.what === "Superseded" ? S.lockedAmended
+    : S.lockedExpired;
   return (
     <li className="rxv-line" data-recorded={line.description ? undefined : "no"}>
       <div className="rxv-line-h">
@@ -147,6 +257,29 @@ function OrderLineCard({
           <dd className="tnum">{fmt.number(line.quantityConsumed)}</dd>
         </div>
       </dl>
+
+      {/*
+        30.6 — the actions, DISABLED rather than hidden when the line can no longer change, with the reason
+        in words beside them (design 46 §10). "A hidden control makes the doctor think the feature is
+        missing" — and then they ring the pharmacy instead of reading the sentence that would have answered
+        them. `aria-describedby` ties the two together, so a screen reader gets the explanation with the
+        button rather than as unrelated text further down.
+      */}
+      <div className="rxv-line-actions">
+        <Button
+          variant="secondary" size="sm" disabled={lock !== null} onClick={() => onAct("amend")}
+          aria-describedby={lock ? `lock-${line.id}` : undefined}
+        >
+          {t(S.amend)}
+        </Button>
+        <Button
+          variant="danger" size="sm" disabled={lock !== null} onClick={() => onAct("cancel")}
+          aria-describedby={lock ? `lock-${line.id}` : undefined}
+        >
+          {t(S.withdraw)}
+        </Button>
+        {lock && <span id={`lock-${line.id}`} className="rxv-missing">{t(lockedWord)}</span>}
+      </div>
     </li>
   );
 }

@@ -137,6 +137,7 @@ import type {
   SaveApprovalRule,
   AutoDecisionSwitch,
   SetAutoDecision,
+  AmendReasonOption,
 } from "@mersal/contracts";
 
 /**
@@ -210,6 +211,22 @@ export interface ApiClient {
   /** The care episode of one VISIT (ADR-0031) — the encounter workspace's own history, and the source the
    *  order and prescription dialogs filter by reference to show what happened to one transaction. */
   encounterTimeline(encounterId: string): Promise<TimelineStep[]>;
+
+  // ---- 30.6 amend / cancel a signed line (design 46 §1-§3) --------------------------------------------
+  /** The CODED reason vocabulary for the picker. Served, not hard-coded, so adding one stays a data change. */
+  amendmentReasons(kind: "order" | "prescription"): Promise<AmendReasonOption[]>;
+  /** Withdraw one line. The reason code is mandatory; the free text is additional, never instead. */
+  cancelOrderLine(orderId: string, lineId: string, reasonCode: string, reasonText?: string): Promise<void>;
+  /** Supersede one line. The signed row is never edited — a new version replaces it. */
+  amendOrderLine(
+    orderId: string, lineId: string, quantityOrdered: number, reasonCode: string, reasonText?: string,
+  ): Promise<void>;
+  cancelPrescriptionLine(
+    rxId: string, lineId: string, reasonCode: string, reasonText?: string,
+  ): Promise<void>;
+  amendPrescriptionLine(
+    rxId: string, lineId: string, quantityPrescribed: number, reasonCode: string, reasonText?: string,
+  ): Promise<void>;
   /** Start the visit for a checked-in appointment (CheckedIn → an open encounter). Server-gated: the caller
    * must be the assigned practitioner, or the appointment must name none. Returns the encounter id. */
   startVisit(appointmentId: string, beneficiaryId: string): Promise<{ encounterId: string }>;

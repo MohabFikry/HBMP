@@ -58,7 +58,19 @@ function renderScreen(ui: React.ReactElement, api: Partial<ApiClient>) {
   return render(
     <AppProviders
       authClient={new DevAuthClient()}
-      apiClient={{ listPatients: vi.fn().mockResolvedValue(PATIENTS), ...api } as unknown as ApiClient}
+      apiClient={{
+        listPatients: vi.fn().mockResolvedValue(PATIENTS),
+        // 30.6 — the amend/cancel picker the detail dialogs ask for. In the shared base rather than in each
+        // test, because every worklist test opens a detail dialog and none of them is ABOUT the picker.
+        amendmentReasons: vi.fn().mockResolvedValue([
+          { code: "ClinicalChange", nameEn: "Clinical change", nameAr: "تغير الحالة السريرية" },
+        ]),
+        cancelOrderLine: vi.fn().mockResolvedValue(undefined),
+        amendOrderLine: vi.fn().mockResolvedValue(undefined),
+        cancelPrescriptionLine: vi.fn().mockResolvedValue(undefined),
+        amendPrescriptionLine: vi.fn().mockResolvedValue(undefined),
+        ...api,
+      } as unknown as ApiClient}
     >
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>{ui}</MemoryRouter>
     </AppProviders>,

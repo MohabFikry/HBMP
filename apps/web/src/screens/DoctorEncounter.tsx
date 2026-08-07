@@ -31,6 +31,7 @@ import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
 import { PatientContextBar } from "./PatientProfile";
 import { MemberClinicalPanel } from "./encounter/MemberClinicalPanel";
+import { OrderDetailModal } from "./encounter/OrderDetailModal";
 import { PrescriptionDetailModal } from "./encounter/PrescriptionDetailModal";
 import { SectionView } from "./ProfileSectionViews";
 import { useLocation, useSearchParams } from "react-router-dom";
@@ -94,6 +95,8 @@ const S = {
   proceduresFor: { en: "Procedures ordered for this patient", ar: "الإجراءات المطلوبة لهذا المريض" },
   noProcedures: { en: "You have raised no procedures for this patient.", ar: "لم تطلب أي إجراءات لهذا المريض." },
   orderProcedure: { en: "Order a procedure", ar: "طلب إجراء" },
+  colOpen: { en: "Open", ar: "فتح" },
+  openOrder: { en: "Open the order", ar: "فتح الطلب" },
   colHistory: { en: "History", ar: "السجل" },
   viewHistory: { en: "Previous occurrences of this service", ar: "الحالات السابقة لهذه الخدمة" },
   tabHistory: { en: "History", ar: "السجل" },
@@ -1565,7 +1568,12 @@ function PrescriptionsTab({
           />
         </div>
       </Card>
-      <PrescriptionDetailModal rx={viewing} onOpenChange={(open) => !open && setViewing(null)} />
+      {/* Same reason as `onDone` above: a withdrawn drug that stays in the list reads as a failed withdraw. */}
+      <PrescriptionDetailModal
+        rx={viewing}
+        onOpenChange={(open) => !open && setViewing(null)}
+        onChanged={rx.reload}
+      />
     </div>
   );
 }
@@ -1601,6 +1609,7 @@ function InvestigationsTab({
   const empty = orderType === "Radiology" ? S.noRadiology : orderType === "Procedure" ? S.noProcedures : S.noLabs;
   const composeHeading = orderType === "Radiology" ? S.orderRadiology : orderType === "Procedure" ? S.orderProcedure : S.orderLab;
 
+  const [viewingOrder, setViewingOrder] = useState<OrderRow | null>(null);
   const orderCols: Column<OrderRow>[] = [
     { key: "orderNo", header: t(S.colRef), cell: (r) => <span className="tnum">{r.orderNo}</span>,
       sortable: true, sortValue: (r) => r.orderNo },
@@ -1622,6 +1631,22 @@ function InvestigationsTab({
       cell: (r) => (r.encounterId
         ? <EncounterTimelineButton encounterId={r.encounterId} reference={r.orderNo} />
         : <span className="muted">—</span>),
+    },
+    // 30.6 — OPEN the order, which is where its lines and their withdraw/amend actions live. The
+    // encounter's own tab had no way in: the detail dialog existed only on the worklist, so a doctor
+    // correcting an order they had just raised had to leave the visit to do it.
+    {
+      key: "open",
+      header: t(S.colOpen),
+      cell: (r) => (
+        <Button
+          variant="ghost"
+          aria-label={`${t(S.openOrder)} — ${r.orderNo}`}
+          onClick={() => setViewingOrder(r)}
+        >
+          <Icon name="chevron" />
+        </Button>
+      ),
     },
     // 29.4 — "has this patient had this service before, and what did it show?" (design 45 §4). THE shared
     // modal, opened from every service line in every tab — one component and one endpoint, never one
@@ -1691,6 +1716,13 @@ function InvestigationsTab({
           onClose={() => setHistoryFor(null)}
         />
       )}
+
+      {/* 30.6 — the same dialog the worklist opens, so withdrawing a line reads identically in both places. */}
+      <OrderDetailModal
+        order={viewingOrder}
+        onOpenChange={(open) => !open && setViewingOrder(null)}
+        onChanged={orders.reload}
+      />
     </div>
   );
 }

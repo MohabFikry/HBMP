@@ -117,6 +117,7 @@ import {
   type IdentityUser,
   type RoleScopeGrant,
   type ReportAccessRequestRow,
+  zAmendReasonOption,
 } from "@mersal/contracts";
 import type { BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, DiagnosisRank, MasterDataEdit, SetDocumentValidity, SaveApprovalRule, ApprovalRule, SetAutoDecision} from "@mersal/contracts";
 import type { CptSection, InvestigationDraftLine, InvestigationOrderType, OrderAcknowledgement, OrderFinding, ValidityExtensionRequest } from "@mersal/contracts";
@@ -643,6 +644,37 @@ export class DevApiClient implements ApiClient {
     }));
   }
   async updateAppointmentNote(_appointmentId: string, _note: string) { void _appointmentId; void _note; }
+
+  // ---- 30.6 amend / cancel a signed line (design 46 §1-§3) ----------------------------------------------
+  //
+  // The reason list mirrors the SEEDED vocabulary, filtered by applies_to exactly as the endpoint does — so
+  // the demo picker offers a drug-specific reason on a prescription and never on a lab order. A dev fixture
+  // that offered all eight everywhere would let a filtering bug reach production looking fine here.
+  amendmentReasons(kind: "order" | "prescription") {
+    const all = [
+      { code: "PrescribingError", nameEn: "Prescribing error", nameAr: "خطأ في الوصف", scope: "All" },
+      { code: "DoseCorrection", nameEn: "Dose correction", nameAr: "تصحيح الجرعة", scope: "Prescription" },
+      { code: "PatientDeclined", nameEn: "Patient declined", nameAr: "رفض المريض", scope: "All" },
+      { code: "ClinicalChange", nameEn: "Clinical change", nameAr: "تغير الحالة السريرية", scope: "All" },
+      { code: "Duplicate", nameEn: "Duplicate", nameAr: "مكرر", scope: "All" },
+      { code: "DrugUnavailable", nameEn: "Drug unavailable", nameAr: "الدواء غير متوفر", scope: "Prescription" },
+      { code: "NotEligible", nameEn: "Patient not eligible", nameAr: "المريض غير مؤهل", scope: "All" },
+      { code: "Other", nameEn: "Other", nameAr: "أخرى", scope: "All" },
+    ];
+    const scope = kind === "prescription" ? "Prescription" : "Order";
+    return this.gate(() => ok(z.array(zAmendReasonOption),
+      all.filter((r) => r.scope === "All" || r.scope === scope)
+         .map(({ code, nameEn, nameAr }) => ({ code, nameEn, nameAr }))));
+  }
+
+  async cancelOrderLine(_o: string, _l: string, _c: string, _t?: string) { void _o; void _l; void _c; void _t; }
+  async amendOrderLine(_o: string, _l: string, _q: number, _c: string, _t?: string) {
+    void _o; void _l; void _q; void _c; void _t;
+  }
+  async cancelPrescriptionLine(_r: string, _l: string, _c: string, _t?: string) { void _r; void _l; void _c; void _t; }
+  async amendPrescriptionLine(_r: string, _l: string, _q: number, _c: string, _t?: string) {
+    void _r; void _l; void _q; void _c; void _t;
+  }
   async rescheduleAppointment(_appointmentId: string, _slotId: string) { void _appointmentId; void _slotId; }
   appointmentTimeline(_appointmentId: string) {
     void _appointmentId;

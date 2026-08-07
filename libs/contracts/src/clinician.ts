@@ -186,3 +186,17 @@ export type VitalInput = z.infer<typeof zVitalInput>;
 /** Outcome of a vitals-capture submission — how many readings were recorded on the encounter. */
 export const zVitalsResult = z.object({ encounterId: zId, recorded: z.number().int() });
 export type VitalsResult = z.infer<typeof zVitalsResult>;
+
+/**
+ * 30.6 — one entry in the CODED amendment/cancellation vocabulary (design 46 §7).
+ *
+ * <p>Served by the API rather than declared here, so adding a reason stays a data change. The code is what
+ * makes "how often do we cancel, and why" answerable; the free text a clinician adds beside it answers "what
+ * happened here", and neither substitutes for the other.</p>
+ */
+export const zAmendReasonOption = z.object({
+  code: z.string(),
+  nameEn: z.string(),
+  nameAr: z.string(),
+});
+export type AmendReasonOption = z.infer<typeof zAmendReasonOption>;

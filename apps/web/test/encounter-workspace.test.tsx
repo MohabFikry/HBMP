@@ -71,6 +71,15 @@ function fakeApi(over: Partial<ApiClient> = {}): ApiClient {
       }],
     }),
     ...over,
+    // 30.6 — the amend/cancel picker. Present because the detail dialogs now ask for it; a partial
+    // fake that omits it is a fake that has drifted from the interface it claims to satisfy.
+    amendmentReasons: async () => [
+      { code: "ClinicalChange", nameEn: "Clinical change", nameAr: "تغير الحالة السريرية" },
+    ],
+    cancelOrderLine: async () => {},
+    amendOrderLine: async () => {},
+    cancelPrescriptionLine: async () => {},
+    amendPrescriptionLine: async () => {},
   } as unknown as ApiClient;
 }
 

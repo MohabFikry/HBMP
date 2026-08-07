@@ -116,6 +116,7 @@ import {
   zDoctorAvailability,
   zAppointmentDay,
   zAppointmentCounts,
+  zAmendReasonOption,
 } from "@mersal/contracts";
 import type {
   BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, CreatePractitionerInput, PractitionerAttachFailure,
@@ -684,6 +685,57 @@ export class HttpApiClient implements ApiClient {
       rowVersion !== undefined ? { ifMatch: rowVersion } : undefined,
     )) as any;
     return parseOr(zCheckInResult, { id: r?.appointmentId ?? appointmentId, status: apptStatusChip(r?.status ?? "NoShow") });
+  }
+
+  // ---- 30.6 amend / cancel a signed line (design 46 §1-§3) ----------------------------------------------
+  //
+  // Every mutation here carries an Idempotency-Key generated ONCE per call, which is the platform's rule and
+  // is load-bearing on this path: a double-tapped withdraw must write one amendment record, because "how
+  // often do we cancel and why" is a clinical-quality metric and one nervous double-click would inflate it.
+
+  async amendmentReasons(kind: "order" | "prescription") {
+    const path = kind === "order"
+      ? "/investigation-orders/amendment-reasons"
+      : "/prescriptions/amendment-reasons";
+    const rows = ((await getRaw(path)) as any[]) ?? [];
+    return rows.map((r: any) =>
+      parseOr(zAmendReasonOption, { code: r.code, nameEn: r.nameEn, nameAr: r.nameAr }));
+  }
+
+  async cancelOrderLine(orderId: string, lineId: string, reasonCode: string, reasonText?: string) {
+    await postRaw(
+      `/investigation-orders/${encodeURIComponent(orderId)}/lines/${encodeURIComponent(lineId)}/cancel`,
+      { reasonCode, reasonText },
+      crypto.randomUUID(),
+    );
+  }
+
+  async amendOrderLine(
+    orderId: string, lineId: string, quantityOrdered: number, reasonCode: string, reasonText?: string,
+  ) {
+    await postRaw(
+      `/investigation-orders/${encodeURIComponent(orderId)}/lines/${encodeURIComponent(lineId)}/amend`,
+      { quantityOrdered, reasonCode, reasonText },
+      crypto.randomUUID(),
+    );
+  }
+
+  async cancelPrescriptionLine(rxId: string, lineId: string, reasonCode: string, reasonText?: string) {
+    await postRaw(
+      `/prescriptions/${encodeURIComponent(rxId)}/lines/${encodeURIComponent(lineId)}/cancel`,
+      { reasonCode, reasonText },
+      crypto.randomUUID(),
+    );
+  }
+
+  async amendPrescriptionLine(
+    rxId: string, lineId: string, quantityPrescribed: number, reasonCode: string, reasonText?: string,
+  ) {
+    await postRaw(
+      `/prescriptions/${encodeURIComponent(rxId)}/lines/${encodeURIComponent(lineId)}/amend`,
+      { quantityPrescribed, reasonCode, reasonText },
+      crypto.randomUUID(),
+    );
   }
 
   async cancelAppointment(appointmentId: string, reason: string, rowVersion?: number) {
