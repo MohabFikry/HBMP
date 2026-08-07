@@ -71,6 +71,18 @@ public static class CareSteps
     /// leaves the medicine looking live to anyone reading the episode.</summary>
     public const string PrescriptionCancelled = "PrescriptionCancelled";
     public const string MedicineDispensed = "MedicineDispensed";
+
+    // ---- 30.5 — line-level amendment (design 46 §6) ----
+    //
+    // Four steps, not two, and not folded into OrderCancelled / PrescriptionCancelled. Withdrawing ONE test
+    // from a three-line order is a different fact from withdrawing the order, and a timeline that said the
+    // latter would have a desk telling a patient their bloods were cancelled when two of the three still
+    // stand. CORRECTED is separate again: the item was not withdrawn, it was changed, and the successor is
+    // live — a reader who saw "cancelled" would chase a replacement that already exists.
+    public const string OrderLineCancelled = "OrderLineCancelled";
+    public const string OrderLineAmended = "OrderLineAmended";
+    public const string PrescriptionLineCancelled = "PrescriptionLineCancelled";
+    public const string PrescriptionLineAmended = "PrescriptionLineAmended";
 }
 
 public static class CareStepSources

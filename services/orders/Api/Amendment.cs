@@ -72,9 +72,20 @@ public static class AmendmentEndpoints
                 // exemption by the block — the braces are load-bearing for the check, not style.
                 insideTransaction: async (o, line, record, innerCt) =>
                 {
-                    await outbox.EnqueueAsync(AmendmentEvents.LineCancelled, AmendmentEvents.DomainStream,
-                        AmendmentEvents.Domain(o, line, record, null), innerCt);
-                    await outbox.EnqueueAsync(AmendmentEvents.LineCancelled, AmendmentEvents.NotificationQueue,
+                    await outbox.EnqueueAsync("OrderLineCancelled", "orders.events", new
+                        {
+                            tenantId = o.TenantId, orderId = o.OrderId, o.OrderNo,
+                            // encounterId is MANDATORY on a mirrored event and is written out here rather
+                            // than behind a helper: CareFeedEnvelopeArchitectureTests reads the payload at
+                            // the call site, and a step it cannot place is dropped in silence.
+                            encounterId = o.EncounterId, beneficiaryId = o.BeneficiaryId,
+                            orderLineId = line.OrderLineId, newLineId = (Guid?)null,
+                            code = line.Code, orderType = o.OrderType.ToString(),
+                            reasonCode = record.ReasonCode, reasonText = record.ReasonText,
+                            amendedByUserId = record.AmendedBy, amendedAt = record.AmendedAt,
+                            assignedProviderId = o.AssignedProviderId,
+                        }, innerCt);
+                    await outbox.EnqueueAsync("OrderLineCancelled", AmendmentEvents.NotificationQueue,
                         AmendmentEvents.Notification(o, line, record), innerCt);
                 }, ct);
 
@@ -104,9 +115,20 @@ public static class AmendmentEndpoints
                 actor, me.Principal?.DisplayName, clock.GetUtcNow(),
                 insideTransaction: async (o, line, record, innerCt) =>
                 {
-                    await outbox.EnqueueAsync(AmendmentEvents.LineAmended, AmendmentEvents.DomainStream,
-                        AmendmentEvents.Domain(o, line, record, record.NewLineId), innerCt);
-                    await outbox.EnqueueAsync(AmendmentEvents.LineAmended, AmendmentEvents.NotificationQueue,
+                    await outbox.EnqueueAsync("OrderLineAmended", "orders.events", new
+                        {
+                            tenantId = o.TenantId, orderId = o.OrderId, o.OrderNo,
+                            // encounterId is MANDATORY on a mirrored event and is written out here rather
+                            // than behind a helper: CareFeedEnvelopeArchitectureTests reads the payload at
+                            // the call site, and a step it cannot place is dropped in silence.
+                            encounterId = o.EncounterId, beneficiaryId = o.BeneficiaryId,
+                            orderLineId = line.OrderLineId, newLineId = record.NewLineId,
+                            code = line.Code, orderType = o.OrderType.ToString(),
+                            reasonCode = record.ReasonCode, reasonText = record.ReasonText,
+                            amendedByUserId = record.AmendedBy, amendedAt = record.AmendedAt,
+                            assignedProviderId = o.AssignedProviderId,
+                        }, innerCt);
+                    await outbox.EnqueueAsync("OrderLineAmended", AmendmentEvents.NotificationQueue,
                         AmendmentEvents.Notification(o, line, record), innerCt);
                     // 30.4 — approvals is told ONLY when the amendment left the approved scope (design 46 §5).
                     // `line` here is the row as it was BEFORE the amendment, which is exactly the "before"
@@ -117,9 +139,22 @@ public static class AmendmentEndpoints
                             new ApprovedScope([line.Code], line.QuantityOrdered, null))
                             == AuthorizationImpact.BeyondApprovedScope)
                     {
-                        await outbox.EnqueueAsync(AmendmentEvents.PendingApproval,
-                            AmendmentEvents.DomainStream,
-                            AmendmentEvents.BeyondScope(o, line, req.QuantityOrdered, record), innerCt);
+                        await outbox.EnqueueAsync("OrderPendingApproval", "orders.events", new
+                        {
+                            tenantId = o.TenantId, orderId = o.OrderId, o.OrderNo,
+                            encounterId = o.EncounterId, beneficiaryId = o.BeneficiaryId,
+                            authorizationId = o.AuthorizationId,
+                            orderLineId = line.OrderLineId, newLineId = record.NewLineId,
+                            code = line.Code,
+                            // The BEFORE and AFTER, so the reviewer is not made to re-derive the change
+                            // from two screens (design 46 §5).
+                            previousQuantity = line.QuantityOrdered,
+                            amendedQuantity = req.QuantityOrdered,
+                            reason = "amended-beyond-approved-scope",
+                            reasonCode = record.ReasonCode, reasonText = record.ReasonText,
+                            orderedByUserId = record.AmendedBy.ToString(),
+                            amendedAt = record.AmendedAt,
+                        }, innerCt);
                     }
                 }, ct);
 
@@ -175,9 +210,20 @@ public static class AmendmentEndpoints
                     new AmendReason(req.ReasonCode, req.ReasonText), actor, me.Principal?.DisplayName, now,
                     insideTransaction: async (o, l, record, innerCt) =>
                     {
-                        await outbox.EnqueueAsync(AmendmentEvents.LineCancelled, AmendmentEvents.DomainStream,
-                            AmendmentEvents.Domain(o, l, record, null), innerCt);
-                        await outbox.EnqueueAsync(AmendmentEvents.LineCancelled, AmendmentEvents.NotificationQueue,
+                        await outbox.EnqueueAsync("OrderLineCancelled", "orders.events", new
+                        {
+                            tenantId = o.TenantId, orderId = o.OrderId, o.OrderNo,
+                            // encounterId is MANDATORY on a mirrored event and is written out here rather
+                            // than behind a helper: CareFeedEnvelopeArchitectureTests reads the payload at
+                            // the call site, and a step it cannot place is dropped in silence.
+                            encounterId = o.EncounterId, beneficiaryId = o.BeneficiaryId,
+                            orderLineId = l.OrderLineId, newLineId = (Guid?)null,
+                            code = l.Code, orderType = o.OrderType.ToString(),
+                            reasonCode = record.ReasonCode, reasonText = record.ReasonText,
+                            amendedByUserId = record.AmendedBy, amendedAt = record.AmendedAt,
+                            assignedProviderId = o.AssignedProviderId,
+                        }, innerCt);
+                        await outbox.EnqueueAsync("OrderLineCancelled", AmendmentEvents.NotificationQueue,
                             AmendmentEvents.Notification(o, l, record), innerCt);
                     }, ct);
 

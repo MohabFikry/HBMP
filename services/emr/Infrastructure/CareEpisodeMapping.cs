@@ -70,6 +70,13 @@ public static class CareEpisodeMapping
                     Str(root, "orderedByUserId"), CareStepSources.Orders),
                 "OrderCancelled" => Draft(CareSteps.OrderCancelled, encounterId.Value, orderNo,
                     Str(root, "cancelledByUserId"), CareStepSources.Orders),
+                // 30.5 — line level. The actor is `amendedByUserId`: unlike consume, an amendment always has
+                // a named clinician behind it, and the episode's value here is largely "who changed my
+                // patient's order".
+                "OrderLineCancelled" => Draft(CareSteps.OrderLineCancelled, encounterId.Value, orderNo,
+                    Str(root, "amendedByUserId"), CareStepSources.Orders),
+                "OrderLineAmended" => Draft(CareSteps.OrderLineAmended, encounterId.Value, orderNo,
+                    Str(root, "amendedByUserId"), CareStepSources.Orders),
                 // Consume and result carry no actor. The person who ran the test is a lab technician at a
                 // performing provider, and the payload names the FACILITY, not a subject emr could resolve to
                 // a name — so the step says so rather than rendering a truncated uuid as "who did this".
@@ -92,6 +99,10 @@ public static class CareEpisodeMapping
                     : null,
                 "RxCancelled" => Draft(CareSteps.PrescriptionCancelled, encounterId.Value, rxNo,
                     Str(root, "cancelledByUserId"), CareStepSources.Pharmacy),
+                "PrescriptionLineCancelled" => Draft(CareSteps.PrescriptionLineCancelled, encounterId.Value,
+                    rxNo, Str(root, "amendedByUserId"), CareStepSources.Pharmacy),
+                "PrescriptionLineAmended" => Draft(CareSteps.PrescriptionLineAmended, encounterId.Value,
+                    rxNo, Str(root, "amendedByUserId"), CareStepSources.Pharmacy),
                 "RxLinesDispensed" => Draft(CareSteps.MedicineDispensed, encounterId.Value, rxNo,
                     null, CareStepSources.Pharmacy),
 

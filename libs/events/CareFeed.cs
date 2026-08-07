@@ -55,9 +55,16 @@ public static class CareFeed
         // orders.events — the investigation leg: ordered, routed for approval, cancelled, sample taken,
         // result back.
         "OrderCreated", "OrderPendingApproval", "OrderCancelled", "OrderLinesConsumed", "OrderResultUploaded",
+        // 30.5 — a LINE withdrawn or corrected is a step in the visit. Distinct from OrderCancelled, which is
+        // the whole order: a doctor reading the episode of a three-line order must be able to tell "one test
+        // was withdrawn" from "the order was withdrawn", and collapsing them would make a partial withdrawal
+        // read as a total one on the surface a desk uses to answer the patient.
+        "OrderLineCancelled", "OrderLineAmended",
 
         // pharmacy.events — the medication leg: written, routed for approval, cancelled, handed over.
         "RxCreated", "RxSubmitted", "RxCancelled", "RxLinesDispensed",
+        // 30.5 — the medication twin. A withdrawn DRUG is not a withdrawn prescription.
+        "PrescriptionLineCancelled", "PrescriptionLineAmended",
 
         // approvals.events — the DECISION only.
         //

@@ -37,6 +37,22 @@ namespace Mersal.Orders.Api;
 /// </summary>
 public static class AmendmentEvents
 {
+    // THE PAYLOADS ARE INLINE AT THE CALL SITES TOO, and the domain-payload builders that used to live here
+    // are gone. CareFeedEnvelopeArchitectureTests and TenantOnEnvelopeArchitectureTests both read the
+    // anonymous object that FOLLOWS the queue argument, to prove `encounterId` and `tenantId` are on the
+    // wire. A helper hid both from them — and a mirrored event missing its encounter does not fail, warn or
+    // dead-letter: the consumer correctly declines to place the step, acks, and the timeline is quietly
+    // missing the order. That is the exact defect this scan was written for. The duplication is the price of
+    // the check being able to see what it checks.
+    //
+    // What remains here is the NOTIFICATION payload, which no scan reads because the notification queue is
+    // not tenant-bound in the same way and carries no episode.
+    //
+    // The names are LITERALS at the enqueue sites, not these constants. CareFeedEnvelopeArchitectureTests
+    // scans source for a mirrored event's name beside its payload to prove `encounterId` is on the wire — a
+    // step without it has no episode, and a step on the WRONG episode is worse than a missing one. A constant
+    // hides the name from that scan, exactly as a helper method hid the enqueue from OutboxAtomicityTests.
+    // These remain as the catalogue, and are what non-scanned code should reference.
     public const string LineCancelled = "OrderLineCancelled";
     public const string LineAmended = "OrderLineAmended";
 
@@ -89,27 +105,6 @@ public static class AmendmentEvents
         amendedAt = record.AmendedAt,
     };
 
-    /// <summary><c>encounterId</c> is mandatory on anything the care feed mirrors: without it a step has no
-    /// episode to attach to, and a step on the WRONG episode is worse than a missing one. Asserted by
-    /// <c>CareFeedEnvelopeArchitectureTests</c>, which fails the build if a mirrored payload drops it.</summary>
-    public static object Domain(
-        InvestigationOrder order, OrderLine line, LineAmendmentRecord record, Guid? newLineId) => new
-    {
-        tenantId = order.TenantId,
-        orderId = order.OrderId,
-        order.OrderNo,
-        encounterId = order.EncounterId,
-        beneficiaryId = order.BeneficiaryId,
-        orderLineId = line.OrderLineId,
-        newLineId,
-        code = line.Code,
-        orderType = order.OrderType.ToString(),
-        reasonCode = record.ReasonCode,
-        reasonText = record.ReasonText,
-        amendedByUserId = record.AmendedBy,
-        amendedAt = record.AmendedAt,
-        assignedProviderId = order.AssignedProviderId,
-    };
 
     /// <summary>
     /// The notification-shaped copy (design 46 §6). The publisher names the RECIPIENTS because only it knows

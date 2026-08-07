@@ -19,6 +19,22 @@ namespace Mersal.Pharmacy.Api;
 /// </summary>
 public static class RxAmendmentEvents
 {
+    // THE PAYLOADS ARE INLINE AT THE CALL SITES TOO, and the domain-payload builders that used to live here
+    // are gone. CareFeedEnvelopeArchitectureTests and TenantOnEnvelopeArchitectureTests both read the
+    // anonymous object that FOLLOWS the queue argument, to prove `encounterId` and `tenantId` are on the
+    // wire. A helper hid both from them — and a mirrored event missing its encounter does not fail, warn or
+    // dead-letter: the consumer correctly declines to place the step, acks, and the timeline is quietly
+    // missing the order. That is the exact defect this scan was written for. The duplication is the price of
+    // the check being able to see what it checks.
+    //
+    // What remains here is the NOTIFICATION payload, which no scan reads because the notification queue is
+    // not tenant-bound in the same way and carries no episode.
+    //
+    // The names are LITERALS at the enqueue sites, not these constants. CareFeedEnvelopeArchitectureTests
+    // scans source for a mirrored event's name beside its payload to prove `encounterId` is on the wire — a
+    // step without it has no episode, and a step on the WRONG episode is worse than a missing one. A constant
+    // hides the name from that scan, exactly as a helper method hid the enqueue from OutboxAtomicityTests.
+    // These remain as the catalogue, and are what non-scanned code should reference.
     public const string LineCancelled = "PrescriptionLineCancelled";
     public const string LineAmended = "PrescriptionLineAmended";
 
@@ -33,48 +49,7 @@ public static class RxAmendmentEvents
     /// </summary>
     public const string PendingApproval = "RxSubmitted";
 
-    /// <summary>The before/after a reviewer needs, so they are not made to re-derive the change.</summary>
-    public static object BeyondScope(
-        Prescription rx, PrescriptionLine before, decimal amendedQuantity, LineAmendmentRecord record) => new
-    {
-        tenantId = rx.TenantId,
-        prescriptionId = rx.PrescriptionId,
-        rx.RxNo,
-        encounterId = rx.EncounterId,
-        beneficiaryId = rx.BeneficiaryId,
-        authorizationId = rx.AuthorizationId,
-        prescriptionLineId = before.PrescriptionLineId,
-        newLineId = record.NewLineId,
-        drugId = before.DrugId,
-        drugName = before.DrugName,
-        previousQuantity = before.QuantityPrescribed,
-        amendedQuantity,
-        requiresApproval = true,
-        orderedByUserId = record.AmendedBy.ToString(),
-        reason = "amended-beyond-approved-scope",
-        reasonCode = record.ReasonCode,
-        amendedAt = record.AmendedAt,
-    };
 
-    /// <summary><c>encounterId</c> is mandatory on anything the care feed mirrors — a step without it has no
-    /// episode, and a step on the wrong episode is worse than a missing one.</summary>
-    public static object Domain(
-        Prescription rx, PrescriptionLine line, LineAmendmentRecord record, Guid? newLineId) => new
-    {
-        tenantId = rx.TenantId,
-        prescriptionId = rx.PrescriptionId,
-        rx.RxNo,
-        encounterId = rx.EncounterId,
-        beneficiaryId = rx.BeneficiaryId,
-        prescriptionLineId = line.PrescriptionLineId,
-        newLineId,
-        drugId = line.DrugId,
-        drugName = line.DrugName,
-        reasonCode = record.ReasonCode,
-        reasonText = record.ReasonText,
-        amendedByUserId = record.AmendedBy,
-        amendedAt = record.AmendedAt,
-    };
 
     public static object Notification(Prescription rx, PrescriptionLine line, LineAmendmentRecord record) =>
         new

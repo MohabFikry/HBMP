@@ -69,9 +69,17 @@ public static class RxAmendmentEndpoints
                 // recognises the exemption by the block.
                 insideTransaction: async (p, line, record, innerCt) =>
                 {
-                    await outbox.EnqueueAsync(RxAmendmentEvents.LineCancelled, RxAmendmentEvents.DomainStream,
-                        RxAmendmentEvents.Domain(p, line, record, null), innerCt);
-                    await outbox.EnqueueAsync(RxAmendmentEvents.LineCancelled, RxAmendmentEvents.NotificationQueue,
+                    await outbox.EnqueueAsync("PrescriptionLineCancelled", "pharmacy.events", new
+                        {
+                            tenantId = p.TenantId, prescriptionId = p.PrescriptionId, p.RxNo,
+                            // encounterId is MANDATORY on a mirrored event — see the orders twin.
+                            encounterId = p.EncounterId, beneficiaryId = p.BeneficiaryId,
+                            prescriptionLineId = line.PrescriptionLineId, newLineId = (Guid?)null,
+                            drugId = line.DrugId, drugName = line.DrugName,
+                            reasonCode = record.ReasonCode, reasonText = record.ReasonText,
+                            amendedByUserId = record.AmendedBy, amendedAt = record.AmendedAt,
+                        }, innerCt);
+                    await outbox.EnqueueAsync("PrescriptionLineCancelled", RxAmendmentEvents.NotificationQueue,
                         RxAmendmentEvents.Notification(p, line, record), innerCt);
                 }, ct);
 
@@ -102,9 +110,17 @@ public static class RxAmendmentEndpoints
                 actor, me.Principal?.DisplayName, clock.GetUtcNow(),
                 insideTransaction: async (p, line, record, innerCt) =>
                 {
-                    await outbox.EnqueueAsync(RxAmendmentEvents.LineAmended, RxAmendmentEvents.DomainStream,
-                        RxAmendmentEvents.Domain(p, line, record, record.NewLineId), innerCt);
-                    await outbox.EnqueueAsync(RxAmendmentEvents.LineAmended, RxAmendmentEvents.NotificationQueue,
+                    await outbox.EnqueueAsync("PrescriptionLineAmended", "pharmacy.events", new
+                        {
+                            tenantId = p.TenantId, prescriptionId = p.PrescriptionId, p.RxNo,
+                            // encounterId is MANDATORY on a mirrored event — see the orders twin.
+                            encounterId = p.EncounterId, beneficiaryId = p.BeneficiaryId,
+                            prescriptionLineId = line.PrescriptionLineId, newLineId = record.NewLineId,
+                            drugId = line.DrugId, drugName = line.DrugName,
+                            reasonCode = record.ReasonCode, reasonText = record.ReasonText,
+                            amendedByUserId = record.AmendedBy, amendedAt = record.AmendedAt,
+                        }, innerCt);
+                    await outbox.EnqueueAsync("PrescriptionLineAmended", RxAmendmentEvents.NotificationQueue,
                         RxAmendmentEvents.Notification(p, line, record), innerCt);
                     // 30.4 — approvals is told ONLY when the amendment left the approved scope. `line` is the
                     // row as it was BEFORE, which is the "before" half the reviewer needs.
@@ -114,9 +130,23 @@ public static class RxAmendmentEndpoints
                             new ApprovedScope([line.DrugId.ToString()], line.QuantityPrescribed, line.DurationDays))
                             == AuthorizationImpact.BeyondApprovedScope)
                     {
-                        await outbox.EnqueueAsync(RxAmendmentEvents.PendingApproval,
-                            RxAmendmentEvents.DomainStream,
-                            RxAmendmentEvents.BeyondScope(p, line, req.QuantityPrescribed, record), innerCt);
+                        await outbox.EnqueueAsync("RxSubmitted", "pharmacy.events", new
+                        {
+                            tenantId = p.TenantId, prescriptionId = p.PrescriptionId, p.RxNo,
+                            encounterId = p.EncounterId, beneficiaryId = p.BeneficiaryId,
+                            authorizationId = p.AuthorizationId,
+                            prescriptionLineId = line.PrescriptionLineId, newLineId = record.NewLineId,
+                            drugId = line.DrugId, drugName = line.DrugName,
+                            previousQuantity = line.QuantityPrescribed,
+                            amendedQuantity = req.QuantityPrescribed,
+                            // The care timeline maps RxSubmitted to a step ONLY when this flag is set, which
+                            // is exactly right here: the script really has gone back for approval.
+                            requiresApproval = true,
+                            reason = "amended-beyond-approved-scope",
+                            reasonCode = record.ReasonCode,
+                            orderedByUserId = record.AmendedBy.ToString(),
+                            amendedAt = record.AmendedAt,
+                        }, innerCt);
                     }
                 }, ct);
 
@@ -150,9 +180,17 @@ public static class RxAmendmentEndpoints
                 clock.GetUtcNow(), EarlyToleranceDays,
                 insideTransaction: async (p, line, record, innerCt) =>
                 {
-                    await outbox.EnqueueAsync(RxAmendmentEvents.LineAmended, RxAmendmentEvents.DomainStream,
-                        RxAmendmentEvents.Domain(p, line, record, record.NewLineId), innerCt);
-                    await outbox.EnqueueAsync(RxAmendmentEvents.LineAmended, RxAmendmentEvents.NotificationQueue,
+                    await outbox.EnqueueAsync("PrescriptionLineAmended", "pharmacy.events", new
+                        {
+                            tenantId = p.TenantId, prescriptionId = p.PrescriptionId, p.RxNo,
+                            // encounterId is MANDATORY on a mirrored event — see the orders twin.
+                            encounterId = p.EncounterId, beneficiaryId = p.BeneficiaryId,
+                            prescriptionLineId = line.PrescriptionLineId, newLineId = record.NewLineId,
+                            drugId = line.DrugId, drugName = line.DrugName,
+                            reasonCode = record.ReasonCode, reasonText = record.ReasonText,
+                            amendedByUserId = record.AmendedBy, amendedAt = record.AmendedAt,
+                        }, innerCt);
+                    await outbox.EnqueueAsync("PrescriptionLineAmended", RxAmendmentEvents.NotificationQueue,
                         RxAmendmentEvents.Notification(p, line, record), innerCt);
                     // 30.4 — on the CHRONIC path the dimension that leaves the approved scope is the
                     // DURATION: extending a course beyond what a reviewer approved is the same act as
@@ -163,9 +201,21 @@ public static class RxAmendmentEndpoints
                             new ApprovedScope([line.DrugId.ToString()], line.QuantityPrescribed, line.DurationDays))
                             == AuthorizationImpact.BeyondApprovedScope)
                     {
-                        await outbox.EnqueueAsync(RxAmendmentEvents.PendingApproval,
-                            RxAmendmentEvents.DomainStream,
-                            RxAmendmentEvents.BeyondScope(p, line, line.QuantityPrescribed, record), innerCt);
+                        await outbox.EnqueueAsync("RxSubmitted", "pharmacy.events", new
+                        {
+                            tenantId = p.TenantId, prescriptionId = p.PrescriptionId, p.RxNo,
+                            encounterId = p.EncounterId, beneficiaryId = p.BeneficiaryId,
+                            authorizationId = p.AuthorizationId,
+                            prescriptionLineId = line.PrescriptionLineId, newLineId = record.NewLineId,
+                            drugId = line.DrugId, drugName = line.DrugName,
+                            previousDurationDays = line.DurationDays,
+                            amendedDurationDays = req.DurationDays,
+                            requiresApproval = true,
+                            reason = "amended-beyond-approved-scope",
+                            reasonCode = record.ReasonCode,
+                            orderedByUserId = record.AmendedBy.ToString(),
+                            amendedAt = record.AmendedAt,
+                        }, innerCt);
                     }
                 }, ct);
 
@@ -268,9 +318,17 @@ public static class RxAmendmentEndpoints
                     new AmendReason(req.ReasonCode, req.ReasonText), actor, me.Principal?.DisplayName, now,
                     insideTransaction: async (p, l, record, innerCt) =>
                     {
-                        await outbox.EnqueueAsync(RxAmendmentEvents.LineCancelled, RxAmendmentEvents.DomainStream,
-                            RxAmendmentEvents.Domain(p, l, record, null), innerCt);
-                        await outbox.EnqueueAsync(RxAmendmentEvents.LineCancelled, RxAmendmentEvents.NotificationQueue,
+                        await outbox.EnqueueAsync("PrescriptionLineCancelled", "pharmacy.events", new
+                        {
+                            tenantId = p.TenantId, prescriptionId = p.PrescriptionId, p.RxNo,
+                            // encounterId is MANDATORY on a mirrored event — see the orders twin.
+                            encounterId = p.EncounterId, beneficiaryId = p.BeneficiaryId,
+                            prescriptionLineId = l.PrescriptionLineId, newLineId = (Guid?)null,
+                            drugId = l.DrugId, drugName = l.DrugName,
+                            reasonCode = record.ReasonCode, reasonText = record.ReasonText,
+                            amendedByUserId = record.AmendedBy, amendedAt = record.AmendedAt,
+                        }, innerCt);
+                        await outbox.EnqueueAsync("PrescriptionLineCancelled", RxAmendmentEvents.NotificationQueue,
                             RxAmendmentEvents.Notification(p, l, record), innerCt);
                     }, ct);
 
