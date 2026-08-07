@@ -36,6 +36,7 @@ builder.Services.AddMemoryCache();
 builder.Services.AddScoped<PharmacyGate>();
 builder.Services.AddScoped<DispensingGate>();
 builder.Services.AddScoped<DispenseExecutor>();
+builder.Services.AddScoped<AmendExecutor>();   // 30.2 — the guarded cancel/amend transition
 // Gives expiry a MOMENT: without it a lapsed prescription reads "Approved" for ever in the row, the reports
 // drawn from it and the audit trail, even though no counter can dispense it.
 builder.Services.AddHostedService<PrescriptionExpirySweeper>();
@@ -119,6 +120,7 @@ app.MapHealthChecks("/health/ready").AllowAnonymous();
 app.MapPrescriptions();
 app.MapRxPricing();     // what the prescription costs, and the member/payer split from eligibility
 app.MapDispensing();
+app.MapRxAmendment();  // 30.2 — cancel/amend a signed prescription at LINE level (design 46 §1-§3)
 app.MapExtendValidity();   // approvals calls this when a validity-extension request is approved
 app.MapReferrals();
 app.MapProfileSections();  // 20.2 — the profile's prescriptions + referrals sections (provider-ownership here)

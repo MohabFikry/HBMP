@@ -23,5 +23,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\libs\beneficiary-lookup\Mersal.BeneficiaryLookup.csproj" />
+    <ProjectReference Include="..\..\..\libs\amendment\Mersal.Amendment.csproj" />
   </ItemGroup>
 </Project>

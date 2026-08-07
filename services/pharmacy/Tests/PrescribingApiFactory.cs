@@ -113,6 +113,9 @@ public sealed class PrescribingApiFactory : WebApplicationFactory<Program>
         if (Db is null) return;
         await using var db = Ctx();
         await db.Database.ExecuteSqlRawAsync(
+            // 30.1 — the amendment ledger references the lines, so it goes first.
+            "DELETE FROM pharmacy.line_amendment WHERE prescription_id IN " +
+            "  (SELECT prescription_id FROM pharmacy.prescription WHERE beneficiary_id = {0}); " +
             "DELETE FROM pharmacy.prescription_line_override WHERE prescription_id IN " +
             "  (SELECT prescription_id FROM pharmacy.prescription WHERE beneficiary_id = {0}); " +
             "DELETE FROM pharmacy.prescription_validation WHERE beneficiary_id = {0}; " +

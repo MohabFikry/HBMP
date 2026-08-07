@@ -9,6 +9,16 @@ namespace Mersal.Pharmacy.Infrastructure;
 public enum DispenseOutcome
 {
     Applied, Replayed, Conflict, NotFound, AlreadyDispensed, OverDispense, RxNotDispensable, LineNotFound, InvalidQuantity, ExpiredLot,
+    /// <summary>
+    /// 30.2 — THE MIRROR of the cancel path (design 46 §2). The line was CANCELLED or SUPERSEDED by the
+    /// prescriber, and nothing was handed over.
+    ///
+    /// <para>Deliberately not folded into <see cref="AlreadyDispensed"/>. They look alike from the code's
+    /// side — both mean "you may not dispense this" — and send the pharmacist to opposite places: one is a
+    /// patient who already has their medicine, the other is a patient standing at the counter whose doctor
+    /// withdrew it, who needs to be told why and, when it was amended, pointed at the corrected line.</para>
+    /// </summary>
+    LineWithdrawn,
     /// <summary>18.A3 — the header is empty, over-length, or contains the reserved <c>::</c> separator.</summary>
     InvalidIdempotencyKey,
     /// <summary>18.A3 — the key was already used for a DIFFERENT dispense (changed quantity, batch or
@@ -17,9 +27,21 @@ public enum DispenseOutcome
     IdempotencyKeyReuse,
 }
 
-public sealed record DispenseResult(DispenseOutcome Outcome, Prescription? Prescription, DispenseEvent? Event)
+/// <summary>
+/// 30.2 — why the line was withdrawn, in the words the counter needs (design 46 §2).
+///
+/// <para><see cref="SupersededById"/> is the load-bearing field. Without it a pharmacist told "this was
+/// amended" has no way to find the corrected line, and a patient goes home empty-handed while a perfectly
+/// valid prescription sits in the system — a refusal that is technically right and operationally useless.</para>
+/// </summary>
+public sealed record LineWithdrawal(
+    string Status, string? ReasonCode, string? ReasonText, Guid? By, DateTimeOffset? At, Guid? SupersededById);
+
+public sealed record DispenseResult(
+    DispenseOutcome Outcome, Prescription? Prescription, DispenseEvent? Event, LineWithdrawal? Withdrawal = null)
 {
-    public static DispenseResult Fail(DispenseOutcome outcome) => new(outcome, null, null);
+    public static DispenseResult Fail(DispenseOutcome outcome, LineWithdrawal? withdrawal = null) =>
+        new(outcome, null, null, withdrawal);
 }
 
 /// <summary>The heart of phase 6 in one place (23-state-machines §3 "Pharmacy-specific guards") so the endpoint and
@@ -61,7 +83,18 @@ public sealed class DispenseExecutor(PharmacyDbContext db)
                 : DispenseResult.Fail(DispenseOutcome.IdempotencyKeyReuse);
 
         var error = Domain.Dispensing.Validate(rx, lineId, quantity, expiryDate, now);
-        if (error != DispenseError.None) return DispenseResult.Fail(Map(error));
+        if (error != DispenseError.None)
+        {
+            // 30.2 — THE MIRROR. A withdrawn line is not "already dispensed": nothing was handed over, and
+            // the pharmacist needs the reason, the prescriber and — if it was amended — where the corrected
+            // line is. Answering with a generic refusal sends them to ring the doctor who already decided.
+            var withdrawn = rx.Lines.FirstOrDefault(l => l.PrescriptionLineId == lineId);
+            if (withdrawn is { Status: RxLineStatus.Cancelled or RxLineStatus.Superseded })
+                return DispenseResult.Fail(DispenseOutcome.LineWithdrawn, new LineWithdrawal(
+                    withdrawn.Status.ToString(), withdrawn.AmendmentReasonCode, withdrawn.AmendmentReasonText,
+                    withdrawn.AmendedBy, withdrawn.AmendedAt, withdrawn.SupersededById));
+            return DispenseResult.Fail(Map(error));
+        }
 
         var line = rx.Lines.First(l => l.PrescriptionLineId == lineId);
         line.QuantityDispensed += quantity;
