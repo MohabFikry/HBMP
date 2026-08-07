@@ -77,6 +77,6 @@ CREATE POLICY rls_care_timeline ON emr.care_timeline
 
 -- A row belonging to no tenant is invisible to every tenant and deletable by none — 0015's rule, applied to
 -- the new table rather than discovered on it later.
-ALTER TABLE emr.care_timeline DROP CONSTRAINT IF EXISTS ck_care_timeline_tenant_not_blank;
+ALTER TABLE emr.care_timeline DROP CONSTRAINT IF EXISTS ck_care_timeline_tenant_not_blank;  -- migrate-compat: contract-ok (re-added immediately below; the drop exists only to make this migration re-runnable)
 ALTER TABLE emr.care_timeline ADD CONSTRAINT ck_care_timeline_tenant_not_blank
     CHECK (length(btrim(tenant_id)) > 0);

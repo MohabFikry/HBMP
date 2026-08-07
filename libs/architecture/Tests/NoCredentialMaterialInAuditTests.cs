@@ -74,6 +74,24 @@ public class NoCredentialMaterialInAuditTests
     }
 
     [Fact]
+    public void The_scanner_does_not_fire_on_prose_that_merely_mentions_a_password()
+    {
+        // The realistic false positive, and the one that turned this check red: an INTERPOLATED log message
+        // whose English names what is being reset. The only variable reaching the log is `user.Id`.
+        //
+        // Worth a test of its own rather than a quiet regex tweak. A guard that fires on correct code gets
+        // suppressed, and the suppression outlives the false positive — so the shape that provoked it is
+        // pinned here, on the side of the line where it belongs.
+        var sample = """
+            .LogError(ex, "Password-reset email could not be sent for user {UserId}.", user.Id);
+            """;
+
+        PublishingCall.IsMatch(sample).Should().BeTrue("it is a log call, so it is still worth scanning");
+        Credential.IsMatch(StripCommentsAndStrings(sample)).Should().BeFalse(
+            "the word 'Password' in a message is prose; what matters is the VARIABLES that reach the log");
+    }
+
+    [Fact]
     public void The_scanner_does_not_fire_on_a_clean_audit_call()
     {
         var sample = """
@@ -85,19 +103,27 @@ public class NoCredentialMaterialInAuditTests
     }
 
     /// <summary>
-    /// Drop comments and string literals before matching.
+    /// Drop comments and string literals before matching, keeping only interpolation holes.
     ///
     /// Without this the check fires on its own explanatory comments and on outcome names like
     /// "UserPasswordReset" — which are exactly what a good audit event SHOULD say. What matters is whether
     /// a credential-bearing VARIABLE is being passed, and that survives this stripping.
     /// </summary>
+    /// <remarks>
+    /// A string literal contributes NOTHING but its <c>{…}</c> holes. The earlier version stripped only
+    /// literals containing no brace, which meant an INTERPOLATED message kept its prose — so
+    /// <c>LogError(ex, "Password-reset email could not be sent for user {UserId}.", user.Id)</c> was reported
+    /// as credential material on the strength of the word "Password" in an English sentence. A guard that
+    /// fires on correct code is a guard that gets suppressed, and the suppression outlives the false
+    /// positive. Holes are still kept, because <c>{user.PasswordHash}</c> inside a message IS the mistake.
+    /// </remarks>
     private static string StripCommentsAndStrings(string source)
     {
         var noBlockComments = Regex.Replace(source, @"/\*.*?\*/", " ", RegexOptions.Singleline);
         var noLineComments = Regex.Replace(noBlockComments, @"//[^\n]*", " ");
-        // Interpolation holes are kept: `{user.PasswordHash}` inside a string IS the mistake.
-        var noPlainStrings = Regex.Replace(noLineComments, @"""(?:[^""\\{]|\\.)*""", " ");
-        return noPlainStrings;
+
+        return Regex.Replace(noLineComments, @"""(?:[^""\\]|\\.)*""", literal =>
+            " " + string.Join(' ', Regex.Matches(literal.Value, @"\{([^{}]+)\}").Select(h => h.Groups[1].Value)) + " ");
     }
 
     private static IEnumerable<(string Absolute, string Relative)> ProductionFiles()

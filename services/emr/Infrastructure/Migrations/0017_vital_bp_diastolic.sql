@@ -14,7 +14,7 @@
 -- number, one LOINC code, and a `value_num_2` that is null for six of the seven types would put the exception
 -- in the shape of the table instead of in the pair that actually has it.
 
-ALTER TABLE emr.vital DROP CONSTRAINT IF EXISTS vital_vital_type_check;
+ALTER TABLE emr.vital DROP CONSTRAINT IF EXISTS vital_vital_type_check;  -- migrate-compat: contract-ok (re-added immediately below with 'BPd' added to the allowed set — a WIDENING, so no row valid before is invalid after)
 ALTER TABLE emr.vital ADD CONSTRAINT vital_vital_type_check
     CHECK (vital_type IN ('BP','BPDiastolic','HR','Temp','SpO2','Weight','Height','BMI'));
 

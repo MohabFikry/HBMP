@@ -16,7 +16,7 @@ ALTER TABLE callcentre.caller_verification
 
 -- NOT VALID so the existing rows are not scanned: they already satisfy it via the default, and a validating
 -- scan on a table this hot buys nothing. Run VALIDATE CONSTRAINT out of hours if a full check is ever wanted.
-ALTER TABLE callcentre.caller_verification DROP CONSTRAINT IF EXISTS caller_verification_method_chk;
+ALTER TABLE callcentre.caller_verification DROP CONSTRAINT IF EXISTS caller_verification_method_chk;  -- migrate-compat: contract-ok (dropped and re-added in the same statement pair to widen the allowed set; the constraint never governs a running release without its replacement)
 ALTER TABLE callcentre.caller_verification
     ADD CONSTRAINT caller_verification_method_chk
     CHECK (method IN ('OnSystem', 'OffSystem')) NOT VALID;

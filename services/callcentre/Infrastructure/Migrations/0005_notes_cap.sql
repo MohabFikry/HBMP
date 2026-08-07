@@ -18,7 +18,7 @@
 -- refuses to apply because of historical data is a migration that does not get applied.
 
 ALTER TABLE callcentre.call_interaction
-    DROP CONSTRAINT IF EXISTS call_interaction_notes_len;
+    DROP CONSTRAINT IF EXISTS call_interaction_notes_len;  -- migrate-compat: contract-ok (re-added immediately below; the drop exists only to make this migration re-runnable)
 
 ALTER TABLE callcentre.call_interaction
     ADD CONSTRAINT call_interaction_notes_len
