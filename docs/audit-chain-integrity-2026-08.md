@@ -1,6 +1,7 @@
 # Audit chain integrity — the 2026-08 `jsonb` pre-image defect
 
-- **Status:** root cause found and fixed forward; 75 historical records permanently unverifiable
+- **Status:** two defects found; both fixed forward. 75 historical records permanently unverifiable.
+  **No tampering:** every break is accounted for by the storage defect below.
 - **Found:** 2026-08-07, from `crit: integrity.mismatch` in audit-service on restart
 - **Fix:** `services/audit/Infrastructure/Migrations/0003_hash_preimage_must_not_be_normalised.sql`
 - **Guard:** `Mersal.Audit.Tests.HashPreimageStorageTests`
@@ -15,8 +16,9 @@ crit: integrity.mismatch in audit partition 202607: broken at index 28
 crit: integrity.mismatch in audit partition 202608: broken at index 65 …
 ```
 
-Both partitions. The verifier returns on the first break, so those indices are the first affected record in
-each partition, not the only ones.
+Both partitions. The verifier returned on the first break, so those indices were the first affected record in
+each partition — and, as it turned out, the only two the verifier ever looked past. See "the second, worse
+defect" below.
 
 ## Root cause
 
@@ -51,6 +53,32 @@ The obvious harm is the false alarm. The real harm is what a standing false alar
 integrity verifier that reports "tampered" on healthy data is one people stop reading — and it is the only
 mechanism that would tell them about **real** tampering. A detector nobody believes is worse than no
 detector, because it is still counted as coverage.
+
+## The second, worse defect this exposed
+
+`HashChain.Verify` **returned at the first break**. With a known-bad record at index 28 of `202607` and index
+65 of `202608`, that left **33,404 of 33,407 records never reached** — including every record written
+afterwards.
+
+The verifier is the only mechanism that would report real tampering, and a single damaged row switched it off
+for the rest of the partition. Silently: it still logged a `crit`, so it looked like it was working.
+
+**Fixed.** `Verify` now reports every break and steps over it, resuming from the record's **stored** hash —
+because that is what the next record was actually chained onto. Resuming from the recomputed hash would turn
+one real break into a mismatch on every record after it, and one break rendered as thousands is as unreadable
+as none. `ChainVerification` gained `Breaks` and `RecordsVerified`; "no breaks" means nothing without knowing
+how many records were looked at.
+
+### What the trail actually says, now that all of it is read
+
+```
+partition 202608: 307 break(s) across 29,308 record(s) verified
+partition 202607:  17 break(s) across  4,194 record(s) verified
+```
+
+Those counts are **exactly** the number of records carrying a `jsonb`-era pre-image in each partition — 307
+and 17. Every break is accounted for by this defect, and **nothing else in the trail is broken.** That
+statement could not be made before, because 99.99% of the trail had never been verified.
 
 ## Blast radius
 

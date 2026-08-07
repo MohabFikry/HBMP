@@ -40,35 +40,71 @@ public static class HashChain
     {
         ArgumentNullException.ThrowIfNull(orderedRecords);
 
+        var breaks = new List<ChainBreak>();
         string? expectedPrev = Genesis;
+
         for (var i = 0; i < orderedRecords.Count; i++)
         {
             var r = orderedRecords[i];
 
             if (!string.Equals(r.PrevHash, expectedPrev, StringComparison.Ordinal))
             {
-                return ChainVerification.Broken(i, r.AuditEventId,
-                    $"prev_hash mismatch: expected {expectedPrev}, found {r.PrevHash} (insertion/deletion/reorder)");
+                breaks.Add(new ChainBreak(i, r.AuditEventId,
+                    $"prev_hash mismatch: expected {expectedPrev}, found {r.PrevHash} (insertion/deletion/reorder)"));
             }
-
-            var recomputed = ComputeRecordHash(r);
-            if (!string.Equals(r.RecordHash, recomputed, StringComparison.Ordinal))
+            else if (!string.Equals(r.RecordHash, ComputeRecordHash(r), StringComparison.Ordinal))
             {
-                return ChainVerification.Broken(i, r.AuditEventId,
-                    $"record_hash mismatch: stored {r.RecordHash}, recomputed {recomputed} (record was tampered)");
+                breaks.Add(new ChainBreak(i, r.AuditEventId,
+                    $"record_hash mismatch: stored {r.RecordHash}, recomputed {ComputeRecordHash(r)} (record was tampered)"));
             }
 
+            /*
+             * CONTINUE PAST THE BREAK, resuming from the record's STORED hash.
+             *
+             * This used to `return` on the first break, and that was the more dangerous half of the audit
+             * defect found in 2026-08: one record damaged by the jsonb pre-image bug left 33,404 of 33,407
+             * records NEVER REACHED, including everything written afterwards. The verifier is the only
+             * mechanism that reports real tampering, and a single known-bad row switched it off for the rest
+             * of the partition — silently, because the alert it did raise looked like it was doing its job.
+             *
+             * Resuming from the STORED hash rather than the recomputed one matters just as much: the next
+             * record was chained onto what was actually written, so resuming from a recomputed value would
+             * turn one real break into a mismatch on every record after it. One break rendered as thousands
+             * is exactly as unreadable as none.
+             */
             expectedPrev = r.RecordHash;
         }
 
-        return ChainVerification.Ok;
+        return breaks.Count == 0
+            ? ChainVerification.Intact(orderedRecords.Count)
+            : ChainVerification.WithBreaks(breaks, orderedRecords.Count);
     }
 }
 
-/// <summary>Result of a chain verification pass.</summary>
-public sealed record ChainVerification(bool IsIntact, int? BrokenAtIndex, Guid? BrokenRecordId, string? Reason)
-{
-    public static readonly ChainVerification Ok = new(true, null, null, null);
+/// <summary>One break found in a chain.</summary>
+public sealed record ChainBreak(int Index, Guid RecordId, string Reason);
 
-    public static ChainVerification Broken(int index, Guid id, string reason) => new(false, index, id, reason);
+/// <summary>
+/// Result of a chain verification pass.
+///
+/// <para><see cref="Breaks"/> lists EVERY break found; <see cref="BrokenAtIndex"/> and friends expose the
+/// first for callers that only need one. <see cref="RecordsVerified"/> is what makes a pass auditable in its
+/// own right — "no breaks" means nothing without knowing how many records were actually looked at.</para>
+/// </summary>
+public sealed record ChainVerification(
+    bool IsIntact, int? BrokenAtIndex, Guid? BrokenRecordId, string? Reason,
+    IReadOnlyList<ChainBreak> Breaks, int RecordsVerified)
+{
+    public static readonly ChainVerification Ok = new(true, null, null, null, [], 0);
+
+    public static ChainVerification Intact(int recordsVerified) =>
+        new(true, null, null, null, [], recordsVerified);
+
+    public static ChainVerification WithBreaks(IReadOnlyList<ChainBreak> breaks, int recordsVerified) =>
+        new(false, breaks[0].Index, breaks[0].RecordId, breaks[0].Reason, breaks, recordsVerified);
+
+    /// <summary>Kept for existing callers/tests that construct a single-break result directly.</summary>
+    public static ChainVerification Broken(int index, Guid id, string reason) =>
+        WithBreaks([new ChainBreak(index, id, reason)], index + 1);
 }
+
