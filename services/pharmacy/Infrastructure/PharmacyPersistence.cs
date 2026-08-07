@@ -18,11 +18,27 @@ public interface IDrugValidator
     /// uuid and nothing a pharmacist could read. Returning the name answers existence too: null is "no".</para>
     /// </summary>
     Task<string?> DrugNameAsync(Guid drugId, string? bearerToken, CancellationToken ct = default);
+
+    /// <summary>
+    /// 30.x — the pack facts the chronic allocation needs (design 45 §6). NULL means master data does not
+    /// hold the drug; a present result may still carry NULL fields, and those are carried through as ABSENCE
+    /// rather than defaulted — assuming a pack is splittable is the dangerous default, because it silently
+    /// permits a fractional inhaler.
+    /// </summary>
+    Task<DrugPack?> PackAsync(Guid drugId, string? bearerToken, CancellationToken ct = default);
 }
+
+/// <param name="IsPackSplittable">Null ⇒ master data does not say. The allocation refuses to compute rather
+/// than guessing.</param>
+public sealed record DrugPack(bool? IsPackSplittable, decimal? PackSize);
 
 public sealed class AllowAllDrugValidator : IDrugValidator
 {
     public Task<string?> DrugNameAsync(Guid drugId, string? bearerToken, CancellationToken ct = default) => Task.FromResult<string?>("Test drug");
+
+    /// <summary>Splittable with no pack size — the tablet case, which needs no conversion.</summary>
+    public Task<DrugPack?> PackAsync(Guid drugId, string? bearerToken, CancellationToken ct = default) =>
+        Task.FromResult<DrugPack?>(new DrugPack(IsPackSplittable: true, PackSize: null));
 }
 
 /// <summary>Advisory prescribe-time screening (US-033): interaction across the Rx's drugs + allergy conflicts vs

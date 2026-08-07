@@ -19,6 +19,7 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
     public DbSet<PrescriptionLineOverride> PrescriptionLineOverrides => Set<PrescriptionLineOverride>();
     public DbSet<PrescriptionDispenseWindow> DispenseWindows => Set<PrescriptionDispenseWindow>();   // 29.5
     public DbSet<LineAmendmentRecord> LineAmendments => Set<LineAmendmentRecord>();                  // 30.1
+    public DbSet<RefillFrequency> RefillFrequencies => Set<RefillFrequency>();                       // 29.5
 
     /// <summary>
     /// 30.1 — a new line is version 1 of its own chain unless it was created BY an amendment, which sets the
@@ -67,6 +68,15 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
             e.HasIndex(x => x.IdempotencyKey);
             e.HasMany(x => x.Lines).WithOne().HasForeignKey(l => l.PrescriptionId);
         });
+        // 29.5 — the configurable refill cadence.
+        b.Entity<RefillFrequency>(e =>
+        {
+            e.ToTable("refill_frequency");
+            e.HasKey(x => x.Code);
+            e.Property(x => x.NameEn).HasColumnName("name_en");
+            e.Property(x => x.NameAr).HasColumnName("name_ar");
+        });
+
         // 29.5 — chronic refill windows (design 45 §5).
         b.Entity<PrescriptionDispenseWindow>(e =>
         {

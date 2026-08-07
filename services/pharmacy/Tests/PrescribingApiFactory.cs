@@ -113,6 +113,17 @@ public sealed class PrescribingApiFactory : WebApplicationFactory<Program>
         if (Db is null) return;
         await using var db = Ctx();
         await db.Database.ExecuteSqlRawAsync(
+            // 30.x — dispense events, refill windows and the amendment ledger all reference the lines, so
+            // they go first. dispense_event was previously unreachable from this factory (nothing here
+            // dispensed) and is now, because the chronic-wiring suite exercises the counter.
+            "DELETE FROM pharmacy.dispense_event WHERE prescription_line_id IN " +
+            "  (SELECT prescription_line_id FROM pharmacy.prescription_line WHERE prescription_id IN " +
+            "     (SELECT prescription_id FROM pharmacy.prescription WHERE beneficiary_id = {0})); " +
+            "DELETE FROM pharmacy.prescription_dispense_window WHERE prescription_id IN " +
+            "  (SELECT prescription_id FROM pharmacy.prescription WHERE beneficiary_id = {0}); " +
+            "DELETE FROM pharmacy.rx_note WHERE subject_id IN " +
+            "  (SELECT prescription_line_id FROM pharmacy.prescription_line WHERE prescription_id IN " +
+            "     (SELECT prescription_id FROM pharmacy.prescription WHERE beneficiary_id = {0})); " +
             // 30.1 — the amendment ledger references the lines, so it goes first.
             "DELETE FROM pharmacy.line_amendment WHERE prescription_id IN " +
             "  (SELECT prescription_id FROM pharmacy.prescription WHERE beneficiary_id = {0}); " +

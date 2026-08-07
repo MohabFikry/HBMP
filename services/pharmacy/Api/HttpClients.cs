@@ -50,7 +50,32 @@ public sealed class HttpDrugValidator(HttpClient http, IMemoryCache cache) : IDr
         return label;
     }
 
-    private sealed record DrugDto(Guid DrugId, string? Name, string? Strength, string? Form);
+    /// <summary>30.x — the pack facts, from the SAME /drugs/by-id call the name comes from. No new endpoint
+    /// and no second round trip: masterdata already returns the whole drug row.</summary>
+    public async Task<DrugPack?> PackAsync(Guid drugId, string? bearerToken, CancellationToken ct = default)
+    {
+        var key = $"drug-pack:{drugId}";
+        if (cache.TryGetValue<DrugPack>(key, out var cached) && cached is not null) return cached;
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/drugs/by-id/{drugId}");
+        BearerHeader.Apply(req, bearerToken);
+        using var resp = await http.SendAsync(req, ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+
+        var body = await resp.Content.ReadFromJsonAsync<DrugDto>(Json, ct);
+        if (body is null) return null;
+
+        // ABSENCE IS CARRIED THROUGH. A null is_pack_splittable is not "true": the allocation reports
+        // NotChecked and names the missing field, because a silently wrong quantity is a dispensing error.
+        var pack = new DrugPack(body.IsPackSplittable, body.PackSize);
+        cache.Set(key, pack, TimeSpan.FromMinutes(30));
+        return pack;
+    }
+
+    private sealed record DrugDto(
+        Guid DrugId, string? Name, string? Strength, string? Form,
+        bool? IsPackSplittable, decimal? PackSize);
 }
 
 /// <summary>

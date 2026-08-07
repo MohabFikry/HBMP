@@ -13,10 +13,20 @@ namespace Mersal.Pharmacy.Api;
 /// 26.4 — a reason per warning the prescriber is proceeding past. The ACKNOWLEDGEMENT gates submission, not
 /// the warning: an unacknowledged warning is a 422, and an acknowledged one is recorded and allowed.
 /// </param>
+/// <param name="Kind">30.x — "Acute" (the default and the behaviour every existing caller gets) or "Chronic".
+/// A chronic script carries a refill cadence and a duration greater than one month, and its lines are issued
+/// as dated refill WINDOWS rather than as one collection (design 45 §5).</param>
+/// <param name="RefillFrequencyCode">The supervisor-configurable cadence (<c>pharmacy.refill_frequency</c>).
+/// Required on a chronic script, refused on an acute one — "is this chronic?" has exactly one answer.</param>
+/// <param name="DurationDays">The script-level treatment length. Chronic requires &gt; 30: a 14-day course is
+/// not chronic.</param>
 public sealed record CreatePrescriptionRequest(
     Guid BeneficiaryId, Guid EncounterId, DateTimeOffset? ExpiresAt, bool AcknowledgeAlerts, List<CreateRxLine> Lines,
     List<string>? DiagnosisIcdCodes = null,
-    List<LineAcknowledgement>? Acknowledgements = null);
+    List<LineAcknowledgement>? Acknowledgements = null,
+    string? Kind = null,
+    string? RefillFrequencyCode = null,
+    int? DurationDays = null);
 
 /// <param name="DurationDays">26.4 — treatment length; what makes a dose ceiling or duration limit checkable.</param>
 /// <param name="ClientLineId">

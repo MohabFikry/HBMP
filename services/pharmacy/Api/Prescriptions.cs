@@ -4,6 +4,8 @@ using Mersal.Auth.Authorization;
 using Mersal.Authz;
 using Mersal.Events;
 using Mersal.Pharmacy.Domain;
+using Mersal.Prescribing;
+using Mersal.Time;
 using Mersal.Pharmacy.Infrastructure;
 using Mersal.Validity;
 using Microsoft.EntityFrameworkCore;
@@ -16,6 +18,11 @@ namespace Mersal.Pharmacy.Api;
 /// outbox. Alerts are advisory (recorded, never blocking). Every mutation is audited.</summary>
 public static class PrescriptionEndpoints
 {
+    /// <summary>Design 45 §5's default early tolerance. Held here rather than read from system_config until a
+    /// supervisor surface exists to set it — a configurable value with no configured consumer is a
+    /// decoration, and the number is stored ON each window so a later change never rewrites an issued one.</summary>
+    private const int EarlyToleranceDays = 5;
+
     public static void MapPrescriptions(this WebApplication app)
     {
         var v1 = app.MapGroup("/api/v1/prescriptions").RequireAuthorization();
@@ -24,7 +31,8 @@ public static class PrescriptionEndpoints
             CreatePrescriptionRequest req, HttpRequest http, PharmacyDbContext db, PharmacyGate gate,
             IDrugValidator drugs, IPrescribingScreener screener, RxRoutingOptions routing, SequenceIssuer seq,
             PrescriptionValidationService validation, IValidityPolicySource validity,
-            IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+            IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock,
+            IBusinessCalendar calendar, CancellationToken ct) =>
         {
             var idem = http.Headers["Idempotency-Key"].ToString();
             if (string.IsNullOrWhiteSpace(idem))
@@ -136,6 +144,68 @@ public static class PrescriptionEndpoints
             var policyExpiry = ValidityPolicy.ExpiryFor(now, validityDays);
             var expiresAt = req.ExpiresAt is { } requested && requested < policyExpiry ? requested : policyExpiry;
 
+            /*
+             * 30.x — ACUTE OR CHRONIC (design 45 §5), and the wiring phase 29 built the machinery for and
+             * never connected.
+             *
+             * Everything below runs BEFORE the transaction, so a refusal writes nothing. A chronic script
+             * that could not be scheduled must not become a chronic script with no windows: that is
+             * undispensable in a way nothing reports, which is exactly what the migration's CHECK guards
+             * against and what this endpoint must never rely on the CHECK to catch.
+             */
+            var chronic = string.Equals(req.Kind, "Chronic", StringComparison.OrdinalIgnoreCase);
+            RefillFrequency? frequency = null;
+            if (chronic)
+            {
+                if (req.DurationDays is not { } days || !ChronicAllocation.IsChronicDuration(days))
+                    return Results.Problem(statusCode: 422, title: "not-chronic", type: "urn:hbmp:not-chronic",
+                        detail: "A chronic prescription needs a duration of more than one month. A 14-day "
+                              + "course is not chronic — write it as acute.");
+
+                frequency = await db.RefillFrequencies.AsNoTracking()
+                    .FirstOrDefaultAsync(f => f.Code == req.RefillFrequencyCode && f.IsActive, ct);
+                if (frequency is null)
+                    return Results.Problem(statusCode: 422, title: "unknown-refill-frequency",
+                        type: "urn:hbmp:unknown-refill-frequency",
+                        detail: "A chronic prescription needs an ACTIVE refill frequency. Without one it has "
+                              + "no windows and is undispensable in a way nothing reports.");
+            }
+            else if (req.RefillFrequencyCode is not null)
+            {
+                return Results.Problem(statusCode: 422, title: "acute-has-no-schedule",
+                    type: "urn:hbmp:acute-has-no-schedule",
+                    detail: "An acute prescription carries no refill schedule. Allowing one would make "
+                          + "\"is this chronic?\" answerable two ways.");
+            }
+
+            // The per-line allocation, computed up front so a missing pack fact refuses the whole request
+            // rather than leaving some lines scheduled and others not.
+            var allocations = new Dictionary<Guid, AllocationPlan>();
+            if (chronic)
+            {
+                foreach (var l in req.Lines)
+                {
+                    var pack = await drugs.PackAsync(l.DrugId, bearer, ct);
+                    var plan = ChronicAllocation.Plan(new AllocationRequest(
+                        DosePerAdministration: l.DoseAmount ?? 1,
+                        TimesPerDay: l.TimesPerDay ?? 1,
+                        DurationDays: l.DurationDays ?? req.DurationDays!.Value,
+                        FrequencyMonths: frequency!.Months,
+                        IsPackSplittable: pack?.IsPackSplittable,
+                        PackSize: pack?.PackSize));
+
+                    // ABSENCE OF DATA IS NEVER A CLEAN RESULT. The field that is missing is named, because
+                    // "could not compute" without it sends a prescriber to guess.
+                    if (plan.NotChecked)
+                        return Results.Problem(statusCode: 422, title: "quantity-not-checked",
+                            type: "urn:hbmp:quantity-not-checked",
+                            detail: $"Master data does not record '{plan.MissingField}' for one of these "
+                                  + "drugs, so its refill quantities cannot be computed. A silently wrong "
+                                  + "quantity is a dispensing error.");
+                    allocations[l.DrugId] = plan;
+                }
+            }
+
             var rx = new Prescription
             {
                 PrescriptionId = Guid.NewGuid(), RxNo = RxNo.Format(now.Year, await seq.NextAsync("rx_seq", now.Year, ct)),
@@ -146,6 +216,13 @@ public static class PrescriptionEndpoints
                 // Snapshot, not a join: a later correction to the encounter's diagnoses must not rewrite what
                 // this prescription was actually checked against.
                 DiagnosisSnapshot = System.Text.Json.JsonSerializer.Serialize(diagnoses),
+                // 30.x — the script's own shape. valid_from/valid_until span the WHOLE duration; the windows
+                // inside it decide when each collection is due.
+                Kind = chronic ? "Chronic" : "Acute",
+                RefillFrequencyCode = chronic ? frequency!.Code : null,
+                DurationDays = chronic ? req.DurationDays : null,
+                ValidFrom = chronic ? calendar.Today() : null,
+                ValidUntil = chronic ? calendar.Today().AddDays(req.DurationDays!.Value - 1) : null,
                 Lines = req.Lines.Select(l =>
                 {
                     var line = new PrescriptionLine
@@ -156,6 +233,14 @@ public static class PrescriptionEndpoints
                         RefillsAllowed = l.RefillsAllowed, DurationDays = l.DurationDays,
                         Status = RxLineStatus.Active,
                     };
+                    // 30.x — on a chronic line the QUANTITY IS THE ALLOCATION'S TOTAL. The windows sum to it
+                    // exactly, and storing a different number would make "how much was prescribed"
+                    // answerable two ways.
+                    if (chronic)
+                    {
+                        line.QuantityPrescribed = allocations[l.DrugId].Total;
+                        line.DurationDays = l.DurationDays ?? req.DurationDays;
+                    }
                     if (l.ClientLineId is { } cid) lineIdByClientId[cid] = line.PrescriptionLineId;
                     return line;
                 }).ToList(),
@@ -187,6 +272,37 @@ public static class PrescriptionEndpoints
             // declares no navigation between them, so EF has no graph to sort by and emits the inserts in the
             // order they were tracked — which the real foreign key then rejects. Same transaction throughout.
             await db.SaveChangesAsync(ct);
+
+            /*
+             * 30.x — THE REFILL WINDOWS, written AFTER the first save for exactly the reason the overrides
+             * are: a window references prescription_line, the model declares no navigation between them, so
+             * EF emits the inserts in tracking order and the real foreign key rejects them. Same transaction
+             * throughout — a chronic script committed without its schedule is one a counter cannot dispense
+             * and no report flags, which is the state phase 29 left the platform in.
+             */
+            if (chronic)
+            {
+                var start = calendar.Today();
+                foreach (var line in rx.Lines)
+                {
+                    var reqLine = req.Lines.First(l => l.DrugId == line.DrugId);
+                    var days = reqLine.DurationDays ?? req.DurationDays!.Value;
+                    foreach (var w in WindowSchedule.Build(
+                                 allocations[line.DrugId].Windows, start, frequency!.Months, days,
+                                 EarlyToleranceDays))
+                    {
+                        db.DispenseWindows.Add(new PrescriptionDispenseWindow
+                        {
+                            WindowId = Guid.NewGuid(), TenantId = rx.TenantId,
+                            PrescriptionId = rx.PrescriptionId, PrescriptionLineId = line.PrescriptionLineId,
+                            WindowNo = w.WindowNo, ScheduledOpenDate = w.ScheduledOpen,
+                            OpensAt = w.OpensAt, ClosesAt = w.ClosesAt,
+                            AllocatedQuantity = w.AllocatedQuantity, DispensedQuantity = 0m,
+                            Status = "Pending",
+                        });
+                    }
+                }
+            }
 
             // The prescriber's reasons for proceeding. Part of the record and visible to the approver.
             foreach (var ack in req.Acknowledgements ?? [])

@@ -18,13 +18,18 @@ Amending a chronic script's duration and frequency, per [design 46 §4](../HBMP-
 The design decision (three options for the windows, and why nothing is moved or copied) is recorded in
 [the spec](superpowers/specs/2026-08-07-chronic-amendment-design.md).
 
-## The gap this exposed, and it is in phase 29, not phase 30
+## ✅ FIXED — the gap this exposed (originally in phase 29, closed here)
+
+> The section below is kept as written, because the *finding* is the useful part. What it described is now
+> wired: see `ChronicPrescribingIsWiredTests`, and the "How it was closed" section at the end.
+
+## The gap this exposed, and it was in phase 29, not phase 30
 
 **Nothing in production ever creates a refill window.** Searching the whole `services/` tree for a write of
 `prescription_dispense_window`, a call to `WindowSchedule.Build`, a call to `ChronicAllocation.Plan`, or a
 call to `ChronicDispensing.Evaluate` returns, outside tests, **only the file this gate added**.
 
-Concretely, as of this commit:
+Concretely, as it stood when this was written:
 
 | Piece | State |
 |---|---|
@@ -60,3 +65,37 @@ Gate 3 is therefore **complete as specified and inert until phase 29 Gate 5 is f
 That is several gates' worth of work in a different phase. Doing it inside phase 30 would bury a phase-29
 regression inside an unrelated feature commit, and the register of what is actually shipped would be wrong in
 the other direction. It is recorded here instead, and belongs on the phase-29 completion list.
+
+
+---
+
+## How it was closed
+
+| Piece | Now |
+|---|---|
+| `POST /prescriptions` accepts `kind` / `refillFrequencyCode` / `durationDays` | ✅ additive, defaulted to Acute so every existing caller is unaffected |
+| `ChronicAllocation.Plan` | ✅ called per line at submit, from the drug's real pack facts |
+| `WindowSchedule.Build` → `prescription_dispense_window` rows | ✅ written in the SAME transaction as the prescription |
+| `ChronicDispensing.Evaluate` at the counter | ✅ the dispense path refuses a collection outside its window and names the date to come back |
+| The window's own `dispensed_quantity` | ✅ moves with the line's, guarded on the window id |
+| `RefillWindowSweeper` | ✅ now has rows to sweep |
+
+**Four things were needed beyond "call the library".**
+
+1. **A pack lookup.** The allocation needs `is_pack_splittable` and `pack_size`, and pharmacy had no way to
+   ask. It turned out masterdata's existing `/drugs/by-id/{id}` already returns the whole row — so this is a
+   wider DTO on the call the name already comes from, not a new endpoint or a second round trip.
+2. **Refusing before writing.** A chronic script that cannot be scheduled must not be committed as a chronic
+   script with no windows: that is undispensable in a way nothing reports. Every refusal — duration ≤ 1 month,
+   unknown or inactive frequency, missing pack data — happens before the transaction opens.
+3. **Insert ordering.** Windows reference `prescription_line` and the model declares no navigation between
+   them, so EF emitted the inserts in tracking order and the foreign key rejected them. They are written
+   after the first `SaveChanges`, in the same transaction — exactly the hazard the overrides block in the same
+   file already documents.
+4. **Absence carried through.** A drug whose `is_pack_splittable` master data does not record produces a 422
+   naming the missing field, not a guessed quantity. "A silently wrong quantity is a dispensing error."
+
+**The lesson worth keeping.** Every one of the 66 phase-29 tests passed while none of this was reachable.
+A green suite says the code is correct, never that it is *called* — so the regression suite added here asserts
+reachability specifically: it goes in through the HTTP endpoint, and its first assertion is that windows
+exist at all.

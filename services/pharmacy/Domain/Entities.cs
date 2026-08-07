@@ -315,3 +315,19 @@ public sealed class PrescriptionLineOverride
     public string AcknowledgedBy { get; set; } = default!;
     public DateTimeOffset AcknowledgedAt { get; set; }
 }
+
+/// <summary>
+/// 29.5 — a supervisor-configurable refill cadence (<c>pharmacy.refill_frequency</c>, migration 0012).
+///
+/// <para>Data rather than an enum, for the reason the migration records: adding "every 4 months" must be an
+/// INSERT, not a release. <see cref="Months"/> is what the window arithmetic multiplies by.</para>
+/// </summary>
+public sealed class RefillFrequency
+{
+    public string Code { get; set; } = default!;
+    public int Months { get; set; }
+    public string NameEn { get; set; } = default!;
+    public string NameAr { get; set; } = default!;
+    public bool IsActive { get; set; } = true;
+    public int SortOrder { get; set; }
+}

@@ -765,6 +765,19 @@
               "$ref": "#/components/schemas/LineAcknowledgement"
             },
             "nullable": true
+          },
+          "kind": {
+            "type": "string",
+            "nullable": true
+          },
+          "refillFrequencyCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "durationDays": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
           }
         },
         "additionalProperties": false
