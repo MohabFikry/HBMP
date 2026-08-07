@@ -105,6 +105,26 @@ stateDiagram-v2
 
 Canonical: `Draft → Submitted → (Approved | Rejected) → PartiallyDispensed → Dispensed`; plus `Expired`, `Cancelled`.
 
+> **Validation states are NOT prescription states (26.3).** A line carries a check status — `Ok`, `Warning`,
+> `Blocked`, `NotChecked`, `Unavailable` — which describes what the engine could determine, not where the
+> prescription is in its lifecycle. They are orthogonal on purpose: a prescription in `Draft` may carry any
+> of the five, and validation never moves the prescription between states. What the check status governs is
+> whether **submit** is permitted at all — see the `Draft → Submitted` guard below.
+>
+> `NotChecked` and `Unavailable` are not answers and never render as `Ok`; only a **benefit** rule can
+> produce `Blocked` (doc 43 §8 invariants 1–2, ADR-0032).
+>
+> **Severity gates the submit, not the state (28.4, doc 44 §2, ADR-0037).** Every clinical finding used to
+> require a typed acknowledgement before `Draft → Submitted`, so a contraindicated combination and a trivial
+> one demanded the same click — the documented route to override rates above 90%, where clinicians learn to
+> dismiss both. Only **Contraindicated** and **Major** now gate the transition; **Moderate** renders beside
+> the line and **Minor** collapses, and neither stands between the prescriber and submit. A finding with NO
+> severity still gates: a manufacturer label states an effect rather than a rank, and treating "ungraded" as
+> "not serious" would be the engine inventing a judgement it has no source for.
+>
+> This changes **interruption**, never blocking. `ClinicalState` still has no `Blocked` member, so a clinical
+> check remains structurally incapable of refusing a prescription.
+
 ```mermaid
 stateDiagram-v2
     [*] --> Draft: create
@@ -129,7 +149,8 @@ stateDiagram-v2
 | From | Event | Guard / Condition | To | Side-effects / Emitted Event | Actor / Role | Audit note |
 |---|---|---|---|---|---|---|
 | — | create | valid encounter | Draft | `RxCreated` | Doctor | — |
-| Draft | submit | complete lines | Submitted | `RxSubmitted` | Doctor | — |
+| Draft | **validate** (26.4) | ≥1 line with a real `drug_id` | Draft (unchanged) | `prescription_validation` row, `step='Step1'` | Doctor | **Advisory.** Persists no draft prescription; its verdict is display state and is never an input to submit |
+| Draft | submit | complete lines **AND every Warning acknowledged with a reason AND no Blocked finding** | Submitted | `RxSubmitted`; `prescription_validation` `step='Step2'`; `prescription_line_override` per acknowledgement | Doctor | **The server re-validates from scratch and ignores any client-supplied verdict** (doc 43 §5). 422 `unacknowledged-warning` or `blocked-by-benefit-rule` otherwise |
 | Submitted | approve | within policy OR not gated | Approved | `RxApproved` | Approval Team / auto | — |
 | Submitted | reject | out of policy | Rejected | `RxRejected` | Approval Team | Reason mandatory |
 | Approved / PartiallyDispensed | **dispense(subset)** | **line unused AND token unseen (atomic); substitution only from approved list** | PartiallyDispensed | `RxLinesDispensed`; remaining lines available | Pharmacy | Substitution + OOS captured |
@@ -220,6 +241,24 @@ stateDiagram-v2
 | InfoRequested | resupply | info provided | UnderReview | `AuthInfoSupplied` | Requester | — |
 | Rejected | override | director authority | Overridden | `AuthOverridden` | Medical Director | **Justification mandatory** |
 | Approved / PartiallyApproved / Overridden / EmergencyApproved | expire | not consumed in window | Expired | `AuthExpired` | System (timer) | — |
+| — | dispense / consume | a counter handed something over | **Issued** | `FulfilmentRecorded` → the authorization register | System (fulfilment consumer) | `kind='Fulfilment'`; see below |
+
+### 5.1 `Issued` — the fulfilment authorization (ADR-0034)
+
+Dispensing a prescription line, or consuming an investigation-order line, **issues an authorization**
+recording what was actually delivered, separate from the clinical instruction it was delivered against.
+
+**`Issued` is outside the machine above, deliberately.** No transition targets it and none leaves it: there
+is nothing for a reviewer to approve, because the medicine is already in the patient's hand. Allowing one to
+be assigned would put settled work in the review queue and start an SLA clock on a question nobody asked, so
+`AuthorizationWorkflow` admits no edge in either direction and a DB CHECK pins `kind = 'Fulfilment'` ⇔
+`status = 'Issued'`.
+
+One authorization per prescription (per order), accumulating one `authorization_item` per fulfilment — a
+member collecting a fortnight's medication over two visits has one authorization with two items, not two
+that whoever reads them has to add up. A **substitution lands on the item and nowhere else**: `ordered_code`
+and `fulfilled_code` are separate columns ([22 §9.2b](22-data-dictionary.md)), and the fulfilment path never
+writes to `prescription_line`.
 
 ---
 

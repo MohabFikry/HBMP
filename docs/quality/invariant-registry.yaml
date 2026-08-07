@@ -415,7 +415,7 @@ invariants:
       - Mersal.Authz.Tests.BranchRoleScopeParityTests.The_reception_baseline_is_still_what_this_test_claims_it_is
       - Mersal.Identity.Tests.BranchRoleSeedTests.THE_INVARIANT_the_two_branch_roles_resolve_to_identical_scope_sets
       - Mersal.Identity.Tests.BranchRoleSeedTests.Neither_branch_role_resolves_provider_write
-      - Mersal.Identity.Tests.BranchRoleSeedTests.The_branch_roles_resolve_receptions_twelve_plus_the_four
+      - Mersal.Identity.Tests.BranchRoleSeedTests.The_branch_roles_resolve_receptions_thirteen_plus_the_four
       - Mersal.Provider.Tests.BranchRoleCannotWriteTheNetworkTests.A_branch_role_cannot_satisfy_provider_write
       - Mersal.Provider.Tests.BranchRoleCannotWriteTheNetworkTests.The_branch_registry_write_group_really_is_behind_provider_write
       - Mersal.Provider.Tests.BranchRoleCannotWriteTheNetworkTests.The_external_provider_write_surface_really_is_behind_provider_write
@@ -609,3 +609,1112 @@ invariants:
       - Mersal.MasterData.Tests.MasterDataEndpointTests.A_drug_code_is_classified_as_a_medicine_and_an_unrelated_consumable_is_not
       - Mersal.MasterData.Tests.MasterDataEndpointTests.A_vaccine_is_matched_by_a_name_that_MERELY_CONTAINS_it_and_is_flagged_as_a_vaccine
       - Mersal.MasterData.Tests.MasterDataEndpointTests.Classify_needs_something_to_go_on
+
+  # ---------------------------------------------------------------- 43-approval-engine, phase 26
+
+  - id: INV-CHECK-UNAVAILABLE-IS-NEVER-OK
+    statement: >-
+      A clinical check whose data source failed renders as "check unavailable", never as "OK". "No
+      interactions found" and "the interaction service was unreachable" are different answers and must
+      look different, at every step and for every check.
+    source: 43-approval-engine-and-prescribing-support.md §1 rule 1, §8 invariant 2; phase-26 §26.3
+    severity: Critical
+    # This is the invariant phase 26 was written to establish, and it was false for eight phases. The
+    # prescribing screener caught every HttpRequestException and returned no alerts — and, less visibly,
+    # treated every non-2xx the same way through a bare `if (resp.IsSuccessStatusCode)`. Six such paths
+    # across three calls. An outage rendered to the prescriber as a clean bill of health.
+    #
+    # Deleting those catches would have fixed the instances. What is registered here is the class: ports
+    # return Fetched<T>, whose Unavailable case carries NO payload, so there is no empty collection for a
+    # checker to inspect and conclude "nothing found". There is no code path from a failed fetch to Ok.
+    #
+    # The 403 case is listed because it is not hypothetical. Phase 26.1 put masterdata behind
+    # `masterdata:read`; a token missing the scope takes exactly the path that used to render as clean.
+    tests:
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_DEAD_DEPENDENCY_YIELDS_UNAVAILABLE_EVERYWHERE_AND_NEVER_OK
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.Each_check_reports_Unavailable_independently_of_the_others
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.Unavailable_outranks_Warning_when_summarising_a_line
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.An_EMPTY_interaction_list_is_NotChecked_not_Ok
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.No_recorded_allergies_is_NotChecked_because_absence_is_not_a_negative_result
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.With_no_diagnosis_recorded_the_check_says_so_and_does_NOT_report_Ok
+      - Mersal.Pharmacy.Tests.DependencyDownYieldsUnavailableTests.A_dead_dependency_yields_Unavailable_and_NEVER_Ok
+      - Mersal.Pharmacy.Tests.DependencyDownYieldsUnavailableTests.The_screener_reports_the_unavailable_checks_rather_than_staying_silent
+      - Mersal.Pharmacy.Tests.DependencyDownYieldsUnavailableTests.A_partial_outage_does_not_round_the_healthy_checks_up_to_clean
+      - Mersal.Pharmacy.Tests.DependencyDownYieldsUnavailableTests.A_timeout_is_Unavailable_not_a_hung_encounter
+
+  # ---------------------------------------------------------------- 44-clinical-validation-hardening, phase 28
+
+  - id: INV-ALLERGY-UNMAPPED-IS-NOT-CHECKED
+    statement: >-
+      The allergy check reports "OK" only when EVERY recorded allergy was actually compared against the
+      medicine. A recorded allergen the catalogue holds no mapping for yields "not checked", naming the
+      allergen — never "no conflict".
+    source: 44-clinical-validation-hardening.md §1.1, §10 invariant 11; phase-28 Gate 1
+    severity: Critical
+    # THE DEFECT THIS REGISTRY ENTRY IS MADE OF.
+    #
+    # masterdata decided an allergy conflict by building the drug's ATC ancestor chain — J, J01, J01C — and
+    # testing whether a recorded allergen CODE appeared in it. The seeded codes are ALG-PENICILLIN,
+    # ALG-SULFA, ALG-CEPHALO. Two disjoint code spaces, so `codes.Any(c => atcChain.Contains(c))` was a
+    # constant false for every patient and every medicine this platform has ever prescribed. The engine
+    # then rendered it as "No conflict with the 3 recorded allergy/allergies."
+    #
+    # INV-CHECK-UNAVAILABLE-IS-NEVER-OK above covers a source that FAILED. This one covers a source that
+    # ANSWERED, confidently, without having compared anything — which no amount of transport-level honesty
+    # detects. The distinction is worth its own entry: the first is about outages, the second about the
+    # difference between "I found nothing" and "I looked at nothing".
+    #
+    # Why it went unnoticed for eight phases: the engine tests built AllergyScreen by hand and the matcher
+    # had no test at all, so nothing in the repository ever ran a real allergen code through it. The
+    # masterdata test named below is deliberately written against the REAL seeded rows from migration 0002
+    # rather than fixtures it authors itself.
+    tests:
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.An_allergen_that_could_not_be_mapped_is_NotChecked_and_is_named
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_partly_mapped_allergy_history_is_NotChecked_not_Ok
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_conflict_still_warns_when_another_allergen_is_unmapped
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_history_of_only_food_and_environmental_allergies_is_NotChecked
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.No_conflict_against_a_fully_screened_history_is_Ok
+      - Mersal.MasterData.Tests.AllergyMatcherTests.An_allergen_with_no_mapping_at_all_is_reported_unmapped_and_never_screened
+      - Mersal.MasterData.Tests.AllergyMatcherTests.A_food_allergen_is_neither_screened_nor_counted_as_a_gap
+      - Mersal.MasterData.Tests.AllergyMatcherTests.A_medicine_with_no_ingredient_and_no_ATC_is_reported_as_unresolvable
+      - Mersal.MasterData.Tests.MasterDataEndpointTests.No_seeded_drug_allergen_silently_passes
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_medicine_with_no_ingredient_or_ATC_reports_the_DRUGS_gap_not_the_patients
+
+  - id: INV-SERVER-READS-THE-DIAGNOSIS
+    statement: >-
+      The authoritative validation path reads the encounter's diagnoses from emr. A forged, edited or
+      emptied diagnosis array in a submission changes nothing. If emr cannot be read, the indication check
+      is "unavailable" — never "no diagnosis recorded" and never OK.
+    source: 44-clinical-validation-hardening.md §1.3, §10 invariant 15; phase-28 Gate 2
+    severity: Critical
+    # Step 2 re-ran every check server-side — and then took its most important input from the request body
+    # (`req.DiagnosisIcdCodes`). The engine phase 26 built to be untrustworthy-client-proof was reading a
+    # client-supplied diagnosis to decide indication, and would have read it for contraindication too.
+    #
+    # Fixed structurally rather than by deleting one line: diagnoses moved OUT of ValidationRequest and into
+    # ValidationSnapshot behind Fetched<T>, because they are fetched data. Trusting the client is no longer
+    # expressible on the authoritative path — the step-2 caller passes an encounter id and no list at all.
+    #
+    # The step-1 advisory run may still use the composing screen's copy; it is stamped ClientSupplied so a
+    # step-1/step-2 divergence has a recorded explanation rather than looking like an engine that changed
+    # its mind.
+    tests:
+      - Mersal.Pharmacy.Tests.ForgedClientVerdictTests.A_FORGED_DIAGNOSIS_ARRAY_CHANGES_NOTHING
+      - Mersal.Pharmacy.Tests.ForgedClientVerdictTests.An_EMPTIED_diagnosis_array_cannot_suppress_a_finding
+      - Mersal.Pharmacy.Tests.ForgedClientVerdictTests.When_emr_cannot_be_read_the_indication_check_is_Unavailable_and_never_Ok
+
+  - id: INV-ONLY-SEVERE-FINDINGS-GATE
+    statement: >-
+      Only Contraindicated and Major clinical findings interrupt the prescriber and gate submission.
+      Moderate and Minor render beside the line and never block flow. Severity changes INTERRUPTION, never
+      blocking — no clinical check may refuse.
+    source: 44-clinical-validation-hardening.md §2, §10 invariant 13; phase-28 Gate 4
+    severity: High
+    # Every clinical finding used to be a Warning requiring a typed acknowledgement, so a contraindicated
+    # combination and a trivial one demanded the same click. Override rates above 90% are routinely reported
+    # in the CDS literature and the mechanism is always this one: when everything interrupts, everything is
+    # dismissed — including the alerts worth stopping for. Uniform alerting destroys the signal it carries.
+    #
+    # A NULL severity still interrupts, and that is deliberate. Manufacturer-label interactions carry no
+    # grade because a label states an effect rather than a rank; treating "ungraded" as "not serious" would
+    # be the engine inventing a clinical judgement it has no source for.
+    tests:
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.Only_Major_and_Contraindicated_gate_submission
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_moderate_finding_leaves_the_line_submittable
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.An_ungraded_finding_still_interrupts
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_direct_allergy_match_is_Major_and_does_gate
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.An_allergy_conflict_carries_its_severity_and_its_management_line
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.NO_CLINICAL_CHECK_CAN_EVER_BLOCK
+
+  - id: INV-ONE-INGREDIENT-NORMALISER
+    statement: >-
+      The platform normalises an ingredient name in exactly one place. Salt-suffix stripping and the
+      INN/USAN spelling map exist once, in libs/ingredients, and are shared by the prescribing engine, the
+      catalogue and the loader.
+    source: 44-clinical-validation-hardening.md §1.2, §6; phase-28 Gate 1
+    severity: High
+    # Two implementations of a matching rule diverge, and the divergence is silent: a pharmacist authors a
+    # rule against one ingredient and a prescription is screened against another, with nothing reporting a
+    # problem. The salt rule shows why a copy is dangerous — the suffix is stripped from the END of a name
+    # only, because stripping it anywhere turns "sodium chloride" into "chloride", which matches
+    # benzalkonium chloride, a disinfectant.
+    tests:
+      - Mersal.Architecture.Tests.OneIngredientNormaliserTests.Only_one_file_defines_the_ingredient_normaliser
+      - Mersal.Architecture.Tests.OneIngredientNormaliserTests.No_second_salt_stripping_or_INN_USAN_table_exists
+      # A molecule must have ONE key however the catalogue spells it. Found by loading the real data: the
+      # Egyptian catalogue writes "amoxycillin" on 220 products and "amoxicillin" on none, so every curated
+      # rule written in INN matched nothing. Nothing errored — the checks just stopped finding things.
+      - Mersal.ClinicalValidation.Tests.IngredientCanonicalTests.A_molecule_has_ONE_key_however_the_catalogue_spells_it
+      - Mersal.ClinicalValidation.Tests.IngredientCanonicalTests.The_fold_does_not_rewrite_names_that_merely_contain_ph
+      - Mersal.ClinicalValidation.Tests.IngredientCanonicalTests.A_COMBINATION_RESOLVES_TO_ONE_KEY_PER_MOLECULE
+      - Mersal.ClinicalValidation.Tests.IngredientCanonicalTests.A_bracketed_alternative_yields_the_name_the_prescriber_uses
+      - Mersal.ClinicalValidation.Tests.IngredientCanonicalTests.A_product_with_no_usable_ingredient_resolves_to_NOTHING
+
+  - id: INV-COMBINATION-PRODUCTS-DECOMPOSE
+    statement: >-
+      Allergy, interaction and duplicate-therapy checks evaluate at ingredient level, and a combination
+      product is screened on every molecule it contains.
+    source: 44-clinical-validation-hardening.md §1.2, §7, §10 invariant 12; phase-28 Gates 1, 3, 5
+    severity: Critical
+    # masterdata.drug_interaction keyed pairs on PRODUCT ids. The Egyptian catalogue holds tens of thousands
+    # of products, so every ingredient pair would need replicating across the cartesian product of every
+    # brand containing each — which is why the table has zero rows and would have stayed empty. It was not a
+    # data backlog; it was an unpopulatable model.
+    #
+    # Keying on the molecule is also the only way the combination cases work at all: a co-amoxiclav brand
+    # carries ONE ATC for the compound (J01CR02) and cannot decompose from it, and the paracetamol hidden
+    # inside a cold-and-flu remedy — the classic accidental overdose — is invisible without drug_ingredient.
+    tests:
+      - Mersal.MasterData.Tests.AllergyMatcherTests.A_combination_product_is_screened_on_every_ingredient_it_contains
+      - Mersal.MasterData.Tests.AllergyMatcherTests.A_PENICILLIN_ALLERGIC_PATIENT_PRESCRIBED_AMOXICILLIN_IS_FLAGGED
+      - Mersal.MasterData.Tests.MasterDataEndpointTests.A_PENICILLIN_ALLERGIC_BENEFICIARY_PRESCRIBED_AMOXICILLIN_IS_FLAGGED
+
+  - id: INV-DUPLICATE-THERAPY-DETECTED
+    statement: >-
+      Two prescription lines carrying the same molecule are flagged — including when one of them is a
+      combination product, and including the same product written twice. Two medicines in the same ATC-4
+      class are flagged at lower severity.
+    source: 44-clinical-validation-hardening.md §7; phase-28 Gate 5
+    severity: High
+    # Phase 26 skipped it in one line: `if (a.DrugId == b.DrugId) continue;` dropped the same product twice,
+    # and nothing anywhere compared two DIFFERENT products for a shared ingredient. Two trade names holding
+    # one molecule is the commonest real prescribing duplication.
+    #
+    # The paracetamol case is the one that matters: a prescriber writes paracetamol for the fever and a
+    # cold-and-flu compound for the symptoms, the combined daily total crosses the hepatotoxic ceiling, and
+    # nothing on either box says so. It is only detectable because products decompose to molecules (28.1).
+    tests:
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.TWO_BRANDS_OF_PARACETAMOL_WARN_INCLUDING_WHEN_ONE_HIDES_IN_A_COMBINATION
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.The_same_product_twice_warns_instead_of_being_silently_skipped
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.Two_NSAIDs_warn_at_class_level_and_do_not_gate
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_medicine_with_no_recorded_ingredient_is_NotChecked_for_duplication
+
+  - id: INV-ICD-MATCHING-IS-A-HIERARCHY-WALK
+    statement: >-
+      A drug indication at node L matches an encounter diagnosis D when D is a descendant-or-self of L.
+      Block-level indications work; a diagnosis less specific than the indication reports as a possible
+      match, neither a hit nor a miss; and exactly one dot-normalisation exists on the platform.
+    source: 44-clinical-validation-hardening.md §6, §10 invariant 16; phase-28 Gate 7
+    severity: High
+    # The engine truncated both sides to three characters and intersected. That works for the common case and
+    # cannot express a BLOCK-level indication ("J00-J06", acute upper respiratory infections) at all, silently
+    # widens an indication more specific than three characters to its whole category, and reads a
+    # less-specific diagnosis as a mismatch when it is an open question.
+    #
+    # The hierarchy was never missing — `Raw Files/ICD10_2019_full.csv` carries Parent_Code, Chapter_Code and
+    # Block_Code, and the loader bound four of its nine columns. It was read on every load and discarded on
+    # every load.
+    tests:
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_BLOCK_LEVEL_INDICATION_MATCHES_A_CODE_UNDERNEATH_IT
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_LESS_SPECIFIC_DIAGNOSIS_IS_A_POSSIBLE_MATCH_NOT_A_MISS_AND_NOT_A_HIT
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.With_no_hierarchy_loaded_the_check_falls_back_to_the_category_comparison
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_dotted_and_an_undotted_code_are_the_same_code
+      - Mersal.Architecture.Tests.OneIcdNormaliserTests.Only_one_file_implements_ICD_dot_normalisation
+      - Mersal.Architecture.Tests.OneIcdNormaliserTests.The_prescribing_engine_does_not_carry_its_own_copy
+
+  - id: INV-MISSING-PATIENT-INPUT-IS-NOT-CHECKED
+    statement: >-
+      A dose rule that needs an input the platform does not have reports "not checked", naming the missing
+      input — a weight for weight-based dosing, an eGFR for a renally-cleared drug. A weight older than the
+      applicable window is a MISSING weight, not a current one. Never OK.
+    source: 44-clinical-validation-hardening.md §4, §10 invariant 11; phase-28 Gate 8
+    severity: Critical
+    # This is the entire safety argument for shipping a partial dose check. ValidationRequest carried the
+    # encounter, the lines, the diagnoses and the active medications — and NOTHING about the patient — so
+    # every dose check was an adult fixed-dose check in a population that skews paediatric.
+    #
+    # The staleness rule is not fussiness: a two-year-old weight on a growing child produces a confident
+    # mg/kg calculation against a number that stopped being true, which is worse than declining to calculate.
+    # 30 days for a child, 90 for an adult.
+    #
+    # Renal function is the honest limit. Laboratory results are stored as free text (orders
+    # 0002_fulfillment.sql), so no structured eGFR exists and none can be computed. The check says so.
+    tests:
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_WEIGHT_BASED_RULE_WITH_NO_RECORDED_WEIGHT_IS_NOT_CHECKED_AND_SAYS_WHAT_IS_MISSING
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_STALE_WEIGHT_IS_NOT_A_CURRENT_WEIGHT
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.An_adult_weight_stays_current_for_longer_than_a_childs
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_RENALLY_CLEARED_DRUG_STATES_THAT_eGFR_IS_UNAVAILABLE_RATHER_THAN_PASSING
+
+  - id: INV-INTERACTIONS-ARE-INGREDIENT-KEYED
+    statement: >-
+      Interaction rules are keyed on molecules and ATC classes, never on product ids. One rule covers every
+      brand of each side, in both directions. Coverage — the rule count and the date — is stated to the
+      prescriber rather than implied.
+    source: 44-clinical-validation-hardening.md §1.2, §8; phase-28 Gate 3
+    severity: Critical
+    # masterdata.drug_interaction keyed a pair on two PRODUCT uuids against a catalogue of 22,653 products,
+    # so one clinical fact — warfarin interacts with NSAIDs — needed a row per pair of BRANDS. Zero rows, and
+    # it would have stayed at zero: not a data-entry backlog, an unpopulatable model.
+    #
+    # Coverage honesty is part of the invariant, not a nicety. "No interaction found" against a curated list
+    # of a dozen pairs is a far weaker statement than the same words against a licensed database, and a
+    # partial list is ethical to ship only when its partiality is visible.
+    tests:
+      - Mersal.MasterData.Tests.InteractionMatcherTests.ONE_CLASS_RULE_COVERS_EVERY_BRAND_OF_EVERY_NSAID
+      - Mersal.MasterData.Tests.InteractionMatcherTests.A_class_rule_matches_a_DESCENDANT_atc_code_not_only_an_exact_one
+      - Mersal.MasterData.Tests.InteractionMatcherTests.The_pair_matches_in_BOTH_directions
+      - Mersal.MasterData.Tests.InteractionMatcherTests.A_COMBINATION_PRODUCT_IS_SCREENED_ON_EVERY_INGREDIENT_IT_CONTAINS
+      - Mersal.MasterData.Tests.InteractionMatcherTests.One_rule_fires_ONCE_per_pair_however_many_ways_it_matches
+      - Mersal.MasterData.Tests.InteractionMatcherTests.A_medicine_does_not_interact_with_itself
+      - Mersal.MasterData.Tests.InteractionMatcherTests.The_triple_whammy_produces_a_finding_for_each_pair_that_carries_risk
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.An_EMPTY_interaction_list_is_NotChecked_not_Ok
+
+  - id: INV-CONTRAINDICATION-IS-NOT-INDICATION
+    statement: >-
+      "Is this drug dangerous in this condition" is a separate check from "is this drug used for this
+      condition", evaluated against the ICD hierarchy and against the recorded pregnancy STATUS. An unknown
+      pregnancy status does not count as pregnant, and an empty rule list reports "not checked", never OK.
+    source: 44-clinical-validation-hardening.md §5; phase-28 Gate 9
+    severity: Critical
+    # Phase 26 built indication matching and not this. The distinction is the whole point: an indication
+    # MISMATCH means off-label, which is legitimate and common, so that warning fires on a large share of
+    # correct prescriptions and is dismissed constantly — and a dismissed check buries the one that matters.
+    #
+    # Pregnancy is modelled as a STATUS rather than an ICD scope, and the reason is the same kind of
+    # judgement. A rule keyed on O00-O9A would fire only for a patient somebody had already coded as pregnant
+    # on this visit, which is precisely the patient nobody needs reminding about. Equally, Unknown must not
+    # count as pregnant: a rule firing on everyone nobody has asked about is dismissed within a day.
+    tests:
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.AN_NSAID_IN_PEPTIC_ULCER_DISEASE_WARNS_WITH_MECHANISM_AND_AN_ALTERNATIVE
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.An_EMPTY_contraindication_list_is_NotChecked_not_Ok
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.When_the_conditions_could_not_be_read_the_check_is_Unavailable_and_never_Ok
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.The_MOST_SERIOUS_rule_is_reported_when_several_fire
+      - Mersal.MasterData.Tests.ContraindicationMatcherTests.AN_NSAID_PRESCRIBED_WITH_A_CODED_PEPTIC_ULCER_IS_FLAGGED
+      - Mersal.MasterData.Tests.ContraindicationMatcherTests.A_rule_at_a_CATEGORY_catches_every_specific_code_underneath_it
+      - Mersal.MasterData.Tests.ContraindicationMatcherTests.AN_ACE_INHIBITOR_IS_FLAGGED_FOR_A_PATIENT_RECORDED_AS_PREGNANT
+      - Mersal.MasterData.Tests.ContraindicationMatcherTests.AN_UNKNOWN_PREGNANCY_STATUS_DOES_NOT_COUNT_AS_PREGNANT
+
+  - id: INV-DOSING-RULE-IS-PATIENT-SPECIFIC
+    statement: >-
+      A dosing rule is selected most-specific-first on (subject, indication scope, population, route). No
+      recorded age selects NO population-specific rule. A weight-based ceiling is capped at the adult
+      maximum, and with no weight it yields no ceiling at all.
+    source: 44-clinical-validation-hardening.md §4; phase-28 Gate 10
+    severity: Critical
+    # The old shape was one maximum per drug with no indication and no population, and its fetcher was a
+    # hard-coded empty dictionary returning provenance "not-yet-configured".
+    #
+    # Two judgements here are the difference between a check and the appearance of one. Defaulting an unknown
+    # age to Adult would apply an adult ceiling to a four-year-old — not conservative, just absent. And an
+    # uncapped mg/kg calculation lets a 60kg adolescent compute past the adult maximum, which would have the
+    # platform endorsing an overdose of its own arithmetic.
+    #
+    # Taking the strictest of every matching rule would sound safer and would apply a paediatric mg/kg
+    # ceiling to an adult and an otitis-media ceiling to a patient treated for something else. A recommended
+    # range is only useful if it is the right one.
+    tests:
+      - Mersal.MasterData.Tests.DosingRuleSelectorTests.AN_ADULT_AND_A_CHILD_ON_THE_SAME_DRUG_GET_DIFFERENT_RULES
+      - Mersal.MasterData.Tests.DosingRuleSelectorTests.AN_INDICATION_SCOPED_RULE_BEATS_THE_GENERAL_CEILING
+      - Mersal.MasterData.Tests.DosingRuleSelectorTests.NO_RECORDED_AGE_SELECTS_NO_RULE_AT_ALL
+      - Mersal.MasterData.Tests.DosingRuleSelectorTests.A_WEIGHT_BASED_CEILING_IS_CAPPED_AT_THE_ADULT_MAXIMUM
+      - Mersal.MasterData.Tests.DosingRuleSelectorTests.A_WEIGHT_BASED_RULE_WITH_NO_WEIGHT_YIELDS_NO_CEILING
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_dose_within_the_rule_shows_the_recommended_range_and_its_source
+
+  - id: INV-CLINICAL-CHECKS-ONLY-WARN
+    statement: >-
+      Benefit rules may block a prescription; clinical checks may only warn. A clinical warning is
+      overridable by the prescriber with a recorded reason, and is never a hard stop.
+    source: 43-approval-engine-and-prescribing-support.md §1, §8 invariant 1, D1
+    severity: Critical
+    # Blocking a doctor on automated advice of uncertain provenance would be the greater harm — the
+    # indication mapping is ATC-L4 clinical judgement, not a published dataset, and the interaction list is
+    # internally curated with partial coverage by construction. Off-label prescribing is legitimate and
+    # common, so an indication mismatch is a warning forever.
+    #
+    # Enforced structurally, not by review: every clinical checker is typed to return ClinicalState, which
+    # has no Blocked value. Writing a blocking clinical check is a compile error.
+    tests:
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.NO_CLINICAL_CHECK_CAN_EVER_BLOCK
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.An_unlisted_indication_WARNS_and_never_blocks
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_line_is_checked_against_medications_the_patient_already_takes
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_benefit_rule_MAY_block_and_it_is_the_only_thing_that_can
+
+  - id: INV-ADVISORY-CARRIES-PROVENANCE
+    statement: >-
+      Every clinical advisory carries its source name, dataset version and retrieval time, shown to the
+      prescriber and stored with the prescription. A warning that cannot be attributed is a warning a
+      clinician is right to ignore.
+    source: 43-approval-engine-and-prescribing-support.md §1 rule 2, §8 invariant 3
+    severity: High
+    # Not a formality for the indication check. The source workbook's own notes state that the ATC-to-ICD
+    # step "is still clinical judgement, not a published dataset, because no free authoritative
+    # drug-to-indication mapping exists" — which is exactly what a prescriber needs in order to weigh an
+    # off-label warning. The interaction list carries its pair count for the same reason: internal curation
+    # means partial coverage, and the UI must state the extent rather than imply completeness.
+    tests:
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.Every_finding_that_had_a_source_carries_its_provenance
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.An_unavailable_finding_has_no_provenance_to_claim
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.No_interaction_found_against_a_populated_list_is_Ok_and_says_what_it_checked
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.Every_finding_is_bilingual
+
+  - id: INV-INDICATION-MATCHED-AT-CATEGORY-LEVEL
+    statement: >-
+      A drug's listed indications are ICD-10 categories and a recorded diagnosis is specific; both are
+      normalised to the 3-character category before comparison. A drug with no indication data reports
+      "not checked", never "no match" and never "OK".
+    source: 43-approval-engine-and-prescribing-support.md §6; phase-26 §26.1
+    severity: High
+    # Found by inspecting the source rather than by reading the design: every one of the 874 distinct codes
+    # in egyptian-drug-list_5.xlsx is a 3-character category, while masterdata.icd_code stores dotted codes
+    # and emr.diagnosis records the specific one. Comparing by equality would report "not a listed
+    # indication" on virtually every prescription — and a warning that always fires is one clinicians learn
+    # to click through, which is worse than no warning at all.
+    #
+    # The Z76 case is separate and equally load-bearing: 1,019 products (4.5%) carry that filler as their
+    # only listed code. Loading it as a real indication would let a product with no clinical data render as
+    # checked.
+    tests:
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_specific_diagnosis_matches_a_category_level_indication
+      - Mersal.ClinicalValidation.Tests.PrescriptionValidatorTests.A_drug_with_no_indication_data_is_NotChecked_not_a_mismatch
+      - Mersal.MasterData.Tests.DrugListLoaderTests.Placeholder_only_indications_produce_no_rows
+      - Mersal.MasterData.Tests.DrugListLoaderTests.Drugs_with_no_indication_data_are_counted_separately_from_unmatched_ones
+      - Mersal.MasterData.Tests.DrugListLoaderTests.A_drug_that_loses_every_indication_is_named_in_the_report
+      - Mersal.MasterData.Tests.DrugListLoaderTests.Icd_category_is_the_first_three_characters
+
+  - id: INV-STEP2-IGNORES-CLIENT-VERDICT
+    statement: >-
+      Step 1 (prescribing-time validation) is advisory and untrusted. On submission the server re-evaluates
+      from current state and ignores any client-supplied verdict; a warning must be acknowledged with a
+      recorded reason, and a benefit refusal cannot be acknowledged away.
+    source: 43-approval-engine-and-prescribing-support.md §5, §8 invariant 4; phase-26 §26.4
+    severity: Critical
+    # Step 1 runs in the doctor's browser. If its verdict were an input to submission, a crafted payload
+    # carrying "everything is fine" would walk past the entire engine — the same class of hole as trusting a
+    # client-filtered payload. The submit handler therefore reads NOTHING the client claims about the
+    # outcome: not to decide, not to skip work.
+    #
+    # The acknowledgement is what gates submission, not the warning. Overrides are expected and recorded
+    # (doc 43 §1 rule 3) — blocking a prescriber on advice of uncertain provenance would be the greater harm
+    # — but proceeding SILENTLY is not available, and the reason is what the approver later reads.
+    tests:
+      - Mersal.Pharmacy.Tests.ForgedClientVerdictTests.A_FORGED_CLEAN_PAYLOAD_IS_STILL_REFUSED_FOR_A_DRUG_THE_ENGINE_WARNS_ON
+      - Mersal.Pharmacy.Tests.ForgedClientVerdictTests.A_BENEFIT_REFUSAL_CANNOT_BE_ACKNOWLEDGED_AWAY
+      - Mersal.Pharmacy.Tests.ForgedClientVerdictTests.An_acknowledged_warning_is_accepted_and_the_REASON_is_stored
+      - Mersal.Pharmacy.Tests.ForgedClientVerdictTests.Submission_records_the_SERVERS_run_stamped_Step2
+      - Mersal.Pharmacy.Tests.ForgedClientVerdictTests.Validate_returns_five_state_findings_and_persists_the_run_without_a_prescription
+
+  - id: INV-DIAGNOSIS-SNAPSHOT-IS-IMMUTABLE
+    statement: >-
+      A prescription records the encounter's diagnoses AS AT prescribing time, as a snapshot rather than a
+      join. A later correction to the encounter's diagnoses does not change what the prescription was
+      checked against.
+    source: 43-approval-engine-and-prescribing-support.md §6; phase-26 §26.4
+    severity: High
+    # The indication check is a statement about what was known when the prescription was written. A foreign
+    # key would rewrite that history every time a diagnosis was corrected, and the record of what was
+    # actually checked would quietly become unrecoverable.
+    tests:
+      - Mersal.Pharmacy.Tests.ForgedClientVerdictTests.The_diagnosis_snapshot_does_not_change_when_the_encounter_diagnosis_later_does
+      - Mersal.Pharmacy.Tests.ForgedClientVerdictTests.Duration_and_the_diagnosis_snapshot_are_persisted
+
+  - id: INV-CARD-NUMBER-IS-NOT-AN-AUTHENTICATOR
+    statement: >-
+      Resolving a beneficiary requires at least TWO identifiers. A card number alone never opens a record,
+      and the resolved payload carries identity only — no diagnosis, note, prescription or encounter content.
+      Identifier TYPES are recorded, never their values.
+    source: 43-approval-engine-and-prescribing-support.md §7, D5; phase-26 §26.6
+    severity: Critical
+    # A card number is printed on something that gets shared, photographed and reused — the exact fraud the
+    # photo on the patient profile was meant to deter. It is a lookup key, not proof of identity.
+    #
+    # Three defects were fixed together here, and the third is the instructive one: patient.card_number
+    # existed and was unique but no search filter reached it; IdentifierType had no CardNumber member; and
+    # GET /beneficiaries/resolve — which pharmacy-service had been CALLING since phase 6 — did not exist at
+    # all. The call 404'd and the client swallowed it, so those search arms silently returned nothing. A
+    # client calling a non-existent endpoint and failing quietly is worse than an absent feature, because
+    # the feature looks present.
+    #
+    # NOTE: doc 43 D5 says to reuse "the call-centre ≥2-identifier rule, already built and tested". It no
+    # longer exists — phase 15's threshold was deliberately deleted along with the on-screen challenge it
+    # belonged to. The rule is implemented in the resolve endpoint instead.
+    tests:
+      - Mersal.Patient.Tests.CardNumberResolveTests.ONE_IDENTIFIER_IS_NOT_ENOUGH_even_a_valid_card_number
+      - Mersal.Patient.Tests.CardNumberResolveTests.Two_identifiers_resolve_the_beneficiary
+      - Mersal.Patient.Tests.CardNumberResolveTests.Identifiers_that_match_DIFFERENT_people_resolve_to_nobody
+      - Mersal.Patient.Tests.CardNumberResolveTests.The_resolved_payload_carries_NO_CLINICAL_FIELD
+      - Mersal.Patient.Tests.CardNumberResolveTests.The_response_echoes_identifier_TYPES_and_never_their_values
+      - Mersal.Patient.Tests.CardNumberResolveTests.A_card_number_resolves_however_it_was_typed
+      - Mersal.Patient.Tests.CardNumberResolveTests.CardNumber_is_a_first_class_identifier_type
+
+  - id: INV-PRESCRIBING-COMBOBOX-CARRIES-A-REAL-DRUG-ID
+    statement: >-
+      The prescribing combobox searches trade name AND active ingredient, renders the ingredient beneath the
+      trade name before selection, and carries a real drug uuid — never an ATC code string.
+    source: 43-approval-engine-and-prescribing-support.md §6, §10; phase-26 §26.5
+    severity: High
+    # Two trade names holding the same molecule is the commonest prescribing duplication, so the ingredient
+    # is a safety cue and has to be legible at the moment of choosing — not after.
+    #
+    # The uuid half is a regression guard: the modal this replaced sent `drugId: req.drug.code` — the ATC
+    # STRING — where the API expects a Guid, alongside hard-coded defaults of J01CA04 / "Amoxicillin 500mg".
+    # The path could not work against real data at all, which is why it is pinned rather than assumed.
+    tests:
+      - apps/web/test/prescribing-workspace.test.tsx::finds the same product by trade name AND by active ingredient
+      - apps/web/test/prescribing-workspace.test.tsx::shows the active ingredient and price BEFORE the drug is chosen
+      - apps/web/test/prescribing-workspace.test.tsx::is a real ARIA combobox and is operable by keyboard alone
+      - apps/web/test/prescribing-workspace.test.tsx::submits the drug's UUID, never its ATC code
+      - apps/web/test/prescribing-workspace.test.tsx::renders 'Check unavailable' as VISUALLY DISTINCT from OK
+      - apps/web/test/prescribing-workspace.test.tsx::blocks submit until a warning is acknowledged WITH a reason
+      - apps/web/test/prescribing-workspace.test.tsx::invalidates the run when a line is edited afterwards
+      - apps/web/test/prescribing-workspace.test.tsx::has no axe violations against POPULATED fixtures, in English
+      - apps/web/test/prescribing-workspace.test.tsx::renders the workspace and its status words in Arabic
+
+  - id: INV-UNRECORDED-IS-NOT-A-NEGATIVE-FINDING
+    statement: >-
+      An empty allergy list means nobody has recorded one, and an absent blood group means nobody has typed
+      the patient. Neither is ever rendered as a clean or reassuring result, and a FAILED read is never
+      rendered as an empty record. The allergen's name is resolved from master data at write time and never
+      taken from the client.
+    source: 43-approval-engine-and-prescribing-support.md §1 rule 2, §8 invariant 2; 21-accessibility-checklist.md
+    severity: High
+    # The same rule as INV-CHECK-UNAVAILABLE-IS-NOT-OK, one layer earlier. The prescribing workspace is
+    # careful to report `NotChecked` when zero allergens are recorded — but the screen where a doctor would
+    # FIX that had no way to record one, so the honest answer was permanent. Recording an allergy here is
+    # what turns that check into a real answer, which is why the two are pinned together.
+    #
+    # The naming half is not cosmetic. emr.allergy stored only a masterdata uuid, and profile-service's
+    # alerts provider had always read an `allergenDisplay` field nothing ever sent — so the patient context
+    # bar, whose entire job is telling a clinician who and what is in front of them, was one recorded
+    # allergy away from rendering "Allergy: 4f2b8c1a-…". A safety control that displays an identifier has
+    # stopped communicating. Resolving the name SERVER-SIDE is the other half: a client-supplied display
+    # string would let the substance shown on the strip disagree with the allergen actually recorded.
+    tests:
+      - Mersal.Emr.Tests.MemberClinicalRecordTests.A_recorded_allergy_carries_the_substance_NAME_not_just_an_id
+      - Mersal.Emr.Tests.MemberClinicalRecordTests.An_unknown_allergen_is_refused_rather_than_recorded_without_a_name
+      - Mersal.Emr.Tests.MemberClinicalRecordTests.An_empty_record_reports_absence_and_never_a_negative_finding
+      - Mersal.Emr.Tests.MemberClinicalRecordTests.A_clinician_with_no_treating_relationship_cannot_read_or_write_the_record
+      - apps/web/test/member-clinical-panel.test.tsx::says NO ALLERGIES RECORDED rather than showing a calm blank
+      - apps/web/test/member-clinical-panel.test.tsx::renders an unrecorded blood group as an explicit state, not as a missing field
+      - apps/web/test/member-clinical-panel.test.tsx::does NOT report an empty record when the read failed
+      - apps/web/test/member-clinical-panel.test.tsx::has no axe violations in English or Arabic
+
+  - id: INV-SUBSTITUTION-DOES-NOT-EDIT-THE-PRESCRIPTION
+    statement: >-
+      What a counter hands over is recorded as an authorization SEPARATE from the prescription or order it
+      was delivered against. A substitution lands on that authorization — the written product and the
+      delivered product are two fields, both kept — and the clinical record is never written to by the
+      fulfilment path. A redelivered dispense cannot post twice, and settled work never enters the review
+      queue.
+    source: docs/adr/0034-fulfilment-authorization.md; 23-state-machines.md §5
+    severity: Critical
+    # Three failures are pinned here rather than one, because each defeats the invariant on its own.
+    #
+    # OVERWRITING. If the delivered molecule were stored in the field that held the prescribed one, the
+    # record of what the doctor decided would be gone — and that is the fact a reviewer, a pharmacovigilance
+    # query or a later prescriber most needs. The two columns exist so the loss is not expressible.
+    #
+    # DOUBLE-POSTING. Delivery is at-least-once. The processed-event ledger catches a redelivered message
+    # id; the UNIQUE fulfilment_ref is the guard that survives a redelivery under a NEW message id, which
+    # the ledger has never seen. Without the second, a broker retry inflates what the payer is shown.
+    #
+    # DROWNING THE INBOX. A fulfilment is born Issued, and no transition targets that status or leaves it.
+    # A few hundred dispenses a day in the reviewer's work queue is a queue people stop reading, so the
+    # register is a deliberate ask and the inbox default is unchanged.
+    tests:
+      - Mersal.Approvals.Tests.FulfilmentAuthorizationTests.A_dispense_issues_an_authorization_that_keeps_BOTH_the_written_and_the_delivered_drug
+      - Mersal.Approvals.Tests.FulfilmentAuthorizationTests.A_substituted_item_with_no_reason_is_refused
+      - Mersal.Approvals.Tests.FulfilmentAuthorizationTests.A_redelivered_dispense_cannot_post_twice
+      - Mersal.Approvals.Tests.FulfilmentAuthorizationTests.A_second_dispense_against_the_same_prescription_appends_rather_than_issuing_again
+      - Mersal.Approvals.Tests.FulfilmentAuthorizationTests.It_is_born_Issued_and_a_reviewer_cannot_pick_it_up
+      - Mersal.Approvals.Tests.FulfilmentAuthorizationTests.The_reviewer_inbox_does_not_fill_up_with_dispenses_but_the_register_shows_them
+      - Mersal.Approvals.Tests.FulfilmentAuthorizationTests.The_items_endpoint_shows_written_and_delivered_side_by_side_and_no_clinical_payload
+      - apps/web/test/approvals-register.test.tsx::shows the written medicine beside the delivered one on a substitution
+      - apps/web/test/approvals-register.test.tsx::says in words that the prescription was not edited
+      - apps/web/test/prescription-page.test.tsx::records a substitution against the dispense, not against the prescription
+
+  - id: INV-BENCH-NEVER-QUOTES-A-ZERO
+    statement: >-
+      A lab or imaging bench is told what an order costs on the same terms a dispensing counter is: the
+      member and payer figures come from the shared benefit-pricing path, and any figure that cannot be
+      established is rendered as "cannot be quoted" with a reason — never as 0.00, and never omitted.
+    source: docs/adr/0034-fulfilment-authorization.md Decision 4; libs/benefit-pricing
+    severity: Critical
+    # The counter's rule, extended to the bench because it is the same situation: someone in front of a
+    # patient who is about to be told what they owe, with no reviewer between that sentence and the patient.
+    # A zero reads as "free", and a refugee family told their scan is free either receives a bill later or
+    # declines something they could have afforded.
+    #
+    # Today every one of these tiles reads "cannot be quoted": no examination in master data carries a price
+    # and no plan version prices LAB or IMAGING. That is the mechanism working, and it is why the unpriced
+    # cases are pinned as hard as the priced one.
+    tests:
+      - apps/web/test/investigation-order-page.test.tsx::NEVER renders an unquotable share as a zero amount
+      - apps/web/test/investigation-order-page.test.tsx::withholds the total too when nothing on the order has a price
+      - apps/web/test/investigation-order-page.test.tsx::does not render a price at all when pricing fails
+      - apps/web/test/investigation-order-page.test.tsx::says the priced figure is an estimate, not the final bill
+
+  - id: INV-NO-INVENTED-EXAMINATION-EQUIVALENCE
+    statement: >-
+      A lab or imaging technician is never offered a list of "equivalent" examinations, because master data
+      records no such equivalence. The per-line control raises a REQUEST to the approval team, with a
+      mandatory reason and an optional proposal, and grants the requester no decision authority.
+    source: docs/adr/0034-fulfilment-authorization.md Decision 4; 11-permission-matrix.md
+    severity: High
+    # The pharmacy counter substitutes from the drug's ATC-5 class — a real equivalence set the server
+    # checks the choice against. Nothing comparable exists for examinations: examination_type carries a
+    # category and a sensitivity, and neither says one test may stand in for another. A picker derived from
+    # the category would put "any radiology procedure" behind a button, which is a technician prescribing.
+    tests:
+      - Mersal.Approvals.Tests.FulfilmentAuthorizationTests.A_technician_asking_about_a_different_examination_raises_a_review_not_a_fulfilment
+      - Mersal.Approvals.Tests.FulfilmentAuthorizationTests.An_empty_reason_is_refused_because_it_is_the_whole_decision
+      - apps/web/test/investigation-order-page.test.tsx::asks the approval team rather than offering a list
+      - apps/web/test/investigation-order-page.test.tsx::refuses to send without a reason
+
+  - id: INV-COVERAGE-CATEGORY-IS-A-CODE
+    statement: >-
+      The benefit category on an eligibility coverage projection is the canonical CODE (CONSULT / LAB /
+      IMAGING / PHARMACY / REFERRAL), never a display name. The column CHECK-constrains it, because a value
+      outside the closed set reads as "this member has no cover" — which is indistinguishable from the truth.
+    source: 22-data-dictionary.md §11; eligibility migration 0006
+    severity: Critical
+    # This shipped, and ran. Three seeds wrote display names — 'Laboratory', 'Consultation', 'Outpatient',
+    # and a case fixture's 'Oncology' — into the field the engine MATCHES on, so eligibility answered "no
+    # active coverage for LAB" to every seeded member holding laboratory cover.
+    #
+    # It hid because the failure looks exactly like the truth: "no active coverage" is what a desk sees for a
+    # member who genuinely has none, so nothing appeared broken. PHARMACY worked by accident ('Pharmacy'
+    # matches 'PHARMACY' case-insensitively), which is why it eventually surfaced as "the price will not
+    # show on a dispensing screen" rather than as what it was.
+    #
+    # So the guard is in the DATABASE rather than in review. A vocabulary that is closed in the design and
+    # open in the column is one bad INSERT away from telling a refugee they are not covered.
+    tests:
+      - Mersal.Eligibility.Tests.CoverageCategoryVocabularyTests.A_display_name_cannot_be_written_where_a_code_belongs
+      - Mersal.Eligibility.Tests.CoverageCategoryVocabularyTests.Every_shape_the_seeds_used_is_refused
+      - Mersal.Eligibility.Tests.CoverageCategoryVocabularyTests.The_canonical_five_are_accepted
+
+  - id: INV-UNAVAILABLE-IS-NOT-UNPRICED
+    statement: >-
+      A cost share that could not be READ is never reported as a cost share that does not EXIST. The shared
+      pricing path distinguishes an outage or a refusal (Unavailable) from an authored "this tier is not
+      priced" (NotPricedAtTier) from a network gap (TierUnresolved), and each carries its own sentence.
+    source: docs/adr/0033-live-label-checking-openfda.md (the same rule, for money); libs/benefit-pricing
+    severity: Critical
+    # The money counterpart of INV-CHECK-UNAVAILABLE-IS-NOT-OK, and it was broken in the same shape. The
+    # cost-share route sat behind `policy:read` — the entire benefit product, which a pharmacist neither holds
+    # nor should — so every quote made at a counter took a 403, and the client turned it into "this plan does
+    # not price pharmacy at the resolved tier": a claim about a member's benefit, made on the strength of a
+    # permission error.
+    #
+    # Undetectable while it was ALSO true. No plan version had a pharmacy rule, so the sentence was correct
+    # and arrived at through a broken route — which stays invisible until the data changes underneath it.
+    #
+    # The gate is now `policy:price-lookup`, satisfied by policy:read OR eligibility:check, so the two
+    # pricing questions are answerable without handing out the plan book.
+    tests:
+      - Mersal.BenefitPricing.Tests.UnavailableIsNotUnpricedTests.A_refused_read_is_Unavailable_and_not_NotPricedAtTier
+      - Mersal.BenefitPricing.Tests.UnavailableIsNotUnpricedTests.A_timeout_is_Unavailable_too
+      - Mersal.BenefitPricing.Tests.UnavailableIsNotUnpricedTests.A_genuine_404_is_still_NotPricedAtTier
+      - Mersal.BenefitPricing.Tests.UnavailableIsNotUnpricedTests.An_unresolved_tier_keeps_its_own_reason
+
+  - id: INV-CONTRACTS-MATCH-THE-SERVER
+    statement: >-
+      The zod contracts the SPA validates responses against are checked against real, captured responses from
+      the running services — not only against fixtures written from the contracts themselves.
+    source: apps/web/test/fixtures/*.server.json
+    severity: High
+    # `zRxPriceLine` called the field `lineId`; pharmacy-service sends `prescriptionLineId`. Every pricing
+    # response failed contract validation, the client threw, and the dispensing counter said "the cost of this
+    # prescription could not be worked out" on every prescription — while the endpoint had been returning a
+    # correct 290.50 EGP the whole time.
+    #
+    # Nothing caught it because the dev fixture was written FROM the contract, so it used `lineId` too: the
+    # schema, the fixture and the tests all agreed with each other and none of them had ever seen the server.
+    # The OpenAPI drift gate could not help — these are minimal-API routes with no declared response schema,
+    # so the generated spec records only "200 OK". Three copies of one assumption is not corroboration.
+    tests:
+      - apps/web/test/server-shape.test.ts::prices a prescription
+      - apps/web/test/server-shape.test.ts::prices an investigation order
+      - apps/web/test/server-shape.test.ts::lists what was delivered against an authorization
+      - apps/web/test/server-shape.test.ts::splits a priced prescription between the member and the payer
+      - apps/web/test/server-shape.test.ts::still withholds an unquotable share rather than showing a zero
+      - apps/web/test/server-shape.test.ts::multiplies quantity by unit price, on the wire
+
+  - id: INV-PLAN-VERSION-IS-RESOLVED-BY-SERVICE-DATE
+    statement: >-
+      A cost-share quote prices against the plan version IN FORCE ON THE SERVICE DATE, not the version the
+      member was enrolled under and not "whichever is active now". A plan-version activation is a two-row
+      swap and its overlap constraint is deferred to commit, so a correct amendment cannot fail on the order
+      its statements were emitted in.
+    source: 23-state-machines.md; policy migration 0019; eligibility migration 0005
+    severity: High
+    # Two defects, one rule. 19.2b resolved the version from the coverage's `source_plan_version_id`, which is
+    # PROVENANCE — what the cover was projected from — so every future quote was pinned to the terms in force
+    # the day the member enrolled and no amendment could ever reach anybody already on the plan.
+    #
+    # And the amendment itself failed intermittently: `ex_plan_version_no_overlap` was checked per row, so if
+    # the incoming version was updated before the outgoing one was closed there were momentarily two
+    # open-ended versions and the constraint fired — a 409 describing a state that existed for microseconds
+    # and was never committed. It worked on one plan and refused on the next, by luck of statement ordering.
+    tests:
+      - Mersal.Policy.Tests.PlanVersionStoreTests.The_resolver_returns_the_version_in_force_on_the_service_date
+      - Mersal.Policy.Tests.PlanVersionStoreTests.The_resolver_never_returns_a_draft
+      - Mersal.Policy.Tests.PlanVersionStoreTests.An_activation_swap_survives_whichever_row_is_updated_first
+      - Mersal.Policy.Tests.PlanVersionStoreTests.Versions_that_abut_exactly_are_allowed
+      - Mersal.Policy.Tests.PlanVersionStoreTests.Two_resolvable_versions_of_a_plan_cannot_cover_the_same_day
+
+  - id: INV-A-STALE-COUNTER-SAYS-IT-IS-STALE
+    statement: >-
+      The Audit control on a dispensing counter and a lab bench re-reads the document and the price and
+      REPORTS what moved; it never silently corrects the numbers under someone about to confirm them, and it
+      never reports a screen as current when the re-read failed. A failed re-read leaves the document on
+      screen rather than blanking the page.
+    source: apps/web/src/screens/pharmacy/PrescriptionPage.tsx; apps/web/src/screens/lab/InvestigationOrderPage.tsx
+    severity: High
+    # Three failures, and the tests found the third. SILENT CORRECTION: a quantity dispensed at another branch
+    # swapped into the row while the pharmacist reads it leaves them confirming a number they never saw.
+    # FALSE REASSURANCE: "the screen is current" after a read that did not happen is the same defect as a
+    # clinical check reporting Ok on a source that failed (INV-CHECK-UNAVAILABLE-IS-NOT-OK), applied to money
+    # and quantities. And BLANKING: the first cut replaced the whole page with "could not be opened" whenever
+    # a refresh failed — taking the prescription away from a pharmacist with a patient in front of them
+    # because a request timed out. Stale and known to be stale beats gone.
+    tests:
+      - apps/web/test/prescription-page.test.tsx::says the screen is current when the audit finds nothing moved
+      - apps/web/test/prescription-page.test.tsx::reports a quantity dispensed elsewhere rather than silently correcting it
+      - apps/web/test/prescription-page.test.tsx::does NOT claim the screen is current when the re-read failed
+      - apps/web/test/investigation-order-page.test.tsx::says the screen is current when the audit finds nothing moved
+      - apps/web/test/investigation-order-page.test.tsx::reports a panel performed elsewhere rather than silently correcting it
+      - apps/web/test/investigation-order-page.test.tsx::does NOT claim the screen is current when the re-read failed
+
+  - id: INV-AN-UNRECORDED-LINE-FACT-IS-NAMED
+    statement: >-
+      A counter never renders an unrecorded duration, active ingredient or unit price as a blank. Each is
+      said in words and styled as an absence, because a blank cell reads as a value — a missing duration
+      reads as a one-day course, and a missing price reads as free.
+    source: 43-approval-engine-and-prescribing-support.md §1 rule 2; 21-accessibility-checklist.md
+    severity: High
+    # The line-level counterpart of INV-UNRECORDED-IS-NOT-A-NEGATIVE-FINDING. Three of ten prescription lines
+    # in this environment record no duration and 2,786 of 31,651 catalogue products record no active
+    # ingredient, so the empty state is the COMMON state — and only one of "one day" and "nobody wrote it
+    # down" is a reason to ring the prescriber before handing anything over.
+    tests:
+      - apps/web/test/prescription-page.test.tsx::shows the duration, and NEVER leaves an unrecorded one blank
+      - apps/web/test/prescription-page.test.tsx::shows the active ingredient, and names its absence
+      - apps/web/test/prescription-page.test.tsx::shows the unit price on every line, and says so when there is none
+      - apps/web/test/investigation-order-page.test.tsx::says NO PRICE on a line the catalogue does not price, never 0.00
+      - apps/web/test/investigation-order-page.test.tsx::shows the unit price on every line, and says so when there is none
+
+  - id: INV-AN-IDENTIFIER-IS-NEVER-SHORTENED-FOR-DISPLAY
+    statement: >-
+      A drug id carried into the SPA is the whole uuid. It is an identity — the active-ingredient join, the
+      approved-alternatives lookup behind the substitute control, and the drugId sent on submission all key
+      off it — and nothing renders it, so there is no display to shorten it for.
+    source: apps/web/src/api/HttpApiClient.ts (toPrescriptions)
+    severity: High
+    # `code: String(l.drugId).slice(0, 8)` — a display shortening applied to a field nothing displays. It
+    # broke two things at once and neither looked broken: every medicine reported "active ingredient not
+    # recorded", and the substitute modal reported "no approved alternative is listed" for the ENTIRE
+    # catalogue, because master data answers 404 to a prefix (proved live: full id → 200 with 8
+    # alternatives, truncated → 404).
+    #
+    # Both of those are states the screens are DESIGNED to render honestly, which is exactly why nobody saw
+    # it. An honest empty state is indistinguishable from a broken lookup unless something asserts the
+    # lookup's input.
+    tests:
+      - apps/web/test/server-shape.test.ts::carries the drug id whole, not a display prefix of it
+
+  - id: INV-A-HIDDEN-LABEL-IS-HIDDEN-NOT-ABSENT
+    statement: >-
+      A per-row control whose visible label would repeat its column header hides the label visually and keeps
+      it for assistive technology. `hideLabel` renders it `sr-only`; it is never dropped, and a field with no
+      accessible name remains impossible to build.
+    source: apps/design-system/src/components/Field.tsx; 21-accessibility-checklist.md
+    severity: High
+    # Five rows each printing "Dispense now — Augmentin 600mg vial for i.v 600 mg vial" above a number box is
+    # the column header repeated five times at three times the row height. Deleting the label instead would
+    # leave a screen-reader user hearing "edit, 0" five times with nothing to tell the rows apart, on a
+    # control that decides how much medicine a patient receives.
+    #
+    # `hideLabel` was declared on FieldBase and honoured by Labelled, but only SelectField passed it on — on
+    # an InputField it fell into `...rest` and landed on the DOM node as an unknown attribute. A prop the
+    # shared base documents has to work on every field that inherits it.
+    tests:
+      - apps/web/test/prescription-page.test.tsx::does not repeat the medicine's name above every quantity box
+
+  - id: INV-A-SESSION-CANNOT-OUTLIVE-ITS-SCOPES
+    statement: >-
+      A session whose access token lacks a scope the application requests is ended at restore and at renewal,
+      so the user re-authorises once and picks up their current grants. It is never allowed to run on with a
+      permanent, silent 403.
+    source: apps/web/src/auth/oidcClient.ts; RFC 6749 §6
+    severity: Critical
+    # Token scopes are frozen at authorisation. `masterdata:read` and `eligibility:check` were granted to the
+    # pharmacist role AFTER sessions had already begun, and RFC 6749 §6 forbids a refresh from requesting
+    # scopes beyond those originally granted — so every silent renewal faithfully reissued the same gap. The
+    # session could not recover on its own for as long as it lived.
+    #
+    # At a dispensing counter that surfaced as POST /drugs/prices/by-ids answering 403, with the unit price
+    # and the active ingredient rendering as "not recorded": a screen that handles money reporting an
+    # authorisation gap as a fact about the medicine. No amount of care downstream could have caught it —
+    # only the token knows, which is why the check reads the token rather than the failure.
+    #
+    # Fails OPEN on an unreadable token: a shape we cannot parse is not evidence of staleness, and
+    # re-authorising on it would loop a user through sign-in forever, which is worse than the 403.
+    tests:
+      - apps/web/test/stale-scope-session.test.ts::is recognised as stale when a requested scope is missing
+      - apps/web/test/stale-scope-session.test.ts::is current when the token carries every scope the app requests
+      - apps/web/test/stale-scope-session.test.ts::ignores the protocol scopes the issuer may normalise away
+      - apps/web/test/stale-scope-session.test.ts::treats an unreadable token as CURRENT rather than stale
+
+  - id: INV-COST-SHARE-IS-QUOTED-NEVER-SCALED
+    statement: >-
+      The member and payer shares are composed by the benefit engine on the amount actually being handed over,
+      and are re-quoted whenever that amount changes. No client, and no service other than eligibility, may
+      derive a share by scaling another share.
+    source: >-
+      services/pharmacy/Api/RxPricing.cs; services/orders/Api/OrderPricing.cs; libs/money; libs/benefit-pricing
+    severity: Critical
+    # The counter's share tiles answered one question — "what does the WHOLE prescription cost the patient" —
+    # while a pharmacist was handing over part of it. A partial dispense is the ordinary case, not the
+    # exception: stock is short, or the member can only pay for part of a course today. The tiles therefore
+    # overstated what was owed at that moment by exactly the part not being collected.
+    #
+    # The obvious repair — multiply the whole figure by the ratio — is wrong, and wrong in the direction that
+    # is hardest to notice. `libs/money` applies a deductible in full, THEN a copay, THEN coinsurance, so the
+    # share is not linear in the amount. Measured against the live engine on RX-2026-000042: the whole
+    # prescription (EGP 2,268) carries a member share of 613.60, while the two units actually being dispensed
+    # (EGP 324) carry 224.80. Scaling would have quoted 87.66 — under by more than half, on a screen with no
+    # reviewer between it and the patient.
+    #
+    # So the basis travels to the server (`?dispense=`/`?perform=`) and the split comes back composed. An
+    # unknown line id in that basis is a 400 rather than a line quietly skipped, because a dropped line
+    # produces a smaller share that looks exactly as confident as a correct one.
+    #
+    # A basis worth nothing falls back to the whole-prescription question rather than quoting zero: "Patient
+    # pays EGP 0.00" on an untouched screen is the "free" reading that INV-CHECK-UNAVAILABLE-IS-NOT-OK and
+    # INV-UNAVAILABLE-IS-NOT-UNPRICED exist to prevent elsewhere.
+    tests:
+      - apps/web/test/server-shape.test.ts::re-quotes the split on what is being dispensed, and the figure is not proportional
+      - apps/web/test/prescription-page.test.tsx::re-quotes the share rather than scaling it, and the percentage proves it
+      - apps/web/test/prescription-page.test.tsx::quotes the two shares on what is being dispensed, not on the whole prescription
+      - apps/web/test/prescription-page.test.tsx::clears the shares rather than leaving stale ones beside a changed quantity
+      - apps/web/test/investigation-order-page.test.tsx::quotes the two shares on what is being performed, not on the whole order
+      - services/pharmacy/Tests/DispenseBasisTests.cs::A_line_that_is_not_on_this_prescription_is_refused_rather_than_skipped
+      - services/pharmacy/Tests/DispenseBasisTests.cs::A_zero_quantity_parses_and_leaves_the_basis_empty_of_value
+      - services/orders/Tests/PerformBasisTests.cs::A_line_that_is_not_on_this_order_is_refused_rather_than_skipped
+
+  - id: INV-SCROLL-REGIONS-SHARE-ONE-DESIGN
+    statement: >-
+      A region that scrolls inside the page is capped from the scroll scale, contains its overscroll, draws a
+      tokenised scrollbar, and is reachable by keyboard when it holds no control of its own. The page's own
+      scroller and the navigation rail keep the platform scrollbar.
+    source: >-
+      apps/design-system/src/tokens/tokens.css; apps/design-system/src/styles/components.css (.mrs-scroll);
+      21-accessibility-checklist.md; WCAG 2.1.1
+    severity: Medium
+    # Ten expressions capped ten scroll regions — 288px, 320px, 16rem, 20rem, 22rem, 30vh, 88vh,
+    # min(60vh,32rem), min(70vh,640px), calc(100dvh-84px) — for what is really three questions. The two
+    # dropdowns doing exactly the same job disagreed by 64px, and the eleventh author had nothing to copy.
+    #
+    # Not one contained its overscroll. Reaching the bottom of an inner list handed the momentum to the page,
+    # so scrolling a select dropdown to its end scrolled the document behind it and moved the field the
+    # dropdown was anchored to out from under the cursor.
+    #
+    # None styled a scrollbar, and the two platforms fail in opposite directions: Windows draws a ~17px grey
+    # slab (6% of a 288px dropdown spent on furniture matching nothing else), macOS draws an overlay bar that
+    # is invisible until you scroll — so a list that scrolls looks exactly like a list that does not, and the
+    # only way to find the remaining options is to try.
+    #
+    # And thirteen regions that scroll but hold nothing focusable could not be scrolled without a pointer
+    # (WCAG 2.1.1). The route-wide axe pass could never have caught it: `scrollable-region-focusable` only
+    # fires when an element ACTUALLY overflows, and jsdom performs no layout, so every box measures zero and
+    # nothing ever overflows. Real coverage, structurally blind to exactly this — hence a static check.
+    #
+    # `vh` is banned as a scroll cap except as the fallback line before its `dvh` twin: on mobile Safari a
+    # `vh` box is taller than the visible page while the URL bar shows, so the last rows sit behind the
+    # toolbar with no way to reach them.
+    tests:
+      - apps/web/test/scroll-design.test.ts::caps every scroll region from the scale rather than from a fresh number
+      - apps/web/test/scroll-design.test.ts::never measures a scroll cap in bare vh
+      - apps/web/test/scroll-design.test.ts::contains its overscroll and styles its own scrollbar
+      - apps/web/test/scroll-design.test.ts::leaves the page's own scroller and the rail on the platform scrollbar
+      - apps/web/test/scroll-design.test.ts::makes every scroll region that holds no controls a tab stop
+      - apps/web/test/scroll-design.test.ts::does not put a tab stop inside a listbox the arrow keys already drive
+
+  - id: INV-TABLES-SHARE-ONE-DESIGN
+    statement: >-
+      Every table is drawn from one vocabulary: the header type, weight, tracking and colour come from the
+      --tbl-head-* tokens, no table draws a rule under its last row, and a column of quantities aligns to its
+      end with tabular figures through the `numeric` column flag. An identifier or a date is not a numeric
+      column.
+    source: >-
+      apps/design-system/src/tokens/tokens.css; apps/design-system/src/components/DataTable.tsx;
+      apps/design-system/src/styles/components.css (.mrs-num); 0B-DESIGN-SYSTEM-UI.md §10c
+    severity: Medium
+    # FIVE vocabularies had grown for one thing: `.mrs-wl` (the worklist, 36 screens), `.mini-table`,
+    # `.pol-grid`/`.pol-costshare`, `.rx-dispense-table`, and an inline-styled table on the effective-access
+    # preview that carried no class at all and so was invisible to every search for one. They disagreed on
+    # every property a column header has — three sizes (11.5px, 0.78rem, 13px), two colours, and two of the
+    # five with no uppercase and no letter-spacing whatsoever. The member screen renders `.mrs-wl` and
+    # `.pol-grid` inside the SAME CARD, where they read as two different products.
+    #
+    # The numbers were the worse half, because it looked solved. A money column is read by scanning DOWN it,
+    # which only works when the digits stack: left-aligned, 9.50 and 12,400.00 start together and end apart,
+    # so the eye measures each string instead of reading a shape. Thirteen of the app's fifty-six money
+    # renders wrapped their value in `.tnum` — but `.tnum` sets `font-variant-numeric` and nothing else, on a
+    # <span> inside a cell still `text-align: start`. The fix had been applied, it read as applied, and every
+    # column was still ragged. Alignment belongs to the CELL, which is why `numeric` is a column flag rather
+    # than something each cell renderer remembers.
+    #
+    # `numeric` is NOT "contains digits". A case number, an MRN, an order reference and a date are numerals
+    # read left-to-right like words; right-aligning them breaks the column beside them. Those keep `.tnum`.
+    #
+    # The last-row rule is the card's own edge doing the same job twice — a hairline floating in the card's
+    # bottom padding with nothing under it. Only `.mrs-wl` had ever dropped it.
+    tests:
+      - apps/web/test/table-design.test.ts::is described once, in tokens
+      - apps/web/test/table-design.test.ts::never hard-codes its type or colour in a table's own rule
+      - apps/web/test/table-design.test.ts::aligns on the cell, which is the only place alignment works
+      - apps/web/test/table-design.test.ts::is reached through the column flag, not by hand-wrapping the value
+      - apps/web/test/table-design.test.ts::does not right-align an identifier or a date
+      - apps/web/test/table-design.test.ts::stays closed — a new table joins one of the existing ones
+      - apps/web/test/table-design.test.ts::never draws a rule under its last row
+
+  - id: INV-MASTER-DATA-EDIT-IS-AN-APPEND
+    statement: >-
+      A master-data edit appends an effective-dated version with a mandatory rationale; it never mutates or
+      deletes one, and retiring a code is itself a version. Clinical governance reaches ICD-10, CPT, LOINC and
+      ATC only. masterdata-service still exposes no write path.
+    source: >-
+      docs/adr/0035-approval-supervisor-authority.md §4; services/admin/Domain/GovernanceEntities.cs;
+      services/masterdata/Tests/MasterDataAuthzTests.cs
+    severity: High
+    # `medical_director` already held `admin:edit-masterdata` and the endpoint was already built —
+    # effective-dated, versioned, rationale-mandatory, audited. What was missing was a DOOR: `portalForRole`
+    # gives one portal per role, the only Master Data screen lived in the `admin` portal, and it was read-only
+    # anyway. An authority that is granted and unreachable reads, from the outside, exactly like an authority
+    # that was never granted.
+    #
+    # The append is the safety property. Codes are safety-critical and historical records must keep resolving
+    # them as they read at the time — a claim adjudicated last March is judged against last March's ICD entry.
+    # A mutating edit would silently rewrite the basis of every past decision.
+    #
+    # The clinical bound answers ADR-0035's open question. The grant was made because a director absorbs the
+    # consequence of a wrong clinical code — it misroutes a diagnosis into their own queue. That argument does
+    # not reach formulary tiers or allergen groupings, and "they can already edit some of it" is not a reason
+    # to hand over the rest. It narrows nobody: super_admin keeps every system.
+    #
+    # The diff is not decoration. A code table edited blind is how a wrong mapping ships, and a wrong mapping
+    # does not fail loudly. A diff that could not be READ is never rendered as an empty one — an empty diff
+    # says "nothing changes", which is the one thing it must not say when the truth is "we could not see".
+    tests:
+      - services/masterdata/Tests/MasterDataAuthzTests.cs::The_reference_catalogue_exposes_no_write_path
+      - services/admin/Tests/MasterDataGovernanceTests.cs::Clinical_governance_edits_the_clinical_vocabularies
+      - services/admin/Tests/MasterDataGovernanceTests.cs::Clinical_governance_does_not_reach_the_administrative_ones
+      - services/admin/Tests/MasterDataGovernanceTests.cs::Super_admin_keeps_every_system
+      - services/admin/Tests/MasterDataGovernanceTests.cs::An_unbounded_role_anywhere_in_the_set_wins
+      - services/admin/Tests/MasterDataGovernanceTests.cs::A_role_this_bound_says_nothing_about_is_left_to_the_gate
+      - services/admin/Tests/MasterDataGovernanceTests.cs::The_clinical_set_is_exactly_the_four_vocabularies
+      - apps/web/test/master-list-admin.test.tsx::says an edit APPENDS a version rather than replacing one
+      - apps/web/test/master-list-admin.test.tsx::will not save without a rationale
+      - apps/web/test/master-list-admin.test.tsx::refuses a malformed attribute line rather than dropping it
+      - apps/web/test/master-list-admin.test.tsx::NEVER renders an unreadable diff as 'nothing changes'
+      - apps/web/test/master-list-admin.test.tsx::offers no edit control for a code system outside clinical governance
+
+  - id: INV-DOCUMENT-EXPIRY-IS-KNOWN-OR-UNKNOWN
+    statement: >-
+      A document's expiry is either recorded, derived from the renewal cadence and labelled as derived, or
+      absent — and absent is UNKNOWN, never valid. The warning thresholds are configured, can never be
+      emptied, and every failure path falls back to warning more rather than less.
+    source: >-
+      docs/adr/0035-approval-supervisor-authority.md §6; libs/validity/DocumentValidityPolicy.cs;
+      services/document/Infrastructure/Migrations/0004_document_expiry.sql
+    severity: High
+    # The thresholds were `PractitionerLicence.WarningDays = [90, 60, 30]` — a compiled-in constant, so the one
+    # number a Medical Director most obviously owns was the one they could not touch. Moving it to
+    # configuration had to change WHO may set it and change nothing about what happens by default, or a later
+    # surprise becomes impossible to attribute: the fallback still reads 90/60/30 exactly.
+    #
+    # Two columns, not one. `expires_on` alone cannot distinguish "the card says March" from "nobody recorded
+    # one, so the cadence puts a review in March". Mersal does not decide when a government-issued card lapses,
+    # and presenting a policy-computed date as the document's real expiry would be the platform inventing a
+    # fact about a refugee's papers. A CHECK enforces that the date and its source travel together — a
+    # half-written fact is worse than no fact.
+    #
+    # An empty threshold list is refused everywhere: in the endpoint, in the parser, and in the screen. "Warn
+    # at no point" would silence every expiring credential, and the failure would look exactly like a quiet
+    # week. The fallback direction is toward MORE warning — a warning nobody needed is a nuisance, a licence
+    # that lapsed unnoticed is a clinician practising without one.
+    #
+    # The kind vocabulary tracks `patient.beneficiary_identifier.identifier_type`'s CHECK constraint. An enum
+    # that invented its own spelling would give a supervisor a policy that is configured, saved, audited — and
+    # matches no row. `KindForIdentifierType` is a switch and not a search, because FirstOrDefault over an enum
+    # returns the enum's DEFAULT on no match, silently governing an unknown type by the first kind's policy.
+    tests:
+      - libs/validity/Tests/DocumentValidityPolicyTests.cs::The_default_thresholds_are_exactly_the_constant_they_replace
+      - libs/validity/Tests/DocumentValidityPolicyTests.cs::A_threshold_list_that_empties_out_falls_back_whole
+      - libs/validity/Tests/DocumentValidityPolicyTests.cs::An_unusable_cadence_falls_back_rather_than_throwing_or_unbounding
+      - libs/validity/Tests/DocumentValidityPolicyTests.cs::No_recorded_expiry_is_UNKNOWN_and_not_valid
+      - libs/validity/Tests/DocumentValidityPolicyTests.cs::A_threshold_fires_on_the_day_it_is_crossed_and_not_after
+      - libs/validity/Tests/DocumentValidityPolicyTests.cs::An_already_expired_document_crosses_no_threshold
+      - libs/validity/Tests/DocumentValidityPolicyTests.cs::Every_identity_kind_names_an_identifier_type_that_actually_exists
+      - libs/validity/Tests/DocumentValidityPolicyTests.cs::An_ungoverned_identifier_type_resolves_to_NOTHING_rather_than_the_first_kind
+      - apps/web/test/document-validity-admin.test.tsx::says plainly that the renewal period does not override a printed expiry
+      - apps/web/test/document-validity-admin.test.tsx::refuses to empty the warning thresholds
+      - apps/web/test/document-validity-admin.test.tsx::distinguishes a chosen value from an unlooked-at default
+      - apps/web/test/document-validity-admin.test.tsx::sends only what changed
+
+  - id: INV-ENGINE-ROUTES-NEVER-DECIDES
+    statement: >-
+      The approvals engine's routing and SLA rules change WHO decides and BY WHEN, never WHAT is decided.
+      Rules are effective-dated and append-only, ordered totally, fail closed to the default queue and the
+      priority SLA, and a malformed predicate is skipped rather than treated as a catch-all. Authoring them
+      needs `auth:configure`, which a reviewer does not hold.
+    source: >-
+      docs/adr/0035-approval-supervisor-authority.md §5.1/§5.4; services/approvals/Domain/ApprovalRules.cs;
+      services/approvals/Api/RuleApplication.cs
+    severity: Critical
+    # Routing and SLA were built first deliberately: the worst outcome a bug in them can produce is work
+    # arriving on the wrong desk, not a benefit decision made without a human. Pre-auth triggers and
+    # auto-approval build on this infrastructure once it is proved.
+    #
+    # A malformed predicate is SKIPPED, never treated as matching everything. The dangerous reading is the
+    # convenient one: a broken catch-all would swallow the whole queue onto one desk, and the rule would sit
+    # in the list looking live. Skipping it lets the rule below get its chance.
+    #
+    # Routing must never strand work. A request matching nothing goes to the queue that existed before rules
+    # did, and a routing rule may only name a declared queue — a typo would otherwise send requests somewhere
+    # nobody watches, and the symptom is a queue that has gone quiet, which reads like a good week.
+    #
+    # Fail-closed here means the DEFAULT, not nothing. If the rule store cannot be read the request keeps the
+    # priority-based deadline: a request with no deadline is worse than one with a generic deadline, and a
+    # request nobody can see is worse than one routed imperfectly.
+    #
+    # The order is TOTAL — priority, then rule id. A partial order would leave two same-priority rules
+    # resolving by whatever the query returned first: the same request routed two ways on two days, with
+    # nothing changed and nothing to point at.
+    #
+    # `auth:configure` is separate from `auth:decide` because deciding one case and authoring the rule that
+    # shapes a thousand are different powers. A reviewer who could edit the rule routing their own work could
+    # route it away from themselves, and the change would look like ordinary configuration.
+    tests:
+      - services/approvals/Tests/RuleEvaluatorTests.cs::A_malformed_predicate_is_skipped_and_never_treated_as_a_catch_all
+      - services/approvals/Tests/RuleEvaluatorTests.cs::Two_rules_at_the_same_priority_always_resolve_the_same_way
+      - services/approvals/Tests/RuleEvaluatorTests.cs::A_decision_can_be_explained_against_the_rules_in_force_at_ITS_time
+      - services/approvals/Tests/RuleEvaluatorTests.cs::Present_fields_are_ANDed_not_ORed
+      - services/approvals/Tests/RuleEvaluatorTests.cs::A_rule_of_another_family_is_never_considered
+      - services/approvals/Tests/RuleEvaluatorTests.cs::The_default_queue_is_a_real_place_and_not_an_empty_string
+      - services/approvals/Tests/RuleEvaluatorTests.cs::A_disabled_rule_does_not_apply_even_inside_its_window
+      - services/approvals/Tests/ApprovalsAuthzTests.cs::A_reviewer_may_NOT_author_the_rules_that_route_their_own_work
+      - services/approvals/Tests/ApprovalsAuthzTests.cs::Holding_the_scope_without_the_role_is_still_refused
+      - services/approvals/Tests/ApprovalsAuthzTests.cs::The_supervisor_may_author_engine_rules
+      - apps/web/test/approval-engine-admin.test.tsx::says it can change who decides and by when, but never what is decided
+      - apps/web/test/approval-engine-admin.test.tsx::says where a request that matches nothing goes
+      - apps/web/test/approval-engine-admin.test.tsx::keeps superseded versions on screen, dated
+      - apps/web/test/approval-engine-admin.test.tsx::will not publish without a rationale
+      - apps/web/test/approval-engine-admin.test.tsx::only offers queues somebody watches
+      - apps/web/test/approval-engine-admin.test.tsx::warns that a rule with no conditions will swallow everything
+
+  - id: INV-PREAUTH-RULES-ONLY-ADD
+    statement: >-
+      A pre-authorization rule can only ADD a requirement. Its action carries a reason and nothing else, so no
+      rule can remove a gate the plan makes; it is consulted only when the plan says no; an unknown amount
+      never clears an amount floor; and a rule with no conditions is refused outright.
+    source: >-
+      docs/adr/0035-approval-supervisor-authority.md §5.2; services/approvals/Domain/ApprovalRules.cs;
+      services/approvals/Api/RuleApplication.cs
+    severity: Critical
+    # STRUCTURAL, not checked. `PreauthAction` is a record with one string. There is no rule anybody can write
+    # — by hand, by migration, or by a future author who thought a boolean would be convenient — that removes
+    # a requirement. The plan version's RequiresPreauth is a contractual term between the payer and Mersal; a
+    # local rule able to switch it off would silently override a contract and surface months later as a denied
+    # claim nobody could trace back to a configuration change.
+    #
+    # An UNKNOWN amount does not clear an amount floor. An absent figure is not a small one, and treating null
+    # as zero would let exactly the requests nobody could price slip under an "anything over X needs a look"
+    # rule — which is the set most likely to deserve the look.
+    #
+    # A catch-all is REFUSED here, unlike routing where it is merely warned about. For routing a catch-all
+    # gives unmatched work a home; for pre-authorization it would put every act of care on the platform behind
+    # a decision, which is not a configuration change but a service outage with a benefit rationale.
+    #
+    # Fail-safe runs the OTHER way from routing: if the rules cannot be read the plan's answer stands and no
+    # requirement is invented. Gating care nobody chose to gate because a database was briefly unreachable
+    # would stop a beneficiary being treated for an infrastructure reason.
+    tests:
+      - services/approvals/Tests/RuleEvaluatorTests.cs::A_preauth_action_has_no_way_to_say_STOP_requiring
+      - services/approvals/Tests/RuleEvaluatorTests.cs::An_UNKNOWN_amount_does_NOT_clear_an_amount_floor
+      - services/approvals/Tests/RuleEvaluatorTests.cs::An_amount_floor_matches_at_and_above_the_threshold
+      - services/approvals/Tests/RuleEvaluatorTests.cs::A_benefit_category_matches_regardless_of_case
+      - services/approvals/Tests/RuleEvaluatorTests.cs::A_category_and_an_amount_are_ANDed
+      - services/approvals/Tests/RuleEvaluatorTests.cs::A_preauth_rule_is_not_considered_when_asking_about_routing
+      - services/approvals/Tests/RuleEvaluatorTests.cs::A_predicate_with_only_a_category_or_amount_is_NOT_a_catch_all
+      - apps/web/test/approval-engine-admin.test.tsx::says these rules only ever ADD a requirement
+      - apps/web/test/approval-engine-admin.test.tsx::REFUSES a pre-approval rule with no conditions, rather than warning about it
+      - apps/web/test/approval-engine-admin.test.tsx::will not publish without a reason the provider will see
+      - apps/web/test/approval-engine-admin.test.tsx::sends the category, the floor and the reason
+      - apps/web/test/approval-engine-admin.test.tsx::says an unknown amount does not clear the floor
+
+  - id: INV-AUTO-APPROVE-IS-BOUNDED-AND-ATTRIBUTED
+    statement: >-
+      Auto-approval is off unless a tenant turns it on, bounded by a per-rule ceiling under a platform hard
+      maximum, refused for an unpriced request, an outstanding clinical warning or an excluded category, and
+      attributed in the ledger to the RULE and never to a person. There is no auto-rejection.
+    source: >-
+      docs/adr/0035-approval-supervisor-authority.md §5.3; services/approvals/Domain/ApprovalRules.cs;
+      services/approvals/Infrastructure/Migrations/0009_auto_approve.sql
+    severity: Critical
+    # This is the only place in the platform where money is committed with no human in the loop, so every gate
+    # fails TOWARD the human. There is no input — not a missing switch, not an unpriced request, not an
+    # unreadable rule — that produces an approval by omission.
+    #
+    # NO ROW MEANS OFF. A new tenant, a restored database and a failed migration all produce "no row", and
+    # every one of those must mean nobody is being paid without a human having looked. The switch lives in
+    # approvals' own schema, not in admin-service: the control somebody reaches for at 02:00 must not depend on
+    # another service being reachable, and "could not read it" must resolve to off deterministically.
+    #
+    # `reviewer_id` is nullable and `decided_by_rule` sits beside it under a CHECK that EXACTLY ONE is set.
+    # Attributing a machine decision to a human is a falsified audit record, and this ledger is hash-chained
+    # precisely so that cannot happen later — writing a person's id would falsify it at the moment of writing
+    # instead. A sentinel Guid meaning "the system" is worse: it reads as a person's id everywhere it is
+    # joined, and every report and investigation downstream would need to know the magic number.
+    #
+    # The hard maximum is a ceiling on the ceiling. Without it "bounded" would mean "bounded by whatever the
+    # last person to edit a rule typed", and one mistyped figure would be the entire control.
+    #
+    # An UNPRICED request is never auto-approved: "we could not work out what this costs" is not a small
+    # amount. And a catch-all is refused outright — approving ANY request under the ceiling without a human is
+    # the worst rule anybody could write.
+    #
+    # There is no AutoReject family, and its absence is asserted rather than assumed. A wrong auto-approval
+    # costs the payer money and a human reviews the claim later; a wrong auto-rejection denies care to a
+    # refugee with nobody having looked, and per libs/benefit-pricing's own header they have "no reviewer in
+    # the loop and no recovery path".
+    tests:
+      - services/approvals/Tests/AutoApprovalTests.cs::The_switch_being_OFF_refuses_everything_and_is_checked_first
+      - services/approvals/Tests/AutoApprovalTests.cs::An_UNPRICED_request_is_never_auto_approved
+      - services/approvals/Tests/AutoApprovalTests.cs::An_outstanding_clinical_warning_refuses
+      - services/approvals/Tests/AutoApprovalTests.cs::An_excluded_category_refuses
+      - services/approvals/Tests/AutoApprovalTests.cs::Over_the_rules_own_ceiling_refuses
+      - services/approvals/Tests/AutoApprovalTests.cs::The_tenant_hard_maximum_binds_even_when_a_rule_claims_more
+      - services/approvals/Tests/AutoApprovalTests.cs::A_machine_decision_is_attributed_to_the_RULE_and_never_to_a_person
+      - services/approvals/Tests/AutoApprovalTests.cs::There_is_no_auto_reject_family_at_all
+      - services/approvals/Tests/AutoApprovalTests.cs::The_hard_maximum_is_a_real_bound_and_not_effectively_infinite
+      - services/approvals/Tests/AutoApprovalTests.cs::Every_refusal_has_its_own_value_so_a_supervisor_can_act_on_it
+      - apps/web/test/approval-engine-admin.test.tsx::shows the switch OFF for a tenant that has never touched it
+      - apps/web/test/approval-engine-admin.test.tsx::says the switch edits no rule
+      - apps/web/test/approval-engine-admin.test.tsx::will not flip the switch without a reason, in either direction
+      - apps/web/test/approval-engine-admin.test.tsx::says there is no auto-rejection and why
+      - apps/web/test/approval-engine-admin.test.tsx::REFUSES an auto-approval rule with no conditions
+      - apps/web/test/approval-engine-admin.test.tsx::refuses a ceiling above the platform maximum
+
+  - id: INV-EDIT-IMPLIES-READ
+    statement: >-
+      Whoever may edit master data may also read it. The two actions are separate, and the read is narrower
+      than the platform-admin read it was split out of.
+    source: docs/adr/0035-approval-supervisor-authority.md §4; libs/authz/AdminPolicies.cs
+    severity: High
+    # Shipped and caught from the running screen. 27.1 gave clinical governance the master-data EDITOR while
+    # the list behind it still gated on ReadAccess (org_admin, super_admin) — an editor over a list its own
+    # author could not open. That is the same defect as granting an authority and giving it no door, which is
+    # what the ADR set out to fix; it was reproduced while fixing it.
+    #
+    # Widening ReadAccess would have been the wrong repair: it also gates the access matrix, the SoD matrix,
+    # break-glass and the access-review campaigns, and a Medical Director reading the ICD table is not a
+    # Medical Director reading who can do what on the platform.
+    #
+    # The subset assertion is the durable part. It fails the moment anybody grants a write without the
+    # matching read, which no amount of care at the call site reliably prevents.
+    tests:
+      - services/admin/Tests/MasterDataGovernanceTests.cs::Whoever_may_EDIT_master_data_may_also_READ_it
+      - services/admin/Tests/MasterDataGovernanceTests.cs::Reading_master_data_does_NOT_grant_the_platform_admin_reads

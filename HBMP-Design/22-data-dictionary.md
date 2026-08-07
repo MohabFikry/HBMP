@@ -378,6 +378,8 @@ Indexes: `UNIQUE(order_no)`; `(beneficiary_id, status)`; partial `(expires_at) W
 | `status` | `varchar(20)` | No | | Lifecycle | Internal | enum (see §11) |
 | `submitted_at` | `timestamptz` | Yes | | | Internal | |
 | `expires_at` | `timestamptz` | Yes | | | Internal | |
+| `primary_icd_code` | `varchar(10)` | Yes | | 26.4 — the encounter's primary diagnosis at prescribing time | PHI | |
+| `diagnosis_snapshot` | `jsonb` | Yes | | 26.4 — the encounter's ICD codes **as at prescribing time**. A SNAPSHOT, not a join: the indication check is a statement about what was known when the prescription was written, and a later correction must not rewrite what was actually checked | PHI | |
 
 ### 8.2 `prescription_line`
 
@@ -392,7 +394,45 @@ Indexes: `UNIQUE(order_no)`; `(beneficiary_id, status)`; partial `(expires_at) W
 | `quantity_prescribed` | `numeric(14,3)` | No | | | Internal | > 0 |
 | `quantity_dispensed` | `numeric(14,3)` | No | | Accumulator | Internal | `CHECK (0 ≤ dispensed ≤ prescribed)` |
 | `refills_allowed` | `integer` | No | | | Internal | ≥ 0 |
+| `duration_days` | `integer` | Yes | | 26.4 — treatment length. The line carried dose/route/frequency/quantity but no duration, and duration is what makes a daily-dose ceiling or a treatment-length limit checkable at all | PHI | `> 0` |
 | `status` | `varchar(20)` | No | | | Internal | enum: Active/PartiallyDispensed/Dispensed/Cancelled |
+
+### 8.2b `prescription_validation` (append-only, phase 26.4)
+
+Every validation run — the advisory one the prescriber saw (`Step1`) and the authoritative one the server
+performed on submit (`Step2`). Never updated, never deleted: it is the evidence of what was shown and what
+was concluded, and since the two evaluate independently a divergence between them is normal and must stay
+inspectable.
+
+| Column | Type | Null | Key | Description | Sens | Validation |
+|---|---|---|---|---|---|---|
+| `validation_id` | `uuid` | No | PK | | Internal | |
+| `prescription_id` | `uuid` | Yes | FK | NULL for a draft run — the doctor validates while composing | Internal | |
+| `encounter_id` | `uuid` | No | logical FK | | Internal | |
+| `beneficiary_id` | `uuid` | No | logical FK | | PHI | |
+| `ran_at` | `timestamptz` | No | | | Internal | |
+| `ran_by` | `text` | Yes | | | Internal | |
+| `step` | `text` | No | | `Step1` advisory · `Step2` authoritative | Internal | enum |
+| `engine_version` | `varchar(32)` | No | | Stamped so "why did this not warn?" survives the engine changing | Internal | |
+| `overall_state` | `text` | No | | | Internal | enum: Ok/Warning/Blocked/NotChecked/Unavailable |
+| `findings` | `jsonb` | No | | The findings as produced, whole | PHI | |
+
+### 8.2c `prescription_line_override` (append-only, phase 26.4)
+
+The prescriber's recorded reason for proceeding past a warning. Overrides are expected and recorded, not
+prevented (doc 43 §1 rule 3) — the reason is mandatory because an acknowledgement without one is a click,
+and a click is not a justification. It is also what the approver later reads.
+
+| Column | Type | Null | Key | Description | Sens | Validation |
+|---|---|---|---|---|---|---|
+| `override_id` | `uuid` | No | PK | | Internal | |
+| `prescription_id` | `uuid` | No | FK | | Internal | FK |
+| `line_id` | `uuid` | No | FK | prescription_line | Internal | FK |
+| `finding_kind` | `text` | No | | | Internal | enum: Indication/Interaction/Allergy/DoseDuration/Benefit |
+| `finding_ref` | `varchar(200)` | Yes | | | Internal | |
+| `reason` | `varchar(300)` | No | | | PHI | `length(btrim(reason)) >= 3` |
+| `acknowledged_by` | `text` | No | | | Internal | |
+| `acknowledged_at` | `timestamptz` | No | | | Internal | |
 
 ### 8.3 `dispense_event` (append-only)
 
@@ -425,6 +465,22 @@ Indexes: `UNIQUE(order_no)`; `(beneficiary_id, status)`; partial `(expires_at) W
 | `decided_at` | `timestamptz` | Yes | | | Internal | |
 | `expires_at` | `timestamptz` | Yes | | | Internal | |
 
+> **`kind`** (`varchar(12)`, default `Review`, CHECK `Review|Fulfilment`) — added by ADR-0034. A `Review` row
+> is a question awaiting a decision; a `Fulfilment` row is a record of something already handed over at a
+> counter or performed at a bench. Both share the aggregate, the `AUTH-` number space, the tenant RLS policy
+> and the audit trail — the argument the 0005 migration made when validity extensions became a fourth source
+> rather than a parallel table. They do NOT share the lifecycle: a fulfilment is born `Issued`, which no
+> transition targets and none leaves (§11), so settled work can never be assigned to a reviewer. A DB CHECK
+> pins `kind = 'Fulfilment'` ⇔ `status = 'Issued'`.
+
+> **eligibility's `coverage_projection`** carries `benefit_category` as the **CODE** from this closed set,
+> never a display name, and CHECK-constrains it (eligibility 0006). It is a MATCHED field: three seeds wrote
+> `Laboratory` / `Consultation` / `Outpatient` / `Oncology` into it and the engine answered "no active
+> coverage for LAB" to members who held laboratory cover — a failure indistinguishable from the truth. The
+> projection also carries `plan_id` alongside `plan_version_id` (eligibility 0005): the version is
+> PROVENANCE, and the version actually priced against is the one **in force on the service date**, resolved
+> through the plan.
+
 ### 9.2 `authorization_decision` (append-only)
 
 | Column | Type | Null | Key | Description | Sens |
@@ -436,6 +492,34 @@ Indexes: `UNIQUE(order_no)`; `(beneficiary_id, status)`; partial `(expires_at) W
 | `decided_by` | `uuid` | No | | Approver | Internal |
 | `decided_at` | `timestamptz` | No | | | Internal |
 | `applied_limits` | `jsonb` | Yes | | Limits applied | Internal |
+
+### 9.2b `authorization_item` — what was actually delivered (ADR-0034)
+
+| Column | Type | Null | Key | Description | Sens |
+|---|---|---|---|---|---|
+| `item_id` | `uuid` | No | PK | | Internal |
+| `tenant_id` | `text` | No | | RLS scope | Internal |
+| `authorization_id` | `uuid` | No | FK | | Internal |
+| `source_line_id` | `uuid` | Yes | logical FK | `prescription_line` / `order_line` | Internal |
+| `fulfilment_ref` | `text` | No | UK *(tenant_id, fulfilment_ref)* | The `dispense_event` / `order_fulfillment` id | Internal |
+| `ordered_code` | `text` | No | | **What the clinician wrote** | Internal |
+| `ordered_label` | `text` | Yes | | | Internal |
+| `fulfilled_code` | `text` | No | | **What was actually handed over / performed** | Internal |
+| `fulfilled_label` | `text` | Yes | | | Internal |
+| `quantity` | `numeric(12,3)` | No | | | Internal |
+| `substitution_reason` | `text` | Yes | | CHECK: required when the two codes differ | Internal |
+| `fulfilled_at` | `timestamptz` | No | | | Internal |
+
+> **Ordered and fulfilled are two columns, not one column plus a flag.** A substitution is not an edit to what
+> the prescriber decided: storing the delivered molecule in the field that held the prescribed one would
+> destroy the record of the clinical decision, which is the fact a later reviewer most needs. This is the
+> structural half of "a substitution affects the authorization only" — the other half is that
+> `prescription_line.drug_id` is never written by the fulfilment path, and approvals-service owns no client
+> for it.
+>
+> **`fulfilment_ref` is UNIQUE per tenant** because delivery is at-least-once. The consumer's
+> `processed_event` ledger catches a redelivered broker message id; this index is the guard that survives a
+> redelivery arriving under a NEW message id, which the ledger has never seen.
 
 ### 9.3 `referral` / `referral_event`
 
@@ -523,13 +607,20 @@ Index: `(entity_type, entity_id, occurred_at)`; `(correlation_id)`.
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `icd_code` | `code` PK, `title`, `chapter`, `is_billable`, `icd11_map` | ICD-10 now, ICD-11 ready |
+| `icd_code` | `code` PK, `title`, `chapter`, `is_billable`, `icd11_map`, `parent_code`, `node_kind` | ICD-10 now, ICD-11 ready. **28.7**: `parent_code` and `node_kind` (Chapter/Block/Category/Subcategory) come from the source file's own `Parent_Code` and `Type` columns, which the loader read on every load and discarded on every load. Without them the indication check had to truncate a diagnosis to three characters, which cannot express a BLOCK-level indication ("J00-J06") at all |
+| `icd_ancestor` | `code` + `ancestor_code` PK, `depth` | **28.7** — the transitive closure of `parent_code`. Materialised rather than walked per query: the indication check runs on every keystroke-triggered validation against every diagnosis and every indication, while the tree changes once a year at reload. `masterdata.rebuild_icd_ancestors()` rebuilds it |
 | `cpt_code` | `code` PK, `description`, `category` | procedures |
 | `loinc_code` | `code` PK, `long_name`, `component`, `property` | labs (LOINC-ready) |
 | `atc_class` | `atc_code` PK, `title`, `level` | drug classification |
-| `drug` | `drug_id` PK, `drug_code` UK, `name`, `atc_code` FK, `form`, `strength` | Drug Master |
-| `drug_interaction` | `interaction_id` PK, `drug_a_id`, `drug_b_id`, `severity`, `description` | enum severity: Minor/Moderate/Major/Contraindicated |
-| `allergen` | `allergen_id` PK, `code` UK, `name`, `category` | Allergy DB |
+| `drug` | `drug_id` PK, `drug_code` UK, `source_row_id` UK, `name`, `name_ar`, `scientific_name`, `atc_code` FK, `form`, `strength`, `price_egp` | Drug Master. **26.1**: `source_row_id` is the source file's own id and `drug_id` is DERIVED from it, so a reload is stable by construction rather than by the trade-name string never drifting. `name_ar` is unpopulated — the Egyptian drug list carries no Arabic column |
+| `drug_indication` | `indication_id` PK, `drug_id` FK, `icd_code`, `is_primary`, `source`, `source_release`, soft-delete | **26.1** — the drug↔ICD link, which existed nowhere before. `icd_code` is a **3-character ICD-10 CATEGORY**, not a specific code: every one of the 874 codes in the source is a category, so the consistency check compares at category level. Deliberately NOT foreign-keyed to `icd_code` — the loader validates and REPORTS unmatched codes rather than letting the database drop them silently. `source` carries the row's own provenance ("ATC + drug class" / "drug class" / "ATC"), because the mapping is ATC-L4 clinical judgement rather than a published dataset |
+| `ingredient` | `ingredient_id` PK, `ingredient_key` UK, `name_en`, `name_ar`, `atc_code`, `rxcui`, `is_active` | **28.1** — one row per active molecule. `ingredient_key` is a normalised INN name ("warfarin") and is the business key every clinical rule points at; a uuid would be referentially stronger and unproofreadable, and governance requires a named pharmacist to review each rule |
+| `drug_ingredient` | `drug_id` + `ingredient_key` PK, `ordinal`, `strength` | **28.1** — product → molecules. **A combination product produces MULTIPLE rows, which is the point**: co-amoxiclav carries one ATC for the compound and cannot decompose from it, and the paracetamol hidden inside a cold-and-flu remedy is invisible without this table. A product with no resolvable ingredient has NO rows, and that absence is load-bearing — the ingredient-level checks report it rather than passing |
+| `interaction_rule` | `rule_id` PK, `subject_kind`/`subject_value`, `object_kind`/`object_value`, `severity`, `mechanism_*`, `clinical_effect_*`, `management_*`, `onset`, `evidence_level`, `citation`, `reviewed_by`, `is_active` | **28.3** — replaces `drug_interaction`. Each side is an Ingredient or an AtcClass, so one row (`warfarin × M01A`) covers every brand of each in both directions and survives new products. UNIQUE on the unordered pair. `ck_interaction_rule_reviewed`: no active rule without a named pharmacist. Seeded from the ONC/NLM high-priority DDI list |
+| `drug_interaction` | `interaction_id` PK, `drug_a_id`, `drug_b_id`, `severity`, `description` | **SUPERSEDED by `interaction_rule` (28.3)**. Keyed a pair on two PRODUCT ids against a 22,653-product catalogue, so one clinical fact needed a row per pair of BRANDS — zero rows, and unpopulatable by construction rather than a data-entry backlog. Retained empty; no code reads it |
+| `allergen` | `allergen_id` PK, `code` UK, `name`, `category`, `atc_scopes`, `is_drug_mappable`, `cross_reactivity_group`, `mapping_source`, `mapping_reviewed_by/at` | Allergy DB. **28.1**: the mapping that made the check capable of matching at all. `is_drug_mappable = false` for food and environmental allergens — NOT the same as unmapped, and the engine words the two differently. `ck_allergen_mapping_reviewed`: an ATC scope requires a named reviewer |
+| `allergen_ingredient` | `allergen_id` + `ingredient_key` PK, `source`, `reviewed_by`, `reviewed_at` | **28.1** — the exact molecules a recorded allergen means. Review columns are NOT NULL by construction: a row without a pharmacist behind it should be impossible to insert |
+| `cross_reactivity_group` / `cross_reactivity_member` / `allergen_cross_reactivity` | `group_code` PK, `confidence`, `statement_en/ar`, `citation`, `reviewed_by` | **28.1** — side-chain-aware, not ring-based (doc 44 §8). `confidence` is mandatory and is stated in the finding: the quoted ~10% penicillin/cephalosporin figure is unsupported, and blanket cephalosporin avoidance causes real harm through inferior antibiotic choice. An allergen may carry SEVERAL groups at different confidences. Sulfonamide-antibiotic → non-antibiotic-sulfonamide is deliberately **not** encoded |
 
 ---
 
@@ -969,7 +1060,24 @@ Three properties are enforced in code, not convention:
 
 ### 11.2 Identifier types
 
-`NationalID`, `Passport`, `RefugeeID`, `UNHCRNo`, `MemberNo`
+`NationalID`, `Passport`, `RefugeeID`, `UNHCRNo`, `MemberNo`, `CardNumber`
+
+`CardNumber` was added in **26.6**. The column existed on `beneficiary` since phase 1 and was unique among
+live rows, but no search filter reached it and the enum had no member — so "find the patient by the number
+on their card", which is how a pharmacy counter works, could not be expressed at all. It is listed last
+deliberately: a card is shared, photographed and reused, so the number is a **lookup key and never an
+authenticator**, and resolution requires a second identifier (doc 43 §7, D5).
+
+### 11.2b Prescribing check states (26.3)
+
+`Ok`, `Warning`, `Blocked`, `NotChecked`, `Unavailable` — **five, never four**.
+
+`Ok`/`Warning`/`Blocked` are answers; `NotChecked` and `Unavailable` are not. `NotChecked` means there was
+no data to check against; `Unavailable` means the source failed. Neither may ever render as `Ok`
+(doc 43 §8 invariant 2). Only a **benefit** rule may produce `Blocked` — clinical checks are typed to a
+state set that has no such value.
+
+Check kinds: `Indication`, `Interaction`, `Allergy`, `DoseDuration`, `Benefit`.
 
 ### 11.3 Order / code systems
 

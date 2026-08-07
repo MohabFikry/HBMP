@@ -64,6 +64,8 @@ Read [`0A-DESIGN-FOUNDATIONS.md`](0A-DESIGN-FOUNDATIONS.md) **first** — it def
 | 39 | Unified Patient Profile — role-projected 360 (Phase 20) | [39-patient-profile.md](39-patient-profile.md) | D |
 | 40 | User & Access Model — membership as the principal, effective-set algebra (Phase 21) | [40-user-access-model.md](40-user-access-model.md) | D |
 | 42 | Branch Management — coordinator & clinics manager, roster, licensing, clinic inventory (Phase 25) | [42-branch-management.md](42-branch-management.md) | D |
+| 43 | Approval Engine, Benefit Lists & Prescribing Decision Support (Phases 26–27) | [43-approval-engine-and-prescribing-support.md](43-approval-engine-and-prescribing-support.md) | D |
+| 44 | Clinical Validation Hardening — DDI, dosing, drug–disease, ICD hierarchy (Phase 28) | [44-clinical-validation-hardening.md](44-clinical-validation-hardening.md) | D |
 
 ---
 
@@ -72,6 +74,7 @@ Read [`0A-DESIGN-FOUNDATIONS.md`](0A-DESIGN-FOUNDATIONS.md) **first** — it def
 - **Executives / Mersal leadership:** 01 → 28 → 29 → 27 → 33
 - **Product & BA:** 02 → 03 → 04 → 05 → 07 → 31 → 32
 - **Architects & Engineers:** 0A → 16 → 15 → 17 → 23 → 24 → 25 → 30 → **37** → **39** (the profile is the one feature that aggregates every zone, so read it after the zones)
+- **Clinical safety / prescribing:** 43 → 22 §8 → 23 §3 → ADR-0032 (why clinical checks warn and benefit rules block, and why interaction checking is local)
 - **Security / DPO / Compliance:** 10 → 11 → 18 → 19 → 20 → **37** (branch scoping, special-category data, sensitive-result release) → **39** (the aggregation surface: server-side projection, the photo as biometric-adjacent data, clipboard as a disclosure)
 - **Finance / Claims:** 10 → 11 → **36** → 31 (EPIC-13) → 32 (US-CLM-*) → 16
 - **UX / Accessibility:** 03 → 09 → 12 → 13 → 14 → 21
