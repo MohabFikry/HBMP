@@ -5,6 +5,7 @@ using Mersal.Authz;
 using Mersal.Events;
 using Mersal.Pharmacy.Domain;
 using Mersal.Pharmacy.Infrastructure;
+using Mersal.Validity;
 using Microsoft.EntityFrameworkCore;
 
 namespace Mersal.Pharmacy.Api;
@@ -22,6 +23,7 @@ public static class PrescriptionEndpoints
         v1.MapPost("", async (
             CreatePrescriptionRequest req, HttpRequest http, PharmacyDbContext db, PharmacyGate gate,
             IDrugValidator drugs, IPrescribingScreener screener, RxRoutingOptions routing, SequenceIssuer seq,
+            PrescriptionValidationService validation, IValidityPolicySource validity,
             IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
             var idem = http.Headers["Idempotency-Key"].ToString();
@@ -40,30 +42,122 @@ public static class PrescriptionEndpoints
             var denied = await gate.CheckAsync(PharmacyPolicies.RxCreate, "prescription", null, req.BeneficiaryId, bearer, ct);
             if (denied is not null) return denied;
 
+            // The NAME, not an existence bit, and the name MASTER DATA gives rather than one the client
+            // sent. A client-supplied label would let the medicine printed on the dispensing screen differ
+            // from the drug actually prescribed, which is the one disagreement this record must not permit.
+            var drugNames = new Dictionary<Guid, string>();
             foreach (var l in req.Lines)
             {
                 if (l.QuantityPrescribed <= 0 || l.RefillsAllowed < 0)
                     return Results.Problem(statusCode: 422, title: "invalid-line", type: "urn:hbmp:invalid-line",
                         detail: $"Drug '{l.DrugId}' needs quantityPrescribed > 0 and refillsAllowed ≥ 0.");
-                if (!await drugs.DrugExistsAsync(l.DrugId, bearer, ct))
+                var drugName = await drugs.DrugNameAsync(l.DrugId, bearer, ct);
+                if (drugName is null)
                     return Results.Problem(statusCode: 422, title: "unknown-drug", type: "urn:hbmp:unknown-drug",
                         detail: $"Drug '{l.DrugId}' is not present in master data.");
+                drugNames[l.DrugId] = drugName;
             }
 
             var now = clock.GetUtcNow();
             var actor = me.Principal?.Subject;
-            var prescriberId = Guid.TryParse(me.Principal?.ProviderId, out var pg) ? pg : Guid.Empty;
+            // The PRESCRIBER is the person who wrote it — the token's SUBJECT. This read
+            // `me.Principal.ProviderId`, the provider the caller belongs to, which a doctor's token does not
+            // carry at all (doctors are practitioner-scoped, not provider-scoped). So the parse failed and
+            // Guid.Empty was written on every prescription this platform had ever issued. Migration 0006
+            // backfills the existing rows from created_by, which is this same value.
+            var prescriberId = Guid.TryParse(actor, out var pid) ? pid : Guid.Empty;
+            var prescriberName = me.Principal?.DisplayName;
+
+            // ---------------------------------------------------------------- 26.4 step 2: AUTHORITATIVE
+            //
+            // The server re-runs the whole validation from current state. The client's step-1 findings are
+            // display state and are not read here — not to decide, not to skip work, not at all. A submission
+            // carrying a clean verdict for a drug the engine refuses must still be refused, or the entire
+            // engine is bypassed by a crafted payload (doc 43 §5, §8 invariant 4).
+            // `req.DiagnosisIcdCodes` IS NOT READ. `authoritative: true` makes the service fetch the
+            // encounter's diagnoses from emr, which is the half of step 2 that phase 26 left open: it
+            // re-ran every check server-side and then took its most important input from the request body,
+            // so an emptied or edited diagnosis array changed what the engine concluded (doc 44 §1.3).
+            var (validationResult, validationRequest, diagnosisContext) = await validation.EvaluateAsync(
+                req.BeneficiaryId, req.EncounterId, req.Lines, clientDiagnoses: [], bearer, ct,
+                authoritative: true);
+
+            // What the prescription is RECORDED as having been checked against — the SERVER's list, not the
+            // client's. A snapshot taken from the request body would let the stored record disagree with the
+            // findings stored beside it.
+            var diagnoses = diagnosisContext.IcdCodes;
+
+            // Acknowledgement is what gates submission — not the warning. A prescriber may proceed past any
+            // clinical warning with a reason; they may not proceed silently.
+            var acknowledged = (req.Acknowledgements ?? [])
+                .Where(a => !string.IsNullOrWhiteSpace(a.Reason))
+                .Select(a => (a.ClientLineId, a.FindingKind))
+                .ToHashSet();
+
+            var unacknowledged = validationResult.Findings
+                .Where(f => f.RequiresAcknowledgement)
+                .Where(f => !acknowledged.Contains((f.LineId, f.Kind.ToString())))
+                .ToList();
+
+            if (unacknowledged.Count > 0)
+            {
+                return Results.Problem(
+                    statusCode: 422, title: "unacknowledged-warning", type: "urn:hbmp:unacknowledged-warning",
+                    detail: "Each warning must be acknowledged with a reason before submission: "
+                            + string.Join("; ", unacknowledged.Select(f => $"{f.Kind}: {f.MessageEn}")));
+            }
+
+            // A benefit refusal is not overridable — benefit rules block, clinical checks warn.
+            var blocked = validationResult.Findings.Where(f => f.IsBlocking).ToList();
+            if (blocked.Count > 0)
+            {
+                return Results.Problem(
+                    statusCode: 422, title: "blocked-by-benefit-rule", type: "urn:hbmp:benefit-blocked",
+                    detail: string.Join("; ", blocked.Select(f => f.MessageEn)));
+            }
+
+            // Line identity: the client's ClientLineId is used only to correlate findings and
+            // acknowledgements. The database key is minted here and never taken from the request.
+            var lineIdByClientId = new Dictionary<Guid, Guid>();
+
+            /*
+             * WHEN THIS PRESCRIPTION STOPS BEING SAFE TO DISPENSE.
+             *
+             * The column has existed since migration 0001 and the dispensing rule has always honoured it —
+             * `expires_at` was simply never written, so every prescription this platform has ever issued was
+             * valid for ever. A prescription is a clinician's judgement about a patient at a moment; handing
+             * one over six months later means dispensing on reasoning nobody has re-examined.
+             *
+             * The tenant's period is resolved from configuration, and the client's `ExpiresAt` may only make
+             * it SHORTER. A prescriber writing a three-day course may say so; nobody may hand themselves a
+             * longer validity than the Medical Director set by putting a date in a request body.
+             */
+            var validityDays = await validity.DaysAsync(ValidityArtefact.Prescription, bearer, ct);
+            var policyExpiry = ValidityPolicy.ExpiryFor(now, validityDays);
+            var expiresAt = req.ExpiresAt is { } requested && requested < policyExpiry ? requested : policyExpiry;
 
             var rx = new Prescription
             {
                 PrescriptionId = Guid.NewGuid(), RxNo = RxNo.Format(now.Year, await seq.NextAsync("rx_seq", now.Year, ct)),
                 BeneficiaryId = req.BeneficiaryId, EncounterId = req.EncounterId, PrescriberId = prescriberId,
-                Status = RxStatus.Draft, ExpiresAt = req.ExpiresAt, IdempotencyKey = idem, CreatedBy = actor,
-                Lines = req.Lines.Select(l => new PrescriptionLine
+                PrescriberName = prescriberName,
+                Status = RxStatus.Draft, ExpiresAt = expiresAt, IdempotencyKey = idem, CreatedBy = actor,
+                PrimaryIcdCode = diagnoses.Count > 0 ? diagnoses[0] : null,
+                // Snapshot, not a join: a later correction to the encounter's diagnoses must not rewrite what
+                // this prescription was actually checked against.
+                DiagnosisSnapshot = System.Text.Json.JsonSerializer.Serialize(diagnoses),
+                Lines = req.Lines.Select(l =>
                 {
-                    PrescriptionLineId = Guid.NewGuid(), DrugId = l.DrugId, Dose = l.Dose, Route = l.Route,
-                    Frequency = l.Frequency, QuantityPrescribed = l.QuantityPrescribed, RefillsAllowed = l.RefillsAllowed,
-                    Status = RxLineStatus.Active,
+                    var line = new PrescriptionLine
+                    {
+                        PrescriptionLineId = Guid.NewGuid(), DrugId = l.DrugId, DrugName = drugNames[l.DrugId],
+                        Dose = l.Dose, Route = l.Route,
+                        Frequency = l.Frequency, QuantityPrescribed = l.QuantityPrescribed,
+                        RefillsAllowed = l.RefillsAllowed, DurationDays = l.DurationDays,
+                        Status = RxLineStatus.Active,
+                    };
+                    if (l.ClientLineId is { } cid) lineIdByClientId[cid] = line.PrescriptionLineId;
+                    return line;
                 }).ToList(),
             };
 
@@ -83,6 +177,30 @@ public static class PrescriptionEndpoints
                     AlertId = Guid.NewGuid(), PrescriptionId = rx.PrescriptionId, Kind = a.Kind.ToString(),
                     Severity = a.Severity, Detail = a.Detail, Acknowledged = req.AcknowledgeAlerts, RaisedAt = now,
                 });
+
+            // The authoritative run, recorded against the prescription. Append-only, and stamped Step2 so a
+            // later reviewer can see what the SERVER concluded rather than what the client displayed.
+            db.PrescriptionValidations.Add(validation.ToRun(
+                validationResult, validationRequest, req.BeneficiaryId, rx.PrescriptionId, "Step2", actor));
+
+            // Saved before the overrides, by hand. An override references prescription_line, and the model
+            // declares no navigation between them, so EF has no graph to sort by and emits the inserts in the
+            // order they were tracked — which the real foreign key then rejects. Same transaction throughout.
+            await db.SaveChangesAsync(ct);
+
+            // The prescriber's reasons for proceeding. Part of the record and visible to the approver.
+            foreach (var ack in req.Acknowledgements ?? [])
+            {
+                if (string.IsNullOrWhiteSpace(ack.Reason)) continue;
+                if (!lineIdByClientId.TryGetValue(ack.ClientLineId, out var lineId)) continue;
+                db.PrescriptionLineOverrides.Add(new PrescriptionLineOverride
+                {
+                    OverrideId = Guid.NewGuid(), PrescriptionId = rx.PrescriptionId, LineId = lineId,
+                    FindingKind = ack.FindingKind, Reason = ack.Reason.Trim(),
+                    AcknowledgedBy = actor ?? "unknown", AcknowledgedAt = now,
+                });
+            }
+
             await db.SaveChangesAsync(ct);
 
             // `encounterId` — ADR-0031. The prescription has held the column since phase 4 and never put it on
@@ -128,6 +246,38 @@ public static class PrescriptionEndpoints
             return Results.Created($"/api/v1/prescriptions/{rx.PrescriptionId}", PrescriptionResponse.From(rx, alertViews));
         }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
 
+        // ------------------------------------------------------------------ 26.4 step 1: advisory validation
+        //
+        // Read-shaped: it persists no draft prescription, only the record of the run. No Idempotency-Key is
+        // required for that reason. Its verdict is display state and NOTHING ELSE — the submit path below
+        // re-evaluates from scratch and never reads what this returned (doc 43 §5).
+        v1.MapPost("/validate", async (
+            ValidatePrescriptionRequest req, HttpRequest http, PharmacyDbContext db, PharmacyGate gate,
+            PrescriptionValidationService validation, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        {
+            if (req.Lines is null || req.Lines.Count == 0)
+                return Results.Problem(statusCode: 400, title: "nothing to validate", type: "urn:hbmp:empty-rx");
+
+            var bearer = http.Headers.Authorization.ToString();
+
+            // Same treating-relationship gate as writing the prescription: validation reads the
+            // beneficiary's allergies and diagnoses, so it is a PHI read and is authorised as one.
+            var denied = await gate.CheckAsync(PharmacyPolicies.RxCreate, "prescription", null, req.BeneficiaryId, bearer, ct);
+            if (denied is not null) return denied;
+
+            // Step 1 may use the composing screen's list for speed — it is advisory and nothing is written
+            // from it. The run records the provenance as client-supplied, so a step-1/step-2 divergence has
+            // an explanation on file rather than looking like an engine that changed its mind.
+            var (result, request, _) = await validation.EvaluateAsync(
+                req.BeneficiaryId, req.EncounterId, req.Lines, req.DiagnosisIcdCodes ?? [], bearer, ct);
+
+            var run = validation.ToRun(result, request, req.BeneficiaryId, null, "Step1", me.Principal?.Subject);
+            db.PrescriptionValidations.Add(run);
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(PrescriptionValidationService.ToView(result, request, run.ValidationId));
+        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+
         v1.MapGet("/{id:guid}", async (Guid id, HttpRequest http, PharmacyDbContext db, PharmacyGate gate, CancellationToken ct) =>
         {
             var rx = await db.Prescriptions.AsNoTracking().Include(p => p.Lines).FirstOrDefaultAsync(p => p.PrescriptionId == id, ct);
@@ -148,7 +298,18 @@ public static class PrescriptionEndpoints
                 q = q.Where(p => p.Status == st);
             var rows = await q.OrderByDescending(p => p.SubmittedAt).Take(100).ToListAsync(ct);
             return Results.Ok(rows.Select(p => PrescriptionResponse.From(p)));
-        }).RequireAuthorization(HbmpPolicies.Scope("pharmacy:read"));
+            // `rx:read`, NOT `pharmacy:read`. This list is the PRESCRIBER's own — it filters on
+            // `CreatedBy == sub` and answers "what have I written". `pharmacy:read` is the DISPENSER's scope,
+            // held by pharmacists for the queue and the search; a doctor does not have it and must not need
+            // it to read back their own work. The identity contract names this exact case when it introduces
+            // `rx:read` ("a prescriber reading back their own prescription", IdentityContract.cs) — the scope
+            // was created for this endpoint and then not applied to it.
+            //
+            // The effect was that every prescription a doctor submitted vanished on saving: the write
+            // succeeded with 201, and the encounter's Prescriptions tab, which reads this endpoint and
+            // filters it to the patient in the browser, got a 403 and rendered an empty list. A prescriber
+            // had no way to see that their own prescription existed.
+        }).RequireAuthorization(HbmpPolicies.Scope("rx:read"));
 
         v1.MapPost("/{id:guid}/cancel", async (
             Guid id, CancelRequest req, HttpRequest http, PharmacyDbContext db, PharmacyGate gate,

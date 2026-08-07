@@ -1,9 +1,11 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using Mersal.ClinicalValidation;
 using Mersal.Pharmacy.Domain;
 using Mersal.Pharmacy.Infrastructure;
 using Microsoft.Extensions.Caching.Memory;
+using Mersal.BeneficiaryLookup;
 
 namespace Mersal.Pharmacy.Api;
 
@@ -23,93 +25,94 @@ public sealed class HttpDrugValidator(HttpClient http, IMemoryCache cache) : IDr
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    public async Task<bool> DrugExistsAsync(Guid drugId, string? bearerToken, CancellationToken ct = default)
+    /// <summary>Resolves the drug and returns its display name (null = not in master data). Fail-closed on
+    /// 5xx/transport, as before: an unvalidated drug is never persisted.</summary>
+    public async Task<string?> DrugNameAsync(Guid drugId, string? bearerToken, CancellationToken ct = default)
     {
-        var key = $"drug:{drugId}";
-        if (cache.TryGetValue<bool>(key, out var ok) && ok) return true;
-        using var req = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/drugs/by-id/{drugId}/exists");
+        var key = $"drug-name:{drugId}";
+        if (cache.TryGetValue<string>(key, out var cached) && cached is not null) return cached;
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/drugs/by-id/{drugId}");
         BearerHeader.Apply(req, bearerToken);
         using var resp = await http.SendAsync(req, ct);
-        if (resp.StatusCode == HttpStatusCode.NotFound) return false;
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
         resp.EnsureSuccessStatusCode();
-        var body = await resp.Content.ReadFromJsonAsync<ExistsDto>(Json, ct);
-        var exists = body?.Exists ?? false;
-        if (exists) cache.Set(key, true, TimeSpan.FromMinutes(30));
-        return exists;
+
+        var body = await resp.Content.ReadFromJsonAsync<DrugDto>(Json, ct);
+        if (string.IsNullOrWhiteSpace(body?.Name)) return null;
+
+        // Trade name plus strength and form, because that is what identifies the box on the shelf. "Augmentin"
+        // alone does not tell a pharmacist whether to reach for 375mg or 1g, and the dose field beside it is
+        // the prescribed dose, not the product's.
+        var label = string.Join(" ", new[] { body!.Name, body.Strength, body.Form }
+            .Where(part => !string.IsNullOrWhiteSpace(part)));
+        cache.Set(key, label, TimeSpan.FromMinutes(30));   // master data is immutable within a deployment
+        return label;
     }
 
-    private sealed record ExistsDto(bool Exists);
+    private sealed record DrugDto(Guid DrugId, string? Name, string? Strength, string? Form);
 }
 
-/// <summary>Advisory prescribe-time screening (US-033): drug-interaction across the Rx's drug ids (masterdata) and
-/// allergy conflicts vs the beneficiary's allergies (sourced from emr-service, checked in masterdata). Best-effort
-/// and NON-BLOCKING — any transport failure yields no alert rather than blocking the prescription.</summary>
-public sealed class HttpPrescribingScreener(IHttpClientFactory factory) : IPrescribingScreener
+/// <summary>
+/// Prescribe-time screening, backed by the shared validation engine (phase 26.3).
+/// </summary>
+/// <remarks>
+/// <para>
+/// This replaces an implementation that caught every <c>HttpRequestException</c> and returned no alerts, and
+/// treated every non-2xx response the same way through a bare <c>if (resp.IsSuccessStatusCode)</c>. There
+/// were six such paths across three calls. The effect was that an outage — or, after 26.1 scoped masterdata,
+/// a token missing <c>masterdata:read</c> — rendered to the prescriber as a clean bill of health. Doc 43 §1
+/// calls that the single most dangerous line in the prescribing path.
+/// </para>
+/// <para>
+/// Every check that could not run now surfaces as an <see cref="AlertKind.Unavailable"/> alert. Screening
+/// remains advisory and non-blocking, which is doc 43 D1's position — the prescriber may proceed past any
+/// clinical warning with a recorded reason — but it can no longer stay silent about not having asked.
+/// </para>
+/// </remarks>
+public sealed class ValidatorBackedPrescribingScreener(
+    IClinicalValidationPorts ports, TimeProvider clock) : IPrescribingScreener
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-
-    public async Task<AlertScreening> ScreenAsync(Guid beneficiaryId, IReadOnlyList<Guid> drugIds, string? bearerToken, CancellationToken ct = default)
+    public async Task<AlertScreening> ScreenAsync(
+        Guid beneficiaryId, IReadOnlyList<Guid> drugIds, string? bearerToken, CancellationToken ct = default)
     {
         var screening = new AlertScreening();
-        var masterdata = factory.CreateClient("masterdata");
-        var emr = factory.CreateClient("emr");
 
-        // 1) Drug-drug interactions among the prescribed drugs.
-        try
+        var lines = drugIds
+            .Select(id => new PrescriptionLineInput(Guid.NewGuid(), id, id.ToString()))
+            .ToList();
+
+        // No encounter and so no diagnoses on this legacy path: it screens a DRUG SET, not a prescription
+        // in context. Passing no encounter id and no client list yields an empty, client-supplied diagnosis
+        // context — which the indication check reports as "no diagnosis recorded", never as Ok.
+        var snapshot = await ports.FetchAsync(
+            beneficiaryId, drugIds, encounterId: null, clientDiagnoses: null, bearerToken, ct);
+
+        // No active-medication list either. It produces NotChecked findings, which are reported rather than
+        // assumed away.
+        var request = new ValidationRequest(Guid.Empty, lines, []);
+        var result = PrescriptionValidator.Validate(request, snapshot, clock.GetUtcNow());
+
+        foreach (var finding in result.Findings)
         {
-            using var req = new HttpRequestMessage(HttpMethod.Post, "/api/v1/drug-interactions/check-by-ids")
-            { Content = JsonContent.Create(new { drugIds }) };
-            BearerHeader.Apply(req, bearerToken);
-            using var resp = await masterdata.SendAsync(req, ct);
-            if (resp.IsSuccessStatusCode)
+            switch (finding)
             {
-                var body = await resp.Content.ReadFromJsonAsync<InteractionDto>(Json, ct);
-                if (body?.HighestSeverity is { } sev)
-                    screening.AddInteraction(sev, $"{body.Interactions?.Length ?? 0} interaction(s) among prescribed drugs (highest: {sev}).");
-            }
-        }
-        catch (HttpRequestException) { /* advisory — ignore */ }
-
-        // 2) Allergy conflicts: pull the beneficiary's allergen ids from emr, screen each drug in masterdata.
-        Guid[] allergenIds;
-        try
-        {
-            using var req = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/beneficiaries/{beneficiaryId}/allergies");
-            BearerHeader.Apply(req, bearerToken);
-            using var resp = await emr.SendAsync(req, ct);
-            allergenIds = resp.IsSuccessStatusCode
-                ? (await resp.Content.ReadFromJsonAsync<AllergyDto[]>(Json, ct) ?? []).Select(a => a.AllergenId).ToArray()
-                : [];
-        }
-        catch (HttpRequestException) { allergenIds = []; }
-
-        if (allergenIds.Length > 0)
-        {
-            foreach (var drugId in drugIds.Distinct())
-            {
-                try
-                {
-                    using var req = new HttpRequestMessage(HttpMethod.Post, "/api/v1/allergies/check-by-ids")
-                    { Content = JsonContent.Create(new { drugId, allergenIds }) };
-                    BearerHeader.Apply(req, bearerToken);
-                    using var resp = await masterdata.SendAsync(req, ct);
-                    if (resp.IsSuccessStatusCode)
-                    {
-                        var body = await resp.Content.ReadFromJsonAsync<AllergyCheckDto>(Json, ct);
-                        if (body?.Conflict == true)
-                            screening.AddAllergy($"Drug {drugId} conflicts with a recorded allergy ({body.MatchedOn}).");
-                    }
-                }
-                catch (HttpRequestException) { /* advisory — ignore */ }
+                case { State: CheckState.Unavailable }:
+                    screening.AddUnavailable($"{finding.Kind}: {finding.MessageEn}");
+                    break;
+                case { Kind: CheckKind.Interaction, State: CheckState.Warning }:
+                    screening.AddInteraction(finding.Severity?.ToString() ?? "Unknown", finding.MessageEn);
+                    break;
+                case { Kind: CheckKind.Allergy, State: CheckState.Warning }:
+                    screening.AddAllergy(finding.MessageEn);
+                    break;
+                default:
+                    break;
             }
         }
 
         return screening;
     }
-
-    private sealed record InteractionDto(string? HighestSeverity, object[]? Interactions);
-    private sealed record AllergyDto(Guid AllergenId);
-    private sealed record AllergyCheckDto(bool Conflict, string? MatchedOn);
 }
 
 /// <summary>Formulary/PBM stand-in (phase 6.3): today it reads masterdata's policy-approved alternatives for a drug.
@@ -138,34 +141,8 @@ public sealed class MasterDataFormularyService(IHttpClientFactory factory) : IFo
     private sealed record AlternativesDto(Guid[]? Alternatives);
 }
 
-/// <summary>Resolves a beneficiary id from a policy/passport/member number via patient-service (phase 6.1 search).
-/// Best-effort and fail-safe — a lookup failure returns null (no match) rather than leaking or erroring.</summary>
-public sealed class HttpBeneficiaryResolver(IHttpClientFactory factory) : IBeneficiaryResolver
-{
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-
-    public async Task<Guid?> ResolveAsync(string? policyNo, string? passport, string? memberNo, string? bearerToken, CancellationToken ct = default)
-    {
-        var q = new List<string>();
-        if (!string.IsNullOrWhiteSpace(policyNo)) q.Add($"policyNo={Uri.EscapeDataString(policyNo)}");
-        if (!string.IsNullOrWhiteSpace(passport)) q.Add($"passport={Uri.EscapeDataString(passport)}");
-        if (!string.IsNullOrWhiteSpace(memberNo)) q.Add($"memberNo={Uri.EscapeDataString(memberNo)}");
-        if (q.Count == 0) return null;
-        try
-        {
-            var patient = factory.CreateClient("patient");
-            using var req = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/beneficiaries/resolve?{string.Join('&', q)}");
-            BearerHeader.Apply(req, bearerToken);
-            using var resp = await patient.SendAsync(req, ct);
-            if (!resp.IsSuccessStatusCode) return null;
-            var body = await resp.Content.ReadFromJsonAsync<ResolveDto>(Json, ct);
-            return body?.BeneficiaryId;
-        }
-        catch (HttpRequestException) { return null; }
-    }
-
-    private sealed record ResolveDto(Guid? BeneficiaryId);
-}
+// HttpBeneficiaryResolver moved to libs/beneficiary-lookup (27.8) — see the note in
+// PharmacyPersistence.cs.
 
 /// <summary>Treating-relationship check via emr-service (token forwarded, boolean only). Fails closed.</summary>
 public sealed class HttpTreatingRelationshipClient(HttpClient http) : ITreatingRelationshipClient
