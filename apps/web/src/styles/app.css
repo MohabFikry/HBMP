@@ -126,6 +126,11 @@ nav.mrs-rail {
   height: calc(100dvh - 60px);
   min-height: 0;
   overflow-y: auto;
+  /* The rail keeps the platform's own scrollbar — it is a primary scroller, and a thin bar on one is a real
+     ergonomic loss — but it must not hand its momentum to the page: scrolling past the last nav item used to
+     carry on and scroll the content pane, which moves the page out from under a user who was only looking
+     for a link. */
+  overscroll-behavior: contain;
 }
 .app-main {
   grid-row: 2;
@@ -214,7 +219,11 @@ nav.mrs-rail {
 
 /* Login screen. */
 .login-wrap {
+  /* `vh` first as the fallback for browsers without `dvh`, then the dynamic unit: on mobile Safari a 100vh
+     box is taller than the visible page while the URL bar is showing, which pushes a centred sign-in card
+     down behind the toolbar. */
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: var(--sp6);
@@ -270,8 +279,21 @@ nav.mrs-rail {
   gap: var(--sp4);
   flex-wrap: wrap;
 }
+/*
+ * The controls on one table row.
+ *
+ * `align-items: center` is the whole fix, and it was absent — so the row defaulted to `stretch` and every
+ * item took the height of the tallest. A 32px icon button stretched to the height of a filled "Check in"
+ * button draws its glyph wherever its own box happens to centre, which is not where the button labels sit;
+ * a bare `<span>` of text stretched the same way and anchored its text to the TOP of that box. Nothing was
+ * misplaced individually, and the row still read as ragged.
+ *
+ * Centre, not baseline: these are buttons and chips, not running text, and a baseline would align the letters
+ * inside them while leaving the boxes themselves stepped.
+ */
 .row-actions {
   display: flex;
+  align-items: center;
   gap: var(--sp2);
   flex-wrap: wrap;
 }
@@ -437,14 +459,22 @@ nav.mrs-rail {
 .mini-table th,
 .mini-table td {
   text-align: start;
-  padding: var(--sp2) var(--sp3);
+  padding: var(--tbl-cell-pad-y-tight) var(--tbl-cell-pad-x-tight);
   border-bottom: 1px solid var(--border);
 }
+.mini-table tbody tr:last-child > td { border-bottom: 0; }
+/* A caption sits ABOVE its table and reads as a sentence, not as a heading — start-aligned so it lines up
+   with the first column rather than centring over the table the way a UA draws it by default. */
+.mini-table-cap {
+  text-align: start;
+  margin-block-end: var(--sp3);
+}
 .mini-table th {
-  font-size: 11.5px;
+  font-size: var(--tbl-head-size);
+  font-weight: var(--tbl-head-weight);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-3);
+  letter-spacing: var(--tbl-head-tracking);
+  color: var(--tbl-head-color);
 }
 
 @media (max-width: 900px) {
@@ -494,12 +524,14 @@ nav.mrs-rail {
     top: auto;
     height: auto;
     block-size: auto;
-    max-block-size: 30vh;         /* a portal with many sections scrolls; it never eats the page */
+    /* A portal with many sections scrolls; it never eats the page. `dvh` because this bar only exists at
+       mobile widths, which is exactly where the collapsing URL bar makes `vh` wrong. */
+    max-block-size: 30dvh;
     align-items: stretch;
     gap: 0;
     overflow-x: auto;
     overflow-y: hidden;
-    overscroll-behavior-x: contain;
+    overscroll-behavior: contain;
     padding: 0;
     /* Clear the iOS home indicator / Android gesture bar. */
     padding-bottom: env(safe-area-inset-bottom, 0);
@@ -997,7 +1029,7 @@ nav.mrs-rail {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding-block-start: 12vh;        /* near the top: the eye is already there after ⌘K */
+  padding-block-start: 12dvh;       /* near the top: the eye is already there after ⌘K */
 }
 .cmdk {
   inline-size: min(34rem, calc(100vw - 2rem));
@@ -1020,7 +1052,7 @@ nav.mrs-rail {
   font-size: 1.05rem;
 }
 .cmdk-input:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
-.cmdk-list { list-style: none; margin: 0; padding: var(--sp2); max-block-size: 22rem; overflow-y: auto; }
+.cmdk-list { list-style: none; margin: 0; padding: var(--sp2); max-block-size: var(--scroll-picker); overflow-y: auto; }
 .cmdk-opt {
   display: flex;
   gap: var(--sp3);
@@ -1194,13 +1226,23 @@ nav.mrs-rail {
    `position: sticky` on the thead from the box that actually scrolls. */
 .bulk-columns > .pol-costshare { display: table; overflow-x: visible; }
 .pol-grid th, .pol-grid td, .pol-costshare th, .pol-costshare td {
-  padding: var(--sp2) var(--sp3);
+  padding: var(--tbl-cell-pad-y-tight) var(--tbl-cell-pad-x-tight);
   border-block-end: 1px solid var(--border);
   text-align: start;
   vertical-align: middle;
 }
+/* The last row's rule is the card's own edge doing the same job twice — it drew a hairline that floated in
+   the card's bottom padding with nothing under it. `.mrs-wl` has always dropped it; these had not. */
+.pol-grid tbody tr:last-child > td,
+.pol-costshare tbody tr:last-child > td { border-block-end: 0; }
+/* One header treatment, from the tokens — these were 0.78rem/0.04em/--text-2 against the worklist's
+   11.5px/0.06em/--text-3, and the member screen renders both in the same card. */
 .pol-grid thead th, .pol-costshare thead th {
-  font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-2);
+  font-size: var(--tbl-head-size);
+  font-weight: var(--tbl-head-weight);
+  text-transform: uppercase;
+  letter-spacing: var(--tbl-head-tracking);
+  color: var(--tbl-head-color);
 }
 .pol-grid input[type="text"], .pol-grid input:not([type]), .pol-grid select,
 .pol-costshare input, .pol-costshare select { min-block-size: 44px; inline-size: 100%; }
@@ -1311,12 +1353,28 @@ nav.mrs-rail {
 }
 /* Reference table inside a modal: the header stays put while the body scrolls, because a column
    contract is read by scanning down the COLUMN column and losing the header defeats that. */
-.bulk-columns { max-height: min(60vh, 32rem); overflow: auto; }
+/* Taller than `--scroll-panel` on purpose and left that way: this is a bulk-edit workspace where the
+   operator compares many columns at once, and cutting it to a reading height would trade a real task for
+   consistency with lists that are not doing the same job. `dvh`, not `vh` — see the token file. */
+.bulk-columns { max-block-size: min(60dvh, 32rem); overflow: auto; }
+/*
+ * A sticky header needs `border-collapse: separate`.
+ *
+ * <p>Under `collapse` the browser owns the border and paints it with the TABLE, not with the cell — so a
+ * sticky `th` carries its background up the page and leaves its bottom rule behind, and the header ends up
+ * floating over the rows with nothing separating it from them. `separate` with zero spacing looks identical
+ * and keeps the border on the cell, which is why `.mrs-wl` has always been drawn that way.</p>
+ *
+ * <p>`--surface-2`, not `--surface-1`: the card colour made the header band indistinguishable from the rows
+ * scrolling under it, which is the one thing a stuck header has to be.</p>
+ */
+.bulk-columns > .pol-costshare { border-collapse: separate; border-spacing: 0; }
 .bulk-columns thead th {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--surface-1);
+  background: var(--surface-2);
+  border-block-end: 1px solid var(--border);
 }
 /*
  * `overflow-wrap: anywhere` is required by 0B §10c — these are exact match keys and must never be clipped.
@@ -1456,6 +1514,10 @@ nav.mrs-rail {
 }
 .profile-idfacts li { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-2); font-size: 0.9rem; }
 .profile-idfacts svg { color: var(--text-3); flex: 0 0 auto; }
+/* A fact that is present but UNRECORDED (blood group, today). Dimmed and italic rather than hidden: the slot
+   stays so the reader sees that the question was asked and has no answer. Never the only cue — the value
+   itself is an em dash and the screen-reader text says "not recorded" in words. */
+.profile-idfact--unknown { color: var(--text-3); font-style: italic; }
 .profile-alerts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp2); }
 .profile-rows, .call-history-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp2); }
 /* A fact grid that columnises when there is room. Coverage and financial lead with 4–6 short facts, and one
@@ -1504,7 +1566,7 @@ nav.mrs-rail {
 
 /* The unknown-section fallback's nested payload. Wraps rather than scrolls horizontally — a page that scrolls
    sideways in RTL is worse than an ugly block of JSON. */
-.profile-raw { margin: 0; padding: var(--sp2); border-radius: var(--r-md); border: 1px solid currentColor; font-size: 0.85em; white-space: pre-wrap; word-break: break-word; max-height: 20rem; overflow-y: auto; }
+.profile-raw { margin: 0; padding: var(--sp2); border-radius: var(--r-md); border: 1px solid currentColor; font-size: 0.85em; white-space: pre-wrap; word-break: break-word; max-block-size: var(--scroll-picker); overflow-y: auto; }
 
 .call-history-toolbar { display: flex; flex-wrap: wrap; gap: var(--sp3); align-items: center; justify-content: space-between; margin-bottom: var(--sp3); }
 .call-row { display: grid; gap: var(--sp2); padding: var(--sp3); border: 1px solid currentColor; border-radius: var(--r-md); }
@@ -1652,7 +1714,17 @@ nav.mrs-rail {
 }
 
 /* Wide tables scroll inside their own container so the page body never scrolls sideways. */
-.pol-tablewrap { overflow-x: auto; }
+/* The hand-rolled table wrappers, held to the same rule as `.mrs-wl-scroll` in the design system: sideways
+   scrolling stays inside the pane, everything else chains to the page. `.mrs-scroll` contains BOTH axes,
+   which is right for a dropdown floating over the page and wrong for a table that IS the page — it swallowed
+   the wheel wherever the cursor sat over a table, including the common case of a table with nothing to
+   scroll vertically at all. Nine wrappers across the portals share this class; the rule is here rather than
+   nine times over. */
+.pol-tablewrap {
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  overscroll-behavior-block: auto;
+}
 
 .pol-deltas { display: grid; gap: var(--sp3); }
 .pol-deltagrid {
@@ -1736,6 +1808,68 @@ nav.mrs-rail {
   flex: 0 0 auto;
   min-block-size: 44px;
 }
+/*
+ * The booking card's vertical rhythm.
+ *
+ * `.section-h` carries no top margin — correct for a heading that opens a card, and wrong for every one after
+ * it. On this screen the patient results list ran straight into "2. Appointment" with nothing between them,
+ * so two steps of a form read as one block. The gap belongs to the SECOND heading onwards, which is what
+ * `~ .section-h` selects: the first one keeps its tight spacing under the branch note.
+ */
+.book-card .section-h ~ .section-h {
+  margin-block-start: var(--sp6);
+}
+/* And the results list needs to end before the next step begins. */
+.book-card .book-hits,
+.book-card .book-chosen {
+  margin-block-end: var(--sp2);
+}
+
+/*
+ * The edit-appointment dialog.
+ *
+ * `stack-3` gave every child the same 12px gap, so the patient's name, the notes field, the doctor picker and
+ * a month calendar all sat at one rhythm — and the calendar, which is the tallest thing in the dialog by a
+ * factor of five, read as just another row. The parts are grouped instead: identity, then the note, then the
+ * move, each separated by more than the fields inside them are.
+ */
+.edit-appt {
+  display: grid;
+  gap: var(--sp5);
+}
+.edit-appt-who {
+  margin: 0;
+  font-size: var(--fs-title-3);
+}
+/* The move section's own stack — the doctor picker, the "no free time" notice and the calendar. */
+.edit-appt section {
+  display: grid;
+  gap: var(--sp3);
+}
+/* `.mrs-help` is scoped to `.mrs-field` in the design system, and the doctor picker is a `.book-field`
+   (label + Select + help) rather than a field component. Same treatment, so the two do not disagree. */
+.edit-appt .book-field .mrs-help {
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+}
+
+/* The row's cancel control: the ghost silhouette, in the danger colour. Frameless by design — see the note at
+   its call site. The hover wash is the danger tint rather than the accent one, so the control never flashes
+   teal on the way to being pressed. */
+.row-cancel.mrs-btn {
+  color: var(--st-bad-fg);
+}
+.row-cancel.mrs-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--st-bad-fg) 12%, transparent);
+}
+
+/* A worklist card: toolbar, an occasional notice, then the table. The notice sat flush against both — the
+   toolbar's own bottom margin above it and nothing at all below — so the range warning read as a strip
+   welded to the table's header rather than as an answer to the filter above it. */
+.board-notice {
+  margin-block-end: var(--sp3);
+}
+
 .book-hits {
   list-style: none;
   margin: 0;
@@ -1743,6 +1877,9 @@ nav.mrs-rail {
   display: grid;
   gap: var(--sp2);
 }
+/* Named explicitly rather than reached as `.book-hits li`: the row is a component now — a pickable button
+   or a blocked line — and a descendant selector hid that from anyone reading either half on its own. */
+.book-hit,
 .book-hits li,
 .book-chosen {
   display: flex;
@@ -1750,13 +1887,68 @@ nav.mrs-rail {
   justify-content: space-between;
   gap: var(--sp3);
   min-block-size: 44px;
-  padding: var(--sp2) var(--sp3);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--surface-1);
 }
+/* The chosen row and a BLOCKED result keep their own padding. A pickable row does not: its padding belongs
+   to the button inside it, so the whole box is the hit target rather than a button floating in a padded
+   frame with dead margins around it. */
+.book-chosen,
+.book-hit--blocked {
+  padding: var(--sp2) var(--sp3);
+  flex-wrap: wrap;
+}
 .book-chosen {
   border-color: var(--accent);
+}
+/*
+ * A result row that can be chosen — the whole row, not a button at the end of it.
+ *
+ * It was a line of text with "Choose" pinned to the far edge, so the target was a 70px button as far as
+ * possible from the name being chosen. `all: unset` strips the UA button styling without touching the
+ * geometry below it; the row is still one control, still tab-reachable, still Enter/Space.
+ */
+.book-hit-pick {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp3);
+  inline-size: 100%;
+  min-block-size: 44px;
+  padding: var(--sp2) var(--sp3);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.book-hit-pick:hover {
+  background: var(--surface-2);
+}
+/* `all: unset` removes the focus ring with everything else, and an invisible focus stop is worse than none. */
+.book-hit-pick:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
+}
+.book-hit-id {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp2);
+  min-inline-size: 0;
+}
+/* Points the way the row goes, and mirrors with the document direction rather than always pointing right. */
+.book-hit-go {
+  flex: none;
+  color: var(--text-3);
+  transform: rotate(-90deg);
+}
+[dir="rtl"] .book-hit-go {
+  transform: rotate(90deg);
+}
+/* The picker's list inside the modal: it is the whole content, so it gets room to breathe. */
+.book-hits--picker {
+  gap: var(--sp2);
 }
 .book-grid {
   display: grid;
@@ -1961,15 +2153,22 @@ nav.mrs-rail {
   white-space: normal;
   text-align: start;
 }
-/* Both halves of the metadata line, in one flow: `RX-2026-000027 · by Dr Karim`. Wraps rather than
-   truncating — an actor's name cut mid-word is the one thing on this row nobody can reconstruct. */
+/* The metadata line: the ACTOR on the leading edge, under the act, and the reference pushed to the trailing
+   edge of the same line. Wraps rather than truncating — an actor's name cut mid-word is the one thing on this
+   row nobody can reconstruct. */
 .vt-meta {
   grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: var(--sp1) var(--sp2);
   min-inline-size: 0;
+}
+/* `margin-inline-start: auto` rather than `justify-content: space-between`: it still pushes the reference to
+   the far edge on one line, and when the pair wraps it simply falls under the actor instead of being flung to
+   the opposite side of a line it now shares with nothing. */
+.vt-ref {
+  margin-inline-start: auto;
 }
 /* The connecting rule between steps — decorative, so it carries no meaning the text does not already. */
 .vt-step + .vt-step {
@@ -1990,6 +2189,9 @@ nav.mrs-rail {
   font-size: var(--fs-caption);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   /* End-aligned: this is what makes the dates line up now that the chip beside them is free to be any
      width. It is the only alignment rule in this list that has to hold. */
   justify-self: end;
@@ -1997,6 +2199,9 @@ nav.mrs-rail {
 .vt-who {
   color: var(--text-2);
   font-size: var(--fs-caption);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   /* Wraps. It shares a line with the reference and is the last thing on the row, so it has room to; the
      ellipsis it used to carry existed only because it was competing for a fixed track. */
   text-align: start;
@@ -2011,13 +2216,36 @@ nav.mrs-rail {
     justify-self: start;
   }
 }
-.vt-actor {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: var(--fs-caption);
-  padding: 1px 5px;
-  border-radius: var(--r-sm);
+/* The glyphs that replaced the words "by" and "at" on a timeline step. Muted and fixed: they label WHICH
+   fact follows, and a step's meaning is carried by the status chip beside them, never by these. */
+.vt-ico {
+  flex: none;
+  color: var(--text-3);
+}
+
+/* A step that OPENS what it names — the encounters modal on "My Patients", where each past visit is a door
+   into that consultation rather than a line to read.
+
+   A real <button>, not a div with a click handler: it is operated by Enter and Space, reachable by Tab, and
+   announced as an action, none of which a listener on a list item gives you. The reset is the price of that
+   — a button brings its own font, colour and centred text, and inheriting them back is what lets it share
+   `.vt-step` with the read-only timeline instead of forking the layout into a second set of rules. */
+button.vt-step {
+  inline-size: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+button.vt-step:hover {
   background: var(--surface-2);
-  color: var(--text-1);
+  border-color: var(--border-strong);
+}
+/* Inset, like the notification panel's rows: an outset ring on a full-width row inside a modal is clipped by
+   the dialog's own padding on the leading edge. */
+button.vt-step:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
 }
 
 /* ── Call-centre reservation panel (15.3) ────────────────────────────────────── */
@@ -2207,11 +2435,11 @@ nav.mrs-rail {
 .ben-doc-upload .mrs-control { inline-size: 100%; }
 
 .ben-doc-preview {
-  inline-size: 100%; max-block-size: min(70vh, 640px);
+  inline-size: 100%; max-block-size: var(--scroll-sheet);
   border: 1px solid var(--border); border-radius: var(--r-sm);
   background: var(--surface-2); object-fit: contain;
 }
-iframe.ben-doc-preview { block-size: min(70vh, 640px); }
+iframe.ben-doc-preview { block-size: var(--scroll-sheet); }
 
 /* ---- Batch intake ---- */
 .ben-batch { display: grid; gap: var(--sp4); }
@@ -2367,14 +2595,138 @@ iframe.ben-doc-preview { block-size: min(70vh, 640px); }
      a walk-in in?", which is most of why the desk looks at a schedule at all. */
   min-block-size: 32px;
 }
+/*
+ * One appointment in the schedule.
+ *
+ * The chip used to be a single row — time, name, status pill — all at the same weight, so finding a person
+ * meant reading every word of every chip. It now leads with the NAME at full weight and demotes the time,
+ * which the hour band beside it already implies.
+ *
+ * The accent bar carries the status as a second, non-textual channel so "who has arrived" is a scan down the
+ * left edge rather than a read of eight pills. The status WORD is still printed beside it — 21-accessibility
+ * §non-color status: hue may reinforce a state, never carry it alone.
+ */
 .dash-appt {
   display: inline-flex;
-  align-items: center;
-  gap: var(--sp2);
-  padding: 4px var(--sp3);
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--surface-1);
+  overflow: hidden;
+  min-inline-size: 208px;
+}
+/* The bar itself. `border-inline-start` rather than a positioned pseudo-element, so it flips with the
+   document direction for Arabic without a second rule. Neutral by default: an unknown status gets the
+   platform's grey, not the colour of whichever state happens to be first in the file. */
+.dash-appt {
+  border-inline-start: 4px solid var(--border-strong, var(--border));
+}
+.dash-appt--ok { border-inline-start-color: var(--st-ok-fg); }
+.dash-appt--info { border-inline-start-color: var(--st-info-fg); }
+.dash-appt--warn { border-inline-start-color: var(--st-warn-fg); }
+.dash-appt--bad { border-inline-start-color: var(--st-bad-fg); }
+/* `part` has its own token pair and its own chip colour everywhere else in the platform; borrowing warn's
+   here made the bar disagree with the status bullet eight pixels away, now that the bullet is drawn from the
+   status colour rather than inheriting a single grey. */
+.dash-appt--part { border-inline-start-color: var(--st-part-fg); }
+
+.dash-appt-body {
+  display: grid;
+  gap: 2px;
+  padding: 6px var(--sp3);
+  min-inline-size: 0;
+}
+/* Name and status on one line, the status hugging the name rather than pinned to the far edge — a status
+   flushed right sits under the NEXT chip's name in a wrapped band and reads as belonging to it. The name
+   yields first when the chip is narrow; the status never shrinks, because a clipped "CHECKED I…" is worse
+   than a clipped name that is still on hover and in the accessibility tree. */
+.dash-appt-top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+  min-inline-size: 0;
+}
+.dash-appt-name {
+  font-weight: 600;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  /* A long name truncates rather than wrapping the chip to three lines and breaking the band's rhythm. The
+     full name is still in the DOM for assistive technology and for a native tooltip on hover. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-inline-size: 0;
+}
+.dash-appt-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp3);
+  font-size: var(--fs-caption);
+  color: var(--text-3);
+  min-inline-size: 0;
+}
+/* Icon + value, kept together. `align-items: center` on the pair rather than a baseline, because a 13px
+   glyph has no text baseline of its own and sits a pixel or two low against one. */
+.dash-appt-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-inline-size: 0;
+}
+/* The glyphs label the KIND of fact and carry no state, so they stay at the muted weight rather than taking
+   the status colour — three coloured things on a chip this size and none of them leads. */
+.dash-appt-ico {
+  flex: none;
+  color: var(--text-3);
+  opacity: 0.9;
+}
+
+/*
+ * The status label, riding beside the name.
+ *
+ * A soft tint rather than a bordered pill: inside a chip that is already a bordered box, a second border for
+ * one word is two frames deep. The bullet in front of it is the same colour as the accent bar down the left
+ * edge, so the state is legible whether you scan the edge of the band or read one chip.
+ *
+ * Hue is never alone here — the WORD is printed at every size (21-accessibility §non-color status).
+ */
+.dash-appt-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 1px 7px 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--st-neu-fg);
+  background: var(--st-neu-bg);
+}
+.dash-appt-dot {
+  inline-size: 5px;
+  block-size: 5px;
+  border-radius: 50%;
+  flex: none;
+  background: currentColor;
+}
+.dash-appt--ok .dash-appt-status { color: var(--st-ok-fg); background: var(--st-ok-bg); }
+.dash-appt--info .dash-appt-status { color: var(--st-info-fg); background: var(--st-info-bg); }
+.dash-appt--warn .dash-appt-status { color: var(--st-warn-fg); background: var(--st-warn-bg); }
+.dash-appt--part .dash-appt-status { color: var(--st-part-fg); background: var(--st-part-bg); }
+.dash-appt--bad .dash-appt-status { color: var(--st-bad-fg); background: var(--st-bad-bg); }
+
+/* The doctor is the one variable-length fact on the second line, so it is the one that gives way. */
+.dash-appt-doctor { min-inline-size: 0; }
+.dash-appt-doctor-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-inline-size: 0;
 }
 
 /* The dashboard's day selector: arrows either side of a centred label. `justify-content: center` on the row
@@ -2418,7 +2770,7 @@ button.dash-daynav-label svg { width: 14px; height: 14px; opacity: 0.7; }
 /* Fixed height + scroll. A range that stretches to cover a 01:33 and a 21:00 is twenty-odd bands, and an
    unbounded schedule pushes everything below it off the page. */
 .dash-day {
-  max-block-size: 420px;
+  max-block-size: var(--scroll-panel);
   overflow-y: auto;
 }
 
@@ -2611,7 +2963,10 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
 }
 .reg-bulklist {
   margin-block-end: var(--sp4);
-  max-block-size: 30vh;
+  /* A fixed picker height rather than 30vh: this list sits inside a dialog that is itself capped against the
+     viewport, and a viewport-relative height nested inside a viewport-relative height shrinks twice on a
+     laptop — the list ended up a few rows tall on the screens it most needed to be readable on. */
+  max-block-size: var(--scroll-picker);
   overflow-y: auto;
 }
 .reg-bulklist li {
@@ -3061,7 +3416,7 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   padding: 0;
   display: grid;
   gap: 2px;
-  max-block-size: 16rem;
+  max-block-size: var(--scroll-picker);
   overflow-y: auto;
 }
 .icd-hit {
@@ -3274,4 +3629,1604 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   background: var(--surface-2);
   border-radius: var(--r-sm);
   padding: 1px 6px;
+}
+
+/* ============================================================================================
+   Prescribing workspace (phase 26.5, design 43 §6)
+   ============================================================================================ */
+
+.rx-workspace {
+  min-inline-size: min(720px, 80vw);
+}
+
+/* ---- the per-line check status -------------------------------------------------------------
+   FIVE states, FOUR cues each: hue, icon glyph, SHAPE OF THE CHIP, and the word. Colour is never
+   the signal on its own (WCAG 2.2 AA, design 0B).
+
+   The shape cue is doing the most work here. "Ok", "Warning" and "Blocked" are ANSWERS and get a
+   solid filled chip; "Not checked" and "Check unavailable" are NOT answers and get a dashed border
+   with a hollow glyph. That difference reads before colour and before text, which is the point:
+   design 43 §8 invariant 2 says a failed check must never render as OK, and the failure mode it
+   guards against is a hurried reader scanning a column of chips. A greyed tick meaning "we could
+   not check" is exactly what this phase exists to prevent. */
+.rx-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp2);
+  padding: 2px var(--sp2);
+  border-radius: var(--r-sm);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.rx-status-glyph {
+  font-size: 0.75rem;
+  line-height: 1;
+}
+/* The fourth cue: the state stated in words. Never abbreviated and never hidden at small sizes —
+   it is the only cue that survives a screen reader, and "Check unavailable" has to be readable as
+   distinct from "OK" without relying on the glyph or the hue. */
+.rx-status-word {
+  letter-spacing: 0.01em;
+}
+.rx-status--answered {
+  border: 1px solid transparent;
+}
+/* The unanswered class. Dashed, and never filled — visually a different KIND of thing. */
+.rx-status--unanswered {
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  font-weight: 500;
+}
+.rx-status--ok {
+  color: var(--st-ok-fg);
+  background: var(--st-ok-bg);
+}
+.rx-status--warning {
+  color: var(--st-warn-fg);
+  background: var(--st-warn-bg);
+}
+.rx-status--blocked {
+  color: var(--st-bad-fg);
+  background: var(--st-bad-bg);
+}
+.rx-status--notchecked {
+  color: var(--text-2);
+}
+/* Distinct from BOTH ok and notchecked: the source failed, which is a stronger statement than
+   "there was nothing to check". */
+.rx-status--unavailable {
+  color: var(--st-warn-fg);
+  border-color: var(--st-warn-fg);
+}
+
+/* ---- severity, as its own cue (28.4, doc 44 §2) ----------------------------------------------
+   Beside the state chip, never inside it. The two answer different questions: the state chip says
+   whether the check produced an ANSWER, this says how much the answer matters. Before phase 28 the
+   severity was interpolated into the message string, so a Contraindicated line and a Minor one were
+   indistinguishable until the modal was opened — which is the mechanism behind override rates above
+   90%: when everything looks the same and demands the same click, everything gets dismissed.
+
+   Four cues here as everywhere: hue, glyph, SHAPE (a distinct outline weight per tier) and the word.
+   The glyphs are deliberately different from the state glyphs so two chips side by side never read as
+   one repeated cue. */
+.rx-severity {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp1);
+  padding: 0.125rem 0.5rem;
+  /* Literal, like every other pill on this sheet — there is no --radius-pill token. */
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.rx-severity-glyph {
+  font-size: 0.6875rem;
+  line-height: 1;
+}
+/* The fourth cue: the tier stated in words. It is the only cue that survives a screen reader, and
+   "Contraindicated" has to be readable as distinct from "Major" without the glyph or the hue. */
+.rx-severity-word {
+  letter-spacing: 0.01em;
+}
+/* Contraindicated: the only tier that gets a solid fill. "Do not co-prescribe" is rare, and it should
+   not look like the tier above it. */
+.rx-severity--contraindicated {
+  color: var(--st-bad-fg);
+  background: var(--st-bad-bg);
+  border: 2px solid var(--st-bad-fg);
+}
+.rx-severity--major {
+  color: var(--st-warn-fg);
+  background: var(--st-warn-bg);
+  border: 2px solid var(--st-warn-fg);
+}
+/* Moderate and Minor do NOT gate submission, and they are drawn to say so: outline only, no fill, and
+   progressively lighter. A prescriber scanning the column should be able to tell at a glance which
+   findings stand between them and Submit. */
+.rx-severity--moderate {
+  color: var(--text-1);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+}
+.rx-severity--minor {
+  color: var(--text-2);
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  font-weight: 600;
+}
+
+/* ---- the drug combobox ---------------------------------------------------------------------- */
+.rx-combobox {
+  position: relative;
+  display: grid;
+  gap: var(--sp1);
+}
+.rx-combobox-label,
+.rx-field-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.rx-combobox-input,
+.rx-field-input {
+  inline-size: 100%;
+  padding: var(--sp2) var(--sp3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  min-block-size: 44px; /* ≥44px target (design 21) */
+}
+.rx-combobox-hint,
+.rx-combobox-empty {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-2);
+}
+.rx-combobox-list {
+  position: absolute;
+  inset-block-start: 100%;
+  inset-inline: 0;
+  z-index: 20;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-block-size: var(--scroll-picker);
+  overflow-y: auto;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 24%);
+}
+.rx-combobox-opt {
+  display: grid;
+  gap: 2px;
+  padding: var(--sp2) var(--sp3);
+  cursor: pointer;
+}
+.rx-combobox-opt--active {
+  background: var(--surface-2);
+}
+/* Trade name carries the title weight; the ingredient line beneath it is the safety cue — two trade
+   names holding the same molecule is the commonest prescribing duplication, so the molecule has to
+   be legible at the moment of choosing, not after. */
+.rx-combobox-trade,
+.rx-drug-trade {
+  font-weight: 600;
+  color: var(--text-1);
+}
+.rx-combobox-sub,
+.rx-drug-sub {
+  font-size: 0.8125rem;
+  color: var(--text-2);
+}
+.rx-drug-flag {
+  color: var(--st-warn-fg);
+  font-weight: 600;
+}
+.rx-drug-chosen {
+  display: grid;
+  gap: 2px;
+}
+.rx-drug-change {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ---- lines ---------------------------------------------------------------------------------- */
+.rx-lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--sp4);
+}
+.rx-line {
+  display: grid;
+  gap: var(--sp3);
+  padding: var(--sp3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+/* ONE ROW per line: medicine · dose · duration · quantity · status.
+   The medicine column is given the bulk of the width because it is the only free-text search; the three
+   numeric-ish fields are narrow by nature, and the status chip sizes to its own word. Stacking these — which
+   is what a narrow dialog forced — turned a single prescription line into a full screen of scrolling and put
+   the status cue far from the drug it describes. */
+.rx-line-main {
+  display: grid;
+  grid-template-columns: minmax(220px, 2.4fr) repeat(3, minmax(88px, 1fr)) auto;
+  gap: var(--sp3);
+  align-items: start;
+}
+/* The wrapper exists for grouping in the markup, not for layout: `contents` lets its four children become
+   direct grid items of the row above, so all five columns align on one track. */
+.rx-line-fields {
+  display: contents;
+}
+/* Below this the five columns cannot hold their minimums without the row becoming unreadable, so the line
+   folds into two rows rather than overflowing horizontally. */
+@media (max-width: 760px) {
+  .rx-line-main {
+    grid-template-columns: 1fr 1fr;
+  }
+  .rx-combobox,
+  .rx-drug-chosen {
+    grid-column: 1 / -1;
+  }
+}
+.rx-field {
+  display: grid;
+  gap: var(--sp1);
+}
+/* The note a doctor writes for the performing site — "left knee", "fasting". It takes two columns because
+   it holds a phrase, not a number, and sizing it like the quantity box beside it would make a free-text
+   instruction scroll inside four characters of width. */
+.rx-field--wide { grid-column: span 2; }
+.rx-line-remove {
+  justify-self: end;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--st-bad-fg);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ---- the per-line checks dialog -------------------------------------------------------------
+   Opened from the status chip. One row per check: what was checked, the verdict, and the reason in a
+   sentence — the source line that used to sit under every finding now lives in the collapsed <details>
+   at the foot of the dialog. Provenance is still SHOWN (design 43 §1 rule 2 requires it), just not
+   shouted twenty-five times on a form the prescriber is still filling in. */
+.rx-checks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--sp3);
+}
+.rx-check {
+  display: grid;
+  grid-template-columns: minmax(96px, auto) auto;
+  gap: var(--sp1) var(--sp3);
+  align-items: center;
+  padding-block-end: var(--sp3);
+  border-block-end: 1px solid var(--border);
+}
+.rx-check:last-child {
+  border-block-end: 0;
+  padding-block-end: 0;
+}
+.rx-check-kind {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.rx-check-message {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-1);
+}
+.rx-check-ack {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--sp1);
+}
+
+/* Collapsed by default: read once, by whoever wants to weigh the advice. */
+.rx-sources {
+  margin-block-start: var(--sp4);
+  padding-block-start: var(--sp3);
+  border-block-start: 1px solid var(--border);
+  font-size: 0.8125rem;
+  color: var(--text-2);
+}
+.rx-sources summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.rx-sources-list {
+  margin: var(--sp2) 0 0;
+  padding-inline-start: var(--sp4);
+  display: grid;
+  gap: var(--sp1);
+}
+.rx-finding-caveat {
+  font-style: italic;
+}
+
+/*
+ * Quoted manufacturer label text. Set apart from the platform's own wording because it is not the
+ * platform's wording: it is a regulatory document, published in English, and reproduced verbatim. The
+ * `dir="ltr"` on the element keeps it readable inside the Arabic layout rather than mirroring it.
+ */
+.rx-check-quote {
+  display: block;
+  margin-block-start: var(--sp2);
+  padding-inline-start: var(--sp3);
+  border-inline-start: 3px solid var(--border-strong);
+  font-size: 0.8125rem;
+  color: var(--text-2);
+  white-space: pre-wrap;
+}
+
+.rx-actions {
+  display: flex;
+  gap: var(--sp3);
+  justify-content: flex-end;
+}
+
+/* The chip as a button. Same four cues, plus a chevron and a pointer — it has to read as openable
+   without becoming a second kind of control. */
+.rx-status--button {
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  gap: var(--sp2);
+}
+.rx-status--button:hover {
+  filter: brightness(0.97);
+}
+.rx-status-more {
+  opacity: 0.7;
+}
+
+/* The compose block sits inside the "prescriptions for this patient" card, under the list of what has
+   already been written — the doctor decides what to add while looking at what is there. */
+.rx-compose {
+  margin-block-start: var(--sp5);
+  padding-block-start: var(--sp4);
+  border-block-start: 1px solid var(--border);
+}
+.rx-compose-h {
+  margin-block-start: 0;
+}
+
+/* ============================================================================================================
+   Member clinical facts — blood group + allergies (MemberClinicalPanel)
+   ============================================================================================================
+   One horizontal strip directly under the patient context bar, above the tabs. It is deliberately the same
+   silhouette as that bar (same border, radius and surface) and joined to it by a negative top margin, so the
+   two read as ONE identity block: who this is, and the two things you must know before acting on them.
+
+   The empty state carries the visual weight, not the populated one. `.mc-empty` is dashed with a hollow
+   glyph — the same "unanswered" treatment LineStatusChip uses for NotChecked/Unavailable, because it is the
+   same statement: nobody has answered this question. A calm blank would say the opposite. */
+/* When the panel follows the context bar, the bar's bottom corners have to stop being round — otherwise its
+   curve shows through above a square-topped strip and the two read as two cards that failed to line up
+   rather than as one block. `:has()` keeps the knowledge in the stylesheet: the bar is used on five screens
+   and only the encounter puts a panel under it, so a modifier class would have to be threaded through every
+   caller to say something CSS can see for itself. */
+.patient-context-bar:has(+ .mc-panel) {
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+  margin-bottom: 0;
+}
+.patient-context-bar:has(+ .mc-panel) + .mc-panel { margin-block-start: 0; }
+
+.mc-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp2) var(--sp3);
+  padding: var(--sp2) var(--sp4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  /* Pulled up under the context bar's own bottom margin so the two touch. */
+  margin-block-start: calc(var(--sp4) * -1);
+  margin-block-end: var(--sp4);
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+  border-block-start: 0;
+}
+
+/* Hairline between the blood group and the allergy list. Vertical and self-stretching so it matches whatever
+   height the row settles at rather than a fixed one. */
+.mc-divider {
+  inline-size: 1px;
+  align-self: stretch;
+  min-block-size: 1.5rem;
+  background: var(--border);
+}
+
+/* ── blood group ────────────────────────────────────────────────────────────────────────────────────── */
+.mc-blood {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem var(--sp2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.mc-blood:hover { background: var(--surface-2); }
+.mc-blood:disabled { cursor: default; opacity: 0.6; }
+.mc-blood svg { color: var(--text-3); flex: 0 0 auto; }
+.mc-blood-label { color: var(--text-2); }
+.mc-blood-value { font-weight: 700; font-variant-numeric: tabular-nums; }
+.mc-blood-edit { opacity: 0.55; }
+/* NOT RECORDED reads as an open question, not as a filled field: dashed edge, italic value. The word
+   "Not recorded" is already in the value, so this is the third and fourth cue, never the only one. */
+.mc-blood[data-recorded="no"] { border-style: dashed; }
+.mc-blood[data-recorded="no"] .mc-blood-value { font-weight: 500; font-style: italic; color: var(--text-3); }
+
+/* ── allergies ──────────────────────────────────────────────────────────────────────────────────────── */
+.mc-allergies {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp2);
+  /* Takes the slack so "Add allergy" is pinned to the end of the strip. */
+  flex: 1 1 auto;
+  min-inline-size: 0;
+}
+
+.mc-allergy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem var(--sp2);
+  border-radius: var(--r-pill);
+  font-size: 0.8125rem;
+  color: var(--st-warn-fg);
+  background: var(--st-warn-bg);
+}
+/* Severe is the one a reader must not skim past, so it takes the stronger pair AND a heavier weight — hue
+   plus weight plus the word "Severe" already in the chip. */
+.mc-allergy[data-severity="Severe"] {
+  color: var(--st-bad-fg);
+  background: var(--st-bad-bg);
+  font-weight: 700;
+}
+/* The warning triangle. A SHAPE cue, so it stays legible in greyscale where the chip's hue does not. */
+.mc-allergy-icon { flex: 0 0 auto; opacity: 0.9; }
+.mc-allergy-name { font-weight: 600; }
+.mc-allergy-sev, .mc-allergy-reaction { opacity: 0.85; }
+
+/* "No allergies recorded" — dashed and hollow, matching the prescribing workspace's unanswered states. */
+.mc-empty {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem var(--sp2);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-pill);
+  font-size: 0.8125rem;
+  color: var(--text-2);
+}
+.mc-empty-glyph { opacity: 0.8; }
+
+.mc-add { flex: 0 0 auto; }
+
+/* Dialog fields — label above control, which is the pattern InputField already sets for the vitals form. */
+.mc-field { display: grid; gap: var(--sp1); }
+.mc-field-label { font-size: 0.85rem; font-weight: 600; color: var(--text-2); }
+
+/* ============================================================================================================
+   The dispensing counter's search (PharmacyDispense)
+   ============================================================================================================
+   Four identifier fields on one row where there is room, wrapping where there is not. `auto-fit` + `minmax`
+   rather than a fixed column count: an Arabic label is routinely half again as long as its English twin, and
+   a hard `repeat(4, …)` that fits "Card number" clips "رقم البطاقة". */
+.rx-search {
+  display: grid;
+  gap: var(--sp3);
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  align-items: end;
+  margin-block-end: var(--sp3);
+}
+/* The buttons take the whole row when the fields wrap, so Search never ends up orphaned in a narrow column
+   beside three empty ones. */
+.rx-search-actions {
+  display: flex;
+  gap: var(--sp2);
+  grid-column: 1 / -1;
+}
+
+/* ============================================================================================================
+   Reading a prescription back (PrescriptionDetailModal)
+   ============================================================================================================
+   The encounter's prescription table answers "how many and when"; this answers "what exactly did I write".
+   Two levels, kept visually distinct: a meta block about the PRESCRIPTION, then one card per LINE. They are
+   not merged into a single table because the sig — dose, route, frequency — belongs to a medicine, and a
+   flat grid of six columns × n rows makes it far too easy to read across the wrong one. Medication errors
+   are made in exactly that gap. */
+.rxv-open { padding-inline: var(--sp2); }
+
+.rxv-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sp2) var(--sp4);
+  align-items: center;
+  margin: 0 0 var(--sp4);
+}
+.rxv-meta dt { color: var(--text-2); font-size: 0.875rem; }
+.rxv-meta dd { margin: 0; }
+
+.rxv-h {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  margin: 0 0 var(--sp2);
+  padding-block-start: var(--sp3);
+  border-block-start: 1px solid var(--border);
+}
+.rxv-count { color: var(--text-2); font-weight: 500; }
+
+.rxv-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp2);
+}
+
+.rxv-line {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  padding: var(--sp3);
+}
+/* A line whose medicine was never recorded is dashed for the same reason the empty allergy state is: it is a
+   statement about the RECORD, and it must not sit on screen looking like a complete one. */
+.rxv-line[data-recorded="no"] { border-style: dashed; }
+
+.rxv-line-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp2);
+  margin-block-end: var(--sp2);
+}
+/* The line's position on the prescription. Decorative to a screen reader — the <ol> already numbers it — but
+   load-bearing on screen, where "the second one" is how a prescription gets discussed out loud. */
+.rxv-line-n {
+  flex: 0 0 auto;
+  min-inline-size: 1.5rem;
+  block-size: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.rxv-drug { font-weight: 600; flex: 1 1 12rem; }
+
+/* Anything the record does not hold: italic, muted, and — where it stands in for a name — hollow-marked. It
+   never inherits the weight of the value it replaces. */
+.rxv-missing {
+  color: var(--text-3);
+  font-style: italic;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.rxv-missing-glyph { opacity: 0.8; font-style: normal; }
+
+/* `auto-fit` again rather than a fixed six: "Quantity prescribed" and "مرات الصرف المسموح بها" are nowhere
+   near the same width, and a column count that fits one clips the other. */
+.rxv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: var(--sp2) var(--sp3);
+  margin: 0;
+}
+.rxv-cell dt {
+  color: var(--text-2);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.rxv-cell dd { margin: 0; font-weight: 600; }
+
+
+/* ============================================================================================================
+   The dispensing counter's prescription page (PrescriptionPage)
+   ============================================================================================================ */
+
+/* One column, generous but bounded. A counter screen is read at arm's length and often at 1280px; letting the
+   medicine table run the full width of a 27" monitor puts the quantity input a head-turn away from the drug
+   name it belongs to. */
+/* NOT a grid, deliberately.
+ *
+ * A grid ITEM's sticky containing block is its own grid area, which is exactly as tall as the item — so
+ * `position: sticky` on the action bar pinned it to a box it already filled and did nothing. The bar sat
+ * wherever the content ended and scrolled away with it. A block flow gives sticky the scrolling pane to work
+ * against, which is what pins the bar to the bottom of the screen without hard-coding a sidebar width into
+ * a `position: fixed` inset. */
+.rx-page {
+  margin-block-start: var(--sp4);
+  /* A little breathing room at the end of the stack. The generous reserve here was to keep the last row clear
+     of a pinned bar; the bar is in flow now, so there is nothing to clear. */
+  padding-block-end: var(--sp6);
+}
+.rx-page > * + * {
+  margin-block-start: var(--sp4);
+}
+
+.rx-head {
+  padding: var(--sp5);
+  display: grid;
+  gap: var(--sp4);
+}
+.rx-head-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp3) var(--sp4);
+}
+.rx-head-no {
+  margin: 0;
+  font-size: var(--fs-title-2);
+  letter-spacing: 0.01em;
+}
+
+/* The meta facts, on a baseline grid so the labels line up whatever their length — the previous definition
+   list let each pair size itself and the three values landed at three different heights. */
+.rx-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, max-content));
+  gap: var(--sp2) var(--sp6);
+  margin: 0;
+  inline-size: 100%;
+}
+.rx-meta > div {
+  display: grid;
+  gap: 2px;
+}
+.rx-meta dt {
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+}
+.rx-meta dd {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp2);
+}
+/* The diagnosis wraps across the full meta row: a three-code snapshot resolved to titles is a sentence, not
+   a field, and squeezing it into a 160px column would truncate the one fact that says what the medicine is
+   FOR. */
+.rx-meta-wide {
+  grid-column: 1 / -1;
+}
+.rx-dx {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp2);
+}
+.rx-dx-chip {
+  padding: 1px var(--sp2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+}
+/* The PRIMARY diagnosis carries weight and a border, not colour alone — it is the one the indication check
+   was run against. */
+.rx-dx-chip--primary {
+  border-color: var(--accent);
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.rx-meta-note {
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+}
+/* Two days or fewer is the point at which the pharmacist has to say something to the patient about coming
+   back. Colour is a cue, not the message — the words still say how long is left. */
+.rx-meta-note--soon {
+  color: var(--st-warn-fg);
+  background: var(--st-warn-bg);
+  border-radius: var(--r-pill);
+  padding: 1px var(--sp2);
+  font-weight: 600;
+}
+
+.rx-card {
+  padding: var(--sp5);
+  display: grid;
+  gap: var(--sp4);
+}
+.rx-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp3);
+  flex-wrap: wrap;
+}
+.rx-card-head .section-h {
+  margin: 0;
+}
+.rx-card-actions {
+  display: flex;
+  gap: var(--sp2);
+}
+
+/* Wide content scrolls INSIDE its own container. The page body must never scroll sideways — a counter screen
+   that shifts horizontally while a quantity is being typed is how the wrong row gets filled in. */
+.rx-dispense-scroll {
+  overflow-x: auto;
+}
+
+.rx-dispense-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+/* Cells centre on the row, not on its first line.
+ *
+ * The medicine cell is three lines tall — trade name, molecule, sig — and everything beside it was one. Top
+ * alignment left the price, the quantities and the controls clinging to the top of a tall row with a band of
+ * white beneath them, so the eye had to travel up to read across. A row is read horizontally; centring is
+ * what makes that one movement. */
+.rx-dispense-table th,
+.rx-dispense-table td {
+  padding: var(--sp3);
+  text-align: start;
+  border-block-end: 1px solid var(--border);
+  vertical-align: middle;
+}
+/* Headers stay bottom-aligned to the header row's baseline — a centred header over a tall body row reads as
+   floating. */
+.rx-dispense-table th {
+  vertical-align: bottom;
+}
+/* The only header in the app with no uppercase and no tracking — it read as a bold body row rather than as
+   a header, which on a counter screen is the line telling you which column is the quantity. */
+.rx-dispense-table th {
+  font-size: var(--tbl-head-size);
+  font-weight: var(--tbl-head-weight);
+  text-transform: uppercase;
+  letter-spacing: var(--tbl-head-tracking);
+  color: var(--tbl-head-color);
+  white-space: nowrap;
+}
+.rx-dispense-table tbody tr:last-child > td { border-block-end: 0; }
+/* Numbers align END so their digits stack — a column of quantities read down the page is the check a
+   pharmacist actually performs, and ragged-left digits defeat it. This table invented the rule; it now
+   lives in `.mrs-num` and applies platform-wide, and `.rx-num` is kept as its local alias so the counter's
+   markup reads in its own vocabulary. */
+.rx-dispense-table th.rx-num,
+.rx-dispense-table td.rx-num {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.rx-col-qty {
+  inline-size: 1%;
+  white-space: nowrap;
+}
+
+.rx-row--picked {
+  background: var(--accent-tint);
+}
+
+/* The per-row ACTION column — the substitute control, and nothing else.
+ *
+ * It lived inside the Medicine cell, which is the widest column in the table, so it landed at a different x
+ * on every row: three lines of detail on one row and one on the next moved the button by half a column. An
+ * action that shifts as you scan down is one you have to look for each time, on a screen where the row above
+ * and the row below hold different medicines.
+ *
+ * Its own column fixes both axes at once — same x on every row, and vertically centred against the row
+ * rather than floating beside a block of variable height. The header is `sr-only` rather than absent: a
+ * screen reader announcing "column 2" tells nobody what the button does. */
+.rx-col-act {
+  inline-size: 1%;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.rx-drug-main {
+  display: grid;
+  gap: 2px;
+  min-inline-size: 16rem;
+}
+.rx-drug-name {
+  overflow-wrap: anywhere;
+}
+.rx-drug-name {
+  font-size: var(--fs-body);
+  line-height: 1.3;
+}
+/* The molecule, one step down from the trade name and one step up from the sig — it is the second thing read
+   and the first thing checked against the packet. */
+.rx-drug-ing {
+  font-size: var(--fs-caption);
+  color: var(--text-1);
+}
+.rx-drug-sig {
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+}
+/* An unrecorded fact, said in words and styled as an absence. Italic and dimmed so it cannot be mistaken at a
+   glance for a value — the same rule the unquotable amount follows below. */
+.rx-unrecorded {
+  font-style: italic;
+  color: var(--text-3);
+}
+
+/* Centred with the rest of the row. An over-quantity renders an error under the input and makes the field
+   taller; the tick stays level with the BOX rather than with the message, which is the thing it acts on. */
+.rx-qty {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+}
+.rx-qty .mrs-field {
+  /* The error message grows downward out of the flow-centred box instead of pushing the tick off-centre. */
+  position: relative;
+}
+/* The number box does not need to be wide enough for a paragraph. Sizing it to the quantity it holds keeps
+   the tick beside it in view instead of pushing it off the end of a scrolling table. */
+.rx-qty .mrs-field {
+  inline-size: 7rem;
+}
+
+/* The per-row controls. ≥44px so they are real targets on a counter touchscreen (WCAG 2.2 AA), and the focus
+   ring is the platform's 3px so keyboard users can see which row they are on. */
+.rx-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 44px;
+  min-block-size: 44px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  color: var(--text-1);
+  cursor: pointer;
+}
+/* Hover has to READ as "this does something".
+ *
+ * It was a step of grey on a white row — invisible at arm's length on a counter screen, which is where this
+ * button is used. Accent border and tint say clickable; there is deliberately no `translateY` lift, because a
+ * control that jumps a pixel inside a dense table row drags the eye off the line being worked. */
+.rx-icon-btn:hover:not(:disabled) {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.rx-icon-btn:active:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+/* A disabled control offers NOTHING on hover — no colour, no cursor, no lift. Half of "why did that not
+   work" is a button that looked live right up to the click. */
+.rx-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.rx-icon-btn:disabled:hover {
+  background: var(--surface-1);
+  border-color: var(--border);
+  color: var(--text-1);
+}
+/* Pressed state carries hue AND fill AND aria-pressed — never colour alone. */
+.rx-icon-btn--on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.rx-icon-btn:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.rx-sub-note {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp2);
+  margin-block-start: var(--sp1);
+  font-size: var(--fs-caption);
+  color: var(--st-warn-fg);
+}
+
+.rx-sub-option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp3);
+  cursor: pointer;
+}
+
+/* ---- the fixed action bar ------------------------------------------------------------------------------ */
+
+/* In normal flow, at the end of the page.
+ *
+ * It was pinned to the foot of the viewport, on the argument that the running total should stay visible while
+ * quantities are typed. In practice a bar floating over the content costs a strip of a counter screen on
+ * every screen it appears on, and reads as an overlay on a page that is otherwise a stack of cards — so it
+ * sits where it belongs, after the thing it acts on. */
+.rx-actionbar {
+  display: grid;
+  gap: var(--sp2);
+  padding: var(--sp3) var(--sp4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+}
+.rx-actionbar-msg:empty {
+  display: none;
+}
+.rx-actionbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp3);
+  flex-wrap: wrap;
+}
+.rx-actionbar-count {
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+}
+.rx-actionbar-count--on {
+  color: var(--text-1);
+  font-weight: 600;
+}
+.rx-actionbar-buttons {
+  display: flex;
+  gap: var(--sp2);
+  margin-inline-start: auto;
+}
+
+/* ---- the three figures --------------------------------------------------------------------------------- */
+
+/* Grid rather than flex so they stay equal-width and cannot be read as a ranking. */
+.rx-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--sp3);
+}
+
+/*
+ * A quote in flight. Dimmed, never blanked: the figures are still the last true answer, and replacing them
+ * with a spinner on every keystroke would teach a pharmacist to read whatever appears next. Opacity only —
+ * no reflow — so the tiles do not jump while somebody is typing a quantity beside them.
+ */
+.rx-tiles--busy {
+  opacity: 0.55;
+  transition: opacity 120ms ease-in;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rx-tiles--busy { transition: none; }
+}
+
+.rx-tile {
+  display: grid;
+  gap: var(--sp1);
+  align-content: start;
+  padding: var(--sp4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+}
+/* What the patient owes is the figure they are told out loud, so it carries the weight — a left rule and a
+   filled ground, not colour alone. */
+.rx-tile--emphasis {
+  border-color: var(--accent);
+  border-inline-start-width: 4px;
+  background: var(--accent-tint);
+}
+.rx-tile-label {
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.rx-tile-value {
+  font-size: var(--fs-title-2);
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--text-1);
+}
+.rx-tile-note {
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+}
+/*
+ * An unquotable amount, deliberately NOT styled like a number.
+ *
+ * Same size and weight as .rx-tile-value would put "cannot be quoted" in the slot a figure occupies, and at a
+ * glance — which is how a counter is read — that reads as an amount. Smaller, lighter and italic makes the
+ * absence legible as an absence.
+ */
+.rx-tile-unknown {
+  font-size: var(--fs-body);
+  font-style: italic;
+  color: var(--text-2);
+}
+.rx-tile-hint {
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+}
+.rx-estimate {
+  margin: 0;
+  font-size: var(--fs-caption);
+}
+
+
+/* ============================================================================================================
+   The printed dispense slip
+   ============================================================================================================ */
+
+/* Off-screen entirely until the counter prints. It is not a preview — a second rendering of the same figures
+   on screen is a second thing to keep in step with the first. */
+.rx-slip {
+  display: none;
+}
+
+@media print {
+  /* Hide the application, show the slip. `visibility` rather than `display` on the ancestors, because the
+     slip lives deep inside the shell and hiding any ancestor by display would take it with them. */
+  body * {
+    visibility: hidden;
+  }
+  .rx-slip,
+  .rx-slip * {
+    visibility: visible;
+  }
+  .rx-slip {
+    display: block;
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline-start: 0;
+    inline-size: 100%;
+    padding: 0;
+    color: #000;
+  }
+  .rx-slip h1 {
+    font-size: 1.25rem;
+    margin: 0 0 0.25rem;
+  }
+  .rx-slip table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-block-start: 0.5rem;
+  }
+  .rx-slip th,
+  .rx-slip td {
+    text-align: start;
+    padding: 0.25rem 0.5rem;
+    border-block-end: 1px solid #999;
+  }
+  .rx-slip .rx-slip-meta {
+    display: grid;
+    grid-template-columns: repeat(2, max-content);
+    gap: 0.15rem 1.5rem;
+    font-size: 0.875rem;
+  }
+  .rx-slip .rx-slip-foot {
+    margin-block-start: 1rem;
+    font-size: 0.75rem;
+  }
+}
+
+/* ---- Master lists (ADR-0035 §4) ---------------------------------------------
+   The retire toggle is a checkbox with a sentence beside it rather than a bare box with a word: retiring a
+   code is a governance act with a consequence downstream, and the consequence belongs next to the control
+   that causes it, not in help text further down the form. */
+.md-retire {
+  display: flex;
+  align-items: start;
+  gap: var(--sp3);
+  padding: var(--sp3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.md-retire input[type="checkbox"] {
+  inline-size: 20px;
+  block-size: 20px;
+  margin-block-start: 2px;
+  flex: none;
+}
+/* The diff is read by scanning the two value columns against each other, so they get equal room rather than
+   sizing to their content — a 3-character "true" beside a 60-character title would otherwise collapse. */
+.md-diff td:nth-child(2),
+.md-diff td:nth-child(3) { inline-size: 32%; }
+
+/* ---- Document validity (ADR-0035 §6) ----------------------------------------
+   One row per document kind: what it is on the left, its two numbers beside it, the action at the end. A grid
+   rather than a table because each row holds two editable fields and a button — a table cell with a form
+   control in it fights the table's own alignment, and the kind's status chip and hint need to wrap under the
+   name rather than stretch the row. */
+.dv-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(140px, 1fr) minmax(160px, 1fr) auto;
+  gap: var(--sp4);
+  align-items: start;
+  padding-block: var(--sp4);
+  border-block-start: 1px solid var(--border);
+}
+.dv-row:first-child { border-block-start: 0; }
+.dv-kind {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp2);
+}
+.dv-when { font-size: var(--fs-caption); }
+/* The "nobody has chosen this" sentence takes the full width under the name rather than squeezing beside the
+   chip — it is the row's most important explanation and a two-word column would make it unreadable. */
+.dv-hint { flex-basis: 100%; margin: 0; font-size: var(--fs-caption); }
+/* The action sits with the fields it commits, not on its own baseline. */
+.dv-row > .mrs-btn { margin-block-start: 26px; }
+
+@media (max-width: 900px) {
+  .dv-row { grid-template-columns: 1fr; }
+  .dv-row > .mrs-btn { margin-block-start: 0; justify-self: start; }
+}
+
+/* ============================================================================================================
+   LOGIN — the split hero (28.8)
+   ============================================================================================================
+   Scoped to `.login-split`, which ONLY the sign-in screen uses. `.login-wrap` above is untouched and still
+   carries the forgot-password and reset screens: those are read in a hurry by somebody who cannot get in, and
+   a full-bleed marketing hero is the wrong thing to put in front of them.
+
+   The hero's gradient stops, its gold and its glass tints are DECORATIVE and live only here. They are written
+   as `--login-*` custom properties rather than sprinkled through the rules so the palette can be read in one
+   place — and so nobody mistakes them for accessible text tokens. Every piece of TEXT on this screen uses the
+   existing accent/surface/border tokens or white on the deep teal, which clears AA.
+   ============================================================================================================ */
+.login-split {
+  --login-teal-1: #00b4b4;
+  --login-teal-2: #008080;
+  --login-teal-3: #00494b;
+  --login-teal-4: #003737;
+  /* The project's own decorative gold (the same value the Mersal lockup uses), not a new one. */
+  --login-gold: #e0a106;
+  --login-glass-line: rgba(255, 255, 255, 0.16);
+
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 1.08fr 0.92fr;
+}
+
+/* ---- the hero ---------------------------------------------------------------------------------------- */
+.login-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--sp8);
+  padding: clamp(36px, 4.5vw, 64px);
+  background: linear-gradient(
+    158deg,
+    var(--login-teal-1) 0%,
+    var(--login-teal-2) 42%,
+    var(--login-teal-3) 78%,
+    var(--login-teal-4) 100%
+  );
+  color: #fff;
+}
+
+/* Fine concentric lines radiating from the top-right corner. `inset: -30%` so the slow scale/translate below
+   never uncovers an edge — an animated layer that reveals its own boundary reads as a rendering fault. */
+.login-hero-waves {
+  position: absolute;
+  inset: -30%;
+  z-index: -3;
+  background: repeating-radial-gradient(
+    circle at 100% 0%,
+    rgba(255, 255, 255, 0.3) 0 1.25px,
+    transparent 1.25px 72px
+  );
+  /* 26s read as static — you had to watch for it to notice anything moving. */
+  animation: login-wave 11s ease-in-out infinite;
+}
+
+@keyframes login-wave {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  33% { transform: translate3d(2%, -2%, 0) scale(1.035); }
+  66% { transform: translate3d(-2%, 2%, 0) scale(1.015); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+/* Motion is decoration here and nothing depends on it, so it simply stops. */
+@media (prefers-reduced-motion: reduce) {
+  .login-hero-waves { animation: none; }
+}
+
+.login-hero-glow {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(720px 540px at 82% 12%, rgba(255, 255, 255, 0.2), transparent 70%),
+    radial-gradient(620px 520px at 8% 92%, rgba(0, 220, 210, 0.22), transparent 70%),
+    linear-gradient(to top, rgba(0, 20, 21, 0.35), transparent 45%);
+}
+
+/* Full-bleed glass. The content sits ABOVE it (z-index) rather than inside it — a backdrop-filter applied to
+   an ancestor blurs its descendants' own backdrop too, which turns crisp text soft. */
+.login-hero-glass {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  backdrop-filter: blur(7px) saturate(1.2) brightness(1.02);
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.07),
+    rgba(255, 255, 255, 0.015) 55%,
+    rgba(0, 20, 21, 0.1)
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    /* A soft inner vignette. Glass has an edge; without one the pane reads as a flat wash over the gradient
+       rather than as a surface sitting on top of it. */
+    inset 0 0 140px rgba(0, 24, 26, 0.16);
+  /* Logical property: the seam belongs on the edge facing the form, which swaps under RTL. */
+  border-inline-end: 1px solid var(--login-glass-line);
+}
+
+/* Anti-banding grain.
+   ------------------------------------------------------------------------------------------------------
+   The blotchy diagonal stripes across the hero are BANDING, not a gradient bug: four teal stops across a
+   1000px panel step through 8-bit colour in increments a screen resolves as bands, and a blur over them
+   smooths the pixels without adding the missing values back.
+   
+   A one-pixel dither breaks the flat regions up so the eye stops joining them into edges. It has to be
+   almost invisible — at any strength you can actually see, it stops being grain and becomes texture. */
+.login-hero-grain {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image:
+    repeating-linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.014) 0 1px,
+      rgba(0, 0, 0, 0.014) 1px 2px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(255, 255, 255, 0.01) 0 1px,
+      transparent 1px 3px
+    );
+}
+
+.login-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp2);
+  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.login-kicker::before {
+  content: "";
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: 50%;
+  background: var(--login-gold);
+}
+
+.login-headline {
+  margin: var(--sp5) 0 0;
+  font-size: clamp(32px, 3.6vw, 44px);
+  font-weight: 700;
+  letter-spacing: -0.032em;
+  line-height: 1.06;
+  text-wrap: balance;
+}
+
+.login-lede {
+  margin: var(--sp4) 0 0;
+  max-width: 420px;
+  font-size: 16.5px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+
+/* ---- the form panel ---------------------------------------------------------------------------------- */
+.login-panel {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: var(--sp4);
+  padding: var(--sp6);
+  background: var(--surface-0);
+}
+.login-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(620px 420px at 88% -10%, var(--accent-tint), transparent 70%);
+}
+.login-panel > * { position: relative; }
+
+.login-panel-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp2);
+}
+
+.login-card-wrap {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: var(--sp4);
+}
+
+/* ---- the panel's own controls -------------------------------------------------------------------------- */
+.login-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  /* A FIXED 44px square, not a minimum. Two buttons whose widths depend on their contents come out different
+     sizes — which is what the globe-plus-letter one did next to the bare moon — and a pair of controls that
+     do the same KIND of thing reading as two different sizes is the misalignment you notice first.
+     Both of them, with no exceptions — the language button carried a globe as well as a letter and came out
+     wider, so the globe went and the letter stayed. */
+  inline-size: 44px;
+  block-size: 44px;
+  padding: 0;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-1);
+  cursor: pointer;
+}
+.login-icon-btn:hover { border-color: var(--border-strong); }
+.login-icon-btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+/* `display: block` on the glyphs: an inline SVG sits on the text baseline and leaves descender space under
+   it, so a flex row centres the BOX and the mark still looks a pixel or two high. */
+.login-icon-btn svg { display: block; }
+/* The language glyph is SVG text (see LoginPage): HTML centres a line box, and the ink of an Arabic letter
+   does not fill its em box, so geometric centring left "ع" visibly low. Nothing to style here beyond the
+   colour it inherits. */
+
+.login-card {
+  inline-size: min(416px, 100%);
+  padding: clamp(26px, 3vw, 38px);
+  border-radius: 22px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  box-shadow: 0 18px 48px -24px rgba(0, 55, 55, 0.45);
+  animation: login-rise 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes login-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-card { animation: none; }
+}
+
+/* LEFT-aligned, both of them. A centred heading over left-aligned labels gives the card two competing
+   alignments, which is what made the old one feel unsettled at a glance. */
+.login-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.024em;
+  text-align: start;
+}
+.login-sub {
+  margin: var(--sp2) 0 0;
+  color: var(--text-2);
+  text-align: start;
+}
+
+/* Both fields are required and the form has two of them, so the asterisks were pure noise. Only the VISUAL
+   mark goes: `required` stays on the input, so `aria-required` and the browser's own validation are intact,
+   and .mrs-req is already aria-hidden — a screen reader never announced it in the first place. */
+.login-card .mrs-req { display: none; }
+
+/* Field polish. Scoped to the card so no other screen's inputs move. */
+.login-card .mrs-control {
+  min-block-size: 50px;
+  border-radius: 13px;
+  border-width: 1.5px;
+  background: var(--surface-2);
+}
+.login-card .mrs-control:focus-visible {
+  background: var(--surface-1);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-tint);
+}
+.login-card .mrs-label {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+/* Leading icon, centred on the CONTROL — not on the field.
+   ------------------------------------------------------------------------------------------------------
+   The first version positioned the icon at 50% of a wrapper that also contains the LABEL, so it centred on
+   label+input together and sat visibly high in the box. Anchoring it to the bottom instead would drift the
+   moment an error message appeared underneath.
+   
+   So the field is flattened with `display: contents` — label, control and error become items of this grid —
+   and the icon is placed in the SAME grid cell as the control. `align-self: center` then means the browser
+   centres it on the control itself, at any label length, with or without an error, at any font size.
+   
+   `inset-inline-start` for the offset and `padding-inline-start` on the control, so the icon and the text
+   swap sides together under RTL; a `left` here would leave the icon on top of Arabic text. */
+.login-field-icon {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+.login-field-icon > .mrs-field {
+  display: contents;
+}
+.login-field-icon > svg {
+  grid-column: 1;
+  grid-row: 2;
+  align-self: center;
+  justify-self: start;
+  margin-inline-start: 14px;
+  color: var(--text-2);
+  pointer-events: none;
+  z-index: 1;
+}
+.login-field-icon > .mrs-field > .mrs-control {
+  grid-column: 1;
+  grid-row: 2;
+  padding-inline-start: 42px;
+}
+
+/* ONE row. It wrapped before, which put the forgot-password link on a line of its own directly above the
+   submit button and read as a second action rather than an aside. */
+.login-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp3);
+}
+.login-meta a {
+  font-size: var(--fs-subhead);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.login-remember {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp2);
+  min-block-size: 44px;
+  font-size: var(--fs-subhead);
+  cursor: pointer;
+}
+
+/* Drawn rather than tinted. `accent-color` alone leaves the browser's own box shape and check, which is a
+   different rounding and a different tick on every platform — on one screen a grey square, on another a
+   blue-ish one. This is one square, brand-filled, with a white check. */
+.login-remember input {
+  appearance: none;
+  -webkit-appearance: none;
+  inline-size: 19px;
+  block-size: 19px;
+  margin: 0;
+  border: 1.5px solid var(--border-input);
+  border-radius: 6px;
+  background: var(--surface-1);
+  display: grid;
+  place-content: center;
+  cursor: pointer;
+}
+.login-remember input::before {
+  content: "";
+  inline-size: 10px;
+  block-size: 10px;
+  transform: scale(0);
+  transition: transform 120ms ease;
+  background: var(--on-accent);
+  clip-path: polygon(14% 44%, 0 60%, 40% 100%, 100% 22%, 84% 6%, 38% 66%);
+}
+.login-remember input:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.login-remember input:checked::before { transform: scale(1); }
+.login-remember input:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.login-submit {
+  inline-size: 100%;
+  min-block-size: 52px;
+  border: 0;
+  border-radius: 14px;
+  font-weight: 650;
+  color: var(--on-accent);
+  /* SOLID. The gradient put a near-black corner at the start of the button, which read as a shadow bug at
+     a glance and dragged the eye away from the label. */
+  background: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp2);
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+.login-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: var(--accent-press);
+  box-shadow: 0 12px 26px -14px rgba(0, 122, 122, 0.85);
+}
+.login-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+.login-submit-arrow { transition: transform 140ms ease; }
+.login-submit:hover:not(:disabled) .login-submit-arrow { transform: translateX(3px); }
+/* Mirrored, then nudged the other way — an arrow that points "forward" points LEFT in Arabic. */
+[dir="rtl"] .login-submit-arrow { transform: scaleX(-1); }
+[dir="rtl"] .login-submit:hover:not(:disabled) .login-submit-arrow { transform: scaleX(-1) translateX(3px); }
+
+.login-help {
+  margin: 0;
+  text-align: center;
+  color: var(--text-2);
+  font-size: var(--fs-caption);
+}
+
+/* ---- one column, hero kept as a banner ---------------------------------------------------------------- */
+@media (max-width: 900px) {
+  .login-split { grid-template-columns: 1fr; }
+  .login-hero {
+    padding: var(--sp6);
+    gap: var(--sp4);
+  }
+  /* The hero becomes a BANNER rather than disappearing: it is the only thing on this page that says whose
+     system this is, and a bare form on a phone could be anybody's. */
+  .login-hero-compact-hide { display: none; }
+  .login-headline { font-size: clamp(24px, 6vw, 30px); }
 }
