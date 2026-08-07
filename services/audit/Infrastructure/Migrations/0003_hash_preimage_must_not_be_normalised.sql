@@ -40,6 +40,9 @@
 --
 -- The cast below preserves what is currently stored; nothing further is lost by it.
 
+-- migrate-compat: contract-ok (jsonb -> text is compatible in BOTH directions on a rolling deploy: Npgsql
+-- reads either as a string, and the value written is a JSON string that text accepts unchanged. Nothing that
+-- was legal before becomes illegal — the point is that Postgres STOPS re-rendering it.)
 ALTER TABLE audit.audit_event
     ALTER COLUMN before_state TYPE text USING before_state::text,
     ALTER COLUMN after_state  TYPE text USING after_state::text;

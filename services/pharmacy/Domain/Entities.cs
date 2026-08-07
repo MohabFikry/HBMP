@@ -7,7 +7,10 @@ namespace Mersal.Pharmacy.Domain;
 /// dispensing is phase 6.</summary>
 public enum RxStatus { Draft, Submitted, Approved, Rejected, PartiallyDispensed, Dispensed, Expired, Cancelled }
 
-public enum RxLineStatus { Active, PartiallyDispensed, Dispensed, Cancelled }
+/// <summary>30.1 — <see cref="Superseded"/> is the state a line enters when it is AMENDED: the row is never
+/// mutated, a new version is inserted, and this one steps aside pointing at its successor (design 46 §1).
+/// It is a line status only; there is deliberately no prescription status of the same name — see pharmacy 0013.</summary>
+public enum RxLineStatus { Active, PartiallyDispensed, Dispensed, Cancelled, Superseded }
 
 public sealed class Prescription
 {
@@ -135,7 +138,57 @@ public sealed class PrescriptionLine
     public RxLineStatus Status { get; set; } = RxLineStatus.Active;
     public uint RowVersion { get; set; }                 // xmin — optimistic-concurrency guard on dispense (phase 6)
 
+    // ---- 30.1 the version chain (design 46 §1, pharmacy 0013) -------------------------------------------
+    // A signed prescription is never edited. Amend INSERTS a new row and marks this one Superseded; the
+    // database refuses an in-place edit of drug, dose, route, frequency, quantity, duration or refills
+    // outright (trg_rx_line_signed).
+
+    public int VersionNo { get; set; } = 1;
+    public Guid? SupersedesId { get; set; }
+    /// <summary>NON-NULL exactly when <see cref="Status"/> is <see cref="RxLineStatus.Superseded"/>, by CHECK.</summary>
+    public Guid? SupersededById { get; set; }
+    /// <summary>The first version in this chain; itself on v1. A chronic line's refill windows follow it.</summary>
+    public Guid RootLineId { get; set; }
+
+    public string? AmendmentReasonCode { get; set; }
+    public string? AmendmentReasonText { get; set; }
+    public Guid? AmendedBy { get; set; }
+    public DateTimeOffset? AmendedAt { get; set; }
+
     public decimal QuantityRemaining => QuantityPrescribed - QuantityDispensed;
+
+    /// <summary>The line is finished and nothing further can be dispensed against it.</summary>
+    public bool IsTerminal =>
+        Status is RxLineStatus.Dispensed or RxLineStatus.Cancelled or RxLineStatus.Superseded;
+}
+
+/// <summary>
+/// 30.1 — one applied cancel or amend on a prescription line (design 46 §1/§7). APPEND-ONLY, enforced by a
+/// trigger, keyed by a UNIQUE <see cref="IdempotencyKey"/> — the same duplicate-proof anchor
+/// <see cref="DispenseEvent"/> uses, so a double-tapped cancel writes one record rather than two.
+/// </summary>
+public sealed class LineAmendmentRecord
+{
+    public Guid AmendmentId { get; set; }
+    public string TenantId { get; set; } = "";
+    public Guid PrescriptionId { get; set; }
+    public Guid PrescriptionLineId { get; set; }
+    /// <summary>The row an Amend created. NULL for a Cancel, which creates no successor.</summary>
+    public Guid? NewLineId { get; set; }
+
+    public string Action { get; set; } = default!;          // Cancel | Amend
+    public string FromStatus { get; set; } = default!;
+    public string ToStatus { get; set; } = default!;
+
+    public string ReasonCode { get; set; } = default!;
+    public string? ReasonText { get; set; }
+
+    public Guid AmendedBy { get; set; }
+    public string? AmendedByDisplay { get; set; }
+    public DateTimeOffset AmendedAt { get; set; }
+
+    public string IdempotencyKey { get; set; } = default!;  // UNIQUE — dedup guarantee
+    public string? RequestHash { get; set; }
 }
 
 /// <summary>Append-only dispense record (22-data-dictionary §8.3, extended with <see cref="ExpiryDate"/> for lot

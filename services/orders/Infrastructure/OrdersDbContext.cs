@@ -15,6 +15,7 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
     public DbSet<ProcessedRequest> ProcessedRequests => Set<ProcessedRequest>();
     public DbSet<ReportAccessRequest> ReportAccessRequests => Set<ReportAccessRequest>();   // 14.7
     public DbSet<ReportAccessGrant> ReportAccessGrants => Set<ReportAccessGrant>();          // 14.7
+    public DbSet<LineAmendmentRecord> LineAmendments => Set<LineAmendmentRecord>();          // 30.1
 
     /// <summary>
     /// 29.2 — a line's <c>RequestedQuantity</c> defaults to what was ordered.
@@ -33,8 +34,16 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
     {
         foreach (var entry in ChangeTracker.Entries<OrderLine>())
         {
-            if (entry.State is EntityState.Added && entry.Entity.RequestedQuantity <= 0)
+            if (entry.State is not EntityState.Added) continue;
+            if (entry.Entity.RequestedQuantity <= 0)
                 entry.Entity.RequestedQuantity = entry.Entity.QuantityOrdered;
+
+            // 30.1 — a new line is version 1 of its own chain unless it was created BY an amendment, which
+            // sets the root explicitly to the line it supersedes. Same reasoning as the quantity above: a
+            // value that is correct by definition belongs at the choke point, because the failure mode when
+            // one call site forgets is a NOT NULL violation, i.e. an order a doctor cannot place.
+            if (entry.Entity.RootLineId == Guid.Empty)
+                entry.Entity.RootLineId = entry.Entity.OrderLineId;
         }
     }
 
@@ -92,8 +101,39 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
             e.Property(x => x.SensitivityLevel).HasConversion<string>().HasColumnName("sensitivity_level");   // phase 14.6
             e.Property(x => x.ProcedureTypeCode).HasColumnName("procedure_type_code");   // 29.2
             e.Property(x => x.RequestedQuantity).HasColumnName("requested_quantity");    // 29.2
+            // 30.1 — the version chain (design 46 §1). The clinical columns above are frozen by
+            // trg_order_line_signed; these are the only ones an amendment writes on the ORIGINAL row.
+            e.Property(x => x.VersionNo).HasColumnName("version_no");
+            e.Property(x => x.SupersedesId).HasColumnName("supersedes_id");
+            e.Property(x => x.SupersededById).HasColumnName("superseded_by_id");
+            e.Property(x => x.RootLineId).HasColumnName("root_line_id");
+            e.Property(x => x.AmendmentReasonCode).HasColumnName("amendment_reason_code");
+            e.Property(x => x.AmendmentReasonText).HasColumnName("amendment_reason_text");
+            e.Property(x => x.AmendedBy).HasColumnName("amended_by");
+            e.Property(x => x.AmendedAt).HasColumnName("amended_at");
             e.Ignore(x => x.QuantityRemaining);
+            e.Ignore(x => x.IsTerminal);
             e.HasIndex(x => x.OrderId);
+            e.HasIndex(x => new { x.RootLineId, x.VersionNo });
+        });
+
+        // 30.1 — the append-only amendment ledger (orders 0013).
+        b.Entity<LineAmendmentRecord>(e =>
+        {
+            e.ToTable("line_amendment");
+            e.HasKey(x => x.AmendmentId);
+            e.Property(x => x.OrderLineId).HasColumnName("order_line_id");
+            e.Property(x => x.NewLineId).HasColumnName("new_line_id");
+            e.Property(x => x.FromStatus).HasColumnName("from_status");
+            e.Property(x => x.ToStatus).HasColumnName("to_status");
+            e.Property(x => x.ReasonCode).HasColumnName("reason_code");
+            e.Property(x => x.ReasonText).HasColumnName("reason_text");
+            e.Property(x => x.AmendedBy).HasColumnName("amended_by");
+            e.Property(x => x.AmendedByDisplay).HasColumnName("amended_by_display");
+            e.Property(x => x.AmendedAt).HasColumnName("amended_at");
+            e.Property(x => x.RequestHash).HasColumnName("request_hash");
+            e.HasIndex(x => x.IdempotencyKey).IsUnique();
+            e.HasIndex(x => x.OrderLineId);
         });
 
         b.Entity<OrderFulfillment>(e =>

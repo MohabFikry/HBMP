@@ -2,5 +2,6 @@
   <PropertyGroup><RootNamespace>Mersal.Pharmacy.Domain</RootNamespace></PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../../libs/prescribing/Mersal.Prescribing.csproj" />
+    <ProjectReference Include="..\..\..\libs\amendment\Mersal.Amendment.csproj" />
   </ItemGroup>
 </Project>

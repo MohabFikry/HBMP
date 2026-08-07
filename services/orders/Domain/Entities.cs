@@ -40,7 +40,10 @@ public enum CodeSystem { CPT, LOINC, LOCAL }
 /// consume path (Active→PartiallyUsed→Completed) is phase 5.</summary>
 public enum OrderStatus { Requested, PendingApproval, Approved, Rejected, Active, PartiallyUsed, Completed, Expired, Cancelled }
 
-public enum OrderLineStatus { Active, PartiallyUsed, Completed, Cancelled }
+/// <summary>30.1 — <see cref="Superseded"/> is the state a line enters when it is AMENDED: the row is never
+/// mutated, a new version is inserted, and this one steps aside pointing at its successor (design 46 §1).
+/// It is a line status only; there is deliberately no head status of the same name — see orders 0013.</summary>
+public enum OrderLineStatus { Active, PartiallyUsed, Completed, Cancelled, Superseded }
 
 /// <summary>Clinical sensitivity ladder (phase 14.6, design 37 §5). Pinned from the examination type at order
 /// creation so later reclassification cannot retroactively unlock already-restricted data.</summary>
@@ -138,7 +141,65 @@ public sealed class OrderLine
     public OrderLineStatus Status { get; set; } = OrderLineStatus.Active;
     public uint RowVersion { get; set; }                 // xmin — optimistic-concurrency guard on consume (phase 5)
 
+    // ---- 30.1 the version chain (design 46 §1, orders 0013) ---------------------------------------------
+    // A signed order is never edited. Amend INSERTS a new row and marks this one Superseded; the database
+    // refuses an in-place edit of the clinical columns outright (trg_order_line_signed).
+
+    /// <summary>1 for the original. Increments on each amendment.</summary>
+    public int VersionNo { get; set; } = 1;
+    /// <summary>The row this one replaces. NULL on v1.</summary>
+    public Guid? SupersedesId { get; set; }
+    /// <summary>The row that replaced this one. NON-NULL exactly when <see cref="Status"/> is
+    /// <see cref="OrderLineStatus.Superseded"/> — enforced by a CHECK, so "superseded but pointing nowhere"
+    /// is not a state that can exist.</summary>
+    public Guid? SupersededById { get; set; }
+    /// <summary>The FIRST version in this chain; itself on v1. Makes "every version of this line" one
+    /// indexed query, which the service-history modal, the fulfiller's queue detail and order notes all
+    /// need — a recursive walk would be re-derived, slightly differently, at each of the three.</summary>
+    public Guid RootLineId { get; set; }
+
+    public string? AmendmentReasonCode { get; set; }
+    public string? AmendmentReasonText { get; set; }
+    public Guid? AmendedBy { get; set; }
+    public DateTimeOffset? AmendedAt { get; set; }
+
     public decimal QuantityRemaining => QuantityOrdered - QuantityConsumed;
+
+    /// <summary>The line is finished and nothing further can be delivered against it. What
+    /// <c>AmendableLine.IsTerminal</c> is fed from: a fully-consumed line is fact, and a cancelled or
+    /// superseded one has already left the live set.</summary>
+    public bool IsTerminal =>
+        Status is OrderLineStatus.Completed or OrderLineStatus.Cancelled or OrderLineStatus.Superseded;
+}
+
+/// <summary>
+/// 30.1 — one applied cancel or amend (design 46 §1/§7). APPEND-ONLY, enforced by a trigger, and keyed by a
+/// UNIQUE <see cref="IdempotencyKey"/>: the same duplicate-proof anchor <see cref="OrderFulfillment"/> uses,
+/// so a double-tapped cancel writes one record rather than two.
+/// </summary>
+public sealed class LineAmendmentRecord
+{
+    public Guid AmendmentId { get; set; }
+    public string TenantId { get; set; } = "";
+    public Guid OrderId { get; set; }
+    /// <summary>The line as it was when the action was taken — for an Amend, the row that became Superseded.</summary>
+    public Guid OrderLineId { get; set; }
+    /// <summary>The row an Amend created. NULL for a Cancel, which creates no successor.</summary>
+    public Guid? NewLineId { get; set; }
+
+    public string Action { get; set; } = default!;          // Cancel | Amend
+    public string FromStatus { get; set; } = default!;
+    public string ToStatus { get; set; } = default!;
+
+    public string ReasonCode { get; set; } = default!;
+    public string? ReasonText { get; set; }
+
+    public Guid AmendedBy { get; set; }
+    public string? AmendedByDisplay { get; set; }
+    public DateTimeOffset AmendedAt { get; set; }
+
+    public string IdempotencyKey { get; set; } = default!;  // UNIQUE — dedup guarantee
+    public string? RequestHash { get; set; }
 }
 
 /// <summary>Append-only consume record (22-data-dictionary §7.3). One immutable row per consumed line: it is the

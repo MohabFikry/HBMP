@@ -73,8 +73,10 @@ public static class OrderConsume
             if (req.Quantity <= 0) return ConsumeError.InvalidQuantity;
             var line = order.Lines.FirstOrDefault(l => l.OrderLineId == req.OrderLineId);
             if (line is null) return ConsumeError.LineNotFound;
-            if (line.Status is OrderLineStatus.Completed or OrderLineStatus.Cancelled)
-                return ConsumeError.AlreadyUsed;                                   // no-reuse
+            // no-reuse. Superseded joins the set in 30.1: the line was AMENDED, and consuming it would
+            // deliver the version the doctor withdrew — the code they corrected, the quantity they reduced.
+            // The amendment would have achieved nothing, and the record would say it had.
+            if (line.IsTerminal) return ConsumeError.AlreadyUsed;
             if (line.QuantityConsumed + req.Quantity > line.QuantityOrdered)
                 return ConsumeError.OverConsume;
         }
@@ -95,11 +97,19 @@ public static class OrderConsume
         order.Status = RecomputeOrderStatus(order);
     }
 
-    /// <summary>Order rolls up from its lines: all non-cancelled lines Completed ⇒ Completed; any consumption yet
-    /// work remaining ⇒ PartiallyUsed; otherwise unchanged. Cancelled lines don't hold the order open.</summary>
+    /// <summary>Order rolls up from its lines: all live lines Completed ⇒ Completed; any consumption yet
+    /// work remaining ⇒ PartiallyUsed; otherwise unchanged.
+    ///
+    /// <para>A line that has LEFT the live set does not hold the order open. Cancelled has always been
+    /// excluded; 30.1 adds Superseded, and it matters more: a superseded line is never Completed — it was
+    /// replaced, not delivered — so counting it would strand the order in PartiallyUsed for ever,
+    /// <c>OrderCompleted</c> would never emit, and the order would sit in a technician's queue with nothing
+    /// left to do on it. Its consumption is not counted either, because the successor carries the
+    /// accumulator forward and counting the dead row again would double it.</para></summary>
     public static OrderStatus RecomputeOrderStatus(InvestigationOrder order)
     {
-        var live = order.Lines.Where(l => l.Status != OrderLineStatus.Cancelled).ToList();
+        var live = order.Lines
+            .Where(l => l.Status is not (OrderLineStatus.Cancelled or OrderLineStatus.Superseded)).ToList();
         if (live.Count > 0 && live.All(l => l.Status == OrderLineStatus.Completed))
             return OrderStatus.Completed;
         if (live.Any(l => l.QuantityConsumed > 0))

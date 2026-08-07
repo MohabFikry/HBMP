@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Mersal.Amendment</RootNamespace>
+    <AssemblyName>Mersal.Amendment</AssemblyName>
+  </PropertyGroup>
+  <!--
+    30.1 — the amend/cancel rules. PURE, with no I/O and no dependencies at all.
+
+    It lives in its own library rather than inside orders-service or pharmacy-service because BOTH need the
+    same answers, and design 46 §3's rule ("the amendable scope is whatever has not been consumed") is one
+    rule about two shapes of line. Two implementations would be two chances to disagree about whether a
+    partly-dispensed line may be cancelled — and the disagreement would surface as a beneficiary who was
+    refused at one counter and served at another.
+
+    The reason vocabulary lives here too, as the SINGLE canonical source. Both services seed it into their
+    own table (orders 0013, pharmacy 0013) so the FK is real and a cancellation never depends on another
+    service being reachable; AmendmentReasonSeedTests reads both migrations and fails the build if either
+    copy drifts from this list.
+  -->
+  <ItemGroup>
+    <!-- The Tests directory is its own project; without this the library compiles the tests into itself. -->
+    <Compile Remove="Tests/**/*.cs" />
+  </ItemGroup>
+</Project>

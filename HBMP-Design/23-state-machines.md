@@ -72,6 +72,7 @@ stateDiagram-v2
     Active --> Expired: validity elapsed
     PartiallyUsed --> Expired: validity elapsed
     Active --> Cancelled: cancel
+    PartiallyUsed --> Cancelled: cancel remainder
     Requested --> Cancelled: cancel
     PendingApproval --> Cancelled: cancel
     Rejected --> [*]
@@ -91,7 +92,48 @@ stateDiagram-v2
 | Active / PartiallyUsed | **consume(subset)** | **line unused AND token unseen (atomic, idempotent)** | PartiallyUsed | `OrderLinesConsumed`; unused lines stay available | Lab / Imaging | `(orderId,lineId,consumeToken)` recorded; **no-reuse** enforced |
 | Active / PartiallyUsed | **consume(all/remaining)** | **all remaining lines unused (atomic)** | Completed | `OrderCompleted` | Lab / Imaging | Duplicate consume impossible |
 | Active / PartiallyUsed | expire | validity window elapsed | Expired | `OrderExpired` | System (timer) | Unused lines voided |
-| Requested / PendingApproval / Active | cancel | not yet fully consumed | Cancelled | `OrderCancelled` | Doctor / Case Manager | Reason recorded |
+| Requested / PendingApproval / Active / **PartiallyUsed** | cancel | not yet fully consumed | Cancelled | `OrderCancelled` | Doctor / Case Manager | **Coded** reason + actor recorded |
+
+> **30.2 — `PartiallyUsed → Cancelled` was missing, and its absence was a defect.** Without it a partly
+> fulfilled order could not be cancelled at all: a doctor with a three-line order whose first sample had been
+> taken could not withdraw the other two, and the endpoint answered 409 for the whole request. That is
+> precisely the case [46 §3](46-order-amendment-and-cancellation.md) opens with — the amendable scope is
+> whatever has NOT been consumed, so the remainder of a partly-used order is the main thing amendment is for.
+
+### 2b. Order line lifecycle — amendment (30.1, [design 46](46-order-amendment-and-cancellation.md))
+
+Amendment and cancellation act on the **line**, not the order: the amendable scope is whatever has not been
+consumed, and an order-level model cannot express "lines 2 and 3, but not line 1".
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active: line created
+    Active --> PartiallyUsed: consume(subset) [atomic]
+    Active --> Completed: consume(all) [atomic]
+    PartiallyUsed --> Completed: consume(remaining) [atomic]
+    Active --> Cancelled: cancel [guarded]
+    PartiallyUsed --> Cancelled: cancel remainder [guarded]
+    Active --> Superseded: amend [guarded, inserts v+1]
+    PartiallyUsed --> Superseded: amend [guarded, inserts v+1]
+    Completed --> [*]
+    Cancelled --> [*]
+    Superseded --> [*]
+```
+
+| From | Event | Guard / Condition | To | Side-effects | Actor |
+|---|---|---|---|---|---|
+| Active / PartiallyUsed | **cancel** | one guarded UPDATE: `status IN (Active,PartiallyUsed) AND xmin = @expected`; coded reason mandatory | Cancelled | `OrderLineCancelled`; append-only `line_amendment` row keyed by a UNIQUE idempotency key | Authoring prescriber / treating clinician |
+| Active / PartiallyUsed | **amend** | same guarded UPDATE; new quantity ≥ quantity already consumed | Superseded | a NEW line at `version_no + 1` carrying `supersedes_id` and the consumed accumulator; original never mutated | Authoring prescriber / treating clinician |
+
+- **`Superseded` is a LINE status only.** There is deliberately no order status of the same name: an order
+  with one superseded line and two live ones is not superseded, and a status nothing can enter is one
+  somebody eventually sets by hand.
+- **The consumed portion is immutable.** The successor inherits `quantity_consumed`, so amending a line with
+  4 of 6 sessions delivered down to 5 leaves ONE session available, not five.
+- **Neither Cancelled nor Superseded returns to the live set.** Enforced by `trg_order_line_signed`, not by
+  the endpoint.
+- **Cancelled and Superseded lines remain visible** in history and in the service-history modal, with their
+  status and reason. A cancelled antibiotic is clinically meaningful.
 
 ### Atomic-consume guard (invariant detail)
 - **Precondition:** target line state ∈ {available} AND `consumeToken` not previously applied.
@@ -140,6 +182,7 @@ stateDiagram-v2
     Draft --> Cancelled: cancel
     Submitted --> Cancelled: cancel
     Approved --> Cancelled: cancel
+    PartiallyDispensed --> Cancelled: cancel remainder
     Rejected --> [*]
     Dispensed --> [*]
     Expired --> [*]
@@ -156,8 +199,44 @@ stateDiagram-v2
 | Approved / PartiallyDispensed | **dispense(subset)** | **line unused AND token unseen (atomic); substitution only from approved list** | PartiallyDispensed | `RxLinesDispensed`; remaining lines available | Pharmacy | Substitution + OOS captured |
 | Approved / PartiallyDispensed | **dispense(all/remaining)** | **all remaining lines unused (atomic)** | Dispensed | `RxDispensed` | Pharmacy | Duplicate dispense impossible |
 | Approved / PartiallyDispensed | expire | validity window elapsed | Expired | `RxExpired` | System (timer) | Pharmacy must reject if presented |
-| Draft / Submitted / Approved | cancel | not fully dispensed | Cancelled | `RxCancelled` | Doctor / Case Manager | Reason recorded |
+| Draft / Submitted / Approved / **PartiallyDispensed** | cancel | not fully dispensed | Cancelled | `RxCancelled` | Doctor / Case Manager | **Coded** reason + actor recorded |
 | Expired / Completed(Dispensed) | present-at-pharmacy | — | (no transition) | `RxRejectedPresentation` | Pharmacy | **Reject expired/completed** |
+
+> **30.2 — `PartiallyDispensed → Cancelled` was missing, exactly as `PartiallyUsed → Cancelled` was on the
+> order side (§2).** A partly-dispensed prescription could not be cancelled at all, so a doctor whose
+> three-line script had had its first drug handed over could not withdraw the other two. Two services, two
+> state tables, the same omission in each — which is what a rule expressed twice does.
+
+### 3b. Prescription line lifecycle — amendment (30.1, [design 46](46-order-amendment-and-cancellation.md))
+
+The medication twin of §2b, and identical in shape. Amendment acts on the **line**; the amendable scope is
+whatever has not been dispensed.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active: line created
+    Active --> PartiallyDispensed: dispense(subset) [atomic]
+    Active --> Dispensed: dispense(all) [atomic]
+    PartiallyDispensed --> Dispensed: dispense(remaining) [atomic]
+    Active --> Cancelled: cancel [guarded]
+    PartiallyDispensed --> Cancelled: cancel remainder [guarded]
+    Active --> Superseded: amend [guarded, inserts v+1]
+    PartiallyDispensed --> Superseded: amend [guarded, inserts v+1]
+    Dispensed --> [*]
+    Cancelled --> [*]
+    Superseded --> [*]
+```
+
+| From | Event | Guard / Condition | To | Side-effects | Actor |
+|---|---|---|---|---|---|
+| Active / PartiallyDispensed | **cancel** | one guarded UPDATE: `status IN (Active,PartiallyDispensed) AND xmin = @expected`; coded reason mandatory | Cancelled | `PrescriptionLineCancelled`; append-only `line_amendment` row keyed by a UNIQUE idempotency key | Authoring prescriber / treating clinician |
+| Active / PartiallyDispensed | **amend** | same guarded UPDATE; new quantity ≥ quantity already dispensed | Superseded | a NEW line at `version_no + 1` carrying `supersedes_id`, every clinical field copied, and the dispensed accumulator | Authoring prescriber / treating clinician |
+
+- **`Superseded` is a LINE status only** — there is no prescription status of the same name (§2b).
+- **The dispensed portion is immutable**: the successor inherits `quantity_dispensed`, so a line with 10 of
+  30 handed over, amended to 20, leaves TEN available, not twenty.
+- **A superseded line can never be dispensed** — doing so would hand over the drug, dose or quantity the
+  prescriber corrected, and the amendment would have achieved nothing while the record said it had.
 
 ### Pharmacy-specific guards
 - **Partial dispensing:** allowed; unfilled lines remain `available` for a later visit.
