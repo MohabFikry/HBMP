@@ -128,14 +128,29 @@ public class CareTimelineTests
                 new { icdCode = "J01.0", diagnosisRank = "Primary", clinicalStatus = "Active" }, Web))
                 .StatusCode.Should().Be(HttpStatusCode.Created);
 
-            var timeline = await doctor.GetFromJsonAsync<List<JsonElement>>($"/api/v1/encounters/{encId}/timeline")
-                ?? throw new InvalidOperationException("the encounter timeline answered with no body");
+            // 30.5c — the encounter timeline answers `{ steps, opening }` rather than a bare array, so it
+            // can carry the check-in moment and the waiting time derived from it (design 46 §7c). The
+            // appointment timeline is unchanged.
+            var body = await doctor.GetFromJsonAsync<JsonElement>($"/api/v1/encounters/{encId}/timeline");
+            var timeline = body.GetProperty("steps").EnumerateArray().ToList();
             var steps = timeline.Select(s => s.GetProperty("status").GetString()).ToList();
 
             steps.Should().Contain(CareSteps.VisitStarted);
             steps.Should().Contain(CareSteps.DiagnosisCoded);
             // Newest first, as the appointment timeline is: whoever opens one is asking what JUST happened.
             timeline.Select(s => s.GetProperty("at").GetDateTimeOffset()).Should().BeInDescendingOrder();
+
+            // This visit was started from an appointment that was checked in, so the opening carries both
+            // moments and the wait between them.
+            var opening = body.GetProperty("opening");
+            opening.GetProperty("kind").GetString().Should().Be("CheckedInThenSeen");
+            opening.GetProperty("noCheckInRecorded").GetBoolean().Should().BeFalse();
+            opening.GetProperty("inconsistent").GetBoolean().Should().BeFalse();
+            opening.GetProperty("waitingMinutes").ValueKind.Should().NotBe(JsonValueKind.Null,
+                "visit started − checked in is the number a clinic manager actually wants, and it now costs "
+                + "nothing to derive");
+            steps.Should().Contain(CareSteps.CheckedIn,
+                "the timeline must OPEN at check-in, not at Visit started (design 46 §7c)");
         }
         finally { await CleanupAsync(app, encId); }
     }
@@ -173,6 +188,9 @@ public class CareTimelineTests
             ProviderId = Guid.NewGuid(), LocationId = Guid.NewGuid(),
             AppointmentType = AppointmentType.Scheduled, Status = AppointmentStatus.CheckedIn,
             ScheduledStart = now.AddHours(-1), ScheduledEnd = now.AddMinutes(-30),
+            // 30.5c — the DURABLE arrival moment (migration 0024). Status alone was never enough: it says
+            // the step happened, not when, and the timeline needs the instant to derive the wait from.
+            CheckedInAt = now.AddMinutes(-45), CheckedInBy = "reception-1",
         });
         db.Encounters.Add(new Encounter
         {

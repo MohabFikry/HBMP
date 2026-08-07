@@ -142,14 +142,56 @@ public static class ClinicalEndpoints
             if (denied is not null) return denied;
 
             var care = await episode.ForEncounterAsync(id, ct);
+
+            /*
+             * 30.5c — THE TIMELINE OPENS AT CHECKED IN (design 46 §7c).
+             *
+             * A COMPOSED VIEW over two aggregates: check-in lives on emr.appointment, recorded by reception,
+             * and the encounter begins later when the doctor opens the visit. The check-in data is NOT copied
+             * onto the encounter — it is read from where it belongs and joined here.
+             *
+             * Three cases, kept distinct (VisitOpeningRules):
+             *   1. checked in then seen   -> both entries, waiting time shown;
+             *   2. NO CHECK-IN RECORDED   -> said in words, never assumed to be the visit-start moment;
+             *   3. recorded out of order  -> both shown AS RECORDED, and FLAGGED, never reordered.
+             */
+            var appointment = enc0.AppointmentId is { } apptId
+                ? await db.Appointments.AsNoTracking().FirstOrDefaultAsync(a => a.AppointmentId == apptId, ct)
+                : null;
+            var visitStarted = care.FirstOrDefault(s => s.Step == CareSteps.VisitStarted)?.OccurredAt
+                               ?? enc0.StartedAt;
+            var opening = VisitOpeningRules.Compose(appointment?.CheckedInAt, visitStarted);
             // Newest first, matching the appointment timeline: whoever opens one is asking what just happened,
             // not how it began. `ForEncounterAsync` returns oldest-first because a timeline read WHOLE is read
             // forwards; the two orders are both deliberate and this is the endpoint's choice to make.
             var rows = care
                 .Select(s => new TimelineRow(s.Step, s.OccurredAt, s.Actor, s.Source, s.Reference))
-                .OrderByDescending(r => r.At)
                 .ToList();
-            return Results.Ok(rows);
+
+            // The arrival is PREPENDED as a step rather than written into the care episode, because it is
+            // reception's record on the appointment and the episode must not claim to own it.
+            if (opening.CheckedInAt is { } arrivedAt)
+                rows.Add(new TimelineRow(
+                    CareSteps.CheckedIn, arrivedAt, appointment?.CheckedInBy, CareStepSources.Emr, null));
+
+            return Results.Ok(new
+            {
+                // NEWEST FIRST, matching the appointment timeline: whoever opens one is asking what just
+                // happened, not how it began.
+                steps = rows.OrderByDescending(r => r.At).ToList(),
+                opening = new
+                {
+                    kind = opening.Kind.ToString(),
+                    checkedInAt = opening.CheckedInAt,
+                    visitStartedAt = opening.VisitStartedAt,
+                    // The number a clinic manager actually wants, and it now costs nothing. NULL whenever it
+                    // cannot honestly be computed — never a fabricated zero.
+                    waitingMinutes = opening.Waiting is { } w ? (int)w.TotalMinutes : (int?)null,
+                    // A data-quality signal, surfaced rather than tidied away.
+                    inconsistent = opening.Flagged,
+                    noCheckInRecorded = opening.Kind == VisitOpeningKind.NoCheckInRecorded,
+                },
+            });
         });
 
         // ---- SOAP note create (US-031) ----

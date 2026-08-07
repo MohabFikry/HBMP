@@ -727,8 +727,13 @@ export class HttpApiClient implements ApiClient {
 
   /** Fetch a timeline and put NAMES to its actor ids. Shared so both timelines resolve actors identically. */
   private async readTimeline(path: string) {
-    const r = (await getRaw(path)) as any[];
-    const steps = r ?? [];
+    // 30.5c — the ENCOUNTER timeline now answers `{ steps, opening }` so it can carry the check-in and the
+    // waiting time derived from it (design 46 §7c); the APPOINTMENT timeline is still a bare array. Both
+    // shapes are accepted here rather than in two helpers, because they are the same list seen from two ends
+    // and splitting them is how the actor-name resolution would drift between the two.
+    const r = (await getRaw(path)) as any;
+    const steps: any[] = Array.isArray(r) ? r : (r?.steps ?? []);
+    const opening = Array.isArray(r) ? undefined : r?.opening;
 
     // Put names to the actor ids. One request for the DISTINCT ids on this timeline, not one per step — a
     // rebooked appointment repeats the same actor several times. A failure here degrades to the id rather than

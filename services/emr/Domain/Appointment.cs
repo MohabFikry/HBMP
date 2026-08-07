@@ -91,6 +91,17 @@ public sealed class Appointment
     public string? UpdatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+
+    /// <summary>
+    /// 30.5c — when reception recorded the arrival (migration 0024, design 46 §7c).
+    ///
+    /// <para>NULL means <b>no check-in was recorded</b> — a walk-in taken straight into the room, or a missed
+    /// step — and readers must say so rather than assuming the visit-start moment. Never derived from
+    /// <see cref="UpdatedAt"/>, which every later transition overwrites: a waiting time computed from it is
+    /// right on the day and quietly wrong by the end of the week.</para>
+    /// </summary>
+    public DateTimeOffset? CheckedInAt { get; set; }
+    public string? CheckedInBy { get; set; }
     /// <summary>PostgreSQL <c>xmin</c> optimistic-concurrency token (drives the 3.2 If-Match ETag).</summary>
     public uint RowVersion { get; set; }
 }
