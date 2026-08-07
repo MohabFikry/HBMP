@@ -730,10 +730,10 @@ export class HttpApiClient implements ApiClient {
     // 30.5c — the ENCOUNTER timeline now answers `{ steps, opening }` so it can carry the check-in and the
     // waiting time derived from it (design 46 §7c); the APPOINTMENT timeline is still a bare array. Both
     // shapes are accepted here rather than in two helpers, because they are the same list seen from two ends
-    // and splitting them is how the actor-name resolution would drift between the two.
+    // and splitting them is how the actor-name resolution would drift between the two. The `opening` half is
+    // not surfaced yet — that is Gate 6 UI work — but accepting the envelope keeps the client working today.
     const r = (await getRaw(path)) as any;
     const steps: any[] = Array.isArray(r) ? r : (r?.steps ?? []);
-    const opening = Array.isArray(r) ? undefined : r?.opening;
 
     // Put names to the actor ids. One request for the DISTINCT ids on this timeline, not one per step — a
     // rebooked appointment repeats the same actor several times. A failure here degrades to the id rather than
