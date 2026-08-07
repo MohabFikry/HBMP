@@ -12,29 +12,22 @@ namespace Mersal.Pharmacy.Api;
 ///
 /// <para>One thing differs and it matters: <b>the beneficiary is notified first</b>, not the provider. For a
 /// chronic script the patient may already be travelling to collect, and design 46 §6 singles that out.</para>
+///
+/// <para>Like its twin, this class builds PAYLOADS and does not enqueue: <c>OutboxAtomicityTests</c> reads
+/// one file at a time, so an enqueue hidden behind a helper reads to it — correctly — as a
+/// non-transactional one. The enqueue stays where the transaction is.</para>
 /// </summary>
 public static class RxAmendmentEvents
 {
     public const string LineCancelled = "PrescriptionLineCancelled";
     public const string LineAmended = "PrescriptionLineAmended";
 
-    public static async Task PublishCancelledAsync(
-        IOutbox outbox, Prescription rx, PrescriptionLine line, LineAmendmentRecord record, CancellationToken ct)
-    {
-        await outbox.EnqueueAsync(LineCancelled, "pharmacy.events", Payload(rx, line, record, null), ct);
-        await NotifyAsync(outbox, rx, line, record, LineCancelled, ct);
-    }
-
-    public static async Task PublishAmendedAsync(
-        IOutbox outbox, Prescription rx, PrescriptionLine line, LineAmendmentRecord record, CancellationToken ct)
-    {
-        await outbox.EnqueueAsync(LineAmended, "pharmacy.events", Payload(rx, line, record, record.NewLineId), ct);
-        await NotifyAsync(outbox, rx, line, record, LineAmended, ct);
-    }
+    public const string DomainStream = "pharmacy.events";
+    public const string NotificationQueue = "notification.domain-events";
 
     /// <summary><c>encounterId</c> is mandatory on anything the care feed mirrors — a step without it has no
     /// episode, and a step on the wrong episode is worse than a missing one.</summary>
-    private static object Payload(
+    public static object Domain(
         Prescription rx, PrescriptionLine line, LineAmendmentRecord record, Guid? newLineId) => new
     {
         tenantId = rx.TenantId,
@@ -52,10 +45,8 @@ public static class RxAmendmentEvents
         amendedAt = record.AmendedAt,
     };
 
-    private static async Task NotifyAsync(
-        IOutbox outbox, Prescription rx, PrescriptionLine line, LineAmendmentRecord record, string eventType,
-        CancellationToken ct) =>
-        await outbox.EnqueueAsync(eventType, "notification.domain-events", new
+    public static object Notification(Prescription rx, PrescriptionLine line, LineAmendmentRecord record) =>
+        new
         {
             tenantId = rx.TenantId,
             entityRef = rx.RxNo,
@@ -67,7 +58,7 @@ public static class RxAmendmentEvents
                 reasonCode = record.ReasonCode,
                 amendedAt = record.AmendedAt,
             },
-        }, ct);
+        };
 
     private static object[] Recipients(Prescription rx, LineAmendmentRecord record)
     {

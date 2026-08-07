@@ -61,7 +61,10 @@ public static class RxAmendmentEndpoints
                 // recognises the exemption by the block.
                 insideTransaction: async (p, line, record, innerCt) =>
                 {
-                    await RxAmendmentEvents.PublishCancelledAsync(outbox, p, line, record, innerCt);
+                    await outbox.EnqueueAsync(RxAmendmentEvents.LineCancelled, RxAmendmentEvents.DomainStream,
+                        RxAmendmentEvents.Domain(p, line, record, null), innerCt);
+                    await outbox.EnqueueAsync(RxAmendmentEvents.LineCancelled, RxAmendmentEvents.NotificationQueue,
+                        RxAmendmentEvents.Notification(p, line, record), innerCt);
                 }, ct);
 
             await AuditAsync(audit, me, lineId, "Cancelled", req.ReasonCode, result.Outcome, ct);
@@ -91,7 +94,10 @@ public static class RxAmendmentEndpoints
                 actor, me.Principal?.DisplayName, clock.GetUtcNow(),
                 insideTransaction: async (p, line, record, innerCt) =>
                 {
-                    await RxAmendmentEvents.PublishAmendedAsync(outbox, p, line, record, innerCt);
+                    await outbox.EnqueueAsync(RxAmendmentEvents.LineAmended, RxAmendmentEvents.DomainStream,
+                        RxAmendmentEvents.Domain(p, line, record, record.NewLineId), innerCt);
+                    await outbox.EnqueueAsync(RxAmendmentEvents.LineAmended, RxAmendmentEvents.NotificationQueue,
+                        RxAmendmentEvents.Notification(p, line, record), innerCt);
                 }, ct);
 
             await AuditAsync(audit, me, lineId, "Superseded", req.ReasonCode, result.Outcome, ct);
@@ -142,7 +148,10 @@ public static class RxAmendmentEndpoints
                     new AmendReason(req.ReasonCode, req.ReasonText), actor, me.Principal?.DisplayName, now,
                     insideTransaction: async (p, l, record, innerCt) =>
                     {
-                        await RxAmendmentEvents.PublishCancelledAsync(outbox, p, l, record, innerCt);
+                        await outbox.EnqueueAsync(RxAmendmentEvents.LineCancelled, RxAmendmentEvents.DomainStream,
+                            RxAmendmentEvents.Domain(p, l, record, null), innerCt);
+                        await outbox.EnqueueAsync(RxAmendmentEvents.LineCancelled, RxAmendmentEvents.NotificationQueue,
+                            RxAmendmentEvents.Notification(p, l, record), innerCt);
                     }, ct);
 
                 var ok = result.Outcome is AmendOutcome.Applied or AmendOutcome.Replayed;

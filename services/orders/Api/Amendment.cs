@@ -72,7 +72,10 @@ public static class AmendmentEndpoints
                 // exemption by the block — the braces are load-bearing for the check, not style.
                 insideTransaction: async (o, line, record, innerCt) =>
                 {
-                    await AmendmentEvents.PublishCancelledAsync(outbox, o, line, record, innerCt);
+                    await outbox.EnqueueAsync(AmendmentEvents.LineCancelled, AmendmentEvents.DomainStream,
+                        AmendmentEvents.Domain(o, line, record, null), innerCt);
+                    await outbox.EnqueueAsync(AmendmentEvents.LineCancelled, AmendmentEvents.NotificationQueue,
+                        AmendmentEvents.Notification(o, line, record), innerCt);
                 }, ct);
 
             await AuditAsync(audit, me, lineId, "Cancelled", req.ReasonCode, result.Outcome, ct);
@@ -101,7 +104,10 @@ public static class AmendmentEndpoints
                 actor, me.Principal?.DisplayName, clock.GetUtcNow(),
                 insideTransaction: async (o, line, record, innerCt) =>
                 {
-                    await AmendmentEvents.PublishAmendedAsync(outbox, o, line, record, innerCt);
+                    await outbox.EnqueueAsync(AmendmentEvents.LineAmended, AmendmentEvents.DomainStream,
+                        AmendmentEvents.Domain(o, line, record, record.NewLineId), innerCt);
+                    await outbox.EnqueueAsync(AmendmentEvents.LineAmended, AmendmentEvents.NotificationQueue,
+                        AmendmentEvents.Notification(o, line, record), innerCt);
                 }, ct);
 
             await AuditAsync(audit, me, lineId, "Superseded", req.ReasonCode, result.Outcome, ct);
@@ -156,7 +162,10 @@ public static class AmendmentEndpoints
                     new AmendReason(req.ReasonCode, req.ReasonText), actor, me.Principal?.DisplayName, now,
                     insideTransaction: async (o, l, record, innerCt) =>
                     {
-                        await AmendmentEvents.PublishCancelledAsync(outbox, o, l, record, innerCt);
+                        await outbox.EnqueueAsync(AmendmentEvents.LineCancelled, AmendmentEvents.DomainStream,
+                            AmendmentEvents.Domain(o, l, record, null), innerCt);
+                        await outbox.EnqueueAsync(AmendmentEvents.LineCancelled, AmendmentEvents.NotificationQueue,
+                            AmendmentEvents.Notification(o, l, record), innerCt);
                     }, ct);
 
                 reports.Add(new LineCancelReport(line.OrderLineId, line.Code,
