@@ -58,6 +58,9 @@ public class PackContentTests
     [InlineData("100 i.u./ml", 100.0)]
     [InlineData("300 I.U./ML", 300.0)]
     [InlineData("10000i.u./ml", 10000.0)]
+    // "units per ml" is the same fact spelled the way a biosimilar's label spells it.
+    [InlineData("100units/ml", 100.0)]
+    [InlineData("100 Units/ ML", 100.0)]
     // A TOTAL is not a concentration. "50000 iu" is what one capsule of vitamin D holds; reading it as a
     // concentration would multiply it by a volume and hand out a hundred times the course.
     [InlineData("50000 iu", null)]
@@ -154,6 +157,24 @@ public class PackContentTests
 
         facts.PrescribingUnit.Should().Be("IU");
         facts.PackContent.Should().Be(1000m);
+    }
+
+    [Fact]
+    public void A_name_that_states_its_own_container_count_is_believed_over_a_column_that_disagrees()
+    {
+        // "insulatard hm 100i.u./ml 5*3ml penfills" carries major = 1 and minor = 5. The NAME says five,
+        // the minor column says five, and the major column is the outlier — so reading the container count
+        // from major alone gave that box 300 IU instead of 1500, a fifth of a month's insulin.
+        //
+        // `N x V ml` is the workbook's own notation for "N containers of V millilitres", used on 70 rows.
+        // On 23 it agrees with major; on 43 more it agrees with minor while major does not. It is the source
+        // stating the count in words, and a stated fact outranks a derived column that contradicts it.
+        var facts = PackUnitRules.Resolve(
+            form: "cartridge", statedSplittable: null, majorUnits: 1m, minorUnits: 5m,
+            volumeWeight: "3 ml", strength: "100iu/ml",
+            tradeName: "insulatard hm 100i.u./ml 5*3ml penfills");
+
+        facts.PackContent.Should().Be(1500m);
     }
 
     [Fact]

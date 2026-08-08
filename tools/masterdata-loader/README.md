@@ -138,10 +138,28 @@ pre-filled pens and is dosed in IU in all three, so `prescribing_unit` becomes `
 bare total — `50000 iu` on a vitamin D capsule — is deliberately *not* read as a concentration: that product
 is prescribed in capsules.
 
-Where nothing can be derived, nothing is: "Lantus Solostar 100 I.U./ML 5 Pens" states its concentration and
-never its volume. Three millilitres is the usual fill of an insulin pen and it is not assumed. Every such row
-is listed by name in `reports/pack-content-missing-<release>.txt`, one `Volume / Weight` cell away from a box
-count.
+Two further sources, both stated rather than inferred:
+
+**A name that counts its own containers.** `5*3ml penfills` is five cartridges of three millilitres, written
+by whoever catalogued it. Seventy names use the notation; on 23 it agrees with W, and on 43 more it agrees
+with X while W does not. Where a stated count and a derived column disagree, the stated one wins — otherwise
+"insulatard hm 100i.u./ml 5*3ml penfills" (`W = 1`) held 300 IU instead of 1500.
+
+**`data/pack-measurement-overrides.csv` — measurements the sheet does not carry.** One line per product, each
+with a `basis` column saying why. "Lantus Solostar 100 I.U./ML 5 Pens" states its concentration and never how
+many millilitres a pen holds; three millilitres is the standard fill of every marketed insulin pen and
+cartridge, and writing THAT into the rules would be a guess that spreads itself to the next product that is
+not 3 ml. A named list cannot spread: a new insulin in a workbook refresh matches nothing, derives no content,
+and appears in the missing-content report.
+
+Precedence is **per input, not per outcome**: the volume is taken from column Y, then the name, then the file;
+the concentration from Z, then the name, then the file. Asking instead whether the sheet produced *a* content
+would skip the rows that need it most — "insulin h bio nph 100i.u.vial" drops the `/ml`, so the sheet answers
+"one vial", which is a coherent answer to the wrong question. Entries that matched nothing are printed at the
+end of a load, because a curated list nobody prunes decays into a list of things that used to be true.
+
+Everything still underivable is listed by name in `reports/pack-content-missing-<release>.txt`, one
+`Volume / Weight` cell away from a box count.
 
 Observed coverage (release `R2019-2022-EG`, after 31.3):
 
@@ -150,7 +168,7 @@ prescribing_unit     21,823 / 22,653  (96.3%)
 pack_size            22,607 / 22,653  (99.8%)
 pack_content         19,213 / 22,653  (84.8%)  <- the divisor
 is_pack_splittable   22,647 / 22,653  (100.0%)
-ALL THREE (usable)   19,213 / 22,653  (84.8%)
+ALL THREE (usable)   19,243 / 22,653  (84.9%)
 ```
 
 The usable figure FELL from 96.1%, and that is the correction: the old number counted every syrup, cream and

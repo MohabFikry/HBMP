@@ -38,13 +38,45 @@ public static class PackMeasure
     /// A concentration in international units per millilitre.
     /// </summary>
     /// <remarks>
-    /// The "/ml" is REQUIRED. The catalogue writes the unit half a dozen ways — <c>iu/ml</c>, <c>i.u./ml</c>,
-    /// <c>I.U./ML</c>, with and without a space — and all of them mean the same thing; but <c>50000 iu</c>
-    /// without it means something else entirely, and the two live in the same column.
+    /// <para>The "/ml" is REQUIRED. The catalogue writes the unit half a dozen ways — <c>iu/ml</c>,
+    /// <c>i.u./ml</c>, <c>I.U./ML</c>, <c>units/ml</c>, with and without a space — and all of them mean the
+    /// same thing; but <c>50000 iu</c> without it means something else entirely, and the two live in the same
+    /// column.</para>
+    ///
+    /// <para><c>units</c> is the spelling the biosimilars use ("Semglee 100 Units/ ML"), and an insulin
+    /// stated in units per millilitre is an insulin stated in IU per millilitre.</para>
     /// </remarks>
     private static readonly Regex IuPerMl = new(
-        @"(?<n>\d+(?:[.,]\d+)?)\s*i\.?\s*u\.?\s*/\s*ml\b",
+        @"(?<n>\d+(?:[.,]\d+)?)\s*(?:i\.?\s*u\.?|units?)\s*/\s*ml\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// The workbook's own notation for a multi-container pack: <c>5*3ml penfills</c>, <c>30 x 0.5 ml sdu</c>.
+    /// </summary>
+    private static readonly Regex Containers = new(
+        @"\b(?<n>\d+)\s*[*x\u00d7]\s*\d+(?:[.,]\d+)?\s*ml\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// How many containers a product NAME says are in the box, or null where it does not say.
+    /// </summary>
+    /// <remarks>
+    /// <para>"5*3ml penfills" is five cartridges of three millilitres, written by the person who catalogued
+    /// it. Across the workbook 70 names use the notation: on 23 it agrees with "Major Units (per box)", and
+    /// on 43 more it agrees with "Minor Units (total)" while major does not. Where a stated count and a
+    /// derived column disagree, the stated one is the fact.</para>
+    ///
+    /// <para>It matters because the alternative is silent and large: "insulatard hm 100i.u./ml 5*3ml
+    /// penfills" carries <c>major = 1</c>, and a box of five 3 ml cartridges read as one holds 300 IU
+    /// instead of 1500 — a fifth of the month's insulin, printed as confidently as a right answer.</para>
+    /// </remarks>
+    public static decimal? ContainerCount(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var m = Containers.Match(text);
+        return m.Success && decimal.TryParse(m.Groups["n"].Value, NumberStyles.Float,
+            CultureInfo.InvariantCulture, out var v) && v > 0 ? v : null;
+    }
 
     /// <summary>Millilitres, converting a litre figure. Null when the text states no volume.</summary>
     public static decimal? Millilitres(string? text)

@@ -1,0 +1,35 @@
+source_row_id,trade_name,volume_ml,iu_per_ml,basis
+856,Apidra Solostar 100i.u./ml 5 Prefilled Pens,3,,SoloStar pre-filled pen — 3 ml cartridge
+32433,Apidra 100 I.U./ML 5 Cartiridges,3,,Insulin cartridge — 3 ml
+1909,Glargivin 100 I.U./ML 5 Cartridges,3,,Insulin cartridge — 3 ml
+6212,Humalog 100i.u./ml (5 Cartridges),3,,Insulin cartridge — 3 ml
+20551,Humalog Kwikpen 100i.u./ml (5 Pens),3,,KwikPen pre-filled pen — 3 ml
+20552,Humalog Kwikpen 200i.u./ml (5 Pens),3,,KwikPen 200 U/ml pre-filled pen — 3 ml (600 IU per pen)
+20553,Humalog mix25 100i.u./ml (5 Cartridges),3,,Insulin cartridge — 3 ml
+6214,Humalog mix25 Kwikpen 100i.u./ml (5 Pens),3,,KwikPen pre-filled pen — 3 ml
+6215,Humalog mix50 Kwikpen 100i.u./ml (5 Pens),3,,KwikPen pre-filled pen — 3 ml
+20568,Humulin N 100 I.U./ML 5 Cartridge,3,,Insulin cartridge — 3 ml
+20569,Humulin R 100 I.U./ML 5 Cartridge,3,,Insulin cartridge — 3 ml
+7099,Lantus 100 I.U./ML 5 Cartridges,3,,Insulin cartridge — 3 ml
+7101,Lantus Solostar 100 I.U./ML 5 Pens,3,,SoloStar pre-filled pen — 3 ml
+7245,Levemir 100 I.U./ML 5 Flexpen,3,,FlexPen pre-filled pen — 3 ml
+21741,Levemir 100 I.U./ML Penfill 5 Cartridges,3,,Penfill cartridge — 3 ml
+23803,Novomix 30 100 I.U./ML 5 Flexpen,3,,FlexPen pre-filled pen — 3 ml
+23804,Novomix 30 100 I.U./ML 5 Penfills,3,,Penfill cartridge — 3 ml
+9066,Novomix 50 100 I.U./ML 5 Flexpen,3,,FlexPen pre-filled pen — 3 ml
+23814,Novorapid 100 I.U./ML 5 Flexpen,3,,FlexPen pre-filled pen — 3 ml
+9060,Novorapid 100 I.U./ML 5 Penfill,3,,Penfill cartridge — 3 ml
+26411,Ryzodeg 100 I.U./ML Flextouch Pre-Filled Pen,3,,FlexTouch pre-filled pen — 3 ml
+28437,Tresiba 100 I.U./ML Flextouch Pre-Filled Pen,3,,FlexTouch pre-filled pen — 3 ml
+27247,Soliqua 100 units+33 MCG/ML 3 Prefilled Pens 3 ML,,100,Combination pen — the workbook states the volume; only the insulin concentration is unreadable from "100 units+33 MCG/ML"
+27248,Soliqua 100 units+50 MCG/ML 3 Prefilled Pens 3 ML,,100,Combination pen — the workbook states the volume; only the insulin concentration is unreadable from "100 unit"
+31633,Xultophy 100 i.u./3.6 MG/ML Prefilled Pen 3 ML,,100,Combination pen — the workbook states the volume; only the insulin concentration is unreadable from "100 iu/3.6mg"
+6246,Humulin 70/30 100 I.U. 5 Cartridge,3,100,"Insulin cartridge — 3 ml; the Strength cell says ""100 i.u."" and drops the /ml every other Humulin row carries"
+6502,Insulinagypt 70/30 100 I.U. 5 Cartridge,3,100,"Insulin cartridge — 3 ml; the Strength cell drops the /ml its own 10ml and 4ml vial siblings carry"
+20863,Insulin H Bio Nph 100i.u.vial,10,100,"U-100 vial — 10 ml, the fill every other insulin vial in this sheet carries; Strength drops the /ml"
+20864,Insulin H Bio R 100i.u. Vial,10,100,"U-100 vial — 10 ml, the fill every other insulin vial in this sheet carries; Strength drops the /ml"
+6501,Insulin H Mix 70/30 100 I.U Vial,10,100,"U-100 vial — 10 ml, the fill every other insulin vial in this sheet carries; Strength drops the /ml"
+20562,Human Insulin Mix Vacsera-Bioton 30/70 100i.u./ml Vial,10,,"U-100 vial — 10 ml, the fill every other insulin vial in this sheet carries"
+20563,Human Insulin N Vacsera-Bioton 100i.u./ml Vial,10,,"U-100 vial — 10 ml, the fill every other insulin vial in this sheet carries"
+20564,Human Insulin R Vacsera-Bioton 100i.u./ml Vial,10,,"U-100 vial — 10 ml, the fill every other insulin vial in this sheet carries"
+20878,Insunil H Nph 100iu/ml Vial,10,,"U-100 vial — 10 ml, the fill every other insulin vial in this sheet carries"

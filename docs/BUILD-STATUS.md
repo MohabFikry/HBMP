@@ -926,15 +926,23 @@ container stopped naming the dose.
 "does the pack count the same thing the dose does?" gate — is gone, because with the content known the
 question does not arise.
 
-**Coverage: 19,213 / 22,653 rows (84.8%) have a real divisor**, down from a nominal 96.1% that included every
-syrup, cream and pen it was wrong for. The 2,610 rows that know their unit but not their box's contents are
+**Coverage: 19,243 / 22,653 rows (84.9%) have a real divisor**, down from a nominal 96.1% that included every
+syrup, cream and pen it was wrong for. The 2,580 rows that know their unit but not their box's contents are
 LISTED by name in `reports/pack-content-missing-<release>.txt`, each one a "Volume / Weight" cell away from a
 box count.
 
-**Where it is unknown it stays unknown.** "Lantus Solostar 100 I.U./ML 5 Pens" states its concentration and
-never its volume. Three millilitres is the usual fill of an insulin pen and the platform does not assume it:
-the composer shows the dose total, labels the field with the unit rather than "boxes", and says the
-catalogue does not record what a box holds.
+**Where it is unknown it stays unknown — unless somebody states it.** The platform does not assume that an
+insulin pen holds three millilitres. `tools/masterdata-loader/data/pack-measurement-overrides.csv` is where
+that fact is *stated*: one line per product, each carrying its own basis, subordinate to the workbook, and
+reported when an entry matches nothing. **All 59 insulin rows now carry a box content** — Lantus SoloStar is
+1,500 IU, so 25 IU nightly for 30 days is one box rather than "750" with a note saying boxes could not be
+counted. A new insulin arriving in a workbook refresh matches nothing and appears in the missing-content
+report, which is the property a rule in code would not have had.
+
+A second source was found while checking those: **a name that counts its own containers.** `5*3ml penfills`
+is the workbook's notation for five cartridges of three millilitres, used on 70 rows — and it agrees with a
+column on 66 of them. Where it disagreed with "Major Units", the major column was the outlier, and
+"Insulatard Hm 5*3ml Penfills" was holding 300 IU instead of 1,500: a fifth of the month's insulin.
 
 ### The screen
 

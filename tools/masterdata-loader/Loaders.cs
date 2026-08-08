@@ -121,8 +121,15 @@ public static class Loaders
     /// whose indications all failed to resolve produces "not checked" forever, and that has to be visible
     /// at load time rather than discovered by a prescriber.
     /// </param>
-    public static DrugListLoad LoadDrugList(string path, string release, IEnumerable<string> knownIcdCodes)
+    /// <param name="overrides">
+    /// 31.3 — measurements the workbook omits, supplied per product and subordinate to it. Defaults to the
+    /// empty set, under which every row derives exactly what the sheet says and nothing more.
+    /// </param>
+    public static DrugListLoad LoadDrugList(
+        string path, string release, IEnumerable<string> knownIcdCodes,
+        PackMeasurementOverrides? overrides = null)
     {
+        overrides ??= PackMeasurementOverrides.None;
         var drugReport = new LoadReport("drug");
         var atcReport = new LoadReport("atc_class");
         var indicationReport = new LoadReport("drug_indication");
@@ -146,7 +153,7 @@ public static class Loaders
             if (string.IsNullOrWhiteSpace(row.TradeNameEn)) { drugReport.Skip("blank-trade-name"); continue; }
             if (string.IsNullOrWhiteSpace(row.SourceRowId)) { drugReport.Skip("blank-source-id"); continue; }
 
-            var drug = Mappers.ToDrugFromXlsx(row, release);
+            var drug = Mappers.ToDrugFromXlsx(row, release, overrides);
             if (string.IsNullOrWhiteSpace(drug.DrugCode)) { drugReport.Skip("empty-drug-code"); continue; }
             drugsByCode[drug.DrugCode] = drug;
             if (drug.Strength is null) missingStrength++;

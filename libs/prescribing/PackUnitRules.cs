@@ -281,8 +281,10 @@ public static class PackUnitRules
          * An absent major column derives nothing rather than falling back to minor, because on these rows
          * minor is the number that is most likely to be measuring something else.
          */
-        if (majorUnits is not > 0) return null;
-        var containers = majorUnits.Value;
+        // A name that states its own multiplier — "5*3ml penfills" — is the source counting the containers
+        // in words. It outranks a column that disagrees; see PackMeasure.ContainerCount.
+        if ((PackMeasure.ContainerCount(tradeName) ?? majorUnits) is not { } containers || containers <= 0)
+            return null;
 
         // The volume column first; the trade name only where it is empty ("… (10ml) vial").
         var millilitres = PackMeasure.Millilitres(volumeWeight) ?? PackMeasure.Millilitres(tradeName);

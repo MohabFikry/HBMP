@@ -11,6 +11,11 @@
     <ProjectReference Include="../../libs/prescribing/Mersal.Prescribing.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <!-- 31.3 — the measurements the drug workbook omits, read at load time. Copied rather than embedded so a
+         pharmacist can open it, and so correcting a value does not need a rebuild. -->
+    <None Include="data/pack-measurement-overrides.csv" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="CsvHelper" />
     <PackageReference Include="ClosedXML" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />

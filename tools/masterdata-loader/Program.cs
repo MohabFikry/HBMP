@@ -52,11 +52,18 @@ List<Mersal.MasterData.Domain.AtcClass> atc;
 List<Mersal.MasterData.Domain.Drug> drugs;
 List<Mersal.MasterData.Domain.DrugIndication> indications = [];
 LoadReport? indicationReport = null;
+var packOverrides = PackMeasurementOverrides.None;
 
 if (useDrugList)
 {
     Console.WriteLine($"drug source: {drugListPath} (workbook — includes indications)");
-    var load = Loaders.LoadDrugList(drugListPath, release, icd.Select(i => i.Code));
+    // 31.3 — measurements the workbook omits, read from a file a pharmacist can open. Subordinate to the
+    // sheet: they fill silences and never contradict it. Absent file ⇒ empty set ⇒ nothing changes.
+    packOverrides = PackMeasurementOverrides.Load(PackMeasurementOverrides.DefaultPath);
+    Console.WriteLine($"pack-measurement overrides: {packOverrides.Count} product(s) "
+                    + $"from {PackMeasurementOverrides.DefaultPath}");
+
+    var load = Loaders.LoadDrugList(drugListPath, release, icd.Select(i => i.Code), packOverrides);
     (drugReport, atcReport, indicationReport, atc, drugs, indications) =
         (load.DrugReport, load.AtcReport, load.IndicationReport, load.Atc, load.Drugs, load.Indications);
 }
@@ -204,6 +211,22 @@ Console.WriteLine($"\nreport written: {reportPath}");
                     && d.PackContent is null)
         .OrderBy(d => d.Name, StringComparer.Ordinal)
         .ToList();
+
+    /*
+     * 31.3 — AN OVERRIDE THAT MATCHED NOTHING.
+     *
+     * The measurement file is keyed on the workbook's own row ids, so an entry that no row matched means the
+     * catalogue moved on and the file did not — or that the sheet has since gained the column, in which case
+     * the sheet won and the line is now dead weight. Either way it is reported: a curated list nobody prunes
+     * decays into a list of things that used to be true, and silence is how that happens.
+     */
+    var strays = packOverrides.Unused();
+    if (strays.Count > 0)
+    {
+        Console.WriteLine();
+        Console.WriteLine($"  !! {strays.Count} pack-measurement override(s) matched no workbook row:");
+        foreach (var stray in strays) Console.WriteLine($"       {stray.SourceRowId,-8} {stray.TradeName}");
+    }
 
     if (oneCellShort.Count > 0)
     {

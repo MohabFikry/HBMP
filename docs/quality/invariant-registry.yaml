@@ -2168,6 +2168,12 @@ invariants:
       - Mersal.Prescribing.Tests.BoxCountTests.An_unknown_pack_content_yields_no_box_count_and_no_guess
       - Mersal.Prescribing.Tests.PackContentTests.An_IU_product_with_no_volume_anywhere_derives_NO_content
       - Mersal.Prescribing.Tests.PackContentTests.Two_columns_that_contradict_each_other_derive_NO_content
+      # 31.3 — and where a measurement IS supplied, it is supplied as reviewable data subordinate to the
+      # workbook, never as a rule in code that would apply itself to the next product that is different.
+      - Mersal.MasterData.Tests.PackMeasurementOverrideTests.The_WORKBOOK_wins_wherever_it_speaks
+      - Mersal.MasterData.Tests.PackMeasurementOverrideTests.A_product_with_no_override_derives_nothing_and_says_nothing
+      - Mersal.MasterData.Tests.PackMeasurementOverrideTests.An_entry_that_matched_nothing_is_REPORTED_rather_than_ignored
+      - Mersal.MasterData.Tests.PackMeasurementOverrideTests.The_shipped_file_parses_and_every_entry_states_a_basis
 
   - id: INV-A-LIST-RULE-DOES-NOT-RESTYLE-A-POPUP-INSIDE-IT
     statement: >-
