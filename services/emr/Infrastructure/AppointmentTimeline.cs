@@ -3,7 +3,14 @@ using Microsoft.EntityFrameworkCore;
 namespace Mersal.Emr.Infrastructure;
 
 /// <summary>One step of an appointment's operational history.</summary>
-public sealed record TimelineRow(string Status, DateTimeOffset At, string? By);
+/// <summary>One step in an appointment's operational timeline.
+///
+/// <para><c>Source</c> and <c>Reference</c> arrived with the care episode (ADR-0031): the timeline is now a
+/// merge of the appointment's own STATUS history and the steps of the episode it started, and a reader has
+/// to be able to tell which is which — a missing step means something different depending on where it was
+/// supposed to come from. Both are optional so an appointment-status step, which has neither, is unchanged.</para></summary>
+public sealed record TimelineRow(
+    string Status, DateTimeOffset At, string? By, string? Source = null, string? Reference = null);
 
 /// <summary>
 /// Reads an appointment's status steps out of emr.appointment_history.
@@ -27,10 +34,13 @@ public static class AppointmentTimeline
                 -- so the snapshot's keys are snake_case rather than the entity's property names. RIGHT of it:
                 -- EmrDbContext uses UseSnakeCaseNamingConvention, so SqlQueryRaw looks for snake_case columns —
                 -- aliasing to "ChangedAt" makes it fail with "the required column 'changed_at' was not present".
-                SELECT row_snapshot ->> 'status'     AS status,
-                       changed_at                    AS changed_at,
-                       row_snapshot ->> 'updated_by' AS updated_by,
-                       row_snapshot ->> 'created_by' AS created_by
+                SELECT row_snapshot ->> 'status'           AS status,
+                       changed_at                          AS changed_at,
+                       row_snapshot ->> 'updated_by'       AS updated_by,
+                       row_snapshot ->> 'created_by'       AS created_by,
+                       row_snapshot ->> 'scheduled_start'  AS scheduled_start,
+                       row_snapshot ->> 'note'             AS note,
+                       row_snapshot ->> 'doctor_id'        AS doctor_id
                   FROM emr.appointment_history
                  WHERE appointment_id = {0}
                  ORDER BY history_id
@@ -40,24 +50,81 @@ public static class AppointmentTimeline
         return Collapse(raw);
     }
 
-    /// <summary>Pure: keep the first snapshot and every later one whose status differs from the one before it.
-    /// Attribution falls back to created_by for the opening step, which is the only one it describes.</summary>
+    /// <summary>
+    /// Pure: keep the first snapshot, every later one whose STATUS differs from the one before it, and — since
+    /// 14.5 — every later one that changed something the desk actually did.
+    ///
+    /// <para>Collapsing purely on status was right when the only writes were transitions, and wrong the moment
+    /// an appointment could be edited: rescheduling changes the times and not the state, so a reschedule left
+    /// no trace at all and the timeline confidently showed "Booked → Checked in" for an appointment that had
+    /// moved twice. The desk uses this to answer "why is this at 3pm when I was told 11?", which it could not.
+    /// </para>
+    ///
+    /// <para>Consecutive identical snapshots are still suppressed — the history trigger fires on every update,
+    /// including ones that touch nothing the timeline cares about, and "Booked, Booked, Booked" buries the
+    /// steps that matter.</para>
+    ///
+    /// <para><b>Returns newest-first.</b> The walk is oldest-first because change-detection requires it; the
+    /// result is reversed because whoever opens a timeline is asking what just happened, not how it began.</para>
+    /// </summary>
     public static List<TimelineRow> Collapse(IReadOnlyList<HistoryProjection> snapshots)
     {
         ArgumentNullException.ThrowIfNull(snapshots);
         var steps = new List<TimelineRow>();
-        string? previous = null;
+        HistoryProjection? previous = null;
         for (var i = 0; i < snapshots.Count; i++)
         {
             var snap = snapshots[i];
             if (string.IsNullOrWhiteSpace(snap.Status)) continue;
-            if (i > 0 && snap.Status == previous) continue;
-            steps.Add(new TimelineRow(snap.Status, snap.ChangedAt, steps.Count == 0 ? snap.CreatedBy : snap.UpdatedBy));
-            previous = snap.Status;
+
+            if (previous is null)
+            {
+                steps.Add(new TimelineRow(snap.Status, snap.ChangedAt, snap.CreatedBy));
+                previous = snap;
+                continue;
+            }
+
+            // A status change is the headline step and keeps its own name.
+            if (snap.Status != previous.Status)
+                steps.Add(new TimelineRow(snap.Status, snap.ChangedAt, snap.UpdatedBy));
+            // Otherwise: an EDIT. Named for what changed, because "Edited" on a reschedule does not answer
+            // the question the desk opened the timeline to ask.
+            else if (snap.ScheduledStart != previous.ScheduledStart)
+                steps.Add(new TimelineRow(Rescheduled, snap.ChangedAt, snap.UpdatedBy));
+            else if (snap.Note != previous.Note)
+                steps.Add(new TimelineRow(NoteEdited, snap.ChangedAt, snap.UpdatedBy));
+            // A move to a different practitioner WITHOUT a time change — the desk swapping the clinician on a
+            // session that keeps its slot. Checked after the reschedule branch, not before, because a move to
+            // another doctor's slot changes both and the desk asked "when is this now?" first; one step per
+            // act, named for the act the reader is looking for.
+            else if (snap.DoctorId != previous.DoctorId)
+                steps.Add(new TimelineRow(DoctorChanged, snap.ChangedAt, snap.UpdatedBy));
+            else
+                continue;   // nothing the timeline speaks about changed
+
+            previous = snap;
         }
+
+        // NEWEST FIRST for the reader; the WALK above stays oldest-first because that is the only order in
+        // which "did this differ from the one before it?" means anything. Reversing at the end keeps the
+        // change-detection honest and still puts the most recent event where someone opening a timeline
+        // looks first — they are almost always asking "what just happened to this?", not "how did it start?".
+        steps.Reverse();
         return steps;
     }
 
+    /// <summary>Pseudo-statuses for edits that do not move the state machine. Distinct from the
+    /// <c>AppointmentStatus</c> vocabulary on purpose — they describe an ACT, not a state the row was ever in,
+    /// and the UI labels them separately.</summary>
+    public const string Rescheduled = "Rescheduled";
+    public const string NoteEdited = "NoteEdited";
+    /// <summary>The appointment was moved to a different practitioner. A separate act from a reschedule: a
+    /// patient told "same time, different doctor" is being told something a `Rescheduled` step does not
+    /// say.</summary>
+    public const string DoctorChanged = "DoctorChanged";
+
     /// <summary>Raw shape read out of the history snapshot (public so the collapse rule is testable).</summary>
-    public sealed record HistoryProjection(string? Status, DateTimeOffset ChangedAt, string? UpdatedBy, string? CreatedBy);
+    public sealed record HistoryProjection(
+        string? Status, DateTimeOffset ChangedAt, string? UpdatedBy, string? CreatedBy,
+        string? ScheduledStart = null, string? Note = null, string? DoctorId = null);
 }

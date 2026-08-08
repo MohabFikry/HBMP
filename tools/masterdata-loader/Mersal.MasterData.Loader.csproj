@@ -8,6 +8,7 @@
     <ProjectReference Include="../../services/masterdata/Domain/Mersal.MasterData.Domain.csproj" />
     <ProjectReference Include="../../services/masterdata/Infrastructure/Mersal.MasterData.Infrastructure.csproj" />
     <ProjectReference Include="../../libs/audit-client/Mersal.Audit.Client.csproj" />
+    <ProjectReference Include="../../libs/prescribing/Mersal.Prescribing.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CsvHelper" />

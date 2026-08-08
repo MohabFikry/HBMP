@@ -1,3 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\libs\amendment\Mersal.Amendment.csproj" />
+  </ItemGroup>
   <PropertyGroup><RootNamespace>Mersal.Approvals.Domain</RootNamespace></PropertyGroup>
 </Project>

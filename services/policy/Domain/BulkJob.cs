@@ -85,10 +85,31 @@ public static class BulkJobTransitions
 /// content. Row 4 231 of job X is row 4 231 of job X forever, and the unique index on
 /// <c>enrollment.idempotency_key</c> is what turns that into "cannot double-apply".</para>
 /// </summary>
+/// <summary>Coverage stated once for a whole intake batch. Contribution is absent on purpose — see
+/// <see cref="BulkJob.DefaultPlanId"/>.</summary>
+public sealed record BulkJobDefaults(Guid? PlanId, Guid? NetworkTierId, Guid? BranchId)
+{
+    public static readonly BulkJobDefaults None = new(null, null, null);
+
+    public bool Any => PlanId is not null || NetworkTierId is not null || BranchId is not null;
+}
+
 public static class BulkIdempotency
 {
     public static string KeyFor(Guid jobId, int rowNumber) =>
         string.Create(CultureInfo.InvariantCulture, $"bulk:{jobId:N}:{rowNumber}");
+
+    /// <summary>
+    /// A key derived from the row's BUSINESS facts rather than from its position in a job.
+    ///
+    /// <para>The (job, row) key is right for a resumed job — a re-commit of a half-finished run walks past the
+    /// rows it already wrote. It is exactly wrong for a RE-UPLOAD, which is a new job and therefore a new key,
+    /// so the second attempt at an unchanged row collides with the overlap exclusion and fails as a duplicate.
+    /// A correction to one cell in a ten-thousand-row file is the normal case, not the exception; keying on
+    /// what the row MEANS is what lets the whole corrected file be re-submitted safely.</para>
+    /// </summary>
+    public static string KeyFor(string businessKey) =>
+        string.Create(CultureInfo.InvariantCulture, $"bulk:{businessKey}");
 }
 
 /// <summary>
@@ -154,6 +175,21 @@ public sealed class BulkJob
     public int AppliedRows { get; set; }
     public int FailedRows { get; set; }
     public int SkippedRows { get; set; }
+
+    /// <summary>
+    /// Coverage the operator stated ONCE for the whole batch; it fills any cell the file leaves blank and
+    /// never overrides one the file states.
+    ///
+    /// <para>Held on the job rather than passed per request because validate and commit are separate calls,
+    /// often minutes apart — a default that applied to the dry run and not to the commit would make the
+    /// preview a preview of something else.</para>
+    ///
+    /// <para>There is deliberately no default contribution: that is the value that varies member by member,
+    /// and one batch-wide figure is precisely the mistake this should not make easy.</para>
+    /// </summary>
+    public Guid? DefaultPlanId { get; set; }
+    public Guid? DefaultNetworkTierId { get; set; }
+    public Guid? DefaultBranchId { get; set; }
 
     public Guid BatchId { get; set; }
     public Guid? SubmittedByUserId { get; set; }

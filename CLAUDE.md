@@ -85,7 +85,11 @@ Each service: `Api/ Domain/ Infrastructure/ Tests/` + `README.md` (template in `
 - **Authorization tests** proving min-necessary (e.g., finance cannot read diagnosis; lab cannot read prescriptions).
 - **Concurrency tests** proving order-consume atomicity/no-reuse under parallel requests.
 - Accessibility: axe in CI (fail on serious/critical) + keyboard/screen-reader checks per UI story.
-- Coverage target ≥ 80% on domain logic. Test data synthetic/masked; never real PHI in lower envs.
+- Coverage: the numbers live in `tools/ci/coverage-floors.json` and nowhere else — target, enforced
+  floors and per-module floors together. Three files once claimed three different bars and only one was
+  enforced, so "what is the coverage bar?" had three answers depending on which you opened. The domain
+  TARGET is 80%; the enforced floor is lower and ratchets upward only (`check-floor-monotonicity.py`).
+  Test data synthetic/masked; never real PHI in lower envs.
 
 ## Definition of Done (every prompt/PR)
 - [ ] Meets the acceptance criteria / user story (`32-user-stories.md`).
@@ -110,3 +114,16 @@ Each service: `Api/ Domain/ Infrastructure/ Tests/` + `README.md` (template in `
 - .NET 8 SDK is installed **user-local** at `~/.dotnet` (no system install). Ensure `PATH` includes `~/.dotnet` and set `DOTNET_ROOT=~/.dotnet`, or use `./dotnet.sh` if provided at repo root.
 - Docker is required to run the Tier 1 infra (`infra/compose`) and needs root to install — see `docs/adr/0003-deployment-tier-strategy.md`.
 - Local Postgres 17 is available for quick DB work; the canonical dev DB is the Compose `postgres:16`.
+- **Running the DB-gated tests: `./dotnet.sh test --with-db <target>`.** ~100 integration, concurrency and RLS
+  tests are gated on `Skip.If(<SERVICE>_TEST_DB is null)`, so a plain `dotnet test` skips every one of them and
+  still reports green — the consume/dispense concurrency proofs, the RLS isolation suites and the break-glass
+  lifecycle among them. `--with-db` points them at the Compose Postgres (`:55432`) using
+  `tools/ci/print-test-db-env.sh`, the same variable list CI exports. It fails loudly if the DB is unreachable
+  rather than letting a run skip everything quietly. **A green suite is only meaningful with this flag.**
+- **Before claiming "gates green", run the OpenAPI drift gate too:
+  `DOTNET=./dotnet.sh tools/ci/check-openapi-drift.sh`** (`--fix` regenerates `docs/api/` in place). It is
+  blocking in CI and asserts the committed specs still describe the running services. It had no local entry
+  point until 25.9, which is exactly how it stayed red in CI for a day while every local check passed — the
+  gates you can run are not automatically the gates that exist. Every gate now lives in `tools/ci/`; if you
+  add one, put it there rather than inline in the workflow, and add it to `REQUIRED_GATES` in
+  `check-gate-freshness.py` so its *silence* alarms as well as its failure.

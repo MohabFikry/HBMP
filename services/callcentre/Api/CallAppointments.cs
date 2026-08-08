@@ -41,6 +41,10 @@ public static class CallAppointments
             {
                 beneficiaryId = req.BeneficiaryId, slotId = req.SlotId, appointmentType = apptType,
                 branchId = req.BranchId, referralRef = req.ReferralRef, originEncounterId = req.OriginEncounterId,
+                // Passed through untouched. The note is capped and refused by emr (AppointmentNote), and the
+                // doctor is checked against the branch there too — re-validating here would be a second copy
+                // of a rule that must not be able to disagree with the first.
+                doctorId = req.DoctorId, note = req.Note,
             };
             var result = await emr.BookAsync(body, http.Headers.Authorization, IdemKey(http), ct);
             if (result.IsSuccess && result.AppointmentId is { } apptId)
@@ -110,12 +114,17 @@ public static class CallAppointments
             Action = action, CancelReason = reason, BranchId = branchId, CreatedBy = deps.Subject,
             CreatedAt = deps.Clock.GetUtcNow(),
         };
+        // The link is the call-centre's record that this appointment was touched on this call, and the
+        // confirmation is what the member actually receives. A link with no confirmation is an agent who
+        // believes the member was told; a confirmation with no link is a message no one can trace to a call.
+        await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
         deps.Db.AppointmentLinks.Add(link);
         await deps.Db.SaveChangesAsync(ct);
 
         // Confirmation to the member's preferred channel (notification-service resolves channel; clinical-free).
         await deps.Outbox.EnqueueAsync("AppointmentConfirmationRequested", "notification.events",
             new { beneficiaryId, appointmentId, action = action.ToString(), callRef = link.CallRef, tenantId = link.TenantId }, ct);
+        await tx.CommitAsync(ct);
         await deps.AuditAsync("call_centre_appointment", appointmentId.ToString(), AuditAction.StateChange,
             $"Appointment{action}", link.CallRef, severity: AuditSeverity.Notice, after: reason?.ToString());
     }
@@ -126,7 +135,8 @@ public static class CallAppointments
     private static string? IfMatch(HttpRequest http) =>
         http.Headers.TryGetValue("If-Match", out var v) ? v.ToString() : null;
 
-    /// <summary>Pass the emr response through faithfully so 409/412/422 semantics reach the agent unchanged.</summary>
+    /// <summary>Pass the emr response through faithfully so 409/412/422 semantics reach the agent unchanged —
+    /// including the media type, so an <c>application/problem+json</c> error is not relabelled as a result.</summary>
     private static IResult Passthrough(GatewayResult r) =>
-        Results.Content(r.Body ?? "", "application/json", statusCode: r.StatusCode);
+        Results.Content(r.Body ?? "", r.MediaType, statusCode: r.StatusCode);
 }

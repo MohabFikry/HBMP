@@ -73,4 +73,47 @@ public class AppointmentDayTests
         start.Should().Be(new DateTimeOffset(2026, 3, 10, 0, 0, 0, TimeSpan.FromHours(2)));
         end.Should().Be(new DateTimeOffset(2026, 3, 11, 0, 0, 0, TimeSpan.FromHours(2)));
     }
+
+    // ---- 14.5: the custom date RANGE on the reception board ------------------------------------------------
+
+    [Fact]
+    public void A_range_is_INCLUSIVE_of_the_last_day()
+    {
+        // "Sunday to Thursday" said out loud includes Thursday. A half-open range would silently drop
+        // Thursday's evening clinic, and the desk would only find out when a patient arrived for an
+        // appointment the board said did not exist.
+        var from = new DateTimeOffset(2026, 7, 19, 9, 0, 0, TimeSpan.FromHours(2));
+        var to = new DateTimeOffset(2026, 7, 23, 9, 0, 0, TimeSpan.FromHours(2));
+
+        var (start, end) = AppointmentDay.CairoRange(from, to, Cairo);
+
+        start.Should().Be(new DateTimeOffset(2026, 7, 19, 0, 0, 0, TimeSpan.FromHours(2)));
+        end.Should().Be(new DateTimeOffset(2026, 7, 24, 0, 0, 0, TimeSpan.FromHours(2)),
+            "the range ends at the END of the last day, not at its start");
+
+        var thursdayEvening = new DateTimeOffset(2026, 7, 23, 20, 30, 0, TimeSpan.FromHours(2));
+        (thursdayEvening >= start && thursdayEvening < end).Should().BeTrue();
+    }
+
+    [Fact]
+    public void A_single_day_range_matches_the_single_day_window()
+    {
+        // from == to must behave exactly as the existing one-day filter, or "today" would mean two different
+        // things depending on which control the operator used.
+        var day = new DateTimeOffset(2026, 7, 22, 13, 0, 0, TimeSpan.FromHours(2));
+
+        AppointmentDay.CairoRange(day, day, Cairo).Should().Be(AppointmentDay.CairoWindow(day, Cairo));
+    }
+
+    [Fact]
+    public void An_early_morning_appointment_on_the_last_day_is_inside_the_range()
+    {
+        // 00:30 Cairo on the closing day — the mirror of the single-day case above, at the far end.
+        var from = new DateTimeOffset(2026, 7, 20, 9, 0, 0, TimeSpan.FromHours(2));
+        var to = new DateTimeOffset(2026, 7, 22, 9, 0, 0, TimeSpan.FromHours(2));
+        var (start, end) = AppointmentDay.CairoRange(from, to, Cairo);
+
+        var appt = new DateTimeOffset(2026, 7, 21, 22, 30, 0, TimeSpan.Zero);   // 00:30 Cairo on the 22nd
+        (appt >= start && appt < end).Should().BeTrue();
+    }
 }

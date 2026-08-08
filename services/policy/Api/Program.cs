@@ -39,6 +39,10 @@ builder.Services.AddHttpClient<INetworkTierCatalog, HttpNetworkTierCatalog>(c =>
 // someone is Active is not a reason to enrol them) and issues the member number.
 builder.Services.AddHttpClient<IBeneficiaryStatusProbe, HttpBeneficiaryStatusProbe>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Patient:BaseUrl"] ?? "http://patient-service:8080"));
+// The intake upsert — register-or-update by card number, which is what makes a corrected import file safe to
+// re-upload. patient-service owns beneficiaries and therefore owns what "the same person" means.
+builder.Services.AddHttpClient<IBeneficiaryIntake, HttpBeneficiaryIntake>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Patient:BaseUrl"] ?? "http://patient-service:8080"));
 builder.Services.AddScoped<IMemberNoIssuer, SequentialMemberNoIssuer>();
 // 19.3b — documents. The bytes, the ClamAV scan and MinIO stay in document-service; policy-service adds only
 // the linkage and the classification. OCR is a WIRED SEAM, disabled: extraction becomes authoritative-looking
@@ -113,12 +117,27 @@ builder.Services.Configure<MembershipOptions>(builder.Configuration.GetSection(M
 // accumulator never advances and every member is eligible forever.
 builder.Services.Configure<ConsumptionConsumerOptions>(builder.Configuration.GetSection(ConsumptionConsumerOptions.SectionName));
 builder.Services.AddHostedService<BenefitConsumptionConsumer>();
+// An approved registration becomes a MEMBERSHIP. Until this consumed the event, `coverage_bound` claimed a
+// policy was bound and nothing had bound one: the member number was issued, every screen showed the person
+// Active, and every eligibility check answered "not covered".
+builder.Services.Configure<RegistrationEnrolmentOptions>(builder.Configuration.GetSection(RegistrationEnrolmentOptions.SectionName));
+builder.Services.AddHostedService<RegistrationEnrolmentConsumer>();
+
+// 19.7 — corrections to the identity record land on the member's Logs tab. patient-service owns the record and
+// cannot write into this service's projection, so it publishes and this projects.
+builder.Services.Configure<BeneficiaryEventOptions>(builder.Configuration.GetSection(BeneficiaryEventOptions.SectionName));
+builder.Services.AddHostedService<BeneficiaryEventConsumer>();
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("policy-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
     .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// Readiness for the probe in infra/helm/rollout/rollout-template.yaml. Process-level only: this reports
+// "through startup and able to serve". A dependency check here would pull the pod out of rotation for a
+// condition the service already surfaces per-request, turning a partial degradation into a total outage.
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 app.UseHbmpTransportSecurity(); // HSTS + HTTPS redirect outside Development (16.5, H8)
@@ -130,6 +149,9 @@ app.UseHbmpRls(); // bind app.tenant_id GUC from the principal (RLS, ADR-0011)
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "policy-service" })).AllowAnonymous();
+// Without this the readinessProbe 404s and the canary rollout waits forever on a healthy pod. Anonymous
+// because kubelet carries no bearer token.
+app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 var v1 = app.MapGroup("/api/v1").RequireAuthorization(HbmpPolicies.Scope("policy:write"));
 
@@ -164,6 +186,11 @@ v1.MapPost("/policies/{policyId:guid}/coverages", async (Guid policyId, CreateCo
                 Enum.Parse<ResetPeriod>(l.ResetPeriod ?? "None"), Enum.Parse<LimitType>(l.LimitType), req.EffectiveFrom),
         }).ToList(),
     };
+    // 24.3 — the coverage and the events announcing it commit together or not at all. EfOutbox commits on
+    // its own SaveChanges, so without this the row could be created and the process die before the enqueue:
+    // a coverage that exists and that eligibility-service is never told about, with nothing recording that
+    // the event was owed. An early return below rolls both back, which is the right outcome.
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
     db.Coverages.Add(cov);
     await db.SaveChangesAsync(ct);
 
@@ -174,11 +201,17 @@ v1.MapPost("/policies/{policyId:guid}/coverages", async (Guid policyId, CreateCo
         coverageId = cov.CoverageId, beneficiaryId = cov.BeneficiaryId, category = cat.Code,
         status = cov.Status.ToString(), policyNo = policy.PolicyNo,
         effectiveFrom = cov.EffectiveFrom, effectiveTo = cov.EffectiveTo,
+        // 19.2b — see the note on the enrolment-driven publisher in MembershipCommands. Null here is honest:
+        // a coverage created directly through this endpoint was not written against a plan version, and a
+        // guess would be priced as fact. No plan either, for the same reason.
+        planId = (Guid?)null,
+        planVersionId = cov.SourcePlanVersionId,
         limits = cov.Limits.Select(l => new { limitType = l.LimitType.ToString(), l.LimitValue, l.ConsumedValue }),
     }, ct);
     foreach (var l in cov.Limits)
         await outbox.EnqueueAsync("CoverageLimitChanged", "policy.events", new { tenantId = cov.TenantId, coverageLimitId = l.CoverageLimitId, cov.CoverageId, l.LimitType, l.LimitValue, remaining = l.Remaining }, ct);
 
+    await tx.CommitAsync(ct);
     return Results.Created($"/api/v1/coverages/{cov.CoverageId}", new { cov.CoverageId, remaining = cov.Limits.Select(l => new { l.LimitType, l.Remaining }) });
 });
 
@@ -200,6 +233,10 @@ v1.MapPost("/coverage-limits/reset-run", async (PolicyDbContext db, IAuditClient
     var today = calendar.Today();   // 18.A3 — reset boundaries are Cairo days
     var limits = await db.CoverageLimits.Where(l => l.ResetPeriod != ResetPeriod.None && l.LimitType != LimitType.Lifetime).ToListAsync(ct);
     var reset = 0;
+    // 24.3 — this one enqueued BEFORE its SaveChanges, which is the mirror failure: EfOutbox commits the
+    // event immediately, so a crash before the save below would publish "your limit was reset" for limits
+    // that were never reset, and a phantom event cannot be un-sent. One transaction covers both directions.
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
     foreach (var l in limits)
     {
         if (LimitReset.ApplyIfDue(l, today))
@@ -210,6 +247,7 @@ v1.MapPost("/coverage-limits/reset-run", async (PolicyDbContext db, IAuditClient
         }
     }
     await db.SaveChangesAsync(ct);
+    await tx.CommitAsync(ct);
     return Results.Ok(new { evaluated = limits.Count, reset });
 });
 

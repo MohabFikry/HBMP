@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { zId, zInstant, zStatus, zPatientRef } from "./common";
+import { zDate, zId, zInstant, zStatus, zPatientRef } from "./common";
 
 /**
  * Reception day-board contracts (Phase 3, US-020). Reception is front-desk, not clinical — a row carries a
@@ -41,6 +41,75 @@ export const zAppointmentRow = z.object({
    * stale board loses to a concurrent transition with 412 instead of silently double-acting. Optional —
    * absent for a fixture/older service, in which case check-in proceeds without the guard. */
   rowVersion: z.number().int().optional(),
+  /**
+   * The GENERAL/administrative booking note, when one was written — access needs, an interpreter, an
+   * arrangement. Shared between reception, the call centre and the treating doctor.
+   *
+   * <b>Never clinical.</b> The call centre writes this field and holds no clinical surface anywhere else on
+   * the platform, so it is the one place clinical detail could accumulate across that line; emr caps it and
+   * the schema caps it again. Absent (rather than empty) when no note was written, so the row renders no
+   * note affordance at all instead of one that opens onto nothing.
+   */
+  note: z.string().nullish(),
+  /**
+   * Who last wrote the note, and when.
+   *
+   * The note crosses a team boundary — reception and the call centre write it, the treating doctor reads it —
+   * and an unattributed instruction is one nobody can follow up or date. A clinician reading "the sister will
+   * interpret" needs to know whether that was agreed this morning or at a booking made six weeks ago.
+   * Display attribution, not the audit trail: that lives in audit-service behind `audit:read`, which none of
+   * the three readers holds.
+   */
+  noteBy: z.string().nullish(),
+  /**
+   * The author in WORDS, snapshotted when the note was written (emr 0022).
+   *
+   * `noteBy` is a subject id, and it is what the note dialog was rendering — "Written by
+   * c18b985c-cc5f-42eb-8b79-e41b7b84f975", which answers "who told us this?" with a string nobody at a desk
+   * can act on. Both are carried: the id is the authoritative link, this is what the reader is shown.
+   *
+   * Null for notes written before 0022. Readers say "unknown" rather than falling back to the id — a uuid on
+   * screen is not attribution, and the whole purpose of these fields is somebody to ask.
+   */
+  noteByName: z.string().nullish(),
+  noteAt: z.string().nullish(),
+  /**
+   * The patient's display name, where the server has one — it is captured at CHECK-IN, so an arrived patient
+   * has a name and a merely-booked appointment does not.
+   *
+   * Absent is "not known", never "withheld": reception seeing the name is a signed-off decision, since the
+   * desk greets the patient and arranges their journey and a masked token does neither. `beneficiary.token`
+   * remains the identity on boards that do not need the name.
+   */
+  beneficiaryName: z.string().nullish(),
+  /**
+   * The practitioner this appointment belongs to, when it names one. Null for a general clinic session that
+   * belongs to whoever is on shift.
+   *
+   * An ID, not a name: who a practitioner is belongs to provider-service, and the screens that need the name
+   * read it there under `practitioner:read` and join. emr returning the name would be one service composing
+   * another's data on the caller's behalf.
+   */
+  doctorId: zId.nullish(),
+  /**
+   * The assigned doctor stopped serving this appointment's branch, so it needs a human decision — reassign,
+   * rebook, or cancel.
+   *
+   * Nothing was done to the appointment automatically: cancelling would destroy booked care over an
+   * administrative change, and reassigning would silently alter who the patient was told they would see.
+   * The flag exists so the desk can act; it is the whole reconciliation.
+   */
+  needsReassignment: z.boolean().optional(),
+  /**
+   * The clinic session this appointment sits in.
+   *
+   * Carried so the edit dialog can load that session's OTHER open times without a second lookup — the board
+   * already knows them, and asking again per row would be a request per open dialog. Nullish because a
+   * fixture or an older service may not supply them, in which case the dialog says the appointment cannot be
+   * moved from here rather than silently hiding the option.
+   */
+  providerId: zId.nullish(),
+  locationId: zId.nullish(),
 });
 export type AppointmentRow = z.infer<typeof zAppointmentRow>;
 
@@ -78,6 +147,20 @@ export const zBookingRequest = z.object({
   appointmentType: z.string().min(1),
   /** Cross-branch callers only (call centre). Omitted by a branch-scoped desk. */
   branchId: zId.optional(),
+  /** The doctor the appointment is for, when the desk chose one rather than a general clinic session. */
+  doctorId: zId.optional(),
+  /**
+   * A short general/administrative note captured at booking. Capped at 500 characters by emr, which REFUSES
+   * an over-long note rather than truncating it — so the form must enforce the same limit rather than letting
+   * an operator write past it and lose the tail.
+   */
+  note: z.string().max(500).optional(),
+  /**
+   * The patient's display name, sent so every board row can show WHO the appointment is for rather than a
+   * masked token. Reception and the call centre are entitled to it and already have it on screen when they
+   * book; emr stores it as a minimum-necessary snapshot and never fetches demographics from a sibling.
+   */
+  beneficiaryName: z.string().optional(),
 });
 export type BookingRequest = z.infer<typeof zBookingRequest>;
 
@@ -108,6 +191,53 @@ export const zBookableClinic = z.object({
 export type BookableClinic = z.infer<typeof zBookableClinic>;
 
 /**
+ * A doctor who has open time, as emr reports it — an id and two numbers, no name and no specialty.
+ *
+ * That omission is the contract, not a gap to fill later. Who a practitioner IS belongs to provider-service,
+ * and the booking screen reads it there directly under `practitioner:read`. Having emr return the name would
+ * mean one service assembling a richer answer about another's data than the caller could obtain themselves,
+ * which is the aggregation shape this platform forbids.
+ *
+ * So the screen holds two authorized reads and joins them: this says WHO CAN BE BOOKED, provider-service says
+ * WHO THEY ARE. A doctor missing from either list is not offered — which is also how a clinician with a full
+ * calendar disappears from the picker without anyone having to remember to hide them.
+ */
+export const zDoctorAvailability = z.object({
+  doctorId: zId,
+  branchId: zId.nullish(),
+  openSlots: z.number().int().nonnegative(),
+  /** Earliest open slot — lets the picker answer "who can see this patient soonest". */
+  nextSlotStart: z.string(),
+});
+export type DoctorAvailability = z.infer<typeof zDoctorAvailability>;
+
+/**
+ * Open-slot count for one Cairo civil day — a cell in the booking calendar.
+ *
+ * `day` is a plain `YYYY-MM-DD`, not an instant, precisely so it cannot be re-zoned on the way to the screen
+ * and land one cell to the left. The server has already decided which Cairo day each slot belongs to; the
+ * calendar's job is to paint that answer, not to recompute it.
+ */
+export const zAppointmentDay = z.object({
+  day: zDate,
+  openSlots: z.number().int().nonnegative(),
+});
+export type AppointmentDay = z.infer<typeof zAppointmentDay>;
+
+/**
+ * The reception dashboard's three cards for one Cairo day, counted SERVER-side.
+ *
+ * Not tallied from the board: that read is capped at 200 rows, so on a busy day the cards would have
+ * disagreed with reality — and disagreed downwards, which is the direction nobody notices.
+ */
+export const zAppointmentCounts = z.object({
+  total: z.number().int().nonnegative(),
+  checkedIn: z.number().int().nonnegative(),
+  noShow: z.number().int().nonnegative(),
+});
+export type AppointmentCounts = z.infer<typeof zAppointmentCounts>;
+
+/**
  * One step of an appointment's operational history: the status it moved into, when, and who did it. `by` is
  * absent for transitions recorded before actor attribution existed — showing no actor is honest, where falling
  * back to whoever booked it would claim they performed a step they did not.
@@ -123,5 +253,15 @@ export const zTimelineStep = z.object({
    *  a name and an unresolved id as an identifier — collapsing them would mean showing a GUID styled as a
    *  person, or worse, treating a name as an id and truncating it to eight characters. */
   byName: z.string().nullish(),
+  /**
+   * Which service recorded the step — "emr", "orders", "pharmacy", "approvals" (ADR-0031).
+   *
+   * Absent on an appointment STATUS step, which comes from the appointment's own history rather than from
+   * the care episode. A reader has to be able to tell the two apart: a gap means something different
+   * depending on where the step was meant to come from.
+   */
+  source: z.string().nullish(),
+  /** The business key the step is about — ENC-*, ORD-*, RX-*, AUTH-*. Never clinical content. */
+  reference: z.string().nullish(),
 });
 export type TimelineStep = z.infer<typeof zTimelineStep>;

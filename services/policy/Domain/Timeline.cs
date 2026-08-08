@@ -111,6 +111,9 @@ public static class TimelineProjection
             "CoverageGenerated" or "CoverageChanged" or "CoverageLimitChanged" or "LimitReset"
                 => TimelineCategory.Coverage,
             "NoteAdded" or "NoteCancelled" => TimelineCategory.Note,
+            // Administrative rather than Enrolment: nothing about the membership moved, the record of the
+            // person did. Filtering the history by Enrolment must not surface a spelling fix.
+            "BeneficiaryDetailsCorrected" => TimelineCategory.Administrative,
             "DocumentAttached" or "DocumentSuperseded" or "DocumentWithdrawn" or "DocumentVerified"
                 => TimelineCategory.Document,
             "UtilizationThresholdCrossed" => TimelineCategory.Utilization,
@@ -222,6 +225,10 @@ public static class TimelineProjection
         "BreakGlassAccessed" => ("Break-glass access to this record", "تم الوصول الطارئ إلى هذا السجل"),
         "RestrictedDocumentDownloaded" => ("A restricted document was downloaded", "تم تنزيل مستند مقيّد"),
         "SensitiveNoteRead" => ("A sensitive note was read", "تمت قراءة ملاحظة حساسة"),
+        // A correction to the IDENTITY record, published by patient-service. It belongs on the membership's
+        // history because that is where an officer asks "why does this member's date of birth differ from the
+        // card" — and the answer is an edit somebody made, not a defect.
+        "BeneficiaryDetailsCorrected" => ("The beneficiary's details were corrected", "تم تصحيح بيانات المستفيد"),
         "BulkJobCompleted" => ("A bulk job was applied to this record", "تم تطبيق عملية جماعية على هذا السجل"),
         "BulkJobRolledBack" => ("A bulk job was rolled back", "تم التراجع عن عملية جماعية"),
         // An unmapped type still gets an entry — see CategoryFor. The English falls back to the raw type so

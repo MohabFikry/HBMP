@@ -42,6 +42,43 @@ public sealed class Appointment
     /// <summary>Originating encounter for a <see cref="AppointmentType.FollowUp"/> booking.</summary>
     public Guid? OriginEncounterId { get; set; }
 
+    /// <summary>A short GENERAL/administrative note captured at booking — access needs, an interpreter, a
+    /// preferred arrangement. Read by reception, the call centre and the treating doctor.
+    /// <para><b>Never clinical.</b> No symptom, diagnosis, medication or result belongs here. The call centre
+    /// writes this field and holds no clinical surface anywhere else on the platform, so a free-text box
+    /// readable by a doctor is exactly where clinical detail would accumulate unless the boundary is stated
+    /// and enforced. <see cref="AppointmentNote"/> caps and normalizes it; migration 0011 caps it again in the
+    /// schema, because the API is not the only writer a table outlives.</para></summary>
+    public string? Note { get; set; }
+
+    /// <summary>Who last wrote <see cref="Note"/>, and when (0014). Display attribution, not an audit trail:
+    /// the note crosses a team boundary — reception and the call centre write it, the treating doctor reads
+    /// it — and an unattributed instruction is one nobody can follow up or date. audit-service holds the
+    /// compliance record, but it needs <c>audit:read</c>, which none of the three readers has.</summary>
+    public string? NoteBy { get; set; }
+    public DateTimeOffset? NoteAt { get; set; }
+
+    /// <summary>The author's display name, captured at the moment the note was written (0022).
+    /// <para>A SNAPSHOT, never joined — 19.3's rule for signatures, and 0020's for allergen names. Without it
+    /// the dialog rendered the raw subject id, which answers "who told us this?" with a string nobody at a
+    /// desk can act on. <see cref="NoteBy"/> stays as the authoritative identity; this is only what the reader
+    /// is shown. NULL for notes written before 0022, which readers say as "unknown" rather than inventing.
+    /// </para></summary>
+    public string? NoteByName { get; set; }
+
+    /// <summary>The patient's display name, captured at BOOKING from the request (0013).
+    /// <para>Minimum-necessary and a SNAPSHOT: a display name only, and deliberately not kept in sync with
+    /// patient-service — it is what the appointment was booked under, and a name that silently changed
+    /// underneath would make the desk's list disagree with the card the patient is holding. emr holds no
+    /// demographics and never fetches this from a sibling; the operator already has it when they book.</para></summary>
+    public string? BeneficiaryName { get; set; }
+
+    /// <summary>Set when the assigned practitioner stopped serving this appointment's branch (14.5,
+    /// <c>PractitionerBranchRevoked</c>). The appointment is NOT cancelled and NOT reassigned — both are
+    /// decisions a background consumer must not make on a patient's behalf — it is marked so reception can
+    /// ring them and rebook. Cleared implicitly when the appointment is rescheduled or cancelled.</summary>
+    public DateTimeOffset? ReassignmentNeededAt { get; set; }
+
     public string? CancelReason { get; set; }
     /// <summary>Reporting flag (US-022): set when a Booked appointment is marked no-show. Populated in 3.2.</summary>
     public bool NoShow { get; set; }
@@ -54,6 +91,17 @@ public sealed class Appointment
     public string? UpdatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+
+    /// <summary>
+    /// 30.5c — when reception recorded the arrival (migration 0024, design 46 §7c).
+    ///
+    /// <para>NULL means <b>no check-in was recorded</b> — a walk-in taken straight into the room, or a missed
+    /// step — and readers must say so rather than assuming the visit-start moment. Never derived from
+    /// <see cref="UpdatedAt"/>, which every later transition overwrites: a waiting time computed from it is
+    /// right on the day and quietly wrong by the end of the week.</para>
+    /// </summary>
+    public DateTimeOffset? CheckedInAt { get; set; }
+    public string? CheckedInBy { get; set; }
     /// <summary>PostgreSQL <c>xmin</c> optimistic-concurrency token (drives the 3.2 If-Match ETag).</summary>
     public uint RowVersion { get; set; }
 }
@@ -107,4 +155,12 @@ public sealed class WaitlistEntry
     public Guid? OriginEncounterId { get; set; }
     public string? CreatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>At-least-once ledger for this service's event consumers: a redelivered event id short-circuits,
+/// so a broker retry cannot re-apply work a human has already dealt with. Same shape as policy-service's.</summary>
+public sealed class ProcessedEvent
+{
+    public Guid EventId { get; set; }
+    public DateTimeOffset ProcessedAt { get; set; }
 }

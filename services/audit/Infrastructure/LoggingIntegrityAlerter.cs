@@ -13,9 +13,34 @@ public sealed class LoggingIntegrityAlerter(ILogger<LoggingIntegrityAlerter> log
 {
     public Task RaiseAsync(string partitionKey, ChainVerification result, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(result);
+
+        // The COUNT and the records-verified total lead, because they are what tells an operator whether this
+        // is the known historical damage (docs/audit-chain-integrity-2026-08.md) or something new. A message
+        // that names one record cannot answer "has this got worse?", and that was the question nobody could
+        // answer while the verifier stopped at the first break.
         logger.LogCritical(
-            "integrity.mismatch in audit partition {Partition}: broken at index {Index} (record {RecordId}) — {Reason}",
-            partitionKey, result.BrokenAtIndex, result.BrokenRecordId, result.Reason);
+            "integrity.mismatch in audit partition {Partition}: {BreakCount} break(s) across {Verified} record(s) verified. First: index {Index} (record {RecordId}) — {Reason}",
+            partitionKey, result.Breaks.Count, result.RecordsVerified,
+            result.BrokenAtIndex, result.BrokenRecordId, result.Reason);
+
+        // Every break, not just the first. Capped so a partition-wide corruption cannot flood the log into
+        // uselessness — the count above is always exact, whether or not every line is printed.
+        const int MaxDetailed = 20;
+        foreach (var b in result.Breaks.Skip(1).Take(MaxDetailed - 1))
+        {
+            logger.LogCritical(
+                "integrity.mismatch in audit partition {Partition}: index {Index} (record {RecordId}) — {Reason}",
+                partitionKey, b.Index, b.RecordId, b.Reason);
+        }
+
+        if (result.Breaks.Count > MaxDetailed)
+        {
+            logger.LogCritical(
+                "integrity.mismatch in audit partition {Partition}: {Suppressed} further break(s) not listed",
+                partitionKey, result.Breaks.Count - MaxDetailed);
+        }
+
         return Task.CompletedTask;
     }
 }

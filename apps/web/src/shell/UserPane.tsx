@@ -81,7 +81,7 @@ export function UserPane({
           </button>
         </header>
 
-        <div className="npane-body">
+        <div className="npane-body mrs-scroll">
           <div className="upane-profile">
             <span className="upane-avatar" aria-hidden="true">
               {initialsOf(displayName)}

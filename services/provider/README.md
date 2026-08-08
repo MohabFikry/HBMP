@@ -51,6 +51,37 @@ and downstream branch-scoping); writes are Network/Org Admin (`provider:write`) 
 - `POST /branches` → `BranchCreated` · `PUT /branches/{id}` → `BranchUpdated`
 - `POST /branches/{id}/status` (reason required) → `BranchStatusChanged`
 
+### Practitioners (14.5 — design 37 §4)
+
+The clinical profile behind a user (`user_id` is a logical FK to identity). Reads are `provider:read` and
+min-necessary — `license_no` is omitted for callers without `provider:write`. Writes are Network/Org Admin
+and audited.
+
+**Specialty and branch assignment are not metadata.** They are the two fields the booking screen filters on
+(`GET /practitioners?branchId=&specialtyCode=`), so a practitioner holding neither is invisible to every
+booking picker while looking perfectly healthy in the admin list. The web admin screen requires both at
+creation and flags existing records that lack them.
+
+- `GET /specialties` — reference set, seeded by `0006` (PSYCH + CPSY drive the 14.6 sensitivity defaults)
+- `POST /practitioners` → 409 if the user already has a profile (`ux_practitioner_user`)
+- `POST /practitioners/{id}/specialties` · `POST /practitioners/{id}/specialties/revoke`
+- `POST /practitioners/{id}/specialties/primary` — promote to primary, demoting the incumbent.
+  Two flushes in one transaction, clear-then-set: `ux_practitioner_primary_specialty` is a partial-unique
+  index over `(practitioner_id) WHERE is_primary`, so setting the new primary first violates it mid-transaction.
+  Revoking the **primary** is refused 409 (`urn:hbmp:primary-specialty-required`) — promote another instead,
+  which is the only path that never leaves a practitioner unbookable.
+- `POST /practitioners/{id}/branches` · `POST /practitioners/{id}/branches/revoke` → `PractitionerBranchRevoked`
+- `POST /practitioners/{id}/status` (reason required) — `Active | Suspended | Inactive`. The picker feed
+  returns Active only, so suspending removes them from booking without deleting a row that appointments
+  and encounters still reference.
+- `GET /practitioners/{id}/serves-branch?branchId=` — the probe emr's two booking gates call (422 otherwise)
+
+**Known gap — revoking a branch does not reconcile existing appointments.** The revoke flips `serves-branch`
+to false, which stops *new* slots and *new* bookings at that branch, but appointments already booked there
+are owned by emr and provider-service cannot see them. `PractitionerBranchRevoked` is published so that
+reconciliation can be built where it belongs; **nothing consumes it yet**, and until something does, the
+appointments must be checked by hand. The admin screen says so at the point of the action.
+
 ### Onboarding workflow (2b.2 — Network Team, FR-NET-003/004/007)
 
 Explicit, auditable state machine `Draft → DocumentsCollected → Credentialed → Contracted → Activated`

@@ -26,6 +26,84 @@ export const iconPaths = {
   /** Branch / clinic site — a building with a cross. Replaces the 🏥 emoji the switcher used: an emoji
    *  renders in the platform font, ignores currentColor and sits off the icon baseline. */
   branch: '<path d="M4 21V7l8-4 8 4v14"/><path d="M9 21v-6h6v6"/><path d="M12 8v3M10.5 9.5h3"/>',
+  /** View — opens a document in place. Paired with `download` below, the two make the distinction the audit
+   *  trail draws: looking at a record and taking a copy of it are different disclosures. */
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+  download: '<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>',
+  /** Edit — a pen over its underline. `doc` was standing in for this and reads as "open a document", which is
+   *  what the note affordance beside it actually does; two different actions must not share a glyph. */
+  pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+
+  // ---- The member card (19.6d) -------------------------------------------------------------------------
+  // Each of these labels ONE thing and is never reused for a second meaning on the same surface. A glyph that
+  // means "a person" beside a button and "the person's sex" two lines above it teaches an operator that the
+  // icons carry nothing, which is worse than having none.
+
+  /** More than one person — the covered household. Distinct from `user`, which opens ONE person's file. */
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  /** A date, and by extension an age. */
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  /** Sex. The combined venus/mars mark rather than a second person glyph. */
+  sex: '<circle cx="11" cy="13" r="4"/><path d="m14 10 5-5M15 5h4v4"/><path d="M11 17v4M9 19h4"/>',
+  /** Nationality — a globe, not a flag: there is one glyph for the field, and flags would need 200. */
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18Z"/>',
+  phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z"/>',
+  /** Move between two things — a plan change, where the member goes one way and nothing comes back. */
+  swap: '<path d="M4 8h13"/><path d="m13 4 4 4-4 4"/><path d="M20 16H7"/><path d="m11 12-4 4 4 4"/>',
+  /**
+   * REPLACE this one with another — the substitution control at a dispensing counter.
+   *
+   * Two opposed arrows with HALF heads — a single barb each, rather than `swap`'s full chevrons. The half
+   * head is the conventional "exchange these two" mark, and at 18px the lighter barb keeps the glyph legible
+   * where two full chevrons crowd into a smudge.
+   */
+  replace: '<path d="M3 9h15"/><path d="m14 5 4 4"/><path d="M21 15H6"/><path d="m10 19-4-4"/>',
+  /** A container something is filed into — the member group. */
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
+  /** A state that can be moved between positions — the beneficiary's status. */
+  toggle: '<rect x="2" y="7" width="20" height="10" rx="5"/><circle cx="16" cy="12" r="3"/>',
+  /** Put back what was ended. */
+  undo: '<path d="M3 8h10a5 5 0 0 1 0 10H8"/><path d="m7 4-4 4 4 4"/>',
+  /**
+   * Withheld pending a justified request — the SHAPE cue on a restricted clinical result (design 37 §6).
+   *
+   * The restricted card drew this as a 🔒 emoji. An emoji is not a design-system icon: it is painted by the
+   * platform's own font, so it differs between Windows, macOS and Android, ignores `currentColor` entirely,
+   * and stays full-colour in a theme it was never designed for. On the one card that has to read as
+   * unmistakably different from an ordinary result, "looks different on every machine" is the wrong property.
+   */
+  lock: '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+
+  /**
+   * The clinician an appointment is assigned to.
+   *
+   * NOT `user`, which already means "open this person's file" wherever it appears next to a name — and the
+   * name beside this glyph is a doctor's, not a patient's. On a schedule chip that carries both a patient and
+   * a clinician, one person-shaped glyph for the second of them would read as a link to the first.
+   */
+  stethoscope:
+    '<path d="M5 3v6a6 6 0 0 0 12 0V3"/><path d="M3 3h4M15 3h4"/>'
+    + '<path d="M11 15v2a4 4 0 0 0 8 0v-2"/><circle cx="19" cy="13" r="2"/>',
+
+  // ---- Vital signs -------------------------------------------------------------------------------------
+  // One glyph per measurement, and none of them borrowed from the status family above.
+  //
+  // The encounter workspace first labelled these rows with `chart`, `half`, `triangle` and `info` — three of
+  // which are STATUS shapes. `triangle` was the worst: it labelled "Temperature" on the left of the row and
+  // simultaneously meant "out of range" in the flag chip on the right of the same row, so one glyph carried
+  // two meanings eighteen pixels apart. That is exactly what the member-card note above warns against.
+
+  /** Blood pressure — a dial with a needle, the sphygmomanometer's face. */
+  gauge: '<circle cx="12" cy="12" r="2"/><path d="m13.4 10.6 3.6-3.6"/><path d="M4.2 18a9 9 0 1 1 15.6 0"/>',
+  /** Heart rate. */
+  heart: '<path d="M12 20.3 4.3 12.9a4.8 4.8 0 0 1 6.8-6.8l.9.9.9-.9a4.8 4.8 0 0 1 6.8 6.8Z"/>',
+  temperature: '<path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0Z"/><path d="M12 9.5v6"/>',
+  /** Oxygen saturation — the drop the pulse oximeter reads through. */
+  droplet: '<path d="M12 3.2s6 6.3 6 10.1a6 6 0 0 1-12 0c0-3.8 6-10.1 6-10.1Z"/>',
+  /** Height — a ruler with its graduations. */
+  ruler: '<rect x="2" y="7" width="20" height="10" rx="2"/><path d="M7 7v3M12 7v4M17 7v3"/>',
+  /** Weight — a balance, not a bathroom scale: the dial of one is indistinguishable from `gauge` above. */
+  scale: '<path d="M12 4v17"/><path d="M7 21h10"/><path d="M4 7h16"/><path d="M4 7 1.5 13a3 3 0 0 0 5 0Z"/><path d="M20 7l-2.5 6a3 3 0 0 0 5 0Z"/>',
 } as const;
 
 export type IconName = keyof typeof iconPaths;

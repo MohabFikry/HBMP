@@ -15,25 +15,19 @@ public sealed class HttpMemberDirectory(IHttpClientFactory factory) : IMemberDir
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    // A sensible default challenge set. The concrete availability is narrowed to what the reception card exposes
-    // (MemberNo) plus the always-available demographic/contact challenges.
-    private static readonly string[] BaseChallenges = ["DateOfBirth", "Phone", "NationalId", "FullName"];
-
+    /// <summary>Find members. ONE query term, matched by eligibility's reception index against the member number,
+    /// national ID, passport, refugee ID, UNHCR number, primary phone and name (multi-word queries are treated as
+    /// a name). The caller does not say which of those they are supplying, and never had to: the index has always
+    /// matched them all, so a type picker in front of this only ever set the on-screen keypad.</summary>
     public async Task<MemberSearchResult> SearchAsync(string query, string? bearer, CancellationToken ct = default)
     {
         // Required: an empty search result and a refused search must never look the same to the agent.
         var resp = await GetAsync<ReceptionSearchDto>("eligibility", $"/api/v1/reception/search?q={Uri.EscapeDataString(query)}", bearer, ct, required: true);
-        var matches = (resp?.Results ?? []).Select(card =>
-        {
-            var challenges = new List<string>();
-            if (!string.IsNullOrWhiteSpace(card.Identity?.MemberNo)) challenges.Add("MemberNo");
-            challenges.AddRange(BaseChallenges);
-            return new MemberMatch(
+        var matches = (resp?.Results ?? []).Select(card => new MemberMatch(
                 card.Identity?.BeneficiaryId ?? Guid.Empty,
                 card.Identity?.DisplayName ?? "—",
-                card.Identity?.MemberNo,
-                challenges);
-        }).Where(m => m.BeneficiaryId != Guid.Empty).ToList();
+                card.Identity?.MemberNo))
+            .Where(m => m.BeneficiaryId != Guid.Empty).ToList();
         return new MemberSearchResult(query, matches.Count, matches);
     }
 
@@ -60,9 +54,11 @@ public sealed class HttpMemberDirectory(IHttpClientFactory factory) : IMemberDir
             contacts.Select(c => new MemberContact(c.ContactId, c.Kind ?? "Phone", c.Value ?? "", c.IsPrimary, c.PreferredChannel)).ToList(),
             appts.Select(a => new MemberAppointment(a.AppointmentId, a.AppointmentType ?? "—", a.Status ?? "—",
                 a.ScheduledStart, a.BranchName, a.DoctorName, a.Specialty,
-                CanReschedule: IsChangeable(a.Status), CanCancel: IsChangeable(a.Status))).ToList(),
+                CanReschedule: IsChangeable(a.Status), CanCancel: IsChangeable(a.Status),
+                RowVersion: a.RowVersion)).ToList(),
             referrals.Select(r => new MemberReferral(r.ReferralRef ?? "—", r.Status ?? "—", r.RequestedSpecialty, r.CreatedAt)).ToList(),
-            followUps.Select(f => new MemberFollowUp(f.OriginEncounterId, f.Reason, f.DueDate, f.Specialty)).ToList());
+            // f.Reason is deliberately NOT projected — see MemberFollowUp. It is not deserialized either.
+            followUps.Select(f => new MemberFollowUp(f.OriginEncounterId, f.DueDate, f.Specialty)).ToList());
     }
 
     private static bool IsChangeable(string? status) =>
@@ -104,10 +100,12 @@ public sealed class HttpMemberDirectory(IHttpClientFactory factory) : IMemberDir
     private sealed record ReceptionIdentityDto(Guid BeneficiaryId, string? MemberNo, string? DisplayName, string? AgeBand, string? Status);
     private sealed record LimitDto(string? Category, decimal? AnnualLimit, decimal? RemainingLimit);
     private sealed record AppointmentDto(Guid AppointmentId, string? AppointmentType, string? Status,
-        DateTimeOffset ScheduledStart, string? BranchName, string? DoctorName, string? Specialty);
+        DateTimeOffset ScheduledStart, string? BranchName, string? DoctorName, string? Specialty, uint RowVersion);
     private sealed record ContactDto(Guid ContactId, string? Kind, string? Value, bool IsPrimary, string? PreferredChannel);
     private sealed record ReferralDto(string? ReferralRef, string? Status, string? RequestedSpecialty, DateTimeOffset? CreatedAt);
-    private sealed record FollowUpDto(Guid? OriginEncounterId, string? Reason, DateOnly? DueDate, string? Specialty);
+    // No Reason property: the clinical free-text on an emr follow-up is not deserialized at all, so it cannot
+    // reach this process, let alone the agent. "Only the fields we project" is enforced by the shape itself.
+    private sealed record FollowUpDto(Guid? OriginEncounterId, DateOnly? DueDate, string? Specialty);
 }
 
 

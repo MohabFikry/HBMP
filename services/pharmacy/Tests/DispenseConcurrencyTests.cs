@@ -35,7 +35,7 @@ public class DispenseConcurrencyTests
                 await using var ctx = Ctx();
                 return await new DispenseExecutor(ctx).DispenseAsync(
                     rxId, lineId, $"key-{i}", Guid.NewGuid(), Guid.NewGuid(),
-                    1, "LOT-A", FutureLot, null, null, DateTimeOffset.UtcNow);
+                    1, "LOT-A", FutureLot, null, null, null, DateTimeOffset.UtcNow);
             });
             var outcomes = await Task.WhenAll(tasks);
 
@@ -69,10 +69,10 @@ public class DispenseConcurrencyTests
             DispenseResult first, replay;
             await using (var ctx = Ctx())
                 first = await new DispenseExecutor(ctx).DispenseAsync(rxId, lineId, "same-key", pharmacy, pharmacy,
-                    1, "LOT-A", FutureLot, null, null, DateTimeOffset.UtcNow);
+                    1, "LOT-A", FutureLot, null, null, null, DateTimeOffset.UtcNow);
             await using (var ctx = Ctx())
                 replay = await new DispenseExecutor(ctx).DispenseAsync(rxId, lineId, "same-key", pharmacy, pharmacy,
-                    1, "LOT-A", FutureLot, null, null, DateTimeOffset.UtcNow);
+                    1, "LOT-A", FutureLot, null, null, null, DateTimeOffset.UtcNow);
 
             first.Outcome.Should().Be(DispenseOutcome.Applied);
             replay.Outcome.Should().Be(DispenseOutcome.Replayed);
@@ -100,14 +100,14 @@ public class DispenseConcurrencyTests
             await using (var ctx = Ctx())
             {
                 var r = await new DispenseExecutor(ctx).DispenseAsync(rxId, lineId, "p1", pharmacy, pharmacy,
-                    1, "LOT-A", FutureLot, null, null, DateTimeOffset.UtcNow);
+                    1, "LOT-A", FutureLot, null, null, null, DateTimeOffset.UtcNow);
                 r.Outcome.Should().Be(DispenseOutcome.Applied);
                 r.Prescription!.Status.Should().Be(RxStatus.PartiallyDispensed);
             }
             await using (var ctx = Ctx())
             {
                 var r = await new DispenseExecutor(ctx).DispenseAsync(rxId, lineId, "p2", pharmacy, pharmacy,
-                    2, "LOT-B", FutureLot, null, null, DateTimeOffset.UtcNow);
+                    2, "LOT-B", FutureLot, null, null, null, DateTimeOffset.UtcNow);
                 r.Outcome.Should().Be(DispenseOutcome.Applied);
                 r.Prescription!.Status.Should().Be(RxStatus.Dispensed);
             }
@@ -134,10 +134,10 @@ public class DispenseConcurrencyTests
 
             await using (var ctx = Ctx())
                 (await new DispenseExecutor(ctx).DispenseAsync(rxId, lineId, "use", pharmacy, pharmacy,
-                    1, "LOT-A", FutureLot, null, null, DateTimeOffset.UtcNow)).Outcome.Should().Be(DispenseOutcome.Applied);
+                    1, "LOT-A", FutureLot, null, null, null, DateTimeOffset.UtcNow)).Outcome.Should().Be(DispenseOutcome.Applied);
             await using (var ctx = Ctx())
                 (await new DispenseExecutor(ctx).DispenseAsync(rxId, lineId, "reuse", pharmacy, pharmacy,
-                    1, "LOT-A", FutureLot, null, null, DateTimeOffset.UtcNow)).Outcome.Should().Be(DispenseOutcome.AlreadyDispensed);
+                    1, "LOT-A", FutureLot, null, null, null, DateTimeOffset.UtcNow)).Outcome.Should().Be(DispenseOutcome.AlreadyDispensed);
         }
         finally { await Cleanup(beneficiary); }
     }
@@ -154,7 +154,7 @@ public class DispenseConcurrencyTests
 
             await using (var ctx = Ctx())
                 (await new DispenseExecutor(ctx).DispenseAsync(rxId, lineId, "exp", pharmacy, pharmacy,
-                    1, "LOT-OLD", new DateOnly(2020, 1, 1), null, null, DateTimeOffset.UtcNow))
+                    1, "LOT-OLD", new DateOnly(2020, 1, 1), null, null, null, DateTimeOffset.UtcNow))
                     .Outcome.Should().Be(DispenseOutcome.ExpiredLot);
 
             await using var verify = Ctx();
@@ -181,7 +181,7 @@ public class DispenseConcurrencyTests
             await using (var ctx = Ctx())
             {
                 var r = await new DispenseExecutor(ctx).DispenseAsync(rxId, lineId, "sub", pharmacy, pharmacy,
-                    1, "LOT-SUB", expiry, alternative, "generic equivalent in stock", DateTimeOffset.UtcNow);
+                    1, "LOT-SUB", expiry, alternative, "generic equivalent in stock", null, DateTimeOffset.UtcNow);
                 r.Outcome.Should().Be(DispenseOutcome.Applied);
                 dispenseId = r.Event!.DispenseId;
             }
@@ -222,7 +222,7 @@ public class DispenseConcurrencyTests
                     return await new DispenseExecutor(ctx).DispenseAsync(
                         rxId, lineId, $"x7-{round}-{i}", Guid.NewGuid(), Guid.NewGuid(),
                         quantity: 1, batchNo: "B-1", expiryDate: FutureLot,
-                        substitutedDrugId: null, substitutionReason: null, DateTimeOffset.UtcNow);
+                        substitutedDrugId: null, substitutionReason: null, note: null, now: DateTimeOffset.UtcNow);
                 });
                 var outcomes = await Task.WhenAll(tasks);
 

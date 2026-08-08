@@ -45,9 +45,16 @@ public static class AbacConditions
 
     /// <summary>Branch-scope: the resource's branch is in the caller's permitted set and (when an active branch
     /// is set) equals it. The permitted set + active branch are resolved onto the <see cref="ResourceRef"/>
-    /// before evaluation, mirroring how treating-relationship / case-assignment are resolved.</summary>
+    /// before evaluation, mirroring how treating-relationship / case-assignment are resolved.
+    ///
+    /// 25.1 — membership of the permitted set is the invariant and holds in BOTH reach modes; what changes is
+    /// the active branch. Under <see cref="ScopeMode.BranchSetScoped"/> it is a view FILTER, so it is not
+    /// applied here: a clinics manager who narrowed their screen to one clinic has not thereby resigned as
+    /// supervisor of the others (see <see cref="ResourceRef.BranchReach"/>). The set-membership test is never
+    /// relaxed by the mode — an unresolved set is empty and denies, as it must.</summary>
     public static bool InBranchScope(AuthzRequest r) =>
         r.Resource.BranchId is { } b
         && r.Resource.PermittedBranchIds.Contains(b)
-        && (r.Resource.ActiveBranchId is null || r.Resource.ActiveBranchId == b);
+        && (r.Resource.BranchReach == ScopeMode.BranchSetScoped
+            || r.Resource.ActiveBranchId is null || r.Resource.ActiveBranchId == b);
 }

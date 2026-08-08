@@ -172,7 +172,7 @@ export function NotificationPane({
           {flash ?? ""}
         </span>
 
-        <div className="npane-body" aria-live="polite">
+        <div className="npane-body mrs-scroll" aria-live="polite">
           {state === "loading" && <p className="muted npane-msg">…</p>}
           {state === "error" && <StatusChip kind="bad" label={L.notificationsError[lang]} />}
           {state === "ready" && rows.length === 0 && (

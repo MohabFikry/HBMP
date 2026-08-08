@@ -6,6 +6,8 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Mersal.Auth;
+using Mersal.Email;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Mersal.Identity.Domain;
 using Mersal.Identity.Infrastructure;
 using Microsoft.AspNetCore.Identity;
@@ -42,9 +44,53 @@ public sealed class IdentityAppFactory : WebApplicationFactory<Program>
             // be minted. The tests kept the literal and started failing with invalid_client, and nobody saw
             // it because IDENTITY_TEST_DB was never exported in CI (Q2): they skipped on every run.
             ["Issuer:ServiceClientSecret"] = ServiceSecret,
+            // 28.3 — every request in this in-process host arrives from ONE address, so the whole suite
+            // shares one credential-rate-limit partition and throttles itself: the session tests turned red
+            // at the eleventh sign-in with a 429, which is the limiter working exactly as designed and
+            // telling us nothing about the code under test. Raised HERE, in the harness, so the shipped
+            // default stays 10 — and `TheDefaultCredentialLimitIsTen` fails if anyone changes that.
+            ["RateLimits:CredentialPerMinute"] = "10000",
+            ["RateLimits:TokenPerMinute"] = "10000",
         }));
+        // 28.6 — a capturing email transport. The reset flow REFUSES to run without one (it answers 503
+        // rather than reporting a send it cannot make), so a test host with no transport could only ever
+        // exercise the refusal. This one reports IsConfigured and keeps what was "sent", so a test can read
+        // the link a person would have clicked — which is how the base64url round trip gets exercised at all.
+        builder.ConfigureServices(services =>
+        {
+            services.RemoveAll<IEmailSender>();
+            services.AddSingleton<IEmailSender>(CapturedEmail.Instance);
+        });
         return base.CreateHost(builder);
     }
+}
+
+/// <summary>
+/// The test host's email transport: reports itself configured and keeps every message instead of sending.
+///
+/// <para>A singleton because WebApplicationFactory builds its own container and the assertion happens outside
+/// it. Cleared per test by the test that reads it — a shared sink that nobody clears reads as "the last run's
+/// mail", which is worse than no evidence.</para>
+/// </summary>
+public sealed class CapturedEmail : IEmailSender
+{
+    public static readonly CapturedEmail Instance = new();
+    private readonly List<(string To, string Subject, string Text)> _sent = [];
+
+    public bool IsConfigured => true;
+
+    public Task SendAsync(string toAddress, string subject, string htmlBody, string textBody, CancellationToken ct = default)
+    {
+        lock (_sent) _sent.Add((toAddress, subject, textBody));
+        return Task.CompletedTask;
+    }
+
+    public IReadOnlyList<(string To, string Subject, string Text)> Sent
+    {
+        get { lock (_sent) return _sent.ToList(); }
+    }
+
+    public void Clear() { lock (_sent) _sent.Clear(); }
 }
 
 /// <summary>Drives the real OIDC flows against the test server so multiple test classes share one path:
@@ -355,7 +401,10 @@ public static class TestFlow
     /// The GET also sets the antiforgery COOKIE on the shared HttpClient handler, which is the other half of
     /// the double-submit pair — so this must run against the same client that will post.
     /// </summary>
-    private static async Task<Dictionary<string, string>> AntiforgeryFields(HttpClient client, string path)
+    /// <remarks>Made INTERNAL in 28.3 so the session-API parity tests can drive the form path with it. Those
+    /// tests exist to compare the two sign-in paths against each other, which needs both drivers in one
+    /// place; a second copy of this helper would be a second thing to keep true about a security control.</remarks>
+    internal static async Task<Dictionary<string, string>> AntiforgeryFields(HttpClient client, string path)
     {
         var html = await client.GetStringAsync(path);
         var m = Regex.Match(html, @"<input type=""hidden"" name=""([^""]+)"" value=""([^""]*)"" />");

@@ -30,7 +30,7 @@ const S = {
   spend: { en: "Spend", ar: "الإنفاق" },
   totals: { en: "Totals", ar: "الإجماليات" },
 
-  setTitle: { en: "Provider settlements", ar: "تسويات مقدّمي الخدمة" },
+  setTitle: { en: "Provider Settlements", ar: "تسويات مقدّمي الخدمة" },
   setEmpty: { en: "No settlements yet.", ar: "لا توجد تسويات بعد." },
   settlement: { en: "Settlement", ar: "التسوية" },
   period: { en: "Period", ar: "الفترة" },
@@ -41,7 +41,7 @@ const S = {
   agreedPrice: { en: "Agreed price", ar: "السعر المتفق" },
   lineTotal: { en: "Line total", ar: "إجمالي البند" },
 
-  sumTitle: { en: "Financial summaries", ar: "الملخصات المالية" },
+  sumTitle: { en: "Financial Summaries", ar: "الملخصات المالية" },
   sumEmpty: { en: "No summary data.", ar: "لا توجد بيانات ملخص." },
   dimension: { en: "Group by", ar: "التجميع حسب" },
   byLine: { en: "Service line", ar: "بند الخدمة" },
@@ -77,7 +77,7 @@ export function FinanceUtilization() {
     { key: "provider", header: t(S.provider), cell: (r) => <span className="tnum">{r.providerRef ?? "—"}</span> },
     { key: "authorized", header: t(S.authorized), cell: (r) => <span className="tnum">{r.authorizedQty}</span> },
     { key: "delivered", header: t(S.delivered), cell: (r) => <span className="tnum">{r.deliveredQty}</span> },
-    { key: "spend", header: t(S.spend), cell: (r) => <span className="tnum">{fmt.money(r.spend)}</span> },
+    { key: "spend", header: t(S.spend), cell: (r) => fmt.money(r.spend), numeric: true },
   ];
   return (
     <>
@@ -113,7 +113,7 @@ export function FinanceSettlements() {
     { key: "settlement", header: t(S.settlement), cell: (r) => <span className="tnum">{r.settlementNo}</span> },
     { key: "provider", header: t(S.provider), cell: (r) => t(r.providerName) },
     { key: "period", header: t(S.period), cell: (r) => <span className="tnum">{r.periodStart} → {r.periodEnd}</span> },
-    { key: "total", header: t(S.total), cell: (r) => <span className="tnum">{fmt.money(r.total)}</span> },
+    { key: "total", header: t(S.total), cell: (r) => fmt.money(r.total), numeric: true },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
     {
       key: "view",
@@ -156,8 +156,8 @@ function SettlementLines({ lines, t }: { lines: SettlementLine[]; t: (l: Localiz
     { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.serviceCode}</span> },
     { key: "line", header: t(S.line), cell: (r) => t(r.serviceLine) },
     { key: "delivered", header: t(S.delivered), cell: (r) => <span className="tnum">{r.deliveredQty}</span> },
-    { key: "agreed", header: t(S.agreedPrice), cell: (r) => <span className="tnum">{fmt.money(r.agreedUnitPrice)}</span> },
-    { key: "total", header: t(S.lineTotal), cell: (r) => <span className="tnum">{fmt.money(r.lineTotal)}</span> },
+    { key: "agreed", header: t(S.agreedPrice), cell: (r) => fmt.money(r.agreedUnitPrice), numeric: true },
+    { key: "total", header: t(S.lineTotal), cell: (r) => fmt.money(r.lineTotal), numeric: true },
   ];
   return (
     <Card as="section" style={{ padding: "var(--sp3)" }}>
@@ -216,7 +216,7 @@ export function FinanceSummaries() {
                     <tr key={i}>
                       <td>{t(b.key)}</td>
                       <td className="tnum">{b.deliveredQty}</td>
-                      <td className="tnum">{fmt.money(b.spend)}</td>
+                      <td className="mrs-num">{fmt.money(b.spend)}</td>
                       <td className="tnum">{b.sharePercent}%</td>
                     </tr>
                   ))}

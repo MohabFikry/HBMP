@@ -42,6 +42,10 @@ public static class ReimbursementEndpoints
                 string.IsNullOrWhiteSpace(body.CurrencyCode) ? "EGP" : body.CurrencyCode!,
                 body.LinkedOrderId, body.LinkedPrescriptionId, docs);
             var bearer = BearerOf(http);
+            // 24.x — a reimbursement submission and BOTH events that route it (submitted, then matched
+            // or sent for manual assessment) commit together. Lose the second and the request sits in a
+            // state no worklist is watching: the beneficiary is owed money and nothing is looking at it.
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             var r = await svc.SubmitAsync(deps.Tenant, deps.Subject ?? "unknown", sub, bearer, ct);
 
             switch (r.Outcome)
@@ -60,6 +64,7 @@ public static class ReimbursementEndpoints
                     await deps.Outbox.EnqueueAsync(matchEvent, "claims.events",
                         new { r.Request.RequestId, r.Request.MatchConfidence, method = r.Request.MatchMethod.ToString(), tenantId = deps.Tenant }, ct);
                     await AuditRequest(deps, r.Request, "ReimbursementSubmitted");
+                    await tx.CommitAsync(ct);
                     return Results.Created($"/api/v1/reimbursement-requests/{r.Request.RequestId}",
                         ReimbursementView.From(r.Request, await OcrOf(deps, r.Request.RequestId, ct)));
             }
@@ -73,6 +78,8 @@ public static class ReimbursementEndpoints
             var denied = await deps.Gate.CheckAsync(ClaimsPolicies.Review, ct);
             if (denied is not null) return denied;
 
+            // 24.x — confirmation CREATES the claim; its ClaimCreated event must not be a second commit.
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             var r = await svc.ConfirmAsync(id, deps.Tenant, deps.Subject ?? "unknown",
                 body.LinkedOrderId, body.LinkedPrescriptionId, BearerOf(http), ct);
             switch (r.Outcome)
@@ -87,6 +94,7 @@ public static class ReimbursementEndpoints
                     await deps.Outbox.EnqueueAsync("ClaimCreated.v1", "claims.events",
                         new { r.Claim!.ClaimId, origin = "Reimbursement", r.Request!.RequestId, tenantId = deps.Tenant }, ct);
                     await AuditRequest(deps, r.Request, "ReimbursementConfirmed");
+                    await tx.CommitAsync(ct);
                     return Results.Ok(new { r.Request.RequestId, claimId = r.Claim.ClaimId, status = r.Request.Status.ToString() });
             }
         }).RequireAuthorization(HbmpPolicies.Scope("claims:review"));
@@ -94,6 +102,10 @@ public static class ReimbursementEndpoints
         // --- read ------------------------------------------------------------------------------------------
         v1.MapGet("/{id:guid}", async (Guid id, ClaimsDeps deps, CancellationToken ct) =>
         {
+            // Deliberately the TENANT-WIDE read, not the provider-aware one: §3.4 marks
+            // reimbursement_request ❌ for every provider-side role. This is the member's own out-of-pocket
+            // claim with their receipts on it, and no provider is a party to it — so a provider_admin holding
+            // claims:read is refused here, and that refusal is a tested rule, not an oversight.
             var denied = await deps.Gate.CheckAsync(ClaimsPolicies.ReadClaim, ct);
             if (denied is not null) return denied;
 

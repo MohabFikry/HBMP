@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Mersal.ClinicalValidation</RootNamespace>
+    <AssemblyName>Mersal.ClinicalValidation</AssemblyName>
+  </PropertyGroup>
+  <!--
+    No FrameworkReference and no dependency on HTTP, EF or a service, deliberately. This library is pure
+    domain logic with no I/O: it evaluates already-fetched snapshots. Phase 27's step-2 evaluator consumes
+    the SAME library, so step 1 and step 2 cannot drift into two implementations of one rule. A dependency
+    on a transport or a persistence layer here would be the first step back towards that drift.
+
+    The ONE ProjectReference below is not a relaxation of that rule. Mersal.Ingredients is pure domain
+    vocabulary with the same no-I/O constraint — it answers "what molecule is this", which this engine and
+    masterdata must answer IDENTICALLY or an interaction rule authored against one ingredient will screen a
+    prescription against another. The ban was always on I/O, not on shared meaning; phase 28 makes that
+    distinction explicit rather than duplicating the normaliser to preserve a literal reading of it.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../ingredients/Mersal.Ingredients.csproj" />
+    <ProjectReference Include="../clinical-codes/Mersal.ClinicalCodes.csproj" />
+    <!--
+      Mersal.Prescribing is the same kind of reference and is admitted for the same reason: pure arithmetic
+      with no I/O, and one answer that two callers must not compute differently. `QuantityMath` decides how
+      much medicine is handed over; the composer fills the field in from it and this engine grades it. Two
+      implementations of that division is two chances to hand a patient the wrong amount.
+    -->
+    <ProjectReference Include="../prescribing/Mersal.Prescribing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Tests/**/*.cs" />
+    <None Remove="Tests/**/*" />
+  </ItemGroup>
+</Project>

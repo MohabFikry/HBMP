@@ -44,6 +44,11 @@ builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Readiness for the probe in infra/helm/rollout/rollout-template.yaml. Process-level only: this reports
+// "through startup and able to serve". A dependency check here would pull the pod out of rotation for a
+// condition the service already surfaces per-request, turning a partial degradation into a total outage.
+builder.Services.AddHealthChecks();
+
 var app = builder.Build();
 app.UseHbmpTransportSecurity(); // HSTS + HTTPS redirect outside Development (16.5, H8)
 app.UseExceptionHandler();
@@ -54,11 +59,16 @@ app.UseHbmpRls(); // 18.B2 — bind app.tenant_id / app.provider_id from the pri
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "admin-service" })).AllowAnonymous();
+// Without this the readinessProbe 404s and the canary rollout waits forever on a healthy pod. Anonymous
+// because kubelet carries no bearer token.
+app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 app.MapUsers();          // 8b.1 grant/revoke/de-provision + access matrix (SoD-checked, audited)
 app.MapAccessReview();   // 8b.1 access-review campaigns (recertify/revoke/auto-expire)
 app.MapPolicyConfig();   // 8b.1 session/device policy + staged policy proposals
 app.MapGovernance();     // 8b.2 master-data versioning + template linter + system config
+app.MapValidityPolicy(); // how long a prescription / lab / imaging order stays actionable
+app.MapDocumentValidity(); // ADR-0035 §6 — how long a document is good for, and how early its lapse is warned
 app.MapPlatform();       // 8b.3 tenant admin + break-glass lifecycle + governance dashboards
 app.MapBranchAssignments(); // 14.2 staff↔branch assignment + active-branch context
 app.MapPayerAssignments();  // 19.5 user↔payer restriction + GET /me/payers (read by IPayerDirectory)

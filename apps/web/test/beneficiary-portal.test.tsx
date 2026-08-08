@@ -7,7 +7,9 @@ import { DevAuthClient } from "../src/auth/authClient";
 import { DevApiClient } from "../src/api/DevApiClient";
 import { ApiError } from "../src/api/http";
 import type { ApiClient } from "../src/api/client";
-import { BeneficiaryManage, BeneficiaryRegister, BeneficiaryStatus } from "../src/screens/BeneficiaryPortal";
+import type { PolicyApi } from "../src/api/policyApi";
+import { BeneficiaryRegister } from "../src/screens/BeneficiaryPortal";
+import { StatusChangeModal } from "../src/screens/BeneficiaryStatusDialog";
 import { seedSession } from "./helpers";
 
 /**
@@ -31,47 +33,60 @@ function renderScreen(ui: React.ReactElement, client: ApiClient = new DevApiClie
   );
 }
 
-async function search(name: string) {
-  await userEvent.type(screen.getByLabelText(/search by name/i), name);
-  await userEvent.click(screen.getByRole("button", { name: /^search$/i }));
-}
-
 beforeEach(() => localStorage.clear());
 afterEach(() => cleanup());
 
-describe("Status & reactivation — legal transitions only", () => {
-  it("offers only the current status's legal moves, named as operations", async () => {
-    renderScreen(<BeneficiaryStatus />);
-    await search("a"); // matches all fixtures
+describe("Status change — legal transitions only", () => {
+  /*
+   * These used to drive the "Status & Reactivation" SCREEN, which is gone (19.7 nav rework): its whole job
+   * was to find a person you had usually just been looking at and press one button, so it is now an action on
+   * the beneficiary's detail. The DIALOG is unchanged and so are these assertions — they simply render it
+   * directly rather than through a search that no longer exists.
+   */
+  const openDialog = (props: Partial<React.ComponentProps<typeof StatusChangeModal>> = {}, client?: ApiClient) =>
+    renderScreen(
+      <StatusChangeModal
+        beneficiaryId="BEN-2"
+        name="Salma Adel"
+        statusRaw="Active"
+        onClose={() => {}}
+        onChanged={() => {}}
+        {...props}
+      />,
+      client,
+    );
 
+  it("offers only the current status's legal moves, named as operations", async () => {
     // Suspended → the one legal desk move is Reinstate. The old screen offered Activate AND Suspend
     // here; Suspend was an invited "already in status" 409.
-    const suspended = (await screen.findAllByRole("row")).find((r) => within(r).queryByText(/Amina Yusuf/))!;
-    await userEvent.click(within(suspended).getByRole("button", { name: /change status/i }));
+    openDialog({ beneficiaryId: "BEN-3", name: "Amina Yusuf", statusRaw: "Suspended" });
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("radio", { name: /reinstate/i })).toBeInTheDocument();
     expect(within(dialog).queryByRole("radio", { name: /suspend/i })).toBeNull();
     expect(within(dialog).queryByRole("radio", { name: /^activate$/i })).toBeNull();
   });
 
-  it("locks the fraud-Blocked state and says WHY instead of rendering a doomed button", async () => {
-    renderScreen(<BeneficiaryStatus />);
-    await search("Hassan");
+  it("locks the fraud-Blocked state and says WHY instead of rendering a doomed control", async () => {
+    // 23 §1: both edges of Blocked belong to a director's case review. A radio here would 403.
+    openDialog({ beneficiaryId: "BEN-9", name: "Hassan Tariq", statusRaw: "Blocked" });
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByRole("radio")).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: /confirm/i })).toBeNull();
+    expect(within(dialog).getByText(/unlocked by a director/i)).toBeInTheDocument();
+  });
 
-    const row = (await screen.findAllByRole("row")).find((r) => within(r).queryByText(/Hassan Tariq/))!;
-    // 23 §1: both edges of Blocked belong to a director's case review. A button here would 403.
-    expect(within(row).queryByRole("button", { name: /change status/i })).toBeNull();
-    expect(within(row).getByText(/medical director/i)).toBeInTheDocument();
+  it("names a status it was never told, rather than showing an empty dialog", async () => {
+    // A caller whose role was not disclosed the beneficiary's status. "No moves" and "we cannot see the
+    // status" are different facts and lead to different next steps.
+    openDialog({ statusRaw: null });
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/was not disclosed to your role/i)).toBeInTheDocument();
   });
 
   it("demands a reason exactly where the server records one", async () => {
     const client = new DevApiClient({ latencyMs: 0 });
     const spy = vi.spyOn(client, "changeBeneficiaryStatus");
-    renderScreen(<BeneficiaryStatus />, client);
-    await search("Salma"); // Active
-
-    const row = (await screen.findAllByRole("row")).find((r) => within(r).queryByText(/Salma Adel/))!;
-    await userEvent.click(within(row).getByRole("button", { name: /change status/i }));
+    openDialog({}, client);
     const dialog = await screen.findByRole("dialog");
 
     await userEvent.click(within(dialog).getByRole("radio", { name: /suspend/i }));
@@ -88,11 +103,7 @@ describe("Status & reactivation — legal transitions only", () => {
   it("does not demand a reason for reinstatement — activation is the default good outcome", async () => {
     const client = new DevApiClient({ latencyMs: 0 });
     const spy = vi.spyOn(client, "changeBeneficiaryStatus");
-    renderScreen(<BeneficiaryStatus />, client);
-    await search("Amina");
-
-    const row = (await screen.findAllByRole("row")).find((r) => within(r).queryByText(/Amina Yusuf/))!;
-    await userEvent.click(within(row).getByRole("button", { name: /change status/i }));
+    openDialog({ beneficiaryId: "BEN-3", name: "Amina Yusuf", statusRaw: "Suspended" }, client);
     const dialog = await screen.findByRole("dialog");
     // Single legal move → pre-selected; no reason field rendered at all.
     expect(within(dialog).queryByLabelText(/reason/i)).toBeNull();
@@ -105,11 +116,7 @@ describe("Status & reactivation — legal transitions only", () => {
     vi.spyOn(client, "changeBeneficiaryStatus").mockRejectedValue(
       new ApiError("http", "conflict", 409, { title: "transition-denied", detail: "already in status Active" }),
     );
-    renderScreen(<BeneficiaryStatus />, client);
-    await search("Amina");
-
-    const row = (await screen.findAllByRole("row")).find((r) => within(r).queryByText(/Amina Yusuf/))!;
-    await userEvent.click(within(row).getByRole("button", { name: /change status/i }));
+    openDialog({ beneficiaryId: "BEN-3", name: "Amina Yusuf", statusRaw: "Suspended" }, client);
     const dialog = await screen.findByRole("dialog");
     await userEvent.click(within(dialog).getByRole("button", { name: /confirm/i }));
 
@@ -119,82 +126,254 @@ describe("Status & reactivation — legal transitions only", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("re-queries after a successful change so the row shows server truth", async () => {
+  it("tells its caller to re-read after a successful change", async () => {
+    // Reactivation can ISSUE a member number, and only the server knows it — so the dialog's contract is to
+    // report success and let the caller re-query, never to patch the row locally.
     const client = new DevApiClient({ latencyMs: 0 });
-    const searchSpy = vi.spyOn(client, "beneficiarySearch");
-    renderScreen(<BeneficiaryStatus />, client);
-    await search("Amina");
-    expect(searchSpy).toHaveBeenCalledTimes(1);
-
-    const row = (await screen.findAllByRole("row")).find((r) => within(r).queryByText(/Amina Yusuf/))!;
-    await userEvent.click(within(row).getByRole("button", { name: /change status/i }));
-    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: /confirm/i }));
-
-    // Reactivation can ISSUE a member number now; only the server knows it. The old screen left the stale
-    // row and painted "Status updated" next to the old status.
-    await vi.waitFor(() => expect(searchSpy).toHaveBeenCalledTimes(2));
-    expect(screen.queryByRole("dialog")).toBeNull();
+    const onChanged = vi.fn();
+    openDialog({ beneficiaryId: "BEN-3", name: "Amina Yusuf", statusRaw: "Suspended", onChanged }, client);
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: /confirm/i }));
+    await vi.waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
 });
 
-describe("Search — typed failures", () => {
-  it("names a permission denial instead of blaming the connection", async () => {
-    const client = new DevApiClient({ latencyMs: 0 });
-    vi.spyOn(client, "beneficiarySearch").mockRejectedValue(
-      new ApiError("http", "forbidden", 403, { title: "forbidden" }),
-    );
-    renderScreen(<BeneficiaryManage />, client);
-    await search("x");
 
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toMatch(/don't have access/i);
-    // Retrying an authorization decision cannot change it.
-    expect(screen.queryByRole("button", { name: /retry/i })).toBeNull();
+/**
+ * The registration form's reference data, stubbed.
+ *
+ * The plan and network-tier lists come from policy-service. Injecting them keeps these tests about the FORM
+ * — its validation, its errors, its clearing behaviour — rather than about whether a gateway is reachable,
+ * and it exercises the same seam the screen uses in production.
+ */
+const PLAN_ID = "11111111-1111-1111-1111-111111111111";
+const TIER_ID = "22222222-2222-2222-2222-222222222222";
+
+function stubPolicyApi(): PolicyApi {
+  return {
+    plans: async () => [
+      { planId: PLAN_ID, planCode: "MERSAL", nameEn: "Mersal", nameAr: "مرسال", category: "Standard", status: "Active" },
+    ],
+    networkTiers: async () => [
+      {
+        networkTierId: TIER_ID, tierCode: "MERSAL", nameEn: "Mersal Network", nameAr: "شبكة مرسال",
+        rank: 1, isOutOfNetwork: false, status: "Active",
+      },
+    ],
+    // The batch panel reads the column contract off the server so the expected-columns table cannot drift
+    // from the template the engine actually parses against.
+    bulkTemplates: async () => [
+      {
+        jobType: "MemberEnrolment", purposeEn: "Register and enrol members.", purposeAr: "تسجيل الأعضاء وقيدهم.",
+        columns: [
+          { name: "card_number", kind: "Text", required: true, descriptionEn: "The card number.", descriptionAr: "رقم البطاقة." },
+        ],
+      },
+    ],
+  } as unknown as PolicyApi;
+}
+
+/** Fill everything the form demands, so a test about ONE rule is not also a test about the other eleven. */
+async function fillValidRegistration() {
+  await userEvent.type(screen.getByLabelText(/card number/i), "#A-1001");
+  await userEvent.type(screen.getByLabelText(/first name/i), "Nour");
+  await userEvent.type(screen.getByLabelText(/last name/i), "Said");
+  await userEvent.type(screen.getByLabelText(/identifier value/i), "29901011234567");
+  await userEvent.type(screen.getByLabelText(/^number/i), "1234567890");
+  await userEvent.type(screen.getByLabelText(/contribution/i), "20");
+
+  const pick = async (label: RegExp, option: RegExp) => {
+    await userEvent.click(screen.getByRole("combobox", { name: label }));
+    await userEvent.click(await screen.findByRole("option", { name: option }));
+  };
+  await pick(/gender/i, /female/i);
+  await pick(/nationality/i, /syria/i);
+  await pick(/^plan/i, /mersal/i);
+  await pick(/network tier/i, /mersal network/i);
+
+  // type="date" wants the value set rather than typed character by character.
+  await userEvent.type(screen.getByLabelText(/birthdate/i), "1990-01-01");
+}
+
+describe("Register — the operational record", () => {
+  it("renders the identifier type as a closed vocabulary, not a free-text enum", async () => {
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />);
+    await userEvent.click(screen.getByRole("combobox", { name: /identifier type/i }));
+    const options = (await screen.findAllByRole("option")).map((o) => o.textContent?.trim());
+    expect(options).toEqual(["National ID", "Passport", "Refugee ID", "UNHCR number"]);
   });
 
-  it("offers retry for a server fault", async () => {
-    const client = new DevApiClient({ latencyMs: 0 });
-    vi.spyOn(client, "beneficiarySearch").mockRejectedValue(new ApiError("http", "boom", 503));
-    renderScreen(<BeneficiaryManage />, client);
-    await search("x");
-    await screen.findByRole("alert");
-    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
-  });
-});
+  it("filters a long list as you type instead of making you walk it", async () => {
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />);
 
-describe("Register — a closed vocabulary and real dates", () => {
-  it("renders the identifier type as a select over the four legal values", async () => {
-    renderScreen(<BeneficiaryRegister />);
-    const select = screen.getByLabelText(/identifier type/i);
-    const options = within(select).getAllByRole("option").map((o) => (o as HTMLOptionElement).value);
-    expect(options).toEqual(["NationalID", "Passport", "RefugeeID", "UNHCRNo"]);
+    // First-letter typeahead over a hundred nationalities means pressing S walks Saudi Arabia → Senegal →
+    // Sierra Leone before it reaches South Sudan. Typing the word is how a long list is meant to behave.
+    const nationality = screen.getByRole("combobox", { name: /nationality/i });
+    await userEvent.click(nationality);
+    await userEvent.type(nationality, "south");
+
+    const options = (await screen.findAllByRole("option")).map((o) => o.textContent);
+    expect(options.some((o) => /South Sudan/.test(o ?? ""))).toBe(true);
+    expect(options.some((o) => /Saudi Arabia/.test(o ?? ""))).toBe(false);
   });
 
-  it("rejects an impossible calendar date client-side", async () => {
+  it("finds a country by its code as well as its name", async () => {
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />);
+    const nationality = screen.getByRole("combobox", { name: /nationality/i });
+    await userEvent.click(nationality);
+    await userEvent.type(nationality, "ER");
+
+    expect((await screen.findAllByRole("option")).some((o) => /Eritrea/.test(o.textContent ?? ""))).toBe(true);
+  });
+
+  it("never keeps a half-typed query as the value", async () => {
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />);
+    const nationality = screen.getByRole("combobox", { name: /nationality/i });
+
+    await userEvent.click(nationality);
+    await userEvent.click(await screen.findByRole("option", { name: /syria/i }));
+    expect(nationality).toHaveValue("Syria");
+
+    // Type nonsense, then abandon it. The input is a QUERY; the value is whatever is selected.
+    await userEvent.type(nationality, "zzzz");
+    await userEvent.keyboard("{Escape}");
+    expect(nationality).toHaveValue("Syria");
+  });
+
+  it("groups the form into named sections rather than one flat grid of twenty inputs", () => {
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />);
+    // Real fieldsets, so the grouping is in the accessibility tree and not only in the paint.
+    for (const section of [/identity/i, /personal details/i, /contact/i, /coverage/i]) {
+      expect(screen.getByRole("group", { name: section })).toBeInTheDocument();
+    }
+  });
+
+  it("carries NO field the operator cannot fill in", () => {
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />);
+
+    // Status and age are both DERIVED — status by the approval workflow, age from the birthdate — so neither
+    // has an input, and a read-only box sitting in a grid of editable ones is just a hole in the alignment.
+    // They belong on the record you read, not the form you fill in.
+    expect(screen.queryByLabelText(/^status/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^age/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/supervisor's decision/i)).not.toBeInTheDocument();
+  });
+
+  it("marks a mandatory field exactly once", () => {
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />);
+
+    // InputField renders its own mark from `required`; a hand-written " *" in the label as well produced
+    // "Card number * *" on every mandatory field.
+    const label = screen.getByText(/^card number$/i).closest("label");
+    expect(label?.textContent?.match(/\*/g) ?? []).toHaveLength(1);
+  });
+
+  it("collapses the notes, and says what is inside while they are shut", async () => {
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />);
+
+    // Six optional prose boxes are the tallest thing on the form and the least often filled.
+    const summary = screen.getByText(/^notes$/i).closest("summary")!;
+    const details = summary.closest("details")!;
+    expect(details.open).toBe(false);
+    expect(summary.textContent).toMatch(/optional/i);
+
+    await userEvent.click(summary);
+    expect(details.open).toBe(true);
+    expect(screen.getByLabelText(/known diagnosis/i)).toBeInTheDocument();
+  });
+
+  it("marks each missing required field at the field, and does not submit", async () => {
     const client = new DevApiClient({ latencyMs: 0 });
     const spy = vi.spyOn(client, "registerBeneficiary");
-    renderScreen(<BeneficiaryRegister />, client);
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />, client);
 
-    await userEvent.type(screen.getByLabelText(/given name/i), "Nour");
-    await userEvent.type(screen.getByLabelText(/family name/i), "Said");
-    await userEvent.type(screen.getByLabelText(/identifier value/i), "29901011234567");
-    // Matches YYYY-MM-DD, is not a date. The old screen forwarded it; the server's 400 came back as
-    // "something went wrong — reload", destroying the guidance along with the operator's confidence.
-    await userEvent.type(screen.getByLabelText(/birth date/i), "2026-02-31");
+    await userEvent.click(screen.getByRole("button", { name: /register beneficiary/i }));
+
+    // Every required field that is simply EMPTY says the same thing, whether it is typed or chosen.
+    //
+    // This assertion used to expect 4 — the four closed vocabularies — because the typed fields answered a
+    // blank box with their FORMAT rule instead: three empty name boxes explained that "names can contain
+    // letters, spaces, hyphens, apostrophes and periods only", and an empty phone box asked for "8–15
+    // digits, with an optional leading +". Neither is what went wrong. The operator had not filled the
+    // field in, and the form said so in one vocabulary for droplists and another for text boxes.
+    //
+    // The rule-specific messages are still exactly right for a field that HAS a value and got it wrong —
+    // which is the case they were written for, and which the birthdate and National ID tests below cover.
+    expect(await screen.findAllByText(/^required\.$/i)).toHaveLength(11);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("refuses a future birthdate before the server has to", async () => {
+    const client = new DevApiClient({ latencyMs: 0 });
+    const spy = vi.spyOn(client, "registerBeneficiary");
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />, client);
+
+    await fillValidRegistration();
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    await userEvent.clear(screen.getByLabelText(/birthdate/i));
+    await userEvent.type(screen.getByLabelText(/birthdate/i), tomorrow);
     await userEvent.click(screen.getByRole("button", { name: /register beneficiary/i }));
 
     expect(await screen.findByText(/enter a real date/i)).toBeInTheDocument();
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("marks each missing required field at the field", async () => {
+  it("normalizes the card number so one card cannot become two records", async () => {
     const client = new DevApiClient({ latencyMs: 0 });
     const spy = vi.spyOn(client, "registerBeneficiary");
-    renderScreen(<BeneficiaryRegister />, client);
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />, client);
 
+    await fillValidRegistration();
     await userEvent.click(screen.getByRole("button", { name: /register beneficiary/i }));
-    expect(await screen.findAllByText(/^required\.$/i)).toHaveLength(3); // given, family, id value
-    expect(spy).not.toHaveBeenCalled();
+
+    // The '#' is a convention, not data — and neither is the case or the padding.
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ cardNumber: "A-1001" }), expect.anything());
+  });
+
+  it("sends the elected coverage as an intent, with the contribution as a number", async () => {
+    const client = new DevApiClient({ latencyMs: 0 });
+    const spy = vi.spyOn(client, "registerBeneficiary");
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />, client);
+
+    await fillValidRegistration();
+    await userEvent.click(screen.getByRole("button", { name: /register beneficiary/i }));
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enrolment: expect.objectContaining({
+          planId: PLAN_ID, networkTierId: TIER_ID, contributionPercent: 20,
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("assembles the phone from the dial code and the national number", async () => {
+    const client = new DevApiClient({ latencyMs: 0 });
+    const spy = vi.spyOn(client, "registerBeneficiary");
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />, client);
+
+    await fillValidRegistration();
+    await userEvent.click(screen.getByRole("button", { name: /register beneficiary/i }));
+
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ phone: "+201234567890" }), expect.anything());
+  });
+
+  it("sends only the note slots the operator actually filled", async () => {
+    const client = new DevApiClient({ latencyMs: 0 });
+    const spy = vi.spyOn(client, "registerBeneficiary");
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />, client);
+
+    await fillValidRegistration();
+    await userEvent.type(screen.getByLabelText(/known diagnosis/i), "Type 2 diabetes");
+    await userEvent.click(screen.getByRole("button", { name: /register beneficiary/i }));
+
+    // A blank slot and a cleared one read identically later; storing empties makes "is the diagnosis on file"
+    // unanswerable.
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ notes: [{ slot: 1, value: "Type 2 diabetes" }] }),
+      expect.anything(),
+    );
   });
 
   it("turns the duplicate-identifier 409 into a search instruction, not a reload", async () => {
@@ -206,11 +385,9 @@ describe("Register — a closed vocabulary and real dates", () => {
         type: "urn:hbmp:duplicate-identifier",
       }),
     );
-    renderScreen(<BeneficiaryRegister />, client);
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />, client);
 
-    await userEvent.type(screen.getByLabelText(/given name/i), "Nour");
-    await userEvent.type(screen.getByLabelText(/family name/i), "Said");
-    await userEvent.type(screen.getByLabelText(/identifier value/i), "29901011234567");
+    await fillValidRegistration();
     await userEvent.click(screen.getByRole("button", { name: /register beneficiary/i }));
 
     const alert = await screen.findByRole("alert");
@@ -220,14 +397,42 @@ describe("Register — a closed vocabulary and real dates", () => {
     expect(screen.getByLabelText(/identifier value/i)).toHaveValue("29901011234567");
   });
 
+  it("gives the duplicate-CARD 409 its own remedy, because opening the existing record is wrong advice", async () => {
+    const client = new DevApiClient({ latencyMs: 0 });
+    vi.spyOn(client, "registerBeneficiary").mockRejectedValue(
+      new ApiError("http", "conflict", 409, {
+        title: "duplicate-card-number",
+        detail: "card 'A-1001' is already held by beneficiary 1234",
+        type: "urn:hbmp:duplicate-card-number",
+      }),
+    );
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />, client);
+
+    await fillValidRegistration();
+    await userEvent.click(screen.getByRole("button", { name: /register beneficiary/i }));
+
+    const alert = await screen.findByRole("alert");
+    // A card clash is usually a mis-read or a re-issue — NOT "this is the same person, open them".
+    expect(alert.textContent).toMatch(/already held by another beneficiary/i);
+    expect(alert.textContent).not.toMatch(/search \/ manage/i);
+  });
+
   it("clears the form only after a confirmed success", async () => {
-    renderScreen(<BeneficiaryRegister />);
-    await userEvent.type(screen.getByLabelText(/given name/i), "Nour");
-    await userEvent.type(screen.getByLabelText(/family name/i), "Said");
-    await userEvent.type(screen.getByLabelText(/identifier value/i), "29901011234567");
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />);
+    await fillValidRegistration();
     await userEvent.click(screen.getByRole("button", { name: /register beneficiary/i }));
 
     expect(await screen.findByText(/registered \(pending\)/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/given name/i)).toHaveValue("");
+    expect(screen.getByLabelText(/first name/i)).toHaveValue("");
+  });
+
+  it("offers the file path for the hundreds-at-a-time case", async () => {
+    renderScreen(<BeneficiaryRegister policyApi={stubPolicyApi()} />);
+    await userEvent.click(screen.getByRole("radio", { name: /many from a file/i }));
+
+    // The same upload → check → commit pipeline as Bulk & Imports, so "nothing is applied until commit" is
+    // the same guarantee rather than a second implementation of it.
+    expect(await screen.findByText(/nothing is written until you commit/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/file \(csv or xlsx\)/i)).toBeInTheDocument();
   });
 });

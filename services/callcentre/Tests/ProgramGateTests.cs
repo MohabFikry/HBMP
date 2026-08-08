@@ -32,7 +32,7 @@ public class ProgramGateTests
         c.DefaultRequestHeaders.Add("X-Test-Features", features ?? "");
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task An_agent_whose_tenant_is_not_on_the_programme_is_refused()
     {
         Skip.If(CallCentreFactory.Db is null, "CALLCENTRE_TEST_DB not set — DB integration test skipped.");
@@ -55,7 +55,7 @@ public class ProgramGateTests
         root.GetProperty("feature").GetString().Should().Be(ProgramFeatures.CallCentre);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task The_same_agent_on_the_programme_is_admitted()
     {
         Skip.If(CallCentreFactory.Db is null, "CALLCENTRE_TEST_DB not set — DB integration test skipped.");
@@ -74,7 +74,7 @@ public class ProgramGateTests
     /// authorization denial — NOT `program-not-enabled`, which would tell them to contact Mersal about something
     /// their own tenant administrator controls.
     /// </summary>
-    [Fact]
+    [SkippableFact]
     public async Task A_caller_lacking_the_scope_gets_the_authorization_denial_not_the_programme_one()
     {
         Skip.If(CallCentreFactory.Db is null, "CALLCENTRE_TEST_DB not set — DB integration test skipped.");
@@ -98,7 +98,7 @@ public class ProgramGateTests
 
     /// <summary>Health probes are anonymous, so the gate must not touch them: a disabled module's container has
     /// to stay alive and reporting, not fall over.</summary>
-    [Fact]
+    [SkippableFact]
     public async Task Liveness_stays_reachable_for_a_tenant_with_the_programme_off()
     {
         Skip.If(CallCentreFactory.Db is null, "CALLCENTRE_TEST_DB not set — DB integration test skipped.");

@@ -124,6 +124,10 @@ INSERT INTO identity.scope (name, domain, service_only) VALUES
     ('finance:read','finance',false), ('finance:write','finance',false), ('finance:approve','finance',false),
     ('finance:export','finance',false), ('finance:project','finance',false),
     ('provider:read','provider',false), ('provider:write','provider',false), ('provider:finance','provider',false),
+    -- 14.5 — the clinician PICKER only (who works at this branch, in which specialty). Not the provider
+    -- directory, contracts, tariffs or tiers, and never a licence number. Booking filters on specialty then
+    -- doctor, and reception rightly holds no provider scope; this is that need, sized to it.
+    ('practitioner:read','provider',false),
     ('policy:write','policy',false), ('referral:write','referral',false),
     ('callcentre:read','callcentre',false), ('callcentre:act','callcentre',false),
     ('callcentre:interaction','callcentre',false), ('callcentre:verify','callcentre',false),
@@ -154,12 +158,15 @@ INSERT INTO identity.role_scope (role_name, scope_name)
 SELECT rs.role, rs.scope FROM (VALUES
     ('reception','reception:search'), ('reception','eligibility:check'),
     ('reception','appointment:read'), ('reception','appointment:write'), ('reception','notification:read'),
+    -- 14.5 — the specialty and doctor pickers on the booking screen.
+    ('reception','practitioner:read'),
 
     ('call_center','callcentre:read'), ('call_center','callcentre:act'),
     ('call_center','callcentre:interaction'), ('call_center','callcentre:verify'),
     -- Reservation-only by construction: appointment:reserve books/reschedules/cancels, while check-in and
     -- no-show sit behind appointment:write, which the call centre deliberately does NOT hold.
     ('call_center','appointment:read'), ('call_center','appointment:reserve'),
+    ('call_center','practitioner:read'),
     ('call_center','notification:read'),
 
     ('beneficiary_mgmt','patient:write'), ('beneficiary_mgmt','eligibility:check'),
@@ -176,14 +183,17 @@ SELECT rs.role, rs.scope FROM (VALUES
     ('claims_officer','claims:export'), ('claims_officer','notification:read'),
 
     ('case_manager','case:read'), ('case_manager','case:write'), ('case_manager','case:manage'),
+    ('case_manager','practitioner:read'),
     ('case_manager','notification:read'),
 
     ('doctor','emr:read'), ('doctor','emr:write'), ('doctor','encounter:write'),
     ('doctor','orders:read'), ('doctor','orders:write'), ('doctor','rx:write'),
     ('doctor','referral:write'), ('doctor','appointment:read'), ('doctor','eligibility:check'),
+    ('doctor','practitioner:read'),
     ('doctor','notification:read'),
 
     ('nurse','emr:read'), ('nurse','encounter:write'), ('nurse','appointment:read'),
+    ('nurse','practitioner:read'),
     ('nurse','notification:read'),
 
     ('lab_tech','orders:read'), ('lab_tech','orders:consume'), ('lab_tech','notification:read'),

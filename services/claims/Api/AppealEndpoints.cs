@@ -26,6 +26,9 @@ public static class AppealEndpoints
             if (!Enum.TryParse<AppellantType>(body.AppellantType, true, out var appellant))
                 return Results.Problem(statusCode: 422, title: "bad-appellant", type: "urn:hbmp:validation", detail: "Unknown appellant type.");
 
+            // 24.x — the appeal reopens a DECIDED line. Its event and the reopening commit together, or
+            // the line is appealable again downstream while the ledger says it was already appealed.
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             var actingFor = deps.ProviderId is null ? deps.Subject : null; // Mersal acting for the appellant
             var r = await appeals.RaiseAsync(deps.Tenant, deps.Subject ?? "unknown", id, body.ClaimLineId, appellant, body.Reason, actingFor, ct);
             switch (r.Outcome)
@@ -40,6 +43,7 @@ public static class AppealEndpoints
                         r.Appeal!.AppealId, claimId = id, resolution = r.Appeal.Resolution.ToString(),
                         r.Appeal.OriginalDecisionId, tenantId = deps.Tenant,
                     }, ct);
+                    await tx.CommitAsync(ct);
                     await deps.Audit.EmitAsync(new AuditEventDraft
                     {
                         EntityType = "claim_appeal", EntityId = r.Appeal.AppealId.ToString(), Action = AuditAction.StateChange,

@@ -39,6 +39,11 @@ public sealed class InboundIngestionService(
             result = adapter.Translate(message);
 
         // Persist the staging row + (on success) the internal events on the SAME transaction (durable outbox).
+        // The comment was here before the transaction was: EfOutbox.EnqueueAsync calls its own SaveChanges, so
+        // a message that translated to three events wrote three commits, and the staging row rode along with
+        // whichever happened to flush first. A crash mid-way left the message recorded as Mapped with only
+        // some of its events staged — and the staging row is the only record that the rest were owed.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
         db.Staging.Add(new InboundStagingRecord
         {
             StagingId = Guid.NewGuid(),
@@ -55,6 +60,7 @@ public sealed class InboundIngestionService(
                 await outbox.EnqueueAsync(evt.Type, "interop.inbound", JsonNode.Parse(evt.PayloadJson), ct);
 
         await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
         return result;
     }
 

@@ -51,10 +51,31 @@ public sealed record AssignSpecialty(string SpecialtyCode, bool IsPrimary);
 
 public sealed record AssignPractitionerBranch(Guid BranchId, DateOnly ValidFrom, DateOnly? ValidTo);
 
+/// <summary>25.2 — record or renew a practitioner's licence. BOTH fields are required: an expiry date is what
+/// makes the licence enforceable as at a slot date (25.3), so a licence stored without one would be a field
+/// that looks maintained and gates nothing.</summary>
+public sealed record UpdatePractitionerLicence(string LicenseNo, DateOnly? LicenseExpiry);
+
+/// <summary>Remove a NON-primary specialty. Revoking the primary is refused (409) — promote another first,
+/// because a practitioner without a primary specialty is invisible to every booking picker.</summary>
+public sealed record RevokeSpecialty(string SpecialtyCode);
+
+/// <summary>End a practitioner's assignment to a branch: the active rows become <c>Revoked</c> rather than
+/// being deleted, so the history that explains an earlier booking there survives.</summary>
+public sealed record RevokePractitionerBranch(Guid BranchId);
+
+/// <summary>Active | Suspended | Inactive, with a reason (audited).</summary>
+public sealed record ChangePractitionerStatus(string Status, string Reason);
+
 /// <summary>Picker/min-necessary practitioner view. <c>LicenseNo</c> is null unless the caller is an admin
 /// (provider:write) — no licence numbers to booking clinicians (design 37 §4).</summary>
 public sealed record PractitionerView(
     Guid PractitionerId, string PractitionerType, string FullNameEn, string FullNameAr,
     string? PrimarySpecialty, IReadOnlyList<string> Specialties, IReadOnlyList<Guid> Branches,
-    string Status, string? LicenseNo);
+    string Status, string? LicenseNo,
+    // 25.3 — licence STATUS, distinct from the licence NUMBER. The number is masked to the maintaining
+    // scopes; the expiry and its derived validity are what a roster chip renders, and are returned to every
+    // caller that may see the practitioner at all. `LicenceValid`/`DaysUntilExpiry` are null when the caller
+    // asked no `asOf` date — "not asked" rather than a guessed answer about today.
+    DateOnly? LicenseExpiry, bool? LicenceValid, int? DaysUntilExpiry);
 

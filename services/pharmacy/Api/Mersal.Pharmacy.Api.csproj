@@ -2,12 +2,14 @@
   <PropertyGroup><RootNamespace>Mersal.Pharmacy.Api</RootNamespace></PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Pharmacy.Domain.csproj" />
+    <ProjectReference Include="../../../libs/clinical-validation/Mersal.ClinicalValidation.csproj" />
     <ProjectReference Include="../../../libs/time/Mersal.Time.csproj" />
     <ProjectReference Include="../Infrastructure/Mersal.Pharmacy.Infrastructure.csproj" />
     <ProjectReference Include="../../../libs/auth/Mersal.Auth.csproj" />
     <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" />
     <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
     <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
+    <ProjectReference Include="..\..\..\libs\validity\Mersal.Validity.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
@@ -18,5 +20,9 @@
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
     <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\libs\beneficiary-lookup\Mersal.BeneficiaryLookup.csproj" />
+    <ProjectReference Include="..\..\..\libs\amendment\Mersal.Amendment.csproj" />
   </ItemGroup>
 </Project>

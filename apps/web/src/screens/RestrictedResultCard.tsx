@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useTheme } from "@mersal/design-system";
+import { Button, Icon, InputField, SelectField, TextareaField, useTheme } from "@mersal/design-system";
 import { L } from "../i18n/strings";
 
 /** Existence-only metadata the server returns for a restricted result (14.7) — NEVER any values. */
@@ -27,42 +27,35 @@ export function RestrictedResultCard({ result, onRequestAccess }: RestrictedResu
   const t = (l: { en: string; ar: string }) => l[lang as "en" | "ar"];
 
   return (
-    <section
-      className="restricted-card"
-      aria-label={t(L.restrictedResult)}
-      style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 16, background: "var(--surface-2)" }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        {/* Four cues: lock icon (shape) + ghost pill (border) + text — no colour dependency. */}
-        <span
-          className="chip chip--restricted"
-          data-testid="restricted-chip"
-          role="status"
-          style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", borderRadius: 999, padding: "2px 10px", fontWeight: 600 }}
-        >
-          <span aria-hidden>🔒</span>
+    <section className="restricted-card" aria-label={t(L.restrictedResult)}>
+      <div className="restricted-head">
+        {/* Four cues: lock (shape) + ghost pill (border) + weight + text — no colour dependency, because a
+            clinician who cannot distinguish hues must still see instantly that this result is withheld. */}
+        <span className="chip chip--restricted" data-testid="restricted-chip" role="status">
+          <Icon name="lock" aria-hidden />
           {t(L.restricted)}
         </span>
         <strong>{result.category}</strong>
       </div>
 
-      <dl style={{ margin: "12px 0", display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px" }}>
-        <dt style={{ opacity: 0.7 }}>{t(L.activeBranch)}</dt>
+      <dl className="restricted-meta">
+        <dt>{t(L.activeBranch)}</dt>
         <dd>{result.orderingBranch ?? "—"}</dd>
         {result.date && (
           <>
-            <dt style={{ opacity: 0.7 }}>{lang === "ar" ? "التاريخ" : "Date"}</dt>
+            <dt>{lang === "ar" ? "التاريخ" : "Date"}</dt>
             <dd>{result.date}</dd>
           </>
         )}
-        <dt style={{ opacity: 0.7 }}>{lang === "ar" ? "الحالة" : "Status"}</dt>
+        <dt>{lang === "ar" ? "الحالة" : "Status"}</dt>
         <dd>{result.status}</dd>
       </dl>
 
-      <p style={{ margin: "0 0 12px" }}>{t(L.restrictedBody)}</p>
-      <button type="button" onClick={onRequestAccess} style={{ minHeight: 44, padding: "0 16px", fontWeight: 600 }}>
+      <p className="restricted-body">{t(L.restrictedBody)}</p>
+      <Button variant="primary"
+              leadingIcon={<Icon name="lock" />} onClick={onRequestAccess}>
         {t(L.requestAccess)}
-      </button>
+      </Button>
     </section>
   );
 }
@@ -99,46 +92,45 @@ export function RequestAccessDialog({ onSubmit, onCancel }: RequestAccessDialogP
         setTouched(true);
         if (valid) onSubmit({ purposeCode: purpose, justification: justification.trim(), requestedTtlHours: hours });
       }}
-      style={{ display: "grid", gap: 12, maxWidth: 480 }}
+      className="restricted-request"
     >
-      <div>
-        <label htmlFor="ra-purpose" style={{ display: "block", fontWeight: 600 }}>{t(L.purpose)}</label>
-        <select
-          id="ra-purpose"
-          value={purpose}
-          aria-invalid={purposeInvalid}
-          aria-describedby={purposeInvalid ? "ra-purpose-err" : undefined}
-          onChange={(e) => setPurpose(e.target.value)}
-          style={{ minHeight: 44, width: "100%" }}
-        >
-          <option value="">—</option>
-          {PURPOSES.map((p) => <option key={p} value={p}>{p}</option>)}
-        </select>
-        {purposeInvalid && <p id="ra-purpose-err" role="alert" style={{ color: "var(--st-bad-fg)" }}>{t(L.purposeRequired)}</p>}
-      </div>
+      {/* The three fields were a bare label+select, label+textarea and label+input, each with its own inline
+          styles. SelectField/TextareaField/InputField carry the label, the help/error wiring and the control
+          height that the hand-written versions each approximated differently. `error` renders the same
+          role="alert" the inline <p> did, so the validation contract is unchanged. */}
+      <SelectField
+        id="ra-purpose"
+        label={t(L.purpose)}
+        placeholder="—"
+        options={PURPOSES.map((p) => ({ value: p, label: p }))}
+        value={purpose || null}
+        onChange={setPurpose}
+        error={purposeInvalid ? t(L.purposeRequired) : undefined}
+      />
 
-      <div>
-        <label htmlFor="ra-just" style={{ display: "block", fontWeight: 600 }}>{t(L.justification)}</label>
-        <textarea
-          id="ra-just"
-          value={justification}
-          aria-invalid={justInvalid}
-          aria-describedby={justInvalid ? "ra-just-err" : undefined}
-          onChange={(e) => setJustification(e.target.value)}
-          rows={3}
-          style={{ width: "100%" }}
-        />
-        {justInvalid && <p id="ra-just-err" role="alert" style={{ color: "var(--st-bad-fg)" }}>{t(L.justificationRequired)}</p>}
-      </div>
+      <TextareaField
+        id="ra-just"
+        label={t(L.justification)}
+        value={justification}
+        onChange={(e) => setJustification(e.target.value)}
+        rows={3}
+        error={justInvalid ? t(L.justificationRequired) : undefined}
+      />
 
-      <div>
-        <label htmlFor="ra-hours" style={{ display: "block", fontWeight: 600 }}>{t(L.duration)}</label>
-        <input id="ra-hours" type="number" min={1} max={168} value={hours} onChange={(e) => setHours(Number(e.target.value))} style={{ minHeight: 44 }} />
-      </div>
+      <InputField
+        id="ra-hours"
+        label={t(L.duration)}
+        type="number"
+        min={1}
+        max={168}
+        value={hours}
+        onChange={(e) => setHours(Number(e.target.value))}
+      />
 
-      <div style={{ display: "flex", gap: 8 }}>
-        <button type="submit" style={{ minHeight: 44, padding: "0 16px", fontWeight: 600 }}>{t(L.submit)}</button>
-        <button type="button" onClick={onCancel} style={{ minHeight: 44, padding: "0 16px" }}>{t(L.cancel)}</button>
+      <div className="row-actions">
+        <Button type="submit" variant="primary"
+              leadingIcon={<Icon name="check2" />}>{t(L.submit)}</Button>
+        <Button type="button" variant="ghost" onClick={onCancel}>{t(L.cancel)}</Button>
       </div>
     </form>
   );

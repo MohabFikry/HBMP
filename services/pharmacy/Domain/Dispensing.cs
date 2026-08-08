@@ -20,7 +20,10 @@ public static class Dispensing
         if (quantity <= 0) return DispenseError.InvalidQuantity;
         var line = rx.Lines.FirstOrDefault(l => l.PrescriptionLineId == lineId);
         if (line is null) return DispenseError.LineNotFound;
-        if (line.Status is RxLineStatus.Dispensed or RxLineStatus.Cancelled) return DispenseError.AlreadyDispensed;  // no-reuse
+        // no-reuse. Superseded joins the set in 30.1: the line was AMENDED, and dispensing it would hand
+        // over the drug, dose or quantity the prescriber corrected — the amendment would have achieved
+        // nothing, and the record would say it had.
+        if (line.IsTerminal) return DispenseError.AlreadyDispensed;
         if (line.QuantityDispensed + quantity > line.QuantityPrescribed) return DispenseError.OverDispense;
         if (expiryDate <= DateOnly.FromDateTime(now.UtcDateTime)) return DispenseError.ExpiredLot;                   // no expired stock
         return DispenseError.None;
@@ -30,11 +33,18 @@ public static class Dispensing
     public static RxLineStatus RecomputeLineStatus(PrescriptionLine line) =>
         line.QuantityDispensed >= line.QuantityPrescribed ? RxLineStatus.Dispensed : RxLineStatus.PartiallyDispensed;
 
-    /// <summary>Prescription rolls up from its lines: all non-cancelled lines Dispensed ⇒ Dispensed; any dispensing yet
-    /// work remaining ⇒ PartiallyDispensed (remainder stays available for a later visit); otherwise unchanged.</summary>
+    /// <summary>Prescription rolls up from its lines: all live lines Dispensed ⇒ Dispensed; any dispensing yet
+    /// work remaining ⇒ PartiallyDispensed (remainder stays available for a later visit); otherwise unchanged.
+    ///
+    /// <para>A line that has LEFT the live set does not hold the prescription open. Cancelled has always been
+    /// excluded; 30.1 adds Superseded, and it matters more: a superseded line is never Dispensed — it was
+    /// replaced, not handed over — so counting it would strand the prescription in PartiallyDispensed for
+    /// ever and <c>RxDispensed</c> would never emit. Its accumulator is not counted either, because the
+    /// successor carries it forward.</para></summary>
     public static RxStatus RecomputePrescriptionStatus(Prescription rx)
     {
-        var live = rx.Lines.Where(l => l.Status != RxLineStatus.Cancelled).ToList();
+        var live = rx.Lines
+            .Where(l => l.Status is not (RxLineStatus.Cancelled or RxLineStatus.Superseded)).ToList();
         if (live.Count > 0 && live.All(l => l.Status == RxLineStatus.Dispensed))
             return RxStatus.Dispensed;
         if (live.Any(l => l.QuantityDispensed > 0))

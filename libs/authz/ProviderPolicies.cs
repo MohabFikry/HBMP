@@ -25,6 +25,13 @@ public static class ProviderPolicies
         /// is routine Network Team work, whereas a tier reassignment reprices every plan that references that
         /// tier, for every member, from its effective date.</summary>
         public const string NetworkAdmin = "network-tier:admin";
+
+        /// <summary>14.5 — read the clinician picker (who works at this branch, in which specialty).
+        /// Deliberately separate from <see cref="Read"/>: booking needs the practitioner list and nothing
+        /// else, whereas <c>provider:read</c> is the whole network directory — contracts, onboarding state
+        /// and tiers — which the front desk has no business seeing. Sized to the need, as
+        /// <c>patient:read</c> was.</summary>
+        public const string PractitionerRead = "practitioner:read";
     }
 
     /// <summary>The PO rules on their own, so other services can splice them into their bundle.</summary>
@@ -65,11 +72,24 @@ public static class ProviderPolicies
             RequiredConditions = [AbacConditions.TenantMatch],
             Sensitive = true,
         },
+        // 14.5 — the clinician picker. The roles that BOOK (reception, call centre) and the clinical roles
+        // that read who a visit belongs to. Not sensitive: it is a name and a specialty, the same pair
+        // printed on the clinic door.
+        new PolicyRule
+        {
+            Action = Actions.PractitionerRead, ResourceType = "practitioner",
+            // org_admin is deliberately absent: it administers ACCESS, not the clinical picker, and holds
+            // neither scope in the seed — naming it would have made this the 142nd rule/role pair that can
+            // never be satisfied, which is the exact defect ScopeIntegrityTests exists to catch.
+            Roles = Set("reception", "call_center", "doctor", "nurse", "case_manager", "network_team"),
+            Scopes = Set("practitioner:read", "provider:read"),
+            RequiredConditions = [AbacConditions.TenantMatch],
+        },
         // Provider techs: read their own provider's work queue only (imported by orders/pharmacy later).
         new PolicyRule
         {
             Action = Actions.QueueRead, ResourceType = "provider_queue",
-            Roles = Set("lab_tech", "imaging_tech", "pharmacist", "provider_admin"),
+            Roles = Set("lab_tech", "imaging_tech", "radiology_tech", "pharmacist", "provider_admin"),
             Scopes = Set("provider:read"),
             RequiredConditions = [AbacConditions.TenantMatch, AbacConditions.ProviderOwnership],
             Sensitive = true,

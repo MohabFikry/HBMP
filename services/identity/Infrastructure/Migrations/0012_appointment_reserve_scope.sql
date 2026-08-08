@@ -10,10 +10,16 @@
 -- powers, which is what "reservation-only, wider scope" actually means.
 
 -- The scope has to exist before anything can be granted it (role_scope_scope_name_fkey).
-INSERT INTO identity.scope (name, domain, description, service_only, deprecated, is_platform_admin_key)
+--
+-- FOUR columns, not six. `deprecated` and `is_platform_admin_key` are added by 0013, one migration LATER, so
+-- naming them here fails on any database built from scratch: "column deprecated of relation scope does not
+-- exist". It ran fine on every long-lived database, where 0013 had been applied by the time anyone re-ran
+-- 0012 — so the whole of CI stopped at this line while every developer machine was green. Both columns
+-- arrive NOT NULL DEFAULT false, which is exactly what this row was specifying anyway.
+INSERT INTO identity.scope (name, domain, description, service_only)
 VALUES ('appointment:reserve', 'appointment',
         'Book, reschedule and cancel appointments WITHOUT the arrival decisions (check-in, no-show).',
-        false, false, false)
+        false)
 ON CONFLICT (name) DO NOTHING;
 
 INSERT INTO identity.role_scope (role_name, scope_name, tenant_id)

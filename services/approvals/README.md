@@ -25,6 +25,19 @@ system-to-system seam that the phase-4 routing saga / the `OrderPendingApproval`
 targets; no clinical payload crosses it. Emits `AuthSubmitted` via the outbox. A non-manual request must name the
 requesting provider (**422** otherwise; DB `CHECK` backstop).
 
+The seam carries two things the authorization cannot work out for itself. `orderedByUserId` is **who** is
+waiting, so a decision notice has a human to reach (§11.3). `encounterId` is **which visit** it came out of
+(ADR-0031, migration 0004), so the decision lands on that patient's care episode — an authorization is one of
+the few artefacts that can hold a consultation open for days, and without it the appointment's timeline showed
+the wait begin and never showed it end. Both are optional and both stay optional: a manual authorization is
+raised by a reviewer with no encounter in hand, and a guessed one would put this member's authorization on
+another member's timeline. The decision events carry `encounterId` and `tenantId` outward for the same reason —
+emr's consumer binds its RLS session from that envelope and refuses a message it cannot attribute.
+
+**Note:** nothing populates `encounterId` automatically yet. The routing saga this endpoint is built for — a
+consumer of `OrderPendingApproval`/`RxSubmitted` — does not exist in the platform; until it does, the *order*
+records that it went for approval and the decision does not come back to the episode.
+
 ## Worklist (US-060) — MIN-NECESSARY, no clinical payload
 
 - `GET /api/v1/authorizations` (scope `auth:read`) — the reviewer inbox: filter by `status`, `priority`,
@@ -34,6 +47,37 @@ requesting provider (**422** otherwise; DB `CHECK` backstop).
 - `POST /api/v1/authorizations/{id}/assign` (scope `auth:review`) — pick up a request: `Submitted → UnderReview`,
   sets the reviewer + starts the priority-based **SLA timer**, emits `AuthUnderReview`. Two reviewers racing → the
   `xmin` optimistic-concurrency guard means exactly one wins; the loser gets a **409** with no state change.
+
+## Fulfilment authorizations — the register (ADR-0034)
+
+Dispensing a prescription line, or consuming an investigation-order line, **issues an authorization**: a
+record of what was actually handed over, separate from the clinical instruction it was delivered against.
+`Kind = Fulfilment`, `Status = Issued`, `SourceRef` = the prescription / order.
+
+- **One authorization per prescription (per order)**, accumulating one `authorization_item` per fulfilment. A
+  member collecting a fortnight's medication over two visits has one authorization with two items.
+- **A substitution lands here and nowhere else.** The item stores `ordered_code` and `fulfilled_code` as two
+  separate columns, so recording what was handed over cannot overwrite what the prescriber wrote — and this
+  service has no client for the prescription at all.
+- **`Issued` is terminal and unreachable.** No transition targets it and none leaves it, so settled work can
+  never be assigned to a reviewer or start an SLA clock on a question nobody asked.
+
+Issuance is **asynchronous, on approvals' own queue** (`approvals.fulfilments`). Not by an HTTP call from the
+dispensing path: an authorization that cannot be issued must never be able to fail a dispense. Not by binding
+`pharmacy.events` / `orders.events` either — that transport is point-to-point and policy-service already
+consumes both, so a second consumer would COMPETE for messages and silently stop the benefit accumulator.
+At-least-once delivery is guarded twice: `processed_event` for a redelivered message id, and UNIQUE
+`(tenant_id, fulfilment_ref)` for a redelivery arriving under a new one.
+
+- `GET /api/v1/authorizations?kind=Fulfilment|Review|All` (scope `auth:read`) — **`kind` defaults to
+  `Review`.** The inbox is a work queue; a few hundred dispenses a day would drown the handful of requests
+  that need a decision, and a queue that is mostly noise stops being read.
+- `GET /api/v1/authorizations/{id}/items` (scope `auth:read`) — codes, labels, quantities and, only where the
+  two codes differ, the substituting pharmacist's reason. Nothing clinical.
+- `POST /api/v1/authorizations/substitution-requests` (scope `auth:request-substitution`, `lab_tech` /
+  `imaging_tech`) — a bench asking whether another examination may stand in. A **request**, not a choice:
+  master data records no equivalence between examinations, so a picker would have to be derived from the
+  category, which would put "any radiology procedure" behind a button.
 
 ## Review view (US-060) — the ONLY clinical-context endpoint
 
@@ -104,6 +148,11 @@ Roles `medical_approval` + `medical_director` on resource type `authorization`. 
   reviewer, timestamp, decision, rationale, `approved_scope` (jsonb, for partial), `break_glass` + mandatory
   `justification`. Immutability enforced by a trigger (`deny_decision_mutation`) **and** a revoked UPDATE/DELETE
   grant on `hbmp_app`; corrections are new rows, never edits.
+- `authorization_item` — what was delivered against a fulfilment authorization: `ordered_code` /
+  `fulfilled_code` (two columns, deliberately), quantity, `substitution_reason` (DB-required when the codes
+  differ), `fulfilment_ref` UNIQUE per tenant. RLS on `tenant_id`.
+- `processed_event` — the fulfilment consumer's dedupe ledger. Intentionally RLS-free: event ids, no tenant
+  data (mirrors `policy.processed_event`).
 - `Infrastructure/Migrations/0001_approvals.sql` — schema, `auth_seq`, both tables, the append-only trigger,
   `processed_request` idempotency ledger. `0002_breakglass.sql` — `retrospective_review_required` /
   `retrospective_reviewed` flags + the retrospective-queue partial index. Both applied to host PG (:55432).
@@ -127,4 +176,12 @@ Roles `medical_approval` + `medical_director` on resource type `authorization`. 
   manual break-glass authorization lands in the **retrospective queue** and drops once reviewed; the **TAT summary**
   aggregates avg/p95/breach over decided cases.
 
-Total: 54 approvals tests; full solution 429 green.
+- `FulfilmentAuthorizationTests` (validation pure; issuance env-gated, live PG) — a dispense keeps **both**
+  the written and the delivered drug; a substituted item with no reason is refused; a redelivered dispense
+  cannot post twice; a second dispense **appends** rather than issuing again; a fulfilment is born `Issued`
+  and a reviewer picking it up gets a 409; the reviewer inbox does not fill with dispenses while the register
+  shows them; the items projection carries no clinical field; a technician's substitution question raises a
+  **Review**, not a fulfilment, and is refused without a reason.
+
+Invariants: `INV-SUBSTITUTION-DOES-NOT-EDIT-THE-PRESCRIPTION`, `INV-NO-INVENTED-EXAMINATION-EQUIVALENCE`
+(`docs/quality/invariant-registry.yaml`).

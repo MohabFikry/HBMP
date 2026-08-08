@@ -6,6 +6,9 @@
     <PackageReference Include="FluentAssertions" />
   </ItemGroup>
   <ItemGroup>
+    <!-- 25.2 — hosts BranchReachGuard, the check that makes widening the practitioner write group safe.
+         Same shape emr's tests already use to reach their Api layer (24.3). -->
+    <ProjectReference Include="../Api/Mersal.Provider.Api.csproj" />
     <ProjectReference Include="../Domain/Mersal.Provider.Domain.csproj" />
     <ProjectReference Include="../Infrastructure/Mersal.Provider.Infrastructure.csproj" />
     <ProjectReference Include="../../../libs/auth/Mersal.Auth.csproj" />

@@ -35,6 +35,30 @@ html[lang="ar"] body {
   font-feature-settings: "tnum";
 }
 
+/*
+ * Links.
+ *
+ * There was no rule for a bare `<a>` anywhere in the system, so any anchor a screen did not style itself
+ * fell back to the user agent's `#0000EE` / visited `#551A8B`. The patient profile's section jump list is
+ * the clearest case: eleven navy links with "Referrals" in purple because someone had clicked it, sitting
+ * beside a teal-and-ink page. Browser-default blue on a themed surface is not a colour anyone chose, and
+ * the visited purple leaks the reader's history into the design.
+ *
+ * `--accent` is the accessible teal (5.2:1 light, ~7:1 dark) — 0A §5's link colour. `:visited` deliberately
+ * matches `:link`: in an operational tool "have I opened this section before" is not information the
+ * interface should be volunteering, and it is the mechanism that produced the two-tone list.
+ */
+a {
+  color: var(--accent);
+  text-underline-offset: 0.15em;
+}
+a:visited {
+  color: var(--accent);
+}
+a:hover {
+  color: var(--accent-press);
+}
+
 :focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
@@ -50,6 +74,21 @@ h3 {
   line-height: 1.18;
 }
 
+/*
+ * Visually hidden, still read aloud.
+ *
+ * `position: absolute` with no `inset` is what makes this cheap — the box leaves flow but stays where it
+ * would have been, so a screen reader reads it in document order. The catch is the containing block: with no
+ * positioned ancestor it is the INITIAL containing block, which means the box is placed at that offset in
+ * the DOCUMENT and escapes every `overflow: hidden` between it and the root. A caption 1100px down a
+ * scrolled worklist therefore grew the page to 1100px, and the whole 100dvh app shell gained a second,
+ * phantom scrollbar: scrolling it slid the entire chrome up and revealed a blank band underneath. The
+ * containing blocks are supplied by the shell (`app.css`: `.app-grid` / `.app-main` are `position:
+ * relative`); the shell rule and this one only work together, so neither may be removed alone.
+ *
+ * `clip-path` alongside the deprecated `clip` because `clip` only ever applied to absolutely positioned
+ * boxes and is gone from the spec; both are kept so the hiding survives either being dropped.
+ */
 .sr-only {
   position: absolute;
   width: 1px;
@@ -58,6 +97,7 @@ h3 {
   margin: -1px;
   overflow: hidden;
   clip: rect(0 0 0 0);
+  clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
 }

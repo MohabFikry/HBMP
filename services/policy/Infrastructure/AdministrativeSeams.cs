@@ -46,7 +46,10 @@ public interface IBeneficiaryAdministrativeSource
 
 /// <summary>The minimum a member list needs to be usable: who this is, and whether they are a live
 /// beneficiary. No identifiers, no contacts — a list is the highest-volume disclosure in the system.</summary>
-public sealed record BeneficiarySummary(Guid BeneficiaryId, string? GivenName, string? FamilyName, string? Status);
+/// <summary>Name + status + card number for one page of somebody else's list. Deliberately narrow — see
+/// patient-service's <c>BeneficiarySummaryEndpoints</c> for why the rest of the record is not here.</summary>
+public sealed record BeneficiarySummary(
+    Guid BeneficiaryId, string? GivenName, string? FamilyName, string? Status, string? CardNumber = null);
 
 public sealed class HttpBeneficiaryAdministrativeSource(HttpClient http) : IBeneficiaryAdministrativeSource
 {

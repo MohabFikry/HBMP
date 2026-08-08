@@ -9,6 +9,18 @@ namespace Mersal.Orders.Infrastructure;
 public enum ConsumeOutcome
 {
     Applied, Replayed, Conflict, NotFound, AlreadyUsed, OverConsume, OrderNotConsumable, LineNotFound, InvalidQuantity,
+    /// <summary>Past its validity window. Its own outcome, not folded into OrderNotConsumable, because the
+    /// technician's recovery is specific: ask the approval team to revalidate it.</summary>
+    OrderExpired,
+    /// <summary>
+    /// 30.2 — THE MIRROR of the cancel path (design 46 §2). The line was CANCELLED or SUPERSEDED by the
+    /// ordering clinician, and nothing was performed.
+    ///
+    /// <para>Not folded into <see cref="AlreadyUsed"/>: one means the work is already done, the other means
+    /// the doctor withdrew it, and a technician with the patient in front of them acts differently on
+    /// each.</para>
+    /// </summary>
+    LineWithdrawn,
     /// <summary>18.A3 — the header is empty, over-length, or contains the reserved <c>::</c> separator.</summary>
     InvalidIdempotencyKey,
     /// <summary>18.A3 — the key was already used for a DIFFERENT request body. Answering it with the
@@ -16,9 +28,18 @@ public enum ConsumeOutcome
     IdempotencyKeyReuse,
 }
 
-public sealed record ConsumeResult(ConsumeOutcome Outcome, InvestigationOrder? Order, IReadOnlyList<OrderFulfillment> Fulfillments)
+/// <summary>30.2 — why the line was withdrawn, in the words the bench needs.
+/// <see cref="SupersededById"/> points at the corrected line, without which "this was amended" leaves a
+/// technician with nowhere to go.</summary>
+public sealed record LineWithdrawal(
+    string Status, string? ReasonCode, string? ReasonText, Guid? By, DateTimeOffset? At, Guid? SupersededById);
+
+public sealed record ConsumeResult(
+    ConsumeOutcome Outcome, InvestigationOrder? Order, IReadOnlyList<OrderFulfillment> Fulfillments,
+    LineWithdrawal? Withdrawal = null)
 {
-    public static ConsumeResult Fail(ConsumeOutcome outcome) => new(outcome, null, []);
+    public static ConsumeResult Fail(ConsumeOutcome outcome, LineWithdrawal? withdrawal = null) =>
+        new(outcome, null, [], withdrawal);
 }
 
 /// <summary>The heart of phase 5 in one place (23-state-machines §2 "Atomic-consume guard") so the endpoint and the
@@ -59,8 +80,20 @@ public sealed class ConsumeExecutor(OrdersDbContext db)
                 ? new ConsumeResult(ConsumeOutcome.Replayed, order, prior)
                 : ConsumeResult.Fail(ConsumeOutcome.IdempotencyKeyReuse);
 
-        var error = OrderConsume.Validate(order, requests);
-        if (error != ConsumeError.None) return ConsumeResult.Fail(Map(error));
+        var error = OrderConsume.Validate(order, requests, now);
+        if (error != ConsumeError.None)
+        {
+            // 30.2 — THE MIRROR. A withdrawn line is not "already used": nothing was performed, and the
+            // technician needs the reason and, when it was amended, where the corrected line is.
+            var withdrawn = order.Lines.FirstOrDefault(l =>
+                requests.Any(r => r.OrderLineId == l.OrderLineId)
+                && l.Status is OrderLineStatus.Cancelled or OrderLineStatus.Superseded);
+            if (withdrawn is not null)
+                return ConsumeResult.Fail(ConsumeOutcome.LineWithdrawn, new LineWithdrawal(
+                    withdrawn.Status.ToString(), withdrawn.AmendmentReasonCode, withdrawn.AmendmentReasonText,
+                    withdrawn.AmendedBy, withdrawn.AmendedAt, withdrawn.SupersededById));
+            return ConsumeResult.Fail(Map(error));
+        }
 
         var fulfillments = new List<OrderFulfillment>();
         foreach (var r in requests)
@@ -162,6 +195,7 @@ public sealed class ConsumeExecutor(OrdersDbContext db)
         ConsumeError.AlreadyUsed => ConsumeOutcome.AlreadyUsed,
         ConsumeError.OverConsume => ConsumeOutcome.OverConsume,
         ConsumeError.OrderNotConsumable => ConsumeOutcome.OrderNotConsumable,
+        ConsumeError.OrderExpired => ConsumeOutcome.OrderExpired,
         _ => ConsumeOutcome.InvalidQuantity,
     };
 

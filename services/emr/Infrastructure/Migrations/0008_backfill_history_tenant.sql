@@ -39,11 +39,11 @@ WHERE tenant_id IS NULL OR btrim(tenant_id) = '';
 -- start. NOT VALID would let existing bad rows survive — there are none left, so this validates immediately
 -- and any future blank INSERT fails loudly at the point it is made instead of silently becoming readable.
 ALTER TABLE emr.appointment_history
-    DROP CONSTRAINT IF EXISTS ck_appointment_history_tenant_not_blank;
+    DROP CONSTRAINT IF EXISTS ck_appointment_history_tenant_not_blank;  -- migrate-compat: contract-ok (idempotent drop-then-readd of a constraint this migration itself adds two lines below; nothing pre-existing is relaxed)
 ALTER TABLE emr.appointment_history
     ADD CONSTRAINT ck_appointment_history_tenant_not_blank CHECK (btrim(tenant_id) <> '');
 
 ALTER TABLE emr.appointment
-    DROP CONSTRAINT IF EXISTS ck_appointment_tenant_not_blank;
+    DROP CONSTRAINT IF EXISTS ck_appointment_tenant_not_blank;  -- migrate-compat: contract-ok (idempotent drop-then-readd of a constraint this migration itself adds two lines below; nothing pre-existing is relaxed)
 ALTER TABLE emr.appointment
     ADD CONSTRAINT ck_appointment_tenant_not_blank CHECK (btrim(tenant_id) <> '');

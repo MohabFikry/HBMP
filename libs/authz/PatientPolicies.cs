@@ -48,6 +48,21 @@ public static class PatientPolicies
         // whether they are active, is squarely this role's job; the read stays tenant-gated, field-projected
         // and audited as Sensitive like every other.
         "policy_admin",
+        // A pharmacist is the same case this list already makes for reception: they are identifying the
+        // person AT THE COUNTER before handing over medication. Without it the dispensing screen showed
+        // "(name unavailable)" beside a member number and a masked token, so the only check available on
+        // "is this the right patient" was a number the patient had just read out.
+        //
+        // Two things bound it, and neither is new mechanism. The field projector gives every reader the
+        // `identity` BASELINE only — name, member/card number, date of birth, sex, status — while
+        // identifier VALUES (`pii`: national ID, UNHCR number, passport) and `contact` (phone, address) stay
+        // stripped, because pharmacist is not granted those classes. And the read is Sensitive, so each one
+        // is audited as a PHI read like every other.
+        //
+        // It also un-breaks the card-number search: pharmacy-service resolves a card + member number through
+        // patient-service under the CALLER's token, so a pharmacist without this read got a 403 that the
+        // resolver turned into "no prescriptions found" — a silent wrong answer about a real patient.
+        "pharmacist",
     ];
 
     public static IReadOnlyList<PolicyRule> Rules() =>

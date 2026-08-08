@@ -1,0 +1,36 @@
+[
+    {
+        "authorizationId": "31bea0f7-e1b6-4325-a5d9-1b0fc9196f52",
+        "authNo": "AUTH-2026-000657",
+        "beneficiaryId": "483bb9fa-2c3a-4f34-a35a-e9a4ace11df2",
+        "serviceCodes": [
+            "913fa07b-a575-4864-bf5d-47af712a7885"
+        ],
+        "priority": "Routine",
+        "status": "Issued",
+        "slaDueAt": null,
+        "slaBreached": false,
+        "tatElapsedSeconds": 0,
+        "source": "Prescription",
+        "itemReference": "RX-2026-000202",
+        "extensionReason": null,
+        "kind": "Fulfilment"
+    },
+    {
+        "authorizationId": "df04e490-83f8-4609-a44a-6f01410019d0",
+        "authNo": "AUTH-2026-000656",
+        "beneficiaryId": "d81af8bf-1e60-41b7-a7d0-9e901ca4700d",
+        "serviceCodes": [
+            "000dc5cd-7844-44d2-8448-f4cf6307dbf7"
+        ],
+        "priority": "Routine",
+        "status": "Issued",
+        "slaDueAt": null,
+        "slaBreached": false,
+        "tatElapsedSeconds": 0,
+        "source": "Prescription",
+        "itemReference": "RX-2026-000042",
+        "extensionReason": null,
+        "kind": "Fulfilment"
+    }
+]

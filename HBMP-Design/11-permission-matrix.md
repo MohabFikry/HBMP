@@ -70,6 +70,9 @@ Resources map to microservices (see [0A](0A-DESIGN-FOUNDATIONS.md)). Object-leve
 | `diagnosis` | emr | `diagnosis` |
 | `order` (lab/imaging/procedure) | orders | indication, `lab_result`/`imaging_result` |
 | `prescription` | orders | `prescription` |
+| `prescription_validation` *(26.4)* | pharmacy | `diagnosis`, `prescription` — the findings name the drugs AND the diagnoses they were checked against |
+| `prescription_line_override` *(26.4)* | pharmacy | `prescription` — the prescriber's free-text clinical reason for proceeding past a warning |
+| `masterdata_catalogue` *(26.1)* | masterdata | none — public medical reference data (ICD/CPT/LOINC/ATC/drugs/indications/interactions/allergens), tenant-free and carrying no PHI |
 | `lab_result` | orders | `lab_result` |
 | `imaging_result` | orders | `imaging_result` |
 | `approval_case` | approvals | attached clinical evidence |
@@ -97,6 +100,84 @@ Resources map to microservices (see [0A](0A-DESIGN-FOUNDATIONS.md)). Object-leve
 | `caller_verification` *(Phase 15)* | callcentre | `verified_identifiers` — **which identifier *types* were confirmed, never the values** — plus result, `failure_reason`, verifier, timestamp |
 
 ---
+
+### 2b. `masterdata:read` — the reference catalogue (26.1)
+
+Added in phase 26.1, and it **reverses a position recorded in code**: masterdata-service served its whole
+catalogue behind a bare authenticated check, and its own authorization suite argued that this was correct.
+
+The grant is deliberately **broad — every role that holds any scope**. That is not an oversight and it does
+not weaken anything: a diagnosis code means the same thing to a doctor, a pharmacist and a claims officer,
+the catalogue is tenant-free, and withholding it would break their screens while protecting nothing. Roles
+holding `profile:read` need it too — the patient profile resolves ICD codes to titles through masterdata,
+and without the scope every profile silently degrades to raw codes.
+
+What the scope buys is not restriction:
+
+- reference-data reach becomes a **stated, reviewable, revocable line in this matrix** rather than an
+  unstated consequence of holding any token at all;
+- a **service, integration or partner token must ask** for the catalogue instead of receiving it by default,
+  and the set of codes a platform carries is a fingerprint of what it treats;
+- phase 27's `approval_supervisor` has something real to be granted.
+
+There is deliberately **no `masterdata:write`**. Master data changes through admin-service's governed,
+effective-dated, audited path (8b.2), never through this service.
+
+> **Consequence worth knowing:** every service sets `Auth:ProtectedScopeRequiresMfa=true`, so scope-gating
+> the catalogue also imposes MFA on it. This is consistent rather than a regression — any session that can
+> reach `emr:read` is already MFA-backed.
+
+### 2c. `auth:request-substitution` and the authorization register (ADR-0034)
+
+Two grants land together, and the second is the one that widens a disclosure surface.
+
+**`auth:request-substitution`** — held by `lab_tech` and `imaging_tech`. It authorizes exactly one endpoint,
+`POST /authorizations/substitution-requests`, whose body names an order line, a reason, and optionally a
+proposed code. It carries **no decision authority**: the request lands `Submitted` in the approval team's
+normal queue with the normal SLA clock, and `auth:decide` is not granted here.
+
+Pharmacists are deliberately **not** granted it. They already resolve the same question at the counter
+against a real formulary — the drug's ATC-5 class — and pharmacy-service already routes an off-formulary
+request to approvals on its own. A second way to ask would be a second answer to keep in step with the first.
+
+The scope exists at all because **examinations have no equivalence set anywhere in master data**:
+`examination_type` records a category and a sensitivity, and neither says that one test may stand in for
+another. Offering a technician a list derived from the category would put "any radiology procedure" behind a
+button, which is a technician prescribing.
+
+**The authorization register** — `GET /authorizations?kind=Fulfilment` and `GET /authorizations/{id}/items`,
+both under the existing `auth:read`. This is a **widening**: the approval team could previously see only the
+requests they were asked to decide, and everything the platform authorized by rule rather than by review —
+which is almost everything — was invisible to a team accountable for what the payer pays.
+
+It is bounded three ways. The item projection carries **codes, labels, quantities and, only where the
+delivered code differs from the written one, the substituting pharmacist's reason** — no diagnosis, no note,
+no indication; the schema has no field that could carry one. The reason is the same bounded exception §3.2
+already makes for a validity-extension request: it is logistics written by a pharmacist and is the entire
+substance of what a reviewer is looking at, and routing them through the PHI-audited clinical review view to
+read one sentence would add an audited access to a patient's record for a question that is not about the
+patient. And the **default is unchanged** — `kind` defaults to `Review`, so the reviewer inbox does not fill
+with dispenses; the register is a deliberate ask on its own screen.
+
+### 2d. `policy:price-lookup` — the pricing slice, not the plan book
+
+An ACTION, not a scope: satisfied by `policy:read` **or** `eligibility:check`, and it authorizes exactly two
+routes — `GET /plans/{id}/version-at` and `GET /plan-versions/{id}/cost-share`.
+
+Both sat behind `policy:read`, which is the entire benefit product: every payer, every plan, every version
+and every rule on the platform. A pharmacist quoting at a counter does not hold it and should not — the same
+over-grant `practitioner:read` was split out of `provider:read` to avoid.
+
+**What that cost, until it was found.** The shared pricing path forwards the fulfiller's own token, so every
+quote made at a counter took a 403 — and the client could not tell that refusal apart from "this plan does
+not price pharmacy at the resolved tier", so a permission error was reported to a patient as a fact about
+their benefit. It stayed invisible because the sentence was ALSO true: no plan version had a pharmacy rule,
+so a broken route and a correct answer looked identical from outside.
+
+No new scope was minted. `eligibility:check` is already the scope for "what does this member pay for this
+category at this provider", which is precisely the question these two routes serve; a third grant naming the
+same question would be one more thing to reason about and one more place to revoke (identity 0025 made this
+argument for the pharmacist, and 0026 for the bench).
 
 ## 3. Object-level permission matrix
 
@@ -253,6 +334,44 @@ Actions here use the extended tokens from §1: **DC** Decide · **AJ** Adjust ·
 > 3. **(c) A grant is single-result and non-transferable.** One `report_access_grant` covers **exactly one `result_ref` for exactly one `grantee_user_id`**; it cannot be re-scoped, widened, shared, delegated, or inherited by a role or a team queue. It is **time-boxed** (default 72 h `Sensitive` / 24 h `HighlySensitive`, configurable), auto-expires, is revocable by the author / Medical Director / DPO, and **every read under it is audited separately** with `grant_id`, `purpose_code` and actor.
 > 4. **Release requires a decided request.** A `report_access_grant` may exist **only** as the product of an `Approved` `report_access_request` carrying a **mandatory `purpose_code` + free-text `justification`**, decided by the **authoring/ordering doctor or a Medical Director** (`SOD`: requester ≠ decider). A Director decision is flagged `decided_by_role=MedicalDirector` and **extra-audited**.
 > 5. **Branch scoping never replaces an existing control.** `BSC` composes with `TR`/`PO`/`ASG`/`TEN` and with the §4 field rules — it narrows, it never grants.
+
+### 3.5b Branch-management resources (Phase 25 — see [42-branch-management.md](42-branch-management.md))
+
+**THE RULE THAT GOVERNS THIS WHOLE SECTION:** `branch_coordinator` and `clinics_manager` hold an **identical**
+scope set. Every cell below applies to both. They differ only in **reach** — one active branch versus the
+whole permitted set — and reach is grant-derived, never role-derived.
+
+| Resource | Branch Coordinator | Clinics Manager | Everyone else |
+|---|---|---|---|
+| `practitioner` (assign/revoke, specialty, licence) | **W** 🔒 branch-reach | **W** 🔒 branch-reach | `provider:write` (network team) only |
+| `practitioner.license_no` | **R** (field-masked to the maintaining scopes) | **R** | absent from the payload |
+| `practitioner.license_expiry` | **R/W** | **R/W** | **R** — the DATE is not the NUMBER; it is what a status chip renders |
+| `specialty` catalogue | **R** (assign from the seeded 26) | **R** | create/rename stays `provider:write` |
+| `roster_exception` | **W** 🔒 branch-reach | **W** 🔒 branch-reach | — |
+| `inventory.item` | **R/W** | **R/W** | — |
+| `inventory.stock_movement` | **W** (append-only) 🔒 branch-reach | **W** 🔒 branch-reach | — |
+| `branch` (create/retire) | **✗** | **✗** | `provider:write` only |
+| external provider / contract / tariff | **✗** | **✗** | `provider:write` / `provider:admin` |
+| `emr_note`, `diagnosis`, result values | **✗** | **✗** | unchanged |
+
+**New scopes:** `branch:practitioner:write`, `branch:roster:write`, `branch:inventory:read`,
+`branch:inventory:write`.
+
+**HARD RULES**
+
+1. **No `provider:write` for a branch role, ever.** It is network-wide — it creates branches, edits external
+   labs, pharmacies and tariffs, and unmasks `license_no`. A coordinator maintaining a doctor's licence must
+   never acquire the authority to re-price the network to do it.
+2. **The branch-reach check is not the scope check.** Holding `branch:*:write` says *what* you may do; reach
+   says *where*. A caller holding only a branch scope may act **only on branches in reach** — a coordinator at
+   Maadi assigning a practitioner to Dokki is **403 + audited at High**, never a silent success. Widening a
+   scope group without this check is strictly worse than not widening it: it hands every coordinator the whole
+   network while looking, in the route table, like a carefully sized permission.
+3. **Inventory carries no beneficiary identifier** — not in a route, a request body, an entity or a column.
+   Clinic inventory is not a second dispensing path; prescribed items go through `pharmacy-service`.
+4. **Licence numbers stay field-masked.** Widened to the branch-maintaining scope in Phase 25, and
+   deliberately NOT to `practitioner:read` — reception holds that for the booking pickers, and a licence
+   number is not something the front desk needs to book an appointment.
 
 ### 3.6 Call-centre resources (Phase 15 — see [10 §3.3/§3.21](10-role-matrix.md))
 
@@ -1061,6 +1180,35 @@ Every cell here must agree with [10-role-matrix.md §5–7](10-role-matrix.md). 
 - **No identifier value is persisted in the `callcentre` schema** — a design-lint/schema assertion must show `caller_verification` carries identifier **types** only, and the frontend fixture must assert no stored identifier value is ever rendered.
 - **The Call Centre bundle declares `MemberScoped` / `BranchUnrestricted`** and contains **no `BSC` predicate** — a cross-branch read is normal for this role, and branch/specialty appear only as selectors.
 - **Every call-centre disclosure and mutation is audited and correlated by `call_ref`** — search, verification (pass *and* fail), 360 read, book/reschedule/cancel, contact update, interaction open/close.
+
+---
+
+## 8b. Amendment and cancellation of signed orders (Phase 30, [design 46](46-order-amendment-and-cancellation.md))
+
+**No new scopes.** Stated explicitly because the phase-30 gate asks for a decision either way rather than
+silence.
+
+Amending or withdrawing a signed line is the same authority as writing one — it is the prescriber correcting
+their own clinical decision, not a new capability — so the endpoints reuse `orders:write` / `rx:write` and the
+existing `OrdersPolicies.Create` / `PharmacyPolicies.RxCreate` rules, which already require the `doctor` role
+and a live **treating relationship**. Notes read under `orders:read` and write under `orders:write`; the
+external centre reads its own notes through the provider portal under `procedure:read`.
+
+A dedicated `orders:amend` scope was considered and rejected. It would have to be granted to exactly the roles
+that already hold `orders:write`, so it adds a second thing to keep in step with the first and nothing else —
+and the failure mode of drift between them is a doctor who can write an order they cannot then correct.
+
+| Who | May amend or withdraw? | Enforced by |
+|---|---|---|
+| The **authoring prescriber** | Yes | role `doctor` + `orders:write` + treating relationship |
+| **Another treating clinician** | Yes, with a coded reason | the same rule — cover happens, and a doctor who has gone home must not block a correction |
+| A **non-treating** clinician | **No** | the ABAC treating-relationship condition, not a role check |
+| **Reception**, the **call centre** | **No** | role |
+| The **fulfilling provider** (lab, radiology, pharmacy, centre) | **No** | role — a pharmacy that disagrees raises a clarification; it does not edit a prescription |
+| Anyone, on an **expired** order | **No** | the order's own validity — it is expired, not amendable, and the approval team can revalidate it |
+
+Every refusal above has a named denial test (`Mersal.Orders.Tests.AmendmentAuthorityTests`), because a rule
+inherited by reuse is a rule nobody has proven.
 
 ---
 

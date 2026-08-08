@@ -56,12 +56,16 @@ public static class EnrollmentEndpoints
                 EffectiveFrom = req.EffectiveFrom, EffectiveTo = req.EffectiveTo, MaxMembers = req.MaxMembers,
                 Status = PolicyStatus.Active, CreatedAt = now, UpdatedAt = now,
             };
+            // The policy row and the event announcing it commit together, or neither does: a PolicyIssued
+            // nobody can look up and a policy nobody downstream heard about are both worse than a failure.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             db.Policies.Add(policy);
             if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
 
             await audit.EmitAsync(Draft("policy", policy.PolicyId, AuditAction.Create, gate), ct);
             await outbox.EnqueueAsync("PolicyIssued", "policy.events",
                 new { tenantId = policy.TenantId, policyId = policy.PolicyId, policy.PolicyNo, payerId = req.PayerId }, ct);
+            await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/policies/{policy.PolicyId}", new { policy.PolicyId, policy.PolicyNo });
         });
 
@@ -83,6 +87,9 @@ public static class EnrollmentEndpoints
                 EffectiveFrom = req.EffectiveFrom, EffectiveTo = req.EffectiveTo,
                 Status = PolicyStatus.Active, CreatedAt = now, UpdatedAt = now,
             };
+            // Renewal writes the successor policy and announces it; the carry-forward report below is derived
+            // from the same read, so the count in PolicyRenewed and the rows it counts share one commit.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             db.Policies.Add(renewed);
 
             var unmapped = new List<string>();
@@ -124,6 +131,7 @@ public static class EnrollmentEndpoints
                 tenantId = renewed.TenantId, policyId = renewed.PolicyId, previousPolicyId = previous.PolicyId,
                 membersCarried = carried, unmapped = unmapped.Count,
             }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(new RenewalView(renewed.PolicyId, renewed.PolicyNo, previous.PolicyId, carried, unmapped));
         });
     }
@@ -168,6 +176,9 @@ public static class EnrollmentEndpoints
                 IsDefault = req.IsDefault, EligibilityRule = req.EligibilityRule, MaxMembers = req.MaxMembers,
                 CreatedAt = now, UpdatedAt = now, CreatedBy = gate.SubjectId, UpdatedBy = gate.SubjectId,
             };
+            // Attaching a plan changes what members of this policy are entitled to. Eligibility consumes
+            // PolicyPlanAttached to rebuild its view, so the row and the event must not be able to diverge.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             db.PolicyPlans.Add(plan);
             if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
 
@@ -177,6 +188,7 @@ public static class EnrollmentEndpoints
                 tenantId = plan.TenantId, policyId = id, policyPlanId = plan.PolicyPlanId,
                 planVersionId = req.PlanVersionId, plan.PlanLabel, plan.IsDefault,
             }, ct);
+            await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/policy-plans/{plan.PolicyPlanId}", PolicyPlanView.From(plan));
         });
 
@@ -252,7 +264,7 @@ public static class EnrollmentEndpoints
             MembershipResult<EnrollOutcome> result;
             try
             {
-                result = await membership.EnrollAsync(command, idempotencyKey, Bearer(http), Actor(gate), ct);
+                result = await membership.EnrollAsync(command, idempotencyKey, Bearer(http), Actor(gate), ct: ct);
             }
             catch (BeneficiaryProbeRefusedException ex)
             {
@@ -393,7 +405,8 @@ public static class EnrollmentEndpoints
     private static string Detail(MembershipError error) =>
         error.Failures is { Count: > 0 } f ? $"{error.Detail} ({string.Join("; ", f)})" : error.Detail;
 
-    private static ActorRef Actor(PolicyGate gate) => new(gate.SubjectId, gate.Subject);
+    private static ActorRef Actor(PolicyGate gate) =>
+        new(gate.SubjectId, gate.Subject, gate.Principal?.DisplayName);
 
     // ---- helpers -----------------------------------------------------------------------------------------
 

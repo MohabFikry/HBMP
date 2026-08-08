@@ -1,0 +1,91 @@
+# Static serving for the Mersal SPA, and the ONE ORIGIN the browser sees (ADR-0036 §4, phase 28.2).
+#
+# History-API routing → always fall back to index.html; long-cache the fingerprinted assets but never the HTML
+# shell, so a redeploy is picked up immediately. Listens on 8080 to match the unprivileged-port convention the
+# service images use.
+#
+# ============================================================================================================
+# WHY THE GATEWAY IS PROXIED THROUGH HERE
+# ============================================================================================================
+# The SPA used to be served from :5173 and reach the issuer at :8090 and the API at :8000 — three origins for
+# one application. Signing in navigated the browser to a different host, which is the whole of what "the app
+# moves to another platform to log in" describes. `/api`, `/connect`, `/.well-known` and `/identity` are now
+# proxied to the gateway from this server block, so every one of them is same-origin.
+#
+# Three separate things depend on that, and they fail three different ways:
+#
+#   1. THE SESSION COOKIE. IssuerSetup sets SameSite=Strict on all four Identity cookies, on the stated
+#      assumption that "nothing in this flow is a legitimate cross-site navigation". A login form posted from
+#      a different origin IS cross-site, and the browser would drop the cookie on the response — the sign-in
+#      would look successful and the next authorize would report login_required. That reads as a credential
+#      problem and is a browser policy.
+#   2. THE URL BAR. A same-origin prompt=none navigation never shows another host. The redirect is only
+#      invisible if the origin matches.
+#   3. THIRD-PARTY COOKIE DEPRECATION. A cross-site arrangement is one browser release from breaking with no
+#      change on our side.
+#
+# The token's `iss` does NOT move: OpenIddict pins it via Issuer:PublicUrl (the ID2088 fix), so it is unchanged
+# by which host the request arrived on, and none of the 19 services that pin Auth__ValidIssuers is touched.
+#
+# NOTE FOR THE ISSUER'S RATE LIMITER: this adds a hop. identity-service counts back through the forwarded
+# chain to find the client, and the count is Forwarding__TrustedHops — it becomes 2 the moment this proxy
+# exists. Getting it wrong collapses every caller onto one bucket again (see ClientPartition, phase 28.1).
+
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # ---- the gateway, same-origin ------------------------------------------------------------------------
+    #
+    # One regex location rather than four prefix blocks. Regex locations are evaluated before ordinary prefix
+    # matches, and none of these paths overlaps /assets/, so the SPA's own files are unaffected.
+    location ~ ^/(api|connect|identity|\.well-known)/ {
+        proxy_pass ${KONG_UPSTREAM};
+        proxy_http_version 1.1;
+
+        # $http_host, NOT $host. `$host` is the hostname with the PORT STRIPPED, so the issuer — which Kong
+        # now forwards this Host to (preserve_host) and which derives its published endpoint URLs from it —
+        # advertised `http://localhost/connect/authorize` with no :5173. A discovery document pointing one
+        # port away from where the application actually lives, which is a harder thing to notice than a
+        # wrong hostname. `$http_host` is the client's Host header verbatim.
+        proxy_set_header Host              $http_host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        # APPEND, never replace. The issuer reads the client's address back out of this chain; replacing it
+        # would leave the gateway's own address as the only entry and re-create the shared rate-limit bucket.
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+
+        # The authorize endpoint answers with a 302 to the SPA's own origin. Left alone deliberately —
+        # rewriting Location here would break the one redirect the whole login depends on.
+        proxy_redirect off;
+    }
+
+    # ---- Fingerprinted build assets are immutable — cache hard --------------------------------------------
+    #
+    # The security headers are REPEATED in every location that sets a header of its own. nginx's `add_header`
+    # does not merge across levels: a directive at server level is discarded entirely by any location with its
+    # own add_header. Setting them once at server level would therefore drop them from exactly the two
+    # locations that serve the application — which is the silent half of a CSP that reads as enabled.
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        add_header Content-Security-Policy "${CSP_POLICY}" always;
+        add_header X-Content-Type-Options  "nosniff"    always;
+        add_header Referrer-Policy         "no-referrer" always;
+        add_header X-Frame-Options         "DENY"       always;
+        try_files $uri =404;
+    }
+
+    # ---- Everything else resolves to the SPA shell (client-side routing). Never cache the shell. ----------
+    location / {
+        add_header Cache-Control "no-cache";
+        add_header Content-Security-Policy "${CSP_POLICY}" always;
+        add_header X-Content-Type-Options  "nosniff"    always;
+        add_header Referrer-Policy         "no-referrer" always;
+        add_header X-Frame-Options         "DENY"       always;
+        try_files $uri /index.html;
+    }
+}

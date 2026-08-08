@@ -60,10 +60,33 @@ function useUnreadCount(enabled: boolean, refreshToken: number): number {
   return count;
 }
 
+/** Static tab title outside a portal (login, access-denied) and the trailing brand inside one. */
+const BRAND = "Mersal HBMP";
+
+/**
+ * Names the browser tab after the active section: "Register New | Mersal HBMP". This is what replaced the
+ * on-screen breadcrumb — one line under the app bar that repeated the nav rail's own current-item
+ * highlight, on every screen. The tab is the one place that context is NOT already visible: with several
+ * portals open, the tab strip is all the user has to tell them apart. Section first, because tabs truncate
+ * from the end.
+ *
+ * `section` is optional, so this is safe to call before the shell knows the portal — the title falls back to
+ * the brand alone, and the effect restores it when the shell unmounts.
+ */
+function useDocumentTitle(section: string | undefined) {
+  const title = section ? `${section} | ${BRAND}` : BRAND;
+  useEffect(() => {
+    document.title = title;
+    return () => {
+      document.title = BRAND;
+    };
+  }, [title]);
+}
+
 /**
  * The shared portal shell (14 §1): glass top bar (banner), permission-generated nav rail (navigation),
- * breadcrumb, and the main landmark. Also hosts the global keyboard map and the session-timeout re-auth
- * prompt. Nav items are ONLY the sections the signed-in user may use (min-necessary menus, US-071).
+ * and the main landmark. Also hosts the global keyboard map and the session-timeout re-auth prompt. Nav
+ * items are ONLY the sections the signed-in user may use (min-necessary menus, US-071).
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const { session, can, logout, timeoutWarning, keepAlive } = useAuth();
@@ -90,6 +113,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const unread = useUnreadCount(canNotify, notifyRefresh);
   const bellRef = useRef<HTMLButtonElement | null>(null);
   const avatarRef = useRef<HTMLButtonElement | null>(null);
+
+  const activePath = location.pathname.split("/")[2] ?? accessible[0]?.path;
+  const activeSection = accessible.find((s) => s.path === activePath);
+  useDocumentTitle(activeSection ? tr(activeSection.label) : undefined);
 
   const homePath = portal && accessible[0] ? `/${portal.base}/${accessible[0].path}` : "/";
   const primaryQueuePath = useMemo(() => {
@@ -159,9 +186,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     // A real URL per item: middle-click/ctrl-click open tabs, and screen readers hear links (QA P2-17).
     href: `/${portal.base}/${s.path}`,
   }));
-
-  const activePath = location.pathname.split("/")[2] ?? accessible[0]?.path;
-  const activeSection = accessible.find((s) => s.path === activePath);
 
   return (
     <div className="app-grid">
@@ -261,15 +285,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       />
 
       <main id="main" className="app-main" tabIndex={-1}>
-        <nav aria-label={L.breadcrumb[lang]} className="app-crumb">
-          <span>{tr(portal.title)}</span>
-          {activeSection && (
-            <>
-              <span aria-hidden="true"> ▸ </span>
-              <span aria-current="page">{tr(activeSection.label)}</span>
-            </>
-          )}
-        </nav>
         {children}
       </main>
 

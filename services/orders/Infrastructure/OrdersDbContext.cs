@@ -15,6 +15,51 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
     public DbSet<ProcessedRequest> ProcessedRequests => Set<ProcessedRequest>();
     public DbSet<ReportAccessRequest> ReportAccessRequests => Set<ReportAccessRequest>();   // 14.7
     public DbSet<ReportAccessGrant> ReportAccessGrants => Set<ReportAccessGrant>();          // 14.7
+    public DbSet<LineAmendmentRecord> LineAmendments => Set<LineAmendmentRecord>();          // 30.1
+    public DbSet<OrderNote> OrderNotes => Set<OrderNote>();                                  // 30.5b
+
+    /// <summary>
+    /// 29.2 — a line's <c>RequestedQuantity</c> defaults to what was ordered.
+    ///
+    /// <para>Not a fudge to satisfy <c>ck_order_line_ordered_within_requested</c>, but the DEFINITION: for a
+    /// line created without a distinct approval step, what was asked for and what may be delivered are the
+    /// same number. The two only diverge when an approval NARROWS the entitlement
+    /// (<c>ProcedureSessions.ApplyApproval</c>), and that is an explicit act on an existing row.</para>
+    ///
+    /// <para>Applied here, once, rather than at each writer, because the alternative is a required field that
+    /// every present and future call site must remember — and the failure mode when one forgets is a CHECK
+    /// violation at save time, i.e. an order a doctor cannot place. A default that is correct by definition
+    /// belongs at the choke point; a default that is a guess would not belong anywhere.</para>
+    /// </summary>
+    private void DefaultRequestedQuantities()
+    {
+        foreach (var entry in ChangeTracker.Entries<OrderLine>())
+        {
+            if (entry.State is not EntityState.Added) continue;
+            if (entry.Entity.RequestedQuantity <= 0)
+                entry.Entity.RequestedQuantity = entry.Entity.QuantityOrdered;
+
+            // 30.1 — a new line is version 1 of its own chain unless it was created BY an amendment, which
+            // sets the root explicitly to the line it supersedes. Same reasoning as the quantity above: a
+            // value that is correct by definition belongs at the choke point, because the failure mode when
+            // one call site forgets is a NOT NULL violation, i.e. an order a doctor cannot place.
+            if (entry.Entity.RootLineId == Guid.Empty)
+                entry.Entity.RootLineId = entry.Entity.OrderLineId;
+        }
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        DefaultRequestedQuantities();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        DefaultRequestedQuantities();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -30,6 +75,16 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
             e.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
             e.Property(x => x.OrderingBranchId).HasColumnName("ordering_branch_id");   // phase 14.4
             e.Property(x => x.SensitivityLevel).HasConversion<string>().HasColumnName("sensitivity_level");   // phase 14.6
+            // 31.1 — the COURSE, at the level it is decided: one kind and one session count per order.
+            e.Property(x => x.ProcedureTypeCode).HasColumnName("procedure_type_code");
+            e.Property(x => x.Sessions).HasColumnName("sessions");
+            e.Property(x => x.AssignedProviderId).HasColumnName("assigned_provider_id");        // 29.2b
+            e.Property(x => x.SharedClinicalContext).HasColumnName("shared_clinical_context");  // 29.2b
+            e.Property(x => x.SharedContextBy).HasColumnName("shared_context_by");
+            e.Property(x => x.SharedContextAt).HasColumnName("shared_context_at");
+            e.Property(x => x.CompletionReport).HasColumnName("completion_report");            // 29.2b
+            e.Property(x => x.CompletionReportedBy).HasColumnName("completion_reported_by");
+            e.Property(x => x.CompletionReportedAt).HasColumnName("completion_reported_at");
             e.HasIndex(x => x.OrderNo).IsUnique();
             e.HasIndex(x => new { x.BeneficiaryId, x.Status });
             e.HasIndex(x => x.OrderingBranchId);
@@ -48,8 +103,60 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
             e.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
             e.Property(x => x.ExaminationTypeId).HasColumnName("examination_type_id");   // phase 14.6
             e.Property(x => x.SensitivityLevel).HasConversion<string>().HasColumnName("sensitivity_level");   // phase 14.6
+            e.Property(x => x.ProcedureTypeCode).HasColumnName("procedure_type_code");   // 29.2
+            e.Property(x => x.RequestedQuantity).HasColumnName("requested_quantity");    // 29.2
+            // 31.1 — how much of this item at each attendance. `quantity_ordered` stays the metered total.
+            e.Property(x => x.QuantityPerSession).HasColumnName("quantity_per_session");
+            // 30.1 — the version chain (design 46 §1). The clinical columns above are frozen by
+            // trg_order_line_signed; these are the only ones an amendment writes on the ORIGINAL row.
+            e.Property(x => x.VersionNo).HasColumnName("version_no");
+            e.Property(x => x.SupersedesId).HasColumnName("supersedes_id");
+            e.Property(x => x.SupersededById).HasColumnName("superseded_by_id");
+            e.Property(x => x.RootLineId).HasColumnName("root_line_id");
+            e.Property(x => x.AmendmentReasonCode).HasColumnName("amendment_reason_code");
+            e.Property(x => x.AmendmentReasonText).HasColumnName("amendment_reason_text");
+            e.Property(x => x.AmendedBy).HasColumnName("amended_by");
+            e.Property(x => x.AmendedAt).HasColumnName("amended_at");
             e.Ignore(x => x.QuantityRemaining);
+            e.Ignore(x => x.IsTerminal);
             e.HasIndex(x => x.OrderId);
+            e.HasIndex(x => new { x.RootLineId, x.VersionNo });
+        });
+
+        // 30.1 — the append-only amendment ledger (orders 0013).
+        b.Entity<LineAmendmentRecord>(e =>
+        {
+            e.ToTable("line_amendment");
+            e.HasKey(x => x.AmendmentId);
+            e.Property(x => x.OrderLineId).HasColumnName("order_line_id");
+            e.Property(x => x.NewLineId).HasColumnName("new_line_id");
+            e.Property(x => x.FromStatus).HasColumnName("from_status");
+            e.Property(x => x.ToStatus).HasColumnName("to_status");
+            e.Property(x => x.ReasonCode).HasColumnName("reason_code");
+            e.Property(x => x.ReasonText).HasColumnName("reason_text");
+            e.Property(x => x.AmendedBy).HasColumnName("amended_by");
+            e.Property(x => x.AmendedByDisplay).HasColumnName("amended_by_display");
+            e.Property(x => x.AmendedAt).HasColumnName("amended_at");
+            e.Property(x => x.RequestHash).HasColumnName("request_hash");
+            e.HasIndex(x => x.IdempotencyKey).IsUnique();
+            e.HasIndex(x => x.OrderLineId);
+        });
+
+        // 30.5b — order-line notes (orders 0015).
+        b.Entity<OrderNote>(e =>
+        {
+            e.ToTable("order_note");
+            e.HasKey(x => x.NoteId);
+            e.Property(x => x.SubjectType).HasColumnName("subject_type");
+            e.Property(x => x.SubjectId).HasColumnName("subject_id");
+            e.Property(x => x.RootLineId).HasColumnName("root_line_id");
+            e.Property(x => x.AuthorUserId).HasColumnName("author_user_id");
+            e.Property(x => x.AuthorDisplayName).HasColumnName("author_display_name");
+            e.Property(x => x.AuthoredAt).HasColumnName("authored_at");
+            e.Property(x => x.CancelledBy).HasColumnName("cancelled_by");
+            e.Property(x => x.CancelledAt).HasColumnName("cancelled_at");
+            e.Property(x => x.CancelReason).HasColumnName("cancel_reason");
+            e.HasIndex(x => x.RootLineId);
         });
 
         b.Entity<OrderFulfillment>(e =>

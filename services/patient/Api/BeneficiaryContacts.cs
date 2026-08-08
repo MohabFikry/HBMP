@@ -91,6 +91,9 @@ public static class BeneficiaryContactEndpoints
 
             beneficiary.UpdatedAt = clock.GetUtcNow();
             beneficiary.UpdatedBy = principal.Subject;
+            // 24.3 — the contact and BeneficiaryContactChanged commit together; a lost event leaves
+            // notification dialling the old number.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             await db.SaveChangesAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
@@ -107,6 +110,7 @@ public static class BeneficiaryContactEndpoints
                 contactType = type.ToString(), isPrimary = existing.IsPrimary,
             }, ct);
 
+            await tx.CommitAsync(ct);
             return Results.Ok(new ContactUpsertView(
                 existing.ContactId, type.ToString(), existing.Value, existing.PreferredChannel, existing.IsPrimary, before));
         }).RequireAuthorization(HbmpPolicies.Scope("patient:write"));

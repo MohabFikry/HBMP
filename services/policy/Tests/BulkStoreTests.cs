@@ -4,6 +4,7 @@ using FluentAssertions;
 using Mersal.Audit.Client;
 using Mersal.Authz;
 using Mersal.Events;
+using Mersal.Data;
 using Mersal.Policy.Domain;
 using Mersal.Policy.Infrastructure;
 using Mersal.Time;
@@ -27,8 +28,20 @@ public class BulkStoreTests
     private static readonly string? Db = Environment.GetEnvironmentVariable("POLICY_TEST_DB");
     private const string Tenant = "11111111-1111-1111-1111-111111111111";
 
+    /// <summary>
+    /// 24.x — the context carries the SAME tenant stamper the API composes.
+    ///
+    /// <para>These tests used a bare DbContext, so nothing stamped tenant_id and every row they wrote
+    /// landed with the entity's `= ""` default — belonging to no tenant, invisible to every real one. 100
+    /// bulk_job and 93 extract_run rows on the dev database came from exactly this. The database now
+    /// refuses them (ck_*_tenant_not_blank), and the right response is to make the fixture behave like
+    /// production rather than to relax the constraint: a test writing data production could never write is
+    /// not testing production.</para>
+    /// </summary>
     private static PolicyDbContext Ctx() => new(new DbContextOptionsBuilder<PolicyDbContext>()
-        .UseNpgsql(Db).UseSnakeCaseNamingConvention().Options);
+        .UseNpgsql(Db).UseSnakeCaseNamingConvention()
+        .AddInterceptors(new TenantStampingInterceptor(new RlsContext { TenantId = Tenant }))
+        .Options);
 
     // ---- Commit: idempotency + partial failure ------------------------------------------------------------
 
@@ -77,6 +90,97 @@ public class BulkStoreTests
         finally { await Cleanup(f); }
     }
 
+    /// <summary>
+    /// The other half of the replay contract, and the reason the bug above went unseen for so long.
+    ///
+    /// <para>A replay is skipped only when NOTHING changed. Correcting the contribution and re-uploading is
+    /// the single most common fix an operator makes, and it must be APPLIED — a file whose only edit is the
+    /// member's share would otherwise be swallowed as "already done" and the correction silently lost.</para>
+    ///
+    /// <para>This pins the COST-SHARE branch specifically: it stays green even if person-level change
+    /// detection is broken, because a changed share alone is enough to make the row an update. The person
+    /// branch is pinned separately below — the two failed independently and a single test covering both
+    /// would have hidden exactly the defect that got here.</para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_re_upload_that_only_corrects_the_contribution_is_applied_not_skipped()
+    {
+        Skip.If(Db is null, "POLICY_TEST_DB not set — DB integration test skipped.");
+        var f = await Seed();
+        try
+        {
+            await using var db = Ctx();
+            var harness = new Harness(db, f);
+
+            var first = await harness.UploadAsync(BulkJobType.MemberEnrolment, EnrolmentCsv(f, f.Beneficiaries));
+            await harness.Engine.ValidateAsync(first.JobId, harness.Scope, null);
+            (await harness.Engine.CommitAsync(first.JobId, harness.Scope, null)).Job.AppliedRows.Should().Be(3);
+
+            // Same people, same plan, same effective date — so the membership replays on its idempotency key.
+            // Only the share differs.
+            var corrected = await harness.UploadAsync(
+                BulkJobType.MemberEnrolment, EnrolmentCsv(f, f.Beneficiaries, contribution: 35m));
+            await harness.Engine.ValidateAsync(corrected.JobId, harness.Scope, null);
+            var second = await harness.Engine.CommitAsync(corrected.JobId, harness.Scope, null);
+
+            second.Job.AppliedRows.Should().Be(3, "a replay whose cost share changed is an update, not a no-op");
+            second.Job.SkippedRows.Should().Be(0);
+
+            db.ChangeTracker.Clear();
+            var shares = await db.Enrollments.AsNoTracking()
+                .Where(e => f.Beneficiaries.Contains(e.BeneficiaryId) && !e.IsDeleted)
+                .Select(e => e.ContributionPercent).ToListAsync();
+            shares.Should().OnlyContain(s => s == 35m, "the correction is the whole point of the re-upload");
+
+            (await db.Enrollments.CountAsync(e => f.Beneficiaries.Contains(e.BeneficiaryId) && !e.IsDeleted))
+                .Should().Be(3, "correcting a share must not create a second membership");
+        }
+        finally { await Cleanup(f); }
+    }
+
+    /// <summary>
+    /// Person-level change detection, pinned on its own.
+    ///
+    /// <para>The share is identical here, so <c>costShareChanged</c> is false and the row can only be applied
+    /// if the PERSON is seen to have changed. That makes this the test that actually fails when the intake
+    /// seam stops noticing edits — the failure mode that shipped: <see cref="BeneficiaryIntake"/> is a record
+    /// with an <c>IReadOnlyList</c> member, so <c>==</c> compares that member by reference and every
+    /// re-parse looked different. It reported the reverse of the truth on every row, and nothing caught it
+    /// because no test asked the question with the share held constant.</para>
+    ///
+    /// <para>A corrected spelling is not a cosmetic edit for a refugee record — it is how a member whose name
+    /// was mis-keyed at intake stops failing identity checks at the desk.</para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_re_upload_that_only_corrects_a_name_is_applied_not_skipped()
+    {
+        Skip.If(Db is null, "POLICY_TEST_DB not set — DB integration test skipped.");
+        var f = await Seed();
+        try
+        {
+            await using var db = Ctx();
+            var harness = new Harness(db, f);
+
+            var first = await harness.UploadAsync(BulkJobType.MemberEnrolment, EnrolmentCsv(f, f.Beneficiaries));
+            await harness.Engine.ValidateAsync(first.JobId, harness.Scope, null);
+            (await harness.Engine.CommitAsync(first.JobId, harness.Scope, null)).Job.AppliedRows.Should().Be(3);
+
+            // Same plan, same date, SAME SHARE — only the spelling differs, so nothing but person-level
+            // change detection can make this an update.
+            var corrected = await harness.UploadAsync(
+                BulkJobType.MemberEnrolment, EnrolmentCsv(f, f.Beneficiaries, firstName: "Aminah"));
+            await harness.Engine.ValidateAsync(corrected.JobId, harness.Scope, null);
+            var second = await harness.Engine.CommitAsync(corrected.JobId, harness.Scope, null);
+
+            second.Job.AppliedRows.Should().Be(3, "a corrected name is a real edit the operator came back to make");
+            second.Job.SkippedRows.Should().Be(0);
+
+            (await db.Enrollments.CountAsync(e => f.Beneficiaries.Contains(e.BeneficiaryId) && !e.IsDeleted))
+                .Should().Be(3, "correcting a name must not create a second membership");
+        }
+        finally { await Cleanup(f); }
+    }
+
     [SkippableFact]
     public async Task A_row_that_breaches_a_rule_fails_alone_and_the_rest_still_apply()
     {
@@ -86,12 +190,16 @@ public class BulkStoreTests
         {
             await using var db = Ctx();
             var harness = new Harness(db, f);
-            // Row 2 names a policy that does not exist. Aborting the file on it would leave the job
+            // Row 2 names a plan that does not exist. Aborting the file on it would leave the job
             // half-applied with no record of where it stopped — not atomic, and not accounted for either.
-            var csv = new StringBuilder("beneficiary_id,policy_no,relationship,effective_from\n");
-            csv.Append(CultureInfo.InvariantCulture, $"{f.Beneficiaries[0]},{f.PolicyNo},Principal,2026-02-01\n");
-            csv.Append(CultureInfo.InvariantCulture, $"{f.Beneficiaries[1]},NO-SUCH-POLICY,Principal,2026-02-01\n");
-            csv.Append(CultureInfo.InvariantCulture, $"{f.Beneficiaries[2]},{f.PolicyNo},Principal,2026-02-01\n");
+            var csv = new StringBuilder(
+                "card_number,first_name,last_name,gender,nationality,phone_no,birthdate,plan,network_tier,contribution\n");
+            var rows = new[] { $"{f.Prefix}-Standard", "NO-SUCH-PLAN", $"{f.Prefix}-Standard" };
+            for (var i = 0; i < 3; i++)
+            {
+                csv.Append(CultureInfo.InvariantCulture,
+                    $"{CardFor(f.Beneficiaries[i])},Amina{i},Yusuf,Female,SY,+201234567890,1990-01-01,{rows[i]},MERSAL,20\n");
+            }
 
             var job = await harness.UploadAsync(BulkJobType.MemberEnrolment, Encoding.UTF8.GetBytes(csv.ToString()));
             var validation = await harness.Engine.ValidateAsync(job.JobId, harness.Scope, null);
@@ -125,7 +233,7 @@ public class BulkStoreTests
 
             validation.Preview.Should().ContainSingle();
             validation.Preview[0].SummaryAr.Should().NotBeNullOrWhiteSpace();
-            validation.Preview[0].Changes.Should().ContainKey("policyNo");
+            validation.Preview[0].Changes.Should().ContainKey("cardNumber");
             (await db.Enrollments.CountAsync(e => e.BeneficiaryId == f.Beneficiaries[0])).Should().Be(0);
         }
         finally { await Cleanup(f); }
@@ -421,9 +529,14 @@ public class BulkStoreTests
                 db, new ActiveBeneficiaries(), new SequentialMemberNos(), Audit, new NullOutbox(),
                 calendar, Options.Create(new MembershipOptions()), clock);
 
+            // The intake seam is the thing under test in the upsert cases, so it is a real fake rather than a
+            // stub: it remembers which cards it has seen, so a second upload of the same file reports the
+            // person as unchanged exactly as patient-service would.
+            Intake = new RecordingIntake(f.Beneficiaries.ToDictionary(CardFor, id => id));
+
             IBulkRowApplier[] appliers =
             [
-                new MemberEnrolmentApplier(db, Membership, new ActiveBeneficiaries()),
+                new MemberEnrolmentApplier(db, Membership, Intake, new SeededTiers(), calendar, clock),
                 new MemberTerminationApplier(db, Membership, calendar),
                 new PlanChangeApplier(db, Membership, calendar),
                 new GroupAssignmentApplier(db, Membership, calendar),
@@ -445,6 +558,7 @@ public class BulkStoreTests
         private readonly Fixture _fixture;
 
         public RecordingAudit Audit { get; }
+        public RecordingIntake Intake { get; }
         public IOperationalDocumentStore Documents { get; }
         public MembershipCommands Membership { get; }
         public BulkJobEngine Engine { get; }
@@ -479,6 +593,64 @@ public class BulkStoreTests
     {
         public Task<string?> GetStatusAsync(Guid beneficiaryId, string? bearerToken, CancellationToken ct = default)
             => Task.FromResult<string?>("Active");
+    }
+
+    /// <summary>
+    /// Stands in for patient-service's register-or-update-by-card endpoint.
+    ///
+    /// <para>Deliberately stateful. The whole point of keying on the card is that the SECOND upload of a file
+    /// finds the person already there and reports them unchanged; a stub that always answered "created" would
+    /// let a broken upsert pass every test.</para>
+    /// </summary>
+    internal sealed class RecordingIntake(Dictionary<string, Guid> known) : IBeneficiaryIntake
+    {
+        private readonly Dictionary<string, BeneficiaryIntake> _seen = new(StringComparer.Ordinal);
+
+        public List<string> Cards { get; } = [];
+
+        public Task<BeneficiaryIntakeResult?> UpsertAsync(
+            BeneficiaryIntake intake, string? bearerToken, CancellationToken ct = default)
+        {
+            Cards.Add(intake.CardNumber);
+            // An unknown card would be a genuinely new person; the fixtures only ever use seeded ones, so an
+            // unseeded card means the CSV and the fixture have drifted apart and the test should say so.
+            if (!known.TryGetValue(intake.CardNumber, out var id))
+                return Task.FromResult<BeneficiaryIntakeResult?>(null);
+
+            var created = !_seen.ContainsKey(intake.CardNumber);
+            var changed = created || !SameContent(_seen[intake.CardNumber], intake);
+            _seen[intake.CardNumber] = intake;
+            return Task.FromResult<BeneficiaryIntakeResult?>(
+                new BeneficiaryIntakeResult(id, "Active", null, created, changed));
+        }
+
+        /// <summary>
+        /// Compare two intakes by VALUE, which `!=` does not do here.
+        ///
+        /// <para><see cref="BeneficiaryIntake"/> is a record, so `==` compares its members with
+        /// <c>EqualityComparer&lt;T&gt;.Default</c> — and one member, <c>Notes</c>, is an
+        /// <c>IReadOnlyList</c>. Lists do not override equality, so that member is compared by REFERENCE and
+        /// two separately-parsed copies of the same CSV row are never equal. The fake therefore reported
+        /// `Changed: true` for a byte-identical re-upload, which is the opposite of what it exists to
+        /// simulate, and the applier duly classified an idempotent replay as Applied rather than Skipped.</para>
+        ///
+        /// <para>The real seam is patient-service comparing PERSISTED values, so unchanged means unchanged.
+        /// Both sides are rebased onto one shared empty list so the reference check on that member passes,
+        /// then the notes are compared as a sequence.</para>
+        /// </summary>
+        private static bool SameContent(BeneficiaryIntake a, BeneficiaryIntake b) =>
+            (a with { Notes = NoNotes }) == (b with { Notes = NoNotes }) && a.Notes.SequenceEqual(b.Notes);
+
+        private static readonly IReadOnlyList<(short Slot, string Value)> NoNotes = [];
+    }
+
+    /// <summary>The tier catalogue provider-service would return. MERSAL is the one the fixtures enrol onto.</summary>
+    private sealed class SeededTiers : INetworkTierCatalog
+    {
+        private static readonly Guid MersalTier = Guid.Parse("11111111-2222-3333-4444-555555555555");
+
+        public Task<IReadOnlyList<NetworkTierRef>> ActiveTiersAsync(string? bearerToken, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<NetworkTierRef>>([new NetworkTierRef(MersalTier, "MERSAL")]);
     }
 
     private sealed class SequentialMemberNos : IMemberNoIssuer
@@ -521,12 +693,24 @@ public class BulkStoreTests
         IReadOnlyList<Guid> PlanIds, IReadOnlyList<Guid> PlanVersionIds,
         Guid PolicyPlanId, Guid SecondPolicyPlanId, Guid CategoryId, IReadOnlyList<Guid> Beneficiaries);
 
-    private static byte[] EnrolmentCsv(Fixture f, IReadOnlyList<Guid> beneficiaries, DateOnly? from = null)
+    /// <summary>The card number a seeded beneficiary is reachable by. Derived from the id so the fake intake
+    /// and the CSV agree without either having to be told the mapping.</summary>
+    private static string CardFor(Guid beneficiaryId) => $"C{beneficiaryId:N}"[..11].ToUpperInvariant();
+
+    private static byte[] EnrolmentCsv(Fixture f, IReadOnlyList<Guid> beneficiaries, DateOnly? from = null,
+        decimal contribution = 20m, string firstName = "Amina")
     {
         var effective = from ?? new DateOnly(2026, 2, 1);
-        var csv = new StringBuilder("beneficiary_id,policy_no,plan_label,relationship,effective_from\n");
+        var csv = new StringBuilder(
+            "card_number,first_name,last_name,gender,nationality,phone_no,birthdate,plan,network_tier,contribution,effective_from\n");
+        var n = 0;
         foreach (var id in beneficiaries)
-            csv.Append(CultureInfo.InvariantCulture, $"{id},{f.PolicyNo},Standard,Principal,{effective:yyyy-MM-dd}\n");
+        {
+            n++;
+            csv.Append(CultureInfo.InvariantCulture,
+                $"{CardFor(id)},{firstName}{n},Yusuf,Female,SY,+201234567890,1990-01-01," +
+                $"{f.Prefix}-Standard,MERSAL,{contribution},{effective:yyyy-MM-dd}\n");
+        }
         return Encoding.UTF8.GetBytes(csv.ToString());
     }
 
@@ -591,14 +775,14 @@ public class BulkStoreTests
         var standard = new PolicyPlan
         {
             PolicyPlanId = Guid.NewGuid(), TenantId = Tenant, PolicyId = policy.PolicyId,
-            PlanVersionId = version.PlanVersionId, PlanLabel = "Standard",
+            PlanVersionId = version.PlanVersionId, PlanLabel = $"{prefix}-Standard",
             EffectiveFrom = new DateOnly(2026, 1, 1), IsDefault = true,
             CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
         };
         var enhanced = new PolicyPlan
         {
             PolicyPlanId = Guid.NewGuid(), TenantId = Tenant, PolicyId = policy.PolicyId,
-            PlanVersionId = enhancedVersion.PlanVersionId, PlanLabel = "Enhanced",
+            PlanVersionId = enhancedVersion.PlanVersionId, PlanLabel = $"{prefix}-Enhanced",
             EffectiveFrom = new DateOnly(2026, 1, 1), IsDefault = false,
             CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
         };

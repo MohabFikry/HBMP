@@ -3,6 +3,9 @@ using Mersal.Authz;
 using Mersal.BenefitPricing;
 using Mersal.Reporting.Domain;
 using Microsoft.EntityFrameworkCore;
+// The header vocabulary is long and repeats on nearly every line of the six view builders below; aliased so a
+// series definition still reads as its data rather than as a column of namespace.
+using Col = Mersal.Reporting.Domain.AnalyticsColumns;
 
 namespace Mersal.Reporting.Infrastructure;
 
@@ -116,21 +119,21 @@ public sealed class AnalyticsQueries(ReportingDbContext db)
                 Point("joined", "Joined", "انضم", joined),
                 Point("left", "Left", "غادر", left),
                 Point("net", "Net change", "صافي التغيّر", joined - left),
-            ], ["Movement", "Members"]),
+            ], [Col.Movement, Col.Members]),
 
             Series("by-relationship", "Enrolments by relationship", "التسجيلات حسب صلة القرابة", "count",
                 [.. byRelationship.Select(r => Point(r.Key, r.Key, r.Key, r.Count))],
-                ["Relationship", "Members"]),
+                [Col.Relationship, Col.Members]),
 
             Series("by-plan", "Enrolments by plan", "التسجيلات حسب الخطة", "count",
                 [.. byPlan.Select(r => Point(r.Key.ToString(), Label(labels, r.Key, en: true), Label(labels, r.Key, en: false), r.Count, r.Key))],
-                ["Plan", "Members"]),
+                [Col.Plan, Col.Members]),
 
             // Its own series because it is an OPERATIONAL number, not a demographic one: these members are
             // enrolled and cannot yet claim, and reception meets them at the desk not knowing that.
             Series("waiting-period", "In waiting period", "ضمن فترة الانتظار", "count",
                 [Point("waiting", "Serving a waiting period", "ضمن فترة انتظار", waiting)],
-                ["Population", "Members"]),
+                [Col.Population, Col.Members]),
         ];
     }
 
@@ -167,13 +170,13 @@ public sealed class AnalyticsQueries(ReportingDbContext db)
             Series("consumed-vs-limit", "Consumed against limit, by benefit category",
                 "الاستهلاك مقابل الحد حسب فئة المنفعة", "currency",
                 [.. byCategory.Select(c => new AnalyticsPoint(c.Category, c.Category, c.Category, c.Consumed, null, c.Limit))],
-                ["Benefit category", "Consumed", "Limit"]),
+                [Col.BenefitCategory, Col.Consumed, Col.Limit]),
 
             // Bands rather than a histogram of percentages: the question is triage, and a band survives the
             // rounding argument a percentage invites (see UtilizationBands).
             Series("band-distribution", "Members by utilization band", "الأعضاء حسب شريحة الاستهلاك", "count",
                 [.. byBand.Select(b => Point(b.Band, b.Band, b.Band, b.Members))],
-                ["Band", "Members"]),
+                [Col.Band, Col.Members]),
 
             Series("threshold-crossings", "Members crossing 80% and 100%", "الأعضاء المتجاوزون ٨٠٪ و١٠٠٪", "count",
             [
@@ -181,13 +184,13 @@ public sealed class AnalyticsQueries(ReportingDbContext db)
                     byBand.Where(b => b.Band is nameof(UtilizationBand.High) or nameof(UtilizationBand.Exhausted)).Sum(b => b.Members)),
                 Point("over-100", "At or over the limit", "بلغ الحد أو تجاوزه",
                     byBand.Where(b => b.Band == nameof(UtilizationBand.Exhausted)).Sum(b => b.Members)),
-            ], ["Threshold", "Members"]),
+            ], [Col.Threshold, Col.Members]),
 
             Series("network-split", "In-network vs out-of-network", "داخل الشبكة مقابل خارجها", "currency",
             [
                 Point("in-network", "In network", "داخل الشبكة", inNetwork),
                 Point("out-of-network", "Out of network", "خارج الشبكة", outNetwork),
-            ], ["Network", "Consumed"]),
+            ], [Col.Network, Col.Consumed]),
         ];
     }
 
@@ -232,17 +235,17 @@ public sealed class AnalyticsQueries(ReportingDbContext db)
                 "المطالب / المعتمد / المعدّل / الصافي حسب الجهة", "currency",
                 [.. byPayer.Select(x => new AnalyticsPoint(x.Payer.ToString(),
                     Label(payerLabels, x.Payer, en: true), Label(payerLabels, x.Payer, en: false), x.Net, x.Payer, x.Claimed))],
-                ["Payer", "Net payable", "Claimed"]),
+                [Col.Payer, Col.NetPayable, Col.Claimed]),
 
             Series("top-cost-drivers", "Top cost drivers by benefit category",
                 "أكبر مسبّبات التكلفة حسب فئة المنفعة", "currency",
                 [.. byCategory.Select(x => Point(x.Category, x.Category, x.Category, x.Net))],
-                ["Benefit category", "Net payable"]),
+                [Col.BenefitCategory, Col.NetPayable]),
 
             Series("cost-per-member-month", "Cost per active member per month",
                 "التكلفة لكل عضو نشط شهريًا", "currency",
                 [Point("pmpm", "Per member per month", "لكل عضو شهريًا", perMemberMonth)],
-                ["Metric", "Amount"]),
+                [Col.Metric, Col.Amount]),
         ];
     }
 
@@ -277,19 +280,19 @@ public sealed class AnalyticsQueries(ReportingDbContext db)
         [
             Series("tier-mix", "Delivered value by network tier", "القيمة المقدَّمة حسب شريحة الشبكة", "currency",
                 [.. byTier.Select(t => new AnalyticsPoint(t.Tier, t.Tier, t.Tier, t.Net, null, t.Claims))],
-                ["Tier", "Net payable", "Claims"]),
+                [Col.Tier, Col.NetPayable, Col.Claims]),
 
             Series("oon-leakage", "Out-of-network leakage", "التسرّب خارج الشبكة", "percent",
             [
                 Point("leakage-rate", "Out-of-network share of claims", "نسبة المطالبات خارج الشبكة", leakageRate),
                 Point("leakage-cost", "Out-of-network net payable", "الصافي المستحق خارج الشبكة",
                     oon.Where(x => x.Key).Sum(x => x.Net)),
-            ], ["Measure", "Value"]),
+            ], [Col.Measure, Col.Value]),
 
             Series("top-providers", "Top providers by value", "أعلى مقدّمي الخدمة قيمةً", "currency",
                 [.. topProviders.Select(x => new AnalyticsPoint(x.Provider.ToString(),
                     x.Provider.ToString()[..8], x.Provider.ToString()[..8], x.Net, x.Provider, x.Claims))],
-                ["Provider", "Net payable", "Claims"]),
+                [Col.Provider, Col.NetPayable, Col.Claims]),
         ];
     }
 
@@ -341,13 +344,13 @@ public sealed class AnalyticsQueries(ReportingDbContext db)
         return
         [
             Series("plan-enrolment", "Active members by plan", "الأعضاء النشطون حسب الخطة", "count", enrolment,
-                ["Plan", "Active members"]),
+                [Col.Plan, Col.ActiveMembers]),
             Series("plan-cost-per-member", "Net cost per active member", "صافي التكلفة لكل عضو نشط", "currency",
-                costPerMember, ["Plan", "Cost per member", "Total net"]),
+                costPerMember, [Col.Plan, Col.CostPerMember, Col.TotalNet]),
             Series("plan-utilization", "Utilization of limit", "استهلاك الحد", "percent", utilization,
-                ["Plan", "% of limit used"]),
+                [Col.Plan, Col.PercentOfLimitUsed]),
             Series("plan-oon-rate", "Out-of-network rate", "نسبة الخدمات خارج الشبكة", "percent", oonRate,
-                ["Plan", "% out of network"]),
+                [Col.Plan, Col.PercentOutOfNetwork]),
         ];
     }
 
@@ -389,7 +392,7 @@ public sealed class AnalyticsQueries(ReportingDbContext db)
                 Point("over-limit", "Over the limit", "تجاوزوا الحد", overLimit),
                 Point("near-limit", "80–99% of the limit", "٨٠–٩٩٪ من الحد", nearLimit),
                 Point("no-utilization", "No utilization at all", "بدون أي استهلاك", noUtilization),
-            ], ["Outlier", "Members"]),
+            ], [Col.Outlier, Col.Members]),
 
             Series("data-quality", "Data quality findings", "ملاحظات جودة البيانات", "count",
             [
@@ -398,7 +401,7 @@ public sealed class AnalyticsQueries(ReportingDbContext db)
                 // The pre-19.2 rows the 19.7 backfill retires. Counted here so the backfill has a number to
                 // drive to zero rather than being declared done.
                 Point("unattributed-payer", "Policies with no payer", "وثائق بلا جهة ممولة", unattributedPayer),
-            ], ["Finding", "Count"]),
+            ], [Col.Finding, Col.Count]),
         ];
     }
 
@@ -471,7 +474,7 @@ public sealed class AnalyticsQueries(ReportingDbContext db)
 
     private static AnalyticsSeries Series(
         string key, string titleEn, string titleAr, string unit,
-        IReadOnlyList<AnalyticsPoint> points, IReadOnlyList<string> columns) =>
+        IReadOnlyList<AnalyticsPoint> points, IReadOnlyList<BiText> columns) =>
         new(key, titleEn, titleAr, unit, points, SummarizeEn(titleEn, points), SummarizeAr(titleAr, points), columns);
 
     /// <summary>The one-line text summary that accompanies every chart (U6). Written server-side so it always
@@ -485,13 +488,48 @@ public sealed class AnalyticsQueries(ReportingDbContext db)
             $"{title}: {points.Count} series totalling {total:0.##}; highest is {top.LabelEn} at {top.Value:0.##}.");
     }
 
+    /// <summary>Egyptian Arabic, with Egyptian Arabic's digits.</summary>
+    /// <remarks>
+    /// <para>This was composed under <see cref="CultureInfo.InvariantCulture"/>, like its English twin — so
+    /// the Arabic sentence read "…بإجمالي 160؛ الأعلى … بقيمة 120": Arabic prose carrying Latin numerals,
+    /// inside a card whose figures the client renders through <c>Intl</c> with <c>ar-EG</c> and therefore in
+    /// Arabic-Indic. One card, two numeral systems, for the same kind of quantity (audit §5.8).</para>
+    ///
+    /// <para><b>Why a mapping and not a culture.</b> Switching to <c>CultureInfo.GetCultureInfo("ar-EG")</c>
+    /// is the obvious fix and it does not work: .NET's <c>ToString</c> formats with ASCII digits under EVERY
+    /// culture — <c>NumberFormatInfo.NativeDigits</c> exists but numeric formatting does not apply it — so
+    /// ar-EG changes the decimal separator and nothing else. Worse, the lookup THROWS under globalization-
+    /// invariant mode, which is how .NET runs in a slim container, and from a static initializer that takes
+    /// the whole class down. Mapping the ten code points has neither problem and says plainly what it does.
+    /// </para>
+    ///
+    /// <para>Invariant stays right for the English summary and for the CSV export, which is machine-read: a
+    /// spreadsheet opening ١٦٠ has a text cell, not a number.</para>
+    /// </remarks>
     private static string SummarizeAr(string title, IReadOnlyList<AnalyticsPoint> points)
     {
         if (points.Count == 0) return $"{title}: لا توجد بيانات ضمن عوامل التصفية المحددة.";
         var top = points.MaxBy(p => p.Value)!;
         var total = points.Sum(p => p.Value);
-        return string.Create(CultureInfo.InvariantCulture,
-            $"{title}: {points.Count} سلاسل بإجمالي {total:0.##}؛ الأعلى {top.LabelAr} بقيمة {top.Value:0.##}.");
+        return ToArabicIndic(string.Create(CultureInfo.InvariantCulture,
+            $"{title}: {points.Count} سلاسل بإجمالي {total:0.##}؛ الأعلى {top.LabelAr} بقيمة {top.Value:0.##}."));
+    }
+
+    /// <summary>
+    /// Latin digits → Arabic-Indic, in place, leaving everything else alone.
+    /// </summary>
+    /// <remarks>
+    /// Applied to the whole composed sentence rather than to each number, because the label interpolated into
+    /// it (<c>top.LabelAr</c>) is a plan or category name out of the dimension feed and may itself carry a
+    /// digit — "الخطة 2" reading Latin beside an Arabic-Indic total is the same seam one level down. Codes
+    /// that must stay Latin (member numbers, AUTH refs) do not appear in this sentence.
+    /// </remarks>
+    internal static string ToArabicIndic(string s)
+    {
+        Span<char> buffer = stackalloc char[s.Length];
+        for (var i = 0; i < s.Length; i++)
+            buffer[i] = s[i] is >= '0' and <= '9' ? (char)('٠' + (s[i] - '0')) : s[i];
+        return new string(buffer);
     }
 
     /// <summary>Whole months in the filter window, at least one — the denominator of "per member per month".

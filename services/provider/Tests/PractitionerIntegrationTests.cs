@@ -79,6 +79,88 @@ public class PractitionerIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
+    /// <summary>The order the promote-to-primary endpoint writes in is not a style choice — it is what the
+    /// partial-unique index permits. Clearing the old primary must be flushed BEFORE the new one is set;
+    /// doing it the other way round is a constraint violation, and only a real database says so.</summary>
+    [SkippableFact]
+    public async Task Promoting_a_new_primary_requires_clearing_the_old_one_first()
+    {
+        Skip.If(Owner is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var tenant = T();
+        try
+        {
+            var id = await SeedPractitioner(tenant);
+            await using (var db = Ctx())
+            {
+                db.PractitionerSpecialties.Add(new PractitionerSpecialty { PractitionerId = id, SpecialtyCode = "PSYCH", IsPrimary = true });
+                db.PractitionerSpecialties.Add(new PractitionerSpecialty { PractitionerId = id, SpecialtyCode = "CARD", IsPrimary = false });
+                await db.SaveChangesAsync();
+            }
+
+            await using (var db = Ctx())
+            {
+                await using var tx = await db.Database.BeginTransactionAsync();
+                var rows = await db.PractitionerSpecialties.Where(s => s.PractitionerId == id).ToListAsync();
+                foreach (var s in rows.Where(s => s.IsPrimary)) s.IsPrimary = false;
+                await db.SaveChangesAsync();                       // the flush that frees the index
+                rows.Single(s => s.SpecialtyCode == "CARD").IsPrimary = true;
+                await db.SaveChangesAsync();
+                await tx.CommitAsync();
+            }
+
+            await using (var verify = Ctx())
+            {
+                var primary = await verify.PractitionerSpecialties.AsNoTracking()
+                    .Where(s => s.PractitionerId == id && s.IsPrimary).Select(s => s.SpecialtyCode).ToListAsync();
+                primary.Should().Equal(["CARD"], "exactly one primary, and it is the promoted one");
+            }
+        }
+        finally { await Cleanup(tenant); }
+    }
+
+    /// <summary>Revoking an assignment must flip serves-branch to false — that probe is what emr's two
+    /// booking gates read, so this is the whole mechanism by which removing a doctor from a clinic stops new
+    /// bookings there.</summary>
+    [SkippableFact]
+    public async Task Revoking_a_branch_assignment_makes_serves_branch_false()
+    {
+        Skip.If(Owner is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var tenant = T();
+        var maadi = Guid.NewGuid();
+        try
+        {
+            var id = await SeedPractitioner(tenant);
+            var today = new DateOnly(2026, 7, 26);
+            await using (var db = Ctx())
+            {
+                db.PractitionerBranchAssignments.Add(new PractitionerBranchAssignment
+                { AssignmentId = Guid.NewGuid(), PractitionerId = id, BranchId = maadi, ValidFrom = From, Status = "Active" });
+                await db.SaveChangesAsync();
+            }
+
+            Task<bool> Serves(ProviderDbContext c) => c.PractitionerBranchAssignments.AsNoTracking().AnyAsync(a =>
+                a.PractitionerId == id && a.BranchId == maadi && a.Status == "Active" && a.ValidFrom <= today && (a.ValidTo == null || a.ValidTo >= today));
+
+            await using (var db = Ctx()) (await Serves(db)).Should().BeTrue();
+
+            await using (var db = Ctx())
+            {
+                foreach (var a in await db.PractitionerBranchAssignments.Where(a => a.PractitionerId == id && a.BranchId == maadi && a.Status == "Active").ToListAsync())
+                    a.Status = "Revoked";
+                await db.SaveChangesAsync();
+            }
+
+            await using (var db = Ctx())
+            {
+                (await Serves(db)).Should().BeFalse("a revoked assignment must not satisfy the booking gate");
+                // The row survives: it is the record that explains an appointment booked there last month.
+                (await db.PractitionerBranchAssignments.AsNoTracking()
+                    .CountAsync(a => a.PractitionerId == id && a.BranchId == maadi)).Should().Be(1);
+            }
+        }
+        finally { await Cleanup(tenant); }
+    }
+
     private static async Task<Guid> SeedPractitioner(string tenant)
     {
         await using var db = Ctx();

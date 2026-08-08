@@ -24,7 +24,16 @@ public sealed class CallCentreFactory : WebApplicationFactory<Program>
     public FakeMemberDirectory Directory { get; } = new();
     public FakeAppointmentGateway Gateway { get; } = new();
     public FakeContactGateway Contacts { get; } = new();
-    public InMemoryOutbox Outbox { get; private set; } = default!;
+    /// <summary>The in-memory outbox this host published to.
+    ///
+    /// <para>Resolved on READ, not assigned in <see cref="CreateClient"/>. It used to be a settable property
+    /// populated only when a client was created, so a test that touched the outbox before its first
+    /// <c>AgentClient()</c> call — <c>CallCentreE2ETests</c> opens with <c>factory.Outbox.Clear()</c> — got a
+    /// NullReferenceException unless a SIBLING test in the same class happened to run first and set it. xUnit
+    /// does not order test methods, so that suite passed or failed on which test the runner picked first.
+    /// The outbox is a singleton in the host, so resolving it here is the same object, minus the ordering
+    /// hazard. Reading it also forces host creation, exactly as <c>CreateClient</c> does.</para></summary>
+    public InMemoryOutbox Outbox => (InMemoryOutbox)Services.GetRequiredService<InMemoryOutbox>();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -50,15 +59,28 @@ public sealed class CallCentreFactory : WebApplicationFactory<Program>
 
     public new HttpClient CreateClient()
     {
-        var c = base.CreateClient();
-        Outbox = (InMemoryOutbox)Services.GetRequiredService<InMemoryOutbox>();
-        return c;
+        return base.CreateClient();
     }
 
     public HttpClient AgentClient()
     {
         var c = CreateClient();
         c.DefaultRequestHeaders.Add("X-Test-Sub", TestAuthHandler.AgentSub);
+        c.DefaultRequestHeaders.Add("X-Test-Role", "call_center");
+        c.DefaultRequestHeaders.Add("X-Test-Scope", "callcentre:interaction callcentre:verify callcentre:read callcentre:act");
+        c.DefaultRequestHeaders.Add("X-Test-Tenant", "t-callcentre");
+        c.DefaultRequestHeaders.Add("X-Test-Mfa", "1");
+        return c;
+    }
+
+    /// <summary>A DIFFERENT agent: same tenant, same role, same scopes — everything the policy engine looks at
+    /// is identical to <see cref="AgentClient"/>. Only the subject differs, which is the whole point: the
+    /// write paths on an interaction used to be role+tenant only, so this client could patch, close and rewrite
+    /// the summary on a colleague's call.</summary>
+    public HttpClient OtherAgentClient()
+    {
+        var c = CreateClient();
+        c.DefaultRequestHeaders.Add("X-Test-Sub", "33333333-3333-3333-3333-333333333333");
         c.DefaultRequestHeaders.Add("X-Test-Role", "call_center");
         c.DefaultRequestHeaders.Add("X-Test-Scope", "callcentre:interaction callcentre:verify callcentre:read callcentre:act");
         c.DefaultRequestHeaders.Add("X-Test-Tenant", "t-callcentre");
@@ -85,7 +107,7 @@ public sealed class FakeMemberDirectory : IMemberDirectory
 
     public Task<MemberSearchResult> SearchAsync(string query, string? bearer, CancellationToken ct = default) =>
         Task.FromResult(new MemberSearchResult(query, 1,
-            [new MemberMatch(BeneficiaryId, "Amal Hassan", "MRS-M-1001", ["MemberNo", "DateOfBirth", "Phone"])]));
+            [new MemberMatch(BeneficiaryId, "Amal Hassan", "MRS-M-1001")]));
 
     /// <summary>Records the interaction it was asked about: profile-service gates the 360 on a verification for
     /// THAT call, so a directory that drops the id produces a 403 the endpoint reports as 404.</summary>

@@ -9,8 +9,8 @@ namespace Mersal.Profile.Infrastructure;
 // in orders/pharmacy, the design-37 §6 sensitive gate in orders, case-assignment in case. The profile adds
 // section shaping on top and nothing else (design 39 §1).
 
-/// <summary>Section 2 — allergies, critical flags and interaction warnings. Always first, always prominent: an
-/// alert a user has to scroll to is an alert that was not shown.</summary>
+/// <summary>Section 2 — blood group, allergies, critical flags and interaction warnings. Always first, always
+/// prominent: an alert a user has to scroll to is an alert that was not shown.</summary>
 public sealed class AlertsSectionProvider(CallerScopedHttp http) : ISectionProvider
 {
     public string Key => ProfileSections.Alerts;
@@ -18,18 +18,24 @@ public sealed class AlertsSectionProvider(CallerScopedHttp http) : ISectionProvi
     public async Task<object?> FetchAsync(SectionRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
-        using var doc = await http.GetAsync("emr", $"/api/v1/beneficiaries/{request.BeneficiaryId}/allergies",
+        // ONE call for both facts. emr's /clinical-record exists precisely so this section does not need
+        // two gated reads — each would write its own PHI-read audit event, and one clinician opening one
+        // patient should not appear in the review as two accesses.
+        using var doc = await http.GetAsync("emr", $"/api/v1/beneficiaries/{request.BeneficiaryId}/clinical-record",
             request.Caller, ct);
         if (doc is null) return null;
 
-        var allergies = doc.RootElement.EnumerateArray()
+        var allergies = doc.RootElement.Array("allergies")
             .Select(a => new AllergyAlert(
+                // emr has carried the allergen NAME since its migration 0020. The uuid fallback is kept for
+                // rows recorded before that — it is ugly on purpose, so a stale row looks stale rather than
+                // silently reading as a substance.
                 a.Str("allergenDisplay") ?? a.Str("allergenId") ?? "(unspecified)",
                 a.Str("reaction"),
                 a.Str("severity") ?? "Unknown"))
             .ToList();
 
-        return new AlertsSection(allergies, [], [], []);
+        return new AlertsSection(allergies, [], [], [], doc.RootElement.Str("bloodGroup"));
     }
 }
 
@@ -108,7 +114,8 @@ public sealed class EncountersSectionProvider(ClinicalContextSource source) : IS
                 e.Str("encounterRef") ?? e.Str("encounterId") ?? "(unknown)",
                 e.Moment("occurredAt") ?? default,
                 e.Str("branchName"), e.Str("clinicianName"), e.Str("specialty"),
-                e.Str("reason"), e.Str("status") ?? "Unknown"))
+                e.Str("reason"), e.Str("status") ?? "Unknown", e.Str("encounterId"),
+                e.Str("branchId"), e.Str("clinicianId")))
             .ToList();
 
         return new EncountersSection(rows);
@@ -150,7 +157,12 @@ public sealed class InvestigationsSectionProvider(CallerScopedHttp http) : ISect
                 i.Str("providerName"),
                 i.Str("resultSummary"),
                 i.Bool("restricted"),
-                i.Str("sensitivityLevel")))
+                i.Str("sensitivityLevel"),
+                // 29.2 — fail-safe default. An absent orderType reads as "Investigation", never as one of the
+                // real kinds: putting an unknown row in the Procedures pane would tell a doctor a procedure
+                // was ordered when the upstream simply did not say.
+                i.Str("orderType") ?? "Investigation",
+                i.Uuid("encounterId")))
             .ToList();
 
         return new InvestigationsSection(rows);
@@ -180,7 +192,8 @@ public sealed class PrescriptionsSectionProvider(CallerScopedHttp http) : ISecti
                 r.Moment("dispensedOn"),
                 r.Str("batchNo"),
                 r.Day("expiryDate"),
-                r.Str("substitutedWith")))
+                r.Str("substitutedWith"),
+                r.Uuid("encounterId")))
             .ToList();
 
         return new PrescriptionsSection(rows);

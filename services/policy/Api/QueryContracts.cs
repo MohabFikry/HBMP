@@ -68,6 +68,10 @@ public sealed record MemberQueryRowView(
     string? GivenName,
     string? FamilyName,
     string? BeneficiaryStatus,
+    /// <summary>The number printed on the card in the beneficiary's hand — how a desk matches the person to
+    /// the row. Resolved with the name, from the same per-page lookup, so it is null under the same
+    /// conditions.</summary>
+    string? CardNumber,
     Guid PolicyId,
     Guid PolicyPlanId,
     string? PlanLabel,
@@ -94,7 +98,7 @@ public sealed record MemberQueryRowView(
         ArgumentNullException.ThrowIfNull(r);
         return new(
             r.EnrollmentId, r.BeneficiaryId, r.MemberNo,
-            summary?.GivenName, summary?.FamilyName, summary?.Status,
+            summary?.GivenName, summary?.FamilyName, summary?.Status, summary?.CardNumber,
             r.PolicyId, r.PolicyPlanId, r.PlanLabel, r.GroupId,
             mayReadContract ? r.PayerId : null,
             r.Relationship.ToString(), r.Status.ToString(),
@@ -152,10 +156,32 @@ public sealed record MembershipSummaryView(
 
 /// <summary>Dependants covered under this member, or the principal they are covered under. The COVERED family,
 /// which is a membership fact policy-service owns — deliberately not patient-service's household, which
-/// answers a different question and would disagree the moment a relative is not enrolled.</summary>
+/// answers a different question and would disagree the moment a relative is not enrolled.
+///
+/// <para><see cref="GivenName"/>/<see cref="FamilyName"/> come from patient-service for this household only
+/// and stay null when it could not be asked — same rule as the roster: a blank name is legible, a wrong one is
+/// not. A family list of member numbers is a list nobody can use.</para></summary>
 public sealed record CoveredFamilyMemberView(
-    Guid EnrollmentId, Guid BeneficiaryId, string MemberNo, string Relationship, string Status,
-    bool IsPrincipal);
+    Guid EnrollmentId, Guid BeneficiaryId, string MemberNo,
+    string? GivenName, string? FamilyName,
+    string Relationship, string Status,
+    bool IsPrincipal,
+    string? PlanLabel = null,
+    DateOnly? EffectiveFrom = null, DateOnly? EffectiveTo = null,
+    /// <summary>True for the enrolment the caller asked from. The modal marks it rather than dropping it: a
+    /// family list that silently omits the person you opened reads as a list with someone missing.</summary>
+    bool IsSubject = false);
+
+/// <summary>The covered household around one enrolment, as its own answer rather than a section of the 360.
+/// <see cref="Unavailable"/> names what could not be composed — names, typically — so a list with blanks in it
+/// says why.</summary>
+public sealed record FamilyView(
+    Guid EnrollmentId,
+    IReadOnlyList<CoveredFamilyMemberView> Members,
+    IReadOnlyList<string> Unavailable,
+    /// <summary>Household members behind a payer this caller may not read, counted rather than listed. A
+    /// family of five that renders as three is a wrong answer; "and two you may not see" is a true one.</summary>
+    int Withheld);
 
 public sealed record EnrollmentHistoryView(
     Guid EventId, Guid EnrollmentId, string EventType, DateOnly EffectiveDate, DateTimeOffset OccurredAt,

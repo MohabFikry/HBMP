@@ -28,7 +28,7 @@ public class TenantFeatureProjectionTests
         await db.Database.ExecuteSqlRawAsync(
             "DELETE FROM identity.tenant_feature WHERE tenant_id = {0}", [tenant]);
 
-    [Fact]
+    [SkippableFact]
     public async Task Enabled_features_are_read_back_for_the_tenant_that_owns_them()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
@@ -61,7 +61,7 @@ public class TenantFeatureProjectionTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task An_unknown_tenant_has_nothing_enabled()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
@@ -76,7 +76,7 @@ public class TenantFeatureProjectionTests
     /// projection takes it, and from that moment every token says Claims is disabled for an organisation whose
     /// own administration screen says it is enabled. Nothing errors; the module is simply dark.
     /// </summary>
-    [Fact]
+    [SkippableFact]
     public async Task An_out_of_order_redelivery_cannot_move_a_switch_backwards()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
@@ -106,7 +106,7 @@ public class TenantFeatureProjectionTests
 
     /// <summary>A genuine re-send of the NEWEST change is still applied: it writes the same value, so it costs
     /// nothing, and refusing it would strand a first delivery that died after claiming its event id.</summary>
-    [Fact]
+    [SkippableFact]
     public async Task A_redelivery_of_the_current_state_is_applied_not_refused()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
@@ -133,7 +133,7 @@ public class TenantFeatureProjectionTests
     /// two consumers racing one redelivery must produce exactly one claim; a SELECT-then-INSERT lets both
     /// through and the handler runs twice.
     /// </summary>
-    [Fact]
+    [SkippableFact]
     public async Task The_dedupe_claim_succeeds_once_and_survives_a_new_context()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
@@ -168,7 +168,7 @@ public class TenantFeatureProjectionTests
     /// wiring the gate changes nothing for them. If this is ever empty, deploying the gate takes live partner
     /// organisations off modules they are using today.
     /// </summary>
-    [Fact]
+    [SkippableFact]
     public async Task Existing_tenants_were_backfilled_with_the_whole_catalogue_enabled()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");

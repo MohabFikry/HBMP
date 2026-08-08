@@ -72,6 +72,9 @@ stateDiagram-v2
     Active --> Expired: validity elapsed
     PartiallyUsed --> Expired: validity elapsed
     Active --> Cancelled: cancel
+    PartiallyUsed --> Cancelled: cancel remainder
+    Active --> PendingApproval: amended beyond approved scope
+    PartiallyUsed --> PendingApproval: amended beyond approved scope
     Requested --> Cancelled: cancel
     PendingApproval --> Cancelled: cancel
     Rejected --> [*]
@@ -91,7 +94,49 @@ stateDiagram-v2
 | Active / PartiallyUsed | **consume(subset)** | **line unused AND token unseen (atomic, idempotent)** | PartiallyUsed | `OrderLinesConsumed`; unused lines stay available | Lab / Imaging | `(orderId,lineId,consumeToken)` recorded; **no-reuse** enforced |
 | Active / PartiallyUsed | **consume(all/remaining)** | **all remaining lines unused (atomic)** | Completed | `OrderCompleted` | Lab / Imaging | Duplicate consume impossible |
 | Active / PartiallyUsed | expire | validity window elapsed | Expired | `OrderExpired` | System (timer) | Unused lines voided |
-| Requested / PendingApproval / Active | cancel | not yet fully consumed | Cancelled | `OrderCancelled` | Doctor / Case Manager | Reason recorded |
+| Active / **PartiallyUsed** | **amend beyond approved scope** (30.4) | the amended line leaves the approved codes, quantity or duration | PendingApproval | `OrderLineAmended`; approvals notified with a before/after | Doctor | The authorisation's basis no longer holds |
+| Requested / PendingApproval / Active / **PartiallyUsed** | cancel | not yet fully consumed | Cancelled | `OrderCancelled` | Doctor / Case Manager | **Coded** reason + actor recorded |
+
+> **30.2 — `PartiallyUsed → Cancelled` was missing, and its absence was a defect.** Without it a partly
+> fulfilled order could not be cancelled at all: a doctor with a three-line order whose first sample had been
+> taken could not withdraw the other two, and the endpoint answered 409 for the whole request. That is
+> precisely the case [46 §3](46-order-amendment-and-cancellation.md) opens with — the amendable scope is
+> whatever has NOT been consumed, so the remainder of a partly-used order is the main thing amendment is for.
+
+### 2b. Order line lifecycle — amendment (30.1, [design 46](46-order-amendment-and-cancellation.md))
+
+Amendment and cancellation act on the **line**, not the order: the amendable scope is whatever has not been
+consumed, and an order-level model cannot express "lines 2 and 3, but not line 1".
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active: line created
+    Active --> PartiallyUsed: consume(subset) [atomic]
+    Active --> Completed: consume(all) [atomic]
+    PartiallyUsed --> Completed: consume(remaining) [atomic]
+    Active --> Cancelled: cancel [guarded]
+    PartiallyUsed --> Cancelled: cancel remainder [guarded]
+    Active --> Superseded: amend [guarded, inserts v+1]
+    PartiallyUsed --> Superseded: amend [guarded, inserts v+1]
+    Completed --> [*]
+    Cancelled --> [*]
+    Superseded --> [*]
+```
+
+| From | Event | Guard / Condition | To | Side-effects | Actor |
+|---|---|---|---|---|---|
+| Active / PartiallyUsed | **cancel** | one guarded UPDATE: `status IN (Active,PartiallyUsed) AND xmin = @expected`; coded reason mandatory | Cancelled | `OrderLineCancelled`; append-only `line_amendment` row keyed by a UNIQUE idempotency key | Authoring prescriber / treating clinician |
+| Active / PartiallyUsed | **amend** | same guarded UPDATE; new quantity ≥ quantity already consumed | Superseded | a NEW line at `version_no + 1` carrying `supersedes_id` and the consumed accumulator; original never mutated | Authoring prescriber / treating clinician |
+
+- **`Superseded` is a LINE status only.** There is deliberately no order status of the same name: an order
+  with one superseded line and two live ones is not superseded, and a status nothing can enter is one
+  somebody eventually sets by hand.
+- **The consumed portion is immutable.** The successor inherits `quantity_consumed`, so amending a line with
+  4 of 6 sessions delivered down to 5 leaves ONE session available, not five.
+- **Neither Cancelled nor Superseded returns to the live set.** Enforced by `trg_order_line_signed`, not by
+  the endpoint.
+- **Cancelled and Superseded lines remain visible** in history and in the service-history modal, with their
+  status and reason. A cancelled antibiotic is clinically meaningful.
 
 ### Atomic-consume guard (invariant detail)
 - **Precondition:** target line state ∈ {available} AND `consumeToken` not previously applied.
@@ -104,6 +149,26 @@ stateDiagram-v2
 ## 3. Prescription Lifecycle
 
 Canonical: `Draft → Submitted → (Approved | Rejected) → PartiallyDispensed → Dispensed`; plus `Expired`, `Cancelled`.
+
+> **Validation states are NOT prescription states (26.3).** A line carries a check status — `Ok`, `Warning`,
+> `Blocked`, `NotChecked`, `Unavailable` — which describes what the engine could determine, not where the
+> prescription is in its lifecycle. They are orthogonal on purpose: a prescription in `Draft` may carry any
+> of the five, and validation never moves the prescription between states. What the check status governs is
+> whether **submit** is permitted at all — see the `Draft → Submitted` guard below.
+>
+> `NotChecked` and `Unavailable` are not answers and never render as `Ok`; only a **benefit** rule can
+> produce `Blocked` (doc 43 §8 invariants 1–2, ADR-0032).
+>
+> **Severity gates the submit, not the state (28.4, doc 44 §2, ADR-0037).** Every clinical finding used to
+> require a typed acknowledgement before `Draft → Submitted`, so a contraindicated combination and a trivial
+> one demanded the same click — the documented route to override rates above 90%, where clinicians learn to
+> dismiss both. Only **Contraindicated** and **Major** now gate the transition; **Moderate** renders beside
+> the line and **Minor** collapses, and neither stands between the prescriber and submit. A finding with NO
+> severity still gates: a manufacturer label states an effect rather than a rank, and treating "ungraded" as
+> "not serious" would be the engine inventing a judgement it has no source for.
+>
+> This changes **interruption**, never blocking. `ClinicalState` still has no `Blocked` member, so a clinical
+> check remains structurally incapable of refusing a prescription.
 
 ```mermaid
 stateDiagram-v2
@@ -120,6 +185,9 @@ stateDiagram-v2
     Draft --> Cancelled: cancel
     Submitted --> Cancelled: cancel
     Approved --> Cancelled: cancel
+    PartiallyDispensed --> Cancelled: cancel remainder
+    Approved --> Submitted: amended beyond approved scope
+    PartiallyDispensed --> Submitted: amended beyond approved scope
     Rejected --> [*]
     Dispensed --> [*]
     Expired --> [*]
@@ -129,14 +197,52 @@ stateDiagram-v2
 | From | Event | Guard / Condition | To | Side-effects / Emitted Event | Actor / Role | Audit note |
 |---|---|---|---|---|---|---|
 | — | create | valid encounter | Draft | `RxCreated` | Doctor | — |
-| Draft | submit | complete lines | Submitted | `RxSubmitted` | Doctor | — |
+| Draft | **validate** (26.4) | ≥1 line with a real `drug_id` | Draft (unchanged) | `prescription_validation` row, `step='Step1'` | Doctor | **Advisory.** Persists no draft prescription; its verdict is display state and is never an input to submit |
+| Draft | submit | complete lines **AND every Warning acknowledged with a reason AND no Blocked finding** | Submitted | `RxSubmitted`; `prescription_validation` `step='Step2'`; `prescription_line_override` per acknowledgement | Doctor | **The server re-validates from scratch and ignores any client-supplied verdict** (doc 43 §5). 422 `unacknowledged-warning` or `blocked-by-benefit-rule` otherwise |
 | Submitted | approve | within policy OR not gated | Approved | `RxApproved` | Approval Team / auto | — |
 | Submitted | reject | out of policy | Rejected | `RxRejected` | Approval Team | Reason mandatory |
 | Approved / PartiallyDispensed | **dispense(subset)** | **line unused AND token unseen (atomic); substitution only from approved list** | PartiallyDispensed | `RxLinesDispensed`; remaining lines available | Pharmacy | Substitution + OOS captured |
 | Approved / PartiallyDispensed | **dispense(all/remaining)** | **all remaining lines unused (atomic)** | Dispensed | `RxDispensed` | Pharmacy | Duplicate dispense impossible |
 | Approved / PartiallyDispensed | expire | validity window elapsed | Expired | `RxExpired` | System (timer) | Pharmacy must reject if presented |
-| Draft / Submitted / Approved | cancel | not fully dispensed | Cancelled | `RxCancelled` | Doctor / Case Manager | Reason recorded |
+| Approved / **PartiallyDispensed** | **amend beyond approved scope** (30.4) | the amended line leaves the approved drug, quantity or duration | Submitted | `PrescriptionLineAmended`; approvals notified. `IsDispensable` excludes Submitted, so the counter refuses it until reviewed | Doctor | The authorisation's basis no longer holds |
+| Draft / Submitted / Approved / **PartiallyDispensed** | cancel | not fully dispensed | Cancelled | `RxCancelled` | Doctor / Case Manager | **Coded** reason + actor recorded |
 | Expired / Completed(Dispensed) | present-at-pharmacy | — | (no transition) | `RxRejectedPresentation` | Pharmacy | **Reject expired/completed** |
+
+> **30.2 — `PartiallyDispensed → Cancelled` was missing, exactly as `PartiallyUsed → Cancelled` was on the
+> order side (§2).** A partly-dispensed prescription could not be cancelled at all, so a doctor whose
+> three-line script had had its first drug handed over could not withdraw the other two. Two services, two
+> state tables, the same omission in each — which is what a rule expressed twice does.
+
+### 3b. Prescription line lifecycle — amendment (30.1, [design 46](46-order-amendment-and-cancellation.md))
+
+The medication twin of §2b, and identical in shape. Amendment acts on the **line**; the amendable scope is
+whatever has not been dispensed.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active: line created
+    Active --> PartiallyDispensed: dispense(subset) [atomic]
+    Active --> Dispensed: dispense(all) [atomic]
+    PartiallyDispensed --> Dispensed: dispense(remaining) [atomic]
+    Active --> Cancelled: cancel [guarded]
+    PartiallyDispensed --> Cancelled: cancel remainder [guarded]
+    Active --> Superseded: amend [guarded, inserts v+1]
+    PartiallyDispensed --> Superseded: amend [guarded, inserts v+1]
+    Dispensed --> [*]
+    Cancelled --> [*]
+    Superseded --> [*]
+```
+
+| From | Event | Guard / Condition | To | Side-effects | Actor |
+|---|---|---|---|---|---|
+| Active / PartiallyDispensed | **cancel** | one guarded UPDATE: `status IN (Active,PartiallyDispensed) AND xmin = @expected`; coded reason mandatory | Cancelled | `PrescriptionLineCancelled`; append-only `line_amendment` row keyed by a UNIQUE idempotency key | Authoring prescriber / treating clinician |
+| Active / PartiallyDispensed | **amend** | same guarded UPDATE; new quantity ≥ quantity already dispensed | Superseded | a NEW line at `version_no + 1` carrying `supersedes_id`, every clinical field copied, and the dispensed accumulator | Authoring prescriber / treating clinician |
+
+- **`Superseded` is a LINE status only** — there is no prescription status of the same name (§2b).
+- **The dispensed portion is immutable**: the successor inherits `quantity_dispensed`, so a line with 10 of
+  30 handed over, amended to 20, leaves TEN available, not twenty.
+- **A superseded line can never be dispensed** — doing so would hand over the drug, dose or quantity the
+  prescriber corrected, and the amendment would have achieved nothing while the record said it had.
 
 ### Pharmacy-specific guards
 - **Partial dispensing:** allowed; unfilled lines remain `available` for a later visit.
@@ -220,6 +326,24 @@ stateDiagram-v2
 | InfoRequested | resupply | info provided | UnderReview | `AuthInfoSupplied` | Requester | — |
 | Rejected | override | director authority | Overridden | `AuthOverridden` | Medical Director | **Justification mandatory** |
 | Approved / PartiallyApproved / Overridden / EmergencyApproved | expire | not consumed in window | Expired | `AuthExpired` | System (timer) | — |
+| — | dispense / consume | a counter handed something over | **Issued** | `FulfilmentRecorded` → the authorization register | System (fulfilment consumer) | `kind='Fulfilment'`; see below |
+
+### 5.1 `Issued` — the fulfilment authorization (ADR-0034)
+
+Dispensing a prescription line, or consuming an investigation-order line, **issues an authorization**
+recording what was actually delivered, separate from the clinical instruction it was delivered against.
+
+**`Issued` is outside the machine above, deliberately.** No transition targets it and none leaves it: there
+is nothing for a reviewer to approve, because the medicine is already in the patient's hand. Allowing one to
+be assigned would put settled work in the review queue and start an SLA clock on a question nobody asked, so
+`AuthorizationWorkflow` admits no edge in either direction and a DB CHECK pins `kind = 'Fulfilment'` ⇔
+`status = 'Issued'`.
+
+One authorization per prescription (per order), accumulating one `authorization_item` per fulfilment — a
+member collecting a fortnight's medication over two visits has one authorization with two items, not two
+that whoever reads them has to add up. A **substitution lands on the item and nowhere else**: `ordered_code`
+and `fulfilled_code` are separate columns ([22 §9.2b](22-data-dictionary.md)), and the fulfilment path never
+writes to `prescription_line`.
 
 ---
 
@@ -259,6 +383,41 @@ stateDiagram-v2
 | CheckedIn | start | doctor available | InConsultation | `EncounterStarted` | Doctor / Nurse | — |
 | InConsultation | close | documentation complete | Completed | `EncounterCompleted`; emit orders/rx/referral | Doctor | AND-join on emitted artifacts (ref 06) |
 | Scheduled / CheckedIn | cancel | — | Cancelled | `ApptCancelled`; free slot | Any | Reason recorded |
+
+---
+
+### 6b. The licence and roster gates on booking *(Phase 25 — see [42 §3/§4](42-branch-management.md))*
+
+Two conditions now stand between an availability rule and a bookable slot, and both are evaluated **as at the
+slot date**, not as at today.
+
+```mermaid
+flowchart LR
+  A[provider_availability<br/>weekly rule] --> G1{practitioner licence<br/>valid on the SLOT date?}
+  G1 -- no --> X1[no slot generated<br/>422 urn:hbmp:practitioner-licence-expired on booking]
+  G1 -- yes --> G2{branch assignment<br/>covers the slot date?}
+  G2 -- no --> X2[422 urn:hbmp:practitioner-not-at-branch]
+  G2 -- yes --> G3{roster exception<br/>on that day?}
+  G3 -- subtractive --> X3[no slot]
+  G3 -- AdHocClinic --> S[slot exists on that date only]
+  G3 -- none --> S
+```
+
+**Availability is computed in exactly ONE function** (`SlotGeneration.Generate`) — the doctor picker,
+`/booking/doctor-availability`, `/appointment-days`, slot materialization and the booking validator all
+resolve through it. A second implementation is the bug: the way that failure presents is a patient given an
+appointment with a doctor who is on leave.
+
+**Effect on an appointment already booked — it does NOT change state.** A lapsed licence or a newly recorded
+closure sets `appointment.reassignment_needed_at` and leaves `status` exactly as it was. `Booked` stays
+`Booked`; nothing transitions to `Cancelled`. **No automated process cancels a beneficiary's appointment** —
+it lands on someone who may have no reliable phone number and has lost a day's pay to travel, and who cannot
+tell a cancellation from being dropped. A person decides who covers the clinic; the flag is how they find out
+they need to.
+
+**The licence boundary is INCLUSIVE.** A licence expiring 30 September is valid *through* 30 September — a
+doctor is not unlicensed on the last day printed on their own certificate — and the rule, the slot generator
+and the flagging consumer are asserted to agree on both boundary days.
 
 ---
 
@@ -576,3 +735,37 @@ Active on plan A ──change-plan (mandatory reason)──▶ Active on plan B
 
 **There is no edit and no delete edge, for any role.** A Cancelled note remains fully visible, struck through,
 with its canceller, timestamp and reason.
+
+
+---
+
+## Refill-window state machine (29.5, design 45 §5)
+
+One window of a chronic prescription. **`Open` is never written** — dispensability is computed from
+`opens_at`/`closes_at` at read time, so a stalled sweeper delays a forfeiture but can never refuse a patient
+at the counter. See `docs/superpowers/specs/2026-08-07-chronic-refill-windows-design.md`.
+
+```
+                    ┌──────────────────────────────► Missed        (sweeper, after closes_at, nothing collected)
+                    │                                  ▲
+   Pending ─────────┼──► PartiallyDispensed ───────────┘           (a partial is NOT swept — the patient attended)
+      │             │            │
+      │             │            └──► Dispensed                    (allocation fully handed over)
+      │             │
+      │             └──► Dispensed                                 (collected in one visit)
+      │
+      └──► Blocked ──► Pending                                     (eligibility failed / restored)
+```
+
+| Transition | Trigger | Written by | Notes |
+|---|---|---|---|
+| Pending → Dispensed / PartiallyDispensed | collection | the counter | Limits consumed PER DISPENSE, as collected |
+| Pending → Blocked | eligibility fails at the counter | the counter | Carries a reason. Does **not** cancel the script |
+| Blocked → Pending | eligibility restored | the counter | The DATES still decide: unblocking after `closes_at` resurrects nothing |
+| Pending → Missed | `closes_at` passed, nothing collected | the sweeper | Records a forfeiture with a timestamp. Idempotent |
+
+**`Blocked` ≠ `Missed`.** One is the system stopping the patient, the other is the patient not coming. Only
+the second is the patient's doing, and only the first should reach a case worker's queue.
+
+**Enforcement is by the dates, not by the status.** A window past `closes_at` is refused by the counter
+whether or not the sweeper has caught up; the sweeper only records what already happened.

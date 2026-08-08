@@ -25,6 +25,20 @@ interaction/allergy alerts and raises referrals; a **pharmacist** searches dispe
 5. **Outbox** — `RxCreated`, `RxSubmitted` (+ `RxApproved` when auto-approved) to `pharmacy.events`, in the same
    transaction as the state change; consumers dedupe on event id.
 
+`RxCreated`, `RxSubmitted`, `RxCancelled` and `RxLinesDispensed` carry **`encounterId`** (ADR-0031) so emr can
+step them onto the patient's care episode. They carry the `rxNo` and **not the drug**: the episode timeline is
+read by reception, so "medicine dispensed · RX-2026-000031" is the act and which medicine is the care.
+`CareFeedEnvelopeArchitectureTests` fails the build if a publish site drops the encounter.
+
+`RxSubmitted` is the routing one, and the only mirrored event that becomes a step *conditionally* — it is
+emitted for every prescription, so emr reads `requiresApproval` and appends `PrescriptionSentForApproval`
+only when it is set. It has to be on the feed because pharmacy has no other event for a gated prescription:
+`RxCreated` fires either way and `RxApproved` fires only when routing did **not** gate it, so a prescription
+waiting on a reviewer used to read on the episode exactly like one waiting to be collected. Its
+`orderedByUserId` is the token subject (`CreatedBy`) like every sibling event — it named a practitioner row
+id until 25.x, which made the one field whose purpose is "someone to reach" point at a directory entry rather
+than an account.
+
 Idempotent on `Idempotency-Key`; every mutation audited. `GET /api/v1/prescriptions/{id}` (treating-gated),
 `POST /api/v1/prescriptions/{id}/cancel` (legal only while not fully dispensed → audited `409` otherwise).
 **Min-necessary:** prescription views never expose investigation results.
@@ -69,6 +83,19 @@ investigation results — this service exposes none, and the pharmacy policy bun
 - `POST /prescriptions/{rxId}/lines/{lineId}/out-of-stock` (scope `pharmacy:dispense`) — **flags** OOS without
   consuming the line (accumulator untouched, quantity stays available); emits `RxLineOutOfStock` to notify the
   prescriber + beneficiary (delivered by notification-service in phase 8) and audits.
+
+### What dispensing issues (ADR-0034)
+
+A dispense **issues a fulfilment authorization** in approvals-service: a record of what was actually handed
+over, separate from the prescription. A second, approvals-shaped copy of the dispense event is enqueued to
+`approvals.fulfilments` inside the dispense transaction — its own queue, because `pharmacy.events` is
+point-to-point and policy-service already consumes it to move the benefit accumulator, and asynchronous
+because an authorization that cannot be issued must never be able to fail a dispense.
+
+The copy carries the PRESCRIBED drug as `orderedCode` and the substitute (when there is one) as
+`fulfilledCode`, in two separate fields. `prescription_line.drug_id` is never written by this path and there
+is nowhere for it to be written to: a substitution changes what the authorization records, never what the
+prescriber decided.
 
 ## Domain
 

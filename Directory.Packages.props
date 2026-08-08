@@ -13,6 +13,10 @@
   </PropertyGroup>
 
   <ItemGroup Label="ASP.NET Core / hosting">
+    <!-- 28.5 — SMTP, so a password-reset link can actually reach somebody. MIT, no service dependency, and
+         the standard choice on .NET now that System.Net.Mail.SmtpClient is documented as obsolete for new
+         code. Behind libs/email's IEmailSender: nothing outside that library references MailKit. -->
+    <PackageVersion Include="MailKit" Version="4.7.1.1" />
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="8.0.8" />
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="6.7.3" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.8" />

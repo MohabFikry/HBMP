@@ -51,7 +51,22 @@ for (const lang of LANGS) {
       );
 
       await page.goto(path);
-      await page.waitForSelector("main", { state: "attached" });
+
+      // 24.4 — WAIT FOR THE SCREEN, NOT THE SHELL. `state: "attached"` on <main> is satisfied by the app
+      // shell, before any lazily-loaded route component has resolved. The jsdom sweep had the identical
+      // bug and it was measurable there: 55 of 112 routes handed axe an empty element, so half the
+      // platform was audited to no effect while the gate stayed green. Contrast is the rule this job
+      // exists for and it needs painted pixels — an empty <main> has none, and reports no violations for
+      // the most reassuring of reasons.
+      await page.waitForFunction(
+        () => (document.querySelector("main")?.textContent ?? "").trim().length > 0,
+        undefined,
+        { timeout: 15_000 },
+      );
+      // Load-bearing: if a route ever genuinely renders nothing, fail here rather than pass an empty audit.
+      const rendered = await page.evaluate(() => (document.querySelector("main")?.textContent ?? "").trim());
+      expect(rendered.length, `${path} (${lang}) rendered an EMPTY <main> — axe would have audited nothing`)
+        .toBeGreaterThan(0);
 
       const results = await new AxeBuilder({ page })
         // ONLY contrast here. Structure is the jsdom suite's job and is already covered on every route;

@@ -29,7 +29,7 @@ function series(over: Partial<AnalyticsSeries> = {}): AnalyticsSeries {
     ],
     summaryEn: "Membership movement: 2 series totalling 160; highest is Joined at 120.",
     summaryAr: "حركة العضوية: سلسلتان بإجمالي ١٦٠؛ الأعلى انضم بقيمة ١٢٠.",
-    columns: ["Movement", "Members"],
+    columns: [{ en: "Movement", ar: "الحركة" }, { en: "Members", ar: "الأعضاء" }],
     ...over,
   };
 }
@@ -43,6 +43,30 @@ function fakeApi(overrides: Partial<PolicyApi> = {}): PolicyApi {
     analytics: () => Promise.resolve(result()),
     analyticsOutlierMembers: () => Promise.resolve([]),
     analyticsExport: () => Promise.resolve(""),
+    // The filter bar is built from reference data now, not from typed uuids (§5.1), so these are part of
+    // the screen's contract rather than incidental.
+    payers: () => Promise.resolve([
+      { payerId: "pay-1", payerCode: "UNHCR", nameEn: "UNHCR", nameAr: "المفوضية", payerType: "Donor", status: "Active" },
+    ]),
+    policyQuery: () => Promise.resolve({
+      items: [{
+        policyId: "pol-1", policyNo: "POL-2026-0001", status: "Active", effectiveFrom: "2026-01-01",
+        memberCount: 12, memberCountBand: "Small", planCount: 1, utilizationBand: "Low",
+      }],
+      page: 1, pageSize: 200, totalCount: 1, totalPages: 1, sortedBy: "policyno",
+    }),
+    networkTiers: () => Promise.resolve([
+      { networkTierId: "t-1", tierCode: "TIER1", nameEn: "Tier 1", nameAr: "الشريحة ١", rank: 1, isOutOfNetwork: false, status: "Active" },
+    ]),
+    benefitCategories: () => Promise.resolve([{ benefitCategoryId: "bc-1", code: "OP", name: "Outpatient" }]),
+    policyPlans: () => Promise.resolve([
+      { policyPlanId: "pp-1", policyId: "pol-1", planVersionId: "pv-1", planLabel: "Bronze v1",
+        effectiveFrom: "2026-01-01", isDefault: true, status: "Active", memberCount: 12 },
+    ]),
+    policyGroups: () => Promise.resolve([
+      { groupId: "g-1", policyId: "pol-1", groupCode: "G1", nameEn: "Cairo", nameAr: "القاهرة",
+        groupType: "Branch", effectiveFrom: "2026-01-01", status: "Active" },
+    ]),
     ...overrides,
   } as unknown as PolicyApi;
 }
@@ -76,6 +100,40 @@ describe("Every chart carries its data table", () => {
 
     // No control that could leave it switched off.
     expect(within(card).queryByRole("button", { name: /show|table|data/i })).not.toBeInTheDocument();
+  });
+
+  it("heads the Arabic table in Arabic, not in English", async () => {
+    localStorage.setItem("mersal-lang", "ar");
+    try {
+      renderDashboard(fakeApi());
+      const card = await screen.findByTestId("series-membership-movement");
+      const table = within(card).getByRole("table");
+
+      // §3.1: `columns` was one monolingual array, so the accessible table — the element that exists FOR the
+      // reader who cannot see the bars — was the only English text left on an Arabic page, and it was the
+      // part that names what each number IS.
+      expect(within(table).getByRole("columnheader", { name: "الحركة" })).toBeInTheDocument();
+      expect(within(table).getByRole("columnheader", { name: "الأعضاء" })).toBeInTheDocument();
+      expect(within(table).queryByRole("columnheader", { name: "Movement" })).not.toBeInTheDocument();
+    } finally {
+      localStorage.removeItem("mersal-lang");
+    }
+  });
+
+  it("prints every figure in one numeral system", async () => {
+    localStorage.setItem("mersal-lang", "ar");
+    try {
+      renderDashboard(fakeApi());
+      const card = await screen.findByTestId("series-membership-movement");
+
+      // §5.8: counts went through `String(value)` and percentages through a template literal, both of which
+      // are always Latin, while the currency column resolved ar-EG and printed Arabic-Indic. One card, two
+      // numeral systems, for the same kind of quantity.
+      expect(within(card).getAllByText("١٢٠").length).toBeGreaterThan(0);
+      expect(within(card).queryByText("120")).not.toBeInTheDocument();
+    } finally {
+      localStorage.removeItem("mersal-lang");
+    }
   });
 
   it("hides the decorative bars from assistive tech rather than duplicating them", async () => {
@@ -141,6 +199,65 @@ describe("The filter bar is the URL", () => {
   });
 });
 
+// ── The filters are usable ──────────────────────────────────────────────────────────────────────────────
+
+describe("Narrowing the dashboard does not require knowing a uuid", () => {
+  it("offers the payers, tiers and categories as pickers rather than text boxes", async () => {
+    renderDashboard(fakeApi());
+    await screen.findByTestId("series-membership-movement");
+
+    // §5.1 — these were `<InputField type="text">` over uuid and enum-token columns, so the only way to use
+    // the dashboard's own narrowing was to already know the value you were filtering to.
+    for (const name of [/payer/i, /network tier/i, /benefit category/i, /member status/i, /utilization band/i]) {
+      expect(await screen.findByRole("combobox", { name })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("textbox", { name: /payer/i })).not.toBeInTheDocument();
+  });
+
+  it("writes the chosen id to the URL, so the picker and the shared link agree", async () => {
+    const analytics = vi.fn().mockResolvedValue(result());
+    renderDashboard(fakeApi({ analytics }));
+    await screen.findByTestId("series-membership-movement");
+
+    await userEvent.click(await screen.findByRole("combobox", { name: /payer/i }));
+    await userEvent.click(await screen.findByRole("option", { name: "UNHCR" }));
+
+    // The label is for the human; the id is what the query and the shared address carry.
+    await waitFor(() =>
+      expect(analytics).toHaveBeenLastCalledWith("enrolment", expect.objectContaining({ payerId: "pay-1" })),
+    );
+  });
+
+  it("will not offer a plan or a group until a policy is chosen, and says why", async () => {
+    renderDashboard(fakeApi());
+    await screen.findByTestId("series-membership-movement");
+
+    // Both hang off a policy. Enabled-and-empty is a control that can only disappoint; disabled with the
+    // reason on it explains the order of the bar instead.
+    expect(await screen.findByRole("combobox", { name: /^plan/i })).toBeDisabled();
+    expect(screen.getAllByText(/choose a policy first/i).length).toBeGreaterThan(0);
+  });
+
+  it("loads the plans of the policy in the address", async () => {
+    renderDashboard(fakeApi(), "/policy/analytics?policyId=pol-1");
+    await screen.findByTestId("series-membership-movement");
+
+    const plan = await screen.findByRole("combobox", { name: /^plan/i });
+    expect(plan).not.toBeDisabled();
+    await userEvent.click(plan);
+    expect(await screen.findByRole("option", { name: "Bronze v1" })).toBeInTheDocument();
+  });
+
+  it("says so when a reference list could not be read, instead of an empty picker", async () => {
+    renderDashboard(fakeApi({ payers: () => Promise.reject(new Error("boom")) } as Partial<PolicyApi>));
+    await screen.findByTestId("series-membership-movement");
+
+    // An empty picker reads as "there are no payers", which is a statement about the data rather than about
+    // the request that failed to make it.
+    expect(await screen.findByText(/some filter lists could not be loaded/i)).toBeInTheDocument();
+  });
+});
+
 // ── Compare mode ────────────────────────────────────────────────────────────────────────────────────────
 
 describe("Delta chips carry a text cue, not a colour", () => {
@@ -186,7 +303,7 @@ describe("Drill-down goes through the audited endpoint", () => {
                 key: "limit-outliers",
                 titleEn: "Members at the edge of their entitlement",
                 points: [{ key: "over-limit", labelEn: "Over the limit", labelAr: "تجاوزوا الحد", value: 14 }],
-                columns: ["Outlier", "Members"],
+                columns: [{ en: "Outlier", ar: "القيمة الشاذة" }, { en: "Members", ar: "الأعضاء" }],
               })],
             }),
           ),

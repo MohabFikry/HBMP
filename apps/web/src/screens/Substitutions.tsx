@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Card, DataTable, InputField, StatusChip } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InputField, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { DrugRef, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -75,7 +75,8 @@ export function Substitutions() {
       <Card as="section" style={{ padding: "var(--sp5)" }}>
         <form onSubmit={run} className="stack" aria-label={t(S.title)}>
           <InputField label={t(S.field)} help={t(S.help)} value={query} onChange={(e) => setQuery(e.currentTarget.value)} autoComplete="off" />
-          <div><Button type="submit" variant="primary" loading={status === "loading"}>{t(S.search)}</Button></div>
+          <div><Button type="submit" variant="primary"
+              leadingIcon={<Icon name="search" />} loading={status === "loading"}>{t(S.search)}</Button></div>
         </form>
       </Card>
 

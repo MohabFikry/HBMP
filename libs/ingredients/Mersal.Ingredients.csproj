@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Mersal.Ingredients</RootNamespace>
+    <AssemblyName>Mersal.Ingredients</AssemblyName>
+  </PropertyGroup>
+  <!--
+    No ProjectReference, and nothing that touches I/O. This is the platform's ONE answer to "what molecule
+    is this, and what molecules is this product made of" — a question asked by the prescribing engine (to
+    look a manufacturer label up), by masterdata (to decompose a product into ingredients so an allergy,
+    an interaction or a duplicate-therapy rule can be keyed on one), and by the loader.
+
+    It lives in its own library because the alternative is worse in both directions. Leaving it inside
+    Mersal.ClinicalValidation would make masterdata — reference data, which sits BELOW the engine — depend
+    on the engine. Copying it into masterdata would give the platform two normalisers, and two
+    implementations of a matching rule diverge silently: the day they disagree, a drug resolves to one
+    ingredient when a rule is authored and a different one when a prescription is screened against it.
+  -->
+</Project>

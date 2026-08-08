@@ -1,5 +1,7 @@
-import { useCallback, useMemo, useRef, useState } from "react";
-import { Button, Card, InlineAlert, useTheme } from "@mersal/design-system";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
+import { Button, Card, Icon, InlineAlert, Select, Tabs, useTheme } from "@mersal/design-system";
+import type { IconName, TabItem } from "@mersal/design-system";
 import type {
   CallHistoryRow,
   ProfileExportSummary,
@@ -9,13 +11,14 @@ import type {
   ProfileAlerts,
   ProfileHeader,
   ProfileSection,
+  ProfileSectionKey,
 } from "@mersal/contracts";
-import { PROFILE_SECTION_KEYS } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAuth } from "../auth/AuthProvider";
 import { permissionsForRole, hasPermission, type Permission, type Role } from "../authz/permissions";
 import { useAsync } from "../api/useAsync";
-import { AsyncSection, PageHeader, useLoc } from "./_shared";
+import { AsyncSection, PageHeader, useBackTarget, useLoc, useOpenProfile } from "./_shared";
+import { SectionView } from "./ProfileSectionViews";
 import { useFormat } from "../i18n/useFormat";
 
 /**
@@ -34,11 +37,11 @@ import { useFormat } from "../i18n/useFormat";
 
 const STR = {
   noPatient: {
-    en: "Open a patient from a worklist or from Search / manage to see their file.",
+    en: "Open a patient from a worklist or from Search / Manage to see their file.",
     ar: "افتح مريضًا من قائمة عمل أو من «بحث / إدارة» لعرض ملفّه.",
   },
-  title: { en: "Patient profile", ar: "ملف المريض" },
-  jumpTo: { en: "Jump to section", ar: "الانتقال إلى قسم" },
+  title: { en: "Patient Profile", ar: "ملف المريض" },
+  tabsLabel: { en: "Profile sections", ar: "أقسام الملف" },
   restricted: { en: "Restricted", ar: "مقيّد" },
   unavailable: { en: "Temporarily unavailable", ar: "غير متاح مؤقتًا" },
   empty: { en: "No records", ar: "لا توجد سجلات" },
@@ -61,7 +64,25 @@ const STR = {
   inbound: { en: "Inbound", ar: "وارد" },
   outbound: { en: "Outbound", ar: "صادر" },
   alerts: { en: "Alerts", ar: "تنبيهات" },
+  historyTab: { en: "History", ar: "السجل الطبي" },
+  coverageTab: { en: "Coverage", ar: "التغطية" },
+  allergyTo: { en: "Allergy:", ar: "حساسية:" },
+  moreAlerts: { en: "more alerts", ar: "تنبيهات أخرى" },
   actions: { en: "Actions", ar: "إجراءات" },
+  filterByDirection: { en: "Filter by direction", ar: "تصفية حسب الاتجاه" },
+  allCalls: { en: "All calls", ar: "كل المكالمات" },
+  // Names for the identity strip's icon-per-fact chips. The icon is decorative; these are what a screen
+  // reader announces, so "Female" is not read out as a bare word with nothing saying it is the sex.
+  age: { en: "Age", ar: "العمر" },
+  sex: { en: "Sex", ar: "النوع" },
+  branch: { en: "Branch", ar: "الفرع" },
+  nationality: { en: "Nationality", ar: "الجنسية" },
+  years: { en: "{n} yrs", ar: "{n} سنة" },
+  bloodGroup: { en: "Blood group", ar: "فصيلة الدم" },
+  bloodGroupUnknown: { en: "Blood group not recorded", ar: "فصيلة الدم غير مسجّلة" },
+  ageApprox: { en: "approx.", ar: "تقريبي" },
+  language: { en: "Preferred language", ar: "اللغة المفضلة" },
+  phone: { en: "Phone", ar: "الهاتف" },
   print: { en: "Print summary", ar: "طباعة الملخص" },
   printing: { en: "Preparing…", ar: "جارٍ التحضير…" },
   printFailed: { en: "The summary could not be generated.", ar: "تعذّر إنشاء الملخص." },
@@ -74,41 +95,46 @@ const STR = {
  * receptionist's screen advertises a capability they will never have and invites a support ticket; a link that
  * 403s is worse still. The server is the authority either way — this list only decides what is worth offering.
  */
-const SECTION_ACTIONS: Record<string, { label: Localized; permission: Permission; href: (id: string) => string }[]> = {
+const SECTION_ACTIONS: Record<string,
+  { label: Localized; permission: Permission; href: (id: string, memberNo?: string) => string; icon: IconName }[]> = {
   header: [
-    { label: { en: "Book appointment", ar: "حجز موعد" }, permission: "appointments.read",
-      href: (id) => `/reception/appointments?beneficiaryId=${encodeURIComponent(id)}` },
+    // `/reception/book`, NOT `/reception/appointments`. It pointed at the day board — the list of everyone's
+    // appointments — so "Book appointment" took you to a screen that books nothing and then had to be
+    // navigated away from. The member number rides along as the booking screen's opening search, because the
+    // one thing that page needs first is which patient, and the profile already knows.
+    { icon: "calendar", label: { en: "Book appointment", ar: "حجز موعد" }, permission: "appointments.read",
+      href: (_id, memberNo) => `/reception/book${memberNo ? `?q=${encodeURIComponent(memberNo)}` : ""}` },
   ],
   encounters: [
-    { label: { en: "Start encounter", ar: "بدء زيارة" }, permission: "emr.write",
+    { icon: "doc", label: { en: "Start encounter", ar: "بدء زيارة" }, permission: "emr.write",
       href: (id) => `/clinician/encounter?beneficiaryId=${encodeURIComponent(id)}` },
   ],
   investigations: [
-    { label: { en: "Raise investigation order", ar: "طلب فحص" }, permission: "orders.place",
+    { icon: "flask", label: { en: "Raise investigation order", ar: "طلب فحص" }, permission: "orders.place",
       href: (id) => `/clinician/orders?beneficiaryId=${encodeURIComponent(id)}` },
   ],
   prescriptions: [
-    { label: { en: "New prescription", ar: "وصفة جديدة" }, permission: "prescriptions.write",
+    { icon: "pill", label: { en: "New prescription", ar: "وصفة جديدة" }, permission: "prescriptions.write",
       href: (id) => `/clinician/prescriptions?beneficiaryId=${encodeURIComponent(id)}` },
   ],
   authorizations: [
-    { label: { en: "View authorizations", ar: "عرض الموافقات" }, permission: "approvals.worklist",
+    { icon: "check2", label: { en: "View authorizations", ar: "عرض الموافقات" }, permission: "approvals.worklist",
       href: (id) => `/approvals/worklist?beneficiaryId=${encodeURIComponent(id)}` },
   ],
   financial: [
-    { label: { en: "Open claims", ar: "فتح المطالبات" }, permission: "claims.worklist",
+    { icon: "chart", label: { en: "Open claims", ar: "فتح المطالبات" }, permission: "claims.worklist",
       href: (id) => `/claims/worklist?beneficiaryId=${encodeURIComponent(id)}` },
   ],
   documents: [
-    { label: { en: "Upload document", ar: "رفع مستند" }, permission: "beneficiary.manage",
+    { icon: "folder", label: { en: "Upload document", ar: "رفع مستند" }, permission: "beneficiary.manage",
       href: (id) => `/beneficiaries/manage?beneficiaryId=${encodeURIComponent(id)}` },
   ],
   notes: [
-    { label: { en: "Add note", ar: "إضافة ملاحظة" }, permission: "policy.members",
+    { icon: "pen", label: { en: "Add note", ar: "إضافة ملاحظة" }, permission: "policy.members",
       href: (id) => `/policy/members?beneficiaryId=${encodeURIComponent(id)}` },
   ],
   caseManagement: [
-    { label: { en: "Open case", ar: "فتح الحالة" }, permission: "case.read",
+    { icon: "folder", label: { en: "Open case", ar: "فتح الحالة" }, permission: "case.read",
       href: (id) => `/cases/my-cases?beneficiaryId=${encodeURIComponent(id)}` },
   ],
 };
@@ -155,6 +181,16 @@ const REASONS: Record<string, Localized> = {
 export function PatientProfile({ beneficiaryId }: { beneficiaryId?: string }) {
   const api = useApi();
   const t = useLoc();
+  /**
+   * A profile is opened FOR someone — from a worklist row, a search result, an open call — and never from a
+   * menu (design 39 §6), so there is always somewhere to go back TO, and it was never offered. The agent who
+   * opened a caller's file mid-call had to find their way back through the nav, and the two call-centre entry
+   * points were plain `<a href>`s that reloaded the SPA, so arriving here meant losing the call entirely.
+   *
+   * `useBackTarget` returns null when this really is the first entry in the tab's history — a pasted deep
+   * link — and the control is then absent rather than present and pointing out of the app.
+   */
+  const back = useBackTarget();
   // No fixture fallback. This used to default to "BEN-2" — a DevApiClient id — so the seven
   // /{portal}/patient routes loaded a person who does not exist outside the dev fixtures, and against a
   // real database the profile simply errored. A file is opened FOR someone (design 39 §6: search → profile,
@@ -167,7 +203,7 @@ export function PatientProfile({ beneficiaryId }: { beneficiaryId?: string }) {
   if (!beneficiaryId) {
     return (
       <>
-        <PageHeader title={t(STR.title)} />
+        <PageHeader title={t(STR.title)} back={back ?? undefined} />
         <Card as="section" style={{ padding: "var(--sp5)" }}>
           <InlineAlert tone="info">{t(STR.noPatient)}</InlineAlert>
         </Card>
@@ -177,7 +213,11 @@ export function PatientProfile({ beneficiaryId }: { beneficiaryId?: string }) {
 
   return (
     <>
-      <PageHeader title={t(STR.title)} actions={<PrintSummaryButton beneficiaryId={beneficiaryId} />} />
+      <PageHeader
+        title={t(STR.title)}
+        back={back ?? undefined}
+        actions={<PrintSummaryButton beneficiaryId={beneficiaryId} />}
+      />
       <AsyncSection state={state} emptyLabel={STR.empty} isEmpty={(p) => !p || p.sections.length === 0}>
         {(profile) => <ProfileBody profile={profile!} onRetry={state.reload} />}
       </AsyncSection>
@@ -222,7 +262,7 @@ function PrintSummaryButton({ beneficiaryId }: { beneficiaryId: string }) {
       >
         {t(state === "busy" ? STR.printing : STR.print)}
       </Button>
-      <span aria-live="polite" role="status" className="visually-hidden">
+      <span aria-live="polite" role="status" className="sr-only">
         {state === "failed" ? t(STR.printFailed) : ""}
       </span>
       {state === "failed" ? <InlineAlert tone="bad">{t(STR.printFailed)}</InlineAlert> : null}
@@ -266,40 +306,110 @@ function openPrintable(summary: ProfileExportSummary) {
   w.print();
 }
 
+type ProfileTabKey = "coverage" | "history" | "authorizations" | "documents" | "notes" | "timeline" | "callHistory";
+
+/**
+ * Section keys grouped into the profile's tabs (design spec
+ * docs/superpowers/specs/2026-08-08-patient-profile-tabs-redesign.md). Each group's `sections` list is in
+ * `PROFILE_SECTION_KEYS` order, which is also render order within the tab — alerts-before-encounters is a
+ * safety property (design 39), not a layout choice this table is free to reorder.
+ */
+export const PROFILE_TAB_GROUPS: { key: ProfileTabKey; title: Localized; sections: ProfileSectionKey[] }[] = [
+  { key: "coverage", title: STR.coverageTab, sections: ["coverage"] },
+  {
+    key: "history",
+    title: STR.historyTab,
+    sections: ["alerts", "pastMedicalHistory", "encounters", "investigations", "prescriptions", "caseManagement"],
+  },
+  { key: "authorizations", title: SECTION_TITLES.authorizations, sections: ["authorizations", "referrals", "financial"] },
+  { key: "documents", title: SECTION_TITLES.documents, sections: ["documents"] },
+  { key: "notes", title: SECTION_TITLES.notes, sections: ["notes"] },
+  { key: "timeline", title: SECTION_TITLES.timeline, sections: ["timeline"] },
+  { key: "callHistory", title: SECTION_TITLES.callHistory, sections: ["callHistory"] },
+];
+
 function ProfileBody({ profile, onRetry }: { profile: PatientProfileContract; onRetry: () => void }) {
   const t = useLoc();
+  const [activeTab, setActiveTab] = useState<ProfileTabKey | undefined>(undefined);
 
-  // Render in the server's order, which is design 39 §3 order. Sorting here would be a second opinion about
-  // the order alerts appear in, and alerts being second is a safety property, not a layout choice.
-  const ordered = useMemo(() => {
-    const rank = new Map(PROFILE_SECTION_KEYS.map((k, i) => [k as string, i]));
-    return [...profile.sections].sort(
-      (a, b) => (rank.get(a.key) ?? 999) - (rank.get(b.key) ?? 999),
-    );
-  }, [profile.sections]);
+  const byKey = useMemo(() => new Map(profile.sections.map((s) => [s.key, s] as const)), [profile.sections]);
+  const header = byKey.get("header");
+  const alerts = byKey.get("alerts");
+  const alertData = alerts?.state === "Visible" ? (alerts.data as ProfileAlerts) : null;
+
+  // Filtered by actual content BEFORE building JSX. A role whose payload never carries a group's sections at
+  // all (lab/imaging techs: header+alerts+investigations only; org/super admin: header+timeline only) must
+  // not land on an empty tab beside six more empty tabs — that reads as "this patient has no records", the
+  // exact failure the three-state design exists to prevent (design 39 §6).
+  const tabItems: TabItem[] = useMemo(() => {
+    const assigned = new Set(PROFILE_TAB_GROUPS.flatMap((g) => g.sections as string[]));
+    // A server ahead of this client sends a key none of the groups above know. It must still be shown
+    // (design 39 §6: an unknown section is rendered, not reported as empty) — it lands in History, the
+    // catch-all clinical tab, rather than being silently dropped.
+    const orphaned = profile.sections.map((s) => s.key).filter((k) => k !== "header" && !assigned.has(k));
+
+    return PROFILE_TAB_GROUPS
+      .map((group) => {
+        const keys = group.key === "history" ? [...group.sections, ...orphaned] : group.sections;
+        const sections = keys.map((key) => byKey.get(key)).filter((s): s is ProfileSection => s !== undefined);
+        return { group, sections };
+      })
+      .filter(({ sections }) => sections.length > 0)
+      .map(({ group, sections }) => ({
+        value: group.key,
+        label: t(group.title),
+        content: (
+          <div className="profile-sections">
+            {sections.map((section) => (
+              <SectionCard key={section.key} section={section} beneficiaryId={profile.beneficiaryId} onRetry={onRetry} />
+            ))}
+          </div>
+        ),
+      }));
+  }, [byKey, profile.sections, profile.beneficiaryId, onRetry, t]);
+
+  // Derived from the filtered list rather than stored, so it is always valid: if `activeTab` names a tab that
+  // no longer exists (or none has been picked yet), this falls back to the first surviving tab automatically
+  // — no `useEffect` needed, and it recomputes correctly if the payload changes on retry.
+  const effectiveTab = tabItems.find((it) => it.value === activeTab)?.value ?? tabItems[0]?.value;
 
   return (
     <div className="patient-profile">
-      <nav className="profile-jump" aria-label={t(STR.jumpTo)}>
-        <ul>
-          {ordered.map((s) => (
-            <li key={s.key}>
-              <a href={`#section-${s.key}`}>{t(SECTION_TITLES[s.key] ?? { en: s.key, ar: s.key })}</a>
-            </li>
-          ))}
-        </ul>
-      </nav>
+      {header ? (
+        <section aria-label={t(SECTION_TITLES.header)}>
+          <Card style={{ padding: "var(--sp5)" }}>
+            {header.state === "Visible" ? (
+              <ProfileIdentity
+                data={header.data as ProfileHeader}
+                // Gated on alerts actually being VISIBLE, not merely present in the payload: an `Unavailable`
+                // alerts section (a real fetch failure) must not let this card assert "not recorded" while the
+                // Alerts card one tab away correctly says "temporarily unavailable" — two contradictory claims
+                // about the same fact. A role whose payload never carries an alerts section at all (reception)
+                // gets `undefined` here and no blood-group fact renders at all.
+                bloodGroup={alerts?.state === "Visible" ? (alertData?.bloodGroup ?? null) : undefined}
+                chips={<AllergyChips alertData={alertData} namedAllergens />}
+                actions={<SectionActions section={header} beneficiaryId={profile.beneficiaryId} />}
+              />
+            ) : (
+              <>
+                <h2 style={{ margin: 0, fontSize: "1.05rem" }}>{t(SECTION_TITLES.header)}</h2>
+                <SectionState section={header} beneficiaryId={profile.beneficiaryId} onRetry={onRetry} />
+              </>
+            )}
+          </Card>
+        </section>
+      ) : null}
 
-      <div className="profile-sections">
-        {ordered.map((section) => (
-          <SectionCard
-            key={section.key}
-            section={section}
-            beneficiaryId={profile.beneficiaryId}
-            onRetry={onRetry}
-          />
-        ))}
-      </div>
+      {tabItems.length > 0 ? (
+        <Tabs
+          variant="pill"
+          className="profile-tabs"
+          aria-label={t(STR.tabsLabel)}
+          value={effectiveTab!}
+          onValueChange={(v) => setActiveTab(v as ProfileTabKey)}
+          items={tabItems}
+        />
+      ) : null}
     </div>
   );
 }
@@ -340,6 +450,7 @@ function SectionCard({
  */
 function SectionActions({ section, beneficiaryId }: { section: ProfileSection; beneficiaryId: string }) {
   const t = useLoc();
+  const navigate = useNavigate();
   const { session } = useAuth();
   const role = session?.role as Role | undefined;
 
@@ -351,12 +462,33 @@ function SectionActions({ section, beneficiaryId }: { section: ProfileSection; b
   const offered = actions.filter((a) => hasPermission(held, a.permission));
   if (offered.length === 0) return null;
 
+  // Only the header section carries one, which is also the only section whose action wants it.
+  const memberNo = section.key === "header" ? (section.data as ProfileHeader | undefined)?.memberNo : undefined;
+
   return (
+    /*
+      BUTTONS that route — they were bare `<a href>`s, which was two defects at once.
+
+      1. A full document load. "Start encounter" reloaded the whole SPA to reach an in-app route, the same
+         fault the context bar above had; anything unsaved elsewhere on screen went with it.
+      2. 0B §10c: a bare text link beside a button is a hierarchy claim. These sit next to the section's own
+         controls and are the primary thing to DO with a section, so they read as the least important thing
+         on the card while being the most actionable.
+
+      Each carries the icon of the module it opens, so a clinician scanning a long profile finds the
+      prescription action by its shape rather than by reading nine labels.
+    */
     <nav className="profile-section-actions" aria-label={t(STR.actions)}>
       {offered.map((a) => (
-        <a key={a.permission} href={a.href(beneficiaryId)} className="profile-action-link">
+        <Button
+          key={a.permission}
+          variant="secondary"
+          size="sm"
+          leadingIcon={<Icon name={a.icon} />}
+          onClick={() => navigate(a.href(beneficiaryId, memberNo))}
+        >
           {t(a.label)}
-        </a>
+        </Button>
       ))}
     </nav>
   );
@@ -440,37 +572,197 @@ function SectionState({
   return <SectionContent section={section} beneficiaryId={beneficiaryId} />;
 }
 
-/** Visible content. Call history has a bespoke renderer (design 39 §5b); everything else is a generic view. */
+/**
+ * Visible content.
+ *
+ * Identity, alerts and call history are bespoke here — identity is the safety strip the context bar reuses,
+ * alerts carry the four-cue treatment, and call history has its own server-generated clipboard contract
+ * (design 39 §5b). Sections 3–14 have designed views of their own in `ProfileSectionViews`, and an unknown
+ * key — a server newer than this client — falls through to a renderer that shows what it cannot lay out
+ * rather than reporting absence.
+ */
 function SectionContent({ section, beneficiaryId }: { section: ProfileSection; beneficiaryId: string }) {
-  if (section.key === "header") return <HeaderView data={section.data as ProfileHeader} />;
   if (section.key === "alerts") return <AlertsView data={section.data as ProfileAlerts} />;
   if (section.key === "callHistory") {
     return <CallHistoryView data={section.data as CallHistorySection} beneficiaryId={beneficiaryId} />;
   }
-  return <GenericView data={section.data} />;
+  return <SectionView section={section} beneficiaryId={beneficiaryId} />;
 }
 
-function HeaderView({ data }: { data: ProfileHeader }) {
+/**
+ * The identity block, laid out like the member card in beneficiary management (`.mem-identity`).
+ *
+ * <b>What changed and why.</b> It used to stack three lines — name, then every fact joined by " · ", then the
+ * status chip on a line of its own. Two problems. The status is the first thing anyone checks before acting
+ * on a record, and it sat last, below a run-on line; and that run-on line gave a member number, an age band,
+ * a sex and a branch the same weight and no labels, so it had to be read left to right to find any one of
+ * them. The member card had already solved this: status beside the name, the identifier on its own quiet
+ * line, and the facts as an icon-per-fact strip that can be scanned rather than parsed.
+ *
+ * <b>What did NOT change: the four cues.</b> The status keeps its own chip element rather than adopting the
+ * generic `StatusChip` the member card uses, because `statusCue` carries a tone AND an icon AND a shape AND
+ * the word (design 39 §5), and a beneficiary's status is exactly the disclosure that must not come down to
+ * a colour.
+ *
+ * Every fact is rendered only if the SERVER sent it. This screen invents nothing: a role whose projection
+ * omits the phone renders no phone chip, rather than an empty one that implies none is recorded.
+ */
+/**
+ * The identity block — avatar, name + status, member number + relationship, and a hairline-separated strip of
+ * icon-per-fact details.
+ *
+ * <b>One component, used by the profile's own header AND by the context strip that follows a user into every
+ * clinical workspace.</b> The strip used to be its own flat line of dot-separated text: same person, same
+ * fields, a different shape in each place, and the differences were not decisions — the strip simply predated
+ * the block and never caught up. A clinician moving from the patient file into the encounter should not have
+ * to re-find the member number in a new layout.
+ *
+ * `onOpen` makes the NAME the way into the full file (the strip's job); without it the name is inert, which
+ * is right on the file itself, where you are already there.
+ */
+export function ProfileIdentity({
+  data,
+  onOpen,
+  chips,
+  actions,
+  bloodGroup,
+}: {
+  data: ProfileHeader;
+  onOpen?: () => void;
+  /** Extra chips beside the status — the encounter workspace's allergy warnings. */
+  chips?: ReactNode;
+  /** Trailing controls, pinned to the end of the block. */
+  actions?: ReactNode;
+  /**
+   * ABO + Rh, from the ALERTS section rather than from `data`.
+   *
+   * It is not on `ProfileHeader` because it is not administrative: the header comes from patient-service,
+   * which reception, the call centre and finance all read, and blood group is clinical data that arrives
+   * from emr behind the treating gate. Passed in as a prop so the field crosses into this block without the
+   * contract implying it was ever part of the demographic record.
+   *
+   * `undefined` = the caller does not supply it (a worklist strip); `null` = supplied and NOT RECORDED,
+   * which is rendered explicitly. The two are different and the middle one is the dangerous one.
+   */
+  bloodGroup?: string | null;
+}) {
   const { lang } = useTheme();
+  const t = useLoc();
   const name = lang === "ar" && data.displayNameAr ? data.displayNameAr : data.displayName;
+
+  // Whole years from the exact date when the caller was given it; the BAND otherwise. `min`-variant roles
+  // (labs, pharmacies) only ever receive the band, so this falls back rather than rendering nothing.
+  const age = data.birthDate ? yearsSince(data.birthDate) : null;
+  const ageText = age !== null
+    ? t(STR.years).replace("{n}", String(age)) + (data.birthDateIsApproximate ? ` (${t(STR.ageApprox)})` : "")
+    : data.ageBand ?? null;
+
+  const facts: { key: string; icon: IconName; label: Localized; value: string; unknown?: boolean }[] = [];
+  if (ageText) facts.push({ key: "age", icon: "calendar", label: STR.age, value: ageText });
+  if (data.sex) facts.push({ key: "sex", icon: "sex", label: STR.sex, value: data.sex });
+  // Blood group sits with the other identity facts because that is where a clinician looks for it, and it
+  // is rendered EVEN WHEN UNRECORDED — as "—", muted, with the state spelled out for a screen reader.
+  //
+  // Omitting the unknown case would have been tidier and is the wrong call: a strip showing six facts and
+  // silently dropping the seventh invites a reader to assume the seventh was never relevant. Blood group is
+  // one of the few facts whose ABSENCE a clinician has to act on, so absence gets a slot of its own.
+  if (bloodGroup !== undefined) {
+    facts.push({
+      key: "blood", icon: "droplet", label: STR.bloodGroup,
+      value: bloodGroup ?? "—", unknown: !bloodGroup,
+    });
+  }
+  if (data.nationalityCode) {
+    facts.push({ key: "nat", icon: "globe", label: STR.nationality, value: data.nationalityCode });
+  }
+  if (data.contact?.phone) {
+    facts.push({ key: "phone", icon: "phone", label: STR.phone, value: data.contact.phone });
+  }
+
   return (
-    <div className="profile-header-strip">
+    <div className="profile-identity">
       <Avatar photoUrl={data.photoUrl} name={name} />
-      <div>
-        <p className="profile-name">{name}</p>
-        <p className="profile-meta">
-          {[data.memberNo, data.ageBand, data.sex, data.branchName].filter(Boolean).join(" · ")}
-        </p>
-        {/* Four cues: the tone, the icon, the shape and the word — never colour alone. */}
-        <p className={`profile-chip profile-chip--${data.statusCue.tone}`} data-shape={data.statusCue.shape}>
-          <span aria-hidden="true" className="profile-chip-icon">
-            {data.statusCue.icon === "check-circle" ? "✔" : "●"}
-          </span>
-          <span>{data.statusCue.label}</span>
-        </p>
+      <div className="profile-identity-text">
+        <div className="profile-nameline">
+          <h3 className="profile-name">
+            {/*
+              A BUTTON that routes, not an `<a href>`.
+
+              This block follows the user into the encounter, dispense, lab, approval and call-centre
+              workspaces, so it is the most-reachable way into the patient file and a bare anchor is the most
+              destructive: a full document load tears down the SPA and with it the open encounter, the
+              dispense in progress or the live call. `useOpenProfile` records the origin, so Back returns to
+              the workspace the clinician left.
+            */}
+            {onOpen ? (
+              <button type="button" className="linklike" onClick={onOpen}>{name}</button>
+            ) : (
+              name
+            )}
+          </h3>
+          {/* Four cues: the tone, the icon, the shape and the word — never colour alone. Styled to match the
+              design-system chip the member card uses, so one patient looks the same in both places, but kept
+              as its own element: `statusCue` carries a SHAPE too, and a beneficiary's status is exactly the
+              disclosure that must not come down to a colour. */}
+          <p className={`profile-chip profile-chip--${data.statusCue.tone}`} data-shape={data.statusCue.shape}>
+            <span aria-hidden="true" className="profile-chip-icon">
+              {data.statusCue.icon === "check-circle" ? "✔" : "●"}
+            </span>
+            <span>{data.statusCue.label}</span>
+          </p>
+          {chips}
+          {actions ? <span className="profile-identity-actions">{actions}</span> : null}
+        </div>
+        {(data.memberNo || data.relationship) && (
+          <p className="profile-sub tnum">
+            {data.memberNo}
+            {data.memberNo && data.relationship && <span aria-hidden="true"> · </span>}
+            {data.relationship}
+          </p>
+        )}
       </div>
+      {/* Outside the text column, so its hairline runs the FULL width of the block rather than starting at
+          the avatar's edge and reading as an indent. Who this is, above; what describes them, below. */}
+      {facts.length > 0 && (
+        <ul className="profile-idfacts">
+          {facts.map((f) => (
+            <li
+              key={f.key}
+              className={f.unknown ? "profile-idfact--unknown" : undefined}
+              title={`${t(f.label)}: ${f.value}`}
+            >
+              <Icon name={f.icon} width={16} height={16} aria-hidden="true" />
+              {/* The icon is decorative, so the FACT still needs naming for a screen reader — otherwise the
+                  strip reads as a bare list of values with nothing saying what any of them is. */}
+              <span className="sr-only">{t(f.label)}: </span>
+              {/* An em dash is not readable aloud as "not recorded", so the unknown case says so in words
+                  and hides the dash — the dash is the SIGHTED shorthand for the same sentence. */}
+              {f.unknown ? (
+                <>
+                  <span className="sr-only">{t(STR.bloodGroupUnknown)}</span>
+                  <span aria-hidden="true">{f.value}</span>
+                </>
+              ) : (
+                <span>{f.value}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
+}
+
+/** Whole years between an ISO date and today. Null for anything unparseable rather than a negative age,
+ *  which is what a malformed date would otherwise render as. Same rule as the member card's `yearsSince`. */
+function yearsSince(isoDate: string): number | null {
+  const born = new Date(isoDate);
+  if (Number.isNaN(born.getTime())) return null;
+  const now = new Date();
+  let years = now.getFullYear() - born.getFullYear();
+  const monthDelta = now.getMonth() - born.getMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && now.getDate() < born.getDate())) years -= 1;
+  return years >= 0 && years < 130 ? years : null;
 }
 
 /**
@@ -536,46 +828,6 @@ function AlertsView({ data }: { data: ProfileAlerts }) {
 }
 
 /** A readable dump of a section payload the profile does not yet render bespoke. Never a JSON blob. */
-function GenericView({ data }: { data: unknown }) {
-  const t = useLoc();
-  if (data === null || data === undefined) return <p className="profile-empty">{t(STR.empty)}</p>;
-
-  const rows = Array.isArray((data as { items?: unknown }).items)
-    ? ((data as { items: Record<string, unknown>[] }).items)
-    : null;
-
-  if (rows) {
-    if (rows.length === 0) return <p className="profile-empty">{t(STR.empty)}</p>;
-    return (
-      <ul className="profile-rows">
-        {rows.map((row, i) => (
-          <li key={String(row.orderRef ?? row.rxRef ?? row.authNo ?? row.encounterRef ?? i)}>
-            {Object.entries(row)
-              .filter(([, v]) => v !== null && v !== undefined && typeof v !== "object")
-              .map(([k, v]) => `${k}: ${String(v)}`)
-              .join(" · ")}
-          </li>
-        ))}
-      </ul>
-    );
-  }
-
-  const entries = Object.entries(data as Record<string, unknown>).filter(
-    ([, v]) => v !== null && v !== undefined && typeof v !== "object",
-  );
-  if (entries.length === 0) return <p className="profile-empty">{t(STR.empty)}</p>;
-  return (
-    <dl className="profile-facts">
-      {entries.map(([k, v]) => (
-        <div key={k}>
-          <dt>{k}</dt>
-          <dd>{String(v)}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
 // ---------------------------------------------------------------- call history (design 39 §5b)
 
 /**
@@ -650,14 +902,23 @@ function CallHistoryView({ data, beneficiaryId }: { data: CallHistorySection; be
   return (
     <div className="call-history">
       <div className="call-history-toolbar">
-        <label>
-          <span className="visually-hidden">{t({ en: "Filter by direction", ar: "تصفية حسب الاتجاه" })}</span>
-          <select value={direction} onChange={(e) => setDirection(e.target.value as typeof direction)}>
-            <option value="all">{t({ en: "All calls", ar: "كل المكالمات" })}</option>
-            <option value="Inbound">{t(STR.inbound)}</option>
-            <option value="Outbound">{t(STR.outbound)}</option>
-          </select>
-        </label>
+        {/*
+          The design-system Select, not a native <select>. A native one cannot style its own option list —
+          the popup is drawn by the OS — so it arrived system-blue and square-cornered inside a rounded
+          Mersal card, with a default border no other control on the profile has. Same reason the branch
+          switcher in the app bar was converted; the keyboard contract (arrows, Home/End, typeahead, Escape)
+          is unchanged.
+        */}
+        <Select
+          aria-label={t(STR.filterByDirection)}
+          value={direction}
+          onChange={(v) => setDirection(v as typeof direction)}
+          options={[
+            { value: "all", label: t(STR.allCalls) },
+            { value: "Inbound", label: t(STR.inbound) },
+            { value: "Outbound", label: t(STR.outbound) },
+          ]}
+        />
         {visible.length > 0 ? (
           <Button variant="secondary" onClick={copyAll}>
             {t(STR.copyAll)}
@@ -769,6 +1030,44 @@ function CallRow({
 // ---------------------------------------------------------------- the patient context bar
 
 /**
+ * Up to 2 named allergens as warning chips, then a "+N more" chip — or a bare count when `namedAllergens`
+ * is false. Shared by `PatientContextBar` (the encounter workspace's identity strip) and the profile's own
+ * always-visible identity card (Task 3), so the two read identically rather than drifting.
+ *
+ * `alertData: null` means "nothing to show" — the caller decides separately (via whether it passes real
+ * data at all) whether that silence is because there is nothing recorded or because this viewer's payload
+ * never carried an alerts section; this component only renders what it is given.
+ */
+function AllergyChips({ alertData, namedAllergens }: { alertData: ProfileAlerts | null; namedAllergens: boolean }) {
+  const t = useLoc();
+  const alertCount = alertData ? alertData.allergies.length + (alertData.criticalFlags?.length ?? 0) : 0;
+  // Two named substances, then a remainder. A strip is a fixed-height safety control, and an eight-allergy
+  // patient must not push the identity it exists to confirm onto a second line.
+  const named = namedAllergens ? alertData?.allergies.slice(0, 2) ?? [] : [];
+  const namedRest = alertCount - named.length;
+
+  return (
+    <>
+      {named.map((a) => (
+        <span key={a.allergen} className="profile-chip profile-chip--critical" data-shape="octagon">
+          <span aria-hidden="true" className="profile-chip-icon">⚠</span>
+          <span>{t(STR.allergyTo)} {a.allergen}</span>
+        </span>
+      ))}
+      {(namedAllergens ? namedRest : alertCount) > 0 ? (
+        <span className="profile-chip profile-chip--critical" data-shape="octagon">
+          <span aria-hidden="true" className="profile-chip-icon">⚠</span>
+          <span>
+            {namedAllergens ? namedRest : alertCount}{" "}
+            {namedAllergens ? t(STR.moreAlerts) : t(STR.alerts)}
+          </span>
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+/**
  * The compact identity strip that follows a user into encounter, order, dispense, approval and call-centre
  * screens (design 39 §6).
  *
@@ -776,12 +1075,51 @@ function CallRow({
  * screen; the failure it prevents is prescribing for the wrong person. It asks for `header,alerts` only —
  * it is on every clinical screen and cannot be slow (build prompt 20.5: p95 &lt; 400ms).
  */
-export function PatientContextBar({ beneficiaryId }: { beneficiaryId: string }) {
+export function PatientContextBar({
+  beneficiaryId,
+  namedAllergens = false,
+  actions,
+  showBloodGroup = false,
+  reloadKey = 0,
+}: {
+  beneficiaryId: string;
+  /**
+   * Name the allergens instead of counting them.
+   *
+   * Opt-in, because the two readings answer different questions. On a worklist or an approval queue "2
+   * alerts" is the right amount — it says "open the file before you act". In a room with the patient, about
+   * to prescribe, the substance IS the decision, and a count sends the doctor hunting for something the bar
+   * already knows.
+   */
+  namedAllergens?: boolean;
+  /** Trailing controls, pinned to the end of the strip (the encounter workspace's patient-file entry). */
+  actions?: ReactNode;
+  /**
+   * Show blood group among the identity facts, including when it is not recorded.
+   *
+   * Opt-in for the same reason `namedAllergens` is. On a worklist or an approval queue it is one more fact
+   * to skim past; in a room with the patient it is one a clinician may have to act on, and its ABSENCE is
+   * the case worth showing rather than hiding.
+   */
+  showBloodGroup?: boolean;
+  /**
+   * Change this to force a re-read.
+   *
+   * The strip caches its profile call keyed on the beneficiary, which is right — it renders on every
+   * clinical screen and must not re-fetch on every render. But a screen that WRITES the facts the strip
+   * displays (the encounter records allergies and blood group) then leaves it showing the pre-write picture
+   * of the exact thing that was just corrected. A nonce is how that screen says "this is now stale".
+   */
+  reloadKey?: number;
+}) {
   const api = useApi();
   const t = useLoc();
+  // The name opens the full file. Routed, and recording where it was opened FROM — see the anchor it
+  // replaced, below.
+  const openProfile = useOpenProfile();
   const state = useAsync(
     useCallback(() => api.patientProfile(beneficiaryId, ["header", "alerts"]), [api, beneficiaryId]),
-    [beneficiaryId],
+    [beneficiaryId, reloadKey],
   );
 
   // The bar renders nothing until it has an answer, and nothing if the header was withheld. A context bar
@@ -793,29 +1131,22 @@ export function PatientContextBar({ beneficiaryId }: { beneficiaryId: string }) 
   const data = header.data as ProfileHeader;
 
   const alerts = profile.sections.find((s) => s.key === "alerts");
-  const alertCount =
-    alerts?.state === "Visible"
-      ? ((alerts.data as ProfileAlerts).allergies.length +
-          ((alerts.data as ProfileAlerts).criticalFlags?.length ?? 0))
-      : 0;
+  const alertData = alerts?.state === "Visible" ? (alerts.data as ProfileAlerts) : null;
 
   return (
     <aside className="patient-context-bar" aria-label={t(STR.title)}>
-      <Avatar photoUrl={data.photoUrl} name={data.displayName} />
-      <a href={`/patients/${encodeURIComponent(beneficiaryId)}`} className="context-bar-name">
-        {data.displayName}
-      </a>
-      <span className="context-bar-meta">
-        {[data.memberNo, data.ageBand, data.sex].filter(Boolean).join(" · ")}
-      </span>
-      <span className={`profile-chip profile-chip--${data.statusCue.tone}`} data-shape={data.statusCue.shape}>
-        <span aria-hidden="true">●</span> {data.statusCue.label}
-      </span>
-      {alertCount > 0 ? (
-        <span className="profile-chip profile-chip--critical" data-shape="octagon">
-          <span aria-hidden="true">⚠</span> {alertCount} {t(STR.alerts)}
-        </span>
-      ) : null}
+      {/* The SAME identity block the patient file leads with — see ProfileIdentity. The strip used to be a
+          flat dot-separated line of the same fields in a different shape, which made a clinician moving from
+          the file into the encounter re-find the member number in a new layout for no reason. */}
+      <ProfileIdentity
+        data={data}
+        onOpen={() => openProfile(beneficiaryId)}
+        actions={actions}
+        // `?? null` matters: when the alerts section is withheld or failed, `alertData` is null and the
+        // strip must still show "not recorded" rather than dropping the fact — `undefined` would drop it.
+        bloodGroup={showBloodGroup ? alertData?.bloodGroup ?? null : undefined}
+        chips={<AllergyChips alertData={alertData} namedAllergens={namedAllergens} />}
+      />
     </aside>
   );
 }

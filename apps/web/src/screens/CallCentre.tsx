@@ -1,20 +1,27 @@
-import { memberStatus, callOutcomeLabel, identifierTypeLabel, appointmentTypeLabel } from "./statusLabels";
+import { memberStatus, callOutcomeLabel, callReasonLabel, identifierTypeLabel, appointmentTypeLabel } from "./statusLabels";
 import { useFormat } from "../i18n/useFormat";
 import { useCallback, useEffect, useState } from "react";
-import { Button, Card, Icon, InputField, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, Icon, InputField, Modal, StatusChip, useTheme } from "@mersal/design-system";
 import { L } from "../i18n/strings";
 import { API_BASE } from "../config";
 import { getToken } from "../auth/tokenStore";
-import { PageHeader } from "./_shared";
-import { ReservationPicker, useReservation } from "./ReservationPicker";
-import { CallNotes } from "./CallNotes";
+import { PageHeader, useOpenProfile } from "./_shared";
+import { BookingForm, type BookingSelection } from "./booking/BookingForm";
+import { useApi } from "../api/ApiProvider";
+import type { BranchSummary } from "@mersal/contracts";
+import { CallSummaryDraft } from "./CallNotes";
+import { MemberSearch } from "./CallCentreSearch";
+import { useRestorableState } from "./useRestorableState";
 
 // ── Types (mirror the callcentre-service DTOs; CLINICAL-FREE by construction) ───────────────────────────
 export interface CcMatch {
   beneficiaryId: string;
   displayName: string;
+  /** The real member number. It used to arrive masked (`•••001`) because MemberNo was an identifier the agent
+   *  could be challenged on, and showing it in full would have let them answer their own challenge. Identity is
+   *  now confirmed on the phone, so the mask protected nothing and cost the agent the one field that tells two
+   *  members with the same name apart. */
   memberNo?: string | null;
-  challengeableIdentifierTypes: string[];
 }
 export interface CcCoverageLine { category: string; annualLimit?: number | null; remainingLimit?: number | null }
 export interface CcContact { contactId: string; kind: string; value: string; isPrimary: boolean }
@@ -22,6 +29,9 @@ export interface CcAppointment {
   appointmentId: string; appointmentType: string; status: string; scheduledStart: string;
   branchName?: string | null; doctorName?: string | null; specialty?: string | null;
   canReschedule: boolean; canCancel: boolean;
+  /** emr's `xmin` concurrency token, echoed back as `If-Match` on a reschedule/cancel so a stale write gets
+   *  412 instead of silently clobbering a change another agent already made to this appointment. */
+  rowVersion: number;
 }
 export interface CcReferral { referralRef: string; status: string; requestedSpecialty?: string | null }
 export interface CcClinic { providerId: string; locationId: string; branchId?: string | null; branchName?: string | null; label: string; openSlots: number }
@@ -35,10 +45,38 @@ export interface Cc360 {
 }
 export interface CcCallRow { callRef: string; startedAt: string; status: string; reasonCode?: string | null; outcome?: string | null }
 
+// ── Wire rows for the four gateway reads with no generated contract ────────────────────────────────────
+// These were `any[]`, which CLAUDE.md's "TS strict, no `any`" forbids and which eslint had been failing the
+// frontend build on. `any` here was not laziness so much as honesty about untyped aggregation endpoints —
+// but it disables checking on every field access below, so a renamed field would have compiled and produced
+// a clinic list of "undefined". Named shapes restore that check.
+//
+// The String()/Number() coercions at the call sites are deliberately KEPT. These types describe what the
+// gateway is expected to send; they do not verify it, and there is no runtime validation on this path. A
+// declared type plus a coercion says "expected string, defended anyway", which is the true position.
+interface BranchClinicRow { providerId: string; locationId: string; branchId?: string | null; openSlots?: number | null }
+interface ClinicLabelRow { locationId: string; providerName: string; locationName: string }
+interface BranchLabelRow { branchId: string; nameEn: string }
+interface AppointmentSlotRow { slotId: string; slotStart: string }
+
 /** The narrow surface the workspace needs. The default implementation calls the gateway; tests inject a fake. */
 export interface CcApi {
-  openInteraction(reasonCode: string): Promise<{ interactionId: string; callRef: string }>;
-  verify(interactionId: string, beneficiaryId: string, types: string[], pass: boolean): Promise<boolean>;
+  /**
+   * Open the call record. `direction` says WHO RANG WHOM — inbound (the member called us) or outbound (we
+   * called them). It was hard-coded "Inbound" on every call the portal ever opened, which made the field a
+   * constant dressed as data: outbound follow-up calls, the ones a supervisor most wants to count, were all
+   * filed as inbound. It is set at open and cannot be corrected afterwards, so the control that collects it
+   * locks once the call is under way.
+   */
+  openInteraction(reasonCode: string, direction: CcDirection): Promise<{ interactionId: string; callRef: string }>;
+  /**
+   * Open a member's file on this call.
+   *
+   * Records the agent's attestation that they confirmed, on the phone, who they are speaking to — and BINDS the
+   * interaction to that member, which is what every later read and write on this call is authorized against.
+   * It replaced a `verify(…, types, pass)` that asked the agent to tick ≥2 identifiers for the server to score.
+   */
+  openMember(interactionId: string, beneficiaryId: string): Promise<boolean>;
   search(q: string): Promise<CcMatch[]>;
   summary(beneficiaryId: string, interactionId: string): Promise<Cc360 | null>;
   /** Clinics with bookable times, across every branch the agent can reach. Each option carries its branch, so
@@ -46,27 +84,44 @@ export interface CcApi {
   clinics(): Promise<CcClinic[]>;
   slots(providerId: string, locationId: string): Promise<CcSlot[]>;
   /** A REAL slot id and the branch it belongs to. Both used to be invented client-side. */
-  book(interactionId: string, beneficiaryId: string, slotId: string, branchId?: string | null): Promise<"ok" | "conflict" | "error">;
-  reschedule(interactionId: string, appointmentId: string, newSlotId: string): Promise<"ok" | "conflict" | "error">;
-  cancel(interactionId: string, appointmentId: string, reasonCode: string): Promise<"ok" | "error">;
-  close(interactionId: string, outcome: string, notes: string): Promise<void>;
+  /** 14.5 — the agent now picks a DOCTOR and may record a general note; both ride the same verified path. */
+  book(
+    interactionId: string,
+    beneficiaryId: string,
+    slotId: string,
+    branchId?: string | null,
+    extra?: { doctorId?: string | null; note?: string },
+  ): Promise<"ok" | "conflict" | "error">;
+  /** `rowVersion` rides along as If-Match: a reschedule computed against times the agent loaded before someone
+   *  else moved the appointment must be refused (412 → "stale"), not applied. */
+  reschedule(interactionId: string, appointmentId: string, newSlotId: string, rowVersion?: number): Promise<CcWriteResult>;
+  cancel(interactionId: string, appointmentId: string, reasonCode: string, rowVersion?: number): Promise<CcWriteResult>;
+  /**
+   * Wrap up the call. `summary` is REQUIRED by the server for every outcome but `Abandoned` (phase 20.3b) — it
+   * is what other roles read later through the patient profile. The result is RETURNED rather than swallowed:
+   * this used to be `Promise<void>`, so a 422 for a missing summary was invisible and the workspace cleared the
+   * call bar as though the call had been wrapped up, leaving the interaction Open in the database forever.
+   *
+   * There is no `notes` argument. It carried a second body of text kept apart from the summary; the call centre
+   * now writes one account of the call, which is this one.
+   */
+  close(interactionId: string, outcome: string, summary: string, reasonCode?: string): Promise<CcCloseResult>;
   history(): Promise<CcCallRow[]>;
 }
 
-const REASONS = ["BookAppointment", "RescheduleAppointment", "CancelAppointment", "AppointmentEnquiry", "EligibilityEnquiry", "UpdateContact", "Complaint", "Other"];
+/** Who rang whom. Recorded on the interaction when it opens. */
+export type CcDirection = "Inbound" | "Outbound";
+
+/** A write against the emr engine. `stale` is emr's 412 — the appointment moved under the agent. */
+export type CcWriteResult = "ok" | "conflict" | "stale" | "error";
+
+/** Wrap-up outcome. `summary-required` is the server's 422 and is a correctable mistake, not a failure. */
+export type CcCloseResult = "ok" | "summary-required" | "not-your-call" | "error";
+
+/** The call reasons the service accepts (mirrors `CallReasonCode`). Exported: the booking journey offers the
+ *  same list in its call-record step, and two copies would drift the moment one gained a value. */
+export const CALL_REASONS = ["BookAppointment", "RescheduleAppointment", "CancelAppointment", "AppointmentEnquiry", "EligibilityEnquiry", "UpdateContact", "Complaint", "Other"];
 const CANCEL_REASONS = ["PatientRequest", "PatientUnwell", "TransportIssue", "Rescheduling", "ClinicClosure", "DuplicateBooking", "Other"];
-// Bilingual display labels for the reason enums — the enum stays the option `value` (sent to the service),
-// only the shown text is localized so the AR portal never renders a raw English enum literal.
-const REASON_LABELS: Record<string, { en: string; ar: string }> = {
-  BookAppointment: { en: "Book appointment", ar: "حجز موعد" },
-  RescheduleAppointment: { en: "Reschedule appointment", ar: "إعادة جدولة موعد" },
-  CancelAppointment: { en: "Cancel appointment", ar: "إلغاء موعد" },
-  AppointmentEnquiry: { en: "Appointment enquiry", ar: "استفسار عن موعد" },
-  EligibilityEnquiry: { en: "Eligibility enquiry", ar: "استفسار عن الأهلية" },
-  UpdateContact: { en: "Update contact", ar: "تحديث بيانات الاتصال" },
-  Complaint: { en: "Complaint", ar: "شكوى" },
-  Other: { en: "Other", ar: "أخرى" },
-};
 const CANCEL_REASON_LABELS: Record<string, { en: string; ar: string }> = {
   PatientRequest: { en: "Patient request", ar: "طلب المريض" },
   PatientUnwell: { en: "Patient unwell", ar: "اعتلال صحة المريض" },
@@ -79,7 +134,7 @@ const CANCEL_REASON_LABELS: Record<string, { en: string; ar: string }> = {
 const OUTCOMES = ["Resolved", "FollowUpRequired", "Transferred", "Abandoned", "NoAction"];
 
 async function req<T>(
-  method: string, path: string, body?: unknown, idempotencyKey?: string,
+  method: string, path: string, body?: unknown, idempotencyKey?: string, ifMatch?: number,
 ): Promise<{ status: number; data: T | null }> {
   const token = getToken();
   const resp = await fetch(`${API_BASE}${path}`, {
@@ -88,6 +143,10 @@ async function req<T>(
       ...(body ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+      // Quoted per RFC 7232. callcentre-service forwards this verbatim to emr, which has always parsed it and
+      // returned 412 on a stale write — the guarantee was implemented end to end and simply never armed,
+      // because no call-centre client ever sent the header.
+      ...(ifMatch !== undefined ? { "If-Match": `"${ifMatch}"` } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -107,13 +166,15 @@ const bookingKey = (interactionId: string, beneficiaryId: string, slotId: string
 /** The live gateway-backed implementation (used in the app; tests inject a fake instead). */
 export function createHttpCcApi(): CcApi {
   return {
-    async openInteraction(reasonCode) {
-      const r = await req<{ interactionId: string; callRef: string }>("POST", "/call-interactions", { direction: "Inbound", reasonCode });
+    async openInteraction(reasonCode, direction) {
+      const r = await req<{ interactionId: string; callRef: string }>("POST", "/call-interactions", { direction, reasonCode });
       return r.data ?? { interactionId: "", callRef: "" };
     },
-    async verify(interactionId, beneficiaryId, types, pass) {
-      const r = await req("POST", `/call-interactions/${interactionId}/verification`, { beneficiaryId, verifiedIdentifierTypes: types, result: pass ? "Passed" : "Failed" });
-      return r.status >= 200 && r.status < 300 && pass;
+    async openMember(interactionId, beneficiaryId) {
+      // One field. The server records method "OffSystem" and binds the call; there is no threshold to meet and
+      // nothing to fail, so there is no pass/fail to send or interpret.
+      const r = await req("POST", `/call-interactions/${interactionId}/verification`, { beneficiaryId });
+      return r.status >= 200 && r.status < 300;
     },
     async search(q) {
       const r = await req<{ matches: CcMatch[] }>("GET", `/call-centre/search?q=${encodeURIComponent(q)}`);
@@ -126,19 +187,19 @@ export function createHttpCcApi(): CcApi {
     async clinics() {
       // emr answers which clinics have bookable times; provider-service puts names to the ids. Neither needs
       // provider:read, which the call centre does not hold.
-      const r = await req<any[]>("GET", "/branch-clinics");
+      const r = await req<BranchClinicRow[]>("GET", "/branch-clinics");
       const rows = r.data ?? [];
       if (rows.length === 0) return [];
       const ids = rows.map((c) => c.locationId).filter(Boolean).join(",");
       const labels = new Map<string, string>();
-      const l = await req<any[]>("GET", `/clinic-labels?locationIds=${encodeURIComponent(ids)}`);
+      const l = await req<ClinicLabelRow[]>("GET", `/clinic-labels?locationIds=${encodeURIComponent(ids)}`);
       for (const row of l.data ?? []) labels.set(String(row.locationId), `${row.providerName} · ${row.locationName}`);
 
       // Branch NAMES too: the agent chooses the branch they are booking into, so it has to be a name.
       const branchIds = [...new Set(rows.map((c) => c.branchId).filter(Boolean).map(String))];
       const branchNames = new Map<string, string>();
       if (branchIds.length > 0) {
-        const b = await req<any[]>("GET", `/branch-labels?branchIds=${encodeURIComponent(branchIds.join(","))}`);
+        const b = await req<BranchLabelRow[]>("GET", `/branch-labels?branchIds=${encodeURIComponent(branchIds.join(","))}`);
         for (const row of b.data ?? []) branchNames.set(String(row.branchId), String(row.nameEn));
       }
 
@@ -150,31 +211,49 @@ export function createHttpCcApi(): CcApi {
       }));
     },
     async slots(providerId, locationId) {
-      const r = await req<any[]>("GET", `/appointment-slots?providerId=${providerId}&locationId=${locationId}&onlyOpen=true`);
+      const r = await req<AppointmentSlotRow[]>("GET", `/appointment-slots?providerId=${providerId}&locationId=${locationId}&onlyOpen=true`);
       return (r.data ?? []).map((x) => ({ slotId: String(x.slotId), start: String(x.slotStart) }));
     },
-    async book(interactionId, beneficiaryId, slotId, branchId) {
+    async book(interactionId, beneficiaryId, slotId, branchId, extra) {
       // slotId used to be crypto.randomUUID(): a slot that cannot exist, so emr answered 404 and no reservation
       // the call centre made could ever hold a real time.
       const r = await req("POST", "/call-centre/appointments", {
         interactionId, beneficiaryId, slotId, branchId, appointmentType: "Scheduled",
+        // Omitted rather than sent as null when unset — the slot is authoritative for the doctor when it
+        // names one, and an explicit null would overwrite that with "no doctor".
+        ...(extra?.doctorId ? { doctorId: extra.doctorId } : {}),
+        ...(extra?.note ? { note: extra.note } : {}),
       }, bookingKey(interactionId, beneficiaryId, slotId));
       if (r.status === 409) return "conflict";
       return r.status >= 200 && r.status < 300 ? "ok" : "error";
     },
-    async reschedule(interactionId, appointmentId, newSlotId) {
+    async reschedule(interactionId, appointmentId, newSlotId, rowVersion) {
       const r = await req("POST", `/call-centre/appointments/${appointmentId}/reschedule`, { interactionId, newSlotId },
-        bookingKey(interactionId, appointmentId, newSlotId));
+        bookingKey(interactionId, appointmentId, newSlotId), rowVersion);
       if (r.status === 409) return "conflict";
+      if (r.status === 412) return "stale";
       return r.status >= 200 && r.status < 300 ? "ok" : "error";
     },
-    async cancel(interactionId, appointmentId, reasonCode) {
+    async cancel(interactionId, appointmentId, reasonCode, rowVersion) {
       const r = await req("POST", `/call-centre/appointments/${appointmentId}/cancel`, { interactionId, reasonCode },
-        `cc-cancel:${interactionId}:${appointmentId}`);
+        `cc-cancel:${interactionId}:${appointmentId}`, rowVersion);
+      if (r.status === 409) return "conflict";
+      if (r.status === 412) return "stale";
       return r.status >= 200 && r.status < 300 ? "ok" : "error";
     },
-    async close(interactionId, outcome, notes) {
-      await req("POST", `/call-interactions/${interactionId}/close`, { outcome, notes });
+    async close(interactionId, outcome, summary, reasonCode) {
+      const r = await req<{ title?: string }>("POST", `/call-interactions/${interactionId}/close`,
+        // `summary` is sent even when blank: letting the server refuse the close is the point. Omitting the
+        // field to avoid the 422 would recreate the bug this replaced — a call that reads as wrapped up and
+        // is still Open, still bound to that member, on the server.
+        //
+        // `reasonCode` rides along so a reason corrected mid-call lands on the record. The direction cannot:
+        // it is fixed when the interaction opens, which is why its control locks rather than pretending.
+        { outcome, summary, ...(reasonCode ? { reasonCode } : {}) });
+      if (r.status >= 200 && r.status < 300) return "ok";
+      if (r.status === 422 && r.data?.title === "summary-required") return "summary-required";
+      if (r.status === 403) return "not-your-call";
+      return "error";
     },
     async history() {
       const r = await req<{ items: CcCallRow[] }>("GET", "/call-interactions");
@@ -184,11 +263,19 @@ export function createHttpCcApi(): CcApi {
 }
 
 /**
- * Phase 15.5 — the call-shaped Call Centre workspace (the heart of the portal, design 37 §6). A single screen:
- * START CALL → SEARCH (phone-first) → VERIFY (≥2 identifier TYPES) → MEMBER 360 (all branches) → ACT (book /
- * cancel) → WRAP UP. Nothing about a member renders until a verification PASS is recorded (verify-before-disclose,
- * enforced again server-side). Verification result + booking outcomes announce via aria-live. No clinical field
- * exists anywhere in this graph.
+ * The call-shaped Call Centre workspace (the heart of the portal, design 37 §6). A single screen:
+ * START CALL → SEARCH → OPEN THE MEMBER'S FILE → MEMBER 360 (all branches) → ACT (book / cancel) → WRAP UP.
+ *
+ * <b>The VERIFY step is gone.</b> Identity is confirmed by the agent on the phone, so the screen no longer asks
+ * them to tick ≥2 identifier types for the server to score. Opening a member's file records that attestation and
+ * binds the call to that member, which is still what authorizes every read and write that follows — a call
+ * cannot disclose a member it was not opened against, and stops disclosing when it closes.
+ *
+ * Booking outcomes and the file opening announce via aria-live. No clinical field exists anywhere in this graph.
+ *
+ * <b>The screen's state survives leaving it.</b> An agent opening the caller's patient profile mid-call used to
+ * come back to a workspace that had forgotten the call — while the interaction was still Open on the server —
+ * leaving them no visible option but to start a second call for the same conversation.
  */
 /**
  * ONE client for the module, not one per render.
@@ -205,22 +292,35 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
   const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const { lang } = useTheme();
   const t = (l: { en: string; ar: string }) => l[lang];
+  const openProfile = useOpenProfile();
 
-  const [interactionId, setInteractionId] = useState<string | null>(null);
-  const [reason, setReason] = useState(REASONS[0]);
-  const [query, setQuery] = useState("");
+  /**
+   * RESTORED state — what the agent needs to still be here after opening the caller's profile and coming back.
+   *
+   * Only the SHAPE of the work is persisted: the call id, what was typed, which member is open. The member's
+   * details are not, and are re-fetched below through the same server gate as the first time — so returning to
+   * this screen re-authorizes the disclosure rather than redisplaying a cached one.
+   */
+  const [interactionId, setInteractionId] = useRestorableState<string | null>("cc-workspace.call", null);
+  const [query, setQuery] = useRestorableState("cc-workspace.query", "");
+  const [openedFor, setOpenedFor] = useRestorableState<CcMatch | null>("cc-workspace.member", null);
+  const [outcome, setOutcome] = useRestorableState("cc-workspace.outcome", OUTCOMES[0]);
+  /** The one account of the call — what other roles read on the member's profile. There is no second "notes"
+   *  field any more; this is it, so it is drafted on the file and sent at close. */
+  const [wrapSummary, setWrapSummary] = useRestorableState("cc-workspace.summary", "");
+
+  const [reason, setReason] = useState(CALL_REASONS[0]);
+  /** Who rang whom. INBOUND by default because most hotline calls are — but it was HARD-CODED "Inbound" on
+   *  every interaction the portal ever opened, so outbound follow-up calls (the ones a supervisor most wants
+   *  to count) were all filed as inbound. Chosen before the call opens, because that is when it is written. */
+  const [direction, setDirection] = useState<CcDirection>("Inbound");
   const [results, setResults] = useState<CcMatch[] | null>(null);
-  const [selected, setSelected] = useState<CcMatch | null>(null);
-  const [ticks, setTicks] = useState<Set<string>>(new Set());
-  const [verifiedFor, setVerifiedFor] = useState<string | null>(null);
   const [summary, setSummary] = useState<Cc360 | null>(null);
   const [announce, setAnnounce] = useState("");
-  const [verifyError, setVerifyError] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelFor, setCancelFor] = useState<string | null>(null);
   const [cancelError, setCancelError] = useState(false);
-  const [outcome, setOutcome] = useState(OUTCOMES[0]);
-  const [notes, setNotes] = useState("");
+  const [summaryError, setSummaryError] = useState(false);
   /**
    * The reservation panel is an ACTION ON THE FILE rather than a permanent fixture inside it. Most calls are
    * not bookings — an eligibility question, a contact correction — and a booking form sitting open under every
@@ -230,94 +330,162 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
   const [showReserve, setShowReserve] = useState(false);
 
   const startCall = useCallback(async () => {
-    const { interactionId: id } = await api.openInteraction(reason);
+    const { interactionId: id } = await api.openInteraction(reason, direction);
     setInteractionId(id);
-    setResults(null); setSelected(null); setVerifiedFor(null); setSummary(null); setAnnounce("");
-  }, [api, reason]);
+    setResults(null); setOpenedFor(null); setSummary(null); setAnnounce("");
+  }, [api, reason, direction, setInteractionId, setOpenedFor]);
 
   const doSearch = useCallback(async () => {
     if (!query.trim()) return;
     setResults(await api.search(query.trim()));
-    setSelected(null); setVerifiedFor(null); setSummary(null);
-  }, [api, query]);
+    setOpenedFor(null); setSummary(null);
+  }, [api, query, setOpenedFor]);
 
-  const select = useCallback((m: CcMatch) => {
-    setSelected(m); setTicks(new Set()); setVerifiedFor(null); setSummary(null); setVerifyError(false);
+  /**
+   * Open a member's file — the one step that replaced the identifier challenge.
+   *
+   * Picking a search hit is now the whole gesture: it records the agent's attestation that they confirmed the
+   * caller on the phone, binds the call to this member, and loads the 360. The 360 is loaded FIRST-CLASS, not
+   * optimistically — if the server refuses, nothing about the member renders and the agent is told, because the
+   * screen showing a file the server would not serve is the failure mode worth avoiding.
+   */
+  const openMember = useCallback(async (m: CcMatch) => {
+    if (!interactionId) return;
     setShowReserve(false);
-  }, []);
+    const attested = await api.openMember(interactionId, m.beneficiaryId).catch(() => false);
+    if (!attested) { setAnnounce(t(L.ccOpenFileFailed)); return; }
+    const s = await api.summary(m.beneficiaryId, interactionId).catch(() => null);
+    if (!s) { setAnnounce(t(L.ccOpenFileFailed)); return; }
+    setOpenedFor(m);
+    setSummary(s);
+    setAnnounce(t(L.ccFileOpened));
+  }, [api, interactionId, setOpenedFor, t]);
 
-  const toggle = (type: string) =>
-    setTicks((prev) => {
-      const next = new Set(prev);
-      if (next.has(type)) next.delete(type); else next.add(type);
-      return next;
-    });
+  /**
+   * Re-read the member's file after returning to this screen.
+   *
+   * The restored state says WHICH member is open on this call; it does not carry their details, and must not.
+   * So a return trip re-fetches through the same server gate as the first visit — if the call has since been
+   * closed elsewhere, or the binding no longer holds, the file simply does not come back.
+   */
+  useEffect(() => {
+    if (!interactionId || !openedFor || summary) return;
+    let live = true;
+    void api.summary(openedFor.beneficiaryId, interactionId)
+      .then((s) => { if (live && s) setSummary(s); })
+      .catch(() => { /* the file stays closed; the agent can re-open it from the search */ });
+    return () => { live = false; };
+  }, [api, interactionId, openedFor, summary]);
 
-  const verify = useCallback(async (pass: boolean) => {
-    if (!interactionId || !selected) return;
-    if (pass && ticks.size < 2) { setVerifyError(true); return; }
-    setVerifyError(false);
-    const ok = await api.verify(interactionId, selected.beneficiaryId, [...ticks], pass);
-    if (ok) {
-      const s = await api.summary(selected.beneficiaryId, interactionId);
-      setVerifiedFor(selected.beneficiaryId);
-      setSummary(s);
-      setAnnounce(t(L.ccVerified));
-    } else {
-      setAnnounce(t(L.ccFailed));
-    }
-  }, [api, interactionId, selected, ticks, t]);
+  // 14.5 — the SAME form the standalone Book-appointment journey and reception use. The workspace was the
+  // last caller of the old branch → clinic → time picker, so converting it retires that second copy of the
+  // dependency chain rather than leaving the call centre with two booking UIs that can drift apart.
+  const [sel, setSel] = useState<BookingSelection>({
+    branchId: null, doctorId: null, slotId: null, note: "", providerId: null, locationId: null,
+  });
+  const [branches, setBranches] = useState<BranchSummary[]>([]);
+  const [reloadToken, setReloadToken] = useState(0);
+  const webApi = useApi();
 
-  const r = useReservation(api, verifiedFor !== null && showReserve);
+  useEffect(() => {
+    let live = true;
+    void webApi.branches().then((b) => live && setBranches(b)).catch(() => live && setBranches([]));
+    return () => { live = false; };
+  }, [webApi]);
 
   const book = useCallback(async () => {
-    if (!interactionId || !verifiedFor || !r.slotId || !r.chosenClinic) return;
-    // The branch comes from the CLINIC, not a separate control: the call centre is cross-branch, and two
-    // controls that can disagree about where the patient is expected is how someone gets sent to Maadi for a
-    // Dokki appointment.
-    const outcome = await api.book(interactionId, verifiedFor, r.slotId, r.chosenClinic.branchId ?? null);
+    if (!interactionId || !openedFor || !sel.slotId) return;
+    const outcome = await api.book(interactionId, openedFor.beneficiaryId, sel.slotId, sel.branchId, {
+      doctorId: sel.doctorId,
+      note: sel.note || undefined,
+    });
     setAnnounce(outcome === "ok" ? t(L.ccBooked) : outcome === "conflict" ? t(L.ccSlotTaken) : t(L.ccBookFailed));
-    // A 409 invalidates the list exactly as a success does: one consumed the slot, the other proves someone
-    // else did. Only a transport error leaves the loaded times still true.
-    if (outcome !== "error") r.refresh();
-  }, [api, interactionId, verifiedFor, r, t]);
+    // A 409 invalidates the times exactly as a success does: one consumed the slot, the other proves someone
+    // else did. Only a transport error leaves the loaded times still true. The agent's branch, specialty and
+    // doctor survive either way — re-entering the caller's request mid-call is a cost they should not pay.
+    if (outcome !== "error") setReloadToken((k) => k + 1);
+  }, [api, interactionId, openedFor, sel, t]);
 
-  const copyNotes = useCallback(async () => {
+  /**
+   * Wrap up. The call bar clears ONLY on a confirmed close — the previous version awaited a `Promise<void>`
+   * and reset regardless, so a refused close left the agent believing the call was wrapped up while the
+   * interaction stayed Open on the server, still bound to that member.
+   *
+   * A confirmed close also DROPS the restored state. Resuming a call that has genuinely ended is worse than
+   * starting clean: the agent would come back to a call bar for an interaction the server has already closed.
+   */
+  const closeCall = useCallback(async () => {
+    if (!interactionId) return;
+    const result = await api.close(interactionId, outcome, wrapSummary.trim(), reason);
+    if (result === "ok") {
+      setSummaryError(false);
+      setInteractionId(null);
+      setResults(null); setOpenedFor(null); setSummary(null);
+      setQuery(""); setWrapSummary(""); setShowReserve(false);
+      setDirection("Inbound");
+      setAnnounce(t(L.ccBookClosed));
+      return;
+    }
+    // Everything below leaves the call OPEN, which is the truth — so the call bar stays as it is.
+    setSummaryError(result === "summary-required");
+    setAnnounce(
+      result === "summary-required" ? t(L.ccSummaryRequired)
+      : result === "not-your-call" ? t(L.ccNotYourCall)
+      : t(L.ccCloseFailed),
+    );
+  }, [api, interactionId, outcome, wrapSummary, reason, setInteractionId, setOpenedFor, setQuery, setWrapSummary, t]);
+
+  const copySummary = useCallback(async () => {
     // Guard the METHOD, not just the object: a non-secure context exposes `navigator.clipboard` as undefined
     // and jsdom exposes neither, so an unguarded call is an unhandled rejection in the agent's face.
     try {
-      await navigator.clipboard?.writeText?.(notes);
+      await navigator.clipboard?.writeText?.(wrapSummary);
       setAnnounce(t(L.ccCopied));
     } catch {
       setAnnounce(t(L.ccCopyFailed));
     }
-  }, [notes, t]);
+  }, [wrapSummary, t]);
+
+  /** The appointment's current concurrency token, from the 360 the agent is looking at. */
+  const rowVersionOf = useCallback((appointmentId: string) =>
+    summary?.appointments.find((a) => a.appointmentId === appointmentId)?.rowVersion,
+  [summary]);
 
   const cancel = useCallback(async (appointmentId: string) => {
     if (!interactionId) return;
     if (!cancelReason) { setCancelError(true); return; }
     setCancelError(false);
-    const r = await api.cancel(interactionId, appointmentId, cancelReason);
-    setAnnounce(r === "ok" ? t(L.ccCancelled) : t(L.ccBookFailed));
+    const r = await api.cancel(interactionId, appointmentId, cancelReason, rowVersionOf(appointmentId));
+    setAnnounce(
+      r === "ok" ? t(L.ccCancelled)
+      : r === "stale" ? t(L.ccApptStale)
+      : t(L.ccBookFailed),
+    );
     setCancelFor(null);
-  }, [api, interactionId, cancelReason, t]);
+    // A stale refusal means the file on screen is out of date — re-read it rather than leaving the agent
+    // acting on times that have already moved.
+    if (r === "stale") setReloadToken((k) => k + 1);
+  }, [api, interactionId, cancelReason, rowVersionOf, t]);
 
   const reschedule = useCallback(async (appointmentId: string) => {
     // Rescheduling needs a NEW time, which lives in the reservation panel — so opening the panel is part of
     // the instruction, not a separate thing the agent has to work out.
-    if (!interactionId || !r.slotId) { setShowReserve(true); setAnnounce(t(L.ccPickTime)); return; }
-    const outcome = await api.reschedule(interactionId, appointmentId, r.slotId);
-    setAnnounce(outcome === "ok" ? t(L.ccRescheduled) : outcome === "conflict" ? t(L.ccSlotTaken) : t(L.ccBookFailed));
-    if (outcome !== "error") r.refresh();
-  }, [api, interactionId, r, t]);
-
-  const isVerified = !!selected && verifiedFor === selected.beneficiaryId;
+    if (!interactionId || !sel.slotId) { setShowReserve(true); setAnnounce(t(L.ccPickTime)); return; }
+    const outcome = await api.reschedule(interactionId, appointmentId, sel.slotId, rowVersionOf(appointmentId));
+    setAnnounce(
+      outcome === "ok" ? t(L.ccRescheduled)
+      : outcome === "conflict" ? t(L.ccSlotTaken)
+      : outcome === "stale" ? t(L.ccApptStale)
+      : t(L.ccBookFailed),
+    );
+    if (outcome !== "error") setReloadToken((k) => k + 1);
+  }, [api, interactionId, sel.slotId, rowVersionOf, t]);
 
   return (
     <div className="cc-workspace">
       <PageHeader title={t({ en: "Call workspace", ar: "مساحة المكالمة" })} />
 
-      {/* aria-live outcome announcer (verification / booking / cancellation) */}
+      {/* aria-live outcome announcer (file opened / booking / cancellation) */}
       <div aria-live="polite" role="status" data-testid="cc-live" className="cc-live">{announce}</div>
 
       {/* 1. CALL BAR */}
@@ -327,16 +495,25 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
             <>
               <label htmlFor="cc-reason">{t(L.ccReason)}</label>
               <select id="cc-reason" value={reason} onChange={(e) => setReason(e.target.value)}>
-                {REASONS.map((r) => <option key={r} value={r}>{t(REASON_LABELS[r])}</option>)}
+                {CALL_REASONS.map((r) => <option key={r} value={r}>{t(callReasonLabel(r))}</option>)}
+              </select>
+              {/* Offered BEFORE the call opens, because that is the only moment it can be recorded — the
+                  interaction stores it at creation and nothing changes it afterwards. */}
+              <label htmlFor="cc-direction">{t(L.ccDirection)}</label>
+              <select
+                id="cc-direction"
+                value={direction}
+                onChange={(e) => setDirection(e.target.value as CcDirection)}
+              >
+                <option value="Inbound">{t(L.ccInbound)}</option>
+                <option value="Outbound">{t(L.ccOutbound)}</option>
               </select>
               <Button variant="primary" onClick={startCall}>{t(L.ccStartCall)}</Button>
             </>
           ) : (
             <>
               <StatusChip kind="ok" label={t(L.ccOnCall)} />
-              <Button variant="ghost" onClick={async () => { await api.close(interactionId, outcome, notes); setInteractionId(null); }}>
-                {t(L.ccCloseCall)}
-              </Button>
+              <Button variant="ghost" onClick={closeCall}>{t(L.ccCloseCall)}</Button>
             </>
           )}
         </div>
@@ -344,62 +521,22 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
 
       {interactionId && (
         <>
-          {/* 2. SEARCH */}
+          {/* 2. SEARCH — one box, matching name / phone / card or member number / every other identifier.
+                 Picking a hit opens the file: the agent confirmed who they are speaking to on the phone, and
+                 the click is what records it. */}
           <Card>
-            <div className="cc-search">
-              <InputField
-                label={t(L.ccSearchLabel)}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") void doSearch(); }}
-              />
-              <Button variant="secondary" onClick={doSearch}>{t(L.ccSearch)}</Button>
-            </div>
-            {results && results.length === 0 && <p role="status">{t(L.ccNoResults)}</p>}
-            {results && results.length > 0 && (
-              <ul className="cc-results">
-                {results.map((m) => (
-                  <li key={m.beneficiaryId}>
-                    <button type="button" className="cc-result" onClick={() => select(m)} aria-pressed={selected?.beneficiaryId === m.beneficiaryId}>
-                      <span>{m.displayName}</span>
-                      {m.memberNo && <span className="cc-muted">{m.memberNo}</span>}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <p className="cc-muted">{t(L.ccOpenFileHelp)}</p>
+            <MemberSearch
+              query={query}
+              onQueryChange={setQuery}
+              onSearch={() => void doSearch()}
+              results={results}
+              onSelect={(m) => void openMember(m)}
+            />
           </Card>
 
-          {/* 3. VERIFY — visible only until verified. NO member detail is shown here. */}
-          {selected && !isVerified && (
-            <Card>
-              <div className="cc-locked" role="region" aria-label={t(L.ccNotVerified)}>
-                <span className="cc-lockchip" data-testid="cc-lockchip">
-                  <Icon name="info" /> <span>{t(L.ccNotVerified)}</span>
-                </span>
-                <p>{t(L.ccNotVerifiedBody)}</p>
-                <fieldset>
-                  <legend>{t(L.ccChallengeOn)}</legend>
-                  {selected.challengeableIdentifierTypes.map((type) => (
-                    <label key={type} className="cc-check">
-                      {/* Localized: the raw enum literal was rendered, so an Arabic-portal agent was asked to
-                          challenge the caller on "DateOfBirth". */}
-                      <input type="checkbox" checked={ticks.has(type)} onChange={() => toggle(type)} />{" "}
-                      {t(identifierTypeLabel(type))}
-                    </label>
-                  ))}
-                </fieldset>
-                {verifyError && <p role="alert" className="cc-error">{t(L.ccNeedTwo)}</p>}
-                <div className="cc-verify-actions">
-                  <Button variant="primary" onClick={() => verify(true)}>{t(L.ccPass)}</Button>
-                  <Button variant="ghost" onClick={() => verify(false)}>{t(L.ccFail)}</Button>
-                </div>
-              </div>
-            </Card>
-          )}
-
-          {/* 4. MEMBER 360 — unlocked only after a PASS. */}
-          {isVerified && summary && (
+          {/* 3. MEMBER 360 — the file, once it is open on this call. */}
+          {openedFor && summary && (
             <Card>
               <div className="cc-360" data-testid="cc-360">
                 <h2>{summary.identity.displayName} {summary.identity.memberNo && <span className="cc-muted">· {summary.identity.memberNo}</span>}</h2>
@@ -411,15 +548,23 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
                   kind={memberStatus(summary.identity.status).kind}
                   label={t(memberStatus(summary.identity.status).label)}
                 />
-                {/* Phase 20 — into the unified profile, carrying the verified interaction. The link appears
-                    only AFTER a pass, because the phase-15 gate is what makes any disclosure legitimate; the
-                    profile endpoint refuses an unverified call-centre principal independently (ADR-0026). */}
-                <a
-                  className="profile-action-link"
-                  href={`/patients/${encodeURIComponent(selected.beneficiaryId)}?interactionId=${encodeURIComponent(interactionId ?? "")}`}
+                {/* Into the unified profile, carrying the interaction this call is bound to — profile-service
+                    checks that binding independently (ADR-0026).
+
+                    A react-router <Link>, NOT an <a href>. As a plain anchor this reloaded the whole SPA, which
+                    tore down the open call, the search results and the member on screen — so an agent who
+                    looked at the caller's profile mid-call came back to an empty workspace while the interaction
+                    was still Open on the server. `state.from` is what the profile's Back button returns to. */}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leadingIcon={<Icon name="user" />}
+                  onClick={() => openProfile(
+                    openedFor.beneficiaryId,
+                    `?interactionId=${encodeURIComponent(interactionId ?? "")}`)}
                 >
                   {t(L.ccOpenProfile)}
-                </a>
+                </Button>
 
                 <section aria-label={t(L.ccCoverage)}>
                   <h3>{t(L.ccCoverage)}</h3>
@@ -441,25 +586,56 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
                           <Button variant="ghost" onClick={() => reschedule(a.appointmentId)}>{t(L.ccReschedule)}</Button>
                         )}
                         {a.canCancel && (
-                          cancelFor === a.appointmentId ? (
-                            <span className="cc-cancel">
-                              <label>
-                                {t(L.ccCancelReason)}
-                                <select value={cancelReason} onChange={(e) => setCancelReason(e.target.value)}>
-                                  <option value="">—</option>
-                                  {CANCEL_REASONS.map((code) => <option key={code} value={code}>{t(CANCEL_REASON_LABELS[code])}</option>)}
-                                </select>
-                              </label>
-                              <Button variant="danger" onClick={() => cancel(a.appointmentId)}>{t(L.ccCancel)}</Button>
-                              {cancelError && <span role="alert" className="cc-error">{t(L.ccCancelReasonRequired)}</span>}
-                            </span>
-                          ) : (
-                            <Button variant="ghost" onClick={() => { setCancelFor(a.appointmentId); setCancelReason(""); setCancelError(false); }}>{t(L.ccCancel)}</Button>
-                          )
+                          <Button
+                            variant="ghost"
+                            aria-label={`${t(L.ccCancel)} — ${fmt.date(a.scheduledStart)}`}
+                            leadingIcon={<Icon name="cross" />}
+                            onClick={() => { setCancelFor(a.appointmentId); setCancelReason(""); setCancelError(false); }}
+                          >
+                            {t(L.ccCancel)}
+                          </Button>
                         )}
                       </li>
                     ))}
                   </ul>
+                  {/*
+                    ONE confirmation dialog for the list, opened by whichever row was clicked.
+
+                    Cancelling releases the time and may hand it straight to someone on the waitlist. It is
+                    not undoable by clicking again, and the member usually finds out only when they arrive —
+                    so it gets a deliberate confirm rather than a second click in a dense list. The reason is
+                    a CODE here, not free text: the call centre's cancellations are what the no-show and
+                    rebook reports group by, and a typed sentence cannot be counted.
+                  */}
+                  <Modal
+                    open={cancelFor !== null}
+                    onOpenChange={(open: boolean) => { if (!open) setCancelFor(null); }}
+                    title={t(L.ccCancel)}
+                    description={t(L.ccCancelConfirm)}
+                    footer={
+                      <>
+                        {/* "Keep it", not "Cancel": a Cancel button on a cancellation dialog is read by half
+                            of operators as "cancel the appointment". */}
+                        <Button variant="secondary" onClick={() => setCancelFor(null)}>{t(L.ccKeep)}</Button>
+                        <Button variant="danger" onClick={() => cancelFor && cancel(cancelFor)}>{t(L.ccCancel)}</Button>
+                      </>
+                    }
+                  >
+                    <div className="cc-field">
+                      <span id="cc-cancel-reason">{t(L.ccCancelReason)}</span>
+                      <select
+                        aria-labelledby="cc-cancel-reason"
+                        className="mrs-control"
+                        value={cancelReason}
+                        onChange={(e) => setCancelReason(e.target.value)}
+                      >
+                        <option value="">—</option>
+                        {CANCEL_REASONS.map((code) => <option key={code} value={code}>{t(CANCEL_REASON_LABELS[code])}</option>)}
+                      </select>
+                      {cancelError && <span role="alert" className="cc-error">{t(L.ccCancelReasonRequired)}</span>}
+                    </div>
+                  </Modal>
+
                   {/* Booking is an ACTION ON THE FILE: the agent is already looking at this member's
                       appointments, so "New appointment" belongs here rather than on another screen. The panel
                       itself is shared with the standalone Book-appointment journey, so the branch → clinic →
@@ -467,7 +643,18 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
                       no no-show, no start-visit — and the server enforces that with appointment:reserve rather
                       than appointment:write, so the missing buttons are presentation, not the boundary. */}
                   {showReserve ? (
-                    <ReservationPicker r={r} onBook={book} bookLabel={t(L.ccBook)} />
+                    <>
+                      <p className="cc-muted">{t(L.ccReserveOnly)}</p>
+                      <BookingForm
+                        branchMode="choose"
+                        branches={branches}
+                        onChange={setSel}
+                        reloadToken={reloadToken}
+                      />
+                      <div className="book-actions">
+                        <Button variant="primary" disabled={!sel.slotId} onClick={book}>{t(L.ccBook)}</Button>
+                      </div>
+                    </>
                   ) : (
                     <Button variant="secondary" onClick={() => setShowReserve(true)}>
                       <Icon name="plus" /> {t(L.ccNewAppointment)}
@@ -482,30 +669,69 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
                   </section>
                 )}
 
-                {/* Call notes ON THE FILE. They were only reachable in the wrap-up card at the very bottom, so
-                    an agent taking a note mid-call had to leave the member they were reading. Same state as
-                    what is sent on close — one note per call, not two that can disagree. */}
-                <section aria-label={t(L.ccCallNotes)}>
-                  <h3>{t(L.ccCallNotes)}</h3>
-                  <CallNotes value={notes} onChange={setNotes} onCopy={copyNotes} />
+                {/* THE call summary, drafted on the file the agent is reading. This used to be "call notes"
+                    here and a separate "call summary" in the wrap-up card below — two boxes, two labels, and
+                    only one of them reaching the people who later read the call. They are one field now, and
+                    it is the one other roles read.
+
+                    NO section aria-label or <h3> here, unlike the sections above. Those group LISTS and need
+                    a name; this is a single labelled field, and wrapping it in a region called "Call summary"
+                    put that name on two elements — so `getAllByLabelText(/call summary/i)` found the region
+                    and the textarea, which is exactly the ambiguity a screen-reader user would have to
+                    resolve. The field labels itself. */}
+                <section>
+                  <CallSummaryDraft value={wrapSummary} onChange={setWrapSummary} onCopy={copySummary} />
                 </section>
               </div>
             </Card>
           )}
 
-          {/* 6. WRAP UP — the outcome, plus the notes when there is no member file to host them (a call that
+          {/* 4. WRAP UP — the outcome, plus the summary when there is no member file to host it (a call that
               never resolved to a member still has to be recorded). */}
           <Card>
             <div className="cc-wrapup" role="group" aria-label={t(L.ccWrapUp)}>
               <label>{t(L.ccOutcome)}
-                <select value={outcome} onChange={(e) => setOutcome(e.target.value)}>
-                  {OUTCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
+                {/* Localized like every other enum on this screen. These were rendered as raw literals, so an
+                    Arabic-portal agent picked their wrap-up from "FollowUpRequired" and "NoAction" — the exact
+                    bug already fixed for the identifier types a few cards up. `callOutcomeLabel` existed and
+                    was in use in the call-history list below; only this control skipped it. */}
+                <select
+                  value={outcome}
+                  // Changing the outcome can make the summary optional (Abandoned), so a "summary is
+                  // required" error left over from a Resolved attempt would be sitting on a form that is
+                  // now valid — telling the agent to fix something the server no longer asks for.
+                  onChange={(e) => { setOutcome(e.target.value); setSummaryError(false); }}
+                >
+                  {OUTCOMES.map((o) => <option key={o} value={o}>{t(callOutcomeLabel(o))}</option>)}
                 </select>
               </label>
-              {/* Rendered here ONLY when the file is not showing it — two controls with the same label is an
-                  ambiguous accessible name, and the duplicate is what makes an agent wonder which one saves. */}
-              {!(isVerified && summary) && (
-                <InputField label={t(L.ccCallNotes)} value={notes} onChange={(e) => setNotes(e.target.value)} />
+
+              {/* The summary OTHER ROLES read. Required by the server for every outcome but Abandoned, so it is
+                  asked for here rather than discovered as a 422 after the agent thinks they are done.
+
+                  Rendered ONLY when the member file is not already hosting it: it is one field in one piece of
+                  state, and two controls carrying the same accessible name is exactly what makes an agent
+                  wonder which of them saves. */}
+              {!(openedFor && summary) && (
+                <InputField
+                  label={t(L.ccSummary)}
+                  help={t(L.ccSummaryHelp)}
+                  value={wrapSummary}
+                  onChange={(e) => { setWrapSummary(e.target.value); if (summaryError) setSummaryError(false); }}
+                  // `required` drives BOTH aria-required and the visible asterisk (InputField derives
+                  // requiredMark from it), and `error` renders icon + text + border with role="alert" and
+                  // aria-invalid — the design system's non-colour error contract, rather than a bare red <p>.
+                  required={outcome !== "Abandoned"}
+                  error={summaryError ? t(L.ccSummaryRequired) : undefined}
+                  maxLength={500}
+                />
+              )}
+
+              {/* The file IS showing the field, so the error has to be shown here too — otherwise a refused
+                  close reports "a summary is required" only in the aria-live region, and a sighted agent
+                  looking at the wrap-up card sees nothing at all. */}
+              {openedFor && summary && summaryError && (
+                <p role="alert" className="cc-error">{t(L.ccSummaryRequired)}</p>
               )}
             </div>
           </Card>

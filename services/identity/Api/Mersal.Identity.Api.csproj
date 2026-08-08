@@ -10,6 +10,9 @@
     <ProjectReference Include="../../../libs/auth/Mersal.Auth.csproj" />
     <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" />
     <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />
+    <!-- 28.5 — the reset link has to reach somebody. identity-service is this library's first caller because
+         it is the service that HOLDS the address; notification-service stores only a user id. -->
+    <ProjectReference Include="../../../libs/email/Mersal.Email.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />

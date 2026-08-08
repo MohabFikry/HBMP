@@ -15,7 +15,7 @@ import { useAsync } from "../api/useAsync";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
-  casesTitle: { en: "My cases", ar: "حالاتي" },
+  casesTitle: { en: "My Cases", ar: "حالاتي" },
   casesEmpty: { en: "You have no assigned cases.", ar: "لا توجد حالات مُسندة إليك." },
   caseNo: { en: "Case", ar: "الحالة" },
   beneficiary: { en: "Beneficiary", ar: "المستفيد" },

@@ -8,8 +8,8 @@ import { AsyncSection, PageHeader, useLoc } from "./_shared";
 type Section = "oversight" | "quality" | "escalations";
 
 const TITLES: Record<Section, Localized> = {
-  oversight: { en: "Approval oversight / TAT", ar: "الإشراف على الموافقات" },
-  quality: { en: "Quality & outcomes", ar: "الجودة والنتائج" },
+  oversight: { en: "Approval Oversight / TAT", ar: "الإشراف على الموافقات" },
+  quality: { en: "Quality & Outcomes", ar: "الجودة والنتائج" },
   escalations: { en: "Escalations", ar: "التصعيدات" },
 };
 const EMPTY: Localized = { en: "No data for this period.", ar: "لا توجد بيانات لهذه الفترة." };

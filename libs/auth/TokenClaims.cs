@@ -18,7 +18,8 @@ namespace Mersal.Auth;
 /// </summary>
 public static class TokenClaims
 {
-    /// <summary>Extract role claims, normalized to lower-case, de-duplicated.</summary>
+    /// <summary>Extract role claims, normalized to lower-case, de-duplicated, and expanded across any open
+    /// rename window (<see cref="LegacyRoleAliases"/>).</summary>
     public static IReadOnlySet<string> ExtractRoles(ClaimsPrincipal user)
     {
         ArgumentNullException.ThrowIfNull(user);
@@ -35,7 +36,11 @@ public static class TokenClaims
             }
         }
 
-        return roles;
+        // 29.1 — THE dual-accept point for a role rename in flight (design 45 §1). Applied here, once, at the
+        // token→principal boundary, so the ~40 downstream sites that compare role names keep working under
+        // either spelling and none of them needs its own dual check to later remember to remove. It only ever
+        // adds a second SPELLING of a role already on the token; it cannot add a role.
+        return LegacyRoleAliases.WindowOpen ? LegacyRoleAliases.Expand(roles) : roles;
     }
 
     /// <summary>Extract OAuth2 scopes from the space-delimited "scope" claim (+ "scp" fallback).</summary>

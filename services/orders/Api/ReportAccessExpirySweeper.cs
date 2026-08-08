@@ -73,6 +73,9 @@ public sealed class ReportAccessExpirySweeper(
                 .Where(g => g.TenantId == tenant && g.RevokedAt == null && g.ExpiresAt <= now)
                 .ToListAsync(ct);
 
+            // 24.3 — the enqueue precedes the save, so without a transaction a crash mid-sweep announces
+            // grants expired that are still live. A revocation event cannot be un-sent.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             foreach (var g in due)
             {
                 g.RevokedAt = now;
@@ -83,6 +86,7 @@ public sealed class ReportAccessExpirySweeper(
                 expired++;
             }
             if (due.Count > 0) await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
         }
 
         if (expired > 0) logger.LogInformation("report-access expiry sweep closed {Count} grant(s)", expired);

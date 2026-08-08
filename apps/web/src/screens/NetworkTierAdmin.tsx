@@ -31,7 +31,7 @@ import { useFormat } from "../i18n/useFormat";
  */
 
 const S = {
-  title: { en: "Network tiers", ar: "شرائح الشبكة" },
+  title: { en: "Network Tiers", ar: "شرائح الشبكة" },
   readOnly: {
     en: "Read-only. The Network Team owns the tier structure; policy administration prices benefits at a tier.",
     ar: "للقراءة فقط. تملك الشبكة هيكل الشرائح؛ وتتولى إدارة الوثائق تسعير المنافع عند الشريحة.",

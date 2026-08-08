@@ -15,6 +15,9 @@ public sealed class PatientDbContext(DbContextOptions<PatientDbContext> options)
     public DbSet<FamilyGroup> FamilyGroups => Set<FamilyGroup>();
     public DbSet<DependentLink> DependentLinks => Set<DependentLink>();
     public DbSet<Registration> Registrations => Set<Registration>();
+    public DbSet<EnrolmentIntent> EnrolmentIntents => Set<EnrolmentIntent>();
+    public DbSet<RegistrationNote> RegistrationNotes => Set<RegistrationNote>();
+    public DbSet<RegistrationThreadEntry> RegistrationThread => Set<RegistrationThreadEntry>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -29,17 +32,77 @@ public sealed class PatientDbContext(DbContextOptions<PatientDbContext> options)
             e.Property(x => x.RowVersion).IsConcurrencyToken();
         });
 
+        b.Entity<EnrolmentIntent>(e =>
+        {
+            e.ToTable("enrolment_intent");
+            e.HasKey(x => x.RegistrationId);
+            e.Property(x => x.RegistrationId).HasColumnName("registration_id");
+            // The relationship is declared even though nothing navigates it, because EF orders its INSERT
+            // batch by the dependencies it can SEE. Without this edge the intent and its registration are
+            // independent roots, EF is free to write them in either order, and it picked the one that
+            // violates the foreign key — a 500 on every registration, and only at runtime.
+            e.HasOne<Registration>().WithOne()
+                .HasForeignKey<EnrolmentIntent>(x => x.RegistrationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.Property(x => x.PlanId).HasColumnName("plan_id");
+            e.Property(x => x.NetworkTierId).HasColumnName("network_tier_id");
+            e.Property(x => x.ContributionPercent).HasColumnName("contribution_percent").HasPrecision(5, 2);
+            e.Property(x => x.DefaultBranchId).HasColumnName("default_branch_id");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+        });
+
+        b.Entity<RegistrationNote>(e =>
+        {
+            e.ToTable("registration_note");
+            // Composite key: one slot may be filled once per registration, which is the invariant rather
+            // than a surrogate id that would let the same slot exist twice.
+            e.HasKey(x => new { x.RegistrationId, x.Slot });
+            e.Property(x => x.RegistrationId).HasColumnName("registration_id");
+            // Same reason as the intent above: the edge is what makes EF write the registration first.
+            e.HasOne<Registration>().WithMany()
+                .HasForeignKey(x => x.RegistrationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.Property(x => x.Slot).HasColumnName("slot");
+            e.Property(x => x.Value).HasColumnName("value").IsRequired();
+            e.Property(x => x.Visibility).HasConversion<string>().HasColumnName("visibility");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+        });
+
+        b.Entity<RegistrationThreadEntry>(e =>
+        {
+            e.ToTable("registration_thread");
+            e.HasKey(x => x.EntryId);
+            e.Property(x => x.Kind).HasConversion<string>().HasColumnName("kind");
+            // Nullable enum → nullable text. Without the explicit conversion EF stores the ordinal, and a
+            // CHECK constraint spelling out 'Approve','RequestInfo','Reject' rejects every write.
+            e.Property(x => x.Decision).HasConversion<string?>().HasColumnName("decision");
+            e.Property(x => x.Body).IsRequired();
+            // Same reason as the intent and the notes above: the edge is what makes EF write the registration
+            // before an entry that references it.
+            e.HasOne<Registration>().WithMany()
+                .HasForeignKey(x => x.RegistrationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.RegistrationId, x.CreatedAt });
+        });
+
         b.Entity<Beneficiary>(e =>
         {
             e.ToTable("beneficiary");
             e.HasKey(x => x.BeneficiaryId);
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
             e.Property(x => x.MemberNo).HasColumnName("member_no");
+            e.Property(x => x.CardNumber).HasColumnName("card_number");
             e.Property(x => x.GivenName).HasColumnName("given_name").IsRequired();
+            e.Property(x => x.MiddleName).HasColumnName("middle_name");
             e.Property(x => x.FamilyName).HasColumnName("family_name").IsRequired();
             e.Property(x => x.BirthDate).HasColumnName("birth_date");
+            e.Property(x => x.BirthDateIsApproximate).HasColumnName("birth_date_is_approximate");
             e.Property(x => x.Sex).HasColumnName("sex");
             e.Property(x => x.NationalityCode).HasColumnName("nationality_code");
+            e.Property(x => x.IndividualNo).HasColumnName("individual_no");
+            e.Property(x => x.CaseNo).HasColumnName("case_no");
             e.Property(x => x.FamilyGroupId).HasColumnName("family_group_id");
             e.Property(x => x.IsDeleted).HasColumnName("is_deleted");
             e.Property(x => x.RowVersion).HasColumnName("row_version").IsConcurrencyToken();

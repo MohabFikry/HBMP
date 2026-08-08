@@ -1,6 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><RootNamespace>Mersal.Reporting.Infrastructure</RootNamespace></PropertyGroup>
   <ItemGroup>
+    <!-- The Arabic-Indic digit mapping is internal on purpose (it rewrites identifiers too) and its hazard
+         is pinned by a test. Same arrangement notification-service already uses for its own internals. -->
+    <InternalsVisibleTo Include="Mersal.Reporting.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Reporting.Domain.csproj" />
     <ProjectReference Include="../../../libs/time/Mersal.Time.csproj" />
     <ProjectReference Include="../../../libs/events/Mersal.Events.csproj" />

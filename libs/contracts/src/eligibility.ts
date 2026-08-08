@@ -58,5 +58,19 @@ export const zEligibilityHit = z.object({
   id: zId,
   name: zLocalized,
   cardNumber: z.string(),
+  /**
+   * The member's lifecycle status, resolved to a chip.
+   *
+   * The reception card has always carried `identity.status`; the client used to drop it on the floor here, so
+   * a search result gave no hint that the person was suspended and the desk found out only when the booking
+   * was refused — or, before the server gate existed, not at all. A booking cannot proceed for a non-Active
+   * member, and the place to say so is the moment they are found.
+   *
+   * Optional because a fixture or an older service may not supply it; absent means "not stated", which the
+   * UI must not paint as "fine".
+   */
+  status: zStatus.optional(),
+  /** True only when the server said Active. Absent status ⇒ false — default-deny in the display layer too. */
+  bookable: z.boolean().optional(),
 });
 export type EligibilityHit = z.infer<typeof zEligibilityHit>;

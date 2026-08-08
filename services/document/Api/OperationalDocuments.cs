@@ -45,7 +45,11 @@ public static class OperationalDocumentEndpoints
             await file.CopyToAsync(ms, ct);
             var bytes = ms.ToArray();
 
-            var validation = validator.Validate(file.ContentType, bytes.LongLength);
+            // The OPERATIONAL list, not the beneficiary-document one: these files are spreadsheets. Same
+            // validator type and the same max size — only the allowed content types differ.
+            var operationalValidator = new UploadValidator(
+                UploadValidator.OperationalAllowed, validator.MaxSizeBytes);
+            var validation = operationalValidator.Validate(file.ContentType, bytes.LongLength);
             if (!validation.IsValid)
                 return Results.Problem(statusCode: 400, title: "upload-rejected", detail: validation.Reason,
                     type: "urn:hbmp:upload-rejected");

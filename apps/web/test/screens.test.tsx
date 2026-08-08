@@ -65,7 +65,7 @@ describe("Executive dashboard — chart data-table alternative (US-073)", () => 
 
   it("MIN-NECESSARY: the finance summaries screen has a data-table toggle (US-073) and no diagnosis dimension", async () => {
     renderApp("/finance/summaries", "finance");
-    await screen.findByRole("heading", { name: "Financial summaries" });
+    await screen.findByRole("heading", { name: "Financial Summaries" });
     // Toggle reveals the accessible table; its dimensions are billing (service line / category / provider).
     await userEvent.click(screen.getByRole("button", { name: "Show data table" }));
     expect(await screen.findByRole("columnheader", { name: "Share" })).toBeInTheDocument();
@@ -109,23 +109,39 @@ describe("Case manager — coordination 360 is a summary (Phase 10.3)", () => {
 
 describe("Async states", () => {
   it("renders an error state with Retry when the service fails", async () => {
+    // Moved off /lab/queue in 27.8: the bench no longer loads a list on mount, so it has no
+    // load-time error state to show. It reports a SEARCH failure instead, which is asserted with the rest of
+    // the bench's behaviour. This case still needs a screen that fetches when it opens.
     const api = new DevApiClient({ latencyMs: 0, fault: "error" });
-    renderApp("/lab/queue", "lab", api);
+    renderApp("/lab/result", "lab", api);
     expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
-  it("renders an empty state when the queue is empty", async () => {
+  it("opens the dispensing counter on a search, not on a list of everyone's prescriptions", async () => {
+    // The screen used to load every dispensable prescription in the tenant on mount, so its empty state was
+    // "No prescriptions awaiting dispense." It now asks who the member is first — a pharmacist's question is
+    // "what do I have for the person in front of me", and browsing to reach one puts other patients'
+    // prescriptions on screen on the way.
     const api = new DevApiClient({ latencyMs: 0, fault: "empty" });
-    renderApp("/pharmacy/queue", "pharmacy", api);
-    expect(await screen.findByText("No prescriptions awaiting dispense.")).toBeInTheDocument();
+    renderApp("/pharmacy/dispense", "pharmacy", api);
+    expect(await screen.findByText(/Enter a prescription number/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Prescription number")).toBeInTheDocument();
+    expect(screen.getByLabelText("Card number")).toBeInTheDocument();
   });
 });
 
-describe("Lab queue — min-necessary", () => {
+describe("Lab bench — min-necessary", () => {
   it("shows a masked patient token and no prescription data", async () => {
+    const user = userEvent.setup();
     renderApp("/lab/queue", "lab");
-    const table = await screen.findByRole("table", { name: "Lab order queue" });
-    expect(within(table).getByText(/•••4821/)).toBeInTheDocument();
+    // Search-first since 27.8 — there is nothing on screen until a patient is asked for, which is the point.
+    await user.type(await screen.findByLabelText(/Card number/i), "CARD-1");
+    await user.type(screen.getByLabelText(/Member number/i), "MEM-1");
+    await user.click(screen.getByRole("button", { name: /^Search$/ }));
+    const table = await screen.findByRole("table", { name: "Perform an order" });
+    // getAllByText: the fixture now carries a live AND a lapsed order for the same member, which is the
+    // ordinary case — what is being asserted is that the token is MASKED, not how many rows carry it.
+    expect(within(table).getAllByText(/•••4821/).length).toBeGreaterThan(0);
     // No prescription/drug column leaks into the lab zone.
     expect(within(table).queryByText(/prescription/i)).not.toBeInTheDocument();
   });

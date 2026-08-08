@@ -4,14 +4,17 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" /><PackageReference Include="xunit" /><PackageReference Include="Xunit.SkippableFact" />
     <PackageReference Include="xunit.runner.visualstudio" /><PackageReference Include="coverlet.collector" />
     <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Npgsql" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../Api/Mersal.Pharmacy.Api.csproj" />
     <ProjectReference Include="../Domain/Mersal.Pharmacy.Domain.csproj" />
     <ProjectReference Include="../Infrastructure/Mersal.Pharmacy.Infrastructure.csproj" />
     <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
     <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" />
+    <ProjectReference Include="..\..\..\libs\validity\Mersal.Validity.csproj" />
   </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
 </Project>

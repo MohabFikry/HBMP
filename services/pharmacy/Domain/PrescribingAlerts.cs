@@ -1,6 +1,20 @@
 namespace Mersal.Pharmacy.Domain;
 
-public enum AlertKind { DrugInteraction, Allergy }
+public enum AlertKind
+{
+    DrugInteraction,
+    Allergy,
+
+    /// <summary>
+    /// A check that could NOT run — the source failed, or there was no data to check against.
+    /// </summary>
+    /// <remarks>
+    /// Phase 26.3. Before it, an unreachable source produced no alert, which is indistinguishable from a
+    /// clean screen: an outage rendered as a clean bill of health. This kind exists so that "we could not
+    /// ask" is something the screening can actually say.
+    /// </remarks>
+    Unavailable,
+}
 
 /// <summary>A prescribe-time safety alert (US-033). ADVISORY / non-blocking: the prescriber may proceed with an
 /// acknowledged override, which is recorded. Alerts never hard-block submission.</summary>
@@ -19,6 +33,13 @@ public sealed class AlertScreening
 
     public void AddAllergy(string detail) =>
         Alerts.Add(new PrescribingAlert(AlertKind.Allergy, "Allergy", detail));
+
+    /// <summary>Records that a check could not run. Never silently omitted.</summary>
+    public void AddUnavailable(string detail) =>
+        Alerts.Add(new PrescribingAlert(AlertKind.Unavailable, "Unavailable", detail));
+
+    /// <summary>True when any check failed to run. A screen with these is not a clean screen.</summary>
+    public bool HasUnavailableChecks => Alerts.Any(a => a.Kind == AlertKind.Unavailable);
 
     /// <summary>When alerts exist the prescriber must acknowledge to proceed (advisory override) — but submission
     /// is never blocked; a missing acknowledgement is simply recorded as un-acknowledged, not a hard stop.</summary>

@@ -24,9 +24,16 @@ public sealed record DecisionResult(
 /// winner + one 409. Line decisions roll up to the claim status and (when batched) to the batch rollups, in one tx.</summary>
 public sealed class DecisionService(ClaimsDbContext db, BatchRollupService rollups, TimeProvider clock)
 {
+    /// <param name="insideTransaction">24.x — run INSIDE the decision's transaction, immediately before it
+    /// commits. The decision's domain events were enqueued by the endpoint AFTER this method returned, so
+    /// they were a second commit: a crash in between left a claim line decided and settled with nothing
+    /// downstream ever told — the money moves and the notification, the batch rollup and the settlement
+    /// advice never hear about it. ClaimIntakeExecutor in this same service already took a callback for
+    /// exactly this reason; the decision path did not.</param>
     public async Task<DecisionResult> DecideAsync(
         string tenantId, string actor, string? callerProviderId, Guid claimId, Guid lineId,
         DecisionRequest req, string? idempotencyKey, decimal dualControlThreshold, string correlationId,
+        Func<Claim, ClaimLine, ClaimDecision, bool, CancellationToken, Task>? insideTransaction = null,
         CancellationToken ct = default)
     {
         var claim = await db.Claims.Include(c => c.Lines).FirstOrDefaultAsync(c => c.ClaimId == claimId && c.TenantId == tenantId, ct);
@@ -47,19 +54,42 @@ public sealed class DecisionService(ClaimsDbContext db, BatchRollupService rollu
             return Fail(DecisionOutcome.SoDProviderAffiliated);
 
         return req.ConfirmsDecisionId is { } confirmId
-            ? await ConfirmAsync(tenantId, actor, claim, line, confirmId, idempotencyKey, correlationId, ct)
-            : await NewDecisionAsync(tenantId, actor, claim, line, req, idempotencyKey, dualControlThreshold, correlationId, ct);
+            ? await ConfirmAsync(tenantId, actor, claim, line, confirmId, idempotencyKey, correlationId, insideTransaction, ct)
+            : await NewDecisionAsync(tenantId, actor, claim, line, req, idempotencyKey, dualControlThreshold, correlationId, insideTransaction, ct);
     }
 
     private async Task<DecisionResult> NewDecisionAsync(
         string tenantId, string actor, Claim claim, ClaimLine line, DecisionRequest req,
-        string? idempotencyKey, decimal threshold, string correlationId, CancellationToken ct)
+        string? idempotencyKey, decimal threshold, string correlationId,
+        Func<Claim, ClaimLine, ClaimDecision, bool, CancellationToken, Task>? insideTransaction, CancellationToken ct)
     {
         // SoD on re-decision (10b.9 appeals): a person may not decide the SAME line twice — an appealed line must be
         // escalated to a DIFFERENT reviewer. A prior terminal (non-pending) decision by this actor ⇒ 403.
         if (await db.ClaimDecisions.AsNoTracking()
             .AnyAsync(d => d.ClaimLineId == line.ClaimLineId && d.DecidedBy == actor && !d.PendingSecondApproval, ct))
             return Fail(DecisionOutcome.SoDSameDecider);
+
+        // A DECIDED LINE IS CLOSED. Until now the only thing stopping a second officer from deciding the same
+        // line was an optimistic-concurrency collision on claim_line.xmin — which fires when the two
+        // transactions OVERLAP and does nothing at all when they merely follow one another. So the guard held
+        // for a genuine race and vanished for the ordinary case: two officers working the same worklist a
+        // second apart, or one retrying after a timeout on a request that had actually succeeded.
+        //
+        // The cost is money, not tidiness. The second decision appends another append-only claim_decision row
+        // and overwrites claim_line.allowed_amount, so the settled figure becomes whichever officer happened
+        // to go last while the first decision sits in the ledger looking authoritative.
+        //
+        // `Status != Pending` is the precise test for "already decided", not an approximation:
+        //   * Approve / PartiallyApprove / Deny / Adjust move the line off Pending (DecisionRules.Apply)
+        //   * RequestInfo / RouteToClinical return null and LEAVE it Pending, so they correctly do not close
+        //     the line — the claim goes to PendingInfo and must still be decided later
+        //   * an appeal reopens by setting the line back to Pending (AppealService.RaiseAsync), which is the
+        //     door a re-decision is supposed to come through
+        //
+        // Placed after the SoD check on purpose: the same actor deciding twice is still reported as
+        // SoDSameDecider, which names their mistake more usefully than a bare conflict.
+        if (line.Status != ClaimLineStatus.Pending)
+            return Fail(DecisionOutcome.Conflict);
 
         var err = DecisionRules.Validate(req.Kind, req.AllowedAmount, req.ReasonCodes, req.Rationale,
             line.BilledAmount, line.ContractPrice, req.IsOverride);
@@ -74,18 +104,19 @@ public sealed class DecisionService(ClaimsDbContext db, BatchRollupService rollu
         if (pending)
         {
             // Dual control: recorded, but the line is NOT changed until a second distinct approver confirms.
-            return await SaveAsync(DecisionOutcome.PendingSecondApproval, decision, claim, line, false, ct);
+            return await SaveAsync(DecisionOutcome.PendingSecondApproval, decision, claim, line, false, insideTransaction, ct);
         }
 
         ApplyEffect(claim, line, req.Kind, req.AllowedAmount);
         var terminal = await RecomputeClaimAsync(claim, line, ct);
         await rollups.RecomputeForClaimAsync(claim, ct);
-        return await SaveAsync(DecisionOutcome.Recorded, decision, claim, line, terminal, ct);
+        return await SaveAsync(DecisionOutcome.Recorded, decision, claim, line, terminal, insideTransaction, ct);
     }
 
     private async Task<DecisionResult> ConfirmAsync(
         string tenantId, string actor, Claim claim, ClaimLine line, Guid confirmId,
-        string? idempotencyKey, string correlationId, CancellationToken ct)
+        string? idempotencyKey, string correlationId,
+        Func<Claim, ClaimLine, ClaimDecision, bool, CancellationToken, Task>? insideTransaction, CancellationToken ct)
     {
         var pending = await db.ClaimDecisions.FirstOrDefaultAsync(
             d => d.DecisionId == confirmId && d.ClaimLineId == line.ClaimLineId && d.PendingSecondApproval, ct);
@@ -101,7 +132,7 @@ public sealed class DecisionService(ClaimsDbContext db, BatchRollupService rollu
         ApplyEffect(claim, line, pending.Decision, pending.AllowedAmount);
         var terminal = await RecomputeClaimAsync(claim, line, ct);
         await rollups.RecomputeForClaimAsync(claim, ct);
-        return await SaveAsync(DecisionOutcome.Confirmed, confirming, claim, line, terminal, ct);
+        return await SaveAsync(DecisionOutcome.Confirmed, confirming, claim, line, terminal, insideTransaction, ct);
     }
 
     // ---- effect + rollups ---------------------------------------------------------------------------------
@@ -129,12 +160,16 @@ public sealed class DecisionService(ClaimsDbContext db, BatchRollupService rollu
 
     // ---- persistence --------------------------------------------------------------------------------------
     private async Task<DecisionResult> SaveAsync(DecisionOutcome outcome,
-        ClaimDecision decision, Claim claim, ClaimLine line, bool terminal, CancellationToken ct)
+        ClaimDecision decision, Claim claim, ClaimLine line, bool terminal,
+        Func<Claim, ClaimLine, ClaimDecision, bool, CancellationToken, Task>? insideTransaction, CancellationToken ct)
     {
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         try
         {
             await db.SaveChangesAsync(ct);
+            // The events join THIS transaction, before the commit: the decision and the news of it are
+            // one fact or neither.
+            if (insideTransaction is not null) await insideTransaction(claim, line, decision, terminal, ct);
             await tx.CommitAsync(ct);
             return new DecisionResult(outcome, decision, claim, line, null, terminal);
         }

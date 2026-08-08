@@ -82,10 +82,33 @@ describe("Visit timeline", () => {
     // Falling back to the booker would claim they checked the patient in — a lie the desk would act on.
     expect(items[1]).toHaveTextContent(/actor not recorded/i);
     expect(items[1]).not.toHaveTextContent("Nada Reception");
-    // Unresolvable: the id still shows, truncated and monospaced, full value in the title. An approximate actor
-    // would be worse than a visible identifier.
-    expect(items[2]).toHaveTextContent("129d2a05");
+    // Unresolvable: said in WORDS, with the raw value on the title. It used to print eight hex characters of
+    // the subject id — not a name, not something anyone at a desk can act on, and read as a glitch where an
+    // answer belongs. Still never guessed at, which is what separates this from `items[1]`: "we have a record
+    // of who and cannot resolve it" and "nothing was recorded" are different facts and are said differently.
+    expect(items[2]).toHaveTextContent(/unknown user/i);
+    expect(items[2]).not.toHaveTextContent("129d2a05");
     expect(within(items[2]).getByTitle(/129d2a05-8c27-43c7-aae2-f2cc4c7fda30/)).toBeInTheDocument();
+  });
+
+  it("labels the actor and the moment with glyphs, and still names them for a screen reader", async () => {
+    const user = userEvent.setup();
+    renderBtn(fakeApi());
+    await user.click(screen.getByRole("button", { name: /timeline/i }));
+
+    const items = within(await screen.findByRole("list")).getAllByRole("listitem");
+    // Two decorative glyphs per step — one for when, one for who. Announcing "clock" and "person" would add
+    // two words that carry nothing the sr-only labels do not already say.
+    const icons = items[0].querySelectorAll("svg");
+    expect(icons.length).toBeGreaterThanOrEqual(2);
+    icons.forEach((i) => expect(i).toHaveAttribute("aria-hidden", "true"));
+    // The words the glyphs replaced survive for a listener: without them the step announces a timestamp and
+    // then a name, with nothing to say what either is doing there.
+    // Asserted against what FOLLOWS each label, not with a word boundary: `toHaveTextContent` collapses
+    // whitespace, so the sr-only text abuts the value beside it ("11:00by Nada Reception") and `\bby\b`
+    // never matches — which would have looked like the labels were missing when they are present.
+    expect(items[0]).toHaveTextContent(/by Nada Reception/i);
+    expect(items[0]).toHaveTextContent(/at 22 Jul 2026/i);
   });
 
   it("an empty history says so rather than showing an empty box", async () => {

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Phase 24 Gate 6.6 — refuse a large binary before it becomes permanent.
+# Enable once per clone:  git config core.hooksPath .githooks
+exec python3 "$(git rev-parse --show-toplevel)/tools/ci/check-large-blobs.py" --staged

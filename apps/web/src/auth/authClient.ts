@@ -45,7 +45,8 @@ const DISPLAY_NAMES: Record<Role, string> = {
   doctor: "Dr. Karim",
   nurse: "Nurse Mona",
   lab: "Al-Shifa Lab",
-  imaging: "Nile Imaging",
+  radiology: "Nile Radiology",
+  procedure_provider: "Cairo Physiotherapy Centre",
   pharmacy: "Mersal Pharmacy",
   medical_approval: "Dr. Reviewer",
   beneficiary_mgmt: "Registration Desk",
@@ -58,6 +59,8 @@ const DISPLAY_NAMES: Record<Role, string> = {
   policy_admin: "Policy Administrator",
   org_admin: "Org Admin",
   super_admin: "Super Admin",
+  branch_coordinator: "Nadia (Maadi Coordinator)",
+  clinics_manager: "Tarek (Clinics Manager)",
   medical_director: "Medical Director",
 };
 

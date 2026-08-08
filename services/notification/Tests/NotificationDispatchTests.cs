@@ -112,7 +112,7 @@ public class NotificationDispatchTests
         try
         {
             var eventId = Guid.NewGuid();
-            var env = new NotificationEnvelope(eventId, "ResultReady", "t0", "ORD-1",
+            var env = new NotificationEnvelope(eventId, "OrderResultUploaded", "t0", "ORD-1",
                 new Dictionary<string, string> { ["ref"] = "ORD-1" },
                 new Dictionary<string, IReadOnlyList<Recipient>> { ["ordering_doctor"] = [new(provider, "en")] });
 

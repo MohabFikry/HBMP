@@ -32,12 +32,15 @@ public static class OnboardingEndpoints
                 return Results.Problem(statusCode: 422, title: "cannot activate provider", detail: guard.Reason);
             }
 
+            // 24.3 — activation and the event that makes the provider ROUTABLE downstream commit together.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             p.Status = ProviderStatus.Active;
             p.OnboardingState = OnboardingState.Activated;
             p.UpdatedAt = clock.GetUtcNow();
             await db.SaveChangesAsync(ct);
             await audit.EmitAsync(Draft(p, AuditAction.StateChange, me, tenant, outcome: "Activated"), ct);
             await outbox.EnqueueAsync("ProviderStatusChanged", "provider.events", new { providerId = p.ProviderId, status = "Active", onboardingState = "Activated", tenantId = tenant }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(new { p.ProviderId, status = p.Status.ToString(), onboardingState = p.OnboardingState.ToString(), routable = true });
         });
 
@@ -48,6 +51,10 @@ public static class OnboardingEndpoints
             var (p, tenant) = await Load(db, id, me, ct);
             if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
+            // 24.3 — suspension revokes the provider's users (an ExecuteUpdate, which commits on its own)
+            // AND announces both facts. Split across three commits, a crash can leave users revoked while
+            // the provider still reads Active downstream — or the reverse.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             p.Status = ProviderStatus.Suspended;
             p.OnboardingState = OnboardingState.Suspended;
             p.UpdatedAt = clock.GetUtcNow();
@@ -56,6 +63,7 @@ public static class OnboardingEndpoints
             await audit.EmitAsync(Draft(p, AuditAction.StateChange, me, tenant, outcome: "Suspended", reason: req.Reason), ct);
             await outbox.EnqueueAsync("ProviderStatusChanged", "provider.events", new { providerId = p.ProviderId, status = "Suspended", tenantId = tenant }, ct);
             await outbox.EnqueueAsync("ProviderUsersRevoked", "provider.events", new { providerId = p.ProviderId, count = revoked, reason = "provider-suspended", tenantId = tenant }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(new { p.ProviderId, status = p.Status.ToString(), usersRevoked = revoked });
         });
 
@@ -70,6 +78,7 @@ public static class OnboardingEndpoints
             var (p, tenant) = await Load(db, id, me, ct);
             if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             p.Status = ProviderStatus.Terminated;
             p.OnboardingState = OnboardingState.Terminated;
             p.UpdatedAt = clock.GetUtcNow();
@@ -78,6 +87,7 @@ public static class OnboardingEndpoints
             await audit.EmitAsync(Draft(p, AuditAction.StateChange, me, tenant, outcome: "Terminated", reason: $"{req.Reason} (2nd approver: {req.SecondApproverSubject})"), ct);
             await outbox.EnqueueAsync("ProviderStatusChanged", "provider.events", new { providerId = p.ProviderId, status = "Terminated", tenantId = tenant }, ct);
             await outbox.EnqueueAsync("ProviderUsersRevoked", "provider.events", new { providerId = p.ProviderId, count = revoked, reason = "provider-terminated", tenantId = tenant }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(new { p.ProviderId, status = p.Status.ToString(), usersRevoked = revoked });
         });
 
@@ -100,12 +110,16 @@ public static class OnboardingEndpoints
                 UserId = Guid.NewGuid(), ProviderId = id, TenantId = tenant!, SubjectRef = req.SubjectRef,
                 Role = req.Role, Status = ProviderUserStatus.Active, CreatedAt = clock.GetUtcNow(),
             };
+            // 24.3 — identity provisioning is driven off ProviderUserProvisioned. A user row without its
+            // event is an account that exists here and nowhere anyone can sign in with.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             db.Users.Add(user);
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return Results.Problem(statusCode: 409, title: "a user with this subject already exists in the tenant"); }
             await audit.EmitAsync(new AuditEventDraft { EntityType = "provider_user", EntityId = user.UserId.ToString(), Action = AuditAction.Create, ActorUserId = me.Principal?.Subject, TenantId = tenant, ProviderId = id.ToString(), DecisionOutcome = "provisioned" }, ct);
             // identity-service (Keycloak) provisioning is driven off this event (deferred sync).
             await outbox.EnqueueAsync("ProviderUserProvisioned", "provider.events", new { userId = user.UserId, providerId = id, user.SubjectRef, user.Role, tenantId = tenant }, ct);
+            await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/providers/{id}/users/{user.UserId}", new { user.UserId, user.Role });
         });
 
@@ -117,8 +131,12 @@ public static class OnboardingEndpoints
             var window = windowDays ?? 30;
             var creds = await db.Credentials.AsNoTracking().Where(c => c.TenantId == tenant && !c.IsDeleted && c.ValidTo != null).ToListAsync(ct);
             var due = creds.Where(c => CredentialRules.ExpiryReminderDue(c, today, window)).ToList();
+            // 24.3 — the sweep is all-or-nothing: a half-emitted run reports a reminder count that does
+            // not match the reminders anyone received.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             foreach (var c in due)
                 await outbox.EnqueueAsync("ProviderCredentialExpiring", "provider.events", new { credentialId = c.CredentialId, providerId = c.ProviderId, c.CredentialType, validTo = c.ValidTo, tenantId = tenant }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(new { evaluated = creds.Count, remindersEmitted = due.Count, windowDays = window });
         });
     }

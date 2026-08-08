@@ -6,8 +6,8 @@ import { useAsync } from "../api/useAsync";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
-  title: { en: "Executive dashboard", ar: "لوحة القيادة" },
-  financeTitle: { en: "Financial dashboard", ar: "اللوحة المالية" },
+  title: { en: "Executive Dashboard", ar: "لوحة القيادة" },
+  financeTitle: { en: "Financial Dashboard", ar: "اللوحة المالية" },
   empty: { en: "No data for this period.", ar: "لا توجد بيانات لهذه الفترة." },
   showTable: { en: "Show data table", ar: "عرض الجدول" },
   showChart: { en: "Show chart", ar: "عرض الرسم" },

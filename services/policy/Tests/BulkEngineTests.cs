@@ -41,12 +41,14 @@ public class BulkEngineTests
     [Fact]
     public void A_missing_required_column_fails_the_file_and_names_it()
     {
-        var csv = Csv("beneficiary_id,policy_no,relationship", $"{Guid.NewGuid()},POL-1,Principal");
+        // No birthdate — which is required, because every age-banded eligibility rule derives from it.
+        var csv = Csv("card_number,first_name,last_name,gender,nationality,phone_no,plan,network_tier,contribution",
+                      "A-1,Amina,Yusuf,Female,SY,+201234567890,Mersal,MERSAL,20");
 
         var result = Parser.Parse(BulkTemplates.MemberEnrolment, "members.csv", csv);
 
         result.Ok.Should().BeFalse();
-        result.Failure!.DetailEn.Should().Contain("effective_from");
+        result.Failure!.DetailEn.Should().Contain("birthdate");
         result.Failure.DetailAr.Should().NotBeNullOrWhiteSpace("the people who fix these files work in Arabic");
     }
 
@@ -54,26 +56,42 @@ public class BulkEngineTests
     public void Missing_and_unknown_columns_are_reported_together()
     {
         // An operator fixing a header should not discover the second problem only after fixing the first.
-        var csv = Csv("beneficiary_id,policy_no,relationship,favourite_colour", "x,y,z,w");
+        var csv = Csv("card_number,first_name,last_name,favourite_colour", "x,y,z,w");
 
         var failure = Parser.Parse(BulkTemplates.MemberEnrolment, "members.csv", csv).Failure!;
 
-        failure.DetailEn.Should().Contain("effective_from").And.Contain("favourite_colour");
+        failure.DetailEn.Should().Contain("birthdate").And.Contain("favourite_colour");
+    }
+
+    [Fact]
+    public void Age_is_not_a_column_because_it_is_derived_from_the_birthdate()
+    {
+        // A file carrying both would eventually carry two different answers, with no rule to choose between
+        // them. The header contract refuses the column outright rather than silently ignoring it.
+        var csv = Csv("card_number,first_name,last_name,gender,nationality,phone_no,birthdate,plan,network_tier,contribution,age",
+                      "A-1,Amina,Yusuf,Female,SY,+201234567890,1990-01-01,Mersal,MERSAL,20,36");
+
+        var failure = Parser.Parse(BulkTemplates.MemberEnrolment, "members.csv", csv).Failure!;
+
+        failure.Code.Should().Be("COLUMN_CONTRACT");
+        failure.DetailEn.Should().Contain("age");
     }
 
     [Fact]
     public void Column_order_and_capitalisation_do_not_matter()
     {
-        var id = Guid.NewGuid();
-        var csv = Csv("Effective From,RELATIONSHIP,Policy_No,beneficiary_id",
-                      $"2026-01-01,Principal,POL-1,{id}");
+        // Spreadsheets are edited by people; rejecting a file over a capital letter teaches operators to fight
+        // the tool rather than read its errors.
+        var csv = Csv("Card Number,First Name,LAST_NAME,Gender,NATIONALITY,Phone No,BirthDate,Plan,Network Tier,CONTRIBUTION",
+                      "A-1,Amina,Yusuf,Female,SY,+201234567890,1990-01-01,Mersal,MERSAL,20");
 
         var result = Parser.Parse(BulkTemplates.MemberEnrolment, "members.csv", csv);
 
         result.Ok.Should().BeTrue();
         result.Rows.Should().HaveCount(1);
-        result.Rows[0].Text("beneficiary_id").Should().Be(id.ToString());
-        result.Rows[0].Text("effective_from").Should().Be("2026-01-01");
+        result.Rows[0].Text("card_number").Should().Be("A-1");
+        result.Rows[0].Text("birthdate").Should().Be("1990-01-01");
+        result.Rows[0].Text("network_tier").Should().Be("MERSAL");
     }
 
     [Fact]

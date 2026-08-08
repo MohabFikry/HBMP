@@ -95,13 +95,13 @@ public static class Fixtures
     public static InvestigationsSection Investigations(bool restricted = false) => new(
         [new InvestigationRow("ORD-2026-0007", Guid.NewGuid(), "Haematology", DateTimeOffset.UtcNow.AddDays(-2),
             "Completed", "Central Lab", restricted ? null : ResultMarker, restricted,
-            restricted ? "HighlySensitive" : "Standard")]);
+            restricted ? "HighlySensitive" : "Standard", "Lab")]);
 
     /// <summary>A row that arrives marked restricted but WITH a value — an upstream regression. The profile must
     /// strip it anyway; the test that proves so is the reason this fixture exists.</summary>
     public static InvestigationsSection LeakyInvestigations() => new(
         [new InvestigationRow("ORD-2026-0008", Guid.NewGuid(), "Psychiatry", DateTimeOffset.UtcNow,
-            "Completed", "Central Lab", ResultMarker, true, "HighlySensitive")]);
+            "Completed", "Central Lab", ResultMarker, true, "HighlySensitive", "Lab")]);
 
     public static PrescriptionsSection Prescriptions() => new(
         [new RxRow("RX-2026-0004", DrugMarker, "Dispensed", DateTimeOffset.UtcNow.AddDays(-1),

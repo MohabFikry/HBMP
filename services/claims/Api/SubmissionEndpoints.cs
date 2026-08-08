@@ -55,6 +55,10 @@ public static class SubmissionEndpoints
             var req = new SubmissionRequest(body.ProviderId, body.BeneficiaryId, body.InvoiceNumber,
                 string.IsNullOrWhiteSpace(body.CurrencyCode) ? "EGP" : body.CurrencyCode!, onBehalfOf, parsed);
             var bearer = BearerOf(http);
+            // 24.x — the claim and its ClaimSubmitted event commit together. SubmissionService joins
+            // this transaction rather than opening its own, so a crash between the two cannot leave a
+            // submitted claim that adjudication, batching and the provider portal never hear about.
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             var r = await submissions.SubmitAsync(deps.Tenant, deps.Subject ?? "unknown", req, idem, bearer, ct);
 
             switch (r.Outcome)
@@ -73,6 +77,7 @@ public static class SubmissionEndpoints
                             r.Submission!.SubmissionId, r.Claim.ClaimId, providerId = body.ProviderId,
                             status = r.Submission.Status.ToString(), tenantId = deps.Tenant,
                         }, ct);
+                    await tx.CommitAsync(ct);
                     return Results.Created($"/api/v1/claims/submissions/{r.Submission!.SubmissionId}", SubmissionView.From(r.Submission));
             }
         }).RequireAuthorization(HbmpPolicies.Scope("claims:submit"));
@@ -107,7 +112,9 @@ public static class SubmissionEndpoints
         // --- read (provider-isolated) ----------------------------------------------------------------------
         v1.MapGet("/{id:guid}", async (Guid id, ClaimsDeps deps, CancellationToken ct) =>
         {
-            var denied = await deps.Gate.CheckAsync(ClaimsPolicies.ReadClaim, ct);
+            // The provider that FILED this invoice may read it back (§3.4, claim_document R🟠PO own
+            // submissions); the isolation below then decides which one that is.
+            var denied = await deps.Gate.CheckClaimReadAsync(ct);
             if (denied is not null) return denied;
 
             var s = await deps.Db.ClaimSubmissions.AsNoTracking().Include(x => x.Lines)

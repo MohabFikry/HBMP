@@ -61,7 +61,11 @@ public sealed class HeaderSectionProvider(AdministrativeSource source) : ISectio
                 : null,
             // A relative path to this service's own gated endpoint, never a blob URL. The bytes are behind a
             // second authorization check and a short-TTL signature (design 39 §5).
-            $"/api/v1/patients/{request.BeneficiaryId}/photo");
+            $"/api/v1/patients/{request.BeneficiaryId}/photo",
+            membership.ValueKind == JsonValueKind.Object ? membership.Str("relationship") : null,
+            beneficiary?.Str("nationalityCode"),
+            beneficiary?.Str("birthDate") is { } bd && DateOnly.TryParse(bd, out var born) ? born : null,
+            beneficiary?.Bool("birthDateIsApproximate") ?? false);
     }
 
     /// <summary>The primary phone out of patient-service's contacts[], preferring the one flagged primary and
@@ -211,7 +215,11 @@ public sealed class TimelineSectionProvider(AdministrativeSource source, CallerS
         if (enrollmentId is null) return null;
 
         using var timeline = await http.GetAsync(
-            AdministrativeSource.ClientName, $"/api/v1/enrollments/{enrollmentId}/timeline?pageSize=100",
+            // The PROFILE seam, not the policy-admin route. `/enrollments/{id}/timeline` sits behind
+            // `policy:read` — the policy-administration scope, which no clinician holds — so this section
+            // answered `owner-declined` for every role outside policy admin, including the ones whose matrix
+            // cell grants it. `/profile/...` is the same rows behind `profile:read` + the design-39 §4 matrix.
+            AdministrativeSource.ClientName, $"/api/v1/profile/enrollments/{enrollmentId}/timeline?pageSize=100",
             request.Caller, ct);
         if (timeline is null) return null;
 

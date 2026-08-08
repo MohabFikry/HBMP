@@ -183,7 +183,9 @@ public class AppointmentTransitionTests
 
     // ---- seed / assert helpers (tag rows with a scope guid in beneficiary_id space for cleanup) ----
 
-    private static async Task<Guid> SeedSlot(Guid provider, Guid location, Guid scope, int hoursAhead)
+    /// <param name="doctor">The slot's practitioner. Defaults to <paramref name="scope"/>, which is also the
+    /// cleanup tag — pass one explicitly only alongside a provider/location the cleanup below also removes.</param>
+    private static async Task<Guid> SeedSlot(Guid provider, Guid location, Guid scope, int hoursAhead, Guid? doctor = null)
     {
         var slotId = Guid.NewGuid();
         var start = DateTimeOffset.UtcNow.AddHours(hoursAhead);
@@ -195,7 +197,7 @@ public class AppointmentTransitionTests
         cmd.Parameters.AddWithValue(slotId);
         cmd.Parameters.AddWithValue(provider);
         cmd.Parameters.AddWithValue(location);
-        cmd.Parameters.AddWithValue(scope);              // doctor_id carries the scope tag for cleanup
+        cmd.Parameters.AddWithValue(doctor ?? scope);    // doctor_id carries the scope tag for cleanup
         cmd.Parameters.AddWithValue(start);
         cmd.Parameters.AddWithValue(start.AddMinutes(15));
         await cmd.ExecuteNonQueryAsync();
@@ -329,11 +331,43 @@ public class AppointmentTransitionTests
             "DELETE FROM emr.appointment WHERE beneficiary_id=$1",
             "DELETE FROM emr.waitlist_entry WHERE beneficiary_id=$1",
             "DELETE FROM emr.appointment_slot WHERE doctor_id=$1",
+            // A slot seeded under a DIFFERENT doctor (the doctor-change test) is not tagged by the scope, so
+            // it is removed by the appointment that pointed at it having already gone — the provider is
+            // unique per test, which is what makes this safe.
+            "DELETE FROM emr.appointment_slot WHERE provider_id IN (SELECT provider_id FROM emr.appointment_slot WHERE doctor_id=$1)",
         })
         {
             await using var cmd = new NpgsqlCommand(sql, conn);
             cmd.Parameters.AddWithValue(scope);
             await cmd.ExecuteNonQueryAsync();
         }
+    }
+
+    [SkippableFact]
+    public async Task Rescheduling_onto_another_doctors_slot_moves_the_DOCTOR_too()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var scope = Guid.NewGuid();
+        var otherDoctor = Guid.NewGuid();
+        var (provider, location) = (Guid.NewGuid(), Guid.NewGuid());
+        var oldSlot = await SeedSlot(provider, location, scope, hoursAhead: 24);
+        var newSlot = await SeedSlot(provider, location, scope, hoursAhead: 48, doctor: otherDoctor);
+        try
+        {
+            var appt = await SeedAppointment(provider, location, oldSlot, AppointmentStatus.Booked, scope);
+
+            await using var ctx = new EmrDbContext(Options());
+            var r = await new AppointmentTransitionService(ctx)
+                .RescheduleAsync(appt, newSlot, ifMatch: null, DateTimeOffset.UtcNow);
+
+            r.Outcome.Should().Be(TransitionOutcome.Ok);
+            // The omission was invisible while the picker only ever offered the appointment's OWN doctor, so
+            // the two could not disagree. Once a desk can move a patient to a different practitioner, an
+            // appointment left pointing at its old doctor while sitting in a new doctor's slot contradicts
+            // itself: the board names one clinician, the session belongs to another, and the patient is
+            // called by neither.
+            r.Appointment!.DoctorId.Should().Be(otherDoctor);
+        }
+        finally { await CleanupScope(scope); }
     }
 }

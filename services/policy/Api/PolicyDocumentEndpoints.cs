@@ -261,6 +261,10 @@ public static class PolicyDocumentEndpoints
             // A re-upload is a NEW VERSION. The prior link becomes Superseded and is never deleted — the
             // superseded version is what a dispute about "which report did you act on" is settled with.
             var versionNo = 1;
+            // The prior link's supersede, the new link and the event announcing it commit together. The bytes
+            // are already in object storage by this point and stay there on a rollback: an unreferenced blob is
+            // reclaimable, whereas a link row with no event is a document the rest of the platform never saw.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             if (req.SupersedesLinkId is { } priorId)
             {
                 var prior = await db.PolicyDocuments.FirstOrDefaultAsync(d => d.LinkId == priorId, ct);
@@ -304,6 +308,7 @@ public static class PolicyDocumentEndpoints
                     documentClass = documentClass.ToString(), visibilityClass = visibility.Value.ToString(),
                     versionNo, supersedes = req.SupersedesLinkId,
                 }, ct);
+            await tx.CommitAsync(ct);
 
             return Results.Created($"/api/v1/documents/{link.LinkId}",
                 PolicyDocumentView.For(link, principal.Roles, DateOnly.FromDateTime(now.UtcDateTime)));
@@ -429,6 +434,7 @@ public static class PolicyDocumentEndpoints
             link.WithdrawnAt = now;
             link.WithdrawalReason = req.Reason.Trim();
             link.UpdatedAt = now;
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
 
             await audit.EmitAsync(new AuditEventDraft
@@ -439,6 +445,7 @@ public static class PolicyDocumentEndpoints
             }, ct);
             await outbox.EnqueueAsync("DocumentWithdrawn", "policy.events",
                 new { tenantId = link.TenantId, linkId, reason = req.Reason, by = principal.Subject }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(PolicyDocumentView.For(link, principal.Roles, DateOnly.FromDateTime(now.UtcDateTime)));
         });
 
@@ -459,6 +466,7 @@ public static class PolicyDocumentEndpoints
             link.VerifiedAt = now;
             link.VerificationNote = req.Note;
             link.UpdatedAt = now;
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             if (await SaveOrConflict(db, ct) is { } conflict) return conflict;
 
             await audit.EmitAsync(new AuditEventDraft
@@ -468,6 +476,7 @@ public static class PolicyDocumentEndpoints
             }, ct);
             await outbox.EnqueueAsync("DocumentVerified", "policy.events",
                 new { tenantId = link.TenantId, linkId, by = principal.Subject }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(PolicyDocumentView.For(link, principal.Roles, DateOnly.FromDateTime(now.UtcDateTime)));
         });
     }

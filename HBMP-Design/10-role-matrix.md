@@ -300,7 +300,13 @@ Some claim lines turn on a genuine **medical-necessity** question that cannot be
 
 The hand-off is one-directional in each phase: the clinical opinion returns as a structured verdict + rationale that the Claims Officer acts on; the officer never gains clinical read by virtue of the routing, and the clinical reviewer never gains claims-decision rights. Both hops are audited.
 
-### 3.20 Branch / Clinic Manager *(new — Phase 14)*
+### 3.20 Branch / Clinic Manager *(Phase 14 — SUPERSEDED by §3.22/§3.23 in Phase 25)*
+
+> **Never seeded.** This role was named in `libs/authz/BranchScope.cs` and the SPA's mirror of it and never
+> existed as an identity role, so nobody ever held it. Phase 25 replaces it with `branch_coordinator` (one
+> clinic) and `clinics_manager` (all six), which share one permission set — see §3.22/§3.23. The description
+> below is retained because it is where the requirement was first written down.
+
 - **Purpose:** Operational oversight of **one or more Mersal branches** — staffing and rota coverage, schedule and availability health, queue throughput and waiting times, no-show and utilization patterns, and day-to-day site administration for the branches they are assigned to.
 - **Portal:** Branch Operations view (an operational dashboard layered on the Reception/scheduling surfaces; see [14-navigation-structure.md](14-navigation-structure.md)).
 - **Typical users:** Branch managers and clinic managers at Aswan, Alexandria, 6th of October, Maadi, Dokki, Nasr City.
@@ -309,6 +315,42 @@ The hand-off is one-directional in each phase: the clinical opinion returns as a
 - **Key capabilities:** View and manage the branch day-list, queue and appointment book; monitor waiting times, throughput, no-shows and slot utilization for the active branch; maintain branch opening hours and availability templates; view practitioner coverage (specialty × session) and request assignment changes; view branch-level operational reports.
 - **Highest tier:** **T1–T2** (identity + appointment + operational metrics). **No EMR, no diagnoses, no result values.**
 - **Notes:** **HARD RULE — a Branch Manager is an operations role, not a clinical one:** the clinical field set is stripped exactly as for Reception, and a **sensitive** result is never visible beyond existence metadata. **A Branch Manager cannot grant themselves (or anyone) a branch assignment** — `user_branch_assignment` changes are made by **Org Admin** (staff) / **Network Team** (practitioner records), on request, and are audited (§7). Branch-level reporting is available across branches only in aggregate, via a MemberScoped reporting grant.
+
+### 3.22 Branch Coordinator · 3.23 Clinics Manager *(new — Phase 25)*
+
+> **These two roles hold ONE permission set and differ ONLY in reach.** That is the decision, and it is
+> enforced rather than described: `BranchScopeSetEqualityTests` / `BranchRoleScopeParityTests` assert the two
+> scope sets are equal in both directions and fail the build if a future phase grants one of them something
+> the other lacks. See [42 §1](42-branch-management.md) and [ADR-0029](../docs/adr/0029-branch-management.md).
+>
+> They **supersede §3.20's** `branch_manager` / `clinic_manager`, which were named in `libs/authz` and the SPA
+> and never seeded as identity roles — referenced in code, held by nobody.
+
+- **Purpose:** Run a Mersal clinic. Everything Reception does, plus the practitioner roster, specialties and
+  **licences** for the branch, the availability that feeds appointment slots, and the clinic's own stock.
+- **Portal:** **Branch Management** (base `branch`) — ONE portal serving both roles (see
+  [14-navigation-structure.md](14-navigation-structure.md)).
+- **Typical users:** *Branch Coordinator* — the person who runs Maadi, or Dokki, or Aswan. *Clinics Manager* —
+  the person who supervises all six.
+- **Scope:** reception's exact twelve scopes plus `branch:practitioner:write`, `branch:roster:write`,
+  `branch:inventory:read`, `branch:inventory:write`. **No `emr:read`** — they run the clinic, they do not read
+  clinical notes. **No `provider:write`**, ever: that scope is network-wide, creates branches, edits external
+  labs and pharmacies, and is what unmasks `license_no`.
+- **Scope mode:** Coordinator = **BranchScoped** (one active branch). Clinics Manager = **BranchSetScoped**
+  (`branch_id ∈ permitted set` — all six at once). The manager's branch control **filters**; the
+  coordinator's **switches**. Reach is **grant-derived, never role-derived**: an unresolvable set matches
+  **zero** rows via the sentinel, never everything.
+- **Key capabilities:** Assign/revoke practitioners and set specialties **at branches in reach** (a
+  coordinator at Maadi assigning to Dokki is 403 + audited); maintain licence numbers and expiry dates; work
+  the licence-alert worklist and the appointments a lapse **flagged for reassignment**; record roster
+  exceptions (leave, public holiday, closure, ad-hoc clinic) with a mandatory **impact preview**; manage
+  clinic stock across medical and non-medical categories.
+- **Highest tier:** **T2** — staff licence data and clinic stock, never a diagnosis.
+- **Notes:** **HARD RULE — a branch role never creates a branch and never edits the external network.**
+  **HARD RULE — no automated process cancels a beneficiary's appointment**: a lapsed licence or a closed
+  clinic FLAGS the affected appointments and a person decides who covers. **HARD RULE — clinic inventory
+  never dispenses to a patient and carries no beneficiary identifier**; prescribed items go through
+  `pharmacy-service` against an `Rx`.
 
 ### 3.21 Call Centre Supervisor *(new — Phase 15)*
 - **Purpose:** Supervise the contact-centre team — oversee call activity and quality, coach agents, review verification failures and complaint outcomes, and own the call-centre KPIs. The senior variant of [Call Center](#33-call-center), **not** a wider data role.

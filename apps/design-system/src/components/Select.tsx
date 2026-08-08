@@ -181,7 +181,7 @@ export function Select({
           ref={listRef}
           id={listId}
           role="listbox"
-          className="mrs-select-list"
+          className="mrs-select-list mrs-scroll"
           aria-label={aria["aria-label"]}
           aria-labelledby={aria["aria-labelledby"]}
         >

@@ -84,8 +84,20 @@ public sealed record AnalyticsSeries(
     IReadOnlyList<AnalyticsPoint> Points,
     string SummaryEn,
     string SummaryAr,
-    /// <summary>Column headers for the accessible table, in the order the points render.</summary>
-    IReadOnlyList<string> Columns);
+    /// <summary>
+    /// Column headers for the accessible table, in the order the points render.
+    ///
+    /// <para>Bilingual, and <see cref="BiText"/> rather than a second parallel list, for the reason the R1
+    /// audit (§3.1) recorded: this was one monolingual array, so every accessible chart alternative rendered
+    /// MOVEMENT / MEMBERS in English inside an otherwise Arabic page — the only untranslated text left on the
+    /// screen, sitting on the element that exists FOR the reader who cannot see the chart. Title, label and
+    /// summary were all already authored in both languages; the headers were the gap.</para>
+    ///
+    /// <para>A translation table on the client was the alternative and is worse: two places would then decide
+    /// what "Net payable" is called, and they drift. Two parallel arrays would be worse again — nothing stops
+    /// them differing in LENGTH, which renders a table with more headers than columns.</para>
+    /// </summary>
+    IReadOnlyList<BiText> Columns);
 
 /// <summary>A view's payload: its series, plus the delta chips when compare mode is on.</summary>
 public sealed record AnalyticsViewResult(

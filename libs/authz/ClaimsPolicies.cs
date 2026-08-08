@@ -17,8 +17,27 @@ public static class ClaimsPolicies
 {
     public const string Version = "10b.0";
 
-    /// <summary>Read / list claims + lines (min-necessary projection — codes, amounts, no clinical fields).</summary>
+    /// <summary>Read / list claims + lines TENANT-WIDE (min-necessary projection — codes, amounts, no clinical
+    /// fields). Mersal staff only; a provider-affiliated caller reads through <see cref="ReadOwnClaim"/>.</summary>
     public const string ReadClaim = "claims:read";
+
+    /// <summary>
+    /// Read the caller's OWN provider's claims, lines, submissions, adjustments, batches and settlement
+    /// advice (11-permission-matrix §3.4, the whole Provider Admin row: <c>claim R🟠PO</c> …
+    /// <c>settlement_advice R🔒🟠PO (own advice)</c>).
+    ///
+    /// <para>A separate ACTION rather than a provider role added to <see cref="ReadClaim"/>, because the two
+    /// reads differ in the condition they are granted under, and <see cref="PolicyRule.RequiredConditions"/>
+    /// applies to every caller of a rule. Adding provider_admin to the tenant-wide rule would either leave the
+    /// provider unisolated (conditions unchanged) or hold Mersal staff to a provider id they do not have
+    /// (conditions widened). Splitting the action keeps <c>provider-ownership</c> mandatory for the provider
+    /// and irrelevant to the staff read — and makes a provider token with no <c>provider_id</c> fail the
+    /// condition and be DENIED, rather than fall through to a tenant-wide read.</para>
+    ///
+    /// <para>Only provider_admin: the portal role that submits and appeals. A lab tech or a pharmacist reads
+    /// its own worklist in orders/pharmacy and has no business in the money.</para>
+    /// </summary>
+    public const string ReadOwnClaim = "claims:read:own";
     /// <summary>Claims-officer worklist read (financial + PHI-adjacent — audited on read).</summary>
     public const string Review = "claims:review";
     /// <summary>Record a line-level decision (append-only; SoD + dual-control enforced in the handler).</summary>
@@ -37,8 +56,21 @@ public static class ClaimsPolicies
     public const string ReimburseSubmit = "claims:reimburse:submit";
     /// <summary>Appeal a decided claim (10b.9).</summary>
     public const string Appeal = "claims:appeal";
-    /// <summary>Export a settlement advice / batch — distinct elevated, audited action (10b.8).</summary>
+    /// <summary>Export a settlement advice / batch, and RELEASE one — distinct elevated, audited action
+    /// (10b.8). Mersal only: generating an advice is the last human control before money moves.</summary>
     public const string Export = "claims:export";
+
+    /// <summary>
+    /// Download the caller's OWN settlement advice (§3.4, Provider Admin: <c>settlement_advice E🔒🟠PO</c>) —
+    /// the remittance the payee is entitled to a copy of.
+    ///
+    /// <para>Split from <see cref="Export"/> because that action ALSO gates generating an advice, which is
+    /// the release step: Mersal's act, never the payee's (18.A4, 36 §9). One action covering both would let
+    /// a provider issue its own payment instruction. The endpoint scope is the same <c>claims:export</c> —
+    /// a provider genuinely holds an export authority — so this rule is the only thing standing between the
+    /// two, which is why a test asserts the release refuses a provider that holds the scope.</para>
+    /// </summary>
+    public const string ExportOwnAdvice = "claims:export:own";
     /// <summary>Record an EXTERNAL settlement / payment reference (SoD-split from decide) (10b.8).</summary>
     public const string Settle = "claims:settle";
     /// <summary>System intake seam — an auto-derive event creates a claim line (not a human action).</summary>
@@ -52,8 +84,18 @@ public static class ClaimsPolicies
         {
             Action = ReadClaim, ResourceType = Resource,
             Roles = Set("claims_officer", "claims_reviewer", "manager", "finance"), Scopes = Set("claims:read"),
-            // Provider users may read only their own claims (ABAC provider-ownership); Mersal staff read tenant-wide.
+            // Mersal staff read tenant-wide. A provider user reads through ReadOwnClaim below — this rule
+            // names no provider role, so a provider token cannot reach a claim through it at all.
             RequiredConditions = [AbacConditions.TenantMatch],
+        },
+        new PolicyRule
+        {
+            Action = ReadOwnClaim, ResourceType = Resource,
+            Roles = Set("provider_admin"), Scopes = Set("claims:read"),
+            // Provider-ownership is what this read is granted UNDER. It is evaluated against the ROW being
+            // read (the claim's / batch's provider), so it refuses a cross-provider read rather than
+            // describing one, and denies a provider token that carries no provider id at all.
+            RequiredConditions = [AbacConditions.TenantMatch, AbacConditions.ProviderOwnership],
         },
         new PolicyRule
         {
@@ -115,6 +157,14 @@ public static class ClaimsPolicies
             Action = Export, ResourceType = Resource,
             Roles = Set("claims_reviewer", "finance", "manager"), Scopes = Set("claims:export"),
             RequiredConditions = [AbacConditions.TenantMatch], Sensitive = true,
+        },
+        new PolicyRule
+        {
+            Action = ExportOwnAdvice, ResourceType = Resource,
+            Roles = Set("provider_admin"), Scopes = Set("claims:export"),
+            // Same shape as ReadOwnClaim: ownership against the batch's PAYEE, so "my advice" is a condition
+            // the engine checks rather than a filter the handler remembers to apply.
+            RequiredConditions = [AbacConditions.TenantMatch, AbacConditions.ProviderOwnership], Sensitive = true,
         },
         new PolicyRule
         {

@@ -6,6 +6,8 @@
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Npgsql" />
+    <!-- 24.3 — hosts the real emr endpoints (EmrApiFactory); Api was 0.8% covered without it. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Api/Mersal.Emr.Api.csproj" />

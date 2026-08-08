@@ -61,6 +61,9 @@ public static class BulkEndpoints
     {
         write.MapPost("", async (
             string jobType, IFormFile file, BulkJobEngine engine, PolicyGate gate,
+            // Batch-level coverage, stated once for the whole file. Recorded on the JOB (0018) so the dry run
+            // and the commit apply the same values; they fill a blank cell and never override a stated one.
+            Guid? defaultPlanId, Guid? defaultNetworkTierId, Guid? defaultBranchId,
             HttpContext http, CancellationToken ct) =>
         {
             if (await gate.CheckAsync(PolicyPolicies.Write, ct) is { } denied) return denied;
@@ -78,7 +81,8 @@ public static class BulkEndpoints
             var job = await engine.UploadAsync(
                 type, file.FileName ?? "upload.csv", file.ContentType ?? "text/csv", ms.ToArray(),
                 new ActorRef(gate.SubjectId, gate.Subject), gate.Subject,
-                http.Request.Headers.Authorization.FirstOrDefault(), ct);
+                http.Request.Headers.Authorization.FirstOrDefault(),
+                new BulkJobDefaults(defaultPlanId, defaultNetworkTierId, defaultBranchId), ct);
 
             // A job that failed at Scanning or parsing is returned with 200 and its terminal status rather than
             // as an error: the job RECORD exists, it is the answer to "what happened to my file", and it is

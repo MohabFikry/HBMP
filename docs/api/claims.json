@@ -78,6 +78,29 @@
         }
       }
     },
+    "/api/v1/claims/{claimId}/adjustments": {
+      "get": {
+        "tags": [
+          "Mersal.Claims.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "claimId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/claims/{claimId}/lines/{lineId}/adjustments": {
       "post": {
         "tags": [
@@ -841,6 +864,27 @@
     },
     "/api/v1/claim-batches/{id}/settlement-advice": {
       "post": {
+        "tags": [
+          "Mersal.Claims.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "get": {
         "tags": [
           "Mersal.Claims.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
         ],

@@ -7,11 +7,30 @@ import { getToken } from "../auth/tokenStore";
 import { ACTIVE_BRANCH_HEADER, setActiveBranch } from "../api/activeBranch";
 import type { BranchOption } from "./BranchSwitcher";
 
-/** Operational roles that are branch-scoped (design 37 §3). Everyone else is member-scoped (all branches). */
-const BRANCH_SCOPED = new Set(["reception", "appointment_coordinator", "nurse", "doctor", "branch_manager", "clinic_manager"]);
+/**
+ * Operational roles that are branch-scoped (design 37 §3). Everyone else is member-scoped (all branches).
+ *
+ * 25.1 — `branch_manager` and `clinic_manager` used to appear here and in libs/authz's copy of this set.
+ * Both were PHANTOMS: named in code, never seeded as identity roles, never held by anyone. Replaced by the
+ * one seeded spelling, `branch_coordinator`.
+ */
+const BRANCH_SCOPED = new Set(["reception", "appointment_coordinator", "nurse", "doctor", "branch_coordinator"]);
+
+/**
+ * 25.1 (design 42 §1) — roles that reach a SET of branches at once. The clinics manager supervises all six
+ * clinics, so their branch control FILTERS (clearing it restores all six) where a coordinator's SWITCHES.
+ * Mirrors `BranchScopeModes.BranchSetScopedRoles`; the server is authoritative either way — this set only
+ * decides how the control behaves, never what the caller may reach.
+ */
+const BRANCH_SET_SCOPED = new Set(["clinics_manager"]);
 
 interface BranchContextValue {
   memberScoped: boolean;
+  /**
+   * 25.1 — true for a set-scoped caller (clinics manager). The control filters instead of switching, and a
+   * null `activeBranchId` means "all branches in reach", not "unresolved".
+   */
+  setScoped: boolean;
   branches: BranchOption[];
   activeBranchId: string | null;
   switchBranch: (id: string) => void;
@@ -35,7 +54,8 @@ function authHeaders(json = false): Record<string, string> {
  * gateway). Member-scoped roles are never branch-restricted here — the switcher is a convenience only.
  */
 export function useBranchContext(role: string | undefined): BranchContextValue {
-  const memberScoped = !role || !BRANCH_SCOPED.has(role);
+  const setScoped = !!role && BRANCH_SET_SCOPED.has(role);
+  const memberScoped = !role || !(BRANCH_SCOPED.has(role) || setScoped);
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
   const [confirmedBranchId, setConfirmedBranchId] = useState<string | null>(null);
@@ -59,7 +79,10 @@ export function useBranchContext(role: string | undefined): BranchContextValue {
           id, name: names.get(id) ?? id.slice(0, 8), isHome: id === home,
         }));
         setBranches(opts);
-        const initial = home ?? opts[0]?.id ?? null;
+        // 25.1 — a SET-scoped caller starts with NO filter, so their first request carries no
+        // X-Active-Branch and the server answers for all six clinics. Defaulting them to Home would open a
+        // supervisory worklist showing one sixth of its rows, with nothing on screen to say so.
+        const initial = setScoped ? null : (home ?? opts[0]?.id ?? null);
         setActiveBranchId(initial);
         setConfirmedBranchId(initial);
         // Publish to the API layer so every subsequent request carries X-Active-Branch.
@@ -71,7 +94,7 @@ export function useBranchContext(role: string | undefined): BranchContextValue {
     return () => {
       live = false;
     };
-  }, [memberScoped, role]);
+  }, [memberScoped, setScoped, role]);
 
   const switchBranch = useCallback((id: string) => {
     setActiveBranchId(id);
@@ -104,5 +127,5 @@ export function useBranchContext(role: string | undefined): BranchContextValue {
     })();
   }, [confirmedBranchId]);
 
-  return { memberScoped, branches, activeBranchId, switchBranch, confirmedBranchId };
+  return { memberScoped, setScoped, branches, activeBranchId, switchBranch, confirmedBranchId };
 }

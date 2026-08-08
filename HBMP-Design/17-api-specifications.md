@@ -409,6 +409,77 @@ paths:
       summary: Get order
       security: [ { oauth2: [ orders.write ] } ]
       responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/InvestigationOrder' } } } } }
+  # ---- 30.1-30.6 amendment and cancellation (design 46) ------------------------------------------------
+  # Amendment is at LINE level, because the amendable scope is whatever has not been consumed. The two
+  # order-level /cancel routes are rewritten onto this path — same routes, scopes and ABAC gates.
+  /investigation-orders/amendment-reasons:
+    get:
+      summary: The coded amendment/cancellation vocabulary, bilingual, for the reason picker
+      security: [ { oauth2: [ orders.read ] } ]
+      responses: { '200': { description: OK } }
+  /investigation-orders/{orderId}/lines/{lineId}/cancel:
+    post:
+      summary: Withdraw ONE line (guarded, idempotent)
+      description: >
+        ONE atomic statement guarded on status + xmin. 409 names WHAT happened, WHEN and BY WHOM — a bare
+        conflict gets retried, and a retry after a dispense is how a cancelled-then-dispensed drug happens.
+        The coded reason is mandatory; free text is additional.
+      security: [ { oauth2: [ orders.write ] } ]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '200': { description: Withdrawn }
+        '409': { description: Not amendable — already delivered, withdrawn, amended, or the order expired }
+        '422': { description: Unknown reason code, or the Idempotency-Key was reused for a different request }
+  /investigation-orders/{orderId}/lines/{lineId}/amend:
+    post:
+      summary: Supersede ONE line with a new version
+      description: >
+        The signed row is never edited. A new version is inserted carrying the consumed accumulator forward,
+        and the original steps aside pointing at it. A new quantity below what was already delivered is
+        refused. The response says whether the change returned the order to pending authorisation.
+      security: [ { oauth2: [ orders.write ] } ]
+      responses:
+        '200': { description: Superseded }
+        '422': { description: Below the delivered quantity, no change, or an unknown reason code }
+  /investigation-orders/{orderId}/cancel-lines:
+    post:
+      summary: Withdraw every still-cancellable line, reporting partial success plainly
+      description: >
+        207 for a genuinely mixed result, naming each line and why it could not be withdrawn. 409 when
+        nothing could be — a 200 with an empty list reads as "done" and the doctor walks away believing an
+        order was withdrawn that is still live.
+      security: [ { oauth2: [ orders.write ] } ]
+      responses:
+        '200': { description: All lines withdrawn }
+        '207': { description: Partial — some lines were already delivered }
+        '409': { description: Nothing was cancellable }
+  /investigation-orders/{orderId}/lines/{lineId}/notes:
+    get:
+      summary: The line's notes, class-projected for the caller
+      security: [ { oauth2: [ orders.read ] } ]
+      responses: { '200': { description: OK } }
+    post:
+      summary: Write a note (append-only, signed, never edited)
+      security: [ { oauth2: [ orders.write ] } ]
+      responses: { '201': { description: Created }, '422': { description: Empty, over 500 characters, or an unknown visibility } }
+  /investigation-orders/notes/{noteId}/cancel:
+    post:
+      summary: Withdraw a note — marks it, never deletes it
+      security: [ { oauth2: [ orders.write ] } ]
+      responses: { '200': { description: Withdrawn, still visible } }
+  /prescriptions/{rxId}/lines/{lineId}/amend-schedule:
+    post:
+      summary: Amend a CHRONIC script's duration and/or frequency
+      description: >
+        Dispensed windows keep their quantities exactly; the remainder is re-allocated and still sums to the
+        new total. The recomputed preview is returned on EVERY outcome including the refusals, because a
+        prescriber deciding whether to convert a script to acute needs the numbers that decision turns on.
+      security: [ { oauth2: [ rx.write ] } ]
+      responses:
+        '200': { description: Amended }
+        '422': { description: Below the dispensed amount, no longer chronic (confirm convertToAcute), or the quantity could not be computed }
+
   /investigation-orders/{id}/consume:
     post:
       summary: Atomically consume an order line (idempotent)
@@ -477,6 +548,14 @@ components:
 ## 8. Prescriptions (incl. dispense)
 
 ```yaml
+components:
+  schemas:
+    # FIVE states, never four. Ok/Warning/Blocked are answers; NotChecked and Unavailable are not, and
+    # neither may ever render as Ok (design 43 §8 invariant 2). Only a benefit rule produces Blocked.
+    CheckState:
+      type: string
+      enum: [ Ok, Warning, Blocked, NotChecked, Unavailable ]
+
 paths:
   /prescriptions:
     post:
@@ -504,7 +583,123 @@ paths:
                       frequency: { type: string }
                       quantityPrescribed: { type: number }
                       refillsAllowed: { type: integer, default: 0 }
-      responses: { '201': { description: Created } }
+                      # 26.4 — duration is what makes a daily-dose ceiling or treatment-length limit
+                      # checkable; clientLineId lets a finding and its acknowledgement name a line before
+                      # the server has minted one (it is never used as a database key).
+                      durationDays: { type: integer, nullable: true }
+                      clientLineId: { type: string, format: uuid }
+                # The encounter's diagnoses, snapshotted onto the prescription. An EMPTY list is meaningful:
+                # the indication check reports "no diagnosis recorded" rather than passing.
+                diagnosisIcdCodes: { type: array, items: { type: string } }
+                # A reason per warning being overridden. The ACKNOWLEDGEMENT gates submission, not the
+                # warning — an unacknowledged warning is 422, an acknowledged one is recorded and allowed.
+                acknowledgements:
+                  type: array
+                  items:
+                    type: object
+                    required: [ clientLineId, findingKind, reason ]
+                    properties:
+                      clientLineId: { type: string, format: uuid }
+                      findingKind: { type: string, enum: [ Indication, Interaction, Allergy, DoseDuration, Benefit ] }
+                      reason: { type: string, maxLength: 300 }
+      responses:
+        '201': { description: Created }
+        '422': { description: 'unacknowledged-warning, or blocked-by-benefit-rule (a benefit refusal cannot be acknowledged away)' }
+
+  # 26.4 — step 1 of the two-step validation (design 43 §5). ADVISORY.
+  #
+  # Read-shaped: persists no draft prescription, only the record of the run, so no Idempotency-Key is
+  # required. Its verdict is DISPLAY STATE ONLY — POST /prescriptions re-evaluates from scratch server-side
+  # and reads nothing this returned. A payload claiming a clean verdict for a drug the engine refuses is
+  # still refused.
+  # 26.2 — the prescribing combobox's data source.
+  /drugs/search:
+    get:
+      summary: Drug typeahead by trade name OR active ingredient
+      description: >
+        One field over both names, because a prescriber searches by whichever they know: "augmentin" and
+        "amoxicillin" must reach the same product. Returns a REAL drug uuid — the modal this replaced sent
+        the ATC code string where the API expects a Guid. Serves the CURRENT market list only, so a
+        prescriber is not offered two entries for one product where only one carries indication data.
+      security: [ { oauth2: [ masterdata.read ] } ]
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 2 } }
+        - { name: pageSize, in: query, schema: { type: integer, maximum: 50, default: 20 } }
+      responses:
+        '200': { description: 'Ranked hits — trade-name prefix > Arabic-name prefix > ingredient prefix > contains' }
+        '400': { description: 'q shorter than 2 characters' }
+
+  # 26.6 — resolve a beneficiary from the identifiers a counter can read.
+  #
+  # This endpoint DID NOT EXIST and was already being called: pharmacy-service has requested it since phase
+  # 6, the call 404'd, and the client swallowed it so those search arms silently returned nothing.
+  /beneficiaries/resolve:
+    get:
+      summary: Resolve a beneficiary from two or more identifiers
+      description: >
+        AT LEAST TWO identifiers are required. A card number is printed on something that gets shared,
+        photographed and reused — it is a lookup key, never proof of identity (design 43 §7, D5). The
+        response carries identity only, no clinical content, and echoes identifier TYPES never their values.
+      security: [ { oauth2: [ patient.read ] } ]
+      parameters:
+        - { name: cardNumber, in: query, schema: { type: string } }
+        - { name: memberNo, in: query, schema: { type: string } }
+        - { name: passport, in: query, schema: { type: string } }
+        - { name: nationalId, in: query, schema: { type: string } }
+        - { name: unhcrNo, in: query, schema: { type: string } }
+        - { name: dateOfBirth, in: query, schema: { type: string, format: date } }
+      responses:
+        '200': { description: 'Exactly one match' }
+        '404': { description: 'No match, or more than one — ambiguity is not a match' }
+        '422': { description: 'two-identifiers-required' }
+
+  /prescriptions/validate:
+    post:
+      summary: Validate a composed prescription (advisory, step 1)
+      security: [ { oauth2: [ rx.write ] } ]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ beneficiaryId, encounterId, lines ]
+              properties:
+                beneficiaryId: { type: string, format: uuid }
+                encounterId: { type: string, format: uuid }
+                diagnosisIcdCodes: { type: array, items: { type: string } }
+                lines: { type: array, items: { type: object } }
+      responses:
+        '200':
+          description: Findings per line
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  validationId: { type: string, format: uuid }
+                  engineVersion: { type: string }
+                  overallState: { $ref: '#/components/schemas/CheckState' }
+                  findings:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        lineId: { type: string, format: uuid }
+                        kind: { type: string, enum: [ Indication, Interaction, Allergy, DoseDuration, Benefit ] }
+                        state: { $ref: '#/components/schemas/CheckState' }
+                        messageEn: { type: string }
+                        messageAr: { type: string }
+                        # Provenance is mandatory on any finding that had a source: a warning a clinician
+                        # cannot attribute is one they are right to ignore (design 43 §1 rule 2).
+                        sourceName: { type: string, nullable: true }
+                        sourceVersion: { type: string, nullable: true }
+                        checkedAt: { type: string, format: date-time, nullable: true }
+                        caveat: { type: string, nullable: true }
+                        requiresAcknowledgement: { type: boolean }
+                        isBlocking: { type: boolean }
+                  # Per-line worst state. Unavailable outranks Warning, so a line with an unchecked source
+                  # never summarises as merely "has warnings".
+                  lineStates: { type: object, additionalProperties: { $ref: '#/components/schemas/CheckState' } }
   /prescriptions/{id}/submit:
     post:
       summary: Submit for approval
@@ -568,7 +763,73 @@ paths:
       summary: List authorizations (approver queue)
       security: [ { oauth2: [ auth.decide ] } ]
       parameters:
-        - { name: status, in: query, schema: { type: string, enum: [ Draft, Submitted, UnderReview, Approved, PartiallyApproved, Rejected, InfoRequested, Overridden, EmergencyApproved, Expired ] } }
+        - { name: status, in: query, schema: { type: string, enum: [ Draft, Submitted, UnderReview, Approved, PartiallyApproved, Rejected, InfoRequested, Overridden, EmergencyApproved, Expired, Issued ] } }
+        # ADR-0034. DEFAULTS TO Review, and the default is the design: the inbox is a work queue, and a few
+        # hundred dispenses a day landing in it would drown the handful of requests that need a decision.
+        # The fulfilment register is asked for deliberately, on its own screen.
+        - { name: kind, in: query, schema: { type: string, enum: [ Review, Fulfilment, All ], default: Review } }
+      responses: { '200': { description: OK } }
+  /authorizations/{id}/items:
+    get:
+      # What was actually delivered against a fulfilment authorization (ADR-0034). Codes, labels, quantities
+      # and — only where the delivered code differs from the written one — the substituting pharmacist's
+      # reason. No clinical payload: this answers "what was delivered against RX-2026-000410", which is a
+      # benefit question. Empty for a review request, which is the honest answer.
+      summary: What was delivered against this authorization
+      security: [ { oauth2: [ auth.read ] } ]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: OK } }
+  /authorizations/substitution-requests:
+    post:
+      # A lab / imaging technician asking whether another examination may stand in for the one ordered. A
+      # REQUEST, not a choice: master data records no equivalence between examinations, so a picker would
+      # have to be derived from the category — which would put "any radiology procedure" behind a button.
+      # The reason is mandatory and is the entire substance of the decision; the proposal is optional,
+      # because naming a replacement test is a clinical choice a technician is not authorised to make.
+      summary: Ask whether another examination may stand in
+      security: [ { oauth2: [ auth.request-substitution ] } ]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ orderId, orderLineId, beneficiaryId, reason ]
+              properties:
+                orderId: { type: string, format: uuid }
+                orderLineId: { type: string, format: uuid }
+                orderReference: { type: string }
+                beneficiaryId: { type: string, format: uuid }
+                orderedCode: { type: string }
+                orderedLabel: { type: string }
+                proposedCode: { type: string }
+                reason: { type: string, minLength: 10 }
+      responses:
+        '201': { description: Raised as a Submitted review request }
+        '409': { description: A request for this line is already with the approval team }
+        '422': { description: Reason missing or too short }
+  /investigation-orders/{orderId}/pricing:
+    get:
+      # What an investigation order costs and how it splits (ADR-0034) — the exact counterpart of
+      # /prescriptions/{id}/pricing. The split comes from eligibility through libs/benefit-pricing, the same
+      # path claims adjudicates with, so the figure a member is quoted and the figure their claim is charged
+      # cannot diverge. `determinate: false` means the amounts are UNKNOWN and NULL — never zero, because a
+      # zero at a counter reads as "free".
+      summary: What this order costs, and the member/payer split
+      security: [ { oauth2: [ orders.read ] } ]
+      parameters:
+        - { name: orderId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: OK } }
+  /examination-types/prices/by-codes:
+    post:
+      # A POST-shaped READ: a list of codes is too long and too structured for a query string, and HTTP has
+      # no verb for "read with a body". Keyed on CODE rather than examination-type id because an order line
+      # always carries a code and only carries an id if it was written after phase 14.6. An unpriced
+      # examination returns NULL, never 0.
+      summary: List prices for a set of examinations
+      security: [ { oauth2: [ masterdata.read ] } ]
       responses: { '200': { description: OK } }
   /authorizations/{id}/decision:
     post:

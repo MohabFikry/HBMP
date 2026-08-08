@@ -7,11 +7,11 @@ It contains four things that work together:
 
 | Layer | What it is | Where |
 |-------|-----------|-------|
-| **Design docs** | 37 deliverables + foundations — the single source of truth (vision → architecture → data → security → delivery → claims → branch scoping & clinical sensitivity) | `00-README-INDEX.md`, `0A`, `0B`, `0C`, `01`–`37` |
+| **Design docs** | 43 deliverables + foundations — the single source of truth (vision → architecture → data → security → delivery → claims → branch scoping & clinical sensitivity → prescribing decision support & the approval engine) | `00-README-INDEX.md`, `0A`, `0B`, `0C`, `01`–`43` |
 | **Prototypes** | Two working, clickable HTML UIs demonstrating the enterprise experience | `prototype-hbmp-multiscreen.html`, `prototype-approvals-worklist.html` |
 | **Build prompts** | Phased Claude Code prompts that build the whole production app | `claude-code-prompts/` |
 | **Domain skills** | 20 Mersal-specific Claude Code skills encoding the business rules | `claude-code-skills/` |
-| **Reference data** | ICD-10, CPT, ATC-classified drugs (seed the master-data service) | `../Master Lists/`, `../Raw Files/` |
+| **Reference data** | ICD-10, CPT, ATC-classified drugs, and the Egyptian drug list with per-drug indications (seed the master-data service) | `../Master Lists/`, `../Raw Files/` |
 
 > **Status:** design DRAFT v0.9, reviewed & internally consistent. **Do not begin implementation** until the design set is approved by Mersal stakeholders (Medical, Operations, Security/DPO, Finance, IT). The prompts assume that gate has passed.
 

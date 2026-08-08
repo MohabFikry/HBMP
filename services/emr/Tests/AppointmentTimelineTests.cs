@@ -27,7 +27,8 @@ public class AppointmentTimelineTests
             new HistoryProjection("Completed", T(40), "doctor-c", "reception-a"),
         });
 
-        steps.Select(s => s.Status).Should().Equal("Booked", "CheckedIn", "Completed");
+        // Newest first — the timeline answers "what just happened to this?" before "how did it start?".
+        steps.Select(s => s.Status).Should().Equal("Completed", "CheckedIn", "Booked");
     }
 
     [Fact]
@@ -48,8 +49,9 @@ public class AppointmentTimelineTests
             new HistoryProjection("Booked", T(0), null, "reception-a"),
             new HistoryProjection("CheckedIn", T(10), "reception-b", "reception-a"),
         });
-        // Not the booker: the point of the timeline is who did each step.
-        steps[1].By.Should().Be("reception-b");
+        // Not the booker: the point of the timeline is who did each step. Index 0 is the LATEST step now
+        // that the list reads newest-first.
+        steps[0].By.Should().Be("reception-b");
     }
 
     [Fact]
@@ -62,7 +64,7 @@ public class AppointmentTimelineTests
             new HistoryProjection("Booked", T(0), null, "reception-a"),
             new HistoryProjection("NoShow", T(30), null, "reception-a"),
         });
-        steps[1].By.Should().BeNull();
+        steps[0].By.Should().BeNull();   // index 0 is the latest step (newest-first)
     }
 
     [Fact]
@@ -74,7 +76,7 @@ public class AppointmentTimelineTests
             new HistoryProjection("CheckedIn", T(10), "b", "a"),
             new HistoryProjection("Completed", T(40), "c", "a"),
         });
-        steps.Select(s => s.At).Should().BeInAscendingOrder().And.Equal(T(0), T(10), T(40));
+        steps.Select(s => s.At).Should().BeInDescendingOrder().And.Equal(T(40), T(10), T(0));
     }
 
     [Fact]
@@ -107,6 +109,52 @@ public class AppointmentTimelineTests
             new HistoryProjection("NoShow", T(30), "b", "a"),
             new HistoryProjection("Booked", T(60), "c", "a"),
         });
-        steps.Select(s => s.Status).Should().Equal("Booked", "NoShow", "Booked");
+        steps.Select(s => s.Status).Should().Equal("Booked", "NoShow", "Booked");   // symmetric under reversal
+    }
+
+    [Fact]
+    public void A_move_to_a_different_doctor_is_its_own_step()
+    {
+        // "Same time, different doctor" is something a `Rescheduled` step does not say, and it is exactly what
+        // the desk has to tell the patient when they ring. Until the edit dialog could change a practitioner
+        // this could not happen — the picker filtered to the appointment's own doctor — so nothing recorded it.
+        var steps = AppointmentTimeline.Collapse(new[]
+        {
+            new AppointmentTimeline.HistoryProjection("Booked", T(0), null, "reception-a", "09:00", null, "dr-1"),
+            new AppointmentTimeline.HistoryProjection("Booked", T(5), "reception-a", "reception-a", "09:00", null, "dr-2"),
+        });
+
+        steps.Should().HaveCount(2);
+        steps[0].Status.Should().Be(AppointmentTimeline.DoctorChanged);
+        steps[0].By.Should().Be("reception-a");
+    }
+
+    [Fact]
+    public void A_move_that_changes_both_the_time_and_the_doctor_reports_the_RESCHEDULE()
+    {
+        // One step per act. The desk opening a timeline after a move asks "when is this now?" first, so the
+        // time change is the headline; emitting both would put two rows against one edit and make the history
+        // longer than the thing it describes.
+        var steps = AppointmentTimeline.Collapse(new[]
+        {
+            new AppointmentTimeline.HistoryProjection("Booked", T(0), null, "reception-a", "09:00", null, "dr-1"),
+            new AppointmentTimeline.HistoryProjection("Booked", T(5), "reception-a", "reception-a", "11:00", null, "dr-2"),
+        });
+
+        steps.Should().HaveCount(2);
+        steps[0].Status.Should().Be(AppointmentTimeline.Rescheduled);
+    }
+
+    [Fact]
+    public void An_unchanged_doctor_adds_nothing()
+    {
+        // The history trigger fires on every update, including ones the timeline says nothing about.
+        var steps = AppointmentTimeline.Collapse(new[]
+        {
+            new AppointmentTimeline.HistoryProjection("Booked", T(0), null, "reception-a", "09:00", null, "dr-1"),
+            new AppointmentTimeline.HistoryProjection("Booked", T(5), "reception-a", "reception-a", "09:00", null, "dr-1"),
+        });
+
+        steps.Should().HaveCount(1);
     }
 }

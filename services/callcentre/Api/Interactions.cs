@@ -39,16 +39,23 @@ public static class Interactions
                 CreatedAt = now,
                 UpdatedAt = now,
             };
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             deps.Db.Interactions.Add(i);
             await deps.Db.SaveChangesAsync(ct);
             await deps.Outbox.EnqueueAsync("CallInteractionOpened", "callcentre.events",
                 new { interactionId = i.InteractionId, i.CallRef, tenantId = i.TenantId, direction = i.Direction.ToString() }, ct);
+            await tx.CommitAsync(ct);
             await deps.AuditAsync("call_interaction", i.InteractionId.ToString(), AuditAction.Create,
                 "CallInteractionOpened", i.CallRef, after: i.Status.ToString());
             return Results.Created($"/api/v1/call-interactions/{i.InteractionId}", InteractionView.From(i, false));
         }).RequireAuthorization(HbmpPolicies.Scope("callcentre:interaction"));
 
-        // --- Record a caller-verification attempt (pass or fail) --------------------------------------------
+        // --- Record the agent's caller-identity attestation --------------------------------------------------
+        //
+        // Identity is confirmed ON THE PHONE. This endpoint records that the agent did so, and BINDS the call to
+        // the member — which is the part that still carries weight: it is what stops a call disclosing a member
+        // it was never opened against, and what ties every subsequent PHI read to a specific call in the audit
+        // trail. There is no threshold to meet and nothing to fail, so there is no 422 and no lockout.
         v1.MapPost("/{id:guid}/verification", async (Guid id, RecordVerificationRequest req, CallDeps deps, CancellationToken ct) =>
         {
             var denied = await deps.Gate.CheckAsync(CallCentrePolicies.Verify, "record-verification", ct);
@@ -58,66 +65,61 @@ public static class Interactions
             var i = await deps.Db.Interactions.FirstOrDefaultAsync(x => x.InteractionId == id, ct);
             if (i is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             if (i.Status != InteractionStatus.Open)
-                return Conflict("This interaction is closed; open a new call to verify.");
+                return Conflict("This interaction is closed; open a new call to work on a member.");
 
-            var types = VerificationPolicy.Normalise(req.VerifiedIdentifierTypes);
             var now = deps.Clock.GetUtcNow();
-
-            // A Pass demands at least the minimum DISTINCT known identifier types; otherwise it's rejected (422) but
-            // NOT recorded as a spurious Pass — the agent must challenge on more identifiers.
-            if (req.Result == VerificationResult.Passed && !VerificationPolicy.MeetsThreshold(types))
-                return Unprocessable("insufficient-identifiers",
-                    $"A pass requires at least {VerificationPolicy.MinIdentifierTypes} confirmed identifier types; got {types.Count}.");
-
-            var effectiveResult = req.Result;
             var v = new CallerVerification
             {
                 VerificationId = Guid.NewGuid(),
                 InteractionId = id,
                 BeneficiaryId = req.BeneficiaryId,
                 TenantId = deps.Tenant ?? "unknown",
-                VerifiedIdentifierTypes = types.ToList(),
-                Result = effectiveResult,
-                FailureReason = effectiveResult == VerificationResult.Failed
-                    ? (string.IsNullOrWhiteSpace(req.FailureReason) ? "unconfirmed" : req.FailureReason[..Math.Min(64, req.FailureReason.Length)])
-                    : null,
+                // Empty ON PURPOSE. The agent confirmed identity verbally and does not report which identifiers
+                // they asked for; writing a plausible set here would be inventing evidence.
+                VerifiedIdentifierTypes = [],
+                Result = VerificationResult.Passed,
+                Method = VerificationMethod.OffSystem,
                 VerifiedAt = now,
                 VerifiedBy = deps.Subject,
             };
             deps.Db.Verifications.Add(v);
 
-            // A Pass binds the interaction to this beneficiary — the anchor the verification gate consults.
-            if (effectiveResult == VerificationResult.Passed)
-            {
-                i.BeneficiaryId = req.BeneficiaryId;
-                i.UpdatedAt = now;
-            }
+            i.BeneficiaryId = req.BeneficiaryId;
+            i.UpdatedAt = now;
+
+            // The binding and the event recording it commit together.
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             await deps.Db.SaveChangesAsync(ct);
 
             await deps.Outbox.EnqueueAsync("CallerVerificationRecorded", "callcentre.events",
-                new { interactionId = id, i.CallRef, beneficiaryId = req.BeneficiaryId, result = effectiveResult.ToString(), typeCount = types.Count }, ct);
-            // Both passes and failures are audited. A failure is a Notice (a disclosure was withheld / attempted).
+                new { interactionId = id, i.CallRef, beneficiaryId = req.BeneficiaryId, result = "Passed", method = "OffSystem" }, ct);
+            await tx.CommitAsync(ct);
             await deps.AuditAsync("caller_verification", v.VerificationId.ToString(), AuditAction.Decision,
-                effectiveResult == VerificationResult.Passed ? "CallerVerificationPassed" : "CallerVerificationFailed",
-                i.CallRef,
-                severity: effectiveResult == VerificationResult.Passed ? AuditSeverity.Notice : AuditSeverity.Warning,
-                after: $"types:{types.Count}",
-                fieldClasses: ["identity"]);
+                "CallerIdentityAttested", i.CallRef, severity: AuditSeverity.Notice,
+                after: "method:OffSystem", fieldClasses: ["identity"]);
             return Results.Ok(VerificationView.From(v));
         }).RequireAuthorization(HbmpPolicies.Scope("callcentre:verify"));
 
-        // --- Update the call log (reason/outcome/notes) -----------------------------------------------------
+        // --- Update the call log (reason/outcome/summary) ---------------------------------------------------
         v1.MapPatch("/{id:guid}", async (Guid id, UpdateInteractionRequest req, CallDeps deps, CancellationToken ct) =>
         {
             var denied = await deps.Gate.CheckAsync(CallCentrePolicies.Interaction, "update-interaction", ct);
             if (denied is not null) return denied;
             var i = await deps.Db.Interactions.FirstOrDefaultAsync(x => x.InteractionId == id, ct);
             if (i is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            if (NotOwner(deps, i) is { } notMine) return notMine;
             if (i.Status != InteractionStatus.Open) return Conflict("This interaction is already closed.");
 
             if (req.ReasonCode is not null) i.ReasonCode = req.ReasonCode;
             if (req.Outcome is not null) i.Outcome = req.Outcome;
-            if (req.Notes is not null) i.Notes = req.Notes;
+            if (req.Summary is not null)
+            {
+                var draft = req.Summary.Trim();
+                if (draft.Length > CallSummaryRules.MaxLength)
+                    return Unprocessable("summary-too-long",
+                        $"A call summary is capped at {CallSummaryRules.MaxLength} characters; got {draft.Length}.");
+                i.Summary = draft;
+            }
             i.UpdatedAt = deps.Clock.GetUtcNow();
             try { await deps.Db.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Conflict("This interaction was updated by someone else."); }
@@ -133,13 +135,20 @@ public static class Interactions
             if (denied is not null) return denied;
             var i = await deps.Db.Interactions.FirstOrDefaultAsync(x => x.InteractionId == id, ct);
             if (i is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            if (NotOwner(deps, i) is { } notMine) return notMine;
             if (i.Status == InteractionStatus.Closed) return Results.Ok(InteractionView.From(i, false));
 
             var now = deps.Clock.GetUtcNow();
             if (req?.ReasonCode is not null) i.ReasonCode = req.ReasonCode;
             if (req?.Outcome is not null) i.Outcome = req.Outcome;
-            if (req?.Notes is not null) i.Notes = req.Notes;
-            if (req?.Summary is not null) i.Summary = req.Summary.Trim();
+            if (req?.Summary is not null)
+            {
+                var draft = req.Summary.Trim();
+                if (draft.Length > CallSummaryRules.MaxLength)
+                    return Unprocessable("summary-too-long",
+                        $"A call summary is capped at {CallSummaryRules.MaxLength} characters; got {draft.Length}.");
+                i.Summary = draft;
+            }
 
             // Phase 20.3b — a summary is REQUIRED at close unless the call was abandoned. Other roles read this
             // field through the patient profile; a call that closed "Resolved" with nothing recorded leaves a
@@ -150,9 +159,11 @@ public static class Interactions
             i.Status = InteractionStatus.Closed;
             i.EndedAt = now;
             i.UpdatedAt = now;
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             await deps.Db.SaveChangesAsync(ct);
             await deps.Outbox.EnqueueAsync("CallInteractionClosed", "callcentre.events",
                 new { interactionId = id, i.CallRef, outcome = i.Outcome?.ToString() }, ct);
+            await tx.CommitAsync(ct);
             await deps.AuditAsync("call_interaction", id.ToString(), AuditAction.StateChange, "CallInteractionClosed",
                 i.CallRef, after: i.Outcome?.ToString());
             // Once closed the verification gate returns false → member detail is no longer disclosable on this call.
@@ -169,6 +180,8 @@ public static class Interactions
 
             var i = await deps.Db.Interactions.FirstOrDefaultAsync(x => x.InteractionId == id, ct);
             if (i is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+            if (NotOwner(deps, i) is { } notMine) return notMine;
 
             var next = req.Summary?.Trim();
             if (string.IsNullOrWhiteSpace(next))
@@ -222,18 +235,45 @@ public static class Interactions
             if (beneficiaryId is { } b) q = q.Where(x => x.BeneficiaryId == b);
             if (from is { } f) q = q.Where(x => x.StartedAt >= f);
             if (to is { } t) q = q.Where(x => x.StartedAt <= t);
+            // Cursor over the COMPOSITE (StartedAt, InteractionId), because StartedAt is not unique: two calls
+            // opened in the same tick made `StartedAt < cursor.StartedAt` skip every one of them but the first,
+            // silently dropping calls out of the middle of a supervisor's page. The tie-break has to be part of
+            // both the ordering and the predicate or the two disagree about what "after" means.
             if (Guid.TryParse(cursor, out var after))
             {
                 var afterRow = await deps.Db.Interactions.AsNoTracking().FirstOrDefaultAsync(x => x.InteractionId == after, ct);
-                if (afterRow is not null) q = q.Where(x => x.StartedAt < afterRow.StartedAt);
+                if (afterRow is not null)
+                    q = q.Where(x => x.StartedAt < afterRow.StartedAt
+                                     || (x.StartedAt == afterRow.StartedAt && x.InteractionId.CompareTo(afterRow.InteractionId) > 0));
             }
 
-            var rows = await q.OrderByDescending(x => x.StartedAt).Take(take + 1).ToListAsync(ct);
+            var rows = await q.OrderByDescending(x => x.StartedAt).ThenBy(x => x.InteractionId).Take(take + 1).ToListAsync(ct);
             var page = rows.Take(take).ToList();
             var next = rows.Count > take ? page[^1].InteractionId.ToString() : null;
             return Results.Ok(new InteractionListResponse(
                 page.Select(x => InteractionView.From(x, false)).ToList(), next));
         }).RequireAuthorization(HbmpPolicies.Scope("callcentre:interaction"));
+    }
+
+    /// <summary>Whether this principal may WRITE to this interaction: the agent who took the call, or a
+    /// supervisor/manager. Returns a ready 403 when not, else null.
+    ///
+    /// <para>The policy layer cannot answer this — <c>CallCentrePolicies</c> is role + tenant only, by design
+    /// (the Call Centre is MemberScoped, so there is no branch or per-record ABAC in the engine). The GET list
+    /// below has always narrowed a non-supervisor to their own calls; the write paths did not, so any
+    /// <c>call_center</c> holder could patch, close, or rewrite the summary on any colleague's call in the
+    /// tenant. The summary is the field other roles read, which made that the most consequential of the three.
+    /// The rule the policy doc already stated ("the agent's own calls") is now enforced where it is decided.</para></summary>
+    private static IResult? NotOwner(CallDeps deps, CallInteraction i)
+    {
+        var p = deps.Me.Principal;
+        if (p is null) return GateResults.Unauthenticated();
+        if (p.IsInRole("call_center_supervisor") || p.IsInRole("manager")) return null;
+        if (Guid.TryParse(deps.Subject, out var self) && i.AgentUserId == self) return null;
+
+        return GateResults.Forbidden("urn:hbmp:callcentre-not-your-call",
+            detail: "This call was taken by another agent. Only that agent or a supervisor may change its record.",
+            reason: "not-call-owner");
     }
 
     private static IResult Unprocessable(string title, string detail) =>

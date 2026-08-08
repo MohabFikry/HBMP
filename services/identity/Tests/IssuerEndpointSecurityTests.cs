@@ -86,15 +86,19 @@ public class IssuerEndpointSecurityTests : IClassFixture<IssuerEndpointSecurityT
     }
 
     [Fact]
-    public void Only_the_liveness_probe_is_anonymous()
+    public void Only_the_health_probes_are_anonymous()
     {
         // The OIDC endpoints are NOT in this list: they are anonymous by protocol (that is how a caller gets a
         // token at all), but OpenIddict owns their authorization, not [AllowAnonymous].
+        //
+        // Both probes are anonymous because kubelet carries no bearer token: a gated liveness probe cannot
+        // report a dead service, and a gated readiness probe never reports Ready, so the rollout hangs. They
+        // are the ONLY additions this list should ever grow by without a security review.
         var anonymous = _host.Endpoints()
             .Where(e => e.Metadata.GetMetadata<IAllowAnonymous>() is not null)
             .Select(Path).Distinct().ToList();
 
-        anonymous.Should().BeEquivalentTo(["/health/live"]);
+        anonymous.Should().BeEquivalentTo(["/health/live", "/health/ready"]);
     }
 
     // ---- S4: CSRF ----------------------------------------------------------------------------------------

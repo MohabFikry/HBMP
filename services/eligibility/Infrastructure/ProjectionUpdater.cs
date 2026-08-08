@@ -89,6 +89,24 @@ public sealed class ProjectionUpdater(EligibilityDbContext db, IEligibilityCache
             c.EffectiveFrom = DateOnly.Parse(ef.GetString()!, System.Globalization.CultureInfo.InvariantCulture);
         if (p.TryGetProperty("effectiveTo", out var et) && et.ValueKind == JsonValueKind.String)
             c.EffectiveTo = DateOnly.Parse(et.GetString()!, System.Globalization.CultureInfo.InvariantCulture);
+        // 19.2 waiting period. Explicit null CLEARS it — a plan amendment that removes the waiting period
+        // must be able to make the member payable, and "absent means leave it alone" would strand the old
+        // boundary forever. An absent property still means "unchanged", so a publisher that predates this
+        // field cannot wipe a boundary it does not know about.
+        if (p.TryGetProperty("waitingPeriodEndsOn", out var wp))
+            c.WaitingPeriodEndsOn = wp.ValueKind == JsonValueKind.String
+                ? DateOnly.Parse(wp.GetString()!, System.Globalization.CultureInfo.InvariantCulture)
+                : null;
+        // 19.2b. Same absent-vs-null discipline as the waiting period above: an ABSENT property means
+        // "unchanged", so a publisher predating this field cannot wipe a version it does not know about,
+        // while an explicit null CLEARS it — a coverage moved off a versioned plan must stop being priced
+        // against the old one.
+        if (p.TryGetProperty("planVersionId", out var pv))
+            c.PlanVersionId = pv.ValueKind == JsonValueKind.String ? pv.GetGuid() : null;
+        // The PLAN, same absent-vs-null discipline again. It is what lets the quote resolve the version in
+        // force on the service date rather than the one the member happened to enrol under.
+        if (p.TryGetProperty("planId", out var pid))
+            c.PlanId = pid.ValueKind == JsonValueKind.String ? pid.GetGuid() : null;
         if (p.TryGetProperty("limits", out var limits) && limits.ValueKind == JsonValueKind.Array)
             c.LimitsJson = limits.GetRawText();
         c.UpdatedAt = clock.GetUtcNow();

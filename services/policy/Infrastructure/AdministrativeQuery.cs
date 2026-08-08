@@ -362,4 +362,58 @@ public sealed class AdministrativeQuery(PolicyDbContext db)
             .Select(e => db.Policies.Where(p => p.PolicyId == e.PolicyId).Select(p => p.PayerId).FirstOrDefault())
             .Distinct()
             .ToListAsync(ct);
+
+    // ---- The covered household ---------------------------------------------------------------------------
+
+    /// <summary>One enrolment's place in the graph, enough to root its household without loading the row.</summary>
+    public async Task<(bool Exists, Guid BeneficiaryId, Guid Root, Guid? PayerId)> EnrollmentHouseholdRootAsync(
+        Guid enrollmentId, CancellationToken ct = default)
+    {
+        var row = await db.Enrollments.AsNoTracking()
+            .Where(e => e.EnrollmentId == enrollmentId && !e.IsDeleted)
+            .Select(e => new
+            {
+                e.EnrollmentId,
+                e.BeneficiaryId,
+                e.PrincipalEnrollmentId,
+                PayerId = db.Policies.Where(p => p.PolicyId == e.PolicyId).Select(p => p.PayerId).FirstOrDefault(),
+            })
+            .FirstOrDefaultAsync(ct);
+
+        return row is null
+            ? (false, Guid.Empty, Guid.Empty, null)
+            : (true, row.BeneficiaryId, Household.RootOf(row.EnrollmentId, row.PrincipalEnrollmentId), row.PayerId);
+    }
+
+    /// <summary>
+    /// Everyone enrolled under the given household roots — the principals themselves and every dependant
+    /// pointing at them.
+    ///
+    /// <para>The ROOTS are the argument rather than "the enrolments I already have", which is what makes this
+    /// symmetric from any member of the family; see <see cref="Household"/>. The caller decides whether to
+    /// subtract the person who asked.</para>
+    ///
+    /// <para>A terminated dependant stays in the result. "Who else is on this cover" is asked to understand a
+    /// family's history as often as its present, and a child whose cover ended last month is the answer to why
+    /// their claim was rejected — the status rides along so the reader can tell.</para>
+    /// </summary>
+    public async Task<IReadOnlyList<Enrollment>> HouseholdAsync(
+        IReadOnlyCollection<Guid> roots, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(roots);
+        if (roots.Count == 0) return [];
+
+        var ids = roots.ToList();
+        var members = await db.Enrollments.AsNoTracking()
+            .Where(e => !e.IsDeleted
+                        && (ids.Contains(e.EnrollmentId)
+                            || (e.PrincipalEnrollmentId != null && ids.Contains(e.PrincipalEnrollmentId.Value))))
+            .ToListAsync(ct);
+
+        // Ordered in memory: a household is a handful of rows, and the order is a display rule
+        // (Household.SortKey) rather than something to re-express as SQL that could drift from it.
+        return [.. members
+            .OrderBy(e => Household.SortKey(e.PrincipalEnrollmentId is null, e.Relationship))
+            .ThenBy(e => e.MemberNo, StringComparer.Ordinal)];
+    }
 }

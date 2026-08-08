@@ -28,19 +28,33 @@ export type Permission =
   | "referrals.write"
   | "results.inbox"
   | "vitals.write"
-  // Lab / imaging
+  // 25.7 — Branch Management (design 42 §6). BOTH branch roles hold ALL of these: one permission set, two
+  // reaches. The manager's extra affordance (comparing the six clinics) is derived from REACH, not from an
+  // extra permission — see the catalog's `reachScoped` flag.
+  | "branch.practitioners"
+  | "branch.roster"
+  | "branch.licences"
+  | "branch.inventory"
+  // Lab / radiology
   | "lab.queue"
   | "lab.consume"
   | "lab.result.upload"
-  | "imaging.queue"
-  | "imaging.consume"
-  | "imaging.result.upload"
+  | "radiology.queue"
+  | "radiology.consume"
+  | "radiology.result.upload"
+  // 29.2b — the EXTERNAL delivering provider (physiotherapy centres, dialysis units, outside clinics).
+  | "procedure.queue"
+  | "procedure.deliver"
+  | "procedure.report"
   // Pharmacy
   | "pharmacy.queue"
   | "pharmacy.dispense"
   | "pharmacy.substitution"
   // Approvals
   | "approvals.worklist"
+  // ADR-0034 — the REGISTER (every authorization, including what counters and benches delivered), as
+  // distinct from the worklist, which is the queue of things waiting for a decision.
+  | "approvals.register"
   | "approvals.decide"
   | "approvals.manual"
   | "approvals.emergency"
@@ -90,6 +104,10 @@ export type Permission =
   | "provider.contracts"
   | "provider.locations"
   | "provider.performance"
+  // 14.5 — the clinical profile behind a user: specialty + the clinics they work at. Its own grant rather
+  // than folding into `provider.locations`, because this administers PEOPLE who can be booked, and it is the
+  // upstream of every specialty/doctor filter on the booking screen.
+  | "provider.practitioners"
   // Network tiers (19.1b). Held by BOTH the Network Team and policy administration — but only the Network
   // Team may write, which is a capability (see `mayAdministerTiers`), not a second permission. Two
   // permissions would have let the two lists drift until a tier had two owners.
@@ -109,6 +127,12 @@ export type Permission =
   | "director.oversight"
   | "director.quality"
   | "director.escalations"
+  // ADR-0035 — clinical governance the supervisor holds. Its own key rather than reusing `admin.masterdata`:
+  // that one means "the platform-admin view of every code system", and this one means "the four clinical
+  // vocabularies, editable". Sharing a key would give whoever holds either the reach of both.
+  | "director.masterlists"
+  // ADR-0035 §5 — author the engine's routing/SLA rules. NOT held by medical_approval.
+  | "director.engine"
   // Cross-cutting — every role has an in-app inbox (self-service, server row-filtered by recipient).
   | "notification.read";
 
@@ -117,7 +141,8 @@ export type Role =
   | "doctor"
   | "nurse"
   | "lab"
-  | "imaging"
+  | "radiology"
+  | "procedure_provider"
   | "pharmacy"
   | "medical_approval"
   | "beneficiary_mgmt"
@@ -130,14 +155,51 @@ export type Role =
   | "policy_admin"
   | "org_admin"
   | "super_admin"
-  | "medical_director";
+  | "medical_director"
+  // 25.7 — the people who run a clinic. Identical permissions; they differ only in how many branches they
+  // reach (ADR-0029).
+  | "branch_coordinator"
+  | "clinics_manager";
 
 /**
  * Role → granted permissions. Derived from 11-permission-matrix §2/§3. Kept deliberately explicit so the
  * min-necessary hard rules are auditable at a glance (no clinical perms in Reception/Finance, etc.).
  */
+/**
+ * 25.7 — the ONE permission list both branch roles hold (design 42 §1). Declared once and referenced twice
+ * below: a coordinator and a clinics manager may do exactly the same things, and differ only in how many
+ * branches those things reach.
+ */
+const BRANCH_ROLE_PERMISSIONS: Permission[] = [
+  // reception's five, verbatim
+  "eligibility.check",
+  "queue.reception",
+  "appointments.read",
+  "appointments.book",
+  "checkin.write",
+  // and the four branch authorities
+  "branch.practitioners",
+  "branch.roster",
+  "branch.licences",
+  "branch.inventory",
+];
+
 export const rolePermissions: Record<Role, Permission[]> = {
   reception: ["eligibility.check", "queue.reception", "appointments.read", "appointments.book", "checkin.write"],
+
+  /*
+   * 25.7 — THE BRANCH ROLES SHARE ONE PERMISSION LIST, LITERALLY.
+   *
+   * Not two lists a test compares: one constant, referenced twice, so the SPA cannot drift even between test
+   * runs. The server-side equality is pinned separately by BranchRoleScopeParityTests and
+   * BranchRoleSeedTests — three independent statements of one invariant, because this is the rule the whole
+   * phase rests on (design 42 §7 rule 1).
+   *
+   * Reception's five, verbatim, plus the four branch authorities. No `emr.read`: they run the clinic, they
+   * do not read clinical notes.
+   */
+  branch_coordinator: BRANCH_ROLE_PERMISSIONS,
+  clinics_manager: BRANCH_ROLE_PERMISSIONS,
   doctor: [
     "emr.read",
     "emr.write",
@@ -150,35 +212,55 @@ export const rolePermissions: Record<Role, Permission[]> = {
   ],
   nurse: ["emr.read", "vitals.write", "results.inbox", "appointments.read"],
   lab: ["lab.queue", "lab.consume", "lab.result.upload"],
-  imaging: ["imaging.queue", "imaging.consume", "imaging.result.upload"],
+  radiology: ["radiology.queue", "radiology.consume", "radiology.result.upload"],
+  // 29.2b (design 45 §2b) — deliberately NARROW. A delivering centre records sessions and reports back; it
+  // holds no result-upload, no prescription and no order-composition permission at all.
+  procedure_provider: ["procedure.queue", "procedure.deliver", "procedure.report"],
   pharmacy: ["pharmacy.queue", "pharmacy.dispense", "pharmacy.substitution"],
-  medical_approval: ["approvals.worklist", "approvals.decide", "approvals.manual", "approvals.emergency", "approvals.sla"],
+  medical_approval: ["approvals.worklist", "approvals.register", "approvals.decide", "approvals.manual", "approvals.emergency", "approvals.sla"],
   // Beneficiary management owns the MEMBERSHIP book: who is enrolled, in which group, on which plan, and
   // what they have used. It does NOT own the benefit product — no payers, no plan versions — because the
   // person enrolling a member must not also be the person who decides what that plan pays for.
   beneficiary_mgmt: [
     "beneficiary.register",
-    "beneficiary.manage",
-    "beneficiary.status",
     // The officer PREPARES approvals (verifies documents, binds coverage); the decision buttons are
     // supervisor-only and the server enforces it (urn:hbmp:approver-required).
     "beneficiary.approvals",
+    // `beneficiary.manage`, `beneficiary.status` and `policy.utilization` were dropped with the sections they
+    // gated (19.7 nav rework). A permission granted to a role with nothing behind it is one nobody can reason
+    // about: it reads as access that exists somewhere.
     "eligibility.check",
     "policy.members",
     "policy.groups",
-    "policy.utilization",
     "policy.bulk",
     "policy.analytics",
   ],
-  // 19.7's approver persona (US-003): reviews what the officer prepared and decides. No register permission
-  // — the person who creates a record must not be the person who activates it, and the split starts here.
+  /*
+   * 19.7's approver persona (US-003) — a SUPERSET of the officer, plus the decision.
+   *
+   * It used to be a strict subset: no register pen, no bulk import, no analytics. The reasoning was
+   * separation of duties — the person who creates a record must not be the person who activates it — but the
+   * implementation was withholding a menu item, and that is the wrong lever twice over.
+   *
+   * It did not enforce the rule. The server's check was `is the caller a supervisor`, never `did the caller
+   * file THIS application`, so nothing stopped a supervisor from registering someone (the permission was
+   * absent from the nav, not from the API) and approving them. The real rule now lives where it belongs:
+   * patient-service refuses a decision on a registration whose `created_by` is the actor
+   * (`urn:hbmp:self-approval`), which is stricter than the old arrangement and true regardless of what any
+   * menu shows.
+   *
+   * And it made the supervisor less useful than the people they supervise. A supervisor who cannot open the
+   * bulk import they are asked about, or the analytics they report from, is a supervisor who borrows an
+   * officer's screen — which is a worse audit trail than giving them their own.
+   */
   beneficiary_mgmt_supervisor: [
+    "beneficiary.register",
     "beneficiary.approvals",
-    "beneficiary.manage",
-    "beneficiary.status",
     "eligibility.check",
     "policy.members",
     "policy.groups",
+    "policy.bulk",
+    "policy.analytics",
   ],
   case_manager: ["case.read", "case.beneficiary360", "case.escalations"],
   // Call Centre — a call workspace + call history. No clinical permission exists here (min-necessary).
@@ -199,6 +281,10 @@ export const rolePermissions: Record<Role, Permission[]> = {
     "provider.contracts",
     "provider.locations",
     "provider.performance",
+    // The Network Team already owns provider onboarding and provider-scoped users; the practitioner record
+    // is the same administration for Mersal's OWN clinicians, and the writes need provider:write — which
+    // org_admin does not hold, so the section belongs here rather than in the admin console.
+    "provider.practitioners",
     "network.tiers",
   ],
   // Policy administration — the benefit product (payers, plans, plan versions) and the policies written
@@ -220,7 +306,7 @@ export const rolePermissions: Record<Role, Permission[]> = {
   // `admin.programs` is super-admin only: enablement is set by Mersal programme administration, and a tenant
   // that can switch on its own programmes is not gated at all (design 40 §4, A4).
   super_admin: ["admin.users", "admin.policies", "admin.masterdata", "admin.tenants", "admin.audit", "admin.config", "admin.access", "admin.programs"],
-  medical_director: ["director.dashboards", "director.oversight", "director.quality", "director.escalations", "approvals.sla"],
+  medical_director: ["director.dashboards", "director.oversight", "director.quality", "director.escalations", "director.masterlists", "director.engine", "approvals.sla"],
 };
 
 /**

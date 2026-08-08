@@ -53,6 +53,39 @@ public class TokenContractByteCompatTests
         "LCJjYWxsY2VudHJlIiwicmVwb3J0aW5nX2V4dHJhY3RzIl19." +
         "c2lnbmF0dXJlLW5vdC12YWxpZGF0ZWQtYnktdGhpcy1maXh0dXJl";
 
+    /// <summary>29.1 — a token as minted for a radiology technician BEFORE the design-45 §1 rename switch:
+    /// <c>roles: ["imaging_tech"]</c>. Never regenerate this either. It is the fixture that proves the rename
+    /// amended the contract rather than breaking it, and it must stay green for the whole dual-accept
+    /// window (docs/runbooks/radiology-rename.md).</summary>
+    private const string PreRadiologySwitchToken =
+        "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImhibXAtc2lnLTEifQ." +
+        "eyJpc3MiOiJodHRwOi8vaWRlbnRpdHktc2VydmljZTo4MDgwIiwiYXVkIjoiaGJtcC1hcGkiLCJleHAiOjE5MDAwMDAwMDAs" +
+        "ImlhdCI6MTg5OTk5OTcwMCwibmJmIjoxODk5OTk5NzAwLCJzdWIiOiJkM2E5MWM0Yi03ZTIwLTRmMTgtOWM2MS04YTRlMmYw" +
+        "YjdkOTMiLCJyb2xlcyI6WyJpbWFnaW5nX3RlY2giXSwic2NvcGUiOiJvcmRlcnM6cmVhZCBvcmRlcnM6Y29uc3VtZSBub3Rp" +
+        "ZmljYXRpb246cmVhZCIsInRlbmFudF9pZCI6Im1lcnNhbC1lZyIsInByb3ZpZGVyX2lkIjoiYjAwMDAwMDAtMDAwMC00MDAw" +
+        "LTgwMDAtMDAwMDAwMDAwMDA2Iiwic2lkIjoiNGYyYzhlMWEtNWQzYi00YzdlLThmMmEtNmIxYzlkMGUzYTc0IiwiYW1yIjpb" +
+        "InB3ZCIsIm90cCJdLCJhY3IiOiJhYWwyIiwibmFtZSI6IlNhbWFyIEZvdWFkIn0." +
+        "c2lnbmF0dXJlLW5vdC12YWxpZGF0ZWQtYnktdGhpcy1maXh0dXJl";
+
+    [Fact]
+    public void A_token_minted_before_the_radiology_switch_still_authorises_a_radiology_tech()
+    {
+        // 29.1 — the amendment, stated as bytes. docs/security/token-contract.md §2 renames imaging_tech to
+        // radiology_tech; ADR-0029 says that AMENDS the frozen contract rather than breaking it, and this is
+        // what that has to mean operationally: the 300 s of tokens already in flight at the switch keep
+        // working, without their scopes or their provider binding shifting.
+        var p = PrincipalFrom(PreRadiologySwitchToken);
+
+        p.IsInRole("radiology_tech").Should().BeTrue("the switched services check the new name");
+        p.IsInRole("imaging_tech").Should().BeTrue("a service not yet redeployed still checks the old one");
+
+        // The rename must move the NAME and nothing else. Authority is unchanged.
+        p.Scopes.Should().BeEquivalentTo("orders:read", "orders:consume", "notification:read");
+        p.ProviderId.Should().Be("b0000000-0000-4000-8000-000000000006");
+        p.TenantId.Should().Be("mersal-eg");
+        p.MfaSatisfied.Should().BeTrue();
+    }
+
     [Fact]
     public void Legacy_token_still_yields_the_same_principal_it_always_did()
     {

@@ -1,4 +1,4 @@
-import { KpiCard, Card, DataTable, SegmentedControl, StatusChip } from "@mersal/design-system";
+import { Card, DataTable, KpiCard, SegmentedControl, StatusChip } from "@mersal/design-system";
 import { useFormat } from "../i18n/useFormat";
 import type { Column } from "@mersal/design-system";
 import type { ClaimRow, ClaimsKpis, Localized, ReconciliationRow } from "@mersal/contracts";
@@ -10,7 +10,7 @@ import { AsyncSection, PageHeader, useLoc } from "./_shared";
 // The Claims portal is minimum-necessary: claim CODES + AMOUNTS + lifecycle status only. Like Finance, there is
 // deliberately no screen, column, or control here that reaches a diagnosis or clinical note (claims ≠ diagnosis).
 const S = {
-  wlTitle: { en: "Claims worklist", ar: "قائمة المطالبات" },
+  wlTitle: { en: "Claims Worklist", ar: "قائمة المطالبات" },
   wlEmpty: { en: "No claims match this filter.", ar: "لا توجد مطالبات مطابقة." },
   claimNo: { en: "Claim", ar: "المطالبة" },
   origin: { en: "Origin", ar: "المصدر" },
@@ -36,7 +36,7 @@ const S = {
   bVariance: { en: "Price variance", ar: "فرق سعر" },
   bBilledNot: { en: "Billed, not delivered", ar: "فوترة بلا تنفيذ" },
 
-  insTitle: { en: "Claims insights", ar: "مؤشرات المطالبات" },
+  insTitle: { en: "Claims Insights", ar: "مؤشرات المطالبات" },
   insEmpty: { en: "No KPI data for this period.", ar: "لا توجد بيانات مؤشرات لهذه الفترة." },
   tat: { en: "Avg TAT (hrs)", ar: "متوسط زمن المعالجة (س)" },
   approval: { en: "Approval rate", ar: "معدل الاعتماد" },
@@ -65,8 +65,8 @@ export function ClaimsWorklist() {
     { key: "claimNo", header: t(S.claimNo), cell: (r) => <span className="tnum">{r.claimNo}</span> },
     { key: "origin", header: t(S.origin), cell: (r) => r.origin },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "claimed", header: t(S.claimed), cell: (r) => <span className="tnum">{fmt.money(r.claimedAmount)}</span> },
-    { key: "net", header: t(S.net), cell: (r) => <span className="tnum">{fmt.money(r.netPayable)}</span> },
+    { key: "claimed", header: t(S.claimed), cell: (r) => fmt.money(r.claimedAmount), numeric: true },
+    { key: "net", header: t(S.net), cell: (r) => fmt.money(r.netPayable), numeric: true },
     { key: "serviceFrom", header: t(S.serviceFrom), cell: (r) => <span className="tnum">{fmt.date(r.serviceDateFrom)}</span> },
     { key: "submitted", header: t(S.submitted), cell: (r) => <span className="tnum">{fmt.date(r.submittedAt)}</span> },
   ];
@@ -107,8 +107,8 @@ export function ClaimsReconciliation() {
     { key: "origin", header: t(S.origin), cell: (r) => r.origin },
     { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.code}</span> },
     { key: "serviceDate", header: t(S.serviceDate), cell: (r) => <span className="tnum">{fmt.date(r.serviceDate)}</span> },
-    { key: "billed", header: t(S.billed), cell: (r) => <span className="tnum">{fmt.money(r.billedAmount)}</span> },
-    { key: "allowed", header: t(S.allowed), cell: (r) => <span className="tnum">{fmt.money(r.allowedAmount)}</span> },
+    { key: "billed", header: t(S.billed), cell: (r) => fmt.money(r.billedAmount), numeric: true },
+    { key: "allowed", header: t(S.allowed), cell: (r) => fmt.money(r.allowedAmount), numeric: true },
     { key: "bucket", header: t(S.bucket), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
   ];
   return (

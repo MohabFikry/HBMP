@@ -36,6 +36,20 @@ builder.Services.AddScoped<NetworkTierGate>();   // 19.1b — Network-Team-only 
 builder.Services.AddScoped<IAdjudicatedClaimProbe, UnwiredAdjudicatedClaimProbe>();
 builder.Services.AddSingleton(TimeProvider.System);
 
+// 25.2 (design 42 §2) — active-branch context. provider-service never needed it before: every write here was
+// network-wide (provider:write) and the branch dimension narrowed nobody. `branch:practitioner:write` changes
+// that — a coordinator's authority is sized to their clinic, so the service now has to KNOW which clinic that
+// is. The permitted set is resolved per request from admin-service and read by BranchReachGuard.
+builder.Services.AddScoped<BranchScopeState>();
+builder.Services.AddScoped<BranchReachGuard>();
+builder.Services.AddHttpClient<IBranchDirectory, HttpBranchDirectory>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Admin:BaseUrl"] ?? "http://admin-service:8080"));
+
+// 25.3 (design 42 §3) — warn 90/60/30 days before a licence lapses and announce it on the day. Nothing
+// happens when a licence expires — no request, no button, the date simply passes — so the only way a lapse
+// becomes visible is if something goes looking. Mirrors orders' ReportAccessExpirySweeper.
+builder.Services.AddHostedService<PractitionerLicenceExpirySweeper>();
+
 // masterdata-backed code validation for CPT/LOINC service-line codes.
 builder.Services.AddHttpClient<ICodeValidator, HttpCodeValidator>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Masterdata:BaseUrl"] ?? "http://masterdata-service:8080"));
@@ -46,6 +60,11 @@ builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("provide
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// Readiness for the probe in infra/helm/rollout/rollout-template.yaml. Process-level only: this reports
+// "through startup and able to serve". A dependency check here would pull the pod out of rotation for a
+// condition the service already surfaces per-request, turning a partial degradation into a total outage.
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 app.UseHbmpTransportSecurity(); // HSTS + HTTPS redirect outside Development (16.5, H8)
@@ -78,7 +97,44 @@ app.UseHbmpRls();
 
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
+// 25.2 — resolve the active-branch context per request (design 37 §3, 42 §1). Mirrors emr's middleware:
+// BranchScoped callers are narrowed to a validated active branch, BranchSetScoped callers carry their whole
+// permitted set with the header acting as a filter, and an X-Active-Branch outside the permitted set is
+// refused 403 + audited. THE INVARIANT: never trust the header — always resolve it against the grants.
+//
+// Member/provider-scoped callers (the Network Team on provider:write) are branch-unrestricted, so this adds
+// no narrowing to any pre-25.2 caller.
+app.Use(async (ctx, next) =>
+{
+    var principal = ctx.RequestServices.GetRequiredService<IHbmpPrincipalAccessor>().Principal;
+    if (principal is not null && ctx.Request.Path.StartsWithSegments("/api/v1"))
+    {
+        var header = ctx.Request.Headers[BranchHeaders.ActiveBranch].FirstOrDefault();
+        var directory = ctx.RequestServices.GetRequiredService<IBranchDirectory>();
+        var state = await BranchScopeResolver.ResolveAsync(principal, header, directory, ctx.RequestAborted);
+        if (state.Denied)
+        {
+            var branchAudit = ctx.RequestServices.GetRequiredService<IAuditClient>();
+            await branchAudit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "branch_scope", EntityId = header ?? "(none)", Action = AuditAction.Grant,
+                ActorUserId = principal.Subject, TenantId = principal.TenantId, ActorMfa = principal.MfaSatisfied,
+                DecisionOutcome = "BranchScopeDenied", DecisionReasonCode = "branch-not-permitted", Severity = AuditSeverity.High,
+            }, ctx.RequestAborted);
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await ctx.Response.WriteAsJsonAsync(new { title = "branch-not-permitted", detail = "the requested active branch is not in your permitted set" });
+            return;
+        }
+        ctx.RequestServices.GetRequiredService<BranchScopeState>().Context = state.Context;
+        if (state.Context.ActiveBranchId is { } activeBranch) ctx.Response.Headers["X-Active-Branch"] = activeBranch.ToString();
+    }
+    await next();
+});
+
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "provider-service" })).AllowAnonymous();
+// Without this the readinessProbe 404s and the canary rollout waits forever on a healthy pod. Anonymous
+// because kubelet carries no bearer token.
+app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 // ------------------------------------------------------------------ helpers
 static string? Bearer(HttpContext http) => http.Request.Headers.Authorization.FirstOrDefault();
@@ -167,10 +223,13 @@ write.MapPost("/providers", async (CreateProvider req, ProviderDbContext db, IAu
         ProviderType = type, Status = ProviderStatus.Suspended, OnboardingState = OnboardingState.Draft,
         CreatedAt = now, UpdatedAt = now,
     };
+    // 24.3 — the provider row and ProviderCreated commit together.
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
     db.Providers.Add(p);
     await db.SaveChangesAsync(ct);
     await audit.EmitAsync(new AuditEventDraft { EntityType = "provider", EntityId = p.ProviderId.ToString(), Action = AuditAction.Create, ActorUserId = me.Principal?.Subject, TenantId = tenant }, ct);
     await outbox.EnqueueAsync("ProviderCreated", "provider.events", new { providerId = p.ProviderId, p.ProviderCode, providerType = p.ProviderType.ToString(), tenantId = tenant }, ct);
+    await tx.CommitAsync(ct);
     return Results.Created($"/api/v1/providers/{p.ProviderId}", ToView(p));
 });
 
@@ -270,10 +329,14 @@ write.MapPost("/contracts/{contractId:guid}/activate", async (Guid contractId, P
     var c = await db.Contracts.Include(x => x.ServiceLines).FirstOrDefaultAsync(x => x.ContractId == contractId && x.TenantId == tenant && !x.IsDeleted, ct);
     if (c is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
     if (c.ServiceLines.Count == 0) return Results.Problem(statusCode: 422, title: "cannot activate a contract with no service lines");
+    // 24.3 — an active contract whose ContractActivated event was lost is a tariff nothing downstream
+    // prices against: claims adjudicate at the wrong rate and nobody sees why.
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
     c.Status = ContractStatus.Active;
     await db.SaveChangesAsync(ct);
     await audit.EmitAsync(new AuditEventDraft { EntityType = "provider_contract", EntityId = c.ContractId.ToString(), Action = AuditAction.StateChange, DecisionOutcome = "Active", ActorUserId = me.Principal?.Subject, TenantId = tenant }, ct);
     await outbox.EnqueueAsync("ContractActivated", "provider.events", new { contractId = c.ContractId, providerId = c.ProviderId, c.ContractNo, tenantId = tenant }, ct);
+    await tx.CommitAsync(ct);
     return Results.Ok(new { c.ContractId, status = c.Status.ToString() });
 });
 

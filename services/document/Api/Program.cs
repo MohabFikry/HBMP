@@ -28,6 +28,11 @@ builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Readiness for the probe in infra/helm/rollout/rollout-template.yaml. Process-level only: this reports
+// "through startup and able to serve". A dependency check here would pull the pod out of rotation for a
+// condition the service already surfaces per-request, turning a partial degradation into a total outage.
+builder.Services.AddHealthChecks();
+
 var app = builder.Build();
 app.UseHbmpTransportSecurity(); // HSTS + HTTPS redirect outside Development (16.5, H8)
 app.UseExceptionHandler();
@@ -43,6 +48,9 @@ app.UseHbmpRls(); // bind app.tenant_id GUC from the principal (RLS, ADR-0011)
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "document-service" })).AllowAnonymous();
+// Without this the readinessProbe 404s and the canary rollout waits forever on a healthy pod. Anonymous
+// because kubelet carries no bearer token.
+app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 // Writes require the write scope; reads no longer ride on the write scope (H9) — the read group is
 // authenticated + row/role-authorized per-request through the engine (see the GET below).
@@ -79,13 +87,19 @@ writes.MapPost("/beneficiaries/{beneficiaryId:guid}/documents", async (
             return Results.Problem(statusCode: 422, title: "malware-detected", detail: $"quarantined: {q.Signature}", type: "urn:hbmp:malware-quarantined");
 
         case UploadOutcome.Stored s:
+        {
+            // 24.3 — a stored document whose DocumentAttached event is lost is a file in MinIO that no
+            // record anywhere points at.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             db.Documents.Add(s.Document);
             await db.SaveChangesAsync(ct);
             await audit.EmitAsync(Draft(beneficiaryId, AuditAction.Create, actor, "stored", s.Version.ChecksumSha256, AuditSeverity.Info, s.Document.DocumentId), ct);
             await outbox.EnqueueAsync("DocumentAttached", "document.events",
                 new { documentId = s.Document.DocumentId, beneficiaryId, docType = type.ToString(), version = s.Version.VersionNo }, ct);
+            await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/beneficiaries/{beneficiaryId}/documents/{s.Document.DocumentId}",
                 new { s.Document.DocumentId, docType = type.ToString(), version = s.Version.VersionNo, s.Version.ChecksumSha256, s.Version.SizeBytes });
+        }
 
         default:
             return Results.Problem(statusCode: 500, title: "unexpected");

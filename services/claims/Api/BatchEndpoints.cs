@@ -27,12 +27,16 @@ public static class BatchEndpoints
 
             var sel = new BatchSelector(req.BatchType, req.SelectionMode, req.PayeeProviderId, req.ProviderLocationId,
                 req.ProviderGroupId, req.PeriodFrom, req.PeriodTo, req.ServiceDateFrom, req.ServiceDateTo, req.ClaimIds);
+            // 24.x — a batch is the unit money is paid in. Created here and unannounced downstream, it is
+            // a payment run nothing else knows to expect.
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             var r = await batches.CreateAsync(deps.Tenant, deps.Subject, sel, ct);
             if (r.Outcome != BatchOutcome.Ok) return Map(r);
 
             await deps.Outbox.EnqueueAsync("BatchCreated.v1", "claims.events",
                 new { batchId = r.Batch!.BatchId, r.Batch.BatchNo, mode = r.Batch.SelectionMode.ToString(), tenantId = deps.Tenant }, ct);
             await Audit(deps, AuditAction.Create, r.Batch.BatchId.ToString(), "BatchCreated", null, r.Batch.Status.ToString());
+            await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/claim-batches/{r.Batch.BatchId}", BatchView.From(r.Batch));
         }).RequireAuthorization(HbmpPolicies.Scope("claims:batch"));
 
@@ -80,7 +84,9 @@ public static class BatchEndpoints
         // --- reads -----------------------------------------------------------------------------------------
         v1.MapGet("", async (ClaimsDeps deps, CancellationToken ct, string? status) =>
         {
-            var denied = await deps.Gate.CheckAsync(ClaimsPolicies.ReadClaim, ct);
+            // §3.4: claim_batch R🔒🟠PO — a payee reads its OWN batches. The payee predicate below is what
+            // makes that true; before the provider read existed it could not be reached at all.
+            var denied = await deps.Gate.CheckClaimReadAsync(ct);
             if (denied is not null) return denied;
             var q = deps.Db.ClaimBatches.AsNoTracking().Include(b => b.Items).Where(b => b.TenantId == deps.Tenant);
             if (deps.ProviderId is { } pid && Guid.TryParse(pid, out var pg)) q = q.Where(b => b.PayeeProviderId == pg);
@@ -91,11 +97,15 @@ public static class BatchEndpoints
 
         v1.MapGet("/{id:guid}", async (Guid id, ClaimsDeps deps, CancellationToken ct) =>
         {
-            var denied = await deps.Gate.CheckAsync(ClaimsPolicies.ReadClaim, ct);
+            var denied = await deps.Gate.CheckClaimReadAsync(ct);
             if (denied is not null) return denied;
             var b = await deps.Db.ClaimBatches.AsNoTracking().Include(x => x.Items)
                 .FirstOrDefaultAsync(x => x.BatchId == id && x.TenantId == deps.Tenant, ct);
             if (b is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            // Ownership re-evaluated against the PAYEE now that the row is in hand — a reimbursement batch has
+            // no payee provider, and no provider is a party to one.
+            var crossProvider = await deps.Gate.CheckClaimReadAsync(ct, new ClaimRow(b.PayeeProviderId));
+            if (crossProvider is not null) return crossProvider;
             if (deps.ProviderId is { } pid && Guid.TryParse(pid, out var pg) && b.PayeeProviderId != pg)
                 return Results.Problem(statusCode: 403, title: "access-denied", type: "urn:hbmp:claims-access-denied");
             return Results.Ok(BatchView.From(b));
@@ -108,12 +118,15 @@ public static class BatchEndpoints
         var denied = await deps.Gate.CheckAsync(ClaimsPolicies.Batch, ct);
         if (denied is not null) return denied;
         var before = (await deps.Db.ClaimBatches.AsNoTracking().FirstOrDefaultAsync(b => b.BatchId == id && b.TenantId == deps.Tenant, ct))?.Status;
+        // 24.x — a batch transition and the event announcing it are one fact or neither.
+        await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
         var r = await batches.TransitionAsync(deps.Tenant, id, to, reason, ct);
         if (r.Outcome != BatchOutcome.Ok) return Map(r);
         if (eventType is not null)
             await deps.Outbox.EnqueueAsync(eventType, "claims.events",
                 new { batchId = id, status = to.ToString(), netPayable = r.Batch!.NetPayable, tenantId = deps.Tenant }, ct);
         await Audit(deps, AuditAction.StateChange, id.ToString(), outcome, before?.ToString(), to.ToString());
+        await tx.CommitAsync(ct);
         return Results.Ok(BatchView.From(r.Batch!));
     }
 

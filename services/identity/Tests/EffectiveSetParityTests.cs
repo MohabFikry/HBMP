@@ -21,7 +21,7 @@ namespace Mersal.Identity.Tests;
 /// Env-gated on IDENTITY_TEST_DB against a migrated database. DB-less CI skips.
 /// </summary>
 [Collection("identity-db")]
-public class EffectiveSetParityTests
+public class EffectiveSetParityTests(IdentityHostFixture host) : IClassFixture<IdentityHostFixture>
 {
     /// <summary>One row of the matrix.</summary>
     /// <param name="Name">Readable label, so a failure names the case rather than an index.</param>
@@ -76,7 +76,7 @@ public class EffectiveSetParityTests
     public async Task Both_modes_compute_identical_sets(Case c)
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
 
         var uname = $"par-{Guid.NewGuid():N}";
         var (userId, _) = await TestFlow.SeedUser(factory, uname, "Passw0rd!Mersal", c.Roles);
@@ -111,7 +111,7 @@ public class EffectiveSetParityTests
     public async Task The_token_scope_claim_is_the_effective_set_not_the_raw_role_grants()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
 
         var uname = $"pare-{Guid.NewGuid():N}";
         // TWO roles, and only one of their keys is denied. Denying everything the request asks for makes

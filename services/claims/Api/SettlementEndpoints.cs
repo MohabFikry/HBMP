@@ -1,7 +1,9 @@
 using Mersal.Audit.Client;
 using Mersal.Auth.Authorization;
 using Mersal.Authz;
+using Mersal.Claims.Domain;
 using Mersal.Claims.Infrastructure;
+using Microsoft.EntityFrameworkCore;
 
 namespace Mersal.Claims.Api;
 
@@ -24,6 +26,9 @@ public static class SettlementEndpoints
             if (denied is not null) return denied;
 
             var bearer = BearerOf(http);
+            // 24.x — the settlement advice IS the payment instruction. Generated and unannounced, the
+            // provider is owed money the rest of the platform has no record of promising.
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             var r = await settlement.GenerateAsync(deps.Tenant, id, deps.Subject ?? "unknown", bearer, ct);
             switch (r.Outcome)
             {
@@ -55,6 +60,7 @@ public static class SettlementEndpoints
                         ActorUserId = deps.Subject, ActorRole = deps.Roles, TenantId = deps.Tenant, ProviderId = deps.ProviderId,
                         DecisionOutcome = r.Outcome.ToString(), Severity = AuditSeverity.High, FieldClasses = ["financials"],
                     }, ct);
+                    await tx.CommitAsync(ct);
                     return Results.Created($"/api/v1/claim-batches/{id}/settlement-advice", new
                     {
                         r.Advice.AdviceId, r.Advice.Version, supersedes = r.Advice.SupersedesAdviceId,
@@ -64,11 +70,49 @@ public static class SettlementEndpoints
             }
         }).RequireAuthorization(HbmpPolicies.Scope("claims:export"));
 
+        // --- read the settlement advice (§3.4 settlement_advice: R✅ staff, R🔒🟠PO own advice) -------------
+        //
+        // 24.4 — like the adjustment read, this did not exist for anyone: the advice was returned once, by the
+        // POST that generated it, and never again. The payee could not see what it had been told it is owed.
+        v1.MapGet("/{id:guid}/settlement-advice", async (Guid id, ClaimsDeps deps, CancellationToken ct) =>
+        {
+            var denied = await deps.Gate.CheckClaimReadAsync(ct);
+            if (denied is not null) return denied;
+
+            var batch = await deps.Db.ClaimBatches.AsNoTracking()
+                .FirstOrDefaultAsync(b => b.BatchId == id && b.TenantId == deps.Tenant, ct);
+            if (batch is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            var crossProvider = await deps.Gate.CheckClaimReadAsync(ct, new ClaimRow(batch.PayeeProviderId));
+            if (crossProvider is not null) return crossProvider;
+            if (deps.ProviderId is { } cp && Guid.TryParse(cp, out var cpg) && batch.PayeeProviderId != cpg)
+                return Results.Problem(statusCode: 403, title: "access-denied", type: "urn:hbmp:claims-access-denied",
+                    detail: "You are not permitted to read this batch.");
+
+            // Newest first, every version: a regeneration supersedes rather than replaces, and a payee holding
+            // an older advice needs to see that it was superseded and by what.
+            var advices = await deps.Db.SettlementAdvices.AsNoTracking()
+                .Where(a => a.BatchId == id && a.TenantId == deps.Tenant)
+                .OrderByDescending(a => a.Version).ToListAsync(ct);
+
+            await deps.Audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "settlement_advice", EntityId = id.ToString(), Action = AuditAction.Read,
+                ActorUserId = deps.Subject, ActorRole = deps.Roles, TenantId = deps.Tenant, ProviderId = deps.ProviderId,
+                FieldClasses = ["financials"],
+            }, ct);
+
+            return deps.IsProviderCaller
+                ? Results.Ok(advices.Select(ProviderAdviceView.From).ToList())
+                : Results.Ok(advices.Select(AdviceView.From).ToList());
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"));
+
         // --- export (CSV / XLSX / PDF) ---------------------------------------------------------------------
         v1.MapGet("/{id:guid}/exports", async (
             Guid id, string? format, ClaimsDeps deps, SettlementService settlement, CancellationToken ct) =>
         {
-            var denied = await deps.Gate.CheckAsync(ClaimsPolicies.Export, ct);
+            // A provider exports its OWN advice under claims:export:own; Mersal under claims:export. The
+            // action split is what keeps the RELEASE above out of a payee's reach while both hold the scope.
+            var denied = await deps.Gate.CheckAdviceExportAsync(ct);
             if (denied is not null) return denied;
 
             var fmt = string.IsNullOrWhiteSpace(format) ? "CSV" : format!.ToUpperInvariant();
@@ -137,3 +181,37 @@ public static class SettlementEndpoints
 
 /// <summary>The external payment fact recorded by Finance after paying OUTSIDE the platform. Records only.</summary>
 public sealed record PaymentReferenceBody(string Reference, DateOnly PaymentDate);
+
+/// <summary>The staff view of an issued advice, including who released it — SoD is read there.</summary>
+public sealed record AdviceView(
+    Guid AdviceId, Guid BatchId, string BatchNo, Guid? PayeeProviderId, DateOnly PeriodFrom, DateOnly PeriodTo,
+    int Version, Guid? SupersedesAdviceId, Guid? DocumentId, string ContentHash, decimal TotalClaimed,
+    decimal TotalPriced, decimal TotalApproved, decimal TotalAdjusted, decimal TotalDenied, decimal NetPayable,
+    string GeneratedBy, DateTimeOffset GeneratedAt)
+{
+    public static AdviceView From(SettlementAdvice a)
+    {
+        ArgumentNullException.ThrowIfNull(a);
+        return new(a.AdviceId, a.BatchId, a.BatchNo, a.PayeeProviderId, a.PeriodFrom, a.PeriodTo, a.Version,
+            a.SupersedesAdviceId, a.DocumentId, a.ContentHash, a.TotalClaimed, a.TotalPriced, a.TotalApproved,
+            a.TotalAdjusted, a.TotalDenied, a.NetPayable, a.GeneratedBy, a.GeneratedAt);
+    }
+}
+
+/// <summary>The PAYEE's view (§3.4 R🔒🟠PO): the remittance itself — period, version, frozen totals, net
+/// payable, and the content hash that proves the document it holds is the one issued. It cannot carry
+/// <c>GeneratedBy</c>: which Mersal user released the payment is internal to Mersal's segregation of duties,
+/// and naming them to the counterparty invites the pressure that control exists to prevent.</summary>
+public sealed record ProviderAdviceView(
+    Guid AdviceId, Guid BatchId, string BatchNo, DateOnly PeriodFrom, DateOnly PeriodTo, int Version,
+    Guid? SupersedesAdviceId, Guid? DocumentId, string ContentHash, decimal TotalClaimed, decimal TotalApproved,
+    decimal TotalAdjusted, decimal TotalDenied, decimal NetPayable, DateTimeOffset IssuedAt)
+{
+    public static ProviderAdviceView From(SettlementAdvice a)
+    {
+        ArgumentNullException.ThrowIfNull(a);
+        return new(a.AdviceId, a.BatchId, a.BatchNo, a.PeriodFrom, a.PeriodTo, a.Version, a.SupersedesAdviceId,
+            a.DocumentId, a.ContentHash, a.TotalClaimed, a.TotalApproved, a.TotalAdjusted, a.TotalDenied,
+            a.NetPayable, a.GeneratedAt);
+    }
+}

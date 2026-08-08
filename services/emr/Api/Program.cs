@@ -31,6 +31,10 @@ builder.Services.AddEmrInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ClinicalGate>();
+// The care-episode timeline (ADR-0031). Scoped, because every step it stages belongs to the
+// transaction of the thing that caused it.
+builder.Services.AddScoped<CareTimelineWriter>();
+builder.Services.AddScoped<CareEpisodeAppender>();
 
 // Clinical code validation against masterdata-service (fail-closed on writes).
 builder.Services.AddHttpClient<IClinicalCodeValidator, HttpClinicalCodeValidator>(c =>
@@ -60,6 +64,27 @@ builder.Services.AddHttpClient<IBranchDirectory, HttpBranchDirectory>(c =>
 builder.Services.AddHttpClient<IPractitionerBranchDirectory, HttpPractitionerBranchDirectory>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Provider:BaseUrl"] ?? "http://provider-service:8080"));
 
+// 14.5 — flag appointments orphaned when a practitioner stops serving a branch. provider-service publishes
+// PractitionerBranchRevoked and nothing consumed it, so bookings already made with that doctor at that branch
+// survived unnoticed until the patient turned up.
+builder.Services.Configure<PractitionerBranchRevokedOptions>(
+    builder.Configuration.GetSection(PractitionerBranchRevokedOptions.SectionName));
+builder.Services.AddHostedService<PractitionerBranchRevokedConsumer>();
+
+// 25.3 — the same shape for a lapsed LICENCE (design 42 §3). The two gates below refuse new slots and new
+// bookings past the expiry; this flags the appointments that were already booked. It FLAGS — a refugee's
+// appointment is never cancelled by a background service.
+builder.Services.Configure<PractitionerLicenceExpiredOptions>(
+    builder.Configuration.GetSection(PractitionerLicenceExpiredOptions.SectionName));
+builder.Services.AddHostedService<PractitionerLicenceExpiredConsumer>();
+
+// ADR-0031 — the half of a care episode emr does not perform itself: the orders, prescriptions, approvals
+// and dispensing a visit causes. Each was recorded in its own service and joined up in none, so an
+// appointment's timeline stopped at the consulting-room door.
+builder.Services.Configure<CareEpisodeConsumerOptions>(
+    builder.Configuration.GetSection(CareEpisodeConsumerOptions.SectionName));
+builder.Services.AddHostedService<CareEpisodeConsumer>();
+
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("emr-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
     .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddRuntimeInstrumentation().AddPrometheusExporter());
@@ -67,6 +92,11 @@ builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("emr-ser
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// Readiness for the probe in infra/helm/rollout/rollout-template.yaml. Process-level only: this reports
+// "through startup and able to serve". A dependency check here would pull the pod out of rotation for a
+// condition the service already surfaces per-request, turning a partial degradation into a total outage.
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 app.UseHbmpTransportSecurity(); // HSTS + HTTPS redirect outside Development (16.5, H8)
@@ -113,6 +143,9 @@ app.Use(async (ctx, next) =>
 });
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "emr-service" })).AllowAnonymous();
+// Without this the readinessProbe 404s and the canary rollout waits forever on a healthy pod. Anonymous
+// because kubelet carries no bearer token.
+app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 var v1 = app.MapGroup("/api/v1/encounters").RequireAuthorization(HbmpPolicies.Scope("encounter:write"));
 
@@ -122,7 +155,7 @@ v1.MapPost("", async (
     CreateEncounterRequest req, HttpRequest http,
     IMemberStatusProvider status, EmrDbContext db, EncounterNoIssuer encounterNos,
     IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, BranchScopeState branchScope,
-    TimeProvider clock, CancellationToken ct) =>
+    CareTimelineWriter timeline, TimeProvider clock, CancellationToken ct) =>
 {
     var idem = http.Headers["Idempotency-Key"].ToString();
     if (string.IsNullOrWhiteSpace(idem))
@@ -209,8 +242,18 @@ v1.MapPost("", async (
         QueueEntryId = Guid.NewGuid(), EncounterId = encounter.EncounterId,
         BeneficiaryId = req.BeneficiaryId, ProviderId = req.ProviderId, State = QueueState.Waiting, EnqueuedAt = now,
     };
+    // "(transactional)" above was a claim, not a fact: the two rows shared one SaveChanges but the two
+    // enqueues below each committed separately, so a crash could open a visit that emr announced to nobody —
+    // no check-in for the appointment, no EncounterStarted for the queue boards. Now it is one transaction.
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
     db.Encounters.Add(encounter);
     db.QueueEntries.Add(queueEntry);
+    // The episode's spine (ADR-0031). Staged inside the same transaction as the encounter: a timeline that
+    // could commit separately from the thing it describes is one that can claim a visit started when no
+    // visit exists.
+    timeline.Add(CareSteps.VisitStarted, req.BeneficiaryId,
+        encounterId: encounter.EncounterId, appointmentId: req.AppointmentId,
+        actor: actor, reference: encounter.EncounterNo, occurredAt: now);
     await db.SaveChangesAsync(ct);
 
     await audit.EmitAsync(new AuditEventDraft
@@ -220,9 +263,18 @@ v1.MapPost("", async (
     }, ct);
 
     if (req.AppointmentId is { } apptId)
-        await outbox.EnqueueAsync("ApptCheckedIn", "emr.events", new { appointmentId = apptId, encounterId = encounter.EncounterId }, ct);
+    {
+        // The clinic, for the read model's per-clinic encounter counts — read off the appointment, which is
+        // the only thing here that knows where the visit was booked. `EncounterFact.ClinicId` falls back to
+        // "unknown" without it, and a per-clinic chart where every row says unknown is a chart of nothing.
+        var locationId = await db.Appointments.AsNoTracking()
+            .Where(a => a.AppointmentId == apptId).Select(a => (Guid?)a.LocationId).FirstOrDefaultAsync(ct);
+        await outbox.EnqueueAsync("ApptCheckedIn", "emr.events",
+            new { appointmentId = apptId, encounterId = encounter.EncounterId, locationId }, ct);
+    }
     await outbox.EnqueueAsync("EncounterStarted", "emr.events",
         new { encounterId = encounter.EncounterId, encounter.EncounterNo, beneficiaryId = req.BeneficiaryId }, ct);
+    await tx.CommitAsync(ct);
 
     return Results.Created($"/api/v1/encounters/{encounter.EncounterId}", EncounterResponse.From(encounter));
 });
@@ -244,6 +296,7 @@ v1.MapGet("/queue", async (EmrDbContext db, CancellationToken ct) =>
 
 app.MapAppointments();
 app.MapQueue();
+app.MapRosterExceptions();   // 25.4 — leave/holiday/closure/ad-hoc + the impact preview
 app.MapClinical();
 app.MapProfileContext();   // 20.2 — the seam the patient profile's PMH + encounters sections read
 app.MapUtilizationFacts();   // 19.4 — encounter COUNTS for utilization; no clinical payload crosses the wire

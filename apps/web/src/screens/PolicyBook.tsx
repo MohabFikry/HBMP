@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Card, DataTable, InlineAlert, StatusChip, Tabs } from "@mersal/design-system";
+import { Button, Card, DataTable, InlineAlert, KpiList, StatusChip, Tabs } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   MemberGroupView,
@@ -129,8 +129,8 @@ export function PolicyList({ api = httpPolicyApi }: { api?: PolicyApi }) {
               header: t(S.window),
               cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`,
             },
-            { key: "members", header: t(S.members), cell: (r) => fmt.number(r.memberCount) },
-            { key: "plans", header: t(S.plans), cell: (r) => fmt.number(r.planCount) },
+            { key: "members", header: t(S.members), cell: (r) => fmt.number(r.memberCount), numeric: true },
+            { key: "plans", header: t(S.plans), cell: (r) => fmt.number(r.planCount), numeric: true },
             {
               key: "used",
               header: t(S.used),
@@ -202,7 +202,7 @@ function PolicyPlansTab({ api, policyId }: { api: PolicyApi; policyId: string })
             ),
           },
           { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}` },
-          { key: "members", header: t(S.members), cell: (r) => fmt.number(r.memberCount) },
+          { key: "members", header: t(S.members), cell: (r) => fmt.number(r.memberCount), numeric: true },
           { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
         ]}
       />
@@ -293,24 +293,24 @@ export function ScopeUtilizationPanel({
               disagreement between the accumulator and the reported total must be visible to whoever acts on
               the number, not discovered afterwards. */}
           {!view.reconciliation.reconciled && <InlineAlert tone="bad">{t(S.reconcileBad)}</InlineAlert>}
-          <dl className="pol-kpis">
-            <div>
-              <dt>{t(S.members)}</dt>
-              <dd>{fmt.number(view.memberCount)}</dd>
-            </div>
-            <div>
-              <dt>{t(S.totalLimit)}</dt>
-              <dd>{fmt.money(view.totalLimit)}</dd>
-            </div>
-            <div>
-              <dt>{t(S.totalConsumed)}</dt>
-              <dd>{fmt.money(view.totalConsumed)}</dd>
-            </div>
-            <div>
-              <dt>{t(S.remaining)}</dt>
-              <dd>{fmt.money(view.totalRemaining)}</dd>
-            </div>
-          </dl>
+          {/*
+            * The four headline figures, in the KPI treatment 0B §10b specifies (audit §5.2).
+            *
+            * They were `<dl class="pol-kpis">` — dt at 0.82rem, dd at 1.25rem, four pairs in a flex row —
+            * which is to say plain text with a size difference. On a screen whose entire purpose is "how much
+            * of this cohort's entitlement is gone", the answer read as a caption. `KpiList` keeps the
+            * definition-list semantics (four terms describing one subject, announced as pairs) and takes the
+            * hairline, the uppercase micro-label and the 34px tabular numerals from the same classes
+            * `KpiCard` uses, so the two cannot drift into two different-looking KPIs.
+            */}
+          <KpiList
+            items={[
+              { label: t(S.members), value: fmt.number(view.memberCount) },
+              { label: t(S.totalLimit), value: fmt.money(view.totalLimit) },
+              { label: t(S.totalConsumed), value: fmt.money(view.totalConsumed) },
+              { label: t(S.remaining), value: fmt.money(view.totalRemaining) },
+            ]}
+          />
 
           <LimitMeters caption={t(S.utilizationCaption)} rows={meters} />
 
@@ -326,8 +326,8 @@ export function ScopeUtilizationPanel({
                 density="compact"
                 columns={[
                   { key: "member", header: t(S.memberNo), cell: (r) => r.memberNo },
-                  { key: "consumed", header: t(S.totalConsumed), cell: (r) => fmt.money(r.totalConsumed) },
-                  { key: "limit", header: t(S.totalLimit), cell: (r) => (r.anyUnlimited ? "∞" : fmt.money(r.totalLimit)) },
+                  { key: "consumed", header: t(S.totalConsumed), cell: (r) => fmt.money(r.totalConsumed), numeric: true },
+                  { key: "limit", header: t(S.totalLimit), cell: (r) => (r.anyUnlimited ? "∞" : fmt.money(r.totalLimit)), numeric: true },
                   { key: "pct", header: t(S.used), cell: (r) => (r.percentUsed != null ? `${Math.round(r.percentUsed)}%` : "—") },
                 ]}
               />
@@ -353,7 +353,21 @@ export function ScopeUtilizationPanel({
  * row count. Building the CSV client-side from data already on screen would have been easier and would have
  * produced a file nobody could later account for.
  */
-export function UtilizationScreen({ api = httpPolicyApi }: { api?: PolicyApi }) {
+export function UtilizationScreen({
+  api = httpPolicyApi,
+  embedded = false,
+}: {
+  api?: PolicyApi;
+  /**
+   * Rendered as a PANEL inside another screen rather than as a screen of its own — which is how the
+   * beneficiary portal reaches it now that Utilization is a tab in Analytics rather than a nav section.
+   *
+   * All it suppresses is the page header. A tab panel that prints its own <h1> gives the page two titles and
+   * two competing answers to "where am I"; policy administration still opens this at `/policy/utilization`,
+   * where the header is the only thing naming the screen.
+   */
+  embedded?: boolean;
+}) {
   const t = useLoc();
   const [policies, setPolicies] = useState<PolicyQueryRow[]>([]);
   const [scope, setScope] = useState<"policies" | "groups" | "plans" | "payers">("policies");
@@ -392,7 +406,7 @@ export function UtilizationScreen({ api = httpPolicyApi }: { api?: PolicyApi }) 
 
   return (
     <div className="pol-screen">
-      <PageHeader title={t(S.tabUtilization)} />
+      {!embedded && <PageHeader title={t(S.tabUtilization)} />}
       <div aria-live="polite" role="status" className="sr-only">{announce}</div>
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
       <Card style={{ padding: "var(--sp4)", display: "flex", gap: "var(--sp4)", alignItems: "end", flexWrap: "wrap" }}>

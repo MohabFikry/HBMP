@@ -52,6 +52,24 @@ builder.Services.ConfigureHttpJsonOptions(o =>
     o.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
 });
 
+// Readiness, with NO upstream checks — and that is the decision, not an omission.
+//
+// This service composes fourteen owning services, so the tempting readiness check is "can I reach them?".
+// That would invert design 39 §6. A section whose owning service does not answer is served as `Unavailable`
+// with a Retry — a PER-SECTION degradation, so a doctor still gets the identity strip, the allergies and the
+// coverage while investigations alone is unreachable. If readiness depended on those upstreams, one blipping
+// service would take every profile-service pod out of rotation and turn that graceful degradation into a
+// total outage of the whole patient file. The gateway would answer 503 for a profile that was 13/14 servable.
+//
+// Nor does it probe the broker. The audit sink connects lazily on first publish (RabbitMqEventPublisher), on
+// purpose, so an unreachable broker does not crash startup; forcing a connection from a probe that kubelet
+// polls every 10s would defeat that. A broker outage surfaces as failed requests — which is correct, because
+// this service refuses to complete a PHI read it cannot audit.
+//
+// So readiness answers exactly one question, the one a readiness probe exists to answer: is this process
+// through startup and able to serve? Same shape as audit-service.
+builder.Services.AddHealthChecks();
+
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -65,6 +83,13 @@ app.UseAuthorization();
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "profile-service" })).AllowAnonymous();
+// `/health/ready` is what `infra/helm/rollout/rollout-template.yaml` puts in the readinessProbe. Without it the
+// probe 404s, the pod never reports Ready, and the canary rollout waits forever on a service that is running
+// perfectly — a deployment that hangs rather than fails, which is the slower way to find out.
+//
+// Anonymous like its sibling: kubelet carries no bearer token, so a probe behind authentication reports a
+// healthy pod as broken the moment anyone tightens the auth defaults.
+app.MapHealthChecks("/health/ready").AllowAnonymous();
 app.MapPrometheusScrapingEndpoint();
 
 app.MapProfile();  // 20.1 — GET /patients/{id}/profile (+ /profile/summary, the audited PHI export)

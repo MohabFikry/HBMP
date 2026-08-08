@@ -36,6 +36,51 @@
   --fs-subhead: 14px;
   --fs-caption: 13px;
 
+  /*
+   * How tall a region gets before it scrolls.
+   *
+   * <p>These were ten different expressions — 288px, 320px, 16rem, 20rem, 22rem, 30vh, 88vh, min(60vh,32rem),
+   * min(70vh,640px), calc(100dvh-84px) — for what is really three questions. Two dropdowns doing the same job
+   * disagreed by 64px, and nobody adding an eleventh scroll region had anything to copy.</p>
+   *
+   * <p>Named by ROLE, not by size, so the choice is "what is this surface" rather than "how tall did the last
+   * one happen to be":</p>
+   * <ul>
+   *   <li><b>picker</b> — a list you choose from. 288px is eight 36px rows: enough to show that the list
+   *       continues, short enough that the option under the cursor stays near the control it belongs to.</li>
+   *   <li><b>panel</b> — a region inside a card that you read rather than pick from.</li>
+   *   <li><b>sheet</b> — a surface that owns most of the viewport. `dvh`, not `vh`: on mobile Safari the
+   *       collapsing URL bar makes `vh` taller than the visible page, so the bottom of a `vh`-capped sheet
+   *       sits behind the toolbar and cannot be scrolled to.</li>
+   * </ul>
+   */
+  --scroll-picker: 288px;
+  --scroll-panel: 420px;
+  --scroll-sheet: min(70dvh, 640px);
+
+  /*
+   * How a table is drawn.
+   *
+   * <p>Four vocabularies had grown for one thing — the worklist's `.mrs-wl`, `.mini-table`, the policy
+   * screens' `.pol-grid`/`.pol-costshare`, and pharmacy's `.rx-dispense-table` — and they disagreed on every
+   * property a column header has: three sizes (11.5px, 0.78rem, 13px), two colours, and two of the four with
+   * no uppercase and no tracking at all. Put side by side on the member screen, which renders `.mrs-wl` and
+   * `.pol-grid` in the same card, they read as two different products.</p>
+   *
+   * <p>The values are the worklist's, because that is the table the platform is mostly made of and the one
+   * 0B §10c describes. Held as tokens rather than copied into four rules so the next table reads from the
+   * same place instead of inventing a fifth.</p>
+   */
+  --tbl-head-size: 11.5px;
+  --tbl-head-weight: 600;
+  --tbl-head-tracking: 0.06em;
+  --tbl-head-color: var(--text-3);
+  --tbl-cell-pad-y: 14px;
+  --tbl-cell-pad-x: 16px;
+  /* Dense tables — a reference contract, a cost-share grid — keep the same type and lose only the room. */
+  --tbl-cell-pad-y-tight: 8px;
+  --tbl-cell-pad-x-tight: 12px;
+
   /* Motion */
   --dur: 200ms;
   --dur-micro: 120ms;
@@ -59,7 +104,12 @@ html[data-theme="light"] {
 
   --text-1: #12262b; /* body        14.8:1 */
   --text-2: #4a5a61; /* secondary    7.0:1 */
-  --text-3: #6b7c82; /* meta / micro-labels */
+  /* meta / micro-labels — 5.5:1 on #ffffff, 5.3:1 on --surface-2, 5.0:1 on --surface-0.
+     Was #6b7c82, which measured 4.35 / 4.17 / 3.99 and therefore failed AA on EVERY light surface. Note
+     that --text-1 and --text-2 carry their ratios in a comment and this one did not: the two that were
+     checked said so, and the one that was never checked was silent. Table headers are the visible
+     casualty — every worklist `th` renders in it at 11.5px. */
+  --text-3: #5d6b71;
 
   --accent: #007a7a; /* teal-700 actions/links 5.2:1 */
   --accent-press: #005c5c;
@@ -100,7 +150,9 @@ html[data-theme="dark"] {
 
   --text-1: #eaf5f4;
   --text-2: #a9c4c4;
-  --text-3: #7fa0a0;
+  /* 5.0:1 on --surface-2, 5.8:1 on --surface-1, 6.7:1 on --surface-0. Was #7fa0a0 — 4.18 on --surface-2,
+     so it passed on the page background and failed inside every card, which is where micro-labels live. */
+  --text-3: #8bb0b0;
 
   --accent: #5fd3d3; /* lightened for AA on dark */
   --accent-press: #86e3e3;

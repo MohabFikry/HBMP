@@ -8,7 +8,15 @@ namespace Mersal.Emr.Infrastructure;
 public interface IClinicalCodeValidator
 {
     Task<bool> IcdExistsAsync(string icdCode, string? bearerToken, CancellationToken ct = default);
-    Task<bool> AllergenExistsAsync(Guid allergenId, string? bearerToken, CancellationToken ct = default);
+    /// <summary>
+    /// Resolve an allergen to its catalogue NAME, or null when masterdata does not hold it.
+    ///
+    /// <para>This replaced an <c>AllergenExistsAsync</c> boolean. The endpoint needs both facts — is this a
+    /// real allergen, and what is it called — and asking for the weaker one meant the name was never
+    /// captured, which is how a display field that three readers already expected came to be permanently
+    /// empty. Returning the name answers existence too: null is "no".</para>
+    /// </summary>
+    Task<string?> AllergenNameAsync(Guid allergenId, string? bearerToken, CancellationToken ct = default);
     Task<bool> DrugExistsAsync(Guid drugId, string? bearerToken, CancellationToken ct = default);
     /// <summary>LOINC is optional on a vital; when omitted this returns true. When present it is validated
     /// (currently accepted-and-recorded — no LOINC dataset is loaded yet — documented like provider-service).</summary>
@@ -19,7 +27,7 @@ public interface IClinicalCodeValidator
 public sealed class AllowAllClinicalCodeValidator : IClinicalCodeValidator
 {
     public Task<bool> IcdExistsAsync(string icdCode, string? bearerToken, CancellationToken ct = default) => Task.FromResult(true);
-    public Task<bool> AllergenExistsAsync(Guid allergenId, string? bearerToken, CancellationToken ct = default) => Task.FromResult(true);
+    public Task<string?> AllergenNameAsync(Guid allergenId, string? bearerToken, CancellationToken ct = default) => Task.FromResult<string?>("Test allergen");
     public Task<bool> DrugExistsAsync(Guid drugId, string? bearerToken, CancellationToken ct = default) => Task.FromResult(true);
     public Task<bool> LoincValidAsync(string? loincCode, string? bearerToken, CancellationToken ct = default) => Task.FromResult(true);
 }

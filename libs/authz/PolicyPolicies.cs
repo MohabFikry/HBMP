@@ -37,6 +37,24 @@ public static class PolicyPolicies
     /// <summary>Supervisory increment: cancel another user's note, approve a retro-effective change.</summary>
     public const string Supervise = "policy:supervise";
 
+    /// <summary>
+    /// The two PRICING lookups — the version in force on a service date, and one category's cost share at one
+    /// tier. Narrower than <see cref="Read"/> on purpose.
+    /// </summary>
+    /// <remarks>
+    /// <para>A pharmacist at a counter and a technician at a bench have to be able to tell a beneficiary what
+    /// they owe, and the shared pricing path resolves that by asking policy-service two questions. Holding
+    /// <see cref="Read"/> to ask them would hand a fulfiller the entire benefit product — every payer, plan,
+    /// version and rule on the platform — which is commercially sensitive and nothing to do with the question
+    /// being asked. That is the same over-grant the practitioner/provider split was made to avoid.</para>
+    /// <para>So the ACTION is narrow and two scopes satisfy it: <c>policy:read</c>, because anyone who may
+    /// read the configuration may obviously read a slice of it, and <c>eligibility:check</c>, which is
+    /// already the scope for "what does this member pay for this category at this provider" and is exactly
+    /// the question these two lookups serve. Minting a third scope for the same question would leave two
+    /// grants to reason about and two places to revoke (identity 0025 made this argument).</para>
+    /// </remarks>
+    public const string PriceLookup = "policy:price-lookup";
+
     public const string Resource = "policy";
 
     public static IReadOnlyList<PolicyRule> Rules() =>
@@ -74,6 +92,15 @@ public static class PolicyPolicies
         {
             Action = Read, ResourceType = Resource,
             Scopes = Set("policy:read"),
+            RequiredConditions = [AbacConditions.TenantMatch],
+        },
+        // The pricing slice: the version in force on a date, and one category's cost share at one tier.
+        // Satisfied by policy:read OR eligibility:check — see the note on PriceLookup. Tenant-scoped, no PHI,
+        // and it can disclose nothing but the terms of the plan the caller is already quoting from.
+        new PolicyRule
+        {
+            Action = PriceLookup, ResourceType = Resource,
+            Scopes = Set("policy:read", "eligibility:check"),
             RequiredConditions = [AbacConditions.TenantMatch],
         },
     ];

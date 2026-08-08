@@ -71,10 +71,25 @@ public static class CallCentrePolicies
     ];
 
     /// <summary>Full bundle = platform defaults + the call-centre rules. callcentre-service authorizes with this.</summary>
+    /// <summary>
+    /// The call-centre bundle, PLUS the profile's call-history rule.
+    ///
+    /// <para><b>The rule was defined in one service's bundle and enforced in another's.</b>
+    /// <c>ProfilePolicies.CallHistoryRead</c> is the action <c>GET
+    /// /beneficiaries/{id}/call-interactions</c> checks — but that endpoint lives in callcentre-service, and
+    /// this bundle carried no rule for it. The engine found nothing to match, and the default is deny, so the
+    /// patient profile's call-history section answered 403 for EVERY role — the call centre's own included.
+    /// Not a doctor problem and not a matrix problem: the section was unreachable by anyone, and the matrix
+    /// cell that grants it had never been consulted.</para>
+    ///
+    /// <para>Only the call-history rule is spliced, not the whole profile bundle. The rest of
+    /// <c>ProfilePolicies.Rules()</c> governs the <c>patient-profile</c> resource, which this service never
+    /// evaluates; importing it would hand callcentre-service opinions about a resource it does not serve.</para>
+    /// </summary>
     public static PolicyBundle Bundle()
     {
         var baseBundle = DefaultPolicies.Bundle();
-        return new PolicyBundle(Version, [.. baseBundle.Rules, .. Rules()]);
+        return new PolicyBundle(Version, [.. baseBundle.Rules, .. Rules(), .. ProfilePolicies.CallHistoryRules()]);
     }
 
     private static HashSet<string> Set(params string[] values) => new(values, StringComparer.Ordinal);

@@ -1,17 +1,21 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useFormat, type Formatters } from "../i18n/useFormat";
-import { Button, Card, DataTable, StatusChip } from "@mersal/design-system";
+import { useMemo, useState } from "react";
+import { useFormat } from "../i18n/useFormat";
+import { Button, Card, DataTable, Icon, InlineAlert, InputField, StatusChip, TableToolbar } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
-import type { AppointmentRow, Localized } from "@mersal/contracts";
+import type { AppointmentRow, Localized, Practitioner, Specialty } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
 import { ApiError } from "../api/http";
-import { AsyncSection, PageHeader, useLoc } from "./_shared";
+import { AsyncSection, PageHeader, useLoc, useOpenProfile } from "./_shared";
+import { useRestorableState } from "./useRestorableState";
 import { VisitTimelineButton } from "./VisitTimeline";
+import {
+  CancelAppointmentButton, doctorColumns, noteColumn, patientColumn, timeAndStatusColumns,
+} from "./booking/appointmentColumns";
+import { EditAppointmentButton } from "./booking/EditAppointment";
 
 const S = {
-  visitsTitle: { en: "Today's visits", ar: "زيارات اليوم" },
+  visitsTitle: { en: "Today's Visits", ar: "زيارات اليوم" },
   visitsEmpty: { en: "No one is checked in yet.", ar: "لا يوجد أحد قد سجّل وصوله بعد." },
   apptTitle: { en: "Appointments", ar: "المواعيد" },
   apptEmpty: { en: "No appointments booked for today.", ar: "لا توجد مواعيد محجوزة اليوم." },
@@ -26,74 +30,96 @@ const S = {
   checkedIn: { en: "Checked in", ar: "تم الوصول" },
   openFile: { en: "Patient file", ar: "ملف المريض" },
   noShow: { en: "No-show", ar: "لم يحضر" },
+  /**
+   * The no-show action is not available yet.
+   *
+   * `noShowOff` is what the desk SEES — compact, in the danger tone, sitting where the button would be.
+   * `noShowHint` is why, and it survives as the control's `title`: "deactivated" without a reason is the
+   * shape of message an operator reads twice and then stops reading, and the reason is the whole answer —
+   * it becomes available on its own, with no action needed from anyone.
+   */
+  noShowOff: { en: "No-show deactivated", ar: "«لم يحضر» معطّل" },
   noShowHint: {
     en: "Available once the appointment window has passed.",
     ar: "يتاح بعد انقضاء وقت الموعد.",
   },
   actions: { en: "Actions", ar: "الإجراءات" },
+  // Headers for the two icon-only columns. An icon column with no header reads as a rendering fault, and the
+  // icons themselves are only labelled per-row (they name WHICH appointment, so a screen reader can tell a
+  // table of identical pencils apart).
+  editCol: { en: "Edit", ar: "تعديل" },
+  cancelCol: { en: "Cancel", ar: "إلغاء" },
+  needsReassign: { en: "Doctor unavailable", ar: "الطبيب غير متاح" },
+  needsReassignWhy: {
+    en: "The assigned doctor no longer works at this clinic — call the patient to reassign or rebook.",
+    ar: "الطبيب المعيَّن لم يعد يعمل في هذه العيادة — اتصل بالمريض لإعادة التعيين أو الحجز.",
+  },
+  search: { en: "Search", ar: "بحث" },
+  searchHint: { en: "Patient token or type", ar: "رمز المريض أو النوع" },
+  when: { en: "When", ar: "المدة" },
+  today: { en: "Today", ar: "اليوم" },
+  customRange: { en: "Custom range", ar: "مدة مخصصة" },
+  from: { en: "From", ar: "من" },
+  to: { en: "To", ar: "إلى" },
+  rangeIncomplete: {
+    en: "Pick both dates to apply the custom range — showing today until then.",
+    ar: "اختر التاريخين لتطبيق المدة المخصصة — يتم عرض اليوم حتى ذلك الحين.",
+  },
+  fBooked: { en: "Booked", ar: "محجوز" },
+  fCheckedIn: { en: "Checked in", ar: "تم الوصول" },
+  fNoShow: { en: "No-show", ar: "لم يحضر" },
+  noneMatch: {
+    en: "No appointments match these filters. Clear a filter to see more.",
+    ar: "لا توجد مواعيد مطابقة لعوامل التصفية. أزل أحد العوامل لعرض المزيد.",
+  },
   stale: {
     en: "This appointment changed since the board loaded — refreshing.",
     ar: "تغيّر هذا الموعد منذ تحميل اللوحة — يجري التحديث.",
   },
 } satisfies Record<string, Localized>;
 
+/** Stable empties: `?? []` mints a new array each render and defeats the memo keyed on it. */
+const NO_PRACTITIONERS: Practitioner[] = [];
+const NO_SPECIALTIES: Specialty[] = [];
+
 /**
- * Shared columns for a read-only appointment board (masked beneficiary token + type/time/status).
+ * The board's identity + scheduling columns, now shared verbatim with the call centre
+ * (`booking/appointmentColumns`).
  *
- * 18.D2 (audit R2 U7) — the appointment TIME is the headline case. This used to be
+ * 18.D2 (audit R2 U7) — the appointment TIME remains the headline case there. It used to be
  * `toLocaleTimeString(undefined, …)`, which formats in the MACHINE's time zone: a clinic PC set to UTC —
  * the default on a fresh Linux image and in every container — rendered a 09:00 Cairo appointment as 07:00.
- * Nothing errored. The receptionist read 07:00, told the patient 07:00, and the patient missed their slot
- * or arrived two hours early. DST made the error change size mid-year. The formatter is now passed in,
- * pinned to Africa/Cairo and the app's own locale.
+ * Nothing errored. The receptionist read 07:00, told the patient 07:00, and the patient missed their slot or
+ * arrived two hours early. The formatter is passed in, pinned to Africa/Cairo and the app's own locale.
  */
-function boardColumns(t: (l: Localized) => string, fmt: Formatters): Column<AppointmentRow>[] {
-  return [
-    { key: "beneficiary", header: t(S.beneficiary), cell: (r) => <span className="tnum">{r.beneficiary.token}</span> },
-    { key: "type", header: t(S.type), cell: (r) => r.appointmentType },
-    { key: "time", header: t(S.time), cell: (r) => <span className="tnum">{fmt.time(r.scheduledStart)}</span> },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-  ];
-}
-
 /**
  * The patient-file action (design 39 §6 — the profile is opened FOR someone from a worklist, never from a
  * menu). Reception's boards are the list the desk actually works from, and every row already names a
  * beneficiary; without this the unified profile had no entry point on this side of the building at all.
  * The SERVER decides which sections reception may see, so the same route serves every portal.
  */
-function patientFileColumn(t: (l: Localized) => string, go: (to: string) => void): Column<AppointmentRow> {
+function patientFileColumn(
+  t: (l: Localized) => string,
+  openProfile: (beneficiaryId: string) => void,
+): Column<AppointmentRow> {
   return {
     key: "file",
     // A real header, not "": an empty <th> has no accessible name (axe empty-table-header). The fixture routes
     // render no rows, which is why the route-level sweep never surfaced this.
     header: t(S.openFile),
+    // Icon + a stronger variant: this is the action reception reaches for most on the board, and as a plain
+    // secondary button among several it read as the least important thing in the row.
     cell: (r) => (
-      <Button variant="secondary" size="sm" onClick={() => go(`/patients/${encodeURIComponent(r.beneficiary.id)}`)}>
+      <Button
+        variant="primary"
+        size="sm"
+        leadingIcon={<Icon name="user" />}
+        onClick={() => openProfile(r.beneficiary.id)}
+      >
         {t(S.openFile)}
       </Button>
     ),
   };
-}
-
-/** Today's visits — everyone who has arrived and is waiting (CheckedIn). */
-export function ReceptionVisits() {
-  const api = useApi();
-  const t = useLoc();
-  const fmt = useFormat();   // 18.D2 (U7) — Cairo appointment times, app locale
-  const navigate = useNavigate();
-  const state = useAsync<AppointmentRow[]>(() => api.appointments("checked-in"), []);
-  const cols = [...boardColumns(t, fmt), patientFileColumn(t, navigate)];
-  return (
-    <>
-      <PageHeader title={t(S.visitsTitle)} />
-      <Card as="section" style={{ padding: "var(--sp3)" }}>
-        <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.visitsEmpty}>
-          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.visitsTitle)} />}
-        </AsyncSection>
-      </Card>
-    </>
-  );
 }
 
 /**
@@ -109,51 +135,216 @@ export function ReceptionAppointments() {
   const api = useApi();
   const t = useLoc();
   const fmt = useFormat();   // 18.D2 (U7) — Cairo appointment times, app locale
-  const navigate = useNavigate();
-  const state = useAsync<AppointmentRow[]>(() => api.appointments("all"), []);
+  // Carries where we came from, so the profile's Back control returns to this board rather than guessing.
+  const openProfile = useOpenProfile();
+
+  // ---- filters (14.5) --------------------------------------------------------------------------------
+  // `when` and the custom range are SERVER-side, because they change which rows exist; `status` and the
+  // search are client-side over what came back, because they narrow rows already in hand. Mixing the two
+  // freely would mean a status filter that silently missed appointments outside today.
+  //
+  // RESTORED across a visit to a patient's file. Narrowing this board is real work — a custom date range and
+  // a status, typed once and applied to a day's list — and the desk opens a patient file FROM a row, so the
+  // round trip used to throw all of it away and drop the receptionist back on an unfiltered "today".
+  const [when, setWhen] = useRestorableState<string | null>("reception-appts.when", "today");
+  const [from, setFrom] = useRestorableState("reception-appts.from", "");
+  const [to, setTo] = useRestorableState("reception-appts.to", "");
+  const [status, setStatus] = useRestorableState<string | null>("reception-appts.status", null);
+  const [query, setQuery] = useRestorableState("reception-appts.query", "");
+
+  const customActive = when === "custom" && from !== "" && to !== "";
+  const range = customActive ? { from, to } : undefined;
+  const state = useAsync<AppointmentRow[]>(
+    () => api.appointments("all", false, range),
+    // Re-fetch only when the SERVER-side inputs change. Typing in the search box must not re-hit the API on
+    // every keystroke — that is the whole reason the two kinds of filter are split.
+    [range?.from, range?.to],
+  );
   const desk = useDeskTransitions(state.reload);
 
+  // Doctor + specialty are provider-service's to disclose; reception reads them directly under
+  // `practitioner:read` and joins here. emr returns only a doctorId — see `doctorColumns`.
+  const practitioners = useAsync<Practitioner[]>(() => api.practitioners({ type: "Doctor" }), []);
+  const specialties = useAsync<Specialty[]>(() => api.specialties(), []);
+  const doctorById = useMemo(
+    () => new Map((practitioners.data ?? NO_PRACTITIONERS).map((d) => [d.id, d])),
+    [practitioners.data],
+  );
+
+  const visible = (rows: AppointmentRow[]) => {
+    const q = query.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (status === "booked" && !r.checkInEligible) return false;
+      if (status === "checked-in" && !r.checkedIn) return false;
+      if (status === "no-show" && r.status.label.en !== "No-show") return false;
+      if (!q) return true;
+      // The NAME is what the desk reads and what a patient gives at the counter, so it is what the search
+      // has to match. The token stays in the haystack for rows booked before names were captured.
+      const doctor = r.doctorId ? doctorById.get(r.doctorId)?.name.en ?? "" : "";
+      return `${r.beneficiaryName ?? ""} ${r.beneficiary.token} ${r.appointmentType} ${doctor}`
+        .toLowerCase().includes(q);
+    });
+  };
+
+  const deps = { t, fmt, doctorById, specialties: specialties.data ?? NO_SPECIALTIES };
   const cols: Column<AppointmentRow>[] = [
-    ...boardColumns(t, fmt),
-    patientFileColumn(t, navigate),
+    patientColumn(deps),
+    ...doctorColumns(deps),
+    ...timeAndStatusColumns(deps),
+    noteColumn(deps),
+    /*
+      ONE COLUMN PER ACTION, not one column holding all of them.
+
+      Edit and cancel used to sit at the end of a flex row whose contents varied by row: a Booked appointment
+      carries Check in and No-show, a checked-in one carries neither, a no-show carries nothing at all. So the
+      two icons landed at a different x on almost every row and the eye had nothing to run down. No amount of
+      alignment INSIDE the cell could fix that — a grid aligns within its own box, and each of these boxes is
+      a separate table cell. The table's own columns are the only thing that aligns across rows, so the
+      actions became columns.
+    */
     {
       key: "actions",
       header: t(S.actions),
       cell: (r) => (
         <span className="row-actions">
+          {/* 14.5 — the doctor stopped serving this branch after the booking was made. Nothing was changed
+              automatically, so this row is asking the desk for a decision rather than reporting one. The
+              reason is spelled out because "Doctor unavailable" alone does not tell anyone what to do. */}
+          {r.needsReassignment && (
+            <>
+              <StatusChip kind="warn" label={t(S.needsReassign)} />
+              <span className="muted">{t(S.needsReassignWhy)}</span>
+            </>
+          )}
           <VisitTimelineButton row={r} />
+          {/* Check-in lives HERE now, and the separate Check-in screen is gone. It was always the same
+              server call against a filtered view of this same board, so the second screen only added a
+              place for the two to disagree — and a decision about where to click before doing the work. */}
           {r.checkInEligible && (
-            <Button variant="primary" size="sm" loading={desk.busy === `in:${r.id}`}
+            <Button variant="primary" size="sm" leadingIcon={<Icon name="ok" />}
+                    loading={desk.busy === `in:${r.id}`}
                     onClick={() => void desk.run(`in:${r.id}`, () => api.checkIn(r.id, r.rowVersion))}>
               {t(S.checkIn)}
             </Button>
           )}
-          {/* Shown only while the server says it is allowed — the desk is never offered a refusal. */}
-          {r.noShowEligible && (
-            <Button variant="secondary" size="sm" loading={desk.busy === `ns:${r.id}`}
-                    onClick={() => void desk.run(`ns:${r.id}`, () => api.noShow(r.id, r.rowVersion))}>
-              {t(S.noShow)}
-            </Button>
-          )}
-          {/* A Booked row whose window has not passed: say WHY there is no no-show button rather than
-              leaving an empty cell the receptionist reads as a broken screen. */}
-          {r.checkInEligible && !r.noShowEligible && <span className="muted">{t(S.noShowHint)}</span>}
         </span>
       ),
     },
+    {
+      key: "edit",
+      header: t(S.editCol),
+      cell: (r) => <EditAppointmentButton row={r} t={t} onSaved={state.reload} />,
+    },
+    {
+      key: "cancel",
+      header: t(S.cancelCol),
+      // A confirmation away: cancelling releases the slot and may hand it straight to the waitlist, so a
+      // single mis-click in a dense table must not be able to do it.
+      cell: (r) => (
+        <CancelAppointmentButton
+          row={r}
+          t={t}
+          onCancel={(reason) => desk.run(`cx:${r.id}`, () => api.cancelAppointment(r.id, reason, r.rowVersion))}
+        />
+      ),
+    },
+    {
+      key: "noshow",
+      header: t(S.noShow),
+      /*
+        THE BUTTON IS ALWAYS THERE, and disabled until the window has passed.
+
+        It was hidden and then replaced by a chip, so the control appeared out of nowhere partway through the
+        morning and the desk had no idea where it would land. A control that is present and visibly unusable
+        teaches its own position; one that materialises does not.
+
+        `aria-disabled`, not `disabled`. A `disabled` button is removed from the tab order, and with it goes
+        the only route a keyboard or screen-reader user has to the REASON — which is the whole point of
+        showing it early. This stays focusable, announces itself as disabled, and carries the reason as its
+        description. The click handler is simply not attached, so it cannot fire.
+      */
+      cell: (r) => {
+        if (!r.checkInEligible && !r.noShowEligible) return null;
+        const ready = r.noShowEligible;
+        return (
+          <Button
+            variant="secondary" size="sm" leadingIcon={<Icon name="cross" />}
+            aria-disabled={ready ? undefined : true}
+            title={ready ? undefined : t(S.noShowHint)}
+            loading={ready && desk.busy === `ns:${r.id}`}
+            onClick={ready
+              ? () => void desk.run(`ns:${r.id}`, () => api.noShow(r.id, r.rowVersion))
+              : undefined}
+          >
+            {t(S.noShow)}
+          </Button>
+        );
+      },
+    },
+    // Last column by request. It is the only control here that LEAVES the board — everything else amends the
+    // appointment in place — so it reads better as the end of the row than as something to step over.
+    patientFileColumn(t, openProfile),
   ];
 
   return (
     <>
       <PageHeader title={t(S.apptTitle)} />
-      <Card as="section" style={{ padding: "var(--sp3)" }}>
+      {/* sp5, not sp3. At 12px the toolbar, the range notice and the table's header row all but touched the
+          card's edge, so the card read as a border drawn around the content rather than as a surface holding
+          it — and every other worklist card in the app is set at sp5, so this one was the odd one out. */}
+      <Card as="section" style={{ padding: "var(--sp5)" }}>
+        <TableToolbar
+          search={{ label: t(S.search), value: query, onChange: setQuery, placeholder: t(S.searchHint) }}
+          filters={[
+            {
+              key: "when", label: t(S.when), value: when, onChange: setWhen,
+              options: [{ value: "today", label: t(S.today) }, { value: "custom", label: t(S.customRange) }],
+              // Beside the chip that reveals them, not at the far end of the bar. They appear only once
+              // "Custom" is chosen: two empty date boxes sitting permanently next to a "Today" chip invite
+              // the desk to wonder which of the two is actually in force.
+              extra: when === "custom" ? (
+                <>
+                  <InputField label={t(S.from)} type="date" value={from} onChange={(e) => setFrom(e.currentTarget.value)} />
+                  <InputField label={t(S.to)} type="date" value={to} onChange={(e) => setTo(e.currentTarget.value)} />
+                </>
+              ) : undefined,
+            },
+            {
+              key: "status", label: t(S.status), value: status, onChange: setStatus,
+              options: [
+                { value: "booked", label: t(S.fBooked) },
+                { value: "checked-in", label: t(S.fCheckedIn) },
+                { value: "no-show", label: t(S.fNoShow) },
+              ],
+            },
+          ]}
+        />
+
+        {/* Chosen "Custom" but not yet finished filling it in — say what is still showing rather than
+            leaving the board looking filtered when it is not. */}
+        {when === "custom" && !customActive && (
+          <div className="board-notice">
+            <InlineAlert tone="info">{t(S.rangeIncomplete)}</InlineAlert>
+          </div>
+        )}
+
         <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.apptEmpty}>
-          {(rows) => (
-            <div aria-live="polite">
-              {desk.stale && <StatusChip kind="warn" label={t(S.stale)} />}
-              <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.apptTitle)} />
-            </div>
-          )}
+          {(rows) => {
+            const shown = visible(rows);
+            return (
+              <div aria-live="polite">
+                {desk.stale && <StatusChip kind="warn" label={t(S.stale)} />}
+                {shown.length === 0 ? (
+                  // Distinct from the empty board above: rows EXIST, the filters hid them. Telling the desk
+                  // "no appointments today" when they have simply filtered to a status with none is how
+                  // someone concludes the system lost their bookings.
+                  <InlineAlert tone="info">{t(S.noneMatch)}</InlineAlert>
+                ) : (
+                  <DataTable columns={cols} rows={shown} rowKey={(r) => r.id} caption={t(S.apptTitle)} />
+                )}
+              </div>
+            );
+          }}
         </AsyncSection>
       </Card>
     </>
@@ -189,79 +380,4 @@ function useDeskTransitions(reload: () => void) {
   }
 
   return { busy, stale, run };
-}
-
-/** Arrivals desk — Booked appointments with a check-in action (Booked → CheckedIn, enqueues a walk-in ticket). */
-export function ReceptionCheckIn() {
-  const api = useApi();
-  const t = useLoc();
-  const fmt = useFormat();   // 18.D2 (U7) — Cairo appointment times, app locale
-  const navigate = useNavigate();
-  const state = useAsync<AppointmentRow[]>(() => api.appointments("booked"), []);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [stale, setStale] = useState(false);
-
-  /**
-   * 18.D1 (audit R2 E3) — check-in renders SERVER-CONFIRMED state only.
-   *
-   * The rule: a read may be optimistic; a server-invariant operation (book, consume, dispense, decide,
-   * check-in, cancel) may not. This screen kept a local `done` set and painted a green "Checked in" chip from
-   * it. The chip was therefore a record of the request having been SENT, not of the patient having been
-   * checked in — and after a partial failure, a reload, or a concurrent transition elsewhere, the board and
-   * the truth disagreed with no way for the receptionist to tell. Now the call is followed by a reload and
-   * the chip is derived from the row's own status.
-   */
-  async function doCheckIn(row: AppointmentRow) {
-    setBusy(row.id);
-    setStale(false);
-    try {
-      // Echo the version we read (opt-in If-Match): a concurrent transition invalidates our board → 412.
-      await api.checkIn(row.id, row.rowVersion);
-      state.reload();
-    } catch (e) {
-      // 412 = the row moved under us (already checked in / rescheduled elsewhere). Re-load the board rather
-      // than double-acting; any other failure re-throws for the generic handler.
-      if (e instanceof ApiError && e.status === 412) {
-        setStale(true);
-        state.reload();
-      } else {
-        throw e;
-      }
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  const cols: Column<AppointmentRow>[] = [
-    ...boardColumns(t, fmt),
-    patientFileColumn(t, navigate),
-    {
-      key: "action",
-      header: t(S.action),
-      cell: (r) =>
-        // Derived from the row the SERVER returned, never from a local "we sent it" flag.
-        r.checkedIn ? (
-          <StatusChip kind="ok" label={t(S.checkedIn)} />
-        ) : (
-          <Button variant="primary" size="sm" loading={busy === r.id} disabled={!r.checkInEligible} onClick={() => void doCheckIn(r)}>
-            {t(S.checkIn)}
-          </Button>
-        ),
-    },
-  ];
-  return (
-    <>
-      <PageHeader title={t(S.checkinTitle)} />
-      <Card as="section" style={{ padding: "var(--sp3)" }}>
-        <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.checkinEmpty}>
-          {(rows) => (
-            <div aria-live="polite">
-              {stale && <StatusChip kind="warn" label={t(S.stale)} />}
-              <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.checkinTitle)} />
-            </div>
-          )}
-        </AsyncSection>
-      </Card>
-    </>
-  );
 }

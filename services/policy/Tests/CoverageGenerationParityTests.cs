@@ -16,6 +16,18 @@ namespace Mersal.Policy.Tests;
 ///
 /// So this projects real generated coverage into the engine's own view type and asserts the verdict, rather
 /// than asserting the two shapes look similar.
+///
+/// <para><b>24.3 — what this file does NOT prove, learned the hard way.</b> <see cref="Project"/> below is a
+/// hand-written stand-in for the projection step, and for two years that was the broken step. The generated
+/// coverage never reached eligibility-service at all (the enrolment path published a COUNT, and the
+/// projection is written only by <c>CoverageChanged</c>), and the projection had nowhere to carry the
+/// waiting-period boundary this helper passes in on line 58 — so a member inside their waiting period was
+/// told Eligible. Every test here passed throughout, because the helper does what the real projection
+/// <i>should</i> do. A test can only prove the seam it actually crosses: these prove the ENGINE agrees with
+/// generated coverage, which is worth proving and is not the same claim as the two services agreeing.
+/// The wire itself is proven by
+/// <see cref="EnrollmentPublishesCoverageTests"/> here and <c>EnrolledMemberEligibilityTests</c> in
+/// eligibility-service — producer side and consumer side, against real databases.</para>
 /// </summary>
 public class CoverageGenerationParityTests
 {

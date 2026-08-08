@@ -53,10 +53,27 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
         appt.Status = AppointmentStatus.CheckedIn;
         appt.UpdatedAt = now;
         appt.UpdatedBy = actor;
+        // 30.5c — the DURABLE arrival moment. updated_at is overwritten by every later transition, so it
+        // could never answer "how long did this person wait"; this column can (design 46 §7c). Set only on
+        // the first check-in, so a re-check-in cannot move an arrival that already happened.
+        appt.CheckedInAt ??= now;
+        appt.CheckedInBy ??= actor;
+        // Backfill the name for an appointment booked before 0013 carried one. `??=` deliberately: the name
+        // the appointment was BOOKED under wins, because that is what the patient was told and what the desk's
+        // list has been showing all morning — check-in must not quietly rewrite it.
+        if (string.IsNullOrWhiteSpace(appt.BeneficiaryName) && !string.IsNullOrWhiteSpace(displayName))
+            appt.BeneficiaryName = displayName.Trim();
         ApplyIfMatch(appt, ifMatch);
         db.Set<QueueTicket>().Add(new QueueTicket
         {
             QueueId = Guid.NewGuid(), AppointmentId = appt.AppointmentId, BeneficiaryId = appt.BeneficiaryId,
+            // 24.x — THE TICKET'S TENANT IS THE APPOINTMENT'S, and it is set here rather than left to the
+            // ambient stamper. The stamper fills a blank from RlsContext, which is empty on any path that
+            // does not run through UseHbmpRls — and a ticket written with tenant_id = '' belongs to nobody:
+            // invisible to every real tenant, so the person waiting simply disappears from the board. One
+            // such row was found on the dev database. The appointment is the authoritative source anyway;
+            // asking an ambient value for something the row already knows is how it went missing.
+            TenantId = appt.TenantId,
             ProviderId = appt.ProviderId, LocationId = appt.LocationId,
             // The ticket inherits the appointment's branch. GET /queues filters on exactly this column for a
             // BranchScoped caller, so a ticket without it is invisible to the desk that just created it.
@@ -69,8 +86,15 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
         return new TransitionResult(TransitionOutcome.Ok, appt);
     }
 
+    /// <param name="insideTransaction">24.x — run INSIDE this transaction, immediately before it commits, so
+    /// the domain event and the state change it announces are one fact or neither. The endpoint used to
+    /// enqueue after this returned, which is a second commit: a crash in between leaves a slot freed or a
+    /// booking moved with nothing downstream told. A callback rather than an outer transaction because this
+    /// runs under an execution strategy that may RETRY the delegate — a retry re-enqueues inside the new
+    /// transaction, which is right, where an outer transaction would have committed the first attempt's.</param>
     public async Task<TransitionResult> RescheduleAsync(
-        Guid appointmentId, Guid newSlotId, uint? ifMatch, DateTimeOffset now, string? actor = null, CancellationToken ct = default)
+        Guid appointmentId, Guid newSlotId, uint? ifMatch, DateTimeOffset now, string? actor = null,
+        Func<Appointment, CancellationToken, Task>? insideTransaction = null, CancellationToken ct = default)
     {
         var appt = await db.Appointments.FirstOrDefaultAsync(a => a.AppointmentId == appointmentId, ct);
         if (appt is null) return TransitionResult.Fail(TransitionOutcome.NotFound);
@@ -103,12 +127,28 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
             appt.SlotId = newSlotId;              // releasing the old slot is implicit (nothing else holds it)
             appt.ScheduledStart = newSlot.SlotStart;
             appt.ScheduledEnd = newSlot.SlotEnd;
+            // THE DOCTOR MOVES WITH THE SLOT.
+            //
+            // It did not, and the omission was invisible while the only way to reschedule was to pick another
+            // slot belonging to the same doctor — the UI filtered the picker by the appointment's own doctor,
+            // so the two could never disagree. The moment a desk can move a patient to a DIFFERENT
+            // practitioner, an appointment left pointing at its old doctor while sitting in a new doctor's
+            // slot is a row that contradicts itself: the board names one clinician and the session belongs to
+            // another, and the patient is called by neither.
+            //
+            // Assigned rather than coalesced: a slot with no doctor is a clinic-level session, and inheriting
+            // the previous doctor onto it would assert a clinician who is not the one holding the slot.
+            appt.DoctorId = newSlot.DoctorId;
             appt.UpdatedAt = now;
             appt.UpdatedBy = actor;
             ApplyIfMatch(appt, ifMatch);
             try
             {
                 await db.SaveChangesAsync(ct);
+                // ONCE. This line was written twice, so every reschedule enqueued `ApptRescheduled` twice —
+                // and consumer dedupe could not save it, because each enqueue mints its own event id, so the
+                // two are indistinguishable from two genuine reschedules to every subscriber downstream.
+                if (insideTransaction is not null) await insideTransaction(appt, ct);
                 await tx.CommitAsync(ct);
                 return new TransitionResult(TransitionOutcome.Ok, appt);
             }
@@ -123,8 +163,15 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
     /// tickets, waitlist promotion), so a failure between them left an appointment cancelled with a
     /// live queue ticket, or a waitlist entry promoted against a cancel that never landed.
     /// </summary>
+    /// <param name="insideTransaction">24.x — run INSIDE this transaction, immediately before it commits, so
+    /// the domain event and the state change it announces are one fact or neither. The endpoint used to
+    /// enqueue after this returned, which is a second commit: a crash in between leaves a slot freed or a
+    /// booking moved with nothing downstream told. A callback rather than an outer transaction because this
+    /// runs under an execution strategy that may RETRY the delegate — a retry re-enqueues inside the new
+    /// transaction, which is right, where an outer transaction would have committed the first attempt's.</param>
     public async Task<TransitionResult> CancelAsync(
-        Guid appointmentId, string? reason, uint? ifMatch, DateTimeOffset now, string? actor = null, CancellationToken ct = default)
+        Guid appointmentId, string? reason, uint? ifMatch, DateTimeOffset now, string? actor = null,
+        Func<Appointment, WaitlistEntry?, CancellationToken, Task>? insideTransaction = null, CancellationToken ct = default)
     {
         return await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
@@ -149,14 +196,22 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
             }
 
             var promoted = freedSlot ? await PromoteWaitlistAsync(appt, ct) : null;
+            if (insideTransaction is not null) await insideTransaction(appt, promoted, ct);
             await tx.CommitAsync(ct);
             return new TransitionResult(TransitionOutcome.Ok, appt, promoted);
         });
     }
 
     /// <summary>18.A3: no-show is ONE transaction, for the same reason as <see cref="CancelAsync"/>.</summary>
+    /// <param name="insideTransaction">24.x — run INSIDE this transaction, immediately before it commits, so
+    /// the domain event and the state change it announces are one fact or neither. The endpoint used to
+    /// enqueue after this returned, which is a second commit: a crash in between leaves a slot freed or a
+    /// booking moved with nothing downstream told. A callback rather than an outer transaction because this
+    /// runs under an execution strategy that may RETRY the delegate — a retry re-enqueues inside the new
+    /// transaction, which is right, where an outer transaction would have committed the first attempt's.</param>
     public async Task<TransitionResult> NoShowAsync(
-        Guid appointmentId, uint? ifMatch, DateTimeOffset now, TimeSpan grace, string? actor = null, CancellationToken ct = default)
+        Guid appointmentId, uint? ifMatch, DateTimeOffset now, TimeSpan grace, string? actor = null,
+        Func<Appointment, int, WaitlistEntry?, CancellationToken, Task>? insideTransaction = null, CancellationToken ct = default)
     {
         return await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
@@ -182,6 +237,9 @@ public sealed class AppointmentTransitionService(EmrDbContext db)
             var promoted = await PromoteWaitlistAsync(appt, ct);   // free the slot for backfill
             var noShowCount = await db.Appointments.CountAsync(
                 a => a.BeneficiaryId == appt.BeneficiaryId && a.Status == AppointmentStatus.NoShow, ct);
+            // The tally is passed in because the repeat-no-show event depends on it, and it is only
+            // knowable here — inside the transaction, after the status write that changes it.
+            if (insideTransaction is not null) await insideTransaction(appt, noShowCount, promoted, ct);
             await tx.CommitAsync(ct);
             return new TransitionResult(TransitionOutcome.Ok, appt, promoted, noShowCount);
         });

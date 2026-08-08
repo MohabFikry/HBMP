@@ -176,6 +176,59 @@ public class DecisionIntegrationTests
         finally { await Cleanup(tenant); }
     }
 
+    /// <summary>
+    /// The same double-decision as the concurrency test above, but SEQUENTIAL — and it is the sequential
+    /// case that matters, because it is the one that actually happens.
+    ///
+    /// <para>Two officers deciding one line were only ever stopped by an optimistic-concurrency collision on
+    /// <c>claim_line.xmin</c>, which fires when their transactions OVERLAP. Nothing refused a second decision
+    /// on a line that already had a terminal one. So the guard held whenever the two requests raced and
+    /// vanished whenever they merely followed one another — which is the ordinary case: two officers working
+    /// the same worklist a second apart, or one retrying after a timeout on a request that had in fact
+    /// succeeded.</para>
+    ///
+    /// <para>The consequence is money. The second decision appends another <c>claim_decision</c> row and
+    /// overwrites <c>claim_line.allowed_amount</c>, so the settled figure is whichever officer happened to
+    /// go last, with the first decision still in the append-only ledger looking authoritative.</para>
+    ///
+    /// <para>Found because the concurrency test failed on CI's faster runner — where the two tasks completed
+    /// far enough apart to serialise — while passing locally. A test that only fails when the timing is
+    /// unlucky is a test that describes the bug it was written to prevent.</para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_second_officer_cannot_decide_a_line_that_is_already_decided()
+    {
+        Skip.If(Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
+        var tenant = T();
+        try
+        {
+            var (claimId, lineId, _) = await Seed(tenant, "system");
+
+            await using (var db = Ctx())
+            {
+                var first = await Svc(db).DecideAsync(tenant, "officer-0", null, claimId, lineId,
+                    Approve(), "seq-key-0", 1_000_000m, "c");
+                first.Outcome.Should().Be(DecisionOutcome.Recorded);
+            }
+
+            // A completely separate context, after the first has committed — no overlap, so no xmin
+            // collision to lean on. Different actor and different key, so neither the SoD-same-decider
+            // check nor the idempotency replay applies. Only an explicit "already decided" rule can refuse.
+            await using (var db = Ctx())
+            {
+                var second = await Svc(db).DecideAsync(tenant, "officer-1", null, claimId, lineId,
+                    Approve(), "seq-key-1", 1_000_000m, "c");
+                second.Outcome.Should().Be(DecisionOutcome.Conflict,
+                    "a line with a terminal decision is closed to further decisions; re-opening one is what " +
+                    "the appeal flow is for (AppealService.RaiseAsync), and it goes through a different door");
+            }
+
+            (await Ctx().ClaimDecisions.CountAsync(d => d.ClaimLineId == lineId)).Should().Be(1,
+                "a second decision row on a decided line makes the settled amount depend on who went last");
+        }
+        finally { await Cleanup(tenant); }
+    }
+
     private static string T() => "t-" + Guid.NewGuid().ToString("N")[..10];
 
     private static async Task Cleanup(string tenant)

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useFormat } from "../i18n/useFormat";
-import { Button, Card, DataTable, InlineAlert, InputField, KpiCard, StatusChip, TextareaField, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, InputField, KpiCard, StatusChip, TextareaField, useTheme } from "@mersal/design-system";
 import { useWrite, writeErrorText } from "../api/useWrite";
 import type { Column } from "@mersal/design-system";
 import type { ApprovalItem, Localized, TatSummary } from "@mersal/contracts";
@@ -9,7 +9,7 @@ import { useAsync } from "../api/useAsync";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
-  slaTitle: { en: "SLA / TAT board", ar: "لوحة الاستجابة" },
+  slaTitle: { en: "SLA / TAT Board", ar: "لوحة الاستجابة" },
   slaEmpty: { en: "No decided authorizations to report on yet.", ar: "لا توجد موافقات مُقرّرة بعد." },
   total: { en: "Decided", ar: "تم البت فيها" },
   avg: { en: "Avg TAT (min)", ar: "متوسط الاستجابة (د)" },
@@ -18,7 +18,7 @@ const S = {
   status: { en: "Status", ar: "الحالة" },
   count: { en: "Count", ar: "العدد" },
 
-  manualTitle: { en: "Manual authorization", ar: "تفويض يدوي" },
+  manualTitle: { en: "Manual Authorization", ar: "تفويض يدوي" },
   beneficiary: { en: "Beneficiary ID", ar: "معرّف المستفيد" },
   codes: { en: "Service codes (comma-separated)", ar: "رموز الخدمات (مفصولة بفواصل)" },
   justification: { en: "Justification", ar: "المبرر" },
@@ -26,7 +26,7 @@ const S = {
   created: { en: "Manual authorization created — flagged for retrospective review.", ar: "تم إنشاء التفويض — مُعلّم للمراجعة اللاحقة." },
   needFields: { en: "Beneficiary, at least one code, and a justification are required.", ar: "المستفيد ورمز واحد على الأقل والمبرر مطلوبة." },
 
-  emgTitle: { en: "Emergency / override", ar: "طارئ / تجاوز" },
+  emgTitle: { en: "Emergency / Override", ar: "طارئ / تجاوز" },
   emgEmpty: { en: "No pending authorizations.", ar: "لا توجد موافقات معلّقة." },
   patient: { en: "Patient", ar: "المريض" },
   service: { en: "Service", ar: "الخدمة" },
@@ -48,8 +48,8 @@ export function ApprovalsSla() {
   const cols: Column<TatSummary["byStatus"][number]>[] = [
     { key: "status", header: t(S.status), cell: (r) => r.status },
     { key: "count", header: t(S.count), cell: (r) => <span className="tnum">{r.count}</span> },
-    { key: "avg", header: t(S.avg), cell: (r) => <span className="tnum">{fmt.number(Math.round(r.avgMinutes))}</span> },
-    { key: "p95", header: t(S.p95), cell: (r) => <span className="tnum">{fmt.number(Math.round(r.p95Minutes))}</span> },
+    { key: "avg", header: t(S.avg), cell: (r) => fmt.number(Math.round(r.avgMinutes)), numeric: true },
+    { key: "p95", header: t(S.p95), cell: (r) => fmt.number(Math.round(r.p95Minutes)), numeric: true },
     { key: "breaches", header: t(S.breaches), cell: (r) => <span className="tnum">{r.breaches}</span> },
   ];
   return (
@@ -119,7 +119,8 @@ export function ApprovalsManual() {
                 differently from a dropped connection, because they demand opposite actions. */}
             {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
             {status === "done" && <StatusChip kind="ok" label={t(S.created)} />}
-            <div><Button type="submit" variant="primary" loading={status === "saving"}>{t(S.create)}</Button></div>
+            <div><Button type="submit" variant="primary"
+              leadingIcon={<Icon name="plus" />} loading={status === "saving"}>{t(S.create)}</Button></div>
           </div>
         </form>
       </Card>
@@ -164,7 +165,8 @@ export function ApprovalsEmergency() {
           <div className="stack" style={{ gap: "var(--sp2)", minWidth: 260 }}>
             <InputField label={t(S.emgJust)} value={reason} onChange={(e) => setReason(e.currentTarget.value)} autoComplete="off" />
             <div style={{ display: "flex", gap: "var(--sp2)" }}>
-              <Button variant="primary" size="sm" loading={busy} onClick={() => void confirm(r.id)}>{t(S.confirm)}</Button>
+              <Button variant="primary"
+              leadingIcon={<Icon name="check2" />} size="sm" loading={busy} onClick={() => void confirm(r.id)}>{t(S.confirm)}</Button>
               <Button variant="ghost" size="sm" onClick={() => { setActive(null); setReason(""); }}>{t(S.cancel)}</Button>
             </div>
           </div>

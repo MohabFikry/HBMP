@@ -31,4 +31,19 @@ public static class AppointmentDay
         var end = new DateTimeOffset(next.ToDateTime(TimeOnly.MinValue), offsetFor(next));
         return (start, end);
     }
+
+    /// <summary>
+    /// The window covering an INCLUSIVE range of Cairo civil days (14.5 — the board's custom date filter).
+    ///
+    /// <para>Inclusive of both ends, which is the only reading an operator has: someone who filters "Sunday to
+    /// Thursday" means Thursday's evening clinic too, and a half-open range would silently drop it. So the end
+    /// is <paramref name="toInstant"/>'s day END, not its start — the same expansion a single-day filter
+    /// already performs, applied to the far end of the range.</para>
+    ///
+    /// <para>Each end resolves its own offset, so a range that straddles a DST change is still exactly the
+    /// days asked for rather than an hour short or long.</para>
+    /// </summary>
+    public static (DateTimeOffset Start, DateTimeOffset End) CairoRange(
+        DateTimeOffset fromInstant, DateTimeOffset toInstant, Func<DateOnly, TimeSpan> offsetFor) =>
+        (CairoWindow(fromInstant, offsetFor).Start, CairoWindow(toInstant, offsetFor).End);
 }

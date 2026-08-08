@@ -42,6 +42,11 @@ builder.Services.ConfigureHttpJsonOptions(o =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Readiness for the probe in infra/helm/rollout/rollout-template.yaml. Process-level only: this reports
+// "through startup and able to serve". A dependency check here would pull the pod out of rotation for a
+// condition the service already surfaces per-request, turning a partial degradation into a total outage.
+builder.Services.AddHealthChecks();
+
 var app = builder.Build();
 app.UseHbmpTransportSecurity(); // HSTS + HTTPS redirect outside Development (16.5, H8)
 app.UseExceptionHandler();
@@ -52,6 +57,9 @@ app.UseHbmpRls(); // bind app.tenant_id / app.provider_id GUCs from the principa
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "patient-service" })).AllowAnonymous();
+// Without this the readinessProbe 404s and the canary rollout waits forever on a healthy pod. Anonymous
+// because kubelet carries no bearer token.
+app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 // 18.B3 (audit R2 S6) — reads and writes are no longer the same permission.
 //
@@ -64,13 +72,14 @@ var read = app.MapGroup("/api/v1/beneficiaries").RequireAuthorization(HbmpPolici
 
 // POST /beneficiaries — register (Idempotency-Key required); 201 + ETag, or 409 duplicate, or 400.
 v1.MapPost("", async (
-    RegisterBeneficiaryRequest req, HttpRequest http,
+    RegisterRequest body, HttpRequest http,
     BeneficiaryRegistrar registrar, PatientDbContext db, IAuditClient audit, IOutbox outbox,
     IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(http.Headers["Idempotency-Key"]))
         return Results.Problem(statusCode: 400, title: "Idempotency-Key header is required", type: "urn:hbmp:idempotency-required");
 
+    var req = body.ToDomain();
     var actor = me.Principal?.Subject;
     var result = await registrar.RegisterAsync(req, actor, ct);
 
@@ -85,18 +94,67 @@ v1.MapPost("", async (
                 type: "urn:hbmp:duplicate-identifier",
                 extensions: new Dictionary<string, object?> { ["existingBeneficiaryId"] = dup.ExistingBeneficiaryId });
 
+        // Its own problem type, because its remedy is its own. A duplicate IDENTIFIER means this is the same
+        // person and the operator should open them; a duplicate CARD usually means the card was mis-read, or
+        // re-issued without the old one being retired — and telling the operator to "open the existing
+        // record" would be wrong advice for a genuinely different person holding a recycled card.
+        case RegistrationResult.DuplicateCardNumber card:
+            return Results.Problem(statusCode: 409, title: "duplicate-card-number",
+                detail: $"card number '{card.CardNumber}' is already held by beneficiary {card.ExistingBeneficiaryId}",
+                type: "urn:hbmp:duplicate-card-number",
+                extensions: new Dictionary<string, object?> { ["existingBeneficiaryId"] = card.ExistingBeneficiaryId });
+
         case RegistrationResult.Created created:
+        {
             db.Beneficiaries.Add(created.Beneficiary);
             // The registration APPLICATION opens with the person, in the same transaction. Until now nothing
             // created these rows — the approval endpoints existed but the worklist behind US-003 was empty
             // unless someone hand-called POST /registrations, which no screen did. A beneficiary without an
             // open application is a person nobody is going to review.
+            var registrationId = Guid.NewGuid();
             db.Registrations.Add(new Registration
             {
-                RegistrationId = Guid.NewGuid(), BeneficiaryId = created.Beneficiary.BeneficiaryId,
+                RegistrationId = registrationId, BeneficiaryId = created.Beneficiary.BeneficiaryId,
                 TenantId = created.Beneficiary.TenantId, Status = RegistrationStatus.Pending,
+                // The elected coverage IS the coverage binding US-003 asks the approver to confirm. Recording
+                // it as bound here is not skipping the guard: the guard asks whether a policy has been chosen,
+                // and one now has been, in a row the approver can read. What remains a supervisor's is the
+                // DECISION, which is unchanged.
+                CoverageBound = created.Intent is not null,
+                // WHO filed it, stamped here rather than looked up later. This is the address a RequestInfo
+                // decision is delivered to: without it the supervisor can ask for more information and the
+                // platform has no queue to put the request in.
+                CreatedBy = actor, CreatedByName = me.Principal?.DisplayName,
                 CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow(),
             });
+
+            // 24.3 — the registration and BeneficiaryRegistered commit together. A registration whose
+            // event is lost never reaches eligibility's member projection: the person exists here and is
+            // unknown at every desk that checks them.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            if (created.Intent is { } intent)
+            {
+                db.EnrolmentIntents.Add(new EnrolmentIntent
+                {
+                    RegistrationId = registrationId, TenantId = created.Beneficiary.TenantId,
+                    PlanId = intent.PlanId, NetworkTierId = intent.NetworkTierId,
+                    ContributionPercent = intent.ContributionPercent, DefaultBranchId = intent.DefaultBranchId,
+                    CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow(),
+                });
+            }
+
+            foreach (var note in created.Notes)
+            {
+                db.RegistrationNotes.Add(new RegistrationNote
+                {
+                    RegistrationId = registrationId, TenantId = created.Beneficiary.TenantId,
+                    Slot = note.Slot, Value = note.Value,
+                    // Taken from the SLOT, never from the request. A client that could name the visibility
+                    // could file a diagnosis as administrative and route it around the clinical rule.
+                    Visibility = RegistrationNoteSlots.VisibilityOf(note.Slot),
+                    CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow(),
+                });
+            }
             await db.SaveChangesAsync(ct);
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -111,15 +169,19 @@ v1.MapPost("", async (
                     tenantId = created.Beneficiary.TenantId,
                     beneficiaryId = created.Beneficiary.BeneficiaryId,
                     status = "Pending",
+                    cardNumber = created.Beneficiary.CardNumber,
                     givenName = created.Beneficiary.GivenName,
+                    middleName = created.Beneficiary.MiddleName,
                     familyName = created.Beneficiary.FamilyName,
                     primaryPhone = created.Beneficiary.Contacts.FirstOrDefault(c => c.IsPrimary)?.Value
                                    ?? created.Beneficiary.Contacts.FirstOrDefault()?.Value,
                     identifiers = created.Beneficiary.Identifiers.Select(i => new { type = i.IdentifierType.ToString(), value = i.IdentifierValue }),
                 }, ct);
 
+            await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/beneficiaries/{created.Beneficiary.BeneficiaryId}",
                 BeneficiaryDto.From(created.Beneficiary));
+        }
 
         default:
             return Results.Problem(statusCode: 500, title: "unexpected");
@@ -173,6 +235,101 @@ read.MapGet("", async (string? identifierType, string? identifierValue, string? 
     return Results.Ok(new { page = p, pageSize = ps, items = disclosed });
 });
 
+// ================================================================ RESOLVE (26.6, doc 43 §7)
+//
+// GET /beneficiaries/resolve — find ONE beneficiary from the identifiers a counter can read off a document.
+//
+// THIS ENDPOINT DID NOT EXIST, AND WAS ALREADY BEING CALLED. pharmacy-service has called
+// `/api/v1/beneficiaries/resolve?policyNo=&passport=&memberNo=` since phase 6; the call 404'd, the client
+// swallowed it, and those search arms silently returned nothing. A client calling a non-existent endpoint
+// and failing quietly is worse than an absent feature, because the feature looks present.
+//
+// TWO IDENTIFIERS ARE REQUIRED, and the reason is specific to what a card is. A card number is printed on
+// something that gets shared, photographed and reused — it is a lookup key, not an authenticator (doc 43 §7,
+// D5). One number should not be enough to pull up a person.
+//
+// NOTE ON PROVENANCE: doc 43 D5 says to reuse "the call-centre ≥2-identifier rule, already built and
+// tested". It no longer exists. Phase 15's threshold was deliberately deleted along with the on-screen
+// challenge it belonged to — VerificationPolicy's own comment explains that a minimum on a set nobody
+// submits is "the shape of a control" rather than a control. So the rule is implemented here, against the
+// identifiers this endpoint actually receives, rather than reused from something that would not have run.
+read.MapGet("/resolve", async (
+    string? cardNumber, string? memberNo, string? passport, string? nationalId, string? unhcrNo, string? dateOfBirth,
+    PatientDbContext db, BeneficiaryReadGuard guard, CancellationToken ct) =>
+{
+    // Which identifier TYPES were supplied. Types only — the values are never logged or echoed back, the
+    // same privacy rule phase 15 applied to verification.
+    var supplied = new List<string>();
+    if (!string.IsNullOrWhiteSpace(cardNumber)) supplied.Add("CardNumber");
+    if (!string.IsNullOrWhiteSpace(memberNo)) supplied.Add("MemberNo");
+    if (!string.IsNullOrWhiteSpace(passport)) supplied.Add("Passport");
+    if (!string.IsNullOrWhiteSpace(nationalId)) supplied.Add("NationalID");
+    if (!string.IsNullOrWhiteSpace(unhcrNo)) supplied.Add("UNHCRNo");
+    if (!string.IsNullOrWhiteSpace(dateOfBirth)) supplied.Add("DateOfBirth");
+
+    if (supplied.Count < 2)
+    {
+        return Results.Problem(
+            statusCode: 422, title: "two-identifiers-required", type: "urn:hbmp:two-identifiers-required",
+            detail: "Resolving a beneficiary requires at least two identifiers. "
+                    + "A card number alone is a lookup key, not proof of identity.");
+    }
+
+    var q = db.Beneficiaries.AsNoTracking().Where(x => !x.IsDeleted);
+
+    if (!string.IsNullOrWhiteSpace(cardNumber))
+    {
+        // Normalized on both sides, so "#A-1234", "a 1234" and "A1234" resolve to the one card rather than
+        // to nothing — the same normalization the uniqueness index was built on.
+        var card = PersonFieldValidation.NormalizeCardNumber(cardNumber);
+        q = q.Where(x => x.CardNumber != null && EF.Functions.ILike(x.CardNumber, card));
+    }
+    if (!string.IsNullOrWhiteSpace(memberNo))
+    {
+        var member = IdentifierValidation.Normalize(memberNo);
+        q = q.Where(x => x.MemberNo != null && EF.Functions.ILike(x.MemberNo, member));
+    }
+    if (!string.IsNullOrWhiteSpace(dateOfBirth) && DateOnly.TryParse(dateOfBirth, out var dob))
+    {
+        q = q.Where(x => x.BirthDate == dob);
+    }
+
+    foreach (var (value, type) in new[]
+             {
+                 (passport, IdentifierType.Passport),
+                 (nationalId, IdentifierType.NationalID),
+                 (unhcrNo, IdentifierType.UNHCRNo),
+             })
+    {
+        if (string.IsNullOrWhiteSpace(value)) continue;
+        var norm = IdentifierValidation.Normalize(value);
+        var ids = db.Identifiers
+            .Where(i => i.IdentifierType == type && i.IdentifierValue == norm && !i.IsDeleted)
+            .Select(i => i.BeneficiaryId);
+        q = q.Where(x => ids.Contains(x.BeneficiaryId));
+    }
+
+    // Every supplied identifier must match the SAME person — the filters are ANDed above. Two identifiers
+    // that each match a different beneficiary resolve to nobody, which is the correct answer.
+    var matches = await q.Include(x => x.Identifiers).Include(x => x.Contacts).Take(2).ToListAsync(ct);
+
+    // Ambiguity is not a match. Returning the first of two would be a coin toss over whose record is opened.
+    if (matches.Count != 1)
+    {
+        return Results.Problem(
+            statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found",
+            detail: matches.Count > 1 ? "More than one beneficiary matches those identifiers." : null);
+    }
+
+    var b = matches[0];
+    if (await guard.AuthorizeAsync(b, ct) is { } denied) return denied;
+
+    // Audited as a PHI read, through the same guard as every other disclosure, tagged with the identifier
+    // TYPES used and never their values.
+    var disclosed = await guard.DiscloseAsync(b, $"resolve[{string.Join('+', supplied)}]", ct);
+    return Results.Ok(new { beneficiaryId = b.BeneficiaryId, matchedOn = supplied, beneficiary = disclosed });
+});
+
 // GET /beneficiaries/{id} — engine-authorized, tenant-scoped, audited, field-projected (18.B3 / S6).
 read.MapGet("/{id:guid}", async (Guid id, PatientDbContext db, BeneficiaryReadGuard guard, CancellationToken ct) =>
 {
@@ -181,6 +338,86 @@ read.MapGet("/{id:guid}", async (Guid id, PatientDbContext db, BeneficiaryReadGu
     if (b is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
     if (await guard.AuthorizeAsync(b, ct) is { } denied) return denied;
     return Results.Ok(await guard.DiscloseAsync(b, "by-id", ct));
+});
+
+// ================================================================ CORRECTING THE IDENTITY RECORD (US-002)
+//
+// A registration captures twenty-two fields from documents in a second language, transcribed at a busy desk.
+// Some of them will be wrong, and until now NOTHING could fix them: the only writes on a beneficiary were
+// register (once), status (its own transition table) and the bulk by-card upsert. An officer who mistyped a
+// birth date had to ask for a re-import of a file they may not have.
+//
+// PATCH, and partial by construction: only the properties present in the body are written, so a form that
+// shows five fields cannot blank the four it did not. `patient:write`, which both beneficiary management and
+// its supervisor hold — the field-level rule that matters is the READ projection, and it is unchanged.
+//
+// NOT editable here, each for its own reason:
+//   · cardNumber — uniquely indexed among live rows. Moving a card between people is a benefit leak, and a
+//     collision is a conflict for a human, not something to resolve by overwriting somebody's identity.
+//   · status — has a legal-transition table and its own endpoint (23 §1).
+//   · identifiers — adding or retiring an identity document is a different act from fixing a typo, and it
+//     carries the duplicate check the registrar owns.
+v1.MapPatch("/{id:guid}", async (Guid id, BeneficiaryEdit req, PatientDbContext db, IAuditClient audit,
+    IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+{
+    var b = await db.Beneficiaries.FirstOrDefaultAsync(x => x.BeneficiaryId == id && !x.IsDeleted, ct);
+    if (b is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+    var errors = BeneficiaryEditRules.Validate(req, clock.GetUtcNow());
+    if (errors.Count > 0) return Results.ValidationProblem(errors.ToDictionary(e => e, e => new[] { e }));
+
+    // The BEFORE state is captured from the row as loaded, and only over the fields this request touches.
+    // A diff of the whole record would bury one corrected letter in twenty unchanged fields, and the audit
+    // trail's job here is to answer "what did they change", not "what did the row look like".
+    var changes = BeneficiaryEditRules.Apply(b, req);
+    if (changes.Count == 0)
+        return Results.Ok(new { b.BeneficiaryId, changed = Array.Empty<string>() });
+
+    var actor = me.Principal?.Subject;
+    b.UpdatedBy = actor;
+    b.UpdatedAt = clock.GetUtcNow();
+    // `beneficiary_history` is written by a trigger on every UPDATE (migration 0001), so the row-level
+    // snapshot happens whether or not this endpoint remembers to. What is added here is the FIELD-LEVEL
+    // account — which values moved, from what, to what — because a snapshot answers "what is it now" and an
+    // operator asking "who changed this birth date" needs the other question answered.
+    // INV-OUTBOX-SURVIVES-CRASH — the correction and the event it announces commit together.
+    //
+    // `EfOutbox.EnqueueRawAsync` runs its own SaveChanges, so without this the update and the enqueue are two
+    // separate commits. A process kill between them leaves the date of birth changed and the event gone, with
+    // nothing recording it was owed — so the member's Logs tab would show the record as it always was, and no
+    // relay, retry or replay would ever produce the missing entry. Enqueue-first is the mirror failure: a
+    // timeline entry for a correction that never landed.
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
+    await db.SaveChangesAsync(ct);
+
+    await audit.EmitAsync(new AuditEventDraft
+    {
+        EntityType = "beneficiary", EntityId = id.ToString(), Action = AuditAction.Update,
+        ActorUserId = actor, TenantId = b.TenantId,
+        BeforeState = BeneficiaryEditRules.Describe(changes, before: true),
+        AfterState = BeneficiaryEditRules.Describe(changes, before: false),
+        DecisionOutcome = "corrected",
+        // Names and dates of birth are pii/identity, and this says so rather than leaving a reviewer to infer
+        // it from the field names.
+        FieldClasses = ["identity", "pii"],
+    }, ct);
+
+    // The member's LOGS tab lives in policy-service, which owns the timeline for a membership. A correction
+    // to the identity record is part of that story — an officer reading "why does this member's date of birth
+    // differ from the card" needs to see the edit that caused it — and patient-service cannot write into
+    // another service's projection, so it publishes and policy projects.
+    await outbox.EnqueueAsync("BeneficiaryDetailsCorrected", "policy.beneficiary-events", new
+    {
+        tenantId = b.TenantId,
+        beneficiaryId = b.BeneficiaryId,
+        changedFields = changes.Select(c => c.Field).ToArray(),
+        actorUserId = actor,
+        actorName = me.Principal?.DisplayName,
+        occurredAt = b.UpdatedAt,
+    }, ct);
+    await tx.CommitAsync(ct);
+
+    return Results.Ok(new { b.BeneficiaryId, changed = changes.Select(c => c.Field).ToArray() });
 });
 
 // ================================================================ REGISTRATION WORKFLOW (1.4, US-003/004)
@@ -192,9 +429,15 @@ var regRead = app.MapGroup("/api/v1/registrations").RequireAuthorization(HbmpPol
 // person the queue cannot show is a person nobody reviews. Reads take patient:read; every disclosed row is
 // engine-authorized and PHI-read-audited individually, exactly as the directory search is, and rows the
 // caller may not read are dropped rather than 403ing the page.
-regRead.MapGet("", async (int? page, int? pageSize, PatientDbContext db, BeneficiaryReadGuard guard, CancellationToken ct) =>
+regRead.MapGet("", async (int? page, int? pageSize, PatientDbContext db, BeneficiaryReadGuard guard,
+    IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
     var (p, ps) = (Math.Max(page ?? 1, 1), Math.Clamp(pageSize ?? 25, 1, 100));
+
+    // The size of the queue, not the size of the page. A pager that can only say "next" cannot say how much
+    // work is left, and "23 of 210" is the number the supervisor is actually managing against.
+    var total = await db.Beneficiaries.AsNoTracking()
+        .CountAsync(x => !x.IsDeleted && x.Status == BeneficiaryStatus.Pending, ct);
 
     // Oldest first: this is a queue, and a queue that shows the newest first starves whoever arrived first.
     var pending = await db.Beneficiaries.AsNoTracking()
@@ -210,6 +453,30 @@ regRead.MapGet("", async (int? page, int? pageSize, PatientDbContext db, Benefic
             .ToListAsync(ct))
         .GroupBy(r => r.BeneficiaryId)
         .ToDictionary(gr => gr.Key, gr => gr.OrderByDescending(r => r.CreatedAt).First());
+
+    // The elected coverage and the standing notes, fetched once for the page rather than per row.
+    var regIds = latest.Values.Select(r => r.RegistrationId).ToList();
+    var intents = await db.EnrolmentIntents.AsNoTracking()
+        .Where(x => regIds.Contains(x.RegistrationId)).ToDictionaryAsync(x => x.RegistrationId, ct);
+    var noteRows = (await db.RegistrationNotes.AsNoTracking()
+            .Where(x => regIds.Contains(x.RegistrationId)).ToListAsync(ct))
+        .GroupBy(x => x.RegistrationId)
+        .ToDictionary(gr => gr.Key, gr => gr.OrderBy(n => n.Slot).ToList());
+
+    // How many entries the conversation holds, so the worklist's note affordance can say whether opening it
+    // is worth the click. The bodies stay behind GET /{id}/thread: a queue of twenty rows would otherwise
+    // ship twenty conversations nobody has asked to read.
+    var threadCounts = (await db.RegistrationThread.AsNoTracking()
+            .Where(x => regIds.Contains(x.RegistrationId))
+            .GroupBy(x => x.RegistrationId)
+            .Select(gr => new { RegistrationId = gr.Key, Count = gr.Count() })
+            .ToListAsync(ct))
+        .ToDictionary(x => x.RegistrationId, x => x.Count);
+
+    // Whether THIS caller may read the clinical slots. The approver is an administrative role, so by default
+    // they may not — slot 1 is a diagnosis and slot 3 a treatment, and 18-security-model.md does not make an
+    // exception for the fact that an administrator typed them in. Capture is not disclosure.
+    var mayReadClinical = NoteProjection.MayReadClinical(me.Principal?.Roles);
 
     var items = new List<object>();
     foreach (var b in pending)
@@ -227,11 +494,32 @@ regRead.MapGet("", async (int? page, int? pageSize, PatientDbContext db, Benefic
                 r.DocumentsVerified,
                 r.CoverageBound,
                 r.Notes,
+                // WHEN the application was filed and by WHOM. The queue is ordered oldest-first and could not
+                // show either, so "how long has this person been waiting" and "who do I ask about it" were
+                // both answerable only from the audit trail — which is evidence, not an operational field.
+                r.CreatedAt,
+                r.CreatedBy,
+                r.CreatedByName,
                 r.UpdatedAt,
+                threadCount = threadCounts.GetValueOrDefault(r.RegistrationId, 0),
+                // What the supervisor is actually approving. Deciding on a registration without being shown
+                // the plan, the tier and the member's share is deciding on a name and a checkbox.
+                enrolment = intents.TryGetValue(r.RegistrationId, out var intent)
+                    ? new
+                    {
+                        intent.PlanId, intent.NetworkTierId,
+                        intent.ContributionPercent, intent.DefaultBranchId,
+                    }
+                    : null,
+                standingNotes = NoteProjection.Project(
+                    noteRows.GetValueOrDefault(r.RegistrationId, []), mayReadClinical),
             },
         });
     }
-    return Results.Ok(new { page = p, pageSize = ps, items });
+    // `total` counts the queue; `items` is what THIS caller may read of this page. They differ when the
+    // engine drops a row, and reporting the post-filter count as the total would silently shrink the queue
+    // for a scoped user — a number that says "you are nearly done" when they are not.
+    return Results.Ok(new { page = p, pageSize = ps, total, items });
 });
 
 // Create a registration for an existing (Pending) beneficiary — the re-review path (a Rejected application
@@ -249,7 +537,14 @@ reg.MapPost("", async (CreateRegistration req, HttpRequest http, PatientDbContex
     // TenantId comes from the beneficiary. It used to be left at its CLR default (""), which the FORCED RLS
     // policy on patient.registration refuses to insert under the NOBYPASSRLS runtime role — the endpoint
     // only ever worked in tests, which connect as the table owner and bypass the policy entirely.
-    var r = new Registration { RegistrationId = Guid.NewGuid(), BeneficiaryId = req.BeneficiaryId, TenantId = beneficiary.TenantId, Status = RegistrationStatus.Pending, CreatedAt = now, UpdatedAt = now };
+    var r = new Registration
+    {
+        RegistrationId = Guid.NewGuid(), BeneficiaryId = req.BeneficiaryId, TenantId = beneficiary.TenantId,
+        Status = RegistrationStatus.Pending,
+        // A re-review is filed by whoever opened it, which is who a follow-up question goes back to.
+        CreatedBy = me.Principal?.Subject, CreatedByName = me.Principal?.DisplayName,
+        CreatedAt = now, UpdatedAt = now,
+    };
     db.Registrations.Add(r);
     await db.SaveChangesAsync(ct);
     await audit.EmitAsync(new AuditEventDraft { EntityType = "registration", EntityId = r.RegistrationId.ToString(), Action = AuditAction.Create, ActorUserId = me.Principal?.Subject }, ct);
@@ -293,14 +588,61 @@ reg.MapPost("/{id:guid}/decision", async (Guid id, DecisionRequest req, PatientD
     var r = await db.Registrations.FirstOrDefaultAsync(x => x.RegistrationId == id, ct);
     if (r is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
+    // ── THE ACTUAL SEPARATION OF DUTIES ─────────────────────────────────────────────────────────────────────
+    //
+    // US-003's rule is that the person who registered someone and vouched for their documents must not be the
+    // person who activates them. The role check above never tested that — it asks "are you a supervisor",
+    // which is a different question — and the rule was held up instead by withholding the register pen from
+    // the supervisor's MENU. A menu is not an enforcement boundary: the registration endpoint was reachable
+    // by anyone holding `patient:write`, which a supervisor does, so a determined supervisor could always
+    // register a person and approve them.
+    //
+    // It is checkable now because `created_by` exists (migration 0005). This is strictly stronger than the
+    // arrangement it replaces — it catches self-approval whoever performs it and whatever the nav shows —
+    // and it is what let the supervisor's portal become a superset of the officer's rather than a subset.
+    //
+    // Audited on denial: a refused self-approval is evidence, not noise.
+    var decider = me.Principal?.Subject;
+    if (!string.IsNullOrWhiteSpace(r.CreatedBy)
+        && string.Equals(r.CreatedBy, decider, StringComparison.Ordinal))
+    {
+        await audit.EmitAsync(new AuditEventDraft { EntityType = "registration", EntityId = id.ToString(), Action = AuditAction.Decision, ActorUserId = decider, DecisionOutcome = "DecisionDenied", DecisionReasonCode = "self-approval (US-003)" }, ct);
+        return Results.Problem(statusCode: 403, title: "self-approval",
+            detail: "you filed this registration; a different approver must decide it (US-003)",
+            type: "urn:hbmp:self-approval");
+    }
+
     var error = RegistrationRules.ValidateDecision(r, decision, req.Notes);
     if (error is not null) return Results.Problem(statusCode: 422, title: "decision-rejected", detail: error);
 
+    // 24.3 — the comment below has always said this activation and its enrolment request publish "in the
+    // same transaction as the activation". They did not: EfOutbox commits each enqueue on its own
+    // SaveChanges, so a crash after the activation left a member number issued, the beneficiary Active,
+    // and RegistrationEnrolmentRequested gone — which is exactly the failure the comment warns about,
+    // arriving by a route it did not consider. Now the claim is true.
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
     var beneficiary = await db.Beneficiaries.FirstAsync(x => x.BeneficiaryId == r.BeneficiaryId, ct);
     var actor = me.Principal?.Subject;
     r.Status = RegistrationRules.ResultOf(decision);
     r.Notes = req.Notes;
     r.UpdatedAt = clock.GetUtcNow();
+
+    // EVERY decision lands on the thread as well as in `notes`. `notes` is a single column the next decision
+    // overwrites, so until now "the UNHCR letter is expired" was gone the moment anybody decided again, and
+    // the officer it was addressed to had nowhere to answer. The thread is append-only (migration 0005), in
+    // the same transaction as the decision — a ruling and the record of that ruling cannot come apart.
+    //
+    // Approve carries no mandatory note, so its entry falls back to naming the outcome rather than being
+    // skipped: a thread that goes silent at the decision reads as a decision that never happened.
+    db.RegistrationThread.Add(new RegistrationThreadEntry
+    {
+        EntryId = Guid.NewGuid(), RegistrationId = r.RegistrationId, TenantId = r.TenantId,
+        Kind = RegistrationThreadKind.Decision, Decision = decision,
+        Body = string.IsNullOrWhiteSpace(req.Notes) ? decision.ToString() : req.Notes.Trim(),
+        AuthorUserId = me.Principal?.Subject, AuthorName = me.Principal?.DisplayName,
+        AuthorRole = "beneficiary_mgmt_supervisor",
+        CreatedAt = clock.GetUtcNow(),
+    });
 
     if (decision == RegistrationDecision.Approve)
     {
@@ -319,12 +661,166 @@ reg.MapPost("/{id:guid}/decision", async (Guid id, DecisionRequest req, PatientD
         await db.SaveChangesAsync(ct);
         await audit.EmitAsync(new AuditEventDraft { EntityType = "beneficiary", EntityId = beneficiary.BeneficiaryId.ToString(), Action = AuditAction.StateChange, ActorUserId = actor, DecisionOutcome = "Activated", AfterState = $"{{\"memberNo\":\"{memberNo}\"}}" }, ct);
         await outbox.EnqueueAsync("BeneficiaryActivated", "patient.events", new { tenantId = beneficiary.TenantId, beneficiaryId = beneficiary.BeneficiaryId, memberNo, givenName = beneficiary.GivenName, familyName = beneficiary.FamilyName }, ct);
+
+        // THE INTENT BECOMES A MEMBERSHIP. Approval is the moment the coverage elected at the desk stops
+        // being a plan and starts being one — which is what `coverage_bound` has always claimed and never
+        // did. Published through the same outbox, in the same transaction as the activation, so a broker
+        // that is down delays the enrolment rather than losing it; policy-service's consumer is idempotent
+        // on the event id, so a redelivery does not enrol the person twice.
+        //
+        // Absent for a legacy registration opened before intents existed. That is not an error — those are
+        // enrolled by hand on the Members screen, exactly as they are today.
+        var enrolment = await db.EnrolmentIntents.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.RegistrationId == r.RegistrationId, ct);
+        if (enrolment is not null)
+        {
+            // A DEDICATED destination, not the shared `patient.events` stream. The transport publishes
+            // point-to-point (default exchange, routing key = queue name), so every consumer attached to one
+            // queue COMPETES for its messages: adding policy-service to patient.events would have had
+            // RabbitMQ round-robin each event between it and eligibility-service, and eligibility acks event
+            // types it does not handle. The result would be an enrolment that happens for roughly half the
+            // approvals and silently vanishes for the rest — the worst possible failure here, because the
+            // member number is issued either way and nothing looks wrong.
+            await outbox.EnqueueAsync("RegistrationEnrolmentRequested", "policy.registration-enrolments", new
+            {
+                tenantId = beneficiary.TenantId,
+                registrationId = r.RegistrationId,
+                beneficiaryId = beneficiary.BeneficiaryId,
+                memberNo,
+                planId = enrolment.PlanId,
+                networkTierId = enrolment.NetworkTierId,
+                contributionPercent = enrolment.ContributionPercent,
+                branchId = enrolment.DefaultBranchId,
+                // Cover starts the day the supervisor approved, not the day the form was filled in. A
+                // back-dated start would grant benefit for the review window, which nobody decided to grant.
+                effectiveFrom = calendar.Today().ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            }, ct);
+        }
+        await tx.CommitAsync(ct);
         return Results.Ok(new { r.RegistrationId, status = r.Status.ToString(), beneficiary.BeneficiaryId, memberNo });
     }
 
     await db.SaveChangesAsync(ct);
     await audit.EmitAsync(new AuditEventDraft { EntityType = "registration", EntityId = r.RegistrationId.ToString(), Action = AuditAction.Decision, ActorUserId = actor, DecisionOutcome = r.Status.ToString(), DecisionReasonCode = req.Notes }, ct);
+
+    // ── "We need more information" has to REACH somebody ────────────────────────────────────────────────────
+    //
+    // RequestInfo used to change a status and write a note, and that was all: the officer who filed the
+    // application was never told, so the request sat in a queue they had no reason to reopen. The event goes
+    // out through the same outbox, in the same transaction as the decision — a broker that is down delays the
+    // notice rather than losing it, and a decision that rolls back cannot leave a notice behind claiming it
+    // happened.
+    //
+    // Addressed to the FILING OFFICER by subject, not fanned out to a role: everyone else's queue is noise,
+    // and a request nobody owns is a request nobody answers. A legacy application with no `created_by` has no
+    // addressee — there is nothing to notify, and inventing a role-wide broadcast for it would train the whole
+    // team to ignore the channel.
+    //
+    // The payload is deliberately thin. Notification bodies interpolate these fields, and 11-permission-matrix
+    // keeps clinical material out of them; the card number is the operational reference the officer recognises
+    // and is not a diagnosis. The prose the supervisor wrote stays on the thread, behind authorization.
+    if (decision == RegistrationDecision.RequestInfo && !string.IsNullOrWhiteSpace(r.CreatedBy))
+    {
+        await outbox.EnqueueAsync("RegistrationInfoRequested", "notification.domain-events", new
+        {
+            tenantId = r.TenantId,
+            entityRef = $"registration:{r.RegistrationId}",
+            // Min-necessary and NON-clinical: the operational reference the officer recognises. The prose the
+            // supervisor wrote stays on the thread, behind authorization.
+            fields = new { @ref = beneficiary.CardNumber ?? beneficiary.MemberNo ?? r.RegistrationId.ToString() },
+            // The addressee, resolved here because patient-service is the only place that knows which officer
+            // filed this application. `registration_officer` is the role RoutingTable targets.
+            recipients = new[] { new { userId = r.CreatedBy, role = "registration_officer", locale = "ar" } },
+        }, ct);
+    }
+
+    await tx.CommitAsync(ct);
     return Results.Ok(new { r.RegistrationId, status = r.Status.ToString(), r.Notes });
+});
+
+// ================================================================ THE REGISTRATION THREAD (US-003)
+//
+// Read with patient:read and written with patient:write — the same split the beneficiary endpoints draw. A
+// supervisor asking for information and the officer answering are both `patient:write` holders, so the reply
+// needs no new scope; what it does need is to be ON THE RECORD, which is why there is no edit or delete.
+
+regRead.MapGet("/{id:guid}/thread", async (Guid id, PatientDbContext db, IAuditClient audit,
+    IHbmpPrincipalAccessor me, CancellationToken ct) =>
+{
+    var r = await db.Registrations.AsNoTracking().FirstOrDefaultAsync(x => x.RegistrationId == id, ct);
+    if (r is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+    var entries = await db.RegistrationThread.AsNoTracking()
+        .Where(x => x.RegistrationId == id)
+        .OrderBy(x => x.CreatedAt)
+        .ToListAsync(ct);
+
+    // The thread carries an approver's reasoning about a named person, which is a disclosure even though no
+    // clinical field crosses it — so the read is audited like the worklist rows themselves.
+    await audit.EmitAsync(new AuditEventDraft
+    {
+        EntityType = "registration", EntityId = id.ToString(), Action = AuditAction.Read,
+        ActorUserId = me.Principal?.Subject, Purpose = "registration-thread",
+    }, ct);
+
+    return Results.Ok(entries.Select(x => new
+    {
+        x.EntryId,
+        kind = x.Kind.ToString(),
+        decision = x.Decision?.ToString(),
+        x.Body,
+        x.AuthorUserId,
+        x.AuthorName,
+        x.AuthorRole,
+        x.CreatedAt,
+    }));
+});
+
+reg.MapPost("/{id:guid}/thread", async (Guid id, ThreadReply req, PatientDbContext db, IAuditClient audit,
+    IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(req.Body))
+        return Results.Problem(statusCode: 400, title: "a reply body is required");
+
+    var r = await db.Registrations.FirstOrDefaultAsync(x => x.RegistrationId == id, ct);
+    if (r is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+    // A Rejected or Active application is CLOSED. Allowing replies onto it would produce a conversation that
+    // looks live under a decision that is final, and invite an officer to answer a question nobody will read.
+    if (r.Status is RegistrationStatus.Rejected or RegistrationStatus.Active)
+        return Results.Problem(statusCode: 409, title: "registration-closed",
+            detail: $"registration is {r.Status}; reopen it with a fresh application to continue",
+            type: "urn:hbmp:registration-closed");
+
+    var now = clock.GetUtcNow();
+    var entry = new RegistrationThreadEntry
+    {
+        EntryId = Guid.NewGuid(), RegistrationId = r.RegistrationId, TenantId = r.TenantId,
+        Kind = RegistrationThreadKind.Reply, Body = req.Body.Trim(),
+        AuthorUserId = me.Principal?.Subject, AuthorName = me.Principal?.DisplayName,
+        AuthorRole = me.Principal?.Roles.FirstOrDefault(),
+        CreatedAt = now,
+    };
+    db.RegistrationThread.Add(entry);
+
+    // The reply becomes the CURRENT note, so the worklist column shows the last thing said rather than the
+    // question that has already been answered. The supervisor scanning the queue needs to see that a row has
+    // moved; a stale question is exactly how a row gets reviewed twice.
+    r.Notes = entry.Body;
+    r.UpdatedAt = now;
+    await db.SaveChangesAsync(ct);
+
+    await audit.EmitAsync(new AuditEventDraft
+    {
+        EntityType = "registration", EntityId = id.ToString(), Action = AuditAction.Update,
+        ActorUserId = me.Principal?.Subject, DecisionOutcome = "ThreadReply",
+    }, ct);
+
+    return Results.Created($"/api/v1/registrations/{id}/thread/{entry.EntryId}", new
+    {
+        entry.EntryId, kind = entry.Kind.ToString(), decision = (string?)null, entry.Body,
+        entry.AuthorUserId, entry.AuthorName, entry.AuthorRole, entry.CreatedAt,
+    });
 });
 
 // ================================================================ LIFECYCLE TRANSITIONS (US-004)
@@ -363,6 +859,9 @@ v1.MapPost("/{id:guid}/status", async (Guid id, StatusChange req, PatientDbConte
     // downstream could reference them, and no BeneficiaryActivated event ever told eligibility they exist.
     // Renewal/unblock of an already-carded member keeps its existing number: the number is an identity fact,
     // not a status fact.
+    // 24.3 — a status change whose event is lost leaves every downstream projection on the old status:
+    // a suspended beneficiary still reads Active where eligibility is decided.
+    await using var tx = await db.Database.BeginTransactionAsync(ct);
     string? issuedMemberNo = null;
     if (to == BeneficiaryStatus.Active && string.IsNullOrEmpty(b.MemberNo))
     {
@@ -381,11 +880,15 @@ v1.MapPost("/{id:guid}/status", async (Guid id, StatusChange req, PatientDbConte
     if (issuedMemberNo is not null)
         await outbox.EnqueueAsync("BeneficiaryActivated", "patient.events", new { tenantId = b.TenantId, beneficiaryId = b.BeneficiaryId, memberNo = issuedMemberNo, givenName = b.GivenName, familyName = b.FamilyName }, ct);
 
+    await tx.CommitAsync(ct);
     return Results.Ok(new { beneficiaryId = id, from = from.ToString(), to = to.ToString(), status = to.ToString(), memberNo = b.MemberNo });
 }).RequireAuthorization(HbmpPolicies.Scope("patient:write"));
 
 app.MapBeneficiarySummaries();   // 19.5 — name-only batch for one page of policy-service's member query
 app.MapBeneficiaryContacts();    // 19.5b — read/upsert contacts; the owner of the field owns the write path
+
+// Register-or-update by card number — what makes a corrected intake file safe to re-upload.
+app.MapBeneficiaryIntake();
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

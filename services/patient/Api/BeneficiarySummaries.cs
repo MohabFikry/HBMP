@@ -44,6 +44,16 @@ public static class BeneficiarySummaryEndpoints
                     b.BeneficiaryId,
                     b.GivenName,
                     b.FamilyName,
+                    // The CARD NUMBER, and nothing else new. It is classified Identity for the same reason
+                    // the member number is (BeneficiaryReadGuard): it is printed on the card the beneficiary
+                    // hands over, it answers "which of these people is in front of me", and a roster that
+                    // shows a name but not the card leaves every desk unable to match the two.
+                    //
+                    // The rest of the registration record still stops here — no identifiers, no contacts, no
+                    // date of birth. A list is the highest-volume disclosure the platform makes; those fields
+                    // are read one person at a time through GET /beneficiaries/{id}, which projects by role
+                    // and audits each read.
+                    b.CardNumber,
                     Status = b.Status.ToString(),
                 })
                 .ToListAsync(ct);

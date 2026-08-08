@@ -138,6 +138,9 @@ public static class FinanceEndpoints
                 return Results.Problem(statusCode: 409, title: "segregation-of-duties",
                     detail: "The approver must be a different person than the submitter.", type: "urn:hbmp:sod-violation");
 
+            // 24.3 — money. An approved settlement whose SettlementApproved event was lost is a payment
+            // authorised here and never announced to anything downstream that acts on it.
+            await using var tx = await deps.Db.Database.BeginTransactionAsync(ct);
             s.Status = SettlementStatus.Approved;
             s.ApprovedBy = deps.Subject;
             s.ApprovedAt = deps.Clock.GetUtcNow();
@@ -147,6 +150,7 @@ public static class FinanceEndpoints
             await deps.Outbox.EnqueueAsync("SettlementApproved", "finance.events",
                 new { settlementId = id, s.SettlementNo, providerId = s.ProviderId, total = s.Total }, ct);
             await Audit(deps, AuditAction.Decision, id.ToString(), "SettlementApproved", "Submitted", "Approved", AuditSeverity.Notice);
+            await tx.CommitAsync(ct);
             return Results.Ok(SettlementView.From(s));
         }).RequireAuthorization(HbmpPolicies.Scope("finance:approve"));
 

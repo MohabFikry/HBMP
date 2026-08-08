@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Card, DataTable, InlineAlert, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, StatusChip, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   BulkCommitView,
@@ -15,11 +15,11 @@ import { createHttpPolicyApi } from "../api/policyApi";
  *  and screens key their load effects on the api instance — a fresh instance per render turned the
  *  first failing (or even succeeding) fetch into an unbounded request loop (QA P0-1: ~400 req/s).*/
 const httpPolicyApi = createHttpPolicyApi();
-import { API_BASE } from "../config";
 import { writeErrorMessage } from "../api/writeError";
 import { PageHeader, useLoc, readErrorMessage } from "./_shared";
 import { useIdempotencyKey } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
+import { BulkTemplateActions } from "./BulkTemplateActions";
 
 /**
  * Phase 19.6 — the operator's side of the 19.5b bulk engine.
@@ -35,7 +35,7 @@ import { useFormat } from "../i18n/useFormat";
  */
 
 const S = {
-  title: { en: "Bulk & imports", ar: "الرفع الجماعي" },
+  title: { en: "Bulk & Imports", ar: "الرفع الجماعي" },
   jobType: { en: "What are you uploading?", ar: "ما الذي ترفعه؟" },
   template: { en: "Download the template", ar: "تنزيل القالب" },
   templateHint: {
@@ -104,6 +104,25 @@ const JOB_TYPES = [
   "BenefitRuleImport",
 ];
 
+/**
+ * What the operator sees in the "What are you uploading?" list.
+ *
+ * The values above are the ENGINE's job types and are sent to it verbatim — they must not change. What was
+ * wrong is that they were also the labels: the droplist read "MemberEnrolment", "ProviderTierAssignment",
+ * "BenefitRuleImport", so the first thing the screen asked was answered in the platform's vocabulary rather
+ * than the operator's, and in English regardless of locale. Naming things by how the system is built is the
+ * one thing the writing guidance is unambiguous about.
+ */
+const JOB_TYPE_LABELS: Record<string, Localized> = {
+  MemberEnrolment: { en: "Enrol members", ar: "تسجيل أعضاء" },
+  MemberTermination: { en: "End memberships", ar: "إنهاء عضويات" },
+  PlanChange: { en: "Move members to another plan", ar: "نقل أعضاء إلى خطة أخرى" },
+  GroupAssignment: { en: "Assign members to groups", ar: "إسناد أعضاء إلى مجموعات" },
+  ContactUpdate: { en: "Update contact details", ar: "تحديث بيانات الاتصال" },
+  ProviderTierAssignment: { en: "Assign providers to network tiers", ar: "إسناد مقدّمي الخدمة لشرائح الشبكة" },
+  BenefitRuleImport: { en: "Import benefit rules", ar: "استيراد قواعد المنافع" },
+};
+
 function jobStatusKind(status: string): "ok" | "warn" | "bad" | "neu" | "info" {
   switch (status) {
     case "Completed": return "ok";
@@ -128,6 +147,10 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const [error, setError] = useState<Localized | null>(null);
   const [busy, setBusy] = useState(false);
   const [announce, setAnnounce] = useState("");
+  // Controlled open for the column-contract modal. `BulkTemplateActions` manages its own open state by
+  // default; the parent holds it too so a validation failure ("unknown column: xyz") can reopen the contract
+  // straight from the alert rather than making the operator find the trigger again.
+  const [columnsOpen, setColumnsOpen] = useState(false);
   const [uploadKey, rotateUploadKey] = useIdempotencyKey();
   const [commitKey, rotateCommitKey] = useIdempotencyKey();
 
@@ -215,40 +238,20 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
           <select className="mrs-control" id="bulk-type" value={jobType} onChange={(e) => { setJobType(e.target.value); reset(); }}>
             {JOB_TYPES.map((x) => (
               <option key={x} value={x}>
-                {x}
+                {JOB_TYPE_LABELS[x] ? t(JOB_TYPE_LABELS[x]) : x}
               </option>
             ))}
           </select>
         </div>
 
+        {/* Hint stays inline; the column TABLE lives in the modal behind the paired trigger (0B §11). */}
         <InlineAlert tone="info">{t(S.templateHint)}</InlineAlert>
-        <div>
-          <a className="mrs-btn secondary" href={`${API_BASE}/bulk-templates/${jobType}`} download>
-            {t(S.template)}
-          </a>
-        </div>
-
-        {template && (
-          <table className="pol-costshare">
-            <caption>{t(S.columns)}</caption>
-            <thead>
-              <tr>
-                <th scope="col">{t(S.column)}</th>
-                <th scope="col">{t(S.required)}</th>
-                <th scope="col">{t(S.meaning)}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {template.columns.map((c) => (
-                <tr key={c.name}>
-                  <th scope="row">{c.name}</th>
-                  <td>{c.required ? "✓" : "—"}</td>
-                  <td>{lang === "ar" ? c.descriptionAr : c.descriptionEn}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        <BulkTemplateActions
+          jobType={jobType}
+          template={template ?? null}
+          open={columnsOpen}
+          onOpenChange={setColumnsOpen}
+        />
 
         <div className="mrs-field" style={{ maxWidth: 480 }}>
           <label className="mrs-label" htmlFor="bulk-file">{t(S.file)}</label>
@@ -261,7 +264,8 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
           />
         </div>
         <div>
-          <Button variant="primary" onClick={doUpload} loading={busy} disabled={!file || busy}>
+          <Button variant="primary"
+              leadingIcon={<Icon name="download" />} onClick={doUpload} loading={busy} disabled={!file || busy}>
             {t(S.upload)}
           </Button>
         </div>
@@ -293,7 +297,8 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
             </Button>
             {/* Commit is gated on the dry run having said the file is committable — the server enforces the
                 same transition, this only stops an operator reaching for it first. */}
-            <Button variant="primary" onClick={doCommit} disabled={busy || !validation?.committable}>
+            <Button variant="primary"
+              leadingIcon={<Icon name="check2" />} onClick={doCommit} disabled={busy || !validation?.committable}>
               {t(S.commit)}
             </Button>
           </div>
@@ -342,17 +347,19 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
               <InlineAlert tone={recon.balances ? "ok" : "bad"}>
                 {recon.balances ? t(S.balanced) : t(S.unbalanced)}
               </InlineAlert>
-              <table className="pol-costshare">
-                <caption className="sr-only">{t(S.reconcile)}</caption>
-                <tbody>
-                  <tr><th scope="row">{t(S.submitted)}</th><td>{fmt.number(recon.submitted)}</td></tr>
-                  <tr><th scope="row">{t(S.valid)}</th><td>{fmt.number(recon.valid)}</td></tr>
-                  <tr><th scope="row">{t(S.invalid)}</th><td>{fmt.number(recon.invalid)}</td></tr>
-                  <tr><th scope="row">{t(S.applied)}</th><td>{fmt.number(recon.applied)}</td></tr>
-                  <tr><th scope="row">{t(S.failed)}</th><td>{fmt.number(recon.failed)}</td></tr>
-                  <tr><th scope="row">{t(S.skipped)}</th><td>{fmt.number(recon.skipped)}</td></tr>
-                </tbody>
-              </table>
+              <div className="pol-tablewrap mrs-scroll mrs-scroll-focusable" tabIndex={0}>
+                <table className="pol-costshare">
+                  <caption className="sr-only">{t(S.reconcile)}</caption>
+                  <tbody>
+                    <tr><th scope="row">{t(S.submitted)}</th><td>{fmt.number(recon.submitted)}</td></tr>
+                    <tr><th scope="row">{t(S.valid)}</th><td>{fmt.number(recon.valid)}</td></tr>
+                    <tr><th scope="row">{t(S.invalid)}</th><td>{fmt.number(recon.invalid)}</td></tr>
+                    <tr><th scope="row">{t(S.applied)}</th><td>{fmt.number(recon.applied)}</td></tr>
+                    <tr><th scope="row">{t(S.failed)}</th><td>{fmt.number(recon.failed)}</td></tr>
+                    <tr><th scope="row">{t(S.skipped)}</th><td>{fmt.number(recon.skipped)}</td></tr>
+                  </tbody>
+                </table>
+              </div>
               {recon.errorDocumentId && <InlineAlert tone="info">{t(S.errorFile)}</InlineAlert>}
             </div>
           )}

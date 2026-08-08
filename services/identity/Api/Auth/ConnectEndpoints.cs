@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
+using OpenIddict.Validation.AspNetCore;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Mersal.Identity.Api.Auth;
@@ -32,9 +33,19 @@ public static class ConnectEndpoints
             var request = http.GetOpenIddictServerRequest()
                 ?? throw new InvalidOperationException("The OpenIddict request cannot be retrieved.");
 
+            // 28.3 — prompt=none means "answer, do NOT interact" (OIDC Core §3.1.2.1). This is how the SPA
+            // completes a sign-in it has already driven through /connect/session: the cookie is set, so
+            // authorize returns a code without a single page being rendered.
+            //
+            // It is also the LOOP-BREAKER. The SPA does not use the server-rendered login, so an authorize it
+            // cannot satisfy has to terminate in an error the SPA can read. Challenging would redirect it to
+            // the very page this ADR exists to stop showing, and it would follow that redirect forever.
+            var silent = request.HasPrompt(Prompts.None);
+
             var auth = await http.AuthenticateAsync(IdentityConstants.ApplicationScheme);
             if (!auth.Succeeded)
             {
+                if (silent) return Forbid(Errors.LoginRequired, "No active issuer session.");
                 // Not signed in → bounce to the (minimal) login, returning here afterwards.
                 return Results.Challenge(
                     new AuthenticationProperties { RedirectUri = http.Request.PathBase + http.Request.Path + http.Request.QueryString },
@@ -57,6 +68,13 @@ public static class ConnectEndpoints
                 // identity-level roles, which is exactly the blended principal this phase removes.
                 if (options.Count == 0)
                     return Forbid(Errors.AccessDenied, "This account has no active membership in any organization.");
+
+                // Under prompt=none the chooser is an INTERACTION, and the spec's word for "I would have had
+                // to ask you something" is interaction_required — distinct from login_required, because the
+                // remedy is different: the caller must pick an organization, not sign in again. Collapsing
+                // the two would send a signed-in user back to a password prompt to answer a question about
+                // which tenant they are working in.
+                if (silent) return Forbid(Errors.InteractionRequired, "A membership must be selected.");
 
                 var back = http.Request.PathBase + http.Request.Path + http.Request.QueryString;
                 return Results.Redirect($"/connect/select-membership?returnUrl={Uri.EscapeDataString(back)}");
@@ -158,6 +176,86 @@ public static class ConnectEndpoints
                 ["provider_id"] = user.ProviderId?.ToString(),
             });
         }).RequireAuthorization();
+
+        // ---- Current entitlement (28.11) ------------------------------------------------------------------
+        //
+        // "Which scopes would this caller be granted if they authorised RIGHT NOW?"
+        //
+        // ============================================================================================================
+        // WHY THE SPA CANNOT ANSWER THIS FOR ITSELF
+        // ============================================================================================================
+        // A token's scopes are fixed at authorisation, and the refresh grant above deliberately constrains its
+        // re-mint to the scopes on the stored grant — a refresh must never widen authority. So when an
+        // administrator adds a scope to a role, every live session keeps the narrower token until its refresh
+        // token expires, and every screen needing the new scope collects a 403 in the meantime.
+        //
+        // The SPA cannot detect that by reading its own token. It knows what it ASKED for and what it RECEIVED,
+        // but the gap between them is normally just least privilege working — a reception token legitimately
+        // carries 15 of the 80 scopes the application requests. Treating that gap as staleness is precisely the
+        // bug this endpoint replaces: the client-side guard that did so was false for every user in the system
+        // and signed people out on every page load. Only the issuer knows which of the two it is.
+        //
+        // So the issuer says. The caller intersects the answer with its own request list and re-authorises when
+        // something it needs is missing — the policy decision stays with the client, because only the client
+        // knows which scopes it intends to use.
+        //
+        // ============================================================================================================
+        // WHAT IT DISCLOSES, AND WHAT IT IS NOT
+        // ============================================================================================================
+        // A caller's OWN entitlement, to a caller already holding a token that exercises it. Minimum-necessary
+        // is satisfied by construction: the subject and membership come from the bearer token, never from the
+        // request, so there is no parameter with which to ask about somebody else.
+        //
+        // It is NOT a revocation channel. A membership that has been suspended fails here with 403, but the
+        // control that ENDS such a session is the refresh grant above, which refuses within the access token's
+        // 5-minute lifetime. A client is free to ignore this endpoint entirely; nothing about authority
+        // enforcement depends on it being called.
+        //
+        // Not audited, deliberately. It reads no PHI and no other person's data, and it is called once per page
+        // load — an audit row per reload would bury the disclosure events the trail exists to make findable.
+        app.MapGet("/connect/entitlement", async (
+            HttpContext http, UserManager<ApplicationUser> users, UserClaimsService claims,
+            MembershipService memberships) =>
+        {
+            // Authenticated explicitly as well as by the route policy — the same two-layer rule the admin
+            // surface follows, because a control that depends on a route group being wired correctly is one
+            // careless edit from silence.
+            var auth = await http.AuthenticateAsync(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
+            if (!auth.Succeeded || auth.Principal is null)
+                return Results.Problem(statusCode: StatusCodes.Status401Unauthorized, title: "unauthenticated");
+
+            var userId = auth.Principal.GetClaim(Claims.Subject);
+            var user = userId is null ? null : await users.FindByIdAsync(userId);
+            if (user is null || !user.IsActive)
+                return Results.Problem(statusCode: StatusCodes.Status401Unauthorized, title: "unauthenticated");
+
+            // Resolved exactly as the refresh grant resolves it, and for the same reason: authority lives on the
+            // MEMBERSHIP (invariant 1). Answering from the identity-level roles when a membership is present
+            // would report an entitlement no token minted for this session could ever carry, and the client
+            // would re-authorise in a loop chasing scopes it cannot be granted.
+            var membershipId = MembershipIdFrom(auth.Principal);
+            UserTokenFacts facts;
+            if (membershipId is { } mid)
+            {
+                var membership = await memberships.ResolveAsync(user.Id, mid, http.RequestAborted);
+                if (membership is null)
+                    return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "membership-inactive",
+                        detail: "The membership this session was issued for is no longer active.");
+                facts = await claims.ForAsync(user, membership, http.RequestAborted);
+            }
+            else
+            {
+                // The membership-less legacy grant. Kept in step with the refresh branch above; both disappear
+                // with the contract migration that drops user_role.
+                facts = await claims.ForAsync(user, http.RequestAborted);
+            }
+
+            // Sorted, so a client comparing sets is not comparing dictionary iteration order.
+            return Results.Ok(new EntitlementResponse(
+                [.. facts.Scopes.OrderBy(s => s, StringComparer.Ordinal)]));
+        })
+        .RequireAuthorization(IdentityAdminPolicies.Authenticated)
+        .RequireRateLimiting(IssuerRateLimits.Token);
 
         // ---- Password sign-in (17.3 login UI); routes to TOTP when the account has 2FA enabled -------------
         app.MapGet("/connect/login", (HttpContext http, IAntiforgery antiforgery, string? returnUrl) =>
@@ -306,3 +404,12 @@ public static class ConnectEndpoints
     private static Guid? MembershipIdFrom(System.Security.Claims.ClaimsPrincipal? principal) =>
         Guid.TryParse(principal?.FindFirst(TokenPrincipalFactory.MembershipClaim)?.Value, out var id) ? id : null;
 }
+
+/// <summary>
+/// The answer from <c>/connect/entitlement</c>: every platform scope the caller would be granted on a fresh
+/// authorisation, sorted.
+///
+/// A named record rather than an anonymous object so the shape is greppable from the client that consumes it —
+/// and so a future field cannot be added by accident in a lambda nobody re-reads.
+/// </summary>
+public sealed record EntitlementResponse(IReadOnlyList<string> Scopes);

@@ -6,8 +6,8 @@ import { useAsync } from "../api/useAsync";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
-  vitalsTitle: { en: "Vitals & triage", ar: "العلامات والفرز" },
-  resultsTitle: { en: "Results inbox", ar: "صندوق النتائج" },
+  vitalsTitle: { en: "Vitals & Triage", ar: "العلامات والفرز" },
+  resultsTitle: { en: "Results Inbox", ar: "صندوق النتائج" },
   pickPatient: { en: "Select a patient to record vitals.", ar: "اختر مريضاً لتسجيل العلامات." },
   pickPatientRead: { en: "Select a patient to view their recorded vitals.", ar: "اختر مريضاً لعرض علاماته المسجلة." },
   empty: { en: "No patients on your worklist.", ar: "لا يوجد مرضى في قائمتك." },
@@ -21,6 +21,7 @@ const S = {
   weight: { en: "Weight (kg)", ar: "الوزن" },
   height: { en: "Height (cm)", ar: "الطول" },
   systolic: { en: "Systolic BP", ar: "الضغط الانقباضي" },
+  diastolic: { en: "Diastolic BP", ar: "الضغط الانبساطي" },
   recorded: { en: "Recorded vitals", ar: "العلامات المسجلة" },
   none: { en: "No vitals recorded on this encounter yet.", ar: "لا توجد علامات مسجلة على هذه الزيارة بعد." },
 } satisfies Record<string, Localized>;
@@ -74,7 +75,7 @@ function VitalsForm({ patient, onBack }: { patient: PatientListItem; onBack: () 
   const api = useApi();
   const t = useLoc();
   const [fields, setFields] = useState<Record<VitalType, string>>({
-    HR: "", Temp: "", SpO2: "", Weight: "", Height: "", BP: "", BMI: "",
+    HR: "", Temp: "", SpO2: "", Weight: "", Height: "", BP: "", BPDiastolic: "", BMI: "",
   });
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "empty">("idle");
 
@@ -90,7 +91,7 @@ function VitalsForm({ patient, onBack }: { patient: PatientListItem; onBack: () 
     setStatus("saving");
     await api.recordVitals(patient.id, readings);
     setStatus("saved");
-    setFields({ HR: "", Temp: "", SpO2: "", Weight: "", Height: "", BP: "", BMI: "" });
+    setFields({ HR: "", Temp: "", SpO2: "", Weight: "", Height: "", BP: "", BPDiastolic: "", BMI: "" });
   }
 
   return (
@@ -105,6 +106,9 @@ function VitalsForm({ patient, onBack }: { patient: PatientListItem; onBack: () 
           <InputField label={t(S.temp)} inputMode="decimal" value={fields.Temp} onChange={set("Temp")} />
           <InputField label={t(S.spo2)} inputMode="decimal" value={fields.SpO2} onChange={set("SpO2")} />
           <InputField label={t(S.systolic)} inputMode="decimal" value={fields.BP} onChange={set("BP")} />
+          {/* Triage records the PAIR. The form asked for a systolic alone because that was all emr could
+              store (migration 0017); a nurse writing "118" and nothing else is not a blood pressure. */}
+          <InputField label={t(S.diastolic)} inputMode="decimal" value={fields.BPDiastolic} onChange={set("BPDiastolic")} />
           <InputField label={t(S.weight)} inputMode="decimal" value={fields.Weight} onChange={set("Weight")} />
           <InputField label={t(S.height)} inputMode="decimal" value={fields.Height} onChange={set("Height")} />
         </dl>

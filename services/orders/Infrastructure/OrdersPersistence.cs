@@ -69,6 +69,7 @@ public static class DependencyInjection
              .AddHbmpRlsInterceptors(sp));
         services.AddScoped<OrderNoIssuer>();
         services.AddScoped<ConsumeExecutor>();
+        services.AddScoped<AmendExecutor>();   // 30.2 — the guarded cancel/amend transition
 
         // Routing policy from configuration (Orders:Routing) — gated types/codes + high-cost threshold. Read
         // manually (no config-binder dependency): arrays via GetChildren, threshold parsed invariantly.

@@ -52,12 +52,16 @@ public static class BranchEndpoints
                 Phone = req.Phone, OpeningHours = req.OpeningHours, Status = BranchStatus.Active,
                 CreatedBy = me.Principal?.Subject, UpdatedBy = me.Principal?.Subject, CreatedAt = now, UpdatedAt = now,
             };
+            // 24.3 — the branch row and BranchCreated commit together; downstream routing and scheduling
+            // learn about a branch only from the event.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             db.Branches.Add(branch);
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return Results.Problem(statusCode: 409, title: $"a branch with code '{branch.BranchCode}' already exists"); }
 
             await audit.EmitAsync(Draft(branch, AuditAction.Create, me, outcome: "created"), ct);
             await outbox.EnqueueAsync("BranchCreated", "provider.events", new { branchId = branch.BranchId, branch.BranchCode, branch.NameEn, branch.NameAr }, ct);
+            await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/branches/{branch.BranchId}", ToView(branch));
         });
 
@@ -74,12 +78,14 @@ public static class BranchEndpoints
             if (!string.IsNullOrWhiteSpace(req.Timezone)) b.Timezone = req.Timezone!;
             if (req.Phone is not null) b.Phone = req.Phone;
             if (req.OpeningHours is not null) b.OpeningHours = req.OpeningHours;
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             b.UpdatedBy = me.Principal?.Subject;
             b.UpdatedAt = clock.GetUtcNow();
             await db.SaveChangesAsync(ct);
 
             await audit.EmitAsync(Draft(b, AuditAction.Update, me, outcome: "updated"), ct);
             await outbox.EnqueueAsync("BranchUpdated", "provider.events", new { branchId = b.BranchId, b.BranchCode }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(ToView(b));
         });
 
@@ -92,6 +98,7 @@ public static class BranchEndpoints
             var b = await db.Branches.FirstOrDefaultAsync(x => x.BranchId == id && !x.IsDeleted, ct);
             if (b is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
 
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             var from = b.Status;
             b.Status = status;
             b.UpdatedBy = me.Principal?.Subject;
@@ -100,6 +107,7 @@ public static class BranchEndpoints
 
             await audit.EmitAsync(Draft(b, AuditAction.StateChange, me, outcome: status.ToString(), reason: req.Reason), ct);
             await outbox.EnqueueAsync("BranchStatusChanged", "provider.events", new { branchId = b.BranchId, b.BranchCode, from = from.ToString(), to = status.ToString() }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(new { b.BranchId, status = b.Status.ToString() });
         });
     }

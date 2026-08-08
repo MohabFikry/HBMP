@@ -10,6 +10,8 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using System.Text.Json.Serialization;
 
+using Mersal.BenefitPricing;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Accept enum NAMES in request bodies (e.g. decision "Approved") as well as numbers — the portals send
@@ -28,12 +30,34 @@ builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddApprovalsInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ApprovalsGate>();
+builder.Services.AddScoped<RuleApplication>();  // ADR-0035 §5.4 — applies routing + SLA rules at assign
+// 19.1b — the shared tier-pricing path, which `preauth-required` reads. `AddHbmpTierPricing`'s own summary
+// names approvals as a consumer; it had simply never been called here, which is the other half of why that
+// endpoint was dead code. Shared rather than resolved locally so an approval and the claim that follows it
+// cannot disagree about which tier the care was delivered at.
+builder.Services.AddHbmpTierPricing(builder.Configuration);
 builder.Services.AddScoped<DecisionDeps>();
+
+// ADR-0034 — every dispense and every consume issues a fulfilment authorization. The consumer binds
+// approvals' OWN queue: `pharmacy.events` / `orders.events` are point-to-point and already consumed by
+// policy-service, so binding either would compete for messages and silently stop the benefit accumulator.
+builder.Services.Configure<FulfilmentConsumerOptions>(builder.Configuration.GetSection(FulfilmentConsumerOptions.SectionName));
+builder.Services.AddScoped<FulfilmentIssuer>();
+builder.Services.AddHostedService<FulfilmentConsumer>();
 
 // The clinical review view assembles a field-scoped projection from emr-service under the caller's purpose (PUR),
 // fail-closed. document-service supplies supporting reports; both are reached with the caller's bearer token.
 builder.Services.AddHttpClient<IClinicalContextProvider, HttpClinicalContextClient>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Emr:BaseUrl"] ?? "http://emr-service:8080"));
+
+// An approved validity extension has to reach the service that owns the expired item — approvals records
+// the decision, pharmacy and orders own the expiry. Both are called with the REVIEWER's own token; their
+// extend endpoints are gated on auth:decide, which says where the authority actually lives.
+builder.Services.AddHttpClient("pharmacy", c =>
+    c.BaseAddress = new Uri(builder.Configuration["Pharmacy:BaseUrl"] ?? "http://pharmacy-service:8080"));
+builder.Services.AddHttpClient("orders", c =>
+    c.BaseAddress = new Uri(builder.Configuration["Orders:BaseUrl"] ?? "http://orders-service:8080"));
+builder.Services.AddScoped<IValidityExtensionApplier, HttpValidityExtensionApplier>();
 
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("approvals-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())
@@ -42,6 +66,11 @@ builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("approva
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// Readiness for the probe in infra/helm/rollout/rollout-template.yaml. Process-level only: this reports
+// "through startup and able to serve". A dependency check here would pull the pod out of rotation for a
+// condition the service already surfaces per-request, turning a partial degradation into a total outage.
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 app.UseHbmpTransportSecurity(); // HSTS + HTTPS redirect outside Development (16.5, H8)
@@ -58,11 +87,21 @@ app.UseHbmpRls(); // bind app.tenant_id GUC from the principal (RLS, ADR-0011)
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live", service = "approvals-service" })).AllowAnonymous();
+// Without this the readinessProbe 404s and the canary rollout waits forever on a healthy pod. Anonymous
+// because kubelet carries no bearer token.
+app.MapHealthChecks("/health/ready").AllowAnonymous();
 
 app.MapWorklist();   // phase 7.1 ingestion + reviewer inbox + assign
 app.MapReview();     // phase 7.1 clinical review view (field-scoped, PHI-read audited)
 app.MapDecisions();  // phase 7.2 decisions (mandatory rationale) + downstream events + TAT/SLA
+app.MapValidityExtensions();   // a fulfiller asks for an expired prescription / order to be revalidated
+app.MapSubstitutionRequests(); // ADR-0034 — a bench asks whether another examination may stand in
 app.MapBreakGlass(); // phase 7.3 emergency / override / manual + retrospective queue + TAT summary
+app.MapEngineRules(); // ADR-0035 §5 — the supervisor authors routing + SLA rules (who decides, and by when)
+// 19.1b — "is pre-authorization required for THIS care?". It had been written and never registered, so the
+// endpoint was dead code and absent from the generated spec; found while wiring ADR-0035 §5.2's additive
+// trigger rules into it, which is the first thing that ever called it.
+app.MapPreauthTrigger();
 app.MapProfileAuthorizations(); // 20.2 — the profile's authorizations section
 app.MapUtilizationFacts(); // 19.4 — raised/approved/denied COUNTS for utilization; no clinical payload
 

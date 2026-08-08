@@ -75,3 +75,10 @@ Thumbs.db
 # Windows/WSL metadata
 *:Zone.Identifier
 *Zone.Identifier
+
+# Agent worktrees. `.claude/skills/` IS tracked — the twenty domain skills are part of the repo — so this
+# ignores only the checkouts a worktree-isolated session creates under `.claude/worktrees/`. Committing one
+# would put a second copy of the whole tree in history.
+/.claude/worktrees/
+.ci-state/
+__pycache__/

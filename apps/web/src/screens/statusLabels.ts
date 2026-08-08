@@ -99,6 +99,26 @@ export function priority(raw: string | null | undefined) {
 }
 
 /** Label-only lookups (no chip): the value is rendered as text, not as a status. */
+/**
+ * Why a call happened. Lives here rather than in a screen because BOTH call-centre screens render it now —
+ * the workspace's call bar and the booking journey's call-record step — and a per-screen copy is exactly how
+ * one of them ends up showing an Arabic-portal agent "FollowUpRequired".
+ */
+const CALL_REASON: Record<string, Localized> = {
+  BookAppointment: { en: "Book appointment", ar: "حجز موعد" },
+  RescheduleAppointment: { en: "Reschedule appointment", ar: "إعادة جدولة موعد" },
+  CancelAppointment: { en: "Cancel appointment", ar: "إلغاء موعد" },
+  AppointmentEnquiry: { en: "Appointment enquiry", ar: "استفسار عن موعد" },
+  EligibilityEnquiry: { en: "Eligibility enquiry", ar: "استفسار عن الأهلية" },
+  UpdateContact: { en: "Update contact", ar: "تحديث بيانات الاتصال" },
+  Complaint: { en: "Complaint", ar: "شكوى" },
+  Other: { en: "Other", ar: "أخرى" },
+};
+
+export function callReasonLabel(raw: string | null | undefined): Localized {
+  return raw ? CALL_REASON[raw] ?? { en: raw, ar: raw } : { en: "—", ar: "—" };
+}
+
 export function callOutcomeLabel(raw: string | null | undefined): Localized {
   return raw ? CALL_OUTCOME[raw] ?? { en: raw, ar: raw } : { en: "—", ar: "—" };
 }

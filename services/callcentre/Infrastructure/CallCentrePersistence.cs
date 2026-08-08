@@ -7,15 +7,24 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Mersal.CallCentre.Infrastructure;
 
-/// <summary>The reusable VERIFICATION GATE primitive (phase 15.1). Every disclose/act endpoint in 15.2–15.4
-/// consults <see cref="IsVerifiedAsync"/> before revealing or changing member data. A verification is valid ONLY
-/// for the interaction it was recorded on AND the beneficiary it bound, and it EXPIRES when the interaction closes
-/// (Status=Closed). This is the server-side enforcement of "verify before you disclose" — never only in the UI.</summary>
+/// <summary>The DISCLOSURE GATE (phase 15.1, redefined 2026-08). Every disclose/act endpoint consults
+/// <see cref="IsVerifiedAsync"/> before revealing or changing member data.
+///
+/// <para><b>What it enforces now.</b> Identity is confirmed by the agent ON THE PHONE, so this no longer asks
+/// whether the platform administered a good-enough challenge. It asks the two questions that survive: is this
+/// call bound to this member, and is it still open? A verification is valid ONLY for the interaction it was
+/// recorded on AND the beneficiary it bound, and it stops being valid when the interaction closes.</para>
+///
+/// <para><b>The 60-minute TTL was removed with the challenge, not despite it.</b> A TTL was the right backstop
+/// for recorded EVIDENCE — an identifier recited 90 minutes ago says little about who is on the line now — but
+/// an attestation that the agent is speaking to this person does not decay across the call; it ends with the
+/// call. Keeping it would have produced a silent mid-call 403 that the agent could neither see coming nor fix,
+/// on a rule that no longer measured anything. Closing the interaction is the expiry.</para></summary>
 public sealed class VerificationService(CallCentreDbContext db)
 {
     public async Task<bool> IsVerifiedAsync(Guid interactionId, Guid beneficiaryId, CancellationToken ct = default)
     {
-        // Valid iff the interaction is still Open, bound to this beneficiary, and has a Passed verification for it.
+        // Valid iff the interaction is still Open, bound to this beneficiary, and carries a Passed record for it.
         var interaction = await db.Interactions.AsNoTracking()
             .FirstOrDefaultAsync(i => i.InteractionId == interactionId, ct);
         if (interaction is null || interaction.Status != InteractionStatus.Open) return false;

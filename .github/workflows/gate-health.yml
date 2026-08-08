@@ -1,0 +1,116 @@
+name: gate-health
+
+# 24.1.2 / 24.1.4 — the watchdog for the watchdogs.
+#
+# Two jobs, both answering questions no push-triggered pipeline can answer about itself:
+#
+#   freshness — has every gate actually EXECUTED recently? Around 27 July backend-ci began dying at its
+#               first gate and six later controls stopped running entirely. Nothing said so, because a
+#               skipped gate is as silent as a passing one. Silence is now an alarm.
+#
+#   ratchet   — has measured coverage pulled far enough ahead of a floor that the floor should move up?
+#               A ratchet only a human remembers to turn is a ratchet that stays where it was set in
+#               March. CLAUDE.md has asked for >=80% domain since the beginning and the enforced floor
+#               sat at 58 because raising it was somebody's optional chore.
+#
+# Runs daily and on demand. The freshness job deliberately runs on a schedule rather than on push: the
+# failure it detects is the absence of activity, and a push-triggered check cannot fire when the thing
+# that stopped happening is pushes.
+
+on:
+  schedule:
+    # 06:00 UTC — 08:00 Africa/Cairo, so a stale gate is on someone's screen at the start of the day
+    # rather than discovered a month later.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard selftest (a checker that cannot fail is not a check)
+        run: python3 tools/ci/check-gate-freshness.py --selftest
+
+      # actions/download-artifact only reaches artifacts from the CURRENT run, and the heartbeats are
+      # written by backend-ci. Ask the API for backend-ci's most recent run instead.
+      - name: Download the most recent gate heartbeats
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .ci-state
+          run_id=$(gh run list --workflow backend-ci --limit 1 --json databaseId -q '.[0].databaseId' || true)
+          if [ -n "$run_id" ]; then
+            gh run download "$run_id" -n gate-heartbeats -D .ci-state || \
+              echo "no gate-heartbeats artifact on run $run_id (first run after this change?)"
+          fi
+
+      - name: Gate freshness (a gate that has not run in 7 days is a failing gate)
+        run: python3 tools/ci/check-gate-freshness.py --state-dir .ci-state --max-age-days 7
+
+  ratchet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard selftests
+        run: |
+          python3 tools/ci/raise-floors.py --selftest
+          python3 tools/ci/check-floor-monotonicity.py --selftest
+
+      - name: Fetch the latest coverage report from backend-ci
+        id: fetch
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ./artifacts-latest
+          run_id=$(gh run list --workflow backend-ci --limit 1 --json databaseId -q '.[0].databaseId' || true)
+          [ -n "$run_id" ] && gh run download "$run_id" -n backend-coverage-openapi -D ./artifacts-latest || \
+            echo "no coverage artifact yet"
+
+      - name: Propose floor raises
+        id: propose
+        run: |
+          report=$(find ./artifacts-latest -name coverage-report.json | head -1)
+          if [ -z "$report" ]; then
+            echo "no coverage report available yet — nothing to ratchet against"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 tools/ci/raise-floors.py --report "$report" --write | tee /tmp/raise.txt
+          if git diff --quiet -- tools/ci/coverage-floors.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The ratchet PROPOSES; a human merges. Auto-committing a floor raise to the default branch would
+      # make the guard capable of breaking the build without review — and a control that can do that to
+      # you unprompted is the one people disable.
+      - name: Open / update the floor-raise PR
+        if: steps.propose.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: ci/raise-coverage-floors
+          title: "ci: tighten coverage floors to measured (auto-raise)"
+          commit-message: |
+            ci: tighten coverage floors to measured coverage
+
+            Opened automatically by gate-health after a green run: these modules have been measuring
+            above their floor by more than the 3-point slack, so the floor is moved to measured-minus-1.
+            One point of give absorbs ordinary variance; a guard that cries wolf gets deleted.
+
+            Raising only. Any decrease is refused by tools/ci/check-floor-monotonicity.py and requires
+            an ADR that names the module.
+          body-path: /tmp/raise.txt
+          labels: ci, coverage
+          delete-branch: true

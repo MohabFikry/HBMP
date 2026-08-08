@@ -17,6 +17,27 @@ public static class IdentityContract
         // `beneficiary_mgmt_supervisor` is the supervisory increment over member administration (cancelling
         // another user's note, approving a retro-effective change). Both T2: neither reads clinical data.
         "policy_admin", "beneficiary_mgmt_supervisor",
+        // 25.1 — the people who RUN a Mersal clinic (design 42 §1). `branch_coordinator` covers one clinic,
+        // `clinics_manager` covers all six, and they hold an IDENTICAL scope set: they differ only in reach.
+        // Two roles with two capability lists was the rejected alternative (ADR-0029) — the lists drift, and
+        // the drift is invisible because the manager's remedy is to ask a coordinator, and asking works.
+        // `BranchScopeSetEqualityTests` fails the build if a future phase grants one of them a scope the
+        // other lacks. Both are T2: they administer staff licence data and clinic stock, never a diagnosis.
+        //
+        // These names also RETIRE the phantoms `branch_manager` / `clinic_manager`, which libs/authz and the
+        // SPA both named and nothing ever seeded.
+        "branch_coordinator", "clinics_manager",
+        // 29.1 (design 45 §1, ADR-0029) — `radiology_tech` is the canonical name for what was `imaging_tech`,
+        // which stays above for the duration of the dual-accept window and is removed by the contract step
+        // (docs/runbooks/radiology-rename.md). BOTH are listed on purpose: this list pins the role names the
+        // store MUST seed, and during the window the store must seed both — an access token minted before the
+        // switch names the old role for the rest of its 300 s TTL, and a role the store has dropped cannot be
+        // resolved to its scopes. Same tier (T3), same scopes, asserted equal by 0031's drift check.
+        "radiology_tech",
+        // 29.2b (design 45 §2b) — the EXTERNAL delivering provider: physiotherapy centres, dialysis units,
+        // outside specialist clinics. Provider-scoped and NOT branch-scoped: an external centre is not one of
+        // Mersal's six clinics, so a branch reach it does not have would silently narrow or widen its queue.
+        "procedure_provider",
     ];
 
     /// <summary>The frozen OAuth scope vocabulary (docs/security/token-contract.md §2). Kept here so the
@@ -24,9 +45,24 @@ public static class IdentityContract
     public static readonly IReadOnlyList<string> Scopes =
     [
         "admin:read", "admin:write", "admin:break-glass",
+        // 26.1 — the reference catalogue (ICD/CPT/LOINC/ATC/drugs/indications/interactions/allergens).
+        // Granted broadly and on purpose: a diagnosis code means the same thing to every clinical role, so
+        // this restricts nobody. It exists so reference-data reach is a stated line in the role matrix that
+        // can be withdrawn, and so a service or integration token has to ask for the catalogue rather than
+        // receive it by virtue of holding any token at all. There is no masterdata:write — master data
+        // changes through admin-service's governed, effective-dated path (8b.2).
+        "masterdata:read",
         "orders:read", "orders:consume", "orders:write",
+        // 29.2b — DISTINCT from orders:consume on purpose. Granting an external centre orders:consume would
+        // leave the ProviderCapability role→type map — a domain rule inside one service — as the only thing
+        // between it and the whole investigation queue. A separate scope means its token cannot even ask.
+        "procedure:read", "procedure:consume",
         "pharmacy:read", "pharmacy:dispense",
         "auth:read", "auth:review", "auth:decide", "auth:emergency", "auth:override", "auth:manual", "auth:ingest",
+        // ADR-0035 §5 — author the engine's routing/SLA rules. Separate from auth:decide on purpose.
+        "auth:configure",
+        "auth:request-extension",   // fulfillers ask for an expired prescription / order to be revalidated
+        "auth:request-substitution",// a technician asks whether another examination may stand in for the one ordered
         "reception:search",
         "emr:read", "emr:write", "encounter:write",
         "rx:write", "patient:read", "patient:write", "eligibility:check",
@@ -41,6 +77,11 @@ public static class IdentityContract
         // tiers), split out of provider:write because a tier reassignment reprices every plan referencing that
         // tier while ordinary provider metadata edits do not.
         "provider:read", "provider:write", "provider:finance", "provider:admin",
+        // 14.5 — the clinician PICKER, and nothing else. Booking filters on specialty then doctor, both of
+        // which live in provider-service; granting the desk `provider:read` to reach them would hand it the
+        // whole network directory (contracts, tariffs, tiers), and having emr fetch them under a service
+        // account is forbidden platform-wide. Same split `patient:read` records: size the scope to the need.
+        "practitioner:read",
         // 19.1 — the PAS split. policy:write already existed for MEMBER administration (enrol/terminate);
         // authoring the benefit product that members are enrolled onto is a separate, far heavier authority
         // (policy:admin), and policy:supervise is the supervisory increment (cancel another user's note,
@@ -73,6 +114,14 @@ public static class IdentityContract
         "reporting:read", "reporting:project", "reporting:export",
         "notification:read", "notification:ingest",
         "audit:read",
+        // 25.1 (design 42 §1) — the BRANCH-SCOPED authorities, sized to a clinic. Each exists because the
+        // network-wide scope that would otherwise be needed is far too wide: `provider:write` lets its holder
+        // create branches and edit external labs, pharmacies and tariffs, and it is also the scope that
+        // unmasks `license_no`. A clinic coordinator needs to maintain a doctor's licence at their own branch
+        // and must never be able to re-price the external network to get it. Neither branch role holds
+        // `provider:write`, and a test proves it.
+        "branch:practitioner:write", "branch:roster:write",
+        "branch:inventory:read", "branch:inventory:write",
     ];
 
     /// <summary>

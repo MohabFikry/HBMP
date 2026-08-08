@@ -67,6 +67,10 @@ public static class ResultEndpoints
             // Attach to this provider's fulfillment for the line (the most recent still awaiting a result).
             var target = fulfillments.Where(f => f.PerformingProviderId == provider)
                 .OrderByDescending(f => f.ResultUploadedAt is null).ThenByDescending(f => f.ConsumedAt).First();
+            // 24.3 — a result stored whose OrderResultUploaded event is lost is a result the ordering
+            // doctor is never notified of, and (for a non-Standard line) one the 14.7 sensitivity gate is
+            // never told to restrict. Both events and the write commit together.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
             target.ResultValue = string.IsNullOrWhiteSpace(resultValue) ? target.ResultValue : resultValue;
             target.ResultDocumentId = documentId ?? target.ResultDocumentId;
             target.ResultUploadedAt = clock.GetUtcNow();
@@ -77,6 +81,10 @@ public static class ResultEndpoints
             {
                 tenantId = order.TenantId, orderId, lineId, fulfillmentId = target.FulfillmentId, order.OrderNo,
                 orderingProviderId = order.OrderingProviderId, beneficiaryId = order.BeneficiaryId,
+                // ADR-0031 — the visit this result answers. The step it produces says a result was reported
+                // and names the order; the VALUE stays here, behind the 14.7 sensitivity gate, because the
+                // episode timeline is read by reception.
+                encounterId = order.EncounterId,
                 approvalGated = order.AuthorizationId is not null, resultDocumentId = target.ResultDocumentId,
                 sensitivityLevel = line.SensitivityLevel.ToString(),
             }, ct);
@@ -97,6 +105,7 @@ public static class ResultEndpoints
                 DecisionReasonCode = $"order:{orderId};line:{lineId}", FieldClasses = ["phi"],
             }, ct);
 
+            await tx.CommitAsync(ct);
             return Results.Ok(ResultResponse.From(target));
         }).RequireAuthorization(HbmpPolicies.Scope("orders:consume")).DisableAntiforgery();
 

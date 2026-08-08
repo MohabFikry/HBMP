@@ -52,21 +52,46 @@ public static class BulkTemplates
     private static readonly BulkColumn Reason =
         new("reason", BulkColumnKind.Text, true, "Why this change is being made.", "سبب هذا التغيير.");
 
+    /// <summary>
+    /// The member intake file.
+    ///
+    /// <para>Keyed on <c>card_number</c> rather than an internal id. The operator building this file works
+    /// from cards and case papers and has never seen a <c>beneficiary_id</c> — asking for one meant every
+    /// intake had to be preceded by a lookup pass that produced the very ids the file was meant to create.
+    /// The card number is the business key the whole record already turns on, and it is what makes a
+    /// RE-UPLOAD safe: the same card is the same person, so a corrected file updates rather than duplicates.</para>
+    ///
+    /// <para>Notably absent: <c>age</c>. It is derived from <c>birthdate</c> at read time, everywhere. A file
+    /// that carried both would eventually carry two different answers, and there is no rule that could say
+    /// which one to believe.</para>
+    /// </summary>
     public static readonly BulkTemplate MemberEnrolment = new(BulkJobType.MemberEnrolment,
     [
-        new("beneficiary_id", BulkColumnKind.Identifier, true, "The beneficiary's id in patient-service.", "معرّف المستفيد في خدمة المرضى."),
-        new("policy_no", BulkColumnKind.Text, true, "The policy to enrol under.", "رقم الوثيقة المراد التسجيل بها."),
-        // Optional, and the fallback is the policy's DEFAULT plan — the same resolution the single-member path
-        // uses. A file that names no plan must not mean something different from a form that names no plan.
-        new("plan_label", BulkColumnKind.Text, false, "The plan to elect; blank uses the policy's default plan.", "الخطة المختارة؛ الفراغ يعني الخطة الافتراضية للوثيقة."),
-        new("group_code", BulkColumnKind.Text, false, "The member group to place them in.", "مجموعة الأعضاء."),
-        new("relationship", BulkColumnKind.Text, true, "Principal, Spouse, Child or Dependent.", "الصلة: أساسي، زوج/زوجة، ابن/ابنة، معال."),
-        new("principal_member_no", BulkColumnKind.Text, false, "For a dependent: the principal's member number.", "لغير الأساسي: رقم عضوية العائل."),
-        new("effective_from", BulkColumnKind.Date, true, "First day of cover (yyyy-MM-dd).", "أول يوم تغطية (سنة-شهر-يوم)."),
-        new("effective_to", BulkColumnKind.Date, false, "Last day of cover, inclusive; blank = open-ended.", "آخر يوم تغطية شاملًا؛ الفراغ = مفتوح."),
-        new("branch_id", BulkColumnKind.Identifier, false, "The branch administering the enrolment.", "الفرع الذي يتم التسجيل من خلاله."),
-        new("age_years", BulkColumnKind.WholeNumber, false, "Age, if the plan's eligibility rule uses it.", "العمر، إذا كانت شروط الخطة تعتمد عليه."),
-    ], "Enrol members under a policy.", "تسجيل أعضاء تحت وثيقة.");
+        new("card_number", BulkColumnKind.Text, true, "The number on the member's card. The key this file matches on — re-uploading updates the same person.", "الرقم المدوّن على بطاقة العضو. المفتاح الذي يطابق عليه هذا الملف — إعادة الرفع تُحدّث الشخص نفسه."),
+        // Optional, and the fallback is Pending — the same state the registration form produces. A migration
+        // of historical members may state Active; a file of new arrivals should not have to.
+        new("status", BulkColumnKind.Text, false, "Active, Suspended or Closed; blank leaves the member Pending for approval.", "نشط، موقوف، أو مغلق؛ الفراغ يترك العضو قيد الاعتماد."),
+        new("first_name", BulkColumnKind.Text, true, "Given name.", "الاسم الأول."),
+        new("middle_name", BulkColumnKind.Text, false, "Middle name.", "الاسم الأوسط."),
+        new("last_name", BulkColumnKind.Text, true, "Family name.", "اسم العائلة."),
+        new("plan", BulkColumnKind.Text, true, "The plan to elect — Mersal, UNCR Direct Billing or UNCR Cash Reimbursement.", "الخطة المختارة — مرسال، أو الفوترة المباشرة، أو التعويض النقدي."),
+        new("network_tier", BulkColumnKind.Text, true, "Mersal, UNCR, Comprehensive or Restricted network.", "شبكة مرسال، أو المفوضية، أو الشاملة، أو المقيّدة."),
+        new("contribution", BulkColumnKind.Number, true, "The member's share of the service price, as a percentage.", "نسبة مشاركة العضو في تكلفة الخدمة."),
+        new("default_branch", BulkColumnKind.Text, false, "The internal clinic this member is normally seen at.", "العيادة الداخلية التي يتابَع بها العضو عادة."),
+        new("individual_no", BulkColumnKind.Text, false, "The programme's individual reference.", "الرقم الفردي في البرنامج."),
+        new("case_no", BulkColumnKind.Text, false, "The case file this member belongs to.", "رقم الحالة التابع لها العضو."),
+        new("gender", BulkColumnKind.Text, true, "Male, Female, Other or Unknown.", "ذكر، أنثى، آخر، أو غير معروف."),
+        new("nationality", BulkColumnKind.Text, true, "ISO 3166-1 alpha-2 country code, e.g. SY.", "رمز الدولة حسب ISO 3166-1، مثل SY."),
+        new("phone_no", BulkColumnKind.Text, true, "Country code and number, e.g. +201234567890.", "رمز الدولة والرقم، مثل ‎+201234567890."),
+        new("birthdate", BulkColumnKind.Date, true, "Date of birth (yyyy-MM-dd). Age is calculated from it and must not be sent.", "تاريخ الميلاد (سنة-شهر-يوم). يُحتسب العمر منه ولا يُرسَل."),
+        new("effective_from", BulkColumnKind.Date, false, "First day of cover; blank = the day the file is committed.", "أول يوم تغطية؛ الفراغ = يوم تنفيذ الملف."),
+        new("note_1", BulkColumnKind.Text, false, "Known diagnosis.", "التشخيص المعروف."),
+        new("note_2", BulkColumnKind.Text, false, "Forecasted case cost.", "التكلفة المتوقعة للحالة."),
+        new("note_3", BulkColumnKind.Text, false, "Insulin patient.", "مريض أنسولين."),
+        new("note_4", BulkColumnKind.Text, false, "Most visited speciality.", "التخصص الأكثر زيارة."),
+        new("note_5", BulkColumnKind.Text, false, "Free note.", "ملاحظة حرة."),
+        new("note_6", BulkColumnKind.Text, false, "Free note.", "ملاحظة حرة."),
+    ], "Register and enrol members.", "تسجيل الأعضاء وقيدهم.");
 
     public static readonly BulkTemplate MemberTermination = new(BulkJobType.MemberTermination,
     [

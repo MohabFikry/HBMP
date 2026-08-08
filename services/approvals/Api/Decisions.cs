@@ -84,7 +84,7 @@ public static class Decisions
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateConcurrencyException) { return Conflict(); }
             await outbox.EnqueueAsync("AuthInfoSupplied", "approvals.events",
-                new { authorizationId = auth.AuthorizationId, auth.AuthNo }, ct);
+                new { tenantId = auth.TenantId, authorizationId = auth.AuthorizationId, auth.AuthNo }, ct);
             await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
@@ -139,6 +139,32 @@ public static class Decisions
         var reviewerId = Guid.TryParse(deps.Me.Principal?.Subject, out var rg) ? rg : Guid.Empty;
         var before = auth.Status;
 
+        /*
+         * A VALIDITY EXTENSION IS APPLIED BEFORE IT IS RECORDED.
+         *
+         * approvals owns the decision; pharmacy and orders own the thing decided about, and only they can
+         * move its expiry. So an approval has to travel — and the ORDER matters more than it looks.
+         *
+         * Recording first and calling after leaves an authorization that says Approved beside a prescription
+         * the counter still cannot dispense: the pharmacist is told yes by one screen and no by the next,
+         * with nothing on either to explain the disagreement. Doing it this way, the reviewer gets both or
+         * neither, and a failure is a 502 they can see and retry rather than a silent split.
+         *
+         * Nothing is refused for a REJECTION — there is nothing to apply, and a rejection must land even if
+         * pharmacy is unreachable.
+         */
+        DateTimeOffset? extendedTo = null;
+        if (auth.Source == AuthSource.ValidityExtension && AuthorizationWorkflow.ReleasesDownstream(decision))
+        {
+            var outcome = await deps.Extensions.ApplyAsync(auth, http.Headers.Authorization.ToString(), ct);
+            if (!outcome.Applied)
+                return Results.Problem(
+                    statusCode: 502, title: "extension-not-applied", type: "urn:hbmp:extension-not-applied",
+                    detail: outcome.Failure + " The decision has NOT been recorded — nothing has changed, and "
+                            + "this can be retried.");
+            extendedTo = outcome.NewExpiry;
+        }
+
         var row = new AuthorizationDecision
         {
             DecisionId = Guid.NewGuid(), AuthorizationId = auth.AuthorizationId, Decision = decision,
@@ -167,15 +193,71 @@ public static class Decisions
             IdempotencyKey = idem, Operation = $"decision:{decision}",
             AuthorizationId = auth.AuthorizationId, StatusCode = 200, CreatedAt = now,
         });
+        // The new expiry is part of the DECISION record, not only of the item — "what did approving this
+        // actually grant" has to be answerable from the ledger without calling another service.
+        if (extendedTo is { } newExpiry && row.ApprovedScope is null)
+            row.ApprovedScope = System.Text.Json.JsonSerializer.Serialize(new { extendedTo = newExpiry });
         await deps.Db.SaveChangesAsync(ct);
 
-        await deps.Outbox.EnqueueAsync(EventType(decision), "approvals.events", new
+        var eventType = EventType(decision);
+        await deps.Outbox.EnqueueAsync(eventType, "approvals.events", new
         {
+            // `tenantId` — emr's care-episode consumer (ADR-0031) binds its RLS session from this envelope and
+            // refuses a message it cannot attribute. `encounterId` is what lets the decision land on the right
+            // patient's episode; NULL on a manual authorization, and the step is then simply not written.
+            tenantId = auth.TenantId,
             authorizationId = auth.AuthorizationId, auth.AuthNo, beneficiaryId = auth.BeneficiaryId,
+            encounterId = auth.EncounterId,
             source = auth.Source.ToString(), sourceRef = auth.SourceRef,
             approvedScope = approvedScopeJson is null ? null : Codes.Parse(approvedScopeJson),
             releasesDownstream = AuthorizationWorkflow.ReleasesDownstream(decision), breakGlass,
+            /*
+             * THE DECISION'S OWN MEASUREMENTS.
+             *
+             * `auth.TatSeconds` and `auth.SlaBreached` are computed four lines above this and were written to
+             * the row and nowhere else, so the approval-TAT report — the whole point of an authorization read
+             * model — had no turnaround times and no breach counts to build from. `priority` matters for the
+             * same reason: TAT is meaningless unaggregated by it, because Urgent and Routine are answering
+             * different promises.
+             *
+             * `reviewerId` is the one attribution the read model can legitimately hold.
+             *
+             * `rejectionReason` is deliberately NOT sent, even though `AuthorizationFact` has a column for it.
+             * This domain has no reason-code vocabulary — a rejection carries the free-text rationale the
+             * reviewer typed, and that is clinical prose which stays on the authorization, behind
+             * authorization. Deriving a "code" from it would be inventing a taxonomy at the point of export,
+             * and a report that groups by a made-up code is worse than one that admits it cannot group. The
+             * column stays null until there is a real coded reason to put in it.
+             */
+            priority = auth.Priority.ToString(),
+            reviewerId,
+            auth.TatSeconds,
+            auth.SlaBreached,
         }, ct);
+
+        // ── TELL THE PERSON WHO IS WAITING ──────────────────────────────────────────────────────────────────
+        //
+        // A SECOND, notification-shaped copy on notification-service's own queue. Not a redirect of the line
+        // above: `approvals.events` carries the decision to whatever consumes it for projections, and the
+        // transport is point-to-point, so a second consumer on that queue would COMPETE for the messages and
+        // each event would reach one of them, never both.
+        //
+        // Until now this did not exist. `RoutingTable` has routed `AuthApproved`, `AuthRejected`,
+        // `AuthInfoRequested`, `AuthPartiallyApproved` and `AuthEmergencyApproved` since phase 8.1, with
+        // bilingual templates authored for each — and nothing ever delivered one, so a clinician learned their
+        // authorization had been decided by opening the worklist and looking.
+        //
+        // Addressed to the SUBMITTER by subject, which approvals-service is the only service that knows. An
+        // authorization with no recorded submitter (a manual one, created out of band) has no addressee, and
+        // the consumer drops it rather than broadcasting to a role.
+        //
+        // ENQUEUED HERE, inside the transaction, rather than inside the helper. The payload construction —
+        // which is the part with the judgement in it — stays in `DecisionNotification`; the enqueue does not,
+        // because INV-OUTBOX-SURVIVES-CRASH is a property of the CALL SITE and a helper that enqueues on its
+        // own is a shape the architecture gate cannot verify and a reader cannot check by eye. It was inside
+        // the helper, and it was atomic only because this one caller happened to hold a transaction open.
+        if (DecisionNotification(auth) is { } notice)
+            await deps.Outbox.EnqueueAsync(eventType, "notification.domain-events", notice, ct);
         await tx.CommitAsync(ct);
 
         await deps.Audit.EmitAsync(new AuditEventDraft
@@ -188,6 +270,39 @@ public static class Decisions
         }, ct);
 
         return Results.Ok(DecisionView.From(auth, row));
+    }
+
+    /// <summary>
+    /// Build the notification-shaped copy of a decision, or null when there is no addressee.
+    ///
+    /// <para>The field bag is min-necessary and NON-clinical (11-permission-matrix, and the dispatcher throws
+    /// on a forbidden key): the authorization number the clinician recognises, and nothing else. The rationale
+    /// the reviewer wrote stays on the authorization, behind authorization.</para>
+    ///
+    /// <para><b>It builds; it does not publish.</b> The enqueue belongs at the call site, inside the caller's
+    /// transaction — see the note there. Splitting it this way keeps the payload judgement in one place while
+    /// leaving the atomicity visible where it is decided.</para>
+    /// </summary>
+    private static object? DecisionNotification(Authorization auth)
+    {
+        if (string.IsNullOrWhiteSpace(auth.CreatedBy)) return null;
+        return new
+        {
+            tenantId = auth.TenantId,
+            entityRef = $"authorization:{auth.AuthorizationId}",
+            // `ref`, because that is the token every auth template interpolates ("Authorization {ref} was
+            // approved"). Named `authNo` at first, and a missing token renders EMPTY rather than leaking the
+            // brace — so the notice went out reading "Authorization  was approved" and nothing failed. The
+            // field bag and the template vocabulary are one contract; the template owns the names.
+            fields = new { @ref = auth.AuthNo },
+            recipients = new[]
+            {
+                // `requesting_provider` is the role `RoutingTable` targets for every auth decision. The person
+                // is the one who submitted it — a role-wide fan-out would put a decision about one clinician's
+                // patient in every clinician's inbox.
+                new { userId = auth.CreatedBy, role = "requesting_provider", locale = "ar" },
+            },
+        };
     }
 
     private static string EventType(AuthDecision d) => d switch
@@ -218,8 +333,9 @@ public static class Decisions
 /// take one injected object rather than a long parameter list.</summary>
 public sealed class DecisionDeps(
     ApprovalsDbContext db, ApprovalsGate gate, IAuditClient audit, IOutbox outbox,
-    IHbmpPrincipalAccessor me, TimeProvider clock)
+    IHbmpPrincipalAccessor me, TimeProvider clock, IValidityExtensionApplier extensions)
 {
+    public IValidityExtensionApplier Extensions { get; } = extensions;
     public ApprovalsDbContext Db { get; } = db;
     public ApprovalsGate Gate { get; } = gate;
     public IAuditClient Audit { get; } = audit;

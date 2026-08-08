@@ -9,6 +9,9 @@ public static class VitalRange
     private static readonly Dictionary<VitalType, (decimal Min, decimal Max, string Unit)> Ranges = new()
     {
         [VitalType.BP] = (30m, 300m, "mmHg"),
+        // The diastolic's plausible band is NOT the systolic's. Sharing one 30–300 range would have accepted
+        // a diastolic of 250, which is not a reading a person survives — it is a transposed systolic.
+        [VitalType.BPDiastolic] = (20m, 200m, "mmHg"),
         [VitalType.HR] = (20m, 300m, "bpm"),
         [VitalType.Temp] = (25m, 45m, "Cel"),
         [VitalType.SpO2] = (50m, 100m, "%"),

@@ -50,7 +50,7 @@ public sealed class HttpAppointmentGateway(IHttpClientFactory factory) : IAppoin
                 if (doc.RootElement.TryGetProperty("appointmentId", out var el) && el.TryGetGuid(out var g)) apptId = g;
             }
             catch (JsonException) { /* non-JSON body (e.g. problem+json without id) — leave null */ }
-            return new GatewayResult((int)resp.StatusCode, text, apptId);
+            return new GatewayResult((int)resp.StatusCode, text, apptId, resp.Content.Headers.ContentType?.MediaType);
         }
         catch (HttpRequestException) { return new GatewayResult(502, null, null); }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested) { return new GatewayResult(504, null, null); }

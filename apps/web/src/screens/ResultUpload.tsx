@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Card, InlineAlert, InputField, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, Icon, InlineAlert, InputField, StatusChip, useTheme } from "@mersal/design-system";
 import { useWrite, writeErrorText } from "../api/useWrite";
 import type { Localized, ResultTask } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -7,7 +7,7 @@ import { useAsync } from "../api/useAsync";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
-  title: { en: "Upload result", ar: "رفع النتيجة" },
+  title: { en: "Upload Result", ar: "رفع النتيجة" },
   empty: { en: "No consumed lines are awaiting a result.", ar: "لا توجد بنود مُنفّذة بانتظار نتيجة." },
   patient: { en: "Patient", ar: "المريض" },
   order: { en: "Order", ar: "الطلب" },
@@ -20,7 +20,7 @@ const S = {
 } satisfies Record<string, Localized>;
 
 /** Result-upload worklist for a lab/imaging provider — the lines they consumed and still owe a result on. */
-export function ResultUpload({ kind }: { kind: "lab" | "imaging" }) {
+export function ResultUpload({ kind }: { kind: "lab" | "radiology" }) {
   const api = useApi();
   const t = useLoc();
   const state = useAsync<ResultTask[]>(() => api.awaitingResult(kind), [kind]);
@@ -88,7 +88,8 @@ function ResultCard({ task, onDone }: { task: ResultTask; onDone: () => void }) 
             {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
           </div>
           <div>
-            <Button type="submit" variant="primary" loading={status === "saving"}>{t(S.submit)}</Button>
+            <Button type="submit" variant="primary"
+              leadingIcon={<Icon name="check2" />} loading={status === "saving"}>{t(S.submit)}</Button>
           </div>
         </form>
       )}

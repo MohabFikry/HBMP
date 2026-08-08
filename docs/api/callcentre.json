@@ -672,6 +672,15 @@
             "type": "string",
             "format": "uuid",
             "nullable": true
+          },
+          "doctorId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -774,20 +783,6 @@
           "beneficiaryId": {
             "type": "string",
             "format": "uuid"
-          },
-          "verifiedIdentifierTypes": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "nullable": true
-          },
-          "result": {
-            "$ref": "#/components/schemas/VerificationResult"
-          },
-          "failureReason": {
-            "type": "string",
-            "nullable": true
           }
         },
         "additionalProperties": false
@@ -837,10 +832,6 @@
           "outcome": {
             "$ref": "#/components/schemas/CallOutcome"
           },
-          "notes": {
-            "type": "string",
-            "nullable": true
-          },
           "summary": {
             "type": "string",
             "nullable": true
@@ -857,14 +848,6 @@
           }
         },
         "additionalProperties": false
-      },
-      "VerificationResult": {
-        "enum": [
-          0,
-          1
-        ],
-        "type": "integer",
-        "format": "int32"
       }
     }
   }

@@ -9,6 +9,22 @@ namespace Mersal.Pharmacy.Infrastructure;
 public enum DispenseOutcome
 {
     Applied, Replayed, Conflict, NotFound, AlreadyDispensed, OverDispense, RxNotDispensable, LineNotFound, InvalidQuantity, ExpiredLot,
+    /// <summary>
+    /// 30.2 — THE MIRROR of the cancel path (design 46 §2). The line was CANCELLED or SUPERSEDED by the
+    /// prescriber, and nothing was handed over.
+    ///
+    /// <para>Deliberately not folded into <see cref="AlreadyDispensed"/>. They look alike from the code's
+    /// side — both mean "you may not dispense this" — and send the pharmacist to opposite places: one is a
+    /// patient who already has their medicine, the other is a patient standing at the counter whose doctor
+    /// withdrew it, who needs to be told why and, when it was amended, pointed at the corrected line.</para>
+    /// </summary>
+    LineWithdrawn,
+    /// <summary>
+    /// 30.x — the line belongs to a CHRONIC script and today is not inside a collectable window (design 45
+    /// §5). Its own outcome because the pharmacist's answer is a DATE — "come back on the 14th" — and a
+    /// generic refusal sends a beneficiary away with nothing to plan around.
+    /// </summary>
+    OutsideRefillWindow,
     /// <summary>18.A3 — the header is empty, over-length, or contains the reserved <c>::</c> separator.</summary>
     InvalidIdempotencyKey,
     /// <summary>18.A3 — the key was already used for a DIFFERENT dispense (changed quantity, batch or
@@ -17,9 +33,28 @@ public enum DispenseOutcome
     IdempotencyKeyReuse,
 }
 
-public sealed record DispenseResult(DispenseOutcome Outcome, Prescription? Prescription, DispenseEvent? Event)
+/// <summary>
+/// 30.2 — why the line was withdrawn, in the words the counter needs (design 46 §2).
+///
+/// <para><see cref="SupersededById"/> is the load-bearing field. Without it a pharmacist told "this was
+/// amended" has no way to find the corrected line, and a patient goes home empty-handed while a perfectly
+/// valid prescription sits in the system — a refusal that is technically right and operationally useless.</para>
+/// </summary>
+public sealed record LineWithdrawal(
+    string Status, string? ReasonCode, string? ReasonText, Guid? By, DateTimeOffset? At, Guid? SupersededById);
+
+/// <summary>30.x — why a chronic collection was refused, and WHEN it may be made instead.</summary>
+public sealed record RefillRefusal(string Reason, DateOnly? OpensAt, decimal Allowed);
+
+public sealed record DispenseResult(
+    DispenseOutcome Outcome, Prescription? Prescription, DispenseEvent? Event, LineWithdrawal? Withdrawal = null,
+    RefillRefusal? Refill = null)
 {
-    public static DispenseResult Fail(DispenseOutcome outcome) => new(outcome, null, null);
+    public static DispenseResult Fail(DispenseOutcome outcome, LineWithdrawal? withdrawal = null) =>
+        new(outcome, null, null, withdrawal);
+
+    public static DispenseResult RefusedRefill(RefillRefusal refusal) =>
+        new(DispenseOutcome.OutsideRefillWindow, null, null, null, refusal);
 }
 
 /// <summary>The heart of phase 6 in one place (23-state-machines §3 "Pharmacy-specific guards") so the endpoint and
@@ -39,6 +74,7 @@ public sealed class DispenseExecutor(PharmacyDbContext db)
     public async Task<DispenseResult> DispenseAsync(
         Guid prescriptionId, Guid lineId, string idempotencyKey, Guid dispensingPharmacyId, Guid actorId,
         decimal quantity, string batchNo, DateOnly expiryDate, Guid? substitutedDrugId, string? substitutionReason,
+        string? note,
         DateTimeOffset now,
         Func<Prescription, DispenseEvent, CancellationToken, Task>? insideTransaction = null,
         CancellationToken ct = default)
@@ -60,9 +96,35 @@ public sealed class DispenseExecutor(PharmacyDbContext db)
                 : DispenseResult.Fail(DispenseOutcome.IdempotencyKeyReuse);
 
         var error = Domain.Dispensing.Validate(rx, lineId, quantity, expiryDate, now);
-        if (error != DispenseError.None) return DispenseResult.Fail(Map(error));
+        if (error != DispenseError.None)
+        {
+            // 30.2 — THE MIRROR. A withdrawn line is not "already dispensed": nothing was handed over, and
+            // the pharmacist needs the reason, the prescriber and — if it was amended — where the corrected
+            // line is. Answering with a generic refusal sends them to ring the doctor who already decided.
+            var withdrawn = rx.Lines.FirstOrDefault(l => l.PrescriptionLineId == lineId);
+            if (withdrawn is { Status: RxLineStatus.Cancelled or RxLineStatus.Superseded })
+                return DispenseResult.Fail(DispenseOutcome.LineWithdrawn, new LineWithdrawal(
+                    withdrawn.Status.ToString(), withdrawn.AmendmentReasonCode, withdrawn.AmendmentReasonText,
+                    withdrawn.AmendedBy, withdrawn.AmendedAt, withdrawn.SupersededById));
+            return DispenseResult.Fail(Map(error));
+        }
 
         var line = rx.Lines.First(l => l.PrescriptionLineId == lineId);
+
+        /*
+         * 30.x — THE CHRONIC WINDOW GATE (design 45 §5), and the second half of the wiring phase 29 left out.
+         *
+         * A chronic line is metered by its SCHEDULE, not only by its total: the whole point of a refill
+         * window is that a three-month script is not collectable on day one. Without this the windows were
+         * decoration — rows the sweeper forfeited and nothing ever enforced.
+         *
+         * The COUNTER enforces and the SWEEPER records (the phase-29 window design): dispensability is
+         * computed from the dates here, so a stalled sweeper delays a forfeiture and can never refuse a
+         * patient standing at the counter.
+         */
+        var openWindow = await NextCollectableWindowAsync(rx, line, now, ct);
+        if (openWindow.Refusal is { } refusal) return DispenseResult.RefusedRefill(refusal);
+
         line.QuantityDispensed += quantity;
         line.Status = Domain.Dispensing.RecomputeLineStatus(line);
         var evt = new DispenseEvent
@@ -71,6 +133,7 @@ public sealed class DispenseExecutor(PharmacyDbContext db)
             Quantity = quantity, IdempotencyKey = idempotencyKey, RequestHash = requestHash,
             BatchNo = batchNo, ExpiryDate = expiryDate,
             SubstitutedDrugId = substitutedDrugId, SubstitutionReason = substitutionReason,
+            Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim(),
             DispensedAt = now, DispensedBy = actorId,
         };
         db.DispenseEvents.Add(evt);
@@ -99,6 +162,15 @@ public sealed class DispenseExecutor(PharmacyDbContext db)
             return new DispenseResult(DispenseOutcome.Replayed, fresh, winner);
         }
 
+        // The window's own accumulator moves with the line's. Guarded on the window id, so a concurrent
+        // collection against a DIFFERENT window of the same line cannot be credited to this one.
+        if (openWindow.Window is { } w)
+            await db.DispenseWindows.Where(x => x.WindowId == w.WindowId)
+                .ExecuteUpdateAsync(u => u
+                    .SetProperty(x => x.DispensedQuantity, x => x.DispensedQuantity + quantity)
+                    .SetProperty(x => x.Status, x => x.DispensedQuantity + quantity >= x.AllocatedQuantity
+                        ? "Dispensed" : "PartiallyDispensed"), ct);
+
         // 18.A3 (audit R2 X7): recompute the prescription's status from the lines as they are NOW,
         // read back inside this transaction, and apply it with a guarded UPDATE + bounded retry. Two
         // pharmacists dispensing DIFFERENT lines used to both write PartiallyDispensed from their own
@@ -109,6 +181,47 @@ public sealed class DispenseExecutor(PharmacyDbContext db)
         if (insideTransaction is not null) await insideTransaction(rx, evt, ct);
         await tx.CommitAsync(ct);
         return new DispenseResult(DispenseOutcome.Applied, rx, evt);
+    }
+
+    /// <summary>
+    /// The window this collection belongs to, or the refusal that says why there is none.
+    ///
+    /// <para>An ACUTE line has no schedule and is unaffected: it returns no window and no refusal, and the
+    /// dispense proceeds exactly as it always has. That is the property that makes this safe to add to a path
+    /// every prescription goes through.</para>
+    /// </summary>
+    private async Task<(PrescriptionDispenseWindow? Window, RefillRefusal? Refusal)> NextCollectableWindowAsync(
+        Prescription rx, PrescriptionLine line, DateTimeOffset now, CancellationToken ct)
+    {
+        var windows = await db.DispenseWindows.AsNoTracking()
+            .Where(w => w.PrescriptionLineId == line.PrescriptionLineId)
+            .OrderBy(w => w.WindowNo).ToListAsync(ct);
+        if (windows.Count == 0) return (null, null);   // acute, or a chronic line issued before 30.x
+
+        var today = DateOnly.FromDateTime(now.UtcDateTime);
+        Domain.ChronicDispenseDecision? firstRefusal = null;
+        DateOnly? earliestOpen = null;
+
+        foreach (var w in windows)
+        {
+            var decision = Domain.ChronicDispensing.Evaluate(
+                new Prescribing.RefillWindow(
+                    w.WindowNo, w.ScheduledOpenDate, w.OpensAt, w.ClosesAt,
+                    w.AllocatedQuantity, w.DispensedQuantity,
+                    Enum.TryParse<Prescribing.WindowStatus>(w.Status, out var st)
+                        ? st : Prescribing.WindowStatus.Pending),
+                today, eligibleNow: true, rx.ValidUntil);
+
+            if (decision.Error == Domain.ChronicDispenseError.None) return (w, null);
+
+            // Keep the FIRST refusal and the EARLIEST future opening: a beneficiary refused today needs the
+            // next date they can come, not the reason the last window of the script is shut.
+            firstRefusal ??= decision;
+            if (decision.OpensAt is { } o && (earliestOpen is null || o < earliestOpen)) earliestOpen = o;
+        }
+
+        return (null, new RefillRefusal(
+            firstRefusal?.Error.ToString() ?? "NoCollectableWindow", earliestOpen, 0m));
     }
 
     /// <summary>Canonical hash of what this dispense asks for — everything that changes the medication

@@ -15,7 +15,37 @@ public sealed record CreateAuthorizationRequest(
     Guid? RequestingProviderId,
     IReadOnlyList<string> ServiceCodes,
     string? RequestedScope,
-    AuthPriority Priority);
+    AuthPriority Priority,
+    /// <summary>
+    /// The user id of the clinician who ordered the thing being authorized — the person waiting for the answer.
+    ///
+    /// <para>Audit §11.3 named this as the one real limit on the auth notifications. This endpoint requires
+    /// <c>auth:ingest</c>, a machine-only scope, so <c>CreatedBy</c> is the routing saga rather than a human.
+    /// <c>NotifyDecisionAsync</c> addresses the decision notice to <c>CreatedBy</c> and returns early when it
+    /// is blank — so on the ordinary flow (order or prescription routed to approval) the decision was
+    /// correctly not sent to anybody, and the clinician who asked for it learned the answer by going and
+    /// looking. Only the break-glass path, where a human IS the caller, ever notified anyone.</para>
+    ///
+    /// <para>So the ingesting service passes the clinician forward, exactly as <c>registration.created_by</c>
+    /// carries the filing officer. Optional: a genuinely unattended authorization (a migration, a seed) has no
+    /// human behind it, and inventing one would address a notice to a machine account. When it is absent the
+    /// notice is still correctly not sent.</para>
+    /// </summary>
+    string? OrderedByUserId = null,
+    /// <summary>
+    /// The encounter the thing being authorized was ordered in (ADR-0031).
+    ///
+    /// <para>Same seam and same argument as <see cref="OrderedByUserId"/>, for a different question. That one
+    /// carries WHO is waiting so the decision notice has an addressee; this carries WHICH VISIT so the
+    /// decision lands on the patient's episode. An authorization is one of the few things that can hold a
+    /// consultation open for days, and until it carried the encounter the appointment's timeline could show
+    /// "sent for approval" and then nothing — the desk could see the wait start and never see it end.</para>
+    ///
+    /// <para>Optional, because a manual authorization is raised by a reviewer with no visit in hand and a
+    /// migration has none at all. Absent means the decision is simply not stepped onto any episode; a guessed
+    /// encounter would put one member's authorization on another member's timeline.</para>
+    /// </summary>
+    Guid? EncounterId = null);
 
 // ---- Worklist projection (MIN-NECESSARY — no clinical payload) ----
 
@@ -30,13 +60,112 @@ public sealed record WorklistItemView(
     string Status,
     DateTimeOffset? SlaDueAt,
     bool SlaBreached,
-    long TatElapsedSeconds)
+    long TatElapsedSeconds,
+    /// <summary>
+    /// Where the request came from — OrderLine / Prescription / Manual / ValidityExtension.
+    ///
+    /// <para>Without it a validity-extension request is indistinguishable from a benefit authorization in
+    /// the queue, and a reviewer opens the clinical review view looking for a diagnosis and a service code
+    /// that a request to re-date a prescription does not have. It is not clinical data; it is what KIND of
+    /// question this is, which is the first thing anyone triaging a queue needs.</para>
+    /// </summary>
+    string Source,
+    /// <summary>
+    /// The originating item's own reference — RX-2026-000312 / ORD-2026-000900.
+    /// </summary>
+    /// <remarks>Populated for a validity-extension request (the expired item) and for a fulfilment
+    /// authorization (what was delivered against). Null elsewhere. It is the only string on this row a human
+    /// can look up, and both of those rows are meaningless without it.</remarks>
+    string? ItemReference,
+    /// <summary>
+    /// The requester's stated reason, on validity-extension rows only.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The worklist is otherwise a NO-clinical-payload projection, and this is a deliberate, bounded
+    /// exception. The reason on an extension request is logistics authored by a pharmacist or technician —
+    /// "the patient could not travel before it lapsed" — and it is the ENTIRE substance of the decision.
+    /// Leaving it out would force a reviewer through the PHI-audited clinical review view to read one
+    /// sentence that is not clinical, adding an audited access to the patient's record for no clinical
+    /// question. That is a worse disclosure outcome, not a better one.
+    /// </para>
+    /// <para>Null for every other source, so the exception cannot widen by accident.</para>
+    /// </remarks>
+    string? ExtensionReason,
+    /// <summary>
+    /// <c>Review</c> — a question waiting for an answer — or <c>Fulfilment</c>, a record of something already
+    /// handed over at a counter (ADR-0034). The two live in one aggregate and one number space; a reviewer
+    /// triaging a row needs to know which of them they are looking at before anything else on it means
+    /// something.
+    /// </summary>
+    string Kind = "Review")
 {
-    public static WorklistItemView From(Authorization a, DateTimeOffset now) => new(
-        a.AuthorizationId, a.AuthNo, a.BeneficiaryId,
-        Codes.Parse(a.ServiceCodes), a.Priority.ToString(), a.Status.ToString(),
-        a.SlaDueAt, a.SlaBreached,
-        (long)((a.DecidedAt ?? now) - a.SubmittedAt).TotalSeconds);
+    public static WorklistItemView From(Authorization a, DateTimeOffset now)
+    {
+        // A fulfilment carries the same `itemRef` key, so one reader serves both. It carries no reason: a
+        // dispense answers no question, and the per-item substitution reasons live on /items.
+        var (itemRef, reason) = a.Source switch
+        {
+            AuthSource.ValidityExtension => ExtensionDetails(a.RequestedScope),
+            _ when a.Kind == AuthKind.Fulfilment => (ExtensionDetails(a.RequestedScope).ItemRef, null),
+            _ => (null, null),
+        };
+
+        return new(
+            a.AuthorizationId, a.AuthNo, a.BeneficiaryId,
+            Codes.Parse(a.ServiceCodes), a.Priority.ToString(), a.Status.ToString(),
+            a.SlaDueAt, a.SlaBreached,
+            (long)((a.DecidedAt ?? now) - a.SubmittedAt).TotalSeconds,
+            a.Source.ToString(), itemRef, reason, a.Kind.ToString());
+    }
+
+    /// <summary>Reads the reference and reason back out of the request's stored scope. A malformed scope
+    /// yields nulls rather than throwing — a queue that 500s because one row's json is odd is worse than a
+    /// row that shows less than it could.</summary>
+    private static (string? ItemRef, string? Reason) ExtensionDetails(string scopeJson)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(scopeJson);
+            var root = doc.RootElement;
+            return (
+                root.TryGetProperty("itemRef", out var r) ? r.GetString() : null,
+                root.TryGetProperty("reason", out var w) ? w.GetString() : null);
+        }
+        catch (System.Text.Json.JsonException) { return (null, null); }
+    }
+}
+
+/// <summary>
+/// One delivered thing on a fulfilment authorization, as the approval team sees it (ADR-0034 Decision 3).
+/// </summary>
+/// <remarks>
+/// <para>Codes, labels, a quantity, and — only when what was handed over differs from what was written — the
+/// substituting pharmacist's reason. No diagnosis, no note, no indication: this row answers "what was
+/// delivered against RX-2026-000410", which is a benefit question, not a clinical one.</para>
+/// <para>The reason is the same bounded exception the worklist already makes for a validity-extension
+/// request. It is logistics authored by a pharmacist — "prescribed brand out of stock this morning" — and it
+/// is the entire substance of what a reviewer is looking at. Routing them through the PHI-audited clinical
+/// review view to read one sentence would add an audited access to a patient's record for a question that is
+/// not about the patient.</para>
+/// </remarks>
+public sealed record AuthorizationItemView(
+    Guid ItemId,
+    Guid? SourceLineId,
+    string OrderedCode,
+    string? OrderedLabel,
+    string FulfilledCode,
+    string? FulfilledLabel,
+    decimal Quantity,
+    /// <summary>True when what was handed over is not what was written. Derived from the two codes rather
+    /// than stored, so it cannot disagree with them.</summary>
+    bool Substituted,
+    string? SubstitutionReason,
+    DateTimeOffset FulfilledAt)
+{
+    public static AuthorizationItemView From(AuthorizationItem i) => new(
+        i.ItemId, i.SourceLineId, i.OrderedCode, i.OrderedLabel, i.FulfilledCode, i.FulfilledLabel,
+        i.Quantity, i.Substituted, i.SubstitutionReason, i.FulfilledAt);
 }
 
 /// <summary>Assign / state-change acknowledgement (no clinical fields).</summary>

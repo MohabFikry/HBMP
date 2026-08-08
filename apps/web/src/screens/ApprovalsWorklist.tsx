@@ -3,6 +3,7 @@ import {
   Button,
   Card,
   DataTable,
+  InlineAlert,
   InputField,
   SegmentedControl,
   StatusChip,
@@ -25,13 +26,34 @@ import { PatientContextBar } from "./PatientProfile";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 
 const S = {
-  title: { en: "Approval worklist", ar: "قائمة الموافقات" },
+  title: { en: "Approval Worklist", ar: "قائمة الموافقات" },
   empty: { en: "No authorizations awaiting your review.", ar: "لا توجد تفويضات بانتظار مراجعتك." },
   patient: { en: "Patient", ar: "المريض" },
   service: { en: "Service", ar: "الخدمة" },
   priority: { en: "Priority", ar: "الأولوية" },
   sla: { en: "SLA", ar: "المهلة" },
   cost: { en: "Est. cost", ar: "التكلفة" },
+  kindExtension: { en: "Validity extension", ar: "تمديد صلاحية" },
+  extTitle: { en: "Validity extension", ar: "تمديد صلاحية" },
+  extWhat: { en: "Expired item", ar: "العنصر المنتهي" },
+  extAskedBy: { en: "Asked by", ar: "مقدم الطلب" },
+  extReason: { en: "Reason given", ar: "السبب المذكور" },
+  extNoReason: { en: "No reason was recorded.", ar: "لم يُسجَّل سبب." },
+  extEffect: {
+    en: "Approving resets the validity to the tenant's configured period, counted from today. Rejecting "
+      + "leaves it expired — the patient needs a new prescription or order from a clinician.",
+    ar: "الموافقة تعيد ضبط الصلاحية للمدة المحددة للجهة، محسوبة من اليوم. الرفض يُبقيها منتهية — وسيحتاج "
+      + "المريض إلى وصفة أو طلب جديد من الطبيب.",
+  },
+  extNoClinical: {
+    en: "There is no clinical review for this kind of request — it is a question about a date, not about "
+      + "care. Everything the decision rests on is above.",
+    ar: "لا توجد مراجعة سريرية لهذا النوع من الطلبات — فهو سؤال عن تاريخ، لا عن الرعاية. كل ما يستند إليه "
+      + "القرار مذكور أعلاه.",
+  },
+  extApprove: { en: "Approve — revalidate", ar: "موافقة — إعادة التفعيل" },
+  extReject: { en: "Reject", ar: "رفض" },
+  extRationale: { en: "Your rationale", ar: "مبرر القرار" },
   state: { en: "State", ar: "الحالة" },
   action: { en: "Action", ar: "إجراء" },
   review: { en: "Review", ar: "مراجعة" },
@@ -69,16 +91,37 @@ export function ApprovalsWorklist() {
   const t = useLoc();
   const worklist = useAsync<ApprovalItem[]>(() => api.approvalWorklist(), []);
   const [selected, setSelected] = useState<string | null>(null);
+  /** The selected ROW, not just its id — an extension is decided from what the queue already carries. */
+  const selectedRow = (worklist.data ?? []).find((r) => r.id === selected) ?? null;
 
   const cols: Column<ApprovalItem>[] = [
     { key: "patient", header: t(S.patient), cell: (r) => <span className="tnum">{r.patient.token}</span> },
-    { key: "service", header: t(S.service), cell: (r) => <span><span className="tnum">{r.service.code}</span> · {t(r.service.label)}</span> },
+    {
+      key: "service",
+      header: t(S.service),
+      // A validity extension has no service code and no cost. Rendering "— · Validity extension" beside two
+      // rows that DO carry both is how a reviewer opens it looking for a diagnosis it was never going to
+      // have; the item's own reference is the thing that identifies it instead.
+      cell: (r) =>
+        r.source === "ValidityExtension" ? (
+          <span>
+            <StatusChip kind="info" label={t(S.kindExtension)} />{" "}
+            <span className="tnum">{r.itemReference ?? "—"}</span>
+          </span>
+        ) : (
+          <span><span className="tnum">{r.service.code}</span> · {t(r.service.label)}</span>
+        ),
+    },
     { key: "priority", header: t(S.priority), cell: (r) => <StatusChip kind={PRIORITY_KIND[r.priority]} label={r.priority} /> },
     {
       key: "sla",
       header: t(S.sla),
       cell: (r) =>
-        r.sla.breached ? (
+        !r.sla ? (
+          // No SLA on a fulfilment authorization: nothing waited on anybody. A countdown here would be a
+          // clock ticking towards a deadline that does not exist.
+          <span className="muted">—</span>
+        ) : r.sla.breached ? (
           <StatusChip kind="bad" label={t(S.breached)} />
         ) : (
           <span className="tnum">{t(S.dueIn)} {r.sla.minutesRemaining} {t(S.min)}</span>
@@ -120,7 +163,14 @@ export function ApprovalsWorklist() {
           </AsyncSection>
         </Card>
         <div>
-          {selected ? (
+          {selectedRow?.source === "ValidityExtension" ? (
+            <ExtensionReviewPanel
+              key={selectedRow.id}
+              item={selectedRow}
+              t={t}
+              onDone={() => { setSelected(null); worklist.reload(); }}
+            />
+          ) : selected ? (
             <ReviewPanel key={selected} approvalId={selected} t={t} onDone={() => { setSelected(null); worklist.reload(); }} />
           ) : (
             <Card style={{ padding: "var(--sp6)" }}>
@@ -130,6 +180,105 @@ export function ApprovalsWorklist() {
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * Deciding a validity-extension request.
+ *
+ * <b>Why it does not use the clinical review view.</b> That endpoint assembles a field-scoped EMR excerpt
+ * and records a PHI read under a purpose-of-use. This request is a question about a DATE — whether a
+ * prescription written three weeks ago may still be dispensed — and there is no diagnosis, service code or
+ * cost behind it to read. Routing it through the clinical view would add an audited access to the patient's
+ * record for a question that is not about the patient, and hand the reviewer a screen full of fields that
+ * are all empty.
+ *
+ * Everything the decision rests on — what expired, who is asking, and why — already arrived with the
+ * worklist row, and is shown here in full.
+ */
+function ExtensionReviewPanel({
+  item,
+  t,
+  onDone,
+}: {
+  item: ApprovalItem;
+  t: (l: Localized) => string;
+  onDone: () => void;
+}) {
+  const api = useApi();
+  const { toast } = useToast();
+  const [rationale, setRationale] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function decide(kind: "approve" | "reject") {
+    // The shared contract requires a rationale on a rejection. Checked here so the reviewer is told before
+    // the round trip; the server refuses it either way.
+    if (kind === "reject" && rationale.trim().length === 0) {
+      setError(t(S.rationaleReq));
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    try {
+      await api.decide({
+        approvalId: item.id,
+        idempotencyKey: newIdempotencyKey(),
+        decision: kind,
+        rationale: rationale.trim(),
+      });
+      toast(t(S.ok), "ok");
+      onDone();
+    } catch {
+      // An approval that could not be APPLIED is refused by the server with a 502 and nothing is recorded —
+      // so "failed" here is the truth, and retrying is a first attempt rather than a repair.
+      toast(t(S.fail), "bad");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card as="section" style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp4)" }}>
+      {/* The context bar, so a decision is never taken against the wrong record. */}
+      <PatientContextBar beneficiaryId={item.patient.id} />
+
+      <div>
+        <h2 className="section-h" style={{ marginBlockStart: 0 }}>{t(S.extTitle)}</h2>
+        <dl className="rxv-meta">
+          <dt>{t(S.extWhat)}</dt>
+          <dd className="tnum">{item.itemReference ?? "—"}</dd>
+          <dt>{t(S.extAskedBy)}</dt>
+          <dd>{t(item.requestedBy)}</dd>
+        </dl>
+
+        <h3 className="rxv-h">{t(S.extReason)}</h3>
+        {/* The whole substance of the decision. An absent reason is said in words rather than left blank —
+            a blank box reads as a rendering fault, and this one would be a refusal waiting to happen. */}
+        {item.extensionReason
+          ? <p>{item.extensionReason}</p>
+          : <p className="rxv-missing">{t(S.extNoReason)}</p>}
+
+        <InlineAlert tone="info">{t(S.extEffect)}</InlineAlert>
+        <p className="muted">{t(S.extNoClinical)}</p>
+      </div>
+
+      <label className="mc-field">
+        <span className="mc-field-label">{t(S.extRationale)}</span>
+        <textarea
+          className="rx-field-input"
+          rows={2}
+          value={rationale}
+          onChange={(e) => setRationale(e.currentTarget.value)}
+        />
+      </label>
+      {error && <InlineAlert tone="bad">{error}</InlineAlert>}
+
+      <div className="rx-actions">
+        <Button variant="danger" loading={busy} onClick={() => void decide("reject")}>{t(S.extReject)}</Button>
+        <Button variant="primary" loading={busy} onClick={() => void decide("approve")}>{t(S.extApprove)}</Button>
+      </div>
+    </Card>
   );
 }
 

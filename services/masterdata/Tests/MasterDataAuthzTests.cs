@@ -1,4 +1,6 @@
 using FluentAssertions;
+using Mersal.Auth.Authorization;
+using Mersal.MasterData.Domain;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -12,23 +14,36 @@ using Microsoft.Extensions.Hosting;
 namespace Mersal.MasterData.Tests;
 
 /// <summary>
-/// Phase 18.E2 — masterdata-service's first authorization suite. It serves 21 endpoints and had one test
-/// file, covering a mapper.
+/// Phase 18.E2 — masterdata-service's authorization suite, revised in phase 26.1.
 ///
-/// The judgement this suite records is worth stating, because it is not "add more tests": masterdata is the
-/// one service where a BARE <c>RequireAuthorization()</c> is the right answer, and that needs to be written
-/// down or someone will eventually "harden" it into a scope check and break every clinical screen.
-///
-/// It serves ICD-10, CPT, LOINC, ATC, drugs, interactions, allergens and examination types. That is a public
-/// medical reference catalogue — the same codes are in every clinical system on earth — and it is tenant-FREE
-/// by design: a diagnosis code means the same thing for every tenant. There is no PHI here, no financial
-/// data, and nothing to isolate. Every clinical role legitimately needs to read it: a doctor ordering, a
-/// pharmacist checking an interaction, a claims officer resolving a billed code. Requiring a scope would
-/// mean granting that scope to essentially everyone, which is a control in name only.
-///
-/// What DOES matter, and is asserted here: authentication is required (the catalogue is not anonymous —
-/// it is a fingerprint of what this platform treats), and no WRITE path exists on it. Master data changes
-/// through admin-service's governed, effective-dated, audited path (8b.2), never through this service.
+/// <para>
+/// WHAT CHANGED, AND WHY THE OLD REASONING IS LEFT LEGIBLE. Through phase 25 this suite argued that
+/// masterdata was the one service where a BARE <c>RequireAuthorization()</c> was the right answer, and warned
+/// that someone would eventually "harden" it into a scope check and break every clinical screen. Phase 26.1
+/// made that change deliberately, so the warning is answered here rather than deleted.
+/// </para>
+/// <para>
+/// The old argument was: the catalogue is public medical reference data — ICD-10, CPT, LOINC, ATC, drugs,
+/// interactions, allergens, examination types — tenant-free by design, carrying no PHI and nothing to
+/// isolate. Every clinical role legitimately reads it: a doctor ordering, a pharmacist checking an
+/// interaction, a claims officer resolving a billed code. Requiring a scope would mean granting it to
+/// essentially everyone, which is a control in name only.
+/// </para>
+/// <para>
+/// Every sentence of that is still true, and <c>masterdata:read</c> is accordingly granted to every role that
+/// holds any scope at all — it restricts no clinician, and the "break every clinical screen" risk was met by
+/// granting from the existing role set rather than an enumerated list. What the scope adds is not
+/// restriction. Reference-data reach becomes a stated, reviewable, revocable line in the role matrix instead
+/// of an unstated consequence of holding a token; a service, integration or partner token must ASK for the
+/// catalogue rather than receive it by default; and phase 27's <c>approval_supervisor</c> has something real
+/// to be granted. An unscoped endpoint is an unbounded one, and phase 26 puts a 22,653-product typeahead on
+/// this surface.
+/// </para>
+/// <para>
+/// Unchanged and still asserted: the catalogue is not anonymous (it is a fingerprint of what this platform
+/// treats), and no WRITE path exists on it. Master data changes through admin-service's governed,
+/// effective-dated, audited path (8b.2), never through this service.
+/// </para>
 /// </summary>
 public class MasterDataAuthzTests : IClassFixture<MasterDataAuthzTests.Host>
 {
@@ -58,6 +73,7 @@ public class MasterDataAuthzTests : IClassFixture<MasterDataAuthzTests.Host>
     private static readonly Dictionary<string, string> Anonymous = new(StringComparer.Ordinal)
     {
         ["/health/live"] = "liveness probe — a gated probe cannot report a dead service",
+        ["/health/ready"] = "readiness probe — kubelet carries no bearer token, so a gated probe never reports Ready",
         ["/metrics"] = "Prometheus scrape, in-cluster only",
     };
 
@@ -98,11 +114,22 @@ public class MasterDataAuthzTests : IClassFixture<MasterDataAuthzTests.Host>
             .Select(e => $"{string.Join('/', e.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods)} {Path(e)}")
             .Distinct().Order(StringComparer.Ordinal).ToList();
 
-        // POST-shaped READS. These take a list of codes in the body — too long and too structured for a
-        // query string — and return a computed answer without touching a row. `/resolve` maps a code to its
-        // canonical entry; `/check` runs an interaction or allergy screen. HTTP has no verb for "read with a
-        // body", so POST is correct here and none of them is a write.
-        string[] readShapedPost = ["/resolve", "/check"];
+        // POST-shaped READS. These take a list of codes or ids in the body — too long and too structured for
+        // a query string — and return a computed answer without touching a row. `/resolve` maps a code to
+        // its canonical entry; `/check` runs an interaction or allergy screen; `/by-ids` (26.3) returns the
+        // indications for a set of drugs; `/by-codes` (ADR-0034) returns list prices for a set of
+        // examinations, keyed on code because an order line always carries one and only carries an
+        // examination-type id if it was written after phase 14.6. HTTP has no verb for "read with a body",
+        // so POST is correct here and none of them is a write.
+        //
+        // The list is a SUFFIX allow-list, which is the point: a new POST has to be named for what it does
+        // and added here deliberately. Anything else — /examination-types, /drugs, a bare resource path —
+        // fails this test, which is how a write would be caught.
+        // `/ancestors` (28.7) is the newest of these: it takes the encounter's diagnosis codes and returns
+        // each one's chain up the ICD-10 tree, so the indication check can ask "is this diagnosis underneath
+        // that indication" instead of truncating both to three characters. It reads `icd_ancestor`, a
+        // closure the LOADER builds; nothing here can write to it.
+        string[] readShapedPost = ["/resolve", "/check", "/by-ids", "/by-codes", "/ancestors"];
         var mutating = writes
             .Where(w => !readShapedPost.Any(suffix => w.Contains(suffix, StringComparison.OrdinalIgnoreCase)))
             .ToList();
@@ -110,6 +137,22 @@ public class MasterDataAuthzTests : IClassFixture<MasterDataAuthzTests.Host>
         mutating.Should().BeEmpty(
             "master data must change only through admin-service's governed path (8b.2), never here:{0}{1}",
             Environment.NewLine, string.Join(Environment.NewLine, mutating));
+    }
+
+    [Fact]
+    public void Every_api_route_requires_the_masterdata_read_scope()
+    {
+        // The phase-26.1 change. A route that carries authorization metadata but no scope policy is the
+        // state this service was in for eight phases: authenticated, and unbounded.
+        var unscoped = _host.Endpoints()
+            .Where(e => Path(e).StartsWith("/api/v1", StringComparison.Ordinal))
+            .Where(e => e.Metadata.GetMetadata<IAllowAnonymous>() is null)
+            .Where(e => e.Metadata.GetMetadata<IAuthorizeData>()?.Policy
+                        != HbmpPolicies.Scope(MasterDataScopes.Read))
+            .Select(Path).Distinct().Order(StringComparer.Ordinal).ToList();
+
+        unscoped.Should().BeEmpty("every catalogue read is gated on {0}:{1}{2}",
+            MasterDataScopes.Read, Environment.NewLine, string.Join(Environment.NewLine, unscoped));
     }
 
     [Fact]

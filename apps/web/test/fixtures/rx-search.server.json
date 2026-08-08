@@ -1,0 +1,31 @@
+[
+    {
+        "prescriptionId": "47f2a33f-d49d-4bbf-97b1-1bb8b35287af",
+        "rxNo": "RX-2026-000312",
+        "beneficiaryId": "483bb9fa-2c3a-4f34-a35a-e9a4ace11df2",
+        "status": "Approved",
+        "expiresAt": "2026-08-13T19:43:36.250238+00:00",
+        "prescriberName": "Dr Karim Abdel-Latif",
+        "submittedAt": "2026-08-03T19:43:36.250238+00:00",
+        "primaryIcdCode": "J01.0",
+        "diagnosisCodes": [
+            "J01.0"
+        ],
+        "expired": false,
+        "lines": [
+            {
+                "prescriptionLineId": "09fcacbd-df16-470d-a4bd-e1fdaeb6098d",
+                "drugId": "032c31bf-3b6e-81cb-9c5b-79969f8934c9",
+                "drugName": "augmentin 600mg vial for i.v 600 mg vial",
+                "dose": "1g",
+                "route": "PO",
+                "frequency": "BD",
+                "durationDays": 7,
+                "quantityPrescribed": 14.0,
+                "quantityDispensed": 0.0,
+                "quantityRemaining": 14.0,
+                "status": "Active"
+            }
+        ]
+    }
+]

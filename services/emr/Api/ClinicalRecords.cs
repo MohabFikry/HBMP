@@ -4,6 +4,7 @@ using Mersal.Auth.Authorization;
 using Mersal.Authz;
 using Mersal.Emr.Domain;
 using Mersal.Emr.Infrastructure;
+using Mersal.Events;
 using Microsoft.EntityFrameworkCore;
 
 namespace Mersal.Emr.Api;
@@ -44,7 +45,45 @@ public static class ClinicalEndpoints
                 .OrderByDescending(e => e.StartedAt)
                 .Take(100)
                 .ToListAsync(ct);
-            return Results.Ok(mine.Select(EncounterResponse.From));
+
+            // The patient's NAME on the treating clinician's own worklist.
+            //
+            // This list was rendering "Beneficiary •••4821" for every row, which is unusable as a worklist:
+            // the doctor cannot tell which of their patients a row is without opening it. The masking is
+            // right on the boards that genuinely do not need identity (lab, pharmacy, approvals); the
+            // treating clinician is not one of them, and already reads the full clinical record behind each
+            // of these rows.
+            //
+            // The source is emr's OWN `appointment.beneficiary_name`, captured at BOOKING — the same column
+            // AppointmentsModule reads for the day board. No call to patient-service: emr holds no
+            // beneficiary demographics, and a service fetching a sibling's data on the caller's behalf is
+            // the aggregation shape this platform forbids outright.
+            //
+            // A walk-in encounter has no appointment and so no name here; it keeps the masked token, which
+            // is the honest answer rather than a blank cell.
+            // The BRANCH rides along on the same lookup, for the same reason and at no extra cost.
+            //
+            // "My Patients" lists a doctor who works more than one branch every patient they treat, with no
+            // way to tell which building any of them was seen in. The branch is not the encounter's own — an
+            // encounter records care, not a place — it belongs to the appointment the visit was started from,
+            // which is the row this query is already reading for the name. A walk-in has no appointment and
+            // therefore no branch, and null says exactly that.
+            //
+            // The projection is now a two-field one, so the `BeneficiaryName != null` filter had to go: it
+            // would have dropped the branch of every walk-in-named row along with the name it was skipping.
+            var apptIds = mine.Select(e => e.AppointmentId).OfType<Guid>().Distinct().ToList();
+            var byAppt = apptIds.Count == 0
+                ? []
+                : await db.Appointments.AsNoTracking()
+                    .Where(a => apptIds.Contains(a.AppointmentId))
+                    .Select(a => new { a.AppointmentId, a.BeneficiaryName, a.BranchId })
+                    .ToDictionaryAsync(a => a.AppointmentId, a => a, ct);
+
+            return Results.Ok(mine.Select(e =>
+            {
+                var appt = e.AppointmentId is { } id ? byAppt.GetValueOrDefault(id) : null;
+                return EncounterResponse.From(e, appt?.BeneficiaryName, appt?.BranchId);
+            }));
         });
 
         // ---- Full clinical record (US-030) — treating clinician or approval team only ----
@@ -70,6 +109,89 @@ public static class ClinicalEndpoints
                 vitals.Select(VitalResponse.From).ToList(),
                 allergies.Select(AllergyResponse.From).ToList(),
                 meds.Select(MedicationHistoryResponse.From).ToList()));
+        });
+
+        // ---- GET /encounters/{id}/timeline — everything that has happened in this visit (ADR-0031) ----
+        //
+        // The care episode has recorded these steps since ADR-0031 — visit started, vitals recorded, diagnosis
+        // coded, order placed, sample taken, result reported, prescription written, medicine dispensed — and
+        // `CareTimelineWriter.ForEncounterAsync` was written to read them back. Nothing ever called it. The
+        // steps were being WRITTEN by six services and read by exactly one screen, the appointment timeline,
+        // which reaches them the long way round: from the appointment DOWN to its encounter.
+        //
+        // That left the encounter workspace — the screen a doctor is actually looking at while the visit
+        // happens — unable to show the history of the visit it is documenting. And an order or a prescription
+        // raised in it could not show what had happened to it either, though every step carries the ORD-/RX-
+        // reference that would answer exactly that.
+        //
+        // Deliberately NOT the audit store, for the same reason the appointment timeline is not: audit-service
+        // holds the hash-chained compliance record, spans every entity, carries before/after state and needs
+        // `audit:read` (Security/Compliance/DPO). A clinician needs the steps of ONE visit, under the
+        // `emr:read` and the treating relationship they already hold for its clinical record.
+        enc.MapGet("/{id:guid}/timeline", async (
+            Guid id, EmrDbContext db, ClinicalGate gate, CareTimelineWriter episode, CancellationToken ct) =>
+        {
+            var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
+            if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found",
+                type: "https://mersal.foundation/problems/not-found");
+
+            // The SAME gate as reading the encounter's clinical record. A timeline of a visit is a read of
+            // that visit: it names the acts performed on a patient, which is why it cannot be looser than the
+            // record it describes.
+            var denied = await gate.CheckAsync("emr:read", EmrPolicies.Resources.Encounter, id.ToString(), enc0.BeneficiaryId, ct);
+            if (denied is not null) return denied;
+
+            var care = await episode.ForEncounterAsync(id, ct);
+
+            /*
+             * 30.5c — THE TIMELINE OPENS AT CHECKED IN (design 46 §7c).
+             *
+             * A COMPOSED VIEW over two aggregates: check-in lives on emr.appointment, recorded by reception,
+             * and the encounter begins later when the doctor opens the visit. The check-in data is NOT copied
+             * onto the encounter — it is read from where it belongs and joined here.
+             *
+             * Three cases, kept distinct (VisitOpeningRules):
+             *   1. checked in then seen   -> both entries, waiting time shown;
+             *   2. NO CHECK-IN RECORDED   -> said in words, never assumed to be the visit-start moment;
+             *   3. recorded out of order  -> both shown AS RECORDED, and FLAGGED, never reordered.
+             */
+            var appointment = enc0.AppointmentId is { } apptId
+                ? await db.Appointments.AsNoTracking().FirstOrDefaultAsync(a => a.AppointmentId == apptId, ct)
+                : null;
+            var visitStarted = care.FirstOrDefault(s => s.Step == CareSteps.VisitStarted)?.OccurredAt
+                               ?? enc0.StartedAt;
+            var opening = VisitOpeningRules.Compose(appointment?.CheckedInAt, visitStarted);
+            // Newest first, matching the appointment timeline: whoever opens one is asking what just happened,
+            // not how it began. `ForEncounterAsync` returns oldest-first because a timeline read WHOLE is read
+            // forwards; the two orders are both deliberate and this is the endpoint's choice to make.
+            var rows = care
+                .Select(s => new TimelineRow(s.Step, s.OccurredAt, s.Actor, s.Source, s.Reference))
+                .ToList();
+
+            // The arrival is PREPENDED as a step rather than written into the care episode, because it is
+            // reception's record on the appointment and the episode must not claim to own it.
+            if (opening.CheckedInAt is { } arrivedAt)
+                rows.Add(new TimelineRow(
+                    CareSteps.CheckedIn, arrivedAt, appointment?.CheckedInBy, CareStepSources.Emr, null));
+
+            return Results.Ok(new
+            {
+                // NEWEST FIRST, matching the appointment timeline: whoever opens one is asking what just
+                // happened, not how it began.
+                steps = rows.OrderByDescending(r => r.At).ToList(),
+                opening = new
+                {
+                    kind = opening.Kind.ToString(),
+                    checkedInAt = opening.CheckedInAt,
+                    visitStartedAt = opening.VisitStartedAt,
+                    // The number a clinic manager actually wants, and it now costs nothing. NULL whenever it
+                    // cannot honestly be computed — never a fabricated zero.
+                    waitingMinutes = opening.Waiting is { } w ? (int)w.TotalMinutes : (int?)null,
+                    // A data-quality signal, surfaced rather than tidied away.
+                    inconsistent = opening.Flagged,
+                    noCheckInRecorded = opening.Kind == VisitOpeningKind.NoCheckInRecorded,
+                },
+            });
         });
 
         // ---- SOAP note create (US-031) ----
@@ -130,7 +252,7 @@ public static class ClinicalEndpoints
         // ---- Sign a note (locks it) ----
         enc.MapPost("/{id:guid}/notes/{noteId:guid}/sign", async (
             Guid id, Guid noteId, EmrDbContext db, ClinicalGate gate, IAuditClient audit,
-            IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+            CareTimelineWriter timeline, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
         {
             var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
             if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
@@ -151,6 +273,11 @@ public static class ClinicalEndpoints
             }
 
             note.IsSigned = true; note.SignedAt = clock.GetUtcNow();
+            // The episode records THAT a note was signed and by whom — never what it says. This timeline is
+            // read by reception and the call centre too (ADR-0031 §3).
+            timeline.Add(CareSteps.NoteSigned, enc0.BeneficiaryId,
+                encounterId: id, appointmentId: enc0.AppointmentId,
+                actor: me.Principal!.Subject, reference: enc0.EncounterNo, occurredAt: note.SignedAt);
             await db.SaveChangesAsync(ct);
             await EmitAsync(audit, "emr_note", note.NoteId, AuditAction.StateChange, me, "{\"isSigned\":true}", ct);
             return Results.Ok(NoteResponse.From(note));
@@ -186,7 +313,8 @@ public static class ClinicalEndpoints
         // ---- Diagnosis (US-031): ICD-10 validated vs masterdata ----
         enc.MapPost("/{id:guid}/diagnoses", async (
             Guid id, AddDiagnosisRequest req, EmrDbContext db, ClinicalGate gate, IClinicalCodeValidator codes,
-            IAuditClient audit, IHbmpPrincipalAccessor me, HttpContext http, TimeProvider clock, CancellationToken ct) =>
+            IAuditClient audit, CareTimelineWriter timeline, IHbmpPrincipalAccessor me, HttpContext http,
+            TimeProvider clock, CancellationToken ct) =>
         {
             var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
             if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
@@ -204,15 +332,136 @@ public static class ClinicalEndpoints
                 RecordedBy = me.Principal!.Subject, RecordedAt = clock.GetUtcNow(),
             };
             db.Diagnoses.Add(dx);
+            // The step says a diagnosis was coded, not WHICH — the ICD code is the clinical content this
+            // timeline deliberately does not carry. The reference is the encounter, which is the door to it
+            // for anyone entitled to open it.
+            timeline.Add(CareSteps.DiagnosisCoded, enc0.BeneficiaryId,
+                encounterId: id, appointmentId: enc0.AppointmentId,
+                actor: dx.RecordedBy, reference: enc0.EncounterNo, occurredAt: dx.RecordedAt);
             await db.SaveChangesAsync(ct);
             await EmitAsync(audit, "diagnosis", dx.DiagnosisId, AuditAction.Create, me, $"{{\"icd\":\"{dx.IcdCode}\"}}", ct);
             return Results.Created($"/api/v1/encounters/{id}/diagnoses/{dx.DiagnosisId}", DiagnosisResponse.From(dx));
         }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
 
+        // ---- End the visit (23 §6) — the transition nothing in this platform performed ----
+        //
+        // `EncounterStatus.Completed` and `AppointmentStatus.Completed` have both existed since phase 1, and
+        // `AppointmentWorkflow` has listed CheckedIn → Completed with the comment "encounter closed (phase 4)"
+        // since phase 3. No code path ever wrote either, so every finished consultation stayed InProgress and
+        // its appointment stayed CheckedIn — and the doctor's day list, which offers "Start visit" for any
+        // CheckedIn appointment, kept offering it for patients who had already been seen and sent home.
+        //
+        // The appointment moves in the SAME transaction. Closing the visit and leaving the appointment open is
+        // the state that caused this, and two endpoints for one clinical act is two chances to end up back in
+        // it — the desk's board and the doctor's board would disagree about the same patient.
+        enc.MapPost("/{id:guid}/complete", async (
+            Guid id, EmrDbContext db, ClinicalGate gate, IAuditClient audit, IOutbox outbox,
+            CareTimelineWriter timeline, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        {
+            var encounter = await db.Encounters.FirstOrDefaultAsync(e => e.EncounterId == id, ct);
+            if (encounter is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+            var denied = await gate.CheckAsync("emr:write", EmrPolicies.Resources.Encounter, id.ToString(), encounter.BeneficiaryId, ct);
+            if (denied is not null) return denied;
+
+            // Idempotent: closing an already-closed visit is the answer the caller wanted, not a conflict.
+            // "Save & finalize" saves, signs and closes in sequence, so a retry after a partial failure must
+            // not turn into an error the doctor cannot act on.
+            if (encounter.Status == EncounterStatus.Completed)
+                return Results.Ok(EncounterResponse.From(encounter));
+            if (!EncounterWorkflow.CanComplete(encounter))
+                return Problem(409, "encounter-not-open", $"the encounter is {encounter.Status}; only an in-progress visit can be closed.");
+            if (!EncounterWorkflow.MayComplete(encounter, me.Principal?.Subject))
+                return Problem(403, "not-the-treating-clinician", "only the clinician who opened this visit may close it.");
+
+            var now = clock.GetUtcNow();
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+
+            encounter.Status = EncounterStatus.Completed;
+            encounter.EndedAt = now;
+            encounter.EndedBy = me.Principal?.Subject;
+
+            // The queue entry is the patient sitting on a clinician's worklist. Leaving it Waiting after the
+            // consultation ends is how a board shows a room that has already emptied.
+            var queued = await db.QueueEntries.FirstOrDefaultAsync(q => q.EncounterId == id && q.State != QueueState.Done, ct);
+            if (queued is not null) queued.State = QueueState.Done;
+
+            Appointment? appt = null;
+            if (encounter.AppointmentId is { } apptId)
+            {
+                appt = await db.Appointments.FirstOrDefaultAsync(a => a.AppointmentId == apptId, ct);
+                // Only when the move is legal. A visit opened against an appointment that was later cancelled
+                // still closes — the consultation happened — and the appointment keeps the state it reached.
+                if (appt is not null && AppointmentWorkflow.CanTransition(appt.Status, AppointmentStatus.Completed))
+                {
+                    appt.Status = AppointmentStatus.Completed;
+                    appt.UpdatedBy = me.Principal?.Subject;
+                    appt.UpdatedAt = now;
+                }
+                else
+                {
+                    appt = null;
+                }
+            }
+
+            timeline.Add(CareSteps.VisitEnded, encounter.BeneficiaryId,
+                encounterId: encounter.EncounterId, appointmentId: encounter.AppointmentId,
+                actor: encounter.EndedBy, reference: encounter.EncounterNo, occurredAt: now);
+            await db.SaveChangesAsync(ct);
+            await outbox.EnqueueAsync("EncounterCompleted", "emr.events", new
+            {
+                encounterId = encounter.EncounterId, encounter.EncounterNo,
+                beneficiaryId = encounter.BeneficiaryId, appointmentId = encounter.AppointmentId,
+                endedAt = now,
+            }, ct);
+            if (appt is not null)
+                await outbox.EnqueueAsync("ApptCompleted", "emr.events", new
+                {
+                    appointmentId = appt.AppointmentId, beneficiaryId = appt.BeneficiaryId,
+                    encounterId = encounter.EncounterId, locationId = appt.LocationId,
+                }, ct);
+            await tx.CommitAsync(ct);
+
+            await EmitAsync(audit, "encounter", encounter.EncounterId, AuditAction.StateChange, me,
+                $"{{\"status\":\"Completed\",\"appointmentClosed\":{(appt is not null).ToString().ToLowerInvariant()}}}", ct);
+            return Results.Ok(EncounterResponse.From(encounter));
+        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
+
+        // ---- Diagnosis retract (US-031) — a mis-keyed code, taken off the working assessment ----
+        //
+        // Not a hard delete: the row is flagged and stays, like every other clinical record here. And not
+        // available after the encounter's note is signed — at that point the assessment is a signed clinical
+        // statement, and the ONLY correction path is an addendum, exactly as it is for the note itself. A
+        // retract endpoint that ignored that would be a back door around the sign-lock, undoing in one call
+        // what SoapNoteRules refuses in another.
+        enc.MapDelete("/{id:guid}/diagnoses/{diagnosisId:guid}", async (
+            Guid id, Guid diagnosisId, EmrDbContext db, ClinicalGate gate, IAuditClient audit,
+            IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        {
+            var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
+            if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            var denied = await gate.CheckAsync("emr:write", EmrPolicies.Resources.Diagnosis, id.ToString(), enc0.BeneficiaryId, ct);
+            if (denied is not null) return denied;
+
+            var dx = await db.Diagnoses.FirstOrDefaultAsync(d => d.DiagnosisId == diagnosisId && d.EncounterId == id && !d.IsDeleted, ct);
+            if (dx is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+
+            if (await db.Notes.AsNoTracking().AnyAsync(n => n.EncounterId == id && n.IsSigned && !n.IsDeleted, ct))
+                return Problem(409, "encounter-signed", "The encounter's note is signed — record the correction as an addendum.");
+            if (!string.Equals(dx.RecordedBy, me.Principal!.Subject, StringComparison.Ordinal))
+                return Problem(403, "not-recorder", "Only the clinician who recorded a diagnosis may retract it.");
+
+            dx.IsDeleted = true;
+            await db.SaveChangesAsync(ct);
+            await EmitAsync(audit, "diagnosis", dx.DiagnosisId, AuditAction.SoftDelete, me, $"{{\"icd\":\"{dx.IcdCode}\",\"isDeleted\":true}}", ct);
+            return Results.NoContent();
+        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
+
         // ---- Vital: per-type range + optional LOINC ----
         enc.MapPost("/{id:guid}/vitals", async (
             Guid id, AddVitalRequest req, EmrDbContext db, ClinicalGate gate, IClinicalCodeValidator codes,
-            IAuditClient audit, IHbmpPrincipalAccessor me, HttpContext http, TimeProvider clock, CancellationToken ct) =>
+            IAuditClient audit, CareTimelineWriter timeline, IHbmpPrincipalAccessor me, HttpContext http,
+            TimeProvider clock, CancellationToken ct) =>
         {
             var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
             if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
@@ -231,10 +480,82 @@ public static class ClinicalEndpoints
                 RecordedBy = me.Principal!.Subject, MeasuredAt = req.MeasuredAt ?? clock.GetUtcNow(),
             };
             db.Vitals.Add(vital);
+            timeline.Add(CareSteps.VitalsRecorded, enc0.BeneficiaryId,
+                encounterId: id, appointmentId: enc0.AppointmentId,
+                actor: vital.RecordedBy, reference: enc0.EncounterNo, occurredAt: vital.MeasuredAt);
             await db.SaveChangesAsync(ct);
             await EmitAsync(audit, "vital", vital.VitalId, AuditAction.Create, me, $"{{\"type\":\"{vital.VitalType}\"}}", ct);
             return Results.Created($"/api/v1/encounters/{id}/vitals/{vital.VitalId}", VitalResponse.From(vital));
         }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
+
+        /* ---- GET /encounters/{id}/validation-context — what the prescribing engine must NOT take from the
+         * client (28.2, design 44 §1.3).
+         *
+         * ============================================================================================
+         * WHY THIS ENDPOINT EXISTS AT ALL
+         * ============================================================================================
+         * pharmacy's step 2 re-ran every clinical check server-side — and then read the diagnosis list out
+         * of the request body. A submission with an emptied or edited `diagnosisIcdCodes` array changed
+         * what the engine concluded about indication and, once phase 28 Gate 9 lands, about
+         * contraindication. It was a hole in the exact invariant phase 26 was built to enforce.
+         *
+         * The client's copy is display state. The SERVER reads the encounter.
+         *
+         * ============================================================================================
+         * WHY A NEW ENDPOINT RATHER THAN /clinical
+         * ============================================================================================
+         * `/clinical` returns notes, vitals, allergies and medication history — the whole record. This is
+         * called on every validation run while a doctor composes a prescription, and minimum-necessary is
+         * a platform rule rather than an aspiration: a check that needs three ICD codes and a weight must
+         * not pull signed SOAP notes across a service boundary to get them.
+         *
+         * One call and one audited PHI read, not three. Gate 9 adds pregnancy status to this same
+         * response for the same reason.
+         *
+         * Gated exactly as `/clinical` is: this is the diagnosis list, which is clinical content. */
+        enc.MapGet("/{id:guid}/validation-context", async (
+            Guid id, EmrDbContext db, ClinicalGate gate, CancellationToken ct) =>
+        {
+            var enc0 = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(e => e.EncounterId == id, ct);
+            if (enc0 is null) return Results.Problem(statusCode: 404, title: "Not Found",
+                type: "https://mersal.foundation/problems/not-found");
+
+            var denied = await gate.CheckAsync("emr:read", EmrPolicies.Resources.Encounter, id.ToString(), enc0.BeneficiaryId, ct);
+            if (denied is not null) return denied;
+
+            // ACTIVE diagnoses only. A resolved condition is not what this prescription is being written
+            // against, and treating it as one would produce indication matches for illnesses the patient
+            // no longer has — the kind of false reassurance that is harder to notice than a false warning.
+            var diagnoses = await db.Diagnoses.AsNoTracking()
+                .Where(d => d.EncounterId == id && !d.IsDeleted && d.ClinicalStatus == ClinicalStatus.Active)
+                .OrderBy(d => d.DiagnosisRank)
+                .Select(d => new { d.IcdCode, Rank = d.DiagnosisRank.ToString() })
+                .ToListAsync(ct);
+
+            // The most recent recorded weight for this PERSON, across every encounter — with the date it
+            // was measured. The date is not decoration: a two-year-old weight on a growing child is worse
+            // than no weight, so the engine treats a stale one as a missing input rather than a current
+            // fact (28.8). Sending the value without its date would make that judgement impossible.
+            var encounterIds = await db.Encounters.AsNoTracking()
+                .Where(e => e.BeneficiaryId == enc0.BeneficiaryId).Select(e => e.EncounterId).ToListAsync(ct);
+
+            var weight = await db.Vitals.AsNoTracking()
+                .Where(v => encounterIds.Contains(v.EncounterId) && v.VitalType == VitalType.Weight && !v.IsDeleted
+                            && v.ValueNum != null)
+                .OrderByDescending(v => v.MeasuredAt)
+                .Select(v => new { v.ValueNum, v.Unit, v.MeasuredAt })
+                .FirstOrDefaultAsync(ct);
+
+            return Results.Ok(new
+            {
+                encounterId = id,
+                beneficiaryId = enc0.BeneficiaryId,
+                diagnoses,
+                weightKg = weight?.ValueNum,
+                weightUnit = weight?.Unit,
+                weightMeasuredAt = weight?.MeasuredAt,
+            });
+        });
 
         // ---- Beneficiary allergy list (beneficiary-level read) — treating clinician / oversight. pharmacy-service
         // calls this (token forwarded) to source allergies for advisory prescribe-time alerts (US-033). ----
@@ -246,6 +567,27 @@ public static class ClinicalEndpoints
             var allergies = await db.Allergies.AsNoTracking()
                 .Where(a => a.BeneficiaryId == beneficiaryId && !a.IsDeleted).ToListAsync(ct);
             return Results.Ok(allergies.Select(AllergyResponse.From));
+        });
+
+        // ---- Standing clinical facts: blood group + allergies, in ONE gated read (migration 0021). ----
+        //
+        // profile-service's alerts section calls this to build the patient context bar. It is one call and
+        // not two on purpose: each ClinicalGate check writes a PHI-read audit event, so fetching blood group
+        // separately would record one clinician's single glance at a patient as two accesses.
+        ben.MapGet("/{beneficiaryId:guid}/clinical-record", async (
+            Guid beneficiaryId, EmrDbContext db, ClinicalGate gate, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync("emr:read", EmrPolicies.Resources.Allergy, beneficiaryId.ToString(), beneficiaryId, ct);
+            if (denied is not null) return denied;
+
+            var standing = await db.BeneficiaryClinical.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.BeneficiaryId == beneficiaryId, ct);
+            var allergies = await db.Allergies.AsNoTracking()
+                .Where(a => a.BeneficiaryId == beneficiaryId && !a.IsDeleted).ToListAsync(ct);
+
+            return Results.Ok(new MemberClinicalRecordResponse(
+                beneficiaryId, standing?.BloodGroup, standing?.RecordedAt,
+                allergies.Select(AllergyResponse.From).ToList()));
         });
 
         // ---- Clinical-context oversight projection (16.6, H4) — the seam approvals /review calls to assemble the
@@ -303,12 +645,17 @@ public static class ClinicalEndpoints
             var denied = await gate.CheckAsync("emr:write", EmrPolicies.Resources.Allergy, beneficiaryId.ToString(), beneficiaryId, ct);
             if (denied is not null) return denied;
 
-            if (!await codes.AllergenExistsAsync(req.AllergenId, Bearer(http), ct))
+            // The NAME, not an existence bit — and the name masterdata gives, never one the client sent. A
+            // display string supplied by the caller would let the substance shown on the safety strip differ
+            // from the allergen actually recorded, which is the one disagreement this record must not permit.
+            var allergenName = await codes.AllergenNameAsync(req.AllergenId, Bearer(http), ct);
+            if (allergenName is null)
                 return Problem(422, "unknown-allergen", $"Allergen '{req.AllergenId}' is not present in master data.");
 
             var allergy = new Allergy
             {
                 AllergyId = Guid.NewGuid(), BeneficiaryId = beneficiaryId, AllergenId = req.AllergenId,
+                AllergenDisplay = allergenName,
                 Reaction = req.Reaction, Severity = req.Severity, Status = req.Status,
                 RecordedBy = me.Principal!.Subject, RecordedAt = clock.GetUtcNow(),
             };
@@ -316,6 +663,39 @@ public static class ClinicalEndpoints
             await db.SaveChangesAsync(ct);
             await EmitAsync(audit, "allergy", allergy.AllergyId, AuditAction.Create, me, $"{{\"severity\":\"{allergy.Severity}\"}}", ct);
             return Results.Created($"/api/v1/beneficiaries/{beneficiaryId}/allergies/{allergy.AllergyId}", AllergyResponse.From(allergy));
+        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
+
+        // ---- Blood group (beneficiary-level, migration 0021) ----
+        //
+        // PUT, not POST: a person has one blood group, so recording it twice is a correction, not a second
+        // fact. Upsert on the beneficiary key. Both the old and the new value go into the audit detail —
+        // a CHANGED blood group is the entry a reviewer will want, and "set to O+" alone does not say that.
+        ben.MapPut("/{beneficiaryId:guid}/blood-group", async (
+            Guid beneficiaryId, SetBloodGroupRequest req, EmrDbContext db, ClinicalGate gate,
+            IAuditClient audit, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
+        {
+            var denied = await gate.CheckAsync("emr:write", EmrPolicies.Resources.Allergy, beneficiaryId.ToString(), beneficiaryId, ct);
+            if (denied is not null) return denied;
+
+            if (!BloodGroups.IsValid(req.BloodGroup))
+                return Problem(422, "invalid-blood-group", $"'{req.BloodGroup}' is not one of {string.Join(", ", BloodGroups.All)}.");
+
+            var row = await db.BeneficiaryClinical.FirstOrDefaultAsync(x => x.BeneficiaryId == beneficiaryId, ct);
+            var previous = row?.BloodGroup;
+            if (row is null)
+            {
+                row = new BeneficiaryClinical { BeneficiaryId = beneficiaryId };
+                db.BeneficiaryClinical.Add(row);
+            }
+            row.BloodGroup = req.BloodGroup;
+            row.RecordedBy = me.Principal!.Subject;
+            row.RecordedAt = clock.GetUtcNow();
+            await db.SaveChangesAsync(ct);
+
+            await EmitAsync(audit, "beneficiary_clinical", beneficiaryId,
+                previous is null ? AuditAction.Create : AuditAction.Update, me,
+                $"{{\"field\":\"bloodGroup\",\"from\":{Json(previous)},\"to\":{Json(req.BloodGroup)}}}", ct);
+            return Results.Ok(new { beneficiaryId, bloodGroup = row.BloodGroup, recordedAt = row.RecordedAt });
         }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
 
         // ---- Medication history (beneficiary-level): drug validated vs masterdata ----
@@ -365,6 +745,12 @@ public static class ClinicalEndpoints
     }
 
     private static string? Bearer(HttpContext http) => http.Request.Headers.Authorization.ToString();
+
+    /// <summary>A string as a JSON literal, or the JSON <c>null</c> token. Audit details are hand-built JSON
+    /// here; `"from":""` and `"from":null` are different claims about a previous value and only one is true
+    /// of a field nobody had recorded.</summary>
+    private static string Json(string? value) =>
+        value is null ? "null" : System.Text.Json.JsonSerializer.Serialize(value);
 
     private static IResult Problem(int status, string type, string detail) =>
         Results.Problem(statusCode: status, title: type, detail: detail, type: $"urn:hbmp:{type}");

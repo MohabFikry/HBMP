@@ -21,7 +21,7 @@ namespace Mersal.Identity.Tests;
 /// Env-gated on IDENTITY_TEST_DB. DB-less CI skips.
 /// </summary>
 [Collection("identity-db")]
-public class MembershipRosterTests
+public class MembershipRosterTests(IdentityHostFixture host) : IClassFixture<IdentityHostFixture>
 {
     private const string Password = "Passw0rd!Mersal";
     private const string TenantB = "22222222-2222-2222-2222-222222222222";
@@ -52,7 +52,7 @@ public class MembershipRosterTests
     public async Task The_roster_lists_the_callers_own_tenant_with_roles_and_override_counts()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var admin = $"ros-{Guid.NewGuid():N}";
         var (adminId, key) = await TestFlow.SeedUser(factory, admin, Password, ["super_admin"], twoFactor: true);
         var (subjectId, _) = await TestFlow.SeedUser(factory, $"rossub-{Guid.NewGuid():N}", Password, ["doctor"]);
@@ -90,7 +90,7 @@ public class MembershipRosterTests
     public async Task Asking_for_another_tenant_is_refused_not_quietly_narrowed()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var admin = $"rosx-{Guid.NewGuid():N}";
         var (adminId, key) = await TestFlow.SeedUser(factory, admin, Password, ["super_admin"], twoFactor: true);
 
@@ -114,7 +114,7 @@ public class MembershipRosterTests
     public async Task The_platform_admin_flag_widens_the_roster_and_nothing_else()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var admin = $"rosp-{Guid.NewGuid():N}";
         var (adminId, key) = await TestFlow.SeedUser(factory, admin, Password, ["super_admin"], twoFactor: true);
         var (subjectId, _) = await TestFlow.SeedUser(factory, $"rospsub-{Guid.NewGuid():N}", Password, ["doctor"]);
@@ -149,7 +149,7 @@ public class MembershipRosterTests
     public async Task A_lapsed_override_is_reported_as_expired_rather_than_dropped()
     {
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
-        using var factory = new IdentityAppFactory();
+        var factory = host.Factory;
         var admin = $"rose-{Guid.NewGuid():N}";
         var (adminId, key) = await TestFlow.SeedUser(factory, admin, Password, ["super_admin"], twoFactor: true);
         var (subjectId, _) = await TestFlow.SeedUser(factory, $"rosesub-{Guid.NewGuid():N}", Password, ["doctor"]);

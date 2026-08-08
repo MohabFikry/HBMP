@@ -118,7 +118,6 @@ public class ProfilePoliciesTests
     [InlineData(ProfileSections.Investigations)]
     [InlineData(ProfileSections.Prescriptions)]
     [InlineData(ProfileSections.Coverage)]
-    [InlineData(ProfileSections.Timeline)]
     public void A_non_treating_doctor_gets_existence_only_with_a_reason(string section)
     {
         // Restricted, NOT absent. A doctor who sees nothing concludes the patient has no history; a doctor who
@@ -205,9 +204,37 @@ public class ProfilePoliciesTests
         ProfilePolicies.CallHistoryLevelFor(Ctx("case_manager")).Should().Be(CallHistoryLevel.None);
     }
 
+    /// <summary>
+    /// The three ADMINISTRATIVE sections a doctor receives without a treating relationship.
+    ///
+    /// <para>This is a deliberate widening, made at the repo owner's request, and it is asserted rather than
+    /// left implicit so nobody has to infer it from the matrix. Authorizations, Timeline and CallHistory are
+    /// answered by approvals-, policy- and callcentre-service, and none of them owns the treating fact: each
+    /// seam builds its context from roles alone and leaves what it does not own false, fail-closed. A
+    /// treating-gated cell there could never evaluate true, so these sections were not withheld — they were
+    /// unreachable, and the profile reported `owner-declined` on all three.</para>
+    ///
+    /// <para>What it costs: any doctor in the tenant sees what a visit was authorized for, when things
+    /// happened, and that a call took place. What it does NOT cost: the clinical sections below keep the
+    /// treating gate, and every read here is still audited as sensitive.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(ProfileSections.Authorizations)]
+    [InlineData(ProfileSections.Timeline)]
+    [InlineData(ProfileSections.CallHistory)]
+    public void A_doctor_receives_the_administrative_sections_without_a_treating_relationship(string section) =>
+        StateOf("doctor", section).Should().Be(ProfileSectionState.Visible);
+
     [Fact]
-    public void A_non_treating_doctor_gets_existence_only_call_history() =>
-        ProfilePolicies.CallHistoryLevelFor(Ctx("doctor")).Should().Be(CallHistoryLevel.None);
+    public void A_doctors_call_history_stays_at_the_operational_level() =>
+        // Widened in REACH, not in DEPTH: still no verification detail and no agent notes (design 39 §5b).
+        ProfilePolicies.CallHistoryLevelFor(Ctx("doctor")).Should().Be(CallHistoryLevel.Operational);
+
+    [Fact]
+    public void The_widening_is_the_doctors_alone_and_does_not_reach_the_nurse() =>
+        // `Doctor()` derives from `Clinician()`, which the nurse still uses unchanged — the row was split so
+        // that granting the doctor more could not silently grant it to everyone sharing that row.
+        StateOf("nurse", ProfileSections.Timeline).Should().Be(ProfileSectionState.Restricted);
 
     [Theory]
     [InlineData(CallHistoryLevel.Full, CallHistoryLevel.Meta, CallHistoryLevel.Meta)]

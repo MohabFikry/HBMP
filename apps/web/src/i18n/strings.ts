@@ -44,18 +44,27 @@ export const L = {
   ccCloseCall: { en: "Close call", ar: "إنهاء المكالمة" },
   ccOnCall: { en: "On call", ar: "مكالمة جارية" },
   ccReason: { en: "Call reason", ar: "سبب المكالمة" },
-  ccSearchLabel: { en: "Find member (phone, member no, national ID, passport, refugee ID, UNHCR)", ar: "ابحث عن مستفيد (هاتف، رقم عضوية، رقم قومي، جواز، رقم لاجئ، UNHCR)" },
+  ccSearchLabel: { en: "Find member", ar: "ابحث عن مستفيد" },
+  // What ONE box matches. Name leads because it is what a caller offers first and what the old identifier-led
+  // picker made look unsupported.
+  ccSearchHelp: {
+    en: "Search by name, phone number, card or member number, national ID, passport, refugee ID or UNHCR number.",
+    ar: "ابحث بالاسم أو رقم الهاتف أو رقم البطاقة أو العضوية أو الرقم القومي أو الجواز أو رقم اللاجئ أو UNHCR.",
+  },
   ccSearch: { en: "Search", ar: "بحث" },
-  ccNotVerified: { en: "Not yet verified", ar: "لم يتم التحقق بعد" },
-  ccNotVerifiedBody: { en: "Confirm the caller's identity before any member detail is shown. Ask the caller to state at least two identifiers.", ar: "تأكّد من هوية المتصل قبل عرض أي بيانات. اطلب من المتصل ذكر هويّتين على الأقل." },
-  ccChallengeOn: { en: "Challenge on (tick each identifier the caller states correctly):", ar: "تحقّق من (حدّد كل هوية يذكرها المتصل بشكل صحيح):" },
-  ccPass: { en: "Verify — Pass", ar: "تحقّق — نجح" },
-  ccFail: { en: "Verify — Fail", ar: "تحقّق — فشل" },
-  ccNeedTwo: { en: "Tick at least two identifiers to pass verification.", ar: "حدّد هويّتين على الأقل لإتمام التحقق." },
-  ccVerified: { en: "Caller verified — member details unlocked", ar: "تم التحقق من المتصل — تم فتح بيانات المستفيد" },
-  // Phase 20 — into the unified profile, offered only after a verification pass.
+  // Identity is confirmed BY THE AGENT ON THE PHONE. Opening the file records that and binds the call to this
+  // member; the agent is told what the click means rather than asked to tick boxes the platform used to score.
+  ccOpenFile: { en: "Open member file", ar: "فتح ملف المستفيد" },
+  ccOpenFileHelp: {
+    en: "Confirm who you are speaking to before you open the file. Opening it records that you did, against this call.",
+    ar: "تأكّد ممّن تتحدث إليه قبل فتح الملف. فتح الملف يسجّل ذلك على هذه المكالمة.",
+  },
+  ccFileOpened: { en: "Member file open for this call", ar: "ملف المستفيد مفتوح لهذه المكالمة" },
+  ccOpenFileFailed: {
+    en: "Couldn't open the member's file — nothing was recorded. Try again.",
+    ar: "تعذّر فتح ملف المستفيد — لم يُسجَّل شيء. حاول مرة أخرى.",
+  },
   ccOpenProfile: { en: "Open full profile", ar: "فتح الملف الكامل" },
-  ccFailed: { en: "Verification failed — details stay hidden", ar: "فشل التحقق — تبقى البيانات مخفية" },
   ccCoverage: { en: "Coverage & remaining limits", ar: "التغطية والحدود المتبقية" },
   ccContacts: { en: "Contacts", ar: "بيانات التواصل" },
   ccAppointments: { en: "Appointments (all branches)", ar: "المواعيد (كل الفروع)" },
@@ -63,6 +72,11 @@ export const L = {
   ccBook: { en: "Book", ar: "حجز" },
   ccReschedule: { en: "Reschedule", ar: "إعادة جدولة" },
   ccCancel: { en: "Cancel appointment", ar: "إلغاء الموعد" },
+  ccCancelConfirm: {
+    en: "The time is released for someone else and anyone on the waitlist may be offered it. Tell the caller before you confirm.",
+    ar: "سيُتاح الوقت لشخص آخر وقد يُعرض على من في قائمة الانتظار. أبلغ المتصل قبل التأكيد.",
+  },
+  ccKeep: { en: "Keep it", ar: "الاحتفاظ به" },
   ccCancelReason: { en: "Cancellation reason", ar: "سبب الإلغاء" },
   ccCancelReasonRequired: { en: "A cancellation reason is required.", ar: "سبب الإلغاء مطلوب." },
   ccSlotTaken: { en: "That slot was just taken — pick another.", ar: "تم حجز هذا الموعد للتو — اختر موعدًا آخر." },
@@ -96,31 +110,61 @@ export const L = {
   ccHistoryEmpty: { en: "No calls yet.", ar: "لا توجد مكالمات بعد." },
   ccHistoryError: { en: "Couldn't load call history.", ar: "تعذّر تحميل سجل المكالمات." },
   ccRescheduled: { en: "Appointment rescheduled and confirmed to the member.", ar: "تمت إعادة جدولة الموعد وتأكيده للمستفيد." },
+  // ── Wrap-up: the summary other roles read, and the close outcomes that used to be silent ───────────────
+  ccSummary: { en: "Call summary", ar: "ملخّص المكالمة" },
+  ccSummaryHelp: {
+    en: "The record of this call. Read by coordinators and clinicians on the member's profile — what the call was about and what you did, with no clinical detail.",
+    ar: "سجل هذه المكالمة. يقرأه المنسّقون والأطباء في ملف المستفيد — موضوع المكالمة وما قمت به، بدون أي تفاصيل طبية.",
+  },
+  ccSummaryRequired: {
+    en: "A summary is required to close this call. Another role reads it later to see what happened.",
+    ar: "يلزم إدخال ملخّص لإنهاء هذه المكالمة. يقرأه لاحقًا زملاء آخرون لمعرفة ما جرى.",
+  },
+  ccCloseFailed: {
+    en: "The call could not be closed and is still open. Try again.",
+    ar: "تعذّر إنهاء المكالمة وما زالت مفتوحة. حاول مرة أخرى.",
+  },
+  ccNotYourCall: {
+    en: "This call was taken by another agent. Only they or a supervisor can change its record.",
+    ar: "هذه المكالمة تولّاها موظف آخر. لا يمكن تعديل سجلّها إلا بواسطته أو بواسطة مشرف.",
+  },
+  ccApptStale: {
+    en: "This appointment changed while you were on the call. Reload the member's file and try again.",
+    ar: "تغيّر هذا الموعد أثناء المكالمة. أعد تحميل ملف المستفيد وحاول مرة أخرى.",
+  },
   // ── The member file: act from the file the agent is already looking at ────────────────────────────────
   ccNewAppointment: { en: "New appointment", ar: "موعد جديد" },
-  ccCallNotes: { en: "Call notes", ar: "ملاحظات المكالمة" },
-  ccCallNotesHelp: {
-    en: "Saved to the call record when you close the call. No clinical detail — this is a contact log.",
-    ar: "تُحفظ في سجل المكالمة عند إنهائها. بدون أي تفاصيل طبية — هذا سجل تواصل.",
-  },
-  ccCopy: { en: "Copy notes", ar: "نسخ الملاحظات" },
-  ccCopied: { en: "Call notes copied to the clipboard.", ar: "تم نسخ ملاحظات المكالمة." },
+  ccCopy: { en: "Copy summary", ar: "نسخ الملخّص" },
+  ccCopied: { en: "Call summary copied to the clipboard.", ar: "تم نسخ ملخّص المكالمة." },
   ccCopyFailed: { en: "Couldn't copy — select the text and copy manually.", ar: "تعذّر النسخ — حدّد النص وانسخه يدويًا." },
   // ── Standalone "Book appointment" journey ─────────────────────────────────────────────────────────────
   ccBookTitle: { en: "Book appointment", ar: "حجز موعد" },
   ccBookIntro: {
-    en: "Find the member, verify the caller, then choose the branch, clinic and time. The booking is logged against this call.",
-    ar: "ابحث عن المستفيد، تحقّق من المتصل، ثم اختر الفرع والعيادة والوقت. يُسجَّل الحجز على هذه المكالمة.",
+    en: "Find the member, open their file, then choose the branch, clinic and time. The booking is logged against this call.",
+    ar: "ابحث عن المستفيد، افتح ملفه، ثم اختر الفرع والعيادة والوقت. يُسجَّل الحجز على هذه المكالمة.",
   },
-  ccSearchBy: { en: "Search by", ar: "البحث بواسطة" },
-  ccSearchByAny: { en: "Any identifier", ar: "أي هوية" },
-  ccSearchByHint: {
-    en: "Any of these finds the member — the choice only sets the keypad and the example.",
-    ar: "أي منها يجد المستفيد — الاختيار يحدّد لوحة الإدخال والمثال فقط.",
+  // The three steps of a call-centre booking, mirroring reception's "1. Patient / 2. Appointment" so the two
+  // front-of-house screens read the same way — with the step the call centre has and reception does not.
+  ccStepMember: { en: "1. Member", ar: "١. المستفيد" },
+  ccStepAppointment: { en: "2. Appointment", ar: "٢. الموعد" },
+  ccStepCallRecord: { en: "3. Call record", ar: "٣. سجل المكالمة" },
+  ccChoose: { en: "Choose", ar: "اختيار" },
+  ccChange: { en: "Change", ar: "تغيير" },
+  ccBookAction: { en: "Book appointment", ar: "احجز الموعد" },
+  // Told only AFTER a booking is attempted — listing what is missing before the agent has tried is noise.
+  ccNeedMember: { en: "Choose a member first.", ar: "اختر المستفيد أولاً." },
+  ccNeedDoctor: { en: "Choose a specialty and doctor.", ar: "اختر التخصص والطبيب." },
+  ccNeedSlot: { en: "Choose a time.", ar: "اختر الوقت." },
+  ccNoteTooLong: { en: "Shorten the appointment notes before booking.", ar: "اختصر ملاحظات الموعد قبل الحجز." },
+  // Who rang whom. Recorded on the interaction at the moment it opens, so it cannot be corrected afterwards —
+  // hence the control locks once the call is under way rather than pretending a later change would stick.
+  ccDirection: { en: "Direction", ar: "اتجاه المكالمة" },
+  ccInbound: { en: "Inbound — the member called us", ar: "وارد — المستفيد اتصل بنا" },
+  ccOutbound: { en: "Outbound — we called the member", ar: "صادر — نحن اتصلنا بالمستفيد" },
+  ccDirectionLocked: {
+    en: "Set when the call was opened and kept as the record of what happened.",
+    ar: "حُدِّد عند فتح المكالمة ويُحفظ كسجل لما حدث.",
   },
-  ccStepFind: { en: "1. Find the member", ar: "١. ابحث عن المستفيد" },
-  ccStepVerify: { en: "2. Verify the caller", ar: "٢. تحقّق من المتصل" },
-  ccStepChoose: { en: "3. Choose branch, clinic and time", ar: "٣. اختر الفرع والعيادة والوقت" },
   ccBookAnother: { en: "Book for another member", ar: "حجز لمستفيد آخر" },
   ccBookFinish: { en: "Finish and close the call", ar: "إنهاء المكالمة" },
   ccBookClosed: { en: "Call closed.", ar: "تم إنهاء المكالمة." },
@@ -134,7 +178,6 @@ export const L = {
   accountClose: { en: "Close account menu", ar: "إغلاق قائمة الحساب" },
   settings: { en: "Settings", ar: "الإعدادات" },
   appearance: { en: "Appearance", ar: "المظهر" },
-  breadcrumb: { en: "Breadcrumb", ar: "مسار التنقل" },
   staySignedIn: { en: "Stay signed in", ar: "البقاء مسجلاً" },
   timeoutTitle: { en: "Session about to expire", ar: "الجلسة على وشك الانتهاء" },
   timeoutBody: {
@@ -142,10 +185,12 @@ export const L = {
     ar: "لم تكن نشطًا. لأسباب أمنية، سيتم تسجيل خروجك قريبًا ما لم تتابع.",
   },
   // Login
-  loginTitle: { en: "Sign in to Mersal HBMP", ar: "تسجيل الدخول إلى مرسال HBMP" },
+  loginTitle: { en: "Sign in", ar: "تسجيل الدخول" },
+  // One short line, left-aligned with the heading. The old copy ran to two centred lines and said three
+  // things at a moment when somebody wants to type a username.
   loginSub: {
-    en: "Single sign-on with multi-factor authentication. You'll land on your role's portal only.",
-    ar: "دخول موحّد مع مصادقة متعددة العوامل. ستصل إلى بوابة دورك فقط.",
+    en: "Use your Mersal single sign-on to continue.",
+    ar: "استخدم الدخول الموحّد لمرسال للمتابعة.",
   },
   chooseRole: { en: "Role (demo sign-in)", ar: "الدور (دخول تجريبي)" },
   mfaLabel: { en: "Authenticator code", ar: "رمز المصادقة" },
@@ -155,6 +200,121 @@ export const L = {
   // Names the platform's own issuer. It said "via Keycloak" until phase 19 — long after ADR-0015 retired
   // Keycloak — so the screen told every operator their credentials were going somewhere they were not.
   signInVia: { en: "Secure sign-in via Mersal ID", ar: "تسجيل دخول آمن عبر هوية مرسال" },
+
+  // ---- 28.4: the sign-in happens HERE now (ADR-0036). Every string authored in both locales. ----
+  usernameLabel: { en: "Username", ar: "اسم المستخدم" },
+  passwordLabel: { en: "Password", ar: "كلمة المرور" },
+  // ONE message for an unknown username, a wrong password and a deactivated account. The server already
+  // refuses to tell them apart; saying more here would rebuild the enumeration oracle in the browser.
+  signInInvalid: {
+    en: "That username and password don't match. Check them and try again.",
+    ar: "اسم المستخدم أو كلمة المرور غير صحيحة. تحقق منهما وحاول مجدداً.",
+  },
+  // Told deliberately (ADR-0036 §5.2): the alternative sends someone to reset a password that was never
+  // wrong, and a reset does not unlock the account — they would lose the password AND stay locked out.
+  signInLocked: {
+    en: "This account is temporarily locked after too many attempts.",
+    ar: "تم قفل هذا الحساب مؤقتاً بعد عدد كبير من المحاولات.",
+  },
+  signInLockedWait: { en: "Try again in about {n} minutes.", ar: "حاول مجدداً بعد حوالي {n} دقيقة." },
+  // "We could not ask" is never rendered as "your password is wrong".
+  signInUnavailable: {
+    en: "Sign-in is unavailable right now. This is not a problem with your password — please try again shortly.",
+    ar: "تسجيل الدخول غير متاح حالياً. هذه ليست مشكلة في كلمة المرور — يرجى المحاولة بعد قليل.",
+  },
+  signInNoMembership: {
+    en: "Your account is not active in any organization. Contact your administrator.",
+    ar: "حسابك غير مُفعّل في أي منظمة. تواصل مع المسؤول.",
+  },
+
+  twoFactorTitle: { en: "Two-step verification", ar: "التحقق بخطوتين" },
+  twoFactorSub: {
+    en: "Enter the 6-digit code from your authenticator app.",
+    ar: "أدخل الرمز المكوّن من 6 أرقام من تطبيق المصادقة.",
+  },
+  twoFactorCode: { en: "Authenticator code", ar: "رمز المصادقة" },
+  twoFactorUseRecovery: { en: "Use a recovery code instead", ar: "استخدم رمز استرداد بدلاً من ذلك" },
+  twoFactorUseCode: { en: "Use my authenticator app", ar: "استخدم تطبيق المصادقة" },
+  twoFactorRecoveryLabel: { en: "Recovery code", ar: "رمز الاسترداد" },
+  twoFactorInvalid: { en: "That code wasn't accepted. Try again.", ar: "لم يتم قبول هذا الرمز. حاول مجدداً." },
+
+  membershipTitle: { en: "Choose an organization", ar: "اختر منظمة" },
+  membershipSub: {
+    en: "Your account is active in more than one. This session will act for the one you pick.",
+    ar: "حسابك مُفعّل في أكثر من واحدة. ستعمل هذه الجلسة نيابة عن التي تختارها.",
+  },
+  membershipContinue: { en: "Continue", ar: "متابعة" },
+
+  signInBack: { en: "Back", ar: "رجوع" },
+  signInWorking: { en: "Signing in…", ar: "جارٍ تسجيل الدخول…" },
+  signInHelp: {
+    en: "Need access? Contact your administrator.",
+    ar: "بحاجة إلى صلاحية؟ تواصل مع المسؤول.",
+  },
+  signInForgot: { en: "Forgot password?", ar: "نسيت كلمة المرور؟" },
+
+  // ---- 28.8: the sign-in hero. Decorative copy, still authored in both locales. ----
+  heroKicker: { en: "Mersal Foundation", ar: "مؤسسة مرسال" },
+  // Two lines on purpose — "One platform." lands, then the promise. The break is markup, not a newline in
+  // the string: a \n would collapse in HTML and an Arabic translation may want to break elsewhere.
+  heroHeadlineLead: { en: "One platform.", ar: "منصة واحدة." },
+  heroHeadlineRest: {
+    en: "Every stakeholder. Every step of care.",
+    ar: "كل صاحب مصلحة. كل خطوة في الرعاية.",
+  },
+  heroLede: {
+    en: "The Healthcare Benefit Management Platform for Mersal Foundation. Eligibility, care and approvals in one auditable, bilingual record.",
+    ar: "منصة إدارة المنافع الصحية لمؤسسة مرسال. الأهلية والرعاية والموافقات في سجل واحد قابل للتدقيق وثنائي اللغة.",
+  },
+  rememberDevice: { en: "Remember this device", ar: "تذكّر هذا الجهاز" },
+  toggleLanguage: { en: "Switch language", ar: "تغيير اللغة" },
+  toggleTheme: { en: "Switch theme", ar: "تغيير السمة" },
+
+  // ---- 28.6: self-service password reset (ADR-0036 §6) ----
+  forgotTitle: { en: "Reset your password", ar: "إعادة تعيين كلمة المرور" },
+  forgotSub: {
+    en: "Enter your username and we'll send a reset link to the email on your account.",
+    ar: "أدخل اسم المستخدم وسنرسل رابط إعادة التعيين إلى البريد المسجّل على حسابك.",
+  },
+  forgotSubmit: { en: "Send reset link", ar: "إرسال رابط إعادة التعيين" },
+  // Deliberately vague about whether the account exists — the server answers the same either way, and a
+  // precise message here would be a free account-existence oracle costing an attacker nothing.
+  forgotSent: {
+    en: "If that account exists, a reset link is on its way. The link works once and expires in 30 minutes.",
+    ar: "إذا كان هذا الحساب موجوداً، فسيصلك رابط إعادة التعيين. يعمل الرابط مرة واحدة وينتهي خلال 30 دقيقة.",
+  },
+  // The vagueness stops at delivery. Never "we've emailed you" when nothing could be emailed.
+  forgotUnavailable: {
+    en: "Password reset isn't available on this system yet. Contact your administrator to have it reset for you.",
+    ar: "إعادة تعيين كلمة المرور غير متاحة بعد على هذا النظام. تواصل مع المسؤول لإعادة تعيينها لك.",
+  },
+
+  resetTitle: { en: "Choose a new password", ar: "اختر كلمة مرور جديدة" },
+  resetSub: {
+    en: "This link works once. Pick a password you haven't used here before.",
+    ar: "هذا الرابط يعمل مرة واحدة. اختر كلمة مرور لم تستخدمها هنا من قبل.",
+  },
+  resetNewPassword: { en: "New password", ar: "كلمة المرور الجديدة" },
+  resetConfirmPassword: { en: "Confirm new password", ar: "تأكيد كلمة المرور الجديدة" },
+  resetSubmit: { en: "Set new password", ar: "تعيين كلمة المرور" },
+  resetMismatch: { en: "The two passwords don't match.", ar: "كلمتا المرور غير متطابقتين." },
+  resetInvalidLink: {
+    en: "That reset link is no longer valid. Links expire after 30 minutes and can be used only once — request a new one.",
+    ar: "هذا الرابط لم يعد صالحاً. تنتهي الروابط بعد 30 دقيقة وتُستخدم مرة واحدة فقط — اطلب رابطاً جديداً.",
+  },
+  // Said BEFORE the fields, not after the deed.
+  resetEndsSessions: {
+    en: "Setting a new password signs you out everywhere.",
+    ar: "تعيين كلمة مرور جديدة سيُنهي جلساتك على كل الأجهزة.",
+  },
+  resetKeepsTwoFactor: {
+    en: "It does not turn off two-step verification — you'll still need your authenticator code.",
+    ar: "لن يُلغي ذلك التحقق بخطوتين — ستظل بحاجة إلى رمز المصادقة.",
+  },
+  resetDone: {
+    en: "Your password is set and every other session has ended. Sign in with the new password.",
+    ar: "تم تعيين كلمة المرور وانتهت كل الجلسات الأخرى. سجّل الدخول بكلمة المرور الجديدة.",
+  },
   // 403 / 404
   forbiddenTitle: { en: "You don't have access to this page", ar: "ليس لديك صلاحية الوصول لهذه الصفحة" },
   forbiddenBody: {

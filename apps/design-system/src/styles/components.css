@@ -31,6 +31,10 @@
   justify-content: center;
   gap: 8px;
   cursor: pointer;
+  /* An <a> carrying this class is a real navigation that happens to be shaped like a button (0B §10c's
+     paired-actions rule); without these two it arrives underlined and in link blue. */
+  text-decoration: none;
+  text-align: center;
 }
 .mrs-btn svg {
   width: 17px;
@@ -88,6 +92,31 @@ html[data-theme="dark"] .mrs-btn.mrs-primary {
   color: var(--st-bad-fg);
   border-color: var(--st-bad-fg);
 }
+/* ---------- An icon-only DANGER button carries no frame -----------------------------------------
+ *
+ * A destructive action stated in WORDS earns an outline: "Withdraw" beside "Amend" is a choice, and the
+ * heavier of the two should look heavier. A destructive action stated as a GLYPH does not — a worklist
+ * column of outlined red boxes, one per row, reads as an alarm about the rows themselves rather than as a
+ * control that acts on one. The colour is enough: it is the only red in the row, and the accessible name
+ * says the word.
+ *
+ * Matched on the CONTENT rather than on a prop, so it cannot be forgotten. `svg:only-child` is precisely
+ * "this button is an icon and nothing else" — a button with `leadingIcon` and a label has two children and
+ * keeps its outline, which is the distinction the rule is actually about. Adding an `iconOnly` prop instead
+ * would put the same decision at every one of the call sites, where it would be got wrong exactly once.
+ *
+ * The hover tint stays: without it the only feedback on a 44px target is the cursor.
+ */
+.mrs-btn.mrs-danger:has(> svg:only-child) {
+  border-color: transparent;
+  background: transparent;
+  padding: 0 8px;
+}
+.mrs-btn.mrs-danger:has(> svg:only-child):hover:not(:disabled) {
+  background: var(--st-bad-bg);
+  border-color: transparent;
+  box-shadow: none;
+}
 .mrs-btn.mrs-warn {
   color: var(--st-warn-fg);
   border-color: var(--st-warn-fg);
@@ -136,15 +165,32 @@ html[data-theme="dark"] .mrs-btn.mrs-primary {
 .mrs-field {
   display: block;
 }
+/* The label style is a LABEL style, not a descendant-of-.mrs-field style. It was only ever scoped to the
+   Field wrapper, so every caller that labels a control the wrapper does not own — a bare Select or Combobox
+   with its own <span className="mrs-label">, as the reception booking form has for Clinic and Appointment
+   type — rendered plain body text beside fields that carried the 500-weight subhead. Same class, two
+   different-looking labels in one form. The scoped rule below is kept (identical declarations, higher
+   specificity) so nothing inside a Field changes. */
+.mrs-label,
 .mrs-field .mrs-label {
   font-weight: 500;
   font-size: var(--fs-subhead);
   display: block;
   color: var(--text-1);
 }
-.mrs-field .mrs-control {
+/*
+  A CONTROL is a control wherever it lives — same reasoning as `.mrs-label` above, and the same defect.
+
+  These declarations were scoped to `.mrs-field .mrs-control`, so any control the Field wrapper does not own
+  received none of them. `Combobox` is exactly that case: its input carries `.mrs-control` but sits inside
+  `.mrs-combo`, so it rendered with no border, no 44px height, no background and no padding — a flat grey bar
+  next to correctly-drawn InputFields on the same form. The booking screen showed both side by side.
+
+  Only `margin-top` stays field-scoped: the 6px gap belongs to the label-above-control arrangement the Field
+  makes, and controls elsewhere (the toolbar's search box, a combobox in a grid) space themselves.
+*/
+.mrs-control {
   width: 100%;
-  margin-top: 6px;
   min-height: 44px;
   border-radius: var(--r-md);
   /* --border is a decorative hairline and sat at ~2:1 against the dark card — an empty input was
@@ -156,12 +202,51 @@ html[data-theme="dark"] .mrs-btn.mrs-primary {
   padding: 10px 12px;
   font: inherit;
 }
-.mrs-field textarea.mrs-control {
+.mrs-field .mrs-control {
+  margin-top: 6px;
+}
+textarea.mrs-control {
   min-height: 80px;
   resize: vertical;
 }
-.mrs-field .mrs-control[aria-invalid="true"] {
+/*
+ * File inputs. The wrapper picked up `.mrs-control`, but the part the operator actually presses — the UA's
+ * "Choose File" button — is a shadow pseudo-element that inherits none of it, so the bulk-upload screen
+ * showed a grey system button with a square border and a ~28px target inside an otherwise themed form. It
+ * is styled here rather than replaced with a custom picker: the native control brings keyboard operation,
+ * the OS file dialog and screen-reader support that a div-and-a-hidden-input reimplements badly.
+ */
+input[type="file"].mrs-control {
+  padding: 6px 8px;
+  cursor: pointer;
+}
+input[type="file"].mrs-control::file-selector-button {
+  min-height: 32px;
+  margin-inline-end: var(--sp3);
+  padding: 0 var(--sp3);
+  border: 1px solid var(--border-input, var(--border));
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+input[type="file"].mrs-control:hover::file-selector-button {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+}
+.mrs-control[aria-invalid="true"] {
   border-color: var(--st-bad-fg);
+}
+/* A disabled control must READ as disabled rather than merely refusing clicks: the booking form disables
+   Specialty until the branch's list arrives and Doctor until a specialty is chosen, and without this they
+   looked identical to enabled ones — so the operator clicked, nothing happened, and the screen looked
+   broken rather than sequenced. */
+.mrs-control:disabled {
+  background: var(--surface-2, var(--surface-1));
+  color: var(--text-3);
+  cursor: not-allowed;
 }
 .mrs-field .mrs-help {
   font-size: var(--fs-caption);
@@ -175,14 +260,43 @@ input[type="checkbox"],
 input[type="radio"] {
   accent-color: var(--accent);
 }
+/*
+ * `.mrs-checkbox` is the sized form used where the checkbox IS the control — a worklist decision cell, a
+ * form's qualifier. At 20×20 it failed BOTH bars that apply to it: WCAG 2.2 AA Target Size (Minimum) wants
+ * 24×24, and this project's own checklist wants 44px. The box stays 24px because a 44px checkbox is
+ * grotesque; the TARGET reaches 44px through a transparent outset, so a shaky hand or a touch screen hits
+ * what it aimed at without the layout growing around it.
+ *
+ * `isolation` + a stacking context keep the outset from swallowing clicks on a neighbouring cell: the
+ * pseudo-element is only as tall as the row it sits in, and rows in these tables are ≥44px anyway.
+ */
 .mrs-checkbox {
-  inline-size: 20px;
-  block-size: 20px;
+  position: relative;
+  inline-size: 24px;
+  block-size: 24px;
   accent-color: var(--accent);
   cursor: pointer;
 }
+.mrs-checkbox::after {
+  content: "";
+  position: absolute;
+  /* (44 - 24) / 2 — the outset that brings the hit area to the 44px bar without moving the box. */
+  inset: -10px;
+}
 .mrs-checkbox:disabled {
   cursor: not-allowed;
+}
+.mrs-checkbox:disabled::after {
+  content: none;
+}
+/*
+ * Dark theme: `accent-color` recolours the CHECKED box, but an unchecked native checkbox keeps the UA's
+ * light-mode chrome — a white filled square on a deep-teal card, which reads as already ticked. Declaring
+ * the scheme lets the UA paint its own dark unchecked state, so checked and unchecked stay distinguishable.
+ */
+html[data-theme="dark"] input[type="checkbox"],
+html[data-theme="dark"] input[type="radio"] {
+  color-scheme: dark;
 }
 
 /* Radio / choice rows (QA follow-up): bare browser radios cramped against their labels read as unstyled.
@@ -284,6 +398,16 @@ html[dir="rtl"] .mrs-search input {
 .mrs-chip {
   display: inline-flex;
   align-items: center;
+  /*
+   * A chip is sized by its label, everywhere.
+   *
+   * `display: inline-flex` becomes `flex` when the chip is a grid or flex ITEM, and the default
+   * `justify-items: stretch` then blows it out to the full column. In the member detail header that turned
+   * a 90px "✓ Active" chip into a 1285px green band across the card — which reads as a section banner
+   * announcing something, not as this member's status. Logical `start` so RTL mirrors for free.
+   */
+  justify-self: start;
+  align-self: start;
   gap: 6px;
   font-size: 12.5px;
   font-weight: 600;
@@ -379,15 +503,134 @@ html[dir="rtl"] .mrs-search input {
   padding: var(--sp5) 0;
 }
 
+/* Pill variant — same tablist/tab/tabpanel semantics as the underline style above, `.mrs-seg`'s look. */
+.mrs-tabs--pill {
+  border-bottom: 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  padding: 3px;
+  gap: 3px;
+}
+.mrs-tabs--pill .mrs-tab {
+  border-bottom: 0;
+  border-radius: var(--r-pill);
+  padding: 0 14px;
+  font-size: var(--fs-caption);
+}
+.mrs-tabs--pill .mrs-tab[aria-selected="true"] {
+  background: var(--surface-1);
+  color: var(--accent);
+  box-shadow: var(--elev-1);
+}
+
+/* ---------- Scrolling ----------------------------------------------------
+ *
+ * One treatment for every region that scrolls INSIDE the page — dropdowns, panel bodies, in-card lists,
+ * modal bodies, wide tables. Two things it fixes, both of which every such region had.
+ *
+ * <b>Scroll chaining.</b> Only two containers in the whole app set `overscroll-behavior`, and both only on
+ * the x axis. Everywhere else, reaching the end of an inner list handed the remaining momentum to the page:
+ * scrolling to the bottom of a select dropdown carried on and scrolled the document behind it, which moves
+ * the field the dropdown is anchored to out from under the cursor. `contain` stops at the boundary. It does
+ * NOT trap the user — the outer surface still scrolls once the wheel stops and starts again.
+ *
+ * <b>The scrollbar itself.</b> Nothing styled one anywhere, so every scroll region rendered the platform
+ * default, and the two platforms disagree in opposite directions. On Windows and most Linux desktops that is
+ * a ~17px light-grey slab with square end caps, which inside a 288px dropdown is 6% of the width spent on
+ * furniture that matches nothing else on the page. On macOS it is an overlay bar that is INVISIBLE until you
+ * scroll — so a list that scrolls looks exactly like a list that does not, and the only way to discover the
+ * remaining options is to try. A thin, always-present, tokenised bar answers both: it costs less room than
+ * the Windows default and it is the affordance macOS omits.
+ *
+ * Declared twice on purpose. `scrollbar-width`/`scrollbar-color` are the standard properties (Firefox, and
+ * Chrome 121+); `::-webkit-scrollbar` is what Safari and older Chromium read. Neither alone covers the
+ * browsers this runs on.
+ *
+ * NOT applied to the page's own scroller or the navigation rail: a thin bar on the primary scroller of a
+ * long worklist is a real ergonomic loss, and the OS default is the right thing for the surface the user
+ * scrolls most.
+ */
+.mrs-scroll {
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.mrs-scroll::-webkit-scrollbar {
+  inline-size: 10px;
+  block-size: 10px;
+}
+.mrs-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.mrs-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--r-pill);
+  /* A transparent border painted over the thumb's own background inset it from the track, so the bar reads
+     as a floating pill rather than a full-bleed slab against the card's edge. */
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.mrs-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+  background-clip: content-box;
+}
+/* Both axes meeting in the corner — without this it renders as an unstyled grey square. */
+.mrs-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/*
+ * A scroll region a keyboard can reach.
+ *
+ * <p>A container that scrolls but holds no focusable child cannot be scrolled without a pointer — arrow keys
+ * go to the page instead (WCAG 2.1.1). The fix is a tab stop, and a tab stop MUST show where focus is: a
+ * silent one is worse than none, because the user cannot tell whether their arrow keys will move this region
+ * or the page. Same treatment `.mrs-wl-scroll` already uses, lifted out so it is not the data table's
+ * private arrangement.</p>
+ *
+ * <p>Deliberately NOT put on dropdowns, menus or listboxes. Those are already keyboard-operable through the
+ * control that owns them — arrow keys from the input move the active option and scroll it into view — and an
+ * extra tab stop in the middle of that would be a stop with nothing to do.</p>
+ */
+.mrs-scroll-focusable:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
+}
+
 /* ---------- Data table / worklist ---------- */
 /* Wide tables scroll horizontally *inside their own pane* rather than pushing the whole page into a
    horizontal scroll. The wrapper owns the overflow so the outer layout stays put as the viewport shrinks. */
+/*
+ * A wide table scrolls SIDEWAYS on its own and hands the page everything else.
+ *
+ * `.mrs-scroll` contains overscroll on both axes, which is right for a dropdown — reaching the end of a
+ * select's list must not carry on and scroll the document, because that moves the field the list is anchored
+ * to out from under the cursor. It is wrong for a table. A table is not an overlay floating above the page;
+ * it is a block IN the page, usually the tallest thing on it, and the wheel lands on it for most of the
+ * screen's area.
+ *
+ * `contain` blocks the chain even when this box has no vertical overflow to consume — which is the common
+ * case, since the table's height is its content — so the page simply stopped scrolling wherever the cursor
+ * happened to be over a table. The user's report was "no vertical scroll available, or the scroll is at the
+ * end"; both are the same rule refusing to pass the gesture on.
+ *
+ * So: `block: auto` restores the chain up the page, and `inline: contain` stays, because horizontal
+ * overscroll is what browsers map to back/forward navigation gestures — chaining that would let a sideways
+ * flick inside a claims table leave the page entirely.
+ */
 .mrs-wl-scroll {
   inline-size: 100%;
   max-inline-size: 100%;
   overflow-x: auto;
-  overscroll-behavior-x: contain;
+  overscroll-behavior-inline: contain;
+  overscroll-behavior-block: auto;
 }
+/* The focus ring for this pane now comes from `.mrs-scroll-focusable`, which the element also carries — the
+   reasoning that used to live here (a scrolling pane is a tab stop, and a silent tab stop is worse than none)
+   moved with it, because it applies to every scroll region and not only to a data table. */
 .mrs-wl {
   width: 100%;
   min-inline-size: max-content;
@@ -399,14 +642,37 @@ html[dir="rtl"] .mrs-search input {
   top: 0;
   background: var(--surface-2);
   text-align: start;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-size: var(--tbl-head-size);
+  font-weight: var(--tbl-head-weight);
+  letter-spacing: var(--tbl-head-tracking);
   text-transform: uppercase;
-  color: var(--text-3);
-  padding: 12px 16px;
+  color: var(--tbl-head-color);
+  padding: 12px var(--tbl-cell-pad-x);
   border-bottom: 1px solid var(--border);
   z-index: 5;
+  white-space: nowrap;
+}
+
+/*
+ * A cell holding a number.
+ *
+ * <p><b>Numbers align to their END, and they were not.</b> A money or quantity column is read by scanning
+ * DOWN it — "which of these claims is the large one", "does this add up" — and that scan only works when the
+ * digits stack. Left-aligned, `9.50` and `12,400.00` start in the same place and end in different ones, so
+ * the eye has to measure each string instead of reading a shape.</p>
+ *
+ * <p>The app got this half right in a way that looked entirely finished. Thirteen of fifty-six money renders
+ * wrapped the value in `.tnum` — but `.tnum` only sets `font-variant-numeric`, and it sat on a `<span>`
+ * inside a cell that is still `text-align: start`. So the digits were the right WIDTH and the column was
+ * still ragged: the fix was applied, and it did not do the thing it was for. Alignment has to live on the
+ * cell, which is why this is a cell class rather than a span class.</p>
+ *
+ * <p>`nowrap` because a wrapped figure is a different number to a reader glancing down the column — "1,240"
+ * broken across two lines reads as two values.</p>
+ */
+.mrs-num {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .mrs-wl th button.mrs-sort {
@@ -416,8 +682,183 @@ html[dir="rtl"] .mrs-search input {
   align-items: center;
   gap: 4px;
 }
+/* `all: unset` above strips the focus ring too, so a keyboard user tabbing across the header had no idea
+   where they were. Put it back explicitly. */
+.mrs-wl th button.mrs-sort:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+/* The chevron points the way the column is actually sorted, so direction is legible without reading
+   aria-sort — and turns rather than vanishing, so the control never looks disabled. */
+.mrs-wl th[aria-sort="none"] button.mrs-sort svg { opacity: 0.35; }
+.mrs-wl th[aria-sort="descending"] button.mrs-sort svg { transform: rotate(180deg); }
+
+/* ---------- Table toolbar (search + filter chips) ---------- */
+.mrs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp3);
+  margin-block-end: var(--sp3);
+}
+/*
+  ONE label treatment for everything in the bar.
+
+  The toolbar mixes three kinds of labelled control — the search box, the filter groups' <legend>s, and
+  whatever a caller passes as `children` (the appointments board passes two date InputFields). Each brought
+  its own label styling: legends were the 11.5px uppercase micro-label, while `.mrs-label` was the 15px
+  subhead. With `align-items: flex-end` the CONTROLS bottom-aligned correctly and the LABELS above them then
+  sat at three different heights, so the bar read as ragged even though nothing was misaligned by accident.
+
+  Every label in here is now the micro-label, with the same 6px below it, so the labels share a baseline and
+  the controls share theirs. The specificity is `.mrs-toolbar .mrs-field .mrs-label` deliberately — it has to
+  outrank `.mrs-field .mrs-label`, and relying on source order for that is a trap for whoever reorders this
+  file next.
+*/
+.mrs-toolbar .mrs-label,
+.mrs-toolbar .mrs-field .mrs-label {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  font-weight: 600;
+  display: block;
+  margin-block-end: 0;   /* the 6px comes from the grid gap / control margin, not from here */
+}
+.mrs-toolbar-search {
+  display: grid;
+  gap: 6px;
+  flex: 1 1 220px;
+  min-inline-size: 0;
+}
+.mrs-toolbar-searchbox {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.mrs-toolbar-searchbox svg {
+  position: absolute;
+  /* Logical inset so the icon sits on the leading edge in both LTR and RTL rather than always on the left. */
+  inset-inline-start: 10px;
+  opacity: 0.6;
+  pointer-events: none;
+}
+.mrs-toolbar-searchbox .mrs-control {
+  padding-inline-start: 34px;
+  margin-top: 0;
+}
+.mrs-toolbar-group {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-inline-size: 0;
+}
+/*
+  The group's VISIBLE label — a span, not the legend.
+
+  A rendered `<legend>` is laid out against the top of its fieldset's box rather than in normal flow. As soon
+  as a group carried an `extra` (the appointments board's date range, a label-over-control pair some 30px
+  taller than a chip) the fieldset grew, and "WHEN" went up with it while every other label in the bar stayed
+  on the label line. The legend now carries the accessible name only; this span is what the eye aligns to, and
+  it is an ordinary flow item sitting directly above its own chips.
+*/
+.mrs-toolbar-grouplabel {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  font-weight: 600;
+  display: block;
+  margin-block-end: 6px;
+}
+/* Label over chips: the same shape as the search box and as any caller-supplied field, which is what lets
+   `align-items: flex-end` on the chipset line all three up. */
+.mrs-toolbar-chipcol {
+  flex: 0 0 auto;
+  min-inline-size: 0;
+}
+.mrs-toolbar-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp2);
+}
+.mrs-chipset {
+  display: flex;
+  flex-wrap: wrap;
+  /* Bottom-aligned, because a group's `extra` (the date range) is a label-over-control pair that is taller
+     than a chip. Without this the chips centre themselves against the tallest item and drift off the row. */
+  align-items: flex-end;
+  gap: var(--sp2);
+}
+/*
+  A chip is sized by its LABEL and nothing else.
+
+  Once the custom-range fields moved inside the chipset, flex started handing them space and squeezing the
+  chips to fit — "Today" collapsed into a circle with its own text wrapped. A filter chip must never shrink
+  or wrap: it is a fixed vocabulary the operator recognises by shape.
+*/
+.mrs-filterchip {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* Caller-supplied fields inside a group are sized rather than left to sprawl: `.mrs-field` is display:block
+   with a 100%-wide control, so a pair of date inputs stretched to fill the row and pushed the second one
+   past the card's edge. */
+.mrs-chipset .mrs-field {
+  inline-size: 168px;
+  flex: 0 0 auto;
+}
+.mrs-chipset .mrs-field .mrs-control {
+  margin-top: 6px;
+}
+.mrs-filterchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-block-size: 44px;          /* the project's own target-size bar (21-accessibility) */
+  padding: 0 var(--sp3);
+  border: 1px solid var(--border-input, var(--border));
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  cursor: pointer;
+}
+.mrs-filterchip:hover { border-color: var(--accent); }
+.mrs-filterchip:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+/* Active state carries THREE cues — fill, weight and a check glyph — so it is never colour alone. */
+.mrs-filterchip.mrs-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.mrs-chipcount { opacity: 0.75; font-variant-numeric: tabular-nums; }
+.mrs-toolbar-extra {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--sp3);
+}
+/*
+  Caller-supplied fields are sized, not left to sprawl. `.mrs-field` is display:block with a 100%-wide
+  control, so inside the flex row a pair of date inputs stretched to fill whatever space was left and pushed
+  themselves against the card's right edge. A date input needs about this much and no more.
+*/
+.mrs-toolbar-extra .mrs-field {
+  inline-size: 168px;
+  flex: 0 0 auto;
+}
+.mrs-toolbar-extra .mrs-field .mrs-control {
+  margin-top: 6px;
+}
 .mrs-wl td {
-  padding: 14px 16px;
+  padding: var(--tbl-cell-pad-y) var(--tbl-cell-pad-x);
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
@@ -425,7 +866,7 @@ html[dir="rtl"] .mrs-search input {
   border-bottom: 0;
 }
 .mrs-wl.mrs-compact td {
-  padding: 8px 16px;
+  padding: var(--tbl-cell-pad-y-tight) var(--tbl-cell-pad-x);
 }
 .mrs-row {
   cursor: pointer;
@@ -506,7 +947,19 @@ nav.mrs-rail {
 }
 .mrs-navi[aria-current="page"] {
   background: var(--accent-tint);
-  color: var(--accent);
+  /*
+   * --accent-PRESS, not --accent.
+   *
+   * `--accent` is documented as 5.2:1, and it is — against WHITE. The active nav item paints it on
+   * `--accent-tint`, where it measures 4.44:1 at 15px: under AA, on the one row in the rail that says where
+   * you are. The token comment measured the right colour against the wrong background, which is the failure
+   * mode a palette note cannot catch and a rendered page can. Found by the in-browser axe pass on the first
+   * run after the browser was restored (§12.5) — jsdom cannot evaluate `color-contrast` at all, so this sat
+   * in every portal, in every locale, under a green a11y gate.
+   *
+   * `--accent-press` on the same tint is 6.7:1, and it is already the "this is engaged" tone.
+   */
+  color: var(--accent-press);
   font-weight: 600;
 }
 .mrs-navi[aria-current="page"]::before {
@@ -521,6 +974,18 @@ nav.mrs-rail {
 }
 
 /* ---------- KPI card ---------- */
+/* A row of KPI cards that is also a definition list. `dd` carries a browser default margin-inline-start of
+   40px, which would indent every value away from its own label. */
+.mrs-kpilist {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp4);
+  margin: 0;
+}
+.mrs-kpilist dd {
+  margin: 0;
+}
+
 .mrs-kpi {
   padding: var(--sp5);
   position: relative;
@@ -547,6 +1012,62 @@ nav.mrs-rail {
   align-items: center;
   gap: 6px;
 }
+/*
+ * The subject glyph on a KPI label. Tinted and set on a soft brand wash so it reads as a marker rather than
+ * as another line of the label — at 12.5px an untinted icon beside uppercase text just looks like a
+ * mis-rendered character. `flex: none` keeps it square when the label wraps on a narrow tile.
+ */
+.mrs-kpi .mrs-kpi-icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  inline-size: 26px;
+  block-size: 26px;
+  border-radius: var(--r-sm);
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+}
+.mrs-kpi .mrs-kpi-icon svg {
+  inline-size: 15px;
+  block-size: 15px;
+}
+
+/*
+ * Toned KPI cards — the hairline and the icon tile only.
+ *
+ * The tone says what KIND of figure the tile counts, and the DEFAULT is the brand gradient above, so every
+ * card that does not ask for one is untouched. A no-shows tile carries `bad` at 0 exactly as it does at 40:
+ * the colour identifies the subject, not the reading. Painting the value would make the card announce a
+ * problem on a morning where nobody missed an appointment.
+ *
+ * The value therefore keeps `--text-1` in every tone, and the uppercase label still names the figure in
+ * words — 21-accessibility §non-color status, applied to a tile whose whole content is a number.
+ *
+ * The hairline fades toward the surface rather than running flat, matching the brand→accent gradient it
+ * replaces; a solid 3px bar reads heavier than the default and the row would stop looking like one family.
+ */
+.mrs-kpi--ok::before {
+  background: linear-gradient(90deg, var(--st-ok-fg), color-mix(in srgb, var(--st-ok-fg) 45%, var(--surface-1)));
+}
+.mrs-kpi--warn::before {
+  background: linear-gradient(90deg, var(--st-warn-fg), color-mix(in srgb, var(--st-warn-fg) 45%, var(--surface-1)));
+}
+.mrs-kpi--bad::before {
+  background: linear-gradient(90deg, var(--st-bad-fg), color-mix(in srgb, var(--st-bad-fg) 45%, var(--surface-1)));
+}
+.mrs-kpi--ok .mrs-kpi-icon {
+  color: var(--st-ok-fg);
+  background: color-mix(in srgb, var(--st-ok-fg) 12%, transparent);
+}
+.mrs-kpi--warn .mrs-kpi-icon {
+  color: var(--st-warn-fg);
+  background: color-mix(in srgb, var(--st-warn-fg) 12%, transparent);
+}
+.mrs-kpi--bad .mrs-kpi-icon {
+  color: var(--st-bad-fg);
+  background: color-mix(in srgb, var(--st-bad-fg) 12%, transparent);
+}
+
 .mrs-kpi .mrs-kpi-val {
   font-size: 34px;
   font-weight: 600;
@@ -615,6 +1136,7 @@ nav.mrs-rail {
   animation: mrs-fade var(--dur) var(--ease);
 }
 .mrs-modal {
+  position: relative;                 /* anchors the close control */
   background: var(--glass-bg);
   backdrop-filter: blur(28px) saturate(1.2);
   -webkit-backdrop-filter: blur(28px) saturate(1.2);
@@ -622,15 +1144,70 @@ nav.mrs-rail {
   border-radius: var(--r-lg);
   box-shadow: var(--elev-3);
   width: min(520px, 92vw);
-  max-height: 88vh;
+  /* dvh: on mobile Safari the collapsing URL bar makes `vh` taller than the visible page, so the last rows
+     of an 88vh modal sat behind the toolbar with no way to scroll to them. */
+  max-height: 88dvh;
   overflow: auto;
   padding: var(--sp6);
+}
+/* Reference content — a column contract, a code list — is read by scanning columns, and 520px is a reading
+   width, not a table width (0B §10c). `data-wide` opts a modal into the table width without changing the
+   default for confirmations, which genuinely want to stay narrow. */
+.mrs-modal[data-wide="true"] {
+  width: min(760px, 94vw);
+}
+.mrs-modal-close {
+  position: absolute;
+  top: var(--sp3);
+  inset-inline-end: var(--sp3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 44px;
+  block-size: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.mrs-modal-close svg {
+  inline-size: 20px;
+  block-size: 20px;
+}
+.mrs-modal-close:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+.mrs-modal-close:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+/* The title must not run under the close control (Radix renders Dialog.Title as an h2). */
+.mrs-modal > h2 {
+  padding-inline-end: var(--sp10);
 }
 .mrs-modal .mrs-modal-body {
   background: var(--surface-1);
   border-radius: var(--r-md);
   padding: var(--sp4);
   margin-top: var(--sp3);
+}
+/*
+ * More air when the body follows the TITLE directly — that is, when the modal has no description.
+ *
+ * The single `--sp3` above was measured against a description: 12px under a muted paragraph reads as a gap.
+ * Under a 20px semibold heading the same 12px reads as a collision, because the heading has more optical
+ * weight and its own line-height sits tighter to the baseline. A modal that drops its description does not
+ * want the paragraph's spacing; it wants the heading's.
+ *
+ * The adjacent-sibling selector is what makes this automatic rather than a per-call-site fix — the appointment
+ * note dialog is simply the first modal to go without a description, and every one after it inherits the
+ * correct gap instead of the next person re-measuring it by eye.
+ */
+.mrs-modal > h2 + .mrs-modal-body {
+  margin-top: var(--sp5);
 }
 @keyframes mrs-fade {
   from {
@@ -782,7 +1359,7 @@ nav.mrs-rail {
   inset-block-start: calc(100% + var(--sp1));
   inset-inline-start: 0;
   min-inline-size: 100%;
-  max-block-size: 288px;
+  max-block-size: var(--scroll-picker);
   overflow-y: auto;
   margin: 0;
   padding: var(--sp1);
@@ -824,4 +1401,236 @@ nav.mrs-rail {
 .mrs-select-option-label {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ── Combobox (editable, filters as you type) ──────────────────────────────────────────────────────────────
+   Deliberately identical in silhouette to `Select`: the two sit side by side in the same form, and a control
+   that is a text box only because its list is long should not also LOOK like a different kind of field. */
+.mrs-combo {
+  position: relative;
+  inline-size: 100%;
+}
+.mrs-combo-control {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+  position: relative;
+}
+.mrs-combo-input {
+  inline-size: 100%;
+  padding-inline-end: calc(var(--sp3) + 16px);   /* room for the chevron */
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+/* The selection's flag sits inside the control, so the pair reads as one object. Absolutely positioned so it
+   overlays the input's own padding rather than shrinking the typing area. */
+.mrs-combo-leading {
+  flex: none;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+.mrs-combo-control > .mrs-combo-leading {
+  position: absolute;
+  inset-inline-start: var(--sp3);
+  pointer-events: none;
+}
+.mrs-combo-control:has(> .mrs-combo-leading) .mrs-combo-input {
+  padding-inline-start: calc(var(--sp3) + 1.5rem);
+}
+.mrs-combo-chevron {
+  position: absolute;
+  inset-inline-end: var(--sp3);
+  inline-size: 16px;
+  block-size: 16px;
+  color: var(--text-2);
+  pointer-events: none;
+  transition: transform 120ms ease;
+}
+.mrs-combo-input[aria-expanded="true"] ~ .mrs-combo-chevron { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .mrs-combo-chevron { transition: none; } }
+
+.mrs-combo-list {
+  position: absolute;
+  z-index: 40;
+  inset-block-start: calc(100% + var(--sp1));
+  inset-inline-start: 0;
+  min-inline-size: 100%;
+  max-block-size: var(--scroll-picker);
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--sp1);
+  list-style: none;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--elev-2);
+}
+.mrs-combo-option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+  min-block-size: 40px;
+  padding-inline: var(--sp2);
+  border-radius: var(--r-sm);
+  color: var(--text-1);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mrs-combo-option.is-active { background: var(--accent-tint); }
+.mrs-combo-option[aria-selected="true"] { font-weight: 600; }
+/* Selection is carried by a check, not by colour alone — the active tint is the same hue. */
+.mrs-combo-check {
+  inline-size: 16px;
+  block-size: 16px;
+  flex: none;
+  color: var(--accent);
+  visibility: hidden;
+}
+.mrs-combo-option[aria-selected="true"] .mrs-combo-check { visibility: visible; }
+.mrs-combo-label { overflow: hidden; text-overflow: ellipsis; }
+.mrs-combo-hint { color: var(--text-2); font-weight: 400; }
+/* "No match" is a statement, not an option — never selectable, never focusable. */
+.mrs-combo-empty {
+  min-block-size: 40px;
+  display: flex;
+  align-items: center;
+  padding-inline: var(--sp2);
+  color: var(--text-2);
+}
+
+/* ============================================================================================================
+   THE PORTAL TABLE PATTERN — toolbar, table, pager (DataTableView)
+   ============================================================================================================ */
+
+/*
+  The three parts stack with the toolbar's own trailing margin doing the first gap, so the wrapper only has to
+  own the space above the pager. A `gap` here would double the toolbar's margin.
+*/
+.mrs-tableview {
+  display: block;
+  min-inline-size: 0;
+}
+
+/* ---- multi-select column ---------------------------------------------------------------------------------
+   Sized to the control, not to a share of the table. Left to the auto layout the checkbox column claimed a
+   twelfth of the width and pushed the name column into wrapping. */
+.mrs-wl th.mrs-selcell,
+.mrs-wl td.mrs-selcell {
+  inline-size: 44px;
+  padding-inline: 12px;
+  text-align: center;
+  /* The 44px hit area on `.mrs-checkbox::after` is absolutely positioned; without this the cell is its
+     containing block rather than the page, and the target stays where it belongs. */
+  position: relative;
+}
+.mrs-wl .mrs-selcell .mrs-checkbox {
+  vertical-align: middle;
+}
+
+/* ---- pager -----------------------------------------------------------------------------------------------
+   Range on one edge, controls on the other, and they swap sides in RTL because both are logical properties.
+   Wraps to two rows on a narrow viewport rather than shrinking the buttons below the 44px target. */
+.mrs-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp3);
+  margin-block-start: var(--sp3);
+  padding-block-start: var(--sp3);
+  border-block-start: 1px solid var(--border);
+}
+.mrs-pager-range {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.mrs-pager-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp3);
+  flex-wrap: wrap;
+}
+.mrs-pager-size {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+}
+.mrs-pager-size .mrs-label {
+  margin: 0;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.mrs-pager-size .mrs-control {
+  margin-top: 0;
+  inline-size: auto;
+  min-inline-size: 72px;
+}
+
+.mrs-pager-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* 44px minimum target (21-accessibility) — a pager is pressed repeatedly and often on a touch screen. */
+  min-block-size: 44px;
+  padding-inline: var(--sp3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mrs-pager-step:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+.mrs-pager-step:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/*
+  The chevron is drawn pointing DOWN. Rotating it to point along the direction of travel is done here, off
+  the document direction, rather than with a prop each caller passes — in RTL "next" is to the left, and a
+  hard-coded arrow is the classic way a mirrored layout ends up pointing backwards.
+*/
+.mrs-pager-step:first-of-type svg { transform: rotate(90deg); }
+.mrs-pager-step:last-of-type  svg { transform: rotate(-90deg); }
+[dir="rtl"] .mrs-pager-step:first-of-type svg { transform: rotate(-90deg); }
+[dir="rtl"] .mrs-pager-step:last-of-type  svg { transform: rotate(90deg); }
+
+/*
+  The pinned actions column (Column.stickyEnd).
+
+  A nine-column worklist overflows its card at 1440px, which `.mrs-wl-scroll` handles — but the column that
+  falls past the fold is the LAST one, and that is where the buttons are. So the operator had to scroll
+  sideways on every row to reach the control they came for. Pinned, the columns that can be read at a glance
+  are the ones that move.
+
+  The background is opaque and matches the surface the row is painted on, because the scrolled cells pass
+  UNDER this one; a transparent sticky cell shows two sets of text stacked on each other. The leading hairline
+  is what says "there is more to the left of this" once anything has scrolled beneath it.
+*/
+.mrs-wl th.mrs-stickyend,
+.mrs-wl td.mrs-stickyend {
+  position: sticky;
+  inset-inline-end: 0;
+  z-index: 1;
+  background: var(--surface-1);
+  border-inline-start: 1px solid var(--border);
+}
+/*
+  The header cell is sticky in BOTH axes — vertically from `.mrs-wl th` above, horizontally from the rule
+  before this one — so it stays in its corner.
+
+  `z-index: 6` and not 3: `.mrs-wl th` already sets 5, and a pinned header at 3 would have passed UNDER the
+  other header cells as they scrolled beneath it, which is the one place the stacking has to be right. It
+  keeps `--surface-2` from the base rule; stating it again here would be one more place to update.
+*/
+.mrs-wl thead th.mrs-stickyend {
+  z-index: 6;
 }

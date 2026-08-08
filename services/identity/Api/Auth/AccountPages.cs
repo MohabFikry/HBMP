@@ -17,6 +17,28 @@ namespace Mersal.Identity.Api.Auth;
 /// factor the application cookie is stamped with the <c>amr</c> claims (pwd, otp) the token then carries, so
 /// <c>MfaEvaluator</c> lets an MFA session reach protected scopes (closes the 16.3 MFA gap on the new issuer).
 /// See docs/security/token-contract.md §3.
+///
+/// <para>
+/// ============================================================================================================
+/// FROZEN AS OF PHASE 28.7 — BUG AND SECURITY FIXES ONLY (ADR-0036 §7)
+/// ============================================================================================================
+/// <b>No new capability goes in this file.</b> Since 28.4 the SPA asks for credentials, the second factor and
+/// the organization choice itself, through <c>/connect/session/*</c>, and completes with
+/// <c>prompt=none</c> — so no browser driven by the Mersal web app ever reaches these pages.
+/// </para>
+/// <para>
+/// They are NOT deleted, and that is deliberate. <c>/connect/authorize</c> without <c>prompt=none</c> — any
+/// future non-SPA client, any deep link arriving cold, any diagnostic — must still terminate in something a
+/// human can use, and OIDC requires an interactive login to exist. <c>ConnectEndpointsTests</c> asserts that
+/// path still lands here.
+/// </para>
+/// <para>
+/// The reason for the freeze is the problem ADR-0036 set out to fix: this file is 349 lines of hand-written
+/// HTML with its own inline CSS, its own bilingual dictionary and its own accessibility — a complete parallel
+/// implementation of things <c>@mersal/design-system</c> already owns, which nothing keeps in step. Letting
+/// TWO login surfaces evolve would re-create that duplication while claiming to have removed it. Every
+/// interactive step added from here is added to the SPA.
+/// </para>
 /// </summary>
 public static class AccountPages
 {
@@ -117,9 +139,17 @@ public static class AccountPages
 
     /// <summary>Re-issue the application cookie with explicit <c>amr</c> claims recording the factors performed
     /// (the SignInManager helpers don't carry amr). The authorize endpoint reads these onto the token.</summary>
+    /// <param name="persistent">
+    /// 28.8 — whether the cookie survives closing the browser ("remember this device").
+    ///
+    /// <para>DEFAULTS TO FALSE, and the form path never passes it, so nothing about the existing behaviour
+    /// changes. Worth knowing before anybody turns it on by policy: Mersal's clinic workstations are SHARED,
+    /// and a persistent issuer cookie on a shared terminal means the next person to sit down is signed in as
+    /// the last. It is offered per sign-in, opt-in, and off unless somebody ticks it.</para>
+    /// </param>
     public static async Task StampSignIn(
         HttpContext http, SignInManager<ApplicationUser> signIn, ApplicationUser user, string[] amr,
-        Guid? membershipId = null)
+        Guid? membershipId = null, bool persistent = false)
     {
         var principal = await signIn.CreateUserPrincipalAsync(user);
         if (principal.Identity is ClaimsIdentity identity)
@@ -132,7 +162,7 @@ public static class AccountPages
                 identity.AddClaim(new Claim(TokenPrincipalFactory.MembershipClaim, mid.ToString()));
         }
         await http.SignInAsync(IdentityConstants.ApplicationScheme, principal,
-            new AuthenticationProperties { IsPersistent = false });
+            new AuthenticationProperties { IsPersistent = persistent });
     }
 
     private static async Task<string> EnsureAuthenticatorKey(UserManager<ApplicationUser> users, ApplicationUser user)

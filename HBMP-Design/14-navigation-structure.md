@@ -11,7 +11,7 @@ Navigation model for the multi-portal platform. Each role gets a **distinct port
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
-│ [≡] Mersal HBMP  ▸ breadcrumb  🏢 Maadi ▾       🔎 search  🔔  ⚙ ▾ │  ← top bar
+│ [≡] Mersal HBMP                🏢 Maadi ▾       🔎 search  🔔  ⚙ ▾ │  ← top bar
 ├──────────┬────────────────────────────────────────────────────┤
 │ PRIMARY  │  CONTENT AREA                                       │
 │ NAV      │  (page header + contextual action bar)              │
@@ -20,7 +20,7 @@ Navigation model for the multi-portal platform. Each role gets a **distinct port
 └──────────┴────────────────────────────────────────────────────┘
 ```
 
-Shared shell elements: skip-to-content link, global search (scoped to what the role may find), **branch switcher / branch-context indicator**, notifications bell, user menu (profile, language EN/AR toggle, theme, sign-out), environment badge (non-prod). Primary nav collapses to a hamburger drawer on tablet/mobile. **⟵RTL:** the entire shell mirrors — primary nav moves to the right, breadcrumb reverses.
+Shared shell elements: skip-to-content link, global search (scoped to what the role may find), **branch switcher / branch-context indicator**, notifications bell, user menu (profile, language EN/AR toggle, theme, sign-out), environment badge (non-prod). Primary nav collapses to a hamburger drawer on tablet/mobile. **⟵RTL:** the entire shell mirrors — primary nav moves to the right; the tab title (§3) is bilingual too.
 
 ### 1.1 Branch switcher (app bar) — [37-branch-scoping-and-clinical-sensitivity.md](37-branch-scoping-and-clinical-sensitivity.md)
 
@@ -62,7 +62,7 @@ flowchart TD
     D[Clinician] --> D1[My Patients / Today]
     D --> D2[Encounter Workspace]
     D2 --> D2a[SOAP Note]
-    D2 --> D2b[Orders: Lab/Imaging]
+    D2 --> D2b[Orders: Lab/Radiology/OP Procedures]
     D2 --> D2c[Prescriptions]
     D2 --> D2d[Referrals]
     D --> D3[Follow-ups]
@@ -214,8 +214,57 @@ flowchart TD
 
 ---
 
-## 3. Breadcrumbs & deep links
-- Breadcrumb pattern: `Portal ▸ Section ▸ Record` (e.g., `Approvals ▸ Worklist ▸ AUTH-2026-4F7K`).
+### 2.x Branch Management portal (Phase 25 — base `branch`)
+
+**ONE portal, two roles.** `branch_coordinator` and `clinics_manager` mount the SAME section list — in the
+SPA it is literally one shared array, so a screen added for one is a screen the other has. See
+[42 §6](42-branch-management.md).
+
+```mermaid
+flowchart TD
+  B[Branch Management] --> B1[Dashboard]
+  B --> B2[Eligibility Check]
+  B --> B3[Appointments]
+  B --> B4[Book Appointment]
+  B --> B5[Practitioners]
+  B --> B6[Roster & Availability]
+  B --> B7[Licence Alerts]
+  B --> B8[Inventory]
+  B --> B9[Branches Overview]
+```
+
+The first four are **reception's screens, reused** — the desk work a coordinator does is the same desk work,
+and a second implementation would be a second place for the board to disagree with itself.
+
+**The branch control behaves differently, and that is the ONLY visible difference between the two roles:**
+
+- **Coordinator (BranchScoped)** — the control **SWITCHES**. One active branch at a time, defaulting to Home.
+- **Clinics Manager (BranchSetScoped)** — the control **FILTERS**. No selection means all six clinics in one
+  response; choosing one narrows every screen to it. Clearing it restores all six — a supervisory worklist
+  that empties when you clear its filter would be the bug.
+
+**Branches Overview is REACH-scoped, not permission-scoped.** A coordinator holds every permission the screen
+needs and simply has one clinic to compare, so hiding it is a reach decision. Making it a permission the
+manager holds and the coordinator does not would break the one-permission-set invariant in order to hide a
+table.
+
+**Licence status uses four cues** — hue **and** icon **and** shape **and** word. Valid / Expiring / Expired
+are three distinct chips, and none of them is grey: a grey chip meaning "may not legally practise" is a
+design failure ([0B §5.2](0B-DESIGN-SYSTEM-UI.md)).
+
+**A roster change is a paired action** ([0B §10c](0B-DESIGN-SYSTEM-UI.md)): the impact preview lists the
+booked appointments affected, and Apply stays disabled until the operator has previewed **and** acknowledged
+what they read. Editing any field invalidates the preview.
+
+## 3. Section title & deep links
+- **The section name lives in the browser tab, not on the page:** `Section | Mersal HBMP` — e.g.
+  `Register New | Mersal HBMP`. Section first, because tabs truncate from the end. The name comes from the
+  portal catalog, so the tab is bilingual with the rest of the shell and always matches the nav-rail item and
+  the page `<h1>` exactly (one string, three renderings). Title Case per [09 §8](09-information-architecture.md).
+  - *Superseded:* an on-screen breadcrumb bar under the app bar. It restated what the nav rail's own
+    current-item highlight and the page `<h1>` already say, on every screen of every portal. The tab strip is
+    the one place that context is genuinely absent — a user with several portals open has nothing else to tell
+    the tabs apart. Record-level context stays on the page, in the `<h1>` and the patient context bar (§3b).
 - Every record has a stable deep link (`/approvals/authorizations/{id}`); opening a deep link the role cannot access returns a 403 page with a "request access / contact admin" affordance — never a blank screen.
 - Contextual "back to list" preserves filters/scroll (state retained in URL query params).
 - **Branch-scoped deep links** carry the record's branch: opening one for a branch outside the user's permitted set returns the **403 page** (with "request access / contact admin"), and opening one for a *permitted but not active* branch prompts to **switch the active branch** rather than silently showing an empty record.
@@ -251,7 +300,7 @@ strip would be worse than none, since confirming which record is open is its ent
 | `g` then `b` | Open the **branch switcher** (BranchScoped roles); arrows move, `Enter` switches, `Esc` cancels |
 | `Enter` | Activate focused row/primary action |
 | `Esc` | Close dialog/menu, return focus to trigger |
-| `Alt+←` | Back (respects breadcrumb) |
+| `Alt+←` | Back (browser history) |
 | Arrow keys | Move within lists, calendars, menus |
 
 Focus is trapped inside modals and returned to the invoking control on close (WCAG 2.4.3). Roving tabindex for grids/queues.
@@ -300,3 +349,55 @@ for a policy administrator rather than present-and-refused (ADR-0019).
 `+ analytics`. The financial and network views are the money questions this role exists to answer; the server
 gates those two views on the financial reporting zone, so the section is visible and the views a caller may
 not read are refused by the service rather than hidden by a nav rule the service does not know about.
+
+
+---
+
+## 29.3 / 29.4 — the encounter tabs and the service-history modal (design 45)
+
+**The encounter carries five tabs**, split by what the doctor came to DO rather than by what the data is:
+
+`Note · Prescriptions · Labs · Radiology · OP Procedures · History`
+
+- **Radiology** is the renamed Imaging tab (29.1). No user-facing string says "Imaging".
+- **OP Procedures** is new (29.2). It uses the SAME composer as Labs and Radiology, parameterised by order
+  type — not a third copy. The composer reveals a **number of sessions** field when the selected procedure
+  type carries `is_session_based`, never when its name happens to be "Physiotherapy": dialysis and
+  rehabilitation are session-based too, and hard-coding the name guarantees that conversation twice more.
+- **History** gains an **OP Procedures** pane beside Investigations and Prescriptions. It filters the SAME
+  authorised section by order type — the same gate, the same payload, no new access path.
+
+### The service-history modal
+
+**Every service line, in every tab, carries an icon opening ONE shared modal** showing that service's full
+history for this patient. One component, one endpoint — "not one implementation per tab", because four copies
+are four places for the restricted-result branch to drift and the one that drifts is the one nobody reviews.
+
+Three states, distinct **in words**:
+
+| State | Rendering |
+|---|---|
+| Has history | The table, plus a trend where results are numeric and the caller may see them. The table stays in the DOM **alongside** any chart (doc 12 §7) |
+| No previous occurrences | "No previous occurrences of this service for this patient." A real, successful answer |
+| Could not load | "…could not be loaded. This is **NOT** a report that there is none" + a Retry |
+
+The third must never render as the second: a clinician reading "no previous tests" when the service was
+simply unreachable will re-order unnecessarily, or miss a trend.
+
+A **restricted** result renders existence-only — date, service, actor, branch and a Restricted chip — with
+the request-access action. There is no value hidden in the DOM, because the server never sent one.
+
+## 29.2b — the external delivering provider's portal (design 45 §2b)
+
+A new portal for physiotherapy centres, dialysis units and outside clinics. Two entries only:
+
+`Our Queue · Verify & Deliver`
+
+- **The queue carries no beneficiary name and no photo.** It is a list of WORK; a centre browsing a list of
+  refugees' names is a disclosure nobody asked for.
+- **Identity is verified at the counter**, behind TWO identifiers, audited. A card is shared and photographed,
+  so it is a lookup key and never proof of identity.
+- Progress reads identically here and in the ordering doctor's worklist — *"4 of 6 sessions delivered"*. A
+  course that reads differently at each end is a course somebody delivers twice.
+- A withheld referral reason renders as **"Not disclosed"**, never as "none": the ordering doctor chose to
+  share nothing, which is different from there being nothing to share.

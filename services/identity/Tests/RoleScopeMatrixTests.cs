@@ -12,11 +12,29 @@ namespace Mersal.Identity.Tests;
 public class RoleScopeMatrixTests
 {
     [Fact]
-    public void Frozen_role_vocabulary_is_19_distinct_roles()
+    public void Frozen_role_vocabulary_is_23_distinct_roles()
     {
-        IdentityContract.Roles.Should().HaveCount(19);
-        IdentityContract.Roles.Distinct().Should().HaveCount(19);
+        // 25.1 added branch_coordinator + clinics_manager (design 42 §1).
+        // 29.1 added radiology_tech (design 45 §1) — a RENAME of imaging_tech, so the count is temporarily
+        // inflated by one. It drops back at the contract step, when imaging_tech is dropped.
+        // 29.2b added procedure_provider (design 45 §2b) — a genuinely NEW role, the external delivering
+        // provider. So 21 + 1 rename-in-flight + 1 new = 23, becoming 22 after the contract step.
+        IdentityContract.Roles.Should().HaveCount(23);
+        IdentityContract.Roles.Distinct().Should().HaveCount(23);
         IdentityContract.Roles.Should().OnlyContain(r => !r.Any(char.IsUpper));
+    }
+
+    [Fact]
+    public void Both_spellings_of_the_radiology_role_are_seeded_for_the_rename_window()
+    {
+        // 29.1 / design 45 §1 — the store must be able to grant EITHER name until the window closes. A token
+        // minted before the switch names imaging_tech for the rest of its 300 s TTL, and a role the store has
+        // already dropped cannot be resolved to its scopes: the technician authenticates, resolves to nothing
+        // and is shown an account with no portal. Dropping imaging_tech is the CONTRACT step and belongs on a
+        // later deploy — see docs/runbooks/radiology-rename.md.
+        IdentityContract.Roles.Should().Contain("radiology_tech");
+        IdentityContract.Roles.Should().Contain("imaging_tech",
+            "the legacy spelling stays grantable until the dual-accept window closes");
     }
 
     [SkippableFact]

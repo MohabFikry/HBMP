@@ -2,12 +2,17 @@ import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
-import { renderNode } from "./helpers";
+import { freezeClock, renderNode } from "./helpers";
 import { DevApiClient } from "../src/api/DevApiClient";
 import { ApiError } from "../src/api/http";
 import type { ApiClient } from "../src/api/client";
 import type { BookingRequest } from "@mersal/contracts";
 import { ReceptionBooking } from "../src/screens/ReceptionBooking";
+
+// FILE SCOPE, not inside one describe: every suite in this file shares fixtures that name absolute
+// July-2026 dates, and the booking calendar defaults its month to the real clock. Scoping the freeze to
+// a single describe left the others rotting on the same time-bomb.
+freezeClock();
 
 class BookingApi extends DevApiClient {
   booked: BookingRequest[] = [];
@@ -35,6 +40,10 @@ class BookingApi extends DevApiClient {
       { id: "slot-2", start: "2026-07-22T11:15:00Z", end: "2026-07-22T11:30:00Z", open: false },
     ]);
   }
+  /** One day, matching the two slots above — the calendar strip must agree with the times beside it. */
+  override appointmentDays() {
+    return Promise.resolve([{ day: "2026-07-22", openSlots: 1 }]);
+  }
   override bookAppointment(input: BookingRequest) {
     this.booked.push(input);
     if (this.bookImpl) return this.bookImpl(input);
@@ -46,18 +55,126 @@ class BookingApi extends DevApiClient {
   }
 }
 
-/** Walk the whole form: find the patient, pick the clinic, pick a time. */
-async function fillForm(user: ReturnType<typeof userEvent.setup>) {
+async function choose(user: ReturnType<typeof userEvent.setup>, name: RegExp, option: RegExp) {
+  await user.click(await screen.findByRole("combobox", { name }));
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
+/** Pick the patient only — the tests that care about the appointment half continue from here. */
+async function pickPatient(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/search by name/i), "Omar");
   await user.click(screen.getByRole("button", { name: /^search$/i }));
-  await user.click(await screen.findByRole("button", { name: /^choose$/i }));
-
-  await user.click(screen.getByRole("combobox", { name: /clinic/i }));
-  await user.click(await screen.findByRole("option", { name: /Mersal Dokki/ }));
-
-  const times = await screen.findAllByRole("radio");
-  await user.click(times[0]);
+  // The ROW is the button now, so its accessible name is the row's own content — the patient, which is what
+  // the operator aims at anyway. There was a "Choose" button pinned to the far edge of the row, as far from
+  // the name being chosen as the layout allowed.
+  await user.click(await screen.findByRole("button", { name: /omar khalil/i }));
 }
+
+/** The times for the chosen day — scoped to the Time section, since the day strip is radios too. */
+function timeButtons() {
+  return within(screen.getByRole("radiogroup", { name: /available times/i })).getAllByRole("radio");
+}
+
+/**
+ * Walk the whole form: patient → specialty → doctor → time. The clinic picker is gone: 14.5 replaced it
+ * with the two fields booking actually filters on, and the clinic behind the doctor is resolved server-side.
+ */
+async function fillForm(user: ReturnType<typeof userEvent.setup>) {
+  await pickPatient(user);
+  await choose(user, /^specialty$/i, /Pediatrics/i);
+  await choose(user, /^doctor$/i, /Hana Mansour/i);
+  await waitFor(() => expect(timeButtons().length).toBeGreaterThan(0));
+  await user.click(timeButtons()[0]);
+}
+
+describe("Reception booking (US-020) — eligibility gate", () => {
+  /** A search returning one active and one suspended member. */
+  class MixedStatusApi extends BookingApi {
+    override searchEligibility() {
+      return Promise.resolve([
+        {
+          id: "ben-active", name: { en: "Omar Khalil", ar: "عمر خليل" }, cardNumber: "MRS-M-014882",
+          status: { kind: "ok" as const, label: { en: "Active", ar: "نشط" } }, bookable: true,
+        },
+        {
+          id: "ben-suspended", name: { en: "Yusuf Haddad", ar: "يوسف حداد" }, cardNumber: "MRS-M-017702",
+          status: { kind: "warn" as const, label: { en: "Suspended", ar: "موقوف" } }, bookable: false,
+        },
+      ]);
+    }
+  }
+
+  async function search(user: ReturnType<typeof userEvent.setup>, api: BookingApi) {
+    renderNode(<ReceptionBooking />, api as unknown as ApiClient);
+    await user.type(screen.getByLabelText(/search by name/i), "a");
+    await user.click(screen.getByRole("button", { name: /^search$/i }));
+    return screen.findByText("Yusuf Haddad");
+  }
+
+  it("opens the results in a dialog when the search is AMBIGUOUS, and not when it is not", async () => {
+    // Several matches is a DECISION, and a decision made against a list wedged between the search box and the
+    // next step of the form is one made in the wrong place — it also ran straight into "2. Appointment", so
+    // two steps read as one block.
+    const user = userEvent.setup();
+    await search(user, new MixedStatusApi({ latencyMs: 0 }));
+    expect(await screen.findByRole("dialog", { name: /choose a patient/i })).toBeInTheDocument();
+  });
+
+  it("answers a single match inline rather than opening a dialog to confirm the only option", async () => {
+    // A dialog to confirm the one possible choice is a click that buys nothing.
+    const user = userEvent.setup();
+    renderNode(<ReceptionBooking />, new BookingApi({ latencyMs: 0 }) as unknown as ApiClient);
+    await user.type(screen.getByLabelText(/search by name/i), "Omar");
+    await user.click(screen.getByRole("button", { name: /^search$/i }));
+
+    expect(await screen.findByRole("button", { name: /omar khalil/i })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("shows each result's status, so the desk learns it at the moment of the search", async () => {
+    const user = userEvent.setup();
+    await search(user, new MixedStatusApi({ latencyMs: 0 }));
+
+    const suspended = (await screen.findByText("Yusuf Haddad")).closest("li")!;
+    expect(within(suspended).getByText(/suspended/i)).toBeInTheDocument();
+    const active = (await screen.findByText("Omar Khalil")).closest("li")!;
+    expect(within(active).getByText(/^active$/i)).toBeInTheDocument();
+  });
+
+  it("offers no way to choose a non-active member, and says why", async () => {
+    const user = userEvent.setup();
+    await search(user, new MixedStatusApi({ latencyMs: 0 }));
+
+    const suspended = (await screen.findByText("Yusuf Haddad")).closest("li")!;
+    // Not merely disabled — NOT A CONTROL AT ALL. A disabled button is still announced as a button and the
+    // desk keeps aiming at it; this row is plain text with the reason beside it, because "why can't I book
+    // them?" is the next question the operator has to answer to the person in front of them.
+    expect(within(suspended).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(suspended).getByText(/cannot be booked/i)).toBeInTheDocument();
+
+    // The active one is unaffected — and the whole row is what you press, not a button at its far edge.
+    const active = (await screen.findByText("Omar Khalil")).closest("li")!;
+    expect(within(active).getByRole("button", { name: /omar khalil/i })).toBeInTheDocument();
+  });
+
+  it("treats an ABSENT status as not bookable — default-deny, not default-allow", async () => {
+    const user = userEvent.setup();
+    class NoStatusApi extends BookingApi {
+      override searchEligibility() {
+        // An older service, or a fixture that never set it. "Not stated" must not render as "fine".
+        return Promise.resolve([
+          { id: "ben-x", name: { en: "Unknown Status", ar: "غير معروف" }, cardNumber: "MRS-M-1", bookable: false },
+        ]);
+      }
+    }
+    renderNode(<ReceptionBooking />, new NoStatusApi({ latencyMs: 0 }) as unknown as ApiClient);
+    await user.type(screen.getByLabelText(/search by name/i), "a");
+    await user.click(screen.getByRole("button", { name: /^search$/i }));
+
+    const row = (await screen.findByText("Unknown Status")).closest("li")!;
+    expect(within(row).queryByRole("button", { name: /^choose$/i })).not.toBeInTheDocument();
+  });
+});
 
 describe("Reception booking (US-020)", () => {
   it("books the chosen slot and does NOT send a branch — the server owns that", async () => {
@@ -86,14 +203,12 @@ describe("Reception booking (US-020)", () => {
     const user = userEvent.setup();
     renderNode(<ReceptionBooking />, new BookingApi({ latencyMs: 0 }) as unknown as ApiClient);
 
-    await user.type(screen.getByLabelText(/search by name/i), "Omar");
-    await user.click(screen.getByRole("button", { name: /^search$/i }));
-    await user.click(await screen.findByRole("button", { name: /^choose$/i }));
-    await user.click(screen.getByRole("combobox", { name: /clinic/i }));
-    await user.click(await screen.findByRole("option", { name: /Mersal Dokki/ }));
+    await pickPatient(user);
+    await choose(user, /^specialty$/i, /Pediatrics/i);
+    await choose(user, /^doctor$/i, /Hana Mansour/i);
 
-    const times = await screen.findAllByRole("radio");
-    expect(times).toHaveLength(2);
+    await waitFor(() => expect(timeButtons()).toHaveLength(2));
+    const times = timeButtons();
     expect(times[0]).toBeEnabled();
     // open:false — never re-derived here from the clock.
     expect(times[1]).toBeDisabled();
@@ -127,34 +242,43 @@ describe("Reception booking (US-020)", () => {
     await waitFor(() => expect(api.slotCalls).toBeGreaterThan(before));
   });
 
-  it("a clinic is one value, so switching it cannot leave the old clinic's times selected", async () => {
+  /**
+   * The invalidation rule, at the link that now sits above the times. Branch → specialty → doctor → time:
+   * changing any link must drop everything below it in the SAME update, or a render exists where the desk is
+   * looking at one doctor's times under another doctor's name and books it.
+   */
+  it("changing the specialty clears the doctor and the time chosen under it", async () => {
     const user = userEvent.setup();
-    const api = new BookingApi({ latencyMs: 0 });
-    renderNode(<ReceptionBooking />, api as unknown as ApiClient);
+    renderNode(<ReceptionBooking />, new BookingApi({ latencyMs: 0 }) as unknown as ApiClient);
 
-    await user.click(screen.getByRole("combobox", { name: /clinic/i }));
-    await user.click(await screen.findByRole("option", { name: /Mersal Dokki/ }));
-    const first = await screen.findAllByRole("radio");
-    await user.click(first[0]);
-    expect(first[0]).toHaveAttribute("aria-checked", "true");
+    await pickPatient(user);
+    await choose(user, /^specialty$/i, /Pediatrics/i);
+    await choose(user, /^doctor$/i, /Hana Mansour/i);
+    await waitFor(() => expect(timeButtons().length).toBeGreaterThan(0));
+    await user.click(timeButtons()[0]);
+    expect(timeButtons()[0]).toHaveAttribute("aria-checked", "true");
 
-    // Provider+location are chosen as ONE value, so there is no transitional render with a new provider and
-    // a stale location — the pair can never be half-changed.
-    await user.click(screen.getByRole("combobox", { name: /clinic/i }));
-    await user.click(await screen.findByRole("option", { name: /Mersal Maadi/ }));
-    await waitFor(() => {
-      const after = screen.queryAllByRole("radio");
-      expect(after.every((r) => r.getAttribute("aria-checked") === "false")).toBe(true);
-    });
+    await choose(user, /^specialty$/i, /Cardiology/i);
+
+    // The doctor is cleared, and with no doctor there are no times to have kept selected.
+    // The Combobox is an <input>: an emptied one has no value, and the placeholder is what invites the
+    // next choice. textContent would be empty either way and prove nothing.
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /^doctor$/i })).toHaveValue(""));
+    expect(screen.queryByRole("radiogroup", { name: /available times/i })).not.toBeInTheDocument();
   });
 
-  it("says why it cannot book when no clinic in the branch has bookable times", async () => {
-    const api = new BookingApi({ latencyMs: 0 });
-    api.clinicsImpl = () => Promise.resolve([]);
-    renderNode(<ReceptionBooking />, api as unknown as ApiClient);
+  it("offers only specialties that actually have a bookable doctor behind them", async () => {
+    const user = userEvent.setup();
+    renderNode(<ReceptionBooking />, new BookingApi({ latencyMs: 0 }) as unknown as ApiClient);
+    await pickPatient(user);
 
-    // An empty dropdown reads as "still loading" and the operator keeps clicking it.
-    expect(await screen.findByText(/no clinic in your branch has bookable times/i)).toBeInTheDocument();
+    await user.click(await screen.findByRole("combobox", { name: /^specialty$/i }));
+    const offered = screen.getAllByRole("option").map((o) => o.textContent ?? "");
+
+    // Obstetrics has a doctor in the directory (PRC-3) but no open slots, so choosing it would present an
+    // empty doctor list — a dead end discovered only after the choice.
+    expect(offered.some((o) => /Pediatrics/.test(o))).toBe(true);
+    expect(offered.some((o) => /Obstetrics/.test(o))).toBe(false);
   });
 
   it("has no serious/critical a11y violations", async () => {

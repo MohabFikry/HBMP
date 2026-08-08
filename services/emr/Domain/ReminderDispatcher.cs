@@ -7,14 +7,14 @@ namespace Mersal.Emr.Domain;
 public sealed class ReminderDispatcher(IEnumerable<IReminderChannel> channels)
 {
     public async Task<ReminderChannel> DispatchAsync(
-        Guid appointmentId, Guid beneficiaryId, Guid providerId, DateTimeOffset scheduledStart,
+        string tenantId, Guid appointmentId, Guid beneficiaryId, Guid providerId, DateTimeOffset scheduledStart,
         ReminderKind kind, ReminderChannel preferred, CancellationToken ct = default)
     {
         var channel = channels.FirstOrDefault(c => c.Channel == preferred)
                       ?? channels.FirstOrDefault(c => c.Channel == ReminderChannel.InApp)
                       ?? throw new InvalidOperationException("No reminder channel registered (in-app is required as the fallback).");
 
-        var message = new ReminderMessage(appointmentId, beneficiaryId, providerId, scheduledStart, kind, channel.Channel);
+        var message = new ReminderMessage(tenantId, appointmentId, beneficiaryId, providerId, scheduledStart, kind, channel.Channel);
         await channel.SendAsync(message, ct);
         return channel.Channel;
     }

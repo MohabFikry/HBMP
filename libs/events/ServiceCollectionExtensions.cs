@@ -20,6 +20,19 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services, IConfiguration configuration, bool? useInMemory = null)
     {
         services.Configure<EventsOptions>(configuration.GetSection(EventsOptions.SectionName));
+        // 24.3 — THIS DEFAULT IS A LIE THE COMMENT BELOW TELLS THE TRUTH ABOUT. "Default = durable,
+        // in-memory only when explicitly opted in, never in production" is true of the OUTBOX on the lines
+        // that follow and was never true of the dedupe store on this line: InMemoryProcessedEventStore is a
+        // ConcurrentDictionary that empties on restart, and its contract — "have I ever processed this id" —
+        // is a question a process lifetime cannot answer. An at-least-once broker redelivers after a crash,
+        // so forgetting means applying the event twice: a second enrolment, a second dispense, a second
+        // decision.
+        //
+        // TryAdd means a service that registers a durable store first wins (identity does:
+        // DbProcessedEventStore). Nothing removes the fallback yet, because ripping it out would break
+        // every service that registers none — so ProcessedEventStoreRegistrationTests names the services
+        // that consume events and requires each of them to have registered a durable one. The fallback is
+        // for tests; the test is what stops it reaching production by omission.
         services.TryAddSingleton<IProcessedEventStore, InMemoryProcessedEventStore>();
         services.TryAddScoped<IdempotentConsumer>();
 

@@ -10,7 +10,7 @@ namespace Mersal.Provider.Api;
 public sealed class ProviderAccessGuard(IAuthorizationEngine engine)
 {
     /// <summary>The provider-scoped roles — a token in any of these MUST carry a provider_id claim.</summary>
-    private static readonly string[] ProviderScopedRoles = ["provider_admin", "lab_tech", "imaging_tech", "pharmacist"];
+    private static readonly string[] ProviderScopedRoles = ["provider_admin", "lab_tech", "imaging_tech", "radiology_tech", "pharmacist"];
 
     public static bool IsProviderScoped(HbmpPrincipal p) => ProviderScopedRoles.Any(p.IsInRole);
 

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mersal.Audit.Client;
 using Mersal.Events;
+using System.Globalization;
 using Mersal.Policy.Domain;
 using Mersal.Time;
 using Microsoft.EntityFrameworkCore;
@@ -46,7 +47,16 @@ public static class MembershipResults
 
 /// <summary>Who is making the change. Passed explicitly rather than read from the request gate, because a
 /// bulk row is applied outside the request that submitted it.</summary>
-public sealed record ActorRef(Guid? UserId, string? Subject);
+/// <summary>
+/// Who performed a membership change.
+///
+/// <param name="Subject">The token subject — a uuid. Machine-stable and unreadable.</param>
+/// <param name="Display">The human name off the token (<c>name</c> / <c>preferred_username</c>), snapshotted
+/// at write time like every other signature on this platform. Without it the member's history says a change
+/// was made by <c>129d2a05-8c27-43c7-aae2-f2cc4c7fda30</c>, which answers "who did this" only for somebody
+/// willing to go and look the id up — so in practice it does not answer it.</param>
+/// </summary>
+public sealed record ActorRef(Guid? UserId, string? Subject, string? Display = null);
 
 public sealed record EnrollCommand(
     Guid BeneficiaryId, Guid PolicyId, Guid? PolicyPlanId, Guid? GroupId, string Relationship,
@@ -102,8 +112,12 @@ public sealed class MembershipCommands(
 {
     // ---- Enrol -------------------------------------------------------------------------------------------
 
+    /// <param name="establishedStatus">The beneficiary's status when the caller already holds it from an
+    /// action it just performed, so the probe would be asking a question it has the answer to. Only the
+    /// registration-approval consumer supplies it; everything else passes null and is probed.</param>
     public async Task<MembershipResult<EnrollOutcome>> EnrollAsync(
-        EnrollCommand cmd, string idempotencyKey, string? bearerToken, ActorRef actor, CancellationToken ct = default)
+        EnrollCommand cmd, string idempotencyKey, string? bearerToken, ActorRef actor,
+        string? establishedStatus = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(cmd);
         ArgumentNullException.ThrowIfNull(actor);
@@ -138,7 +152,15 @@ public sealed class MembershipCommands(
         // The beneficiary must be a real, Active person. Enrolling a Pending or Blocked member would generate
         // coverage that eligibility then refuses on every visit — a membership that looks live in every report
         // and works nowhere.
-        var status = await beneficiaries.GetStatusAsync(cmd.BeneficiaryId, bearerToken, ct);
+        //
+        // `establishedStatus` is the ONE case where the caller already holds the answer: the registration
+        // approval writes the activation and the enrolment event in a single transaction, so the status is
+        // not merely known, it was just SET. A background consumer has no user token to probe with, and the
+        // alternative — giving policy-service a credential of its own — is the pattern this platform
+        // deliberately forbids (see profile-service's NoServiceAccountArchitectureTests). Narrow on purpose:
+        // it substitutes for the probe, it does not skip the Active check below.
+        var status = establishedStatus
+                     ?? await beneficiaries.GetStatusAsync(cmd.BeneficiaryId, bearerToken, ct);
         if (status is null)
             return MembershipResults.Fail<EnrollOutcome>(MembershipFailureKind.Invalid,
                 "UNKNOWN_BENEFICIARY", $"Beneficiary {cmd.BeneficiaryId} was not found.");
@@ -190,6 +212,19 @@ public sealed class MembershipCommands(
             return MembershipResults.Fail<EnrollOutcome>(MembershipFailureKind.Conflict,
                 "PLAN_VERSION_MISSING", "The plan's version could not be loaded.");
 
+        // 24.3 — everything from here to the commit is ONE transaction: the enrolment row, the generated
+        // coverages, the append-only enrollment_event, and every domain event announcing them. EfOutbox
+        // commits each enqueue on its own SaveChanges, so without this a process kill after the business
+        // save leaves a member enrolled whose MemberEnrolled and CoverageChanged events are gone — and
+        // nothing records that they were owed, which is precisely how an enrolled member ends up invisible
+        // to eligibility-service. Any early return below rolls the whole thing back.
+        // Join the caller's transaction when there is one. The bulk engine already wraps each row in
+        // one (BulkJobEngine), and opening a second inside it throws — while the invariant is
+        // already satisfied there, because that outer transaction covers this write and its events
+        // together. Owning one only when nobody else does keeps both callers atomic.
+        await using var tx = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(ct)
+            : null;
         var now = clock.GetUtcNow();
         var enrollment = new Enrollment
         {
@@ -224,6 +259,13 @@ public sealed class MembershipCommands(
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<EnrollOutcome>(default, conflict);
 
         await audit.EmitAsync(Draft("enrollment", enrollment.EnrollmentId, AuditAction.Create, actor), ct);
+        await ProjectMemberHistoryAsync(enrollment, "MemberEnrolled", actor, Changed(
+            // A creation, so every "before" is genuinely null — which the reader renders as "set to", not as
+            // a value that vanished.
+            ("status", null, enrollment.Status.ToString()),
+            ("plan", null, plan.PlanLabel),
+            ("relationship", null, enrollment.Relationship.ToString()),
+            ("effectiveFrom", null, Day(enrollment.EffectiveFrom))), ct);
         // 19.6b widened the payload with the ANALYTIC DIMENSIONS (payer, group, branch, relationship). The
         // dashboard aggregates by them, and an event that says "a member was enrolled" without saying under
         // which payer forces every consumer to go back and ask — which for reporting-service means querying
@@ -244,6 +286,75 @@ public sealed class MembershipCommands(
             categories = coverages.Count,
         }, ct);
 
+        // ...and one ROW-LEVEL event per generated coverage. CoverageGenerated above announces that
+        // generation happened and carries a COUNT; eligibility-service builds its coverage projection from
+        // CoverageChanged and from nothing else, so a count told it nothing it could store. Enrolling through
+        // this path — the path the product uses — therefore left the member with no coverage rows in front of
+        // the eligibility engine, and every check came back Ineligible "no active coverage for <category>":
+        // an entitlement the plan grants, refused at the counter, with no error anywhere to explain it.
+        //
+        // Reusing CoverageChanged rather than teaching consumers a new event is deliberate: the manual
+        // POST /policies/{id}/coverages endpoint already publishes exactly this shape, the consumer is
+        // already idempotent on it, and one event per coverage means the enrolment path and the manual path
+        // cannot drift into two different projections of the same fact.
+        //
+        // INLINE, not a helper. These enqueues have to be provably inside the transaction opened at the top of
+        // this method, and OutboxAtomicityTests proves that by reading the code, not by following calls: a
+        // helper would put them in a method body with no transaction in it, indistinguishable from the
+        // enqueue-after-commit shape this rule exists to forbid. The check cannot be taught to trust a call
+        // graph without also being taught to trust the ones that are genuinely wrong.
+        //
+        // The consumer keys on the category CODE ("LAB"), not the id — its projection has no category table to
+        // resolve a Guid against.
+        if (coverages.Count > 0)
+        {
+            var categoryIds = coverages.Select(c => c.BenefitCategoryId).Distinct().ToList();
+            var codes = await db.BenefitCategories.AsNoTracking()
+                .Where(c => categoryIds.Contains(c.BenefitCategoryId))
+                .ToDictionaryAsync(c => c.BenefitCategoryId, c => c.Code, ct);
+
+            foreach (var coverage in coverages)
+            {
+                // waitingPeriodEndsOn is PER CATEGORY, from this category's own benefit rule, not the
+                // enrolment-level summary date. The enrolment stores the LONGEST wait across categories because
+                // that is the single date the member is told; publishing it here would delay every benefit to
+                // the slowest one. policy-service owns this boundary because it is a function of the plan rule
+                // and the enrolment date, neither of which eligibility-service holds.
+                //
+                // policyNo is the key PolicyChanged cascades on. A coverage published without it is invisible
+                // to suspend/reactivate, so the member would keep their benefit through a suspended policy.
+                var rule = version.Rules.FirstOrDefault(r => r.BenefitCategoryId == coverage.BenefitCategoryId);
+                await outbox.EnqueueAsync("CoverageChanged", "policy.events", new
+                {
+                    tenantId = coverage.TenantId,
+                    coverageId = coverage.CoverageId,
+                    beneficiaryId = coverage.BeneficiaryId,
+                    category = codes.GetValueOrDefault(coverage.BenefitCategoryId),
+                    status = coverage.Status.ToString(),
+                    policyNo = policy.PolicyNo,
+                    effectiveFrom = coverage.EffectiveFrom,
+                    effectiveTo = coverage.EffectiveTo,
+                    // 19.2b — the plan the coverage belongs to, and the version it was written under.
+                    //
+                    // BOTH, because they answer different questions. The VERSION is provenance: what the
+                    // member's cover was projected from, and the fallback when nothing better can be
+                    // resolved. The PLAN is what lets a downstream quote resolve the version in force ON THE
+                    // SERVICE DATE — which is the rule the whole effective-dated layer exists for, and which
+                    // `CoverageDetailEndpoints` already applies. Publishing only the version pinned every
+                    // future quote to the terms in force the day the member enrolled, so an amendment could
+                    // never reach anybody already on the plan.
+                    planId = version.PlanId,
+                    planVersionId = coverage.SourcePlanVersionId,
+                    waitingPeriodEndsOn = rule is null ? null : WaitingPeriod.EndsOnFor(rule, enrollment.EffectiveFrom),
+                    limits = coverage.Limits.Select(l => new
+                    {
+                        limitType = l.LimitType.ToString(), l.LimitValue, l.ConsumedValue,
+                    }),
+                }, ct);
+            }
+        }
+
+        if (tx is not null) await tx.CommitAsync(ct);
         return MembershipResults.Success(new EnrollOutcome(enrollment, coverages.Count, WasReplay: false));
     }
 
@@ -277,7 +388,18 @@ public sealed class MembershipCommands(
             return MembershipResults.Fail<Enrollment>(MembershipFailureKind.Forbidden, "SUPERVISION_REQUIRED",
                 "Back-dating a termination requires supervisory scope.");
 
+        // Join the caller's transaction when there is one. The bulk engine already wraps each row in
+        // one (BulkJobEngine), and opening a second inside it throws — while the invariant is
+        // already satisfied there, because that outer transaction covers this write and its events
+        // together. Owning one only when nobody else does keeps both callers atomic.
+        await using var tx = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(ct)
+            : null;
         var now = clock.GetUtcNow();
+        // Captured BEFORE the mutation: the history's whole job is to say what the value used to be, and by
+        // the time the projection runs the row no longer holds it.
+        var wasStatus = e.Status;
+        var wasCoveredUntil = e.EffectiveTo;
         e.Status = EnrollmentStatus.Terminated;
         e.EffectiveTo = effectiveDate;      // INCLUSIVE: the member IS covered on this day
         e.TerminationReason = reason;
@@ -291,6 +413,9 @@ public sealed class MembershipCommands(
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<Enrollment>(default, conflict);
 
         await audit.EmitAsync(Draft("enrollment", enrollmentId, AuditAction.StateChange, actor, "terminated", reason), ct);
+        await ProjectMemberHistoryAsync(e, "MemberTerminated", actor, Changed(
+            ("status", wasStatus.ToString(), e.Status.ToString()),
+            ("coveredUntil", Day(wasCoveredUntil), Day(e.EffectiveTo))), ct);
         var termDims = await DimensionsAsync(e, ct);
         await outbox.EnqueueAsync("MemberTerminated", "policy.events", new
         {
@@ -299,6 +424,7 @@ public sealed class MembershipCommands(
             termDims.PayerId, termDims.PolicyId, termDims.PolicyPlanId, termDims.GroupId, termDims.BranchId,
             termDims.Relationship, termDims.Status,
         }, ct);
+        if (tx is not null) await tx.CommitAsync(ct);
         return MembershipResults.Success(e);
     }
 
@@ -314,7 +440,16 @@ public sealed class MembershipCommands(
             return MembershipResults.Fail<Enrollment>(MembershipFailureKind.Conflict,
                 "NOT_REINSTATABLE", $"A {e.Status} membership cannot be reinstated.");
 
+        // Join the caller's transaction when there is one. The bulk engine already wraps each row in
+        // one (BulkJobEngine), and opening a second inside it throws — while the invariant is
+        // already satisfied there, because that outer transaction covers this write and its events
+        // together. Owning one only when nobody else does keeps both callers atomic.
+        await using var tx = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(ct)
+            : null;
         var now = clock.GetUtcNow();
+        var wasStatus = e.Status;
+        var wasCoveredUntil = e.EffectiveTo;
         e.Status = EnrollmentStatus.Active;
         e.EffectiveTo = null;
         e.TerminationReason = null;
@@ -327,6 +462,10 @@ public sealed class MembershipCommands(
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<Enrollment>(default, conflict);
 
         await audit.EmitAsync(Draft("enrollment", enrollmentId, AuditAction.StateChange, actor, "reinstated", reason), ct);
+        await ProjectMemberHistoryAsync(e, "MemberReinstated", actor, Changed(
+            ("status", wasStatus.ToString(), e.Status.ToString()),
+            // Cleared, not set — "12 Mar 2026 → —" is how the reader sees an end date being lifted.
+            ("coveredUntil", Day(wasCoveredUntil), null)), ct);
         var reinDims = await DimensionsAsync(e, ct);
         await outbox.EnqueueAsync("MemberReinstated", "policy.events", new
         {
@@ -334,6 +473,7 @@ public sealed class MembershipCommands(
             reinDims.PayerId, reinDims.PolicyId, reinDims.PolicyPlanId, reinDims.GroupId, reinDims.BranchId,
             reinDims.Relationship, reinDims.Status,
         }, ct);
+        if (tx is not null) await tx.CommitAsync(ct);
         return MembershipResults.Success(e);
     }
 
@@ -351,6 +491,17 @@ public sealed class MembershipCommands(
             return MembershipResults.Fail<GroupChangeOutcome>(MembershipFailureKind.Invalid,
                 "UNKNOWN_GROUP", "That group does not belong to this policy.");
 
+        // INV-OUTBOX-SURVIVES-CRASH — the same shape every sibling movement uses, and the one this method
+        // was missing. `MemberGroupChanged` was the last movement to gain an outbox publish, and it gained
+        // it without the transaction its five siblings already had: the write and the event were two
+        // separate commits, so a kill between them left the member in the new group with no event saying so
+        // — which for a group change means the cohort reports silently disagree with the membership book.
+        //
+        // Joins the caller's transaction when there is one. The bulk engine already wraps each row, and
+        // opening a second inside it throws, while the invariant is already satisfied there.
+        await using var tx = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(ct)
+            : null;
         var now = clock.GetUtcNow();
         var from = e.GroupId;
         e.GroupId = groupId;
@@ -361,7 +512,118 @@ public sealed class MembershipCommands(
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<GroupChangeOutcome>(default, conflict);
 
         await audit.EmitAsync(Draft("enrollment", enrollmentId, AuditAction.Update, actor, "group-changed", reason), ct);
+        await ProjectMemberHistoryAsync(e, "MemberGroupChanged", actor, Changed(
+            ("group", await GroupCodeAsync(from, ct), await GroupCodeAsync(groupId, ct)),
+            ("effectiveDate", null, Day(effectiveDate))), ct);
+        /*
+         * The only membership movement that never left this service.
+         *
+         * Terminate, reinstate, plan-change and cancel all publish to `policy.events` with the same dimension
+         * bag; a group change wrote its enrollment_event row and its timeline entry and stopped there. So the
+         * enrolment curve counted five of the six movements, and a member moving between groups — which is
+         * how a cohort is re-cut, and therefore exactly what a group-level report is asked about — was
+         * invisible to every consumer outside policy-service.
+         */
+        var groupDims = await DimensionsAsync(e, ct);
+        await outbox.EnqueueAsync("MemberGroupChanged", "policy.events", new
+        {
+            tenantId = e.TenantId, enrollmentId, beneficiaryId = e.BeneficiaryId, effectiveDate,
+            fromGroupId = from,
+            groupDims.PayerId, groupDims.PolicyId, groupDims.PolicyPlanId, groupDims.GroupId,
+            groupDims.BranchId, groupDims.Relationship, groupDims.Status,
+        }, ct);
+        if (tx is not null) await tx.CommitAsync(ct);
         return MembershipResults.Success(new GroupChangeOutcome(e, from));
+    }
+
+
+    // ============================================================================================================
+    // THE MEMBER'S HISTORY — written HERE, in the transaction that made the change.
+    // ============================================================================================================
+    //
+    // The Logs tab reads `policy.entity_timeline`. Every membership event this class performs was published to
+    // `policy.events` and NOTHING projected it, so the only rows in that table were the ones the demo seed
+    // wrote: a plan change made in the app left no trace, which is exactly what an operator reported.
+    //
+    // `TimelineProjector` documents an intent that the timeline should be projected from events "that already
+    // exist", so it cannot drift from the audit trail. That intent is honoured — this runs immediately after
+    // the audit event is emitted, from the same values, inside the same transaction — and the guarantee is
+    // stronger than a consumer's would be: a change and its history entry commit together or neither does.
+    // A consumer on `policy.events` was the alternative and it buys eventual consistency for a projection the
+    // operator expects to see the moment the dialog closes.
+    //
+    // The event id is DERIVED from what happened rather than random, so a retry of the same change projects
+    // the same row: `ProjectAsync` dedupes on the source event id, and a random one would make every retry a
+    // duplicate line in somebody's history.
+    private async Task ProjectMemberHistoryAsync(
+        Enrollment e, string eventType, ActorRef actor,
+        IReadOnlyDictionary<string, (string? Before, string? After)>? changes,
+        CancellationToken ct)
+    {
+        var occurredAt = clock.GetUtcNow();
+        await new TimelineProjector(db, clock).ProjectAsync(
+            [new TimelineSource(
+                EventId: DerivedEventId(e.EnrollmentId, eventType, occurredAt),
+                EventType: eventType,
+                Scope: NoteScope.Member,
+                ScopeRef: e.EnrollmentId,
+                OccurredAt: occurredAt,
+                SourceService: "policy-service",
+                ActorUserId: actor.UserId,
+                ActorUsername: actor.Subject,
+                // The NAME, snapshotted. The reader of a member's history is asking "who changed this", and a
+                // subject uuid is an answer only to somebody who can resolve it.
+                ActorDisplay: actor.Display,
+                Changes: changes)],
+            e.TenantId, ct);
+    }
+
+    /// <summary>
+    /// The before/after bag for one change, in the vocabulary the READER has.
+    ///
+    /// <para>Labels, not identifiers. "Plan: Standard → Enhanced" is the sentence somebody opens the Logs tab
+    /// to read; <c>policyPlanId: 4f2c… → 91ab…</c> is the same fact written so that answering the question
+    /// requires two more lookups. The identifiers are not lost — <c>policy.enrollment_event</c> keeps them, and
+    /// it is what 19.5b's as-of extraction reconstructs history from, precisely because a label can be reused
+    /// on a renewed policy and an id cannot.</para>
+    ///
+    /// <para><b>The termination reason is deliberately absent</b> from every bag below. It can say "deceased"
+    /// or "suspected misuse", <c>AdministrativeProjection.MayReadCase</c> withholds it from roles that read
+    /// this history, and a diff carries ONE visibility class — so putting it here would route it around the
+    /// projection that exists to hold it back. It stays on the enrolment event and in the audit trail.</para>
+    /// </summary>
+    private static Dictionary<string, (string? Before, string? After)> Changed(
+        params (string Field, string? Before, string? After)[] fields)
+    {
+        var bag = new Dictionary<string, (string?, string?)>(StringComparer.Ordinal);
+        foreach (var (field, before, after) in fields) bag[field] = (before, after);
+        return bag;
+    }
+
+    /// <summary>Dates in the diff are ISO, and formatted invariantly: the entry is rendered in whichever
+    /// language the reader has chosen, so a value serialized in the server's culture would be a second
+    /// formatting decision made in the wrong place.</summary>
+    private static string? Day(DateOnly? date) =>
+        date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    /// <summary>The group's CODE for the history. Null id → null, which the reader shows as "no group" rather
+    /// than as a missing value.</summary>
+    private async Task<string?> GroupCodeAsync(Guid? groupId, CancellationToken ct) =>
+        groupId is not { } id ? null
+            : await db.MemberGroups.AsNoTracking()
+                .Where(g => g.GroupId == id).Select(g => g.GroupCode).FirstOrDefaultAsync(ct);
+
+    /// <summary>The plan's LABEL for the history, by id — the previous plan is only an id by the time the
+    /// change has been applied.</summary>
+    private async Task<string?> PlanLabelAsync(Guid policyPlanId, CancellationToken ct) =>
+        await db.PolicyPlans.AsNoTracking()
+            .Where(pp => pp.PolicyPlanId == policyPlanId).Select(pp => pp.PlanLabel).FirstOrDefaultAsync(ct);
+
+    /// <summary>A stable id for one change: same enrollment, same event type, same instant → same id.</summary>
+    private static Guid DerivedEventId(Guid enrollmentId, string eventType, DateTimeOffset occurredAt)
+    {
+        var seed = $"{enrollmentId:N}|{eventType}|{occurredAt.UtcTicks}";
+        return new Guid(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(seed))[..16]);
     }
 
     // ---- Change plan -------------------------------------------------------------------------------------
@@ -485,6 +747,13 @@ public sealed class MembershipCommands(
 
         var (e, plan, version, existing, policyChoice, carried, _, _, droppedCategories) = resolved.Value!;
 
+        // Join the caller's transaction when there is one. The bulk engine already wraps each row in
+        // one (BulkJobEngine), and opening a second inside it throws — while the invariant is
+        // already satisfied there, because that outer transaction covers this write and its events
+        // together. Owning one only when nobody else does keeps both callers atomic.
+        await using var tx = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(ct)
+            : null;
         var now = clock.GetUtcNow();
         var previousPlanId = e.PolicyPlanId;
         foreach (var coverage in existing)
@@ -519,6 +788,9 @@ public sealed class MembershipCommands(
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<PlanChangeOutcome>(default, conflict);
 
         await audit.EmitAsync(Draft("enrollment", enrollmentId, AuditAction.StateChange, actor, "plan-changed", reason), ct);
+        await ProjectMemberHistoryAsync(e, "MemberPlanChanged", actor, Changed(
+            ("plan", await PlanLabelAsync(previousPlanId, ct), plan.PlanLabel),
+            ("effectiveDate", null, Day(effectiveDate))), ct);
         var planDims = await DimensionsAsync(e, ct);
         await outbox.EnqueueAsync("MemberPlanChanged", "policy.events", new
         {
@@ -529,6 +801,7 @@ public sealed class MembershipCommands(
             planDims.Relationship, planDims.Status,
         }, ct);
 
+        if (tx is not null) await tx.CommitAsync(ct);
         return MembershipResults.Success(new PlanChangeOutcome(
             e, plan, previousPlanId, version.PlanVersionId, policyChoice.ToString(), carried, droppedCategories));
     }
@@ -550,7 +823,15 @@ public sealed class MembershipCommands(
         var e = await db.Enrollments.FirstOrDefaultAsync(x => x.EnrollmentId == enrollmentId && !x.IsDeleted, ct);
         if (e is null) return MembershipResults.Fail<Enrollment>(MembershipFailureKind.NotFound, "NOT_FOUND", "No such membership.");
 
+        // Join the caller's transaction when there is one. The bulk engine already wraps each row in
+        // one (BulkJobEngine), and opening a second inside it throws — while the invariant is
+        // already satisfied there, because that outer transaction covers this write and its events
+        // together. Owning one only when nobody else does keeps both callers atomic.
+        await using var tx = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(ct)
+            : null;
         var now = clock.GetUtcNow();
+        var wasStatus = e.Status;
         e.Status = EnrollmentStatus.Cancelled;
         e.TerminationReason = reason;
         e.UpdatedAt = now;
@@ -563,6 +844,8 @@ public sealed class MembershipCommands(
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<Enrollment>(default, conflict);
 
         await audit.EmitAsync(Draft("enrollment", enrollmentId, AuditAction.StateChange, actor, "cancelled", reason), ct);
+        await ProjectMemberHistoryAsync(e, "MemberEnrolmentCancelled", actor, Changed(
+            ("status", wasStatus.ToString(), e.Status.ToString())), ct);
         var cancelDims = await DimensionsAsync(e, ct);
         await outbox.EnqueueAsync("MemberEnrolmentCancelled", "policy.events", new
         {
@@ -570,6 +853,7 @@ public sealed class MembershipCommands(
             cancelDims.PayerId, cancelDims.PolicyId, cancelDims.PolicyPlanId, cancelDims.GroupId,
             cancelDims.BranchId, cancelDims.Relationship, cancelDims.Status,
         }, ct);
+        if (tx is not null) await tx.CommitAsync(ct);
         return MembershipResults.Success(e);
     }
 

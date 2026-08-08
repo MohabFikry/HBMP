@@ -35,9 +35,22 @@ services:
           - /api/v1/atc-classes
           - /api/v1/drugs
           - /api/v1/drug-interactions
+          # 26.3 — the drug↔ICD indication lookup the prescribing validation reads. /api/v1/drugs already
+          # covers /drugs/search (26.2) by prefix; this is a resource of its own and needs its own path.
+          - /api/v1/drug-indications
           - /api/v1/allergens
           - /api/v1/allergies
           - /api/v1/examination-types
+          # 29.2 — OP Procedures (design 45 §2). `orderable-services` answers "what will ordering this code
+          # actually CREATE — a Procedure order or a Referral?"; `procedure-types` is the session-based-kind
+          # master data the composer reads its sessions field from.
+          - /api/v1/orderable-services
+          - /api/v1/procedure-types
+          # 28 — these two were served but never routed, so every caller outside the compose network got a 404
+          # from Kong for endpoints the service had been answering all along. Found by the route-coverage guard
+          # while adding the routes above; fixed here rather than left for the next person to rediscover.
+          - /api/v1/contraindications
+          - /api/v1/dosing-rules
           - /api/v1/search
         strip_path: false
 
@@ -55,6 +68,12 @@ services:
           - "~/api/v1/beneficiaries/[^/]+/medication-history/.*"
           # 20.2 — the seam the patient profile's PMH + encounters sections read.
           - "~/api/v1/beneficiaries/[^/]+/profile-context$"
+          # Standing clinical facts — blood group + allergies in one gated read, and the write that sets a
+          # blood group. Both MUST be listed: patient-service holds the /beneficiaries catch-all below, so
+          # an emr sub-resource that is not named here is not "unrouted", it is silently answered by the
+          # wrong service — a 404 from patient-service that reads exactly like a missing endpoint in emr.
+          - "~/api/v1/beneficiaries/[^/]+/clinical-record$"
+          - "~/api/v1/beneficiaries/[^/]+/blood-group$"
         regex_priority: 200
         strip_path: false
       - name: emr-routes
@@ -62,11 +81,32 @@ services:
           - /api/v1/encounters
           - /api/v1/appointments
           - /api/v1/appointment-slots
+          # 14.5 — the two reads the booking journey makes. They shipped without routes, so the day picker
+          # and the specialty/doctor filter were 404 at the gateway while working perfectly in fixture mode.
+          # The route-coverage gate catches exactly this, and it was never reached because CI died earlier.
+          - /api/v1/appointment-days
+          - /api/v1/booking
           # The clinics a scheduler may book into, derived from slots in their branch (appointment:read).
           - /api/v1/branch-clinics
+          # 25.4 — leave / public holiday / clinic closure / ad-hoc clinic, plus the impact preview the
+          # apply is gated on. Without a route the roster screen 404s at the gateway while working in
+          # fixture mode, which is exactly what happened to the two booking reads above.
+          - /api/v1/roster-exceptions
           - /api/v1/queue
           - /api/v1/queues
           - /api/v1/treating-relationship
+        strip_path: false
+
+  # --- inventory-service: clinic stock (25.5/25.6) ---
+  # Medical and non-medical consumables on an append-only movement ledger. NOT a dispensing path: no route
+  # here accepts a beneficiary identifier, and NoPhiInInventoryTests fails the build if one appears.
+  - name: inventory-service
+    url: http://inventory-service:8080
+    plugins: *edge_jwt
+    routes:
+      - name: inventory-routes
+        paths:
+          - /api/v1/inventory
         strip_path: false
 
   # --- eligibility-service: reception search + eligibility check + coverage-summary card ---
@@ -182,7 +222,7 @@ services:
           - /api/v1/network-tiers
         strip_path: false
 
-  # --- orders-service: investigation orders + lab/imaging fulfillment + report-access ---
+  # --- orders-service: investigation orders + lab/radiology fulfillment + report-access ---
   - name: orders-service
     url: http://orders-service:8080
     plugins: *edge_jwt
@@ -190,9 +230,32 @@ services:
       - name: orders-routes
         paths:
           - /api/v1/investigation-orders
+          # 29.2b — the external delivering provider's portal (design 45 §2b). Same service, same edge JWT
+          # plugin: an external centre reaches it with a `procedure_provider` token and sees only the rows
+          # routed to it. The separation that matters is `procedure:read`/`procedure:consume` vs
+          # `orders:consume`, which is a SCOPE boundary, not a routing one.
+          - /api/v1/procedure-orders
           - /api/v1/report-access-requests
           - /api/v1/report-access-grants
           - /api/v1/report-access
+        strip_path: false
+
+      # 29.4 — THE SERVICE-HISTORY ENDPOINT (design 45 §4).
+      #
+      # It lives in orders-service but hangs off `/api/v1/patients`, which is PROFILE-SERVICE's namespace.
+      # Without this route the gateway sent every call to profile-service, which does not serve it: the
+      # modal 404'd in every deployed environment from the day it was written, while orders-service answered
+      # 200 to anything that reached it directly.
+      #
+      # Nothing caught it. The endpoint existed, the component existed, and `check-kong-route-coverage` was
+      # satisfied because `/api/v1/patients` IS routed — just to the wrong service. The guard asks whether a
+      # prefix is routed somewhere, not whether it is routed to the service that serves it.
+      #
+      # A REGEX route, because a plain prefix cannot be more specific than profile-service's: Kong scores
+      # regex routes above prefix routes, so this wins for exactly this path and nothing else moves.
+      - name: orders-service-history
+        paths:
+          - ~/api/v1/patients/[^/]+/service-history$
         strip_path: false
 
   # --- pharmacy-service: prescriptions + dispensing + referrals ---
@@ -201,7 +264,11 @@ services:
     plugins: *edge_jwt
     routes:
       - name: pharmacy-routes
-        paths: ["/api/v1/prescriptions", "/api/v1/referrals"]
+        # 29.5 — `refill-frequencies` is the supervisor-configurable cadence table the chronic composer
+        # offers (design 45 §5). It is a sibling prefix rather than a child of /prescriptions because it is
+        # master data, not a prescription. The schedule preview sits under /prescriptions and needs no
+        # entry of its own.
+        paths: ["/api/v1/prescriptions", "/api/v1/referrals", "/api/v1/refill-frequencies"]
         strip_path: false
 
   # --- approvals-service: authorization worklist + decisions ---
@@ -211,6 +278,12 @@ services:
     routes:
       - name: approvals-routes
         paths: ["/api/v1/authorizations"]
+        strip_path: false
+      # ADR-0035 §5 — the supervisor authors the engine's routing/SLA rules. Its own route rather than a
+      # widened prefix: /api/v1/approval-rules is a governance surface behind `auth:configure`, and folding
+      # it into the authorizations path would make one route cover two very different audiences.
+      - name: approvals-engine-rules
+        paths: ["/api/v1/approval-rules"]
         strip_path: false
 
   # --- notification-service ---
@@ -325,9 +398,30 @@ services:
       # 18.C2 (audit R2 W5): /identity was unroutable, so the in-app user/role/scope admin that closes C3
       # could not be reached from the SPA at all and the admin console went on editing the legacy
       # admin-service projection instead of the real identity store.
+      #
+      # 28.2 — `preserve_host: true` ON EVERY ROUTE OF THIS SERVICE. It is a ROUTE property in Kong, not a
+      # service one; setting it on the service is not ignored, it refuses to parse and the gateway will not
+      # start at all (found the hard way — every route 502'd until it was moved here).
+      #
+      # Kong rewrites Host to the upstream by default, so identity-service saw `identity-service:8080`, and
+      # OpenIddict derives its ENDPOINT urls from the request — unlike `issuer`, which is pinned. The
+      # discovery document therefore advertised
+      # `authorization_endpoint: http://identity-service:8080/connect/authorize`: a container hostname no
+      # browser can resolve, published as the address to send users to.
+      #
+      # Pre-existing and invisible. Our own client hand-builds its URLs and never reads discovery, and the one
+      # entry point that answered correctly was the direct :8090 port — the port 28.2 stops using. The
+      # document was right on the path nothing used and wrong on the path everything now takes.
+      #
+      # `issuer` is unaffected either way: it is pinned via Issuer__PublicUrl (the ID2088 fix), which is
+      # exactly why it stayed correct here while every endpoint beside it did not.
+      #
+      # Scoped to this service on purpose. The domain APIs do not build absolute URLs from the request, so
+      # preserving Host for them would be a change with no purpose and some risk.
       - name: identity-admin-routes
         paths: ["/identity"]
         strip_path: false
+        preserve_host: true
         # The admin surface is a normal protected API and carries the edge check like any other route.
         plugins: *edge_jwt
       # 21.6 — the phase-21 user & access surfaces, listed explicitly rather than left to the /identity
@@ -346,6 +440,7 @@ services:
           - "/identity/admin/access-review"    # 21.5 access-review snapshot (JSON + CSV, audited export)
           - "/identity/me"                     # 21.5 self-service sessions + login history
         strip_path: false
+        preserve_host: true
         # Same reasoning as identity-admin-routes: protected admin/self-service APIs, edge check attached.
         plugins: *edge_jwt
       # 18.B3 (S8) — the ONE surface with NO edge jwt: these routes are how a caller OBTAINS a token
@@ -363,6 +458,7 @@ services:
       - name: identity-oidc-routes
         paths: ["/connect", "/.well-known"]
         strip_path: false
+        preserve_host: true
 
 # 18.B3 (audit R2 S8) — EDGE authentication. Until now Kong did routing, CORS and correlation ids only:
 # an unauthenticated request was proxied all the way to a service and rejected there. Every service does

@@ -42,7 +42,22 @@ public sealed record HeaderSection(
     string? BranchName,
     string? PreferredLanguage,
     ContactSummary? Contact,
-    string? PhotoUrl)
+    string? PhotoUrl,
+    /// <summary>Cover relationship — Principal, Spouse, Child, Dependent. Identity, not clinical: which
+    /// person on a policy this is.</summary>
+    string? Relationship = null,
+    /// <summary>ISO country code. The member card in beneficiary management has always shown it; the profile
+    /// header simply never carried it.</summary>
+    string? NationalityCode = null,
+    /// <summary>The exact birth date, so the header can show an AGE rather than a band.
+    ///
+    /// <para>More disclosive than <c>AgeBand</c> and therefore stripped by <c>min</c>: labs and pharmacies get
+    /// the band, which is all a specimen label or a dose check needs. The roles on the full header read the
+    /// birth date one screen away in any case.</para></summary>
+    DateOnly? BirthDate = null,
+    /// <summary>Travels WITH the date, always. An estimated birth date rendered as an exact age is how an
+    /// estimate quietly becomes a hard eligibility cutoff.</summary>
+    bool BirthDateIsApproximate = false)
 {
     /// <summary>
     /// <c>min</c> keeps only what identifies the person: names, member number, age band, sex and status.
@@ -57,6 +72,9 @@ public sealed record HeaderSection(
         ProfileVariants.Min => this with
         {
             BranchName = null, PreferredLanguage = null, Contact = null, PhotoUrl = null,
+            // The exact date goes; AgeBand stays. Relationship and nationality identify a person on a policy,
+            // which is not what a specimen label or a dose check is for.
+            Relationship = null, NationalityCode = null, BirthDate = null, BirthDateIsApproximate = false,
         },
         _ => this,
     };
@@ -75,13 +93,27 @@ public sealed record AlertsSection(
     IReadOnlyList<AllergyAlert> Allergies,
     IReadOnlyList<FlagAlert>? CriticalFlags,
     IReadOnlyList<FlagAlert>? InteractionWarnings,
-    IReadOnlyList<FlagAlert>? OperationalFlags)
+    IReadOnlyList<FlagAlert>? OperationalFlags,
+    /// <summary>
+    /// ABO + Rh, or null when nobody has recorded one (emr migration 0021).
+    ///
+    /// <para>It rides in the ALERTS section rather than the header because of where it comes from and who
+    /// may see it. The header is assembled from patient-service's administrative record, which reception,
+    /// the call centre and finance all read; blood group is clinical and comes from emr behind the same gate
+    /// as the allergy list — the very call that fills this section. Putting it in the header would have
+    /// meant either a second gated fetch on the platform's most-loaded strip, or moving PHI into the
+    /// administrative record to avoid one.</para>
+    /// </summary>
+    string? BloodGroup = null)
 {
     /// <summary><c>allergy</c> — labs and pharmacies get the allergy list and nothing else: contrast reactions
-    /// and drug-allergy checking are their job; a no-show flag or an eligibility warning is not.</summary>
+    /// and drug-allergy checking are their job; a no-show flag or an eligibility warning is not.
+    ///
+    /// <para>Blood group survives this projection. A lab is precisely the caller that has a use for it, and
+    /// it is the same category of fact as the allergy list this variant exists to pass through.</para></summary>
     public AlertsSection Project(string? variant) => variant switch
     {
-        ProfileVariants.Allergy => new(Allergies, null, null, null),
+        ProfileVariants.Allergy => new(Allergies, null, null, null, BloodGroup),
         _ => this,
     };
 }
@@ -141,7 +173,13 @@ public sealed record PastMedicalHistorySection(
 
 public sealed record EncounterRow(
     string EncounterRef, DateTimeOffset OccurredAt, string? BranchName,
-    string? ClinicianName, string? Specialty, string? Reason, string Status);
+    string? ClinicianName, string? Specialty, string? Reason, string Status,
+    /// <summary>The handle a clinical row is opened by. Null under <c>meta</c> — see the projection.</summary>
+    string? EncounterId = null,
+    /// <summary>Branch and clinician as IDS. emr owns neither name; the client resolves both from the
+    /// services that do, the same join it makes for the day board and the booking picker.</summary>
+    string? BranchId = null,
+    string? ClinicianId = null);
 
 public sealed record EncountersSection(IReadOnlyList<EncounterRow> Items)
 {
@@ -150,7 +188,10 @@ public sealed record EncountersSection(IReadOnlyList<EncounterRow> Items)
     /// logistics of a visit, never its content.</summary>
     public EncountersSection Project(string? variant) => variant switch
     {
-        ProfileVariants.Meta => new([.. Items.Select(i => i with { Reason = null })]),
+        // `meta` drops the ID as well as the reason. It is not clinical content, it is a CAPABILITY handle:
+        // the roles on this variant (reception, finance, beneficiary management) have no encounter workspace
+        // to open, so sending them a way to address one is a field with no use and a future misuse.
+        ProfileVariants.Meta => new([.. Items.Select(i => i with { Reason = null, EncounterId = null })]),
         _ => this,
     };
 }
@@ -162,7 +203,13 @@ public sealed record EncountersSection(IReadOnlyList<EncounterRow> Items)
 /// value, and the profile has nothing to strip because it was never sent one.</summary>
 public sealed record InvestigationRow(
     string OrderRef, Guid LineId, string Category, DateTimeOffset OrderedOn, string Status,
-    string? ProviderName, string? ResultSummary, bool Restricted, string? SensitivityLevel);
+    string? ProviderName, string? ResultSummary, bool Restricted, string? SensitivityLevel,
+    /// <summary>29.2 — Lab / Radiology / Procedure, so the history can be read by kind (design 45 §3).
+    /// A routing label, not clinical content; the section, its gate and its projection are unchanged.</summary>
+    string OrderType,
+    /// <summary>The encounter this order was raised on, so one visit's orders can be told from the rest of
+    /// the member's history. An id only — it carries no clinical content.</summary>
+    Guid? EncounterId = null);
 
 public sealed record InvestigationsSection(IReadOnlyList<InvestigationRow> Items)
 {
@@ -181,7 +228,9 @@ public sealed record InvestigationsSection(IReadOnlyList<InvestigationRow> Items
 
 public sealed record RxRow(
     string RxRef, string DrugDisplay, string Status, DateTimeOffset PrescribedOn,
-    DateTimeOffset? DispensedOn, string? BatchNo, DateOnly? ExpiryDate, string? SubstitutedWith);
+    DateTimeOffset? DispensedOn, string? BatchNo, DateOnly? ExpiryDate, string? SubstitutedWith,
+    /// <summary>The encounter this prescription was written on — same purpose as on InvestigationRow.</summary>
+    Guid? EncounterId = null);
 
 public sealed record PrescriptionsSection(IReadOnlyList<RxRow> Items)
 {

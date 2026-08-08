@@ -51,15 +51,28 @@ public sealed class AnalyticsProjector(ReportingDbContext db, TimeProvider clock
                 AddEnrolment(ev, period, "Cancelled");
                 return true;
 
-            // The accumulator moved. Phase 18 owns consumed_value and remains its only writer; this observes
-            // the movement and stores the resulting standing so the dashboard never reads the accumulator.
-            case "BenefitConsumed":
+            /*
+             * The accumulator moved. Phase 18 owns consumed_value and remains its only writer; this observes
+             * the movement and stores the resulting standing so the dashboard never reads the accumulator.
+             *
+             * `BenefitConsumed` used to share this case and is gone. No service publishes it, and none should:
+             * policy-service already emits `CoverageLimitChanged` for exactly this moment, from
+             * `BenefitConsumptionApplier` — the one writer of the accumulator. Two names for one movement is
+             * how a fact gets counted twice the day somebody wires the second one.
+             */
             case "CoverageLimitChanged":
                 AddUtilization(ev, period);
                 return true;
 
+            /*
+             * `ClaimSettled` is the terminal claim decision (claims publishes it as `Claim{Status}.v1`).
+             *
+             * `ClaimAdjudicated` used to share this case and is gone — it was the wrong GRAIN, not merely
+             * unwired. Adjudication is a pre-decision recommendation: booking it as cost would record money a
+             * reviewer may still reduce, and record it again when they do. A cost fact belongs to the moment
+             * the money is final.
+             */
             case "ClaimSettled":
-            case "ClaimAdjudicated":
                 AddCost(ev, period);
                 return true;
 

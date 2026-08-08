@@ -41,9 +41,32 @@ events include `AuthApproved` / `AuthPartiallyApproved` / `AuthRejected` / `Auth
 `AuthEmergencyApproved`, `OrderLineAvailable`, `ResultReady`, `RxReady`, `RxLineOutOfStock`, `AppointmentReminder`,
 `AppointmentNoShow`.
 
-> **Deferred wiring (fanout bus):** dev uses a per-service in-memory outbox with no fanout exchange, so the live
-> broker subscription that turns raw domain events into `ingest` calls lands with the shared event bus (same seam as
-> phases 5–7). The dispatcher + seam are fully testable today without it.
+> **Wired (19.7).** `DomainEventConsumer` subscribes to `notification.domain-events` and delivers. It was
+> deferred, and "deferred" turned out to mean the routing table, thirteen bilingual template pairs, the
+> escalation model and the dispatcher were all built, tested — and fed by nothing. Not one notification was
+> ever delivered to a person.
+>
+> **How a publisher joins.** The transport is point-to-point, so a consumer on a domain stream would COMPETE
+> with that stream's existing consumer and each event would reach one of them, never both. A service that
+> wants a notification therefore enqueues a SECOND, notification-shaped copy to `notification.domain-events`:
+>
+> ```json
+> { "tenantId": "…", "entityRef": "authorization:…",
+>   "fields": { "authNo": "AUTH-2026-000123" },
+>   "recipients": [ { "userId": "…", "role": "requesting_provider", "locale": "ar" } ] }
+> ```
+>
+> with the event type on the message. **The publisher names the recipients** because resolving a role to people
+> is directory business this service is deliberately free of — and because the publisher knows who is actually
+> waiting, which is how a decision reaches the clinician who submitted it instead of every clinician.
+>
+> Adding a notification is now a publisher change plus a template row: no new consumer, no new queue. An event
+> with no entry in `RoutingTable` is logged and dropped rather than failing.
+
+> **Still unpublished.** `AuthSlaBreached`, `OrderLineAvailable`, `ResultReady`, `RxReady` and
+> `AppointmentReminder` are routed and templated here, and **no service emits an event by those names** — the
+> nearest publishers use `OrderResultUploaded`, `RxDispensed`, `ApptNoShow`, `AppointmentReminderIssued`. Those
+> are a naming reconciliation, not a wiring one, and they are open.
 
 ## Bilingual templates (AR/EN)
 
