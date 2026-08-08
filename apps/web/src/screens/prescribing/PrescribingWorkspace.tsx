@@ -43,6 +43,24 @@ const S = {
     ar: "تعذّر حساب الكمية المطلوب صرفها.",
   },
 
+  // ---- 31.4 — copying a prescription that has already been written ----
+  cloned: {
+    en: "Copied {n} medicine(s) from {ref}. Nothing has been prescribed yet — check the doses and submit.",
+    ar: "تم نسخ {n} دواء من {ref}. لم يتم وصف أي شيء بعد — راجع الجرعات ثم أرسل.",
+  },
+  clonePartial: {
+    en: "{n} medicine(s) could not be copied: the catalogue no longer offers them. Everything else was.",
+    ar: "تعذّر نسخ {n} دواء: لم يعد الكتالوج يوفرها. تم نسخ الباقي.",
+  },
+  cloneEmpty: {
+    en: "Nothing on {ref} could be copied: its items do not record which catalogue product they are.",
+    ar: "لا يوجد ما يمكن نسخه من {ref}: بنودها لا تسجّل المنتج المقابل في الكتالوج.",
+  },
+  cloneFailed: {
+    en: "That prescription could not be copied — the drug catalogue could not be reached. Nothing was added.",
+    ar: "تعذّر نسخ الوصفة — لم يمكن الوصول إلى كتالوج الأدوية. لم يُضف أي شيء.",
+  },
+
   // ---- 29.5 (design 45 §5) — acute / chronic ----
   kindLegend: { en: "Prescription type", ar: "نوع الوصفة" },
   acute: { en: "Acute", ar: "حادة" },
@@ -253,10 +271,33 @@ function fingerprint(lines: PrescriptionDraftLine[]): string {
  * The validation result here is ADVISORY. The server re-runs the whole thing on submit and ignores whatever
  * this screen concluded, so nothing below is a security control.
  */
+/**
+ * 31.4 — a transaction to copy into this composer, as the row that offered it knows it.
+ *
+ * <p>Ids and numbers, not draft lines: the composer owns line identity, and a caller minting `lineId`s would
+ * be a second place deciding what a line IS. The medicine itself is re-read from the catalogue here, so a
+ * clone carries today's pack facts and price rather than a snapshot taken when the original was written.</p>
+ */
+export interface PrescriptionClone {
+  /** What the doctor is copying, for the confirmation — "RX-2026-000312". */
+  reference: string;
+  items: {
+    drugId: string;
+    label: string;
+    quantity: number;
+    /** 31.3's unit, carried with its number — a bare "1" copied off a box count is the ambiguity that field
+     *  exists to close, and it would be reintroduced by dropping it here. */
+    quantityUnit: string | null;
+    durationDays: number | null;
+  }[];
+}
+
 export function PrescribingWorkspace({
   encounterId,
   beneficiaryId,
   diagnosisIcdCodes,
+  clone,
+  onCloneApplied,
   onDone,
 }: {
   encounterId: string;
@@ -272,6 +313,9 @@ export function PrescribingWorkspace({
    * reports "no diagnosis recorded" rather than passing.
    */
   diagnosisIcdCodes: string[];
+  /** 31.4 — set by a row's Clone action; consumed once and reported back through `onCloneApplied`. */
+  clone?: PrescriptionClone | null;
+  onCloneApplied?: () => void;
   onDone?: () => void;
 }) {
   const api = useApi();
@@ -306,6 +350,84 @@ export function PrescribingWorkspace({
     setDraft((d) => ({ ...d, result: r, validatedFingerprint: fingerprint }));
 
   const [busy, setBusy] = useState(false);
+
+  /*
+   * 31.4 — COPY AN EXISTING PRESCRIPTION INTO THIS COMPOSER.
+   *
+   * A repeat script is the commonest thing a returning patient needs, and writing one meant finding each
+   * medicine in a catalogue of 22,653 again. The row's Clone action hands over the ids; the work here is
+   * re-reading each one from the CATALOGUE rather than trusting the copy stored on the old line — a clone
+   * should carry today's pack facts, price and availability, not last year's.
+   *
+   * THREE THINGS IT REFUSES TO DO.
+   *
+   * It does not discard what is already composed: the copied medicines are APPENDED, and the only line it
+   * removes is a single empty placeholder, which is not work. A doctor who has half-written a script and
+   * reaches for Clone must not watch it disappear.
+   *
+   * It does not silently drop a medicine the catalogue no longer offers — the count that failed is stated.
+   * A short prescription that looks complete is worse than one that says it is short.
+   *
+   * And it does not carry the dose or the frequency, because the RECORD DOES NOT HOLD THEM: `doseAmount`
+   * and `timesPerDay` are sent at prescribing time for the checks and are never persisted. Guessing them by
+   * parsing the sig string this app formatted would be inventing clinical numbers from display text.
+   */
+  useEffect(() => {
+    if (!clone) return;
+    let live = true;
+
+    // A transaction whose every line predates the drug id — or which carries no lines at all — copies
+    // NOTHING, and must say so. Returning quietly here would leave the request unconsumed and the doctor
+    // watching a button that appears to do nothing.
+    if (clone.items.length === 0) {
+      toast(t(S.cloneEmpty).replace("{ref}", clone.reference), "bad");
+      onCloneApplied?.();
+      return;
+    }
+
+    (async () => {
+      try {
+        const resolved = await Promise.all(
+          clone.items.map(async (item) => ({
+            item,
+            drug: await api.prescribableDrugById(item.drugId).catch(() => null),
+          })),
+        );
+        if (!live) return;
+
+        const usable = resolved.filter((r) => r.drug !== null);
+        if (usable.length > 0) {
+          setLines((prev) => [
+            // An empty placeholder is not work, so it makes way. Anything else the doctor typed stays.
+            ...prev.filter((l) => l.drug !== null || prev.length > 1),
+            ...usable.map(({ item, drug }) => ({
+              ...newLine(),
+              drug: drug!,
+              quantity: item.quantity,
+              quantityUnit: item.quantityUnit ?? "",
+              durationDays: item.durationDays,
+            })),
+          ]);
+          // The copy changes what is composed, so any check already run against the old set is stale.
+          setChecked(null, null);
+        }
+
+        const lost = resolved.length - usable.length;
+        toast(
+          t(S.cloned).replace("{n}", String(usable.length)).replace("{ref}", clone.reference),
+          usable.length > 0 ? "ok" : "bad",
+        );
+        if (lost > 0) toast(t(S.clonePartial).replace("{n}", String(lost)), "bad");
+      } catch {
+        if (live) toast(t(S.cloneFailed), "bad");
+      } finally {
+        if (live) onCloneApplied?.();
+      }
+    })();
+
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clone]);
 
   /*
    * 29.5 — the chronic half (design 45 §5).

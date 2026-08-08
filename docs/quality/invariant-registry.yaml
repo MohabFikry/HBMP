@@ -2208,3 +2208,17 @@ invariants:
       - apps/web/test/unit-aware-dosing.test.tsx::sends what the quantity COUNTS, not just how many
       - apps/web/test/unit-aware-dosing.test.tsx::sends NO unit when nothing was computed, rather than a plausible one
 
+  - id: INV-COPYING-A-TRANSACTION-WRITES-NOTHING
+    statement: >-
+      The Copy action on a prescription or order row fills the composer with a new draft and raises nothing.
+      It never discards work already composed, and it says so when it can copy nothing.
+    source: apps/web/test/encounter-transaction-actions.test.tsx
+    severity: High
+    # A control on a row of a clinical record that silently created a second prescription would be the worst
+    # kind of convenience — and the row it sits on already carries two controls that DO change the record, so
+    # the one that does not has to be provably inert rather than merely intended to be.
+    tests:
+      - apps/web/test/encounter-transaction-actions.test.tsx::offers Copy on the row, and copying writes nothing
+      - apps/web/test/encounter-transaction-actions.test.tsx::fills the composer from the copied transaction
+      - apps/web/test/encounter-transaction-actions.test.tsx::says so when there is nothing on the row it can copy
+

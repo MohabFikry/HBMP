@@ -46,7 +46,10 @@ function rxRow(n: number): RxRow {
     prescriber: loc("Dr Karim Abdel-Latif", "د. كريم عبد اللطيف"),
     lines: [{
       id: `rx-${n}-l1`,
-      drugId: "22222222-2222-2222-2222-222222222222",
+      // A drug the fixture catalogue actually offers: 31.4's Copy re-reads each medicine from the
+      // CATALOGUE rather than trusting the copy on the old line, so an id nothing can resolve would be
+      // testing the "no longer available" path instead of the ordinary one.
+      drugId: "11111111-0000-4000-8000-000000000001",
       drug: loc("Metformin 500mg tablet", "ميتفورمين 500مجم قرص"),
       dose: "500 mg", route: "PO", frequency: "BD",
       quantityPrescribed: 60, quantityDispensed: 0, refillsAllowed: 0,
@@ -78,15 +81,20 @@ function orderRow(n: number, orderType: string): OrderRow {
 /** Seven of each, because five is the page size and a pager that never appears proves nothing. */
 class ManyRowsApi extends DevApiClient {
   cancelled: string[] = [];
+  /** Stands in for a record written before its lines carried a catalogue id — see the Copy tests. */
+  stripLineIdentity = false;
 
   async prescriptionsMine() {
-    return [1, 2, 3, 4, 5, 6, 7].map(rxRow);
+    return [1, 2, 3, 4, 5, 6, 7].map(rxRow).map((r) => this.stripLineIdentity
+      ? { ...r, lines: r.lines.map((l) => ({ ...l, drugId: null })) }
+      : r);
   }
 
   /** Every order type, because each tab filters `ordersMine` down to its own and would otherwise be empty. */
   async ordersMine() {
     return ["Lab", "Radiology", "Procedure"]
-      .flatMap((type) => [1, 2, 3, 4, 5, 6, 7].map((n) => orderRow(n, type)));
+      .flatMap((type) => [1, 2, 3, 4, 5, 6, 7].map((n) => orderRow(n, type)))
+      .map((o) => (this.stripLineIdentity ? { ...o, lines: [] } : o));
   }
 
   async cancelPrescription(id: string) {
@@ -117,7 +125,7 @@ async function openTab(name: RegExp, api = new ManyRowsApi({ latencyMs: 0 })) {
   return { user, api };
 }
 
-/** The transactions table on the open tab — the first one, which sits above the composer. */
+/** The transactions table on the open tab. */
 function transactionsTable(): HTMLTableElement {
   return document.querySelectorAll("table")[0] as HTMLTableElement;
 }
@@ -129,7 +137,34 @@ const TABS: [string, RegExp][] = [
   ["OP Procedures", /procedures/i],
 ];
 
-describe.each(TABS)("The %s tab's transactions table", (_label, tab) => {
+describe.each(TABS)("The %s tab's layout", (_label, tab) => {
+  it("puts the composer in its OWN card, above the history", async () => {
+    /*
+     * Two blocks, two cards, and the one the doctor came here to use is first.
+     *
+     * They used to share a card: the history table, then a rule, then the composer beneath it. That reads as
+     * one thing with an appendix — and it put the tab's whole purpose below five rows of what has already
+     * been written, which on a laptop is below the fold. They are not one thing. What has been prescribed is
+     * a record; what is being prescribed is an act.
+     */
+    await openTab(tab);
+    await screen.findByRole("table", {}, { timeout: 5000 });
+
+    const cards = [...document.querySelectorAll(".mrs-tabpane:not([hidden]) .mrs-card")];
+    expect(cards.length, "the composer and the history are separate cards").toBeGreaterThanOrEqual(2);
+
+    const composer = cards.find((c) => c.querySelector(".rx-compose"));
+    const history = cards.find((c) => c.querySelector("table"));
+    expect(composer, "no card holds the composer").toBeTruthy();
+    expect(history, "no card holds the history table").toBeTruthy();
+    expect(composer).not.toBe(history);
+    // DOM order is reading order: `compareDocumentPosition` returns FOLLOWING for a node after this one.
+    expect(
+      composer!.compareDocumentPosition(history!) & Node.DOCUMENT_POSITION_FOLLOWING,
+      "the history card is not after the composer card",
+    ).toBeTruthy();
+  });
+
   it("pages after five rows", async () => {
     // Five, not eight. This table sits directly above the composer the doctor is about to type into, and
     // eight rows of history push the thing they came to the tab to do below the fold.
@@ -175,6 +210,60 @@ describe.each(TABS)("The %s tab's transactions table", (_label, tab) => {
 
     expect(await screen.findByRole("dialog")).toBeTruthy();
     expect(api.cancelled).toEqual([]);   // nothing has happened yet
+  });
+
+  it("offers Copy on the row, and copying writes nothing", async () => {
+    /*
+     * 31.4 — a repeat script is the commonest thing a returning patient needs, and writing one meant finding
+     * every medicine in a catalogue of 22,653 again.
+     *
+     * The assertion that matters is the SECOND one. Copy fills the composer with a new draft the doctor
+     * still has to check and submit; a control on a row of a clinical record that silently raised a second
+     * prescription would be the worst kind of convenience.
+     */
+    const { user, api } = await openTab(tab);
+    await screen.findByRole("table", {}, { timeout: 5000 });
+
+    const firstRow = transactionsTable().querySelector("tbody tr") as HTMLElement;
+    const copy = within(firstRow).getByRole("button", { name: /copy into the composer/i });
+    // Named for the transaction, like Amend and Withdraw beside it — a row of bare glyphs is a screen-reader
+    // user hearing "button" three times with no way to tell what they act on.
+    expect(copy.getAttribute("aria-label")).toMatch(/(RX|ORD)-/);
+    expect(copy.querySelector("svg"), "it is an icon, so the row stays scannable").toBeTruthy();
+
+    await user.click(copy);
+
+    expect(api.cancelled).toEqual([]);
+    expect(screen.queryByRole("dialog"), "copying opens nothing and confirms nothing").toBeNull();
+  });
+
+  it("fills the composer from the copied transaction", async () => {
+    // What arrives is a DRAFT. The fixture's rows each carry one item, so the composer gains one filled line
+    // in place of its empty placeholder.
+    const { user } = await openTab(tab);
+    await screen.findByRole("table", {}, { timeout: 5000 });
+
+    const firstRow = transactionsTable().querySelector("tbody tr") as HTMLElement;
+    await user.click(within(firstRow).getByRole("button", { name: /copy into the composer/i }));
+
+    // The confirmation says what was copied and from where, and says nothing has been sent.
+    expect(await screen.findByText(/copied 1 .*from (RX|ORD)-/i, {}, { timeout: 5000 })).toBeTruthy();
+  });
+
+  it("says so when there is nothing on the row it can copy", async () => {
+    // A prescription written before drug ids were recorded, or an order carrying no lines, copies NOTHING.
+    // Returning quietly would leave the doctor pressing a button that appears to do nothing — which is how
+    // a control gets a reputation for being broken when it is being honest.
+    const api = new ManyRowsApi({ latencyMs: 0 });
+    api.stripLineIdentity = true;
+    const { user } = await openTab(tab, api);
+    await screen.findByRole("table", {}, { timeout: 5000 });
+
+    const firstRow = transactionsTable().querySelector("tbody tr") as HTMLElement;
+    await user.click(within(firstRow).getByRole("button", { name: /copy into the composer/i }));
+
+    expect(await screen.findByText(/nothing on (RX|ORD)-.* could be copied/i, {}, { timeout: 5000 }))
+      .toBeTruthy();
   });
 
   it("puts its actions in the modal's footer, not at the bottom of the body card", async () => {

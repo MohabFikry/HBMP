@@ -65,6 +65,15 @@ export const iconPaths = {
   /** Put back what was ended. */
   undo: '<path d="M3 8h10a5 5 0 0 1 0 10H8"/><path d="m7 4-4 4 4 4"/>',
   /**
+   * One sheet lying over another — make a second of this.
+   *
+   * The universal copy mark, and deliberately not `replace` or `swap`: both of those are EXCHANGES, and this
+   * leaves the original exactly where it was. On a row beside Amend and Withdraw — two acts that change what
+   * has been written — the one control that changes nothing has to look like it.
+   */
+  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/>'
+      + '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  /**
    * Withheld pending a justified request — the SHAPE cue on a restricted clinical result (design 37 §6).
    *
    * The restricted card drew this as a 🔒 emoji. An emoji is not a design-system icon: it is painted by the

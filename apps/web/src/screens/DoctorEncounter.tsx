@@ -43,7 +43,9 @@ import { TransactionActionsDialog } from "./TransactionActionsDialog";   // 30.6
 import type { TransactionAction } from "./TransactionActionsDialog";
 import type { AmendReasonOption } from "./AmendLineDialog";
 import { PrescribingWorkspace } from "./prescribing/PrescribingWorkspace";
+import type { PrescriptionClone } from "./prescribing/PrescribingWorkspace";
 import { InvestigationWorkspace } from "./investigations/InvestigationWorkspace";
+import type { OrderClone } from "./investigations/InvestigationWorkspace";
 import { EncounterTimelineButton } from "./VisitTimeline";
 import { useFormat } from "../i18n/useFormat";
 
@@ -108,6 +110,9 @@ const S = {
   colActions: { en: "Actions", ar: "الإجراءات" },
   amend: { en: "Amend", ar: "تعديل" },
   withdraw: { en: "Withdraw", ar: "سحب" },
+  // 31.4 — write this one again. The commonest thing a returning patient needs, and it used to mean finding
+  // every medicine or code in the catalogue a second time.
+  clone: { en: "Copy into the composer", ar: "نسخ إلى محرر الطلب" },
   lockedTerminal: { en: "Already closed — cannot be changed", ar: "مغلق بالفعل — لا يمكن تغييره" },
   lockedDispensed: { en: "Dispensed", ar: "تم صرفه" },
   lockedDelivered: { en: "Delivered", ar: "تم تنفيذه" },
@@ -1499,6 +1504,8 @@ function PrescriptionsTab({
   const [viewing, setViewing] = useState<RxRow | null>(null);
   // 30.6 — which transaction is being amended or withdrawn, from the ROW. One at a time.
   const [acting, setActing] = useState<{ rx: RxRow; action: TransactionAction } | null>(null);
+  /** 31.4 — a prescription the doctor asked to copy. Consumed by the composer, then cleared. */
+  const [cloning, setCloning] = useState<PrescriptionClone | null>(null);
   const [reasons, setReasons] = useState<AmendReasonOption[]>([]);
 
   useEffect(() => {
@@ -1561,6 +1568,30 @@ function PrescriptionsTab({
       header: t(S.colActions),
       cell: (r) => (
         <span className="row-actions">
+          {/*
+            31.4 — COPY, beside the two acts that change the record and looking like neither.
+
+            It writes nothing: it fills the composer above with the same medicines, as a new draft the doctor
+            still has to check and submit. That is why it is a ghost and not a danger, and why its label says
+            where the items are going rather than just "Copy".
+          */}
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`${t(S.clone)} — ${r.rxNo}`}
+            onClick={() => setCloning({
+              reference: r.rxNo,
+              items: r.lines.map((l) => ({
+                drugId: l.drugId ?? "",
+                label: l.drug ? t(l.drug) : t(S.rxDrugMissing),
+                quantity: l.quantityPrescribed,
+                quantityUnit: l.quantityUnit ?? null,
+                durationDays: null,
+              })).filter((i) => i.drugId !== ""),
+            })}
+          >
+            <Icon name="copy" />
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -1602,6 +1633,37 @@ function PrescriptionsTab({
 
   return (
     <div className="stack">
+      {/*
+        31.4 — TWO CARDS, AND THE ACT COMES FIRST.
+
+        These were one card: the history table, a rule, then the composer beneath it — which reads as a
+        record with an appendix, and put the thing the doctor opened the tab to do below five rows of what
+        they had already done. On a laptop that is below the fold.
+
+        They are not one thing. What has been prescribed is a RECORD; what is being prescribed is an ACT.
+
+        Composed INLINE rather than in a dialog. A prescription line carries five fields plus a per-line
+        status and an expanding findings panel; a modal narrow enough to sit over the encounter collapsed
+        all of it into a single stacked column, which is the layout the design's own option row is meant
+        to avoid.
+      */}
+      <Card as="section" style={{ padding: "var(--sp5)" }}>
+        <div className="rx-compose">
+          <h3 className="section-h rx-compose-h">{t(S.prescribe)}</h3>
+          <PrescribingWorkspace
+            encounterId={encounter.id}
+            beneficiaryId={encounter.patientId}
+            diagnosisIcdCodes={diagnoses.map((d) => d.code)}
+            clone={cloning}
+            onCloneApplied={() => setCloning(null)}
+            // Re-read the list below the composer. Without this the prescription a doctor just wrote does
+            // not appear until the screen is reloaded — and "it is not in the list" is how a successful
+            // submit reads as a failed one.
+            onDone={rx.reload}
+          />
+        </div>
+      </Card>
+
       <Card as="section" style={{ padding: "var(--sp5)" }}>
         <h3 className="section-h">{t(S.rxFor)}</h3>
         {rxFor.length === 0 ? (
@@ -1610,25 +1672,6 @@ function PrescriptionsTab({
           <DataTableView query={rxQuery} columns={rxCols} rowKey={(r) => r.id} caption={t(S.rxFor)}
             noMatchesLabel={t(S.noMatchesWhen)} />
         )}
-
-        {/*
-          Composed INLINE rather than in a dialog. A prescription line carries five fields plus a per-line
-          status and an expanding findings panel; a modal narrow enough to sit over the encounter collapsed
-          all of it into a single stacked column, which is the layout the design's own option row is meant
-          to avoid.
-        */}
-        <div className="rx-compose">
-          <h4 className="section-h rx-compose-h">{t(S.prescribe)}</h4>
-          <PrescribingWorkspace
-            encounterId={encounter.id}
-            beneficiaryId={encounter.patientId}
-            diagnosisIcdCodes={diagnoses.map((d) => d.code)}
-            // Re-read the list directly above the composer. Without this the prescription a doctor just
-            // wrote does not appear until the screen is reloaded — and "it is not in the list" is how a
-            // successful submit reads as a failed one.
-            onDone={rx.reload}
-          />
-        </div>
       </Card>
       {/* Same reason as `onDone` above: a withdrawn drug that stays in the list reads as a failed withdraw. */}
       <PrescriptionDetailModal
@@ -1703,6 +1746,8 @@ function InvestigationsTab({
   const [viewingOrder, setViewingOrder] = useState<OrderRow | null>(null);
   // 30.6 — which order is being amended or withdrawn, from the ROW.
   const [acting, setActing] = useState<{ order: OrderRow; action: TransactionAction } | null>(null);
+  /** 31.4 — an order the doctor asked to copy. Consumed by the composer, then cleared. */
+  const [cloning, setCloning] = useState<OrderClone | null>(null);
   const [reasons, setReasons] = useState<AmendReasonOption[]>([]);
 
   useEffect(() => {
@@ -1776,6 +1821,22 @@ function InvestigationsTab({
       header: t(S.colActions),
       cell: (r) => (
         <span className="row-actions">
+          {/* 31.4 — copy into the composer above. Writes nothing; see the prescriptions tab. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`${t(S.clone)} — ${r.orderNo}`}
+            onClick={() => setCloning({
+              reference: r.orderNo,
+              items: (r.lines ?? []).map((l) => ({
+                code: l.code,
+                description: l.description,
+                quantity: l.quantityOrdered,
+              })),
+            })}
+          >
+            <Icon name="copy" />
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -1813,6 +1874,23 @@ function InvestigationsTab({
 
   return (
     <div className="stack">
+      {/* 31.4 — the composer in its own card and FIRST. Same reasoning as the prescriptions tab, and stated
+          there: a record and an act are not one block, and the act is what the tab is for. */}
+      <Card as="section" style={{ padding: "var(--sp5)" }}>
+        <div className="rx-compose">
+          <h3 className="section-h rx-compose-h">{t(composeHeading)}</h3>
+          <InvestigationWorkspace
+            encounterId={encounter.id}
+            beneficiaryId={encounter.patientId}
+            orderType={orderType}
+            diagnosisIcdCodes={diagnoses.map((d) => d.code)}
+            clone={cloning}
+            onCloneApplied={() => setCloning(null)}
+            onDone={orders.reload}
+          />
+        </div>
+      </Card>
+
       <Card as="section" style={{ padding: "var(--sp5)" }}>
         <h3 className="section-h">{t(heading)}</h3>
         {mineFor.length === 0 ? (
@@ -1821,17 +1899,6 @@ function InvestigationsTab({
           <DataTableView query={orderQuery} columns={orderCols} rowKey={(r) => r.id} caption={t(heading)}
             noMatchesLabel={t(S.noMatchesWhen)} />
         )}
-
-        <div className="rx-compose">
-          <h4 className="section-h rx-compose-h">{t(composeHeading)}</h4>
-          <InvestigationWorkspace
-            encounterId={encounter.id}
-            beneficiaryId={encounter.patientId}
-            orderType={orderType}
-            diagnosisIcdCodes={diagnoses.map((d) => d.code)}
-            onDone={orders.reload}
-          />
-        </div>
       </Card>
 
       {/*

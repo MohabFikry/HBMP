@@ -4268,12 +4268,11 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   opacity: 0.7;
 }
 
-/* The compose block sits inside the "prescriptions for this patient" card, under the list of what has
-   already been written — the doctor decides what to add while looking at what is there. */
+/* 31.4 — the compose block now HAS its own card, so it carries no divider and no top inset of its own. It
+   was separated from the history by a rule inside a shared card; the two are separate cards now, and a rule
+   above the first thing in a card is a line under nothing. */
 .rx-compose {
-  margin-block-start: var(--sp5);
-  padding-block-start: var(--sp4);
-  border-block-start: 1px solid var(--border);
+  margin-block-start: 0;
 }
 .rx-compose-h {
   margin-block-start: 0;

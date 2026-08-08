@@ -992,3 +992,59 @@ DROP is gone.
   dosed in IU, including both Lantus rows. Filling one cell per row fixes each.
 - The 21 pre-existing `DROP CONSTRAINT` lines across five migrations still fail `check-migration-compat`.
   Unchanged by this phase and still unacknowledged.
+
+---
+
+## Phase 31.4 — the act above the record, and a repeat you do not retype
+
+### Two cards per tab, composer first
+
+All four encounter tabs rendered the history table and the composer inside ONE card, separated by a rule.
+That reads as a record with an appendix — and it put the thing the doctor opened the tab to do below five rows
+of what they had already done, which on a laptop is below the fold. They are now sibling cards, and the
+composer is first. What has been prescribed is a **record**; what is being prescribed is an **act**.
+
+### Copy, on the row
+
+A repeat script is the commonest thing a returning patient needs, and writing one meant finding every medicine
+in a catalogue of 22,653 a second time. Every transaction row on all four tabs now carries a Copy icon beside
+Amend and Withdraw, and it is deliberately the one control there that changes nothing: it fills the composer
+above with a **new draft** the prescriber still has to check and submit.
+
+Four things it refuses to do:
+
+- **It does not write.** No confirmation, no dialog, nothing raised — a control on a clinical record that
+  silently created a second prescription would be the worst kind of convenience.
+- **It does not discard what is already composed.** Items are APPENDED; the only line it removes is a single
+  empty placeholder, which is not work.
+- **It re-reads each medicine from the CATALOGUE** rather than trusting the copy stored on the old line, so a
+  copy carries today's pack facts, price and availability. A product the catalogue no longer offers is
+  **counted and reported**, never quietly dropped from the copy.
+- **It says when it can copy nothing** — a record whose lines predate the drug id, or an order with no lines.
+  Returning quietly is how a control earns a reputation for being broken when it is being honest.
+
+The quantity comes across **with its unit** (31.3), so a copied box count does not arrive as a bare number.
+
+### What a copy cannot carry, and why
+
+**Dose and frequency.** `doseAmount` and `timesPerDay` are sent at prescribing time — the daily-dose rule and
+the quantity check run on them — and are **never persisted**. The line keeps a formatted sig ("1 Tablet x
+3/day") and nothing numeric. Parsing that string back would be inventing clinical numbers out of display text,
+so a copied prescription arrives with those two fields empty and the Quantity check honestly reporting that it
+has nothing to compute from.
+
+**A procedure course's kind and session count.** Order-level facts since 31.1, and the worklist row does not
+carry them.
+
+### Verified
+
+Web 1,160 / 89 files. Driven in a browser on all four tabs: composer card above the history card on each, a
+Copy control on every row, and copying RX-2026-002719 filling the composer with Panadol and the confirmation
+"Copied 1 medicine(s) … Nothing has been prescribed yet".
+
+### Not done in 31.4
+
+- **The numeric dose is still not persisted.** It is the reason a copy cannot carry a dose, and a wider gap
+  than that: a prescription cannot be re-checked later against the numbers it was written from. Two nullable
+  columns would close it.
+
