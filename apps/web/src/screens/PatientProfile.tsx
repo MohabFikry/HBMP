@@ -375,6 +375,7 @@ function ProfileBody({ profile, onRetry }: { profile: PatientProfileContract; on
                 // — this screen must not invent a "not recorded" claim about data that role has no access to.
                 bloodGroup={alerts ? (alertData?.bloodGroup ?? null) : undefined}
                 chips={<AllergyChips alertData={alertData} namedAllergens />}
+                actions={<SectionActions section={header} beneficiaryId={profile.beneficiaryId} />}
               />
             ) : (
               <SectionState section={header} beneficiaryId={profile.beneficiaryId} onRetry={onRetry} />
