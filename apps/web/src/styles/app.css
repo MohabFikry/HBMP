@@ -245,6 +245,20 @@ nav.mrs-rail {
 }
 .stack {
   display: grid;
+  /*
+    `minmax(0, 1fr)`, not the implicit `auto`.
+    ===========================================================================================
+    A grid's default `auto` track sizes to at least the MIN-CONTENT of its items, and a track is
+    allowed to exceed the container to honour that. So a stack holding anything with a stubborn
+    intrinsic width — a nine-column table, a fieldset, a long unbroken string — grows WIDER than
+    the column it sits in, and everything inside it is painted over whatever comes next in the
+    layout. That is what put the encounter's Labs and OP-Procedures tables underneath the vitals
+    rail: the rail was exactly where it belonged, and the card beside it was 170px too wide.
+
+    A single-column stack has no business being wider than its container in any case, so this is
+    stated once here rather than patched at each screen that trips over it.
+  */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp4);
 }
 /* Tighter sibling of `.stack` for a short outcome group — a status chip, its one line of detail, and the
@@ -252,6 +266,7 @@ nav.mrs-rail {
    that panel rendered with no gap at all and the three elements ran together. */
 .stack-3 {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);   /* see `.stack` */
   gap: var(--sp3);
 }
 .section-h {
@@ -386,26 +401,16 @@ nav.mrs-rail {
   padding: 0;
 }
 
-/* Pharmacy dispense lines. */
-.rx-lines {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: var(--sp3);
-}
-.rx-line {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--sp4);
-  padding: var(--sp3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-}
-.rx-line .mrs-field {
-  min-width: 130px;
-}
+/*
+  `.rx-lines` / `.rx-line` were declared HERE as well as ~3,400 lines below, under a comment claiming they
+  were the pharmacy dispense lines. Nothing renders them there any more — the only users are the prescribing
+  and investigation composers, which the later block styles. So this was a dead duplicate of two class names,
+  far enough from its twin that neither could be read without finding the other, and it carried a
+  `min-width: 130px` that would have fought the wrapping row the composer now uses.
+
+  Removed rather than reconciled: two rules for one class is a stylesheet nobody can reason about, and the
+  later one already won on every property that mattered.
+*/
 
 /* Dashboard. */
 .kpi-row {
@@ -3258,10 +3263,28 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
 .enc-main {
   min-inline-size: 0;
 }
+/* The tab panel is a block inside that column and must not become the one link in the chain that
+   reintroduces an intrinsic minimum. */
+.enc-main .mrs-tabpane {
+  min-inline-size: 0;
+}
 .enc-rail {
   display: grid;
   gap: var(--sp4);
   align-content: start;
+  /*
+    ABOVE the note column, always.
+    ===========================================================================================
+    A worklist's pinned actions column (`.mrs-wl th.mrs-stickyend`) carries `z-index: 1`, and two
+    positioned elements with `z-index: auto` otherwise paint in DOM order — so the moment a table
+    beside this rail overflowed, its ACTIONS header punched straight through the vitals card and
+    the two sets of text stacked on each other.
+
+    The overflow itself is fixed above; this is the guard that keeps the NEXT one from landing on
+    top of a patient's readings. A rail that renders over the content beside it is the correct
+    outcome either way: it is the thing anchored to the viewport.
+  */
+  z-index: 2;
   /* Follows the note down a long consultation — the save actions must never be a scroll away from the text
      they save. `align-content: start` above keeps the two cards their own height rather than stretching. */
   position: sticky;
@@ -3285,6 +3308,7 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
    below where the rail's offset above expects it. */
 .enc-soap {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);   /* see `.stack` */
   gap: var(--sp4);
 }
 .soap-card {
@@ -3884,10 +3908,12 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   padding: 0;
   list-style: none;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);   /* see `.stack` */
   gap: var(--sp4);
 }
 .rx-line {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);   /* see `.stack` */
   gap: var(--sp3);
   padding: var(--sp3);
   border: 1px solid var(--border);
