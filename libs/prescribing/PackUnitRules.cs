@@ -1,19 +1,26 @@
 namespace Mersal.Prescribing;
 
 /// <summary>What a product's pack data implies. Nulls mean "not derivable", never a default.</summary>
-/// <param name="PackCountsPrescribingUnits">
-/// 31.2 — whether <c>pack_size</c> counts the SAME thing <c>PrescribingUnit</c> names.
+/// <param name="PackSize">
+/// The catalogue's "Minor Units (total)" — what it says is in the box, in ITS units. Kept because the
+/// price-per-unit comparison is defined against it, and because it is a recorded fact rather than a derived
+/// one.
+/// </param>
+/// <param name="PackContent">
+/// 31.3 — how many PRESCRIBING UNITS one box holds. The divisor for every quantity question.
 ///
-/// <para>It counts the catalogue's MINOR UNITS: 20 tablets, 10 sachets, 3 ampoules — but also 5 PENS, and
-/// ONE bottle of a 120 ml syrup. So it lines up with the dose for the countable forms and does not for the
-/// measured ones, where the pack counts containers and the dose counts millilitres, grams, puffs or IU.</para>
+/// <para>For a countable form it is the same number as <paramref name="PackSize"/>: a box of 24 tablets
+/// holds 24 tablets. For a measured one the two are different things, and using the pack size was the
+/// defect — a 120 ml bottle of syrup is <c>minor = 1</c>, so a 210 ml course divided to <b>210 bottles</b>,
+/// and a box of five insulin pens dosed in IU could not be divided at all.</para>
 ///
-/// <para>Only where it lines up can a box count be computed. Where it does not, the number is withheld:
-/// 180 IU over a pack of 5 pens divides to 36 boxes, and 180 IU is less than one 300-IU pen.</para>
+/// <para>NULL where the workbook records no volume, weight or concentration to derive it from. The usual
+/// fill of an insulin pen is three millilitres and that is not assumed here: a guessed pack size produces a
+/// guessed box count, which is a dispensing error indistinguishable from a correct answer (invariant 8).</para>
 /// </param>
 public sealed record DerivedPackFacts(
     string? PrescribingUnit, bool? IsPackSplittable, decimal? PackSize = null,
-    bool PackCountsPrescribingUnits = false);
+    decimal? PackContent = null);
 
 /// <summary>
 /// 29.6 — derives the prescribing unit, the pack size and splittability (design 45 §6).
@@ -43,11 +50,32 @@ public static class PackUnitRules
     /// things. Kept as a set of UNITS rather than of forms, because the unit is what the dose is expressed
     /// in and it is the unit the comparison is actually about.
     /// </remarks>
-    private static readonly HashSet<string> CountableUnits = new(StringComparer.Ordinal)
+    /// <summary>Countable units whose count is the catalogue's MINOR column: 24 tablets in two strips.</summary>
+    /// <remarks>
+    /// A strip is not a dispensable thing, so the major column here is packaging trivia and the minor column
+    /// is the answer. The two disagree on 12,154 of 12,479 tablet rows, and that disagreement is expected.
+    /// </remarks>
+    private static readonly HashSet<string> ItemUnits = new(StringComparer.Ordinal)
     {
         "Tablet", "Capsule", "Sachet", "Suppository", "Pessary", "Lozenge", "Gummy",
-        "Vial", "Ampoule", "Syringe", "Cartridge", "Patch", "Dressing", "Enema", "Bar",
+        "Patch", "Dressing", "Enema", "Bar",
     };
+
+    /// <summary>Countable units that ARE the container: vials, ampoules, cartridges, pre-filled syringes.</summary>
+    /// <remarks>
+    /// Here the two columns are supposed to say the same thing, and on 2,237 of 2,343 rows they do. On the
+    /// other 106 they contradict each other in both directions — "adwiflam 75mg/3ml 6 amp" carries
+    /// <c>6 / 60</c> while "alejon hair 15 vials x 3 ml" carries <c>1 / 15</c> — so there is no rule that
+    /// picks the right one, and a coin-toss between two container counts is a coin-toss between two
+    /// quantities of medicine. See <see cref="Containers"/>.
+    /// </remarks>
+    private static readonly HashSet<string> ContainerUnits = new(StringComparer.Ordinal)
+    {
+        "Vial", "Ampoule", "Syringe", "Cartridge",
+    };
+
+    private static readonly HashSet<string> CountableUnits =
+        new(ItemUnits.Concat(ContainerUnits), StringComparer.Ordinal);
 
     /// <summary>Form fragment → (unit, splittable). Matched as a SUBSTRING, because the workbook's forms are
     /// free text: "f.c. tablet", "film coated tablets" and "tablet" are all one thing.</summary>
@@ -59,6 +87,12 @@ public static class PackUnitRules
     [
         // Non-splittable FIRST: "pre-filled pen" contains no splittable fragment, but "spray solution" and
         // "nasal drops" could both match a shorter splittable token if the order were reversed.
+        //
+        // A MOUTH sprays in PUFFS and a NOSE sprays in SPRAYS, so these three precede the bare "spray"
+        // below — which is the nasal and topical case, and was the word used for all of them.
+        ("oral spray", "Puff", false),
+        ("sublingual spray", "Puff", false),
+        ("mouth spray", "Puff", false),
         ("inhaler", "Puff", false),
         ("puff", "Puff", false),
         // "prefilled syringe" / "pre-filled syringe" — before "pen", and before the liquid fragments, because
@@ -131,7 +165,7 @@ public static class PackUnitRules
         foreach (var (fragment, unit, splittable) in Forms)
         {
             if (form.Contains(fragment, StringComparison.Ordinal))
-                return new DerivedPackFacts(unit, splittable, null, CountableUnits.Contains(unit));
+                return new DerivedPackFacts(unit, splittable);
         }
 
         // Unrecognised. NOT defaulted — see the class remarks.
@@ -170,40 +204,171 @@ public static class PackUnitRules
     /// form. The product-level override always wins — a chewable tablet that must not be halved and a scored
     /// one that may be are both "tablet", and only the product knows which it is.
     /// </remarks>
+    /// <param name="volumeWeight">"Volume / Weight" — the contents of ONE container ("120 ml", "30 gm").</param>
+    /// <param name="strength">"Strength" — where a concentration ("100 iu/ml") is recorded, when it is.</param>
+    /// <param name="tradeName">
+    /// The product name, read ONLY as a fallback source for the volume and the concentration. It is not a
+    /// data column and it is not treated as one; but "toujeo solostar 300 i.u./ml 1.5 ml 3 pens" states its
+    /// concentration properly while its Strength cell drops the "/ml", and the fact is the same fact.
+    /// </param>
     public static DerivedPackFacts Resolve(
         string? form,
         bool? statedSplittable,
         string? statedUnit = null,
         decimal? majorUnits = null,
         decimal? minorUnits = null,
-        decimal? statedPackSize = null)
+        decimal? statedPackSize = null,
+        string? volumeWeight = null,
+        string? strength = null,
+        string? tradeName = null)
     {
         var fromForm = FromDosageForm(form);
         var fromPack = FromPackUnits(majorUnits, minorUnits);
 
-        var unit = statedUnit ?? fromForm.PrescribingUnit;
+        /*
+         * A CONCENTRATION IN IU PER MILLILITRE MEANS THE MEDICINE IS COUNTED IN IU — whatever holds it.
+         *
+         * Insulin is the case that says so out loud: it arrives in vials, cartridges and pre-filled pens,
+         * and a prescriber writes "25 IU at night" for every one of them. Taking the unit from the CONTAINER
+         * put "Cartridge" beside the dose field of a medicine nobody has ever dosed in cartridges.
+         *
+         * The concentration is what makes this safe to infer. A bare total — "50000 iu" on a vitamin D
+         * capsule — is deliberately not read as one: that product IS prescribed in capsules, and there is
+         * nothing per-millilitre about it.
+         */
+        var concentration = PackMeasure.IuPerMillilitre(strength) ?? PackMeasure.IuPerMillilitre(tradeName);
+
+        var unit = statedUnit ?? (concentration is not null ? "IU" : fromForm.PrescribingUnit);
+        var packSize = statedPackSize ?? fromPack.PackSize;
+
         return new DerivedPackFacts(
             unit,
             statedSplittable ?? fromPack.IsPackSplittable ?? fromForm.IsPackSplittable,
-            statedPackSize ?? fromPack.PackSize,
-            // Asked of the RESOLVED unit, so a product-level override of the unit carries the comparison
-            // with it rather than leaving the flag describing the unit the form guessed.
-            unit is not null && CountableUnits.Contains(unit));
+            packSize,
+            ContentOf(unit, packSize, majorUnits, volumeWeight, concentration, tradeName));
     }
 
     /// <summary>
-    /// Whether all three facts a quantity calculation needs are known.
+    /// How many prescribing units one box holds — see <see cref="DerivedPackFacts.PackContent"/>.
     /// </summary>
     /// <remarks>
-    /// ALL three, not any: a row with a unit and a splittability but no pack size still cannot be converted
-    /// into whole packs, and reporting it as complete would produce exactly the confident wrong number
-    /// invariant 8 forbids.
+    /// <para><b>Containers come from the MAJOR column, never the minor one.</b> "Major Units (per box)" is
+    /// the container count and behaves like one across the catalogue: 1 for a 10 ml vial, 5 for five
+    /// penfills, 3 for three pens, 6 for six ampoules. The minor column is not a container count and does
+    /// not claim to be — "actrapid hm 100 i.u./ml 10 ml vial" carries <c>minor = 10</c>, which is its
+    /// millilitres, and multiplying a per-container volume by it would give that box 100 ml.</para>
+    ///
+    /// <para><b>Countable forms skip all of it.</b> A box of 24 tablets holds 24 tablets; there is nothing
+    /// to measure, and the minor column is exactly the right answer.</para>
     /// </remarks>
-    /// <summary>Whether a pack size counts the same thing this unit names — see
-    /// <see cref="DerivedPackFacts.PackCountsPrescribingUnits"/>.</summary>
-    public static bool PackCounts(string? prescribingUnit) =>
-        prescribingUnit is not null && CountableUnits.Contains(prescribingUnit);
+    private static decimal? ContentOf(
+        string? unit, decimal? packSize, decimal? majorUnits, string? volumeWeight, decimal? concentration,
+        string? tradeName)
+    {
+        if (unit is null) return null;
+        if (ItemUnits.Contains(unit)) return packSize is > 0 ? packSize : null;
+        if (ContainerUnits.Contains(unit)) return Containers(majorUnits, packSize);
 
-    public static bool IsComplete(string? unit, decimal? packSize, bool? splittable) =>
-        !string.IsNullOrWhiteSpace(unit) && packSize is > 0 && splittable is not null;
+        /*
+         * A MEASURED product takes its container count from the major column alone.
+         *
+         * Here the two columns are not expected to agree, and their disagreement is not evidence of an
+         * error: "actrapid hm 100 i.u./ml 10 ml vial" carries major = 1 and minor = 10 because the minor
+         * column is counting the vial's MILLILITRES. Demanding agreement — which is right for a box of
+         * ampoules, where both columns claim to count ampoules — would discard a row whose contents are
+         * exactly derivable.
+         *
+         * An absent major column derives nothing rather than falling back to minor, because on these rows
+         * minor is the number that is most likely to be measuring something else.
+         */
+        if (majorUnits is not > 0) return null;
+        var containers = majorUnits.Value;
+
+        // The volume column first; the trade name only where it is empty ("… (10ml) vial").
+        var millilitres = PackMeasure.Millilitres(volumeWeight) ?? PackMeasure.Millilitres(tradeName);
+
+        return unit switch
+        {
+            "ML" => Times(containers, millilitres),
+            "Gram" => Times(containers, PackMeasure.Grams(volumeWeight) ?? PackMeasure.Grams(tradeName)),
+            "IU" => concentration is { } iu ? Times(containers * iu, millilitres) : null,
+            // Puff, Drop and Spray: the catalogue records no count of actuations for any product, so there is
+            // nothing to derive from. Withheld rather than approximated from the container's volume, which
+            // would need a per-actuation dose nobody has recorded either.
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// How many containers are in the box, or null when the two columns disagree about it.
+    /// </summary>
+    /// <remarks>
+    /// Same principle as <see cref="FromPackUnits"/>: an incoherent pair derives nothing. Where the columns
+    /// agree — 95.5% of container rows — either is the answer. Where they do not, one of them is wrong, there
+    /// is no way to tell which, and the difference is the difference between one box and ten.
+    /// </remarks>
+    private static decimal? Containers(decimal? majorUnits, decimal? minorUnits)
+    {
+        if (majorUnits is not > 0) return minorUnits is > 0 ? minorUnits : null;
+        if (minorUnits is > 0 && minorUnits != majorUnits) return null;
+        return majorUnits;
+    }
+
+    private static decimal? Times(decimal a, decimal? b) => b is { } v && v > 0 ? a * v : null;
+
+    /// <summary>Every unit the platform reasons with — the closed vocabulary the drug table's CHECK holds.</summary>
+    /// <remarks>
+    /// Declared here rather than in the migration alone so that a unit cannot enter the vocabulary without
+    /// also acquiring a short form; <c>PackContentTests</c> asserts the pair.
+    /// </remarks>
+    public static IReadOnlyCollection<string> Units { get; } =
+        [.. CountableUnits, "ML", "Gram", "Puff", "IU", "Drop", "Spray"];
+
+    /// <summary>
+    /// 31.3 — the unit as a prescriber writes it: <c>tabs</c>, <c>caps</c>, <c>IU</c>, <c>puffs</c>.
+    /// </summary>
+    /// <remarks>
+    /// The dose field is labelled with this. The stored vocabulary is singular and title-cased because it is
+    /// a database value — "Tablet", "Capsule", "Ampoule" — and a field labelled "Dose (Tablet)" reads as a
+    /// column name leaking onto a prescription. Unknown values are returned unchanged rather than blanked:
+    /// showing the raw word is worse than showing the short one and far better than showing nothing.
+    /// </remarks>
+    public static string ShortUnit(string? unit) => unit switch
+    {
+        null or "" => "",
+        "Tablet" => "tabs",
+        "Capsule" => "caps",
+        "Sachet" => "sachets",
+        "Suppository" => "supps",
+        "Pessary" => "pessaries",
+        "Lozenge" => "lozenges",
+        "Gummy" => "gummies",
+        "Vial" => "vials",
+        "Ampoule" => "amps",
+        "Syringe" => "syringes",
+        "Cartridge" => "cartridges",
+        "Patch" => "patches",
+        "Dressing" => "dressings",
+        "Enema" => "enemas",
+        "Bar" => "bars",
+        "ML" => "ml",
+        "Gram" => "gm",
+        "Puff" => "puffs",
+        "Drop" => "drops",
+        "Spray" => "sprays",
+        "IU" => "IU",
+        _ => unit,
+    };
+
+    /// <summary>
+    /// Whether every fact a quantity calculation needs is known.
+    /// </summary>
+    /// <remarks>
+    /// ALL of them, not any: a row with a unit and a splittability but no pack CONTENT cannot be converted
+    /// into boxes, and reporting it as complete would produce exactly the confident wrong number invariant 8
+    /// forbids. The content — not the pack size — is the one that matters, which is the whole of 31.3: a
+    /// syrup with <c>pack_size = 1</c> looked complete and divided a 210 ml course into 210 bottles.
+    /// </remarks>
+    public static bool IsComplete(string? unit, decimal? packContent, bool? splittable) =>
+        !string.IsNullOrWhiteSpace(unit) && packContent is > 0 && splittable is not null;
 }

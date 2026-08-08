@@ -1,3 +1,4 @@
+using Mersal.Prescribing;
 using Mersal.MasterData.Domain;
 using Mersal.MasterData.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -41,7 +42,18 @@ public sealed record DrugSearchHit(
     // without a second call. Every one of them is nullable, and a null renders as an absence.
     string? PrescribingUnit,
     decimal? PackSize,
-    bool? IsPackSplittable);
+    bool? IsPackSplittable)
+{
+    /// <summary>
+    /// 31.3 — the unit as a prescriber writes it: <c>tabs</c>, <c>caps</c>, <c>IU</c>, <c>puffs</c>.
+    /// </summary>
+    /// <remarks>
+    /// Derived here rather than in the browser, from the same table that owns the vocabulary. The stored
+    /// words are database values — "Tablet", "Capsule", "Ampoule" — and a dose field labelled "Dose
+    /// (Tablet)" reads as a column name that escaped onto a prescription.
+    /// </remarks>
+    public string PrescribingUnitShort => PackUnitRules.ShortUnit(PrescribingUnit);
+}
 
 public static class DrugSearch
 {

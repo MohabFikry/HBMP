@@ -159,3 +159,42 @@ describe("29.5 — the composer can preview the window schedule before submittin
     expect(p.windows.reduce((s, w) => s + w.allocatedQuantity, 0)).toBe(p.total);
   });
 });
+
+describe("31.3 — the quantity's unit reaches the wire", () => {
+  it("sends quantityUnit beside quantityPrescribed", async () => {
+    /*
+     * THE HAZARD. 31.3 made the composer's Quantity field a box count wherever the catalogue records what a
+     * box holds, so a seven-day course of a 24-tablet product is written as "1". The dispensing counter
+     * renders that figure and takes the pharmacist's number against it — and 1 box and 1 tablet are the same
+     * character.
+     *
+     * A screen-level test cannot see this: the composer holds the unit either way. What matters is that the
+     * MAPPING onto the wire carries it, which is the seam this file exists for.
+     */
+    const { HttpApiClient } = await import("../src/api/HttpApiClient");
+    const fetchMock = capture();
+
+    await new HttpApiClient().submitPrescription({
+      ...BASE,
+      lines: [{ ...LINE, quantity: 2, quantityUnit: "boxes" }],
+    } as never);
+
+    const b = bodyOf(fetchMock);
+    expect(b.lines[0].quantityPrescribed).toBe(2);
+    expect(b.lines[0].quantityUnit).toBe("boxes");
+  });
+
+  it("sends no unit rather than a plausible one when nothing was computed", async () => {
+    // Invariant 8 at the one place a wrong word is worse than none: a unit nobody derived, printed beside a
+    // number at a dispensing counter, reads exactly like one that was.
+    const { HttpApiClient } = await import("../src/api/HttpApiClient");
+    const fetchMock = capture();
+
+    await new HttpApiClient().submitPrescription({
+      ...BASE,
+      lines: [{ ...LINE, quantity: 30, quantityUnit: "" }],
+    } as never);
+
+    expect(bodyOf(fetchMock).lines[0].quantityUnit).toBeNull();
+  });
+});

@@ -1524,6 +1524,11 @@ export class HttpApiClient implements ApiClient {
           frequency: l.frequency ?? null,
           quantityPrescribed: Number(l.quantityPrescribed ?? 0),
           quantityDispensed: Number(l.quantityDispensed ?? 0),
+          // 31.3 — read strictly. An absent unit renders as no unit; it is never filled in with a plausible
+          // one, because "1" meaning one box and "1" meaning one tablet are the same character.
+          quantityUnit: typeof l.quantityUnit === "string" && l.quantityUnit.length > 0
+            ? l.quantityUnit
+            : null,
           refillsAllowed: Math.trunc(Number(l.refillsAllowed ?? 0)),
           status: rxStatus(l.status),
         })),
@@ -1896,6 +1901,11 @@ export class HttpApiClient implements ApiClient {
             : drugCoded(l.drugId),
           quantity: Math.max(1, Math.round(Number(l.quantityPrescribed ?? 1))),
           dispensed: Math.round(Number(l.quantityDispensed ?? 0)),
+          // 31.3 — read strictly. An absent unit shows as no unit; the one thing this screen must never do
+          // is put a plausible word next to a number that means something else.
+          quantityUnit: typeof l.quantityUnit === "string" && l.quantityUnit.length > 0
+            ? l.quantityUnit
+            : null,
           // The dose ALONE now. Route, frequency and duration travel as their own fields so the counter can
           // lay them out as the distinct facts they are; joining them into one string here left the screen
           // unable to say "duration not recorded" without parsing its own display text back apart.
@@ -2007,6 +2017,12 @@ export class HttpApiClient implements ApiClient {
         prescribingUnit: typeof d.prescribingUnit === "string" && d.prescribingUnit.length > 0
           ? d.prescribingUnit
           : null,
+        // 31.3 — the SERVER's short form, never one reconstructed here. "Tablet" → "tabs" is a fact about
+        // the vocabulary the drug table owns, and a second copy of it beside a dose field is a second
+        // answer to what a medicine is counted in.
+        prescribingUnitShort: typeof d.prescribingUnitShort === "string" && d.prescribingUnitShort.length > 0
+          ? d.prescribingUnitShort
+          : null,
         packSize: typeof d.packSize === "number" ? d.packSize : null,
         isPackSplittable: typeof d.isPackSplittable === "boolean" ? d.isPackSplittable : null,
       }),
@@ -2082,6 +2098,12 @@ export class HttpApiClient implements ApiClient {
         prescribingUnit: typeof d.prescribingUnit === "string" && d.prescribingUnit.length > 0
           ? d.prescribingUnit
           : null,
+        // 31.3 — the SERVER's short form, never one reconstructed here. "Tablet" → "tabs" is a fact about
+        // the vocabulary the drug table owns, and a second copy of it beside a dose field is a second
+        // answer to what a medicine is counted in.
+        prescribingUnitShort: typeof d.prescribingUnitShort === "string" && d.prescribingUnitShort.length > 0
+          ? d.prescribingUnitShort
+          : null,
         packSize: typeof d.packSize === "number" ? d.packSize : null,
         isPackSplittable: typeof d.isPackSplittable === "boolean" ? d.isPackSplittable : null,
       });
@@ -2107,7 +2129,7 @@ export class HttpApiClient implements ApiClient {
       packs: r?.packs ?? null,
       // Read strictly: an absent box count is NOT zero and NOT one, it is "this cannot be counted in boxes".
       boxes: typeof r?.boxes === "number" ? r.boxes : null,
-      packSize: r?.packSize ?? null,
+      packContent: r?.packContent ?? null,
       prescribingUnit: r?.prescribingUnit ?? null,
       isPackSplittable: r?.isPackSplittable ?? null,
     });
@@ -3710,6 +3732,11 @@ function rxLines(lines: PrescriptionDraftLine[]) {
       route: "Oral",
       frequency: "Daily",
       quantityPrescribed: l.quantity,
+      // 31.3 — what that number counts, snapshotted with it. The composer knows because it is what the
+      // Quantity field is labelled with; the counter cannot know, and renders the figure alone.
+      // `|| null`, not `?? null`: the draft carries "" for "nothing computed", and an empty string stored
+      // against a quantity is a unit that exists and says nothing. Absent is the honest wire value.
+      quantityUnit: l.quantityUnit || null,
       refillsAllowed: 0,
       durationDays: l.durationDays,
       clientLineId: l.lineId,

@@ -115,6 +115,20 @@ public sealed class Drug
     public decimal? PackSize { get; set; }
     public string? PackUnit { get; set; }
 
+    /// <summary>
+    /// 31.3 — how many PRESCRIBING units one box holds, which is what every quantity is divided by.
+    /// </summary>
+    /// <remarks>
+    /// <para>Equal to <see cref="PackSize"/> for the countable forms and different for every measured one:
+    /// a 120 ml bottle of syrup is <c>pack_size = 1</c> and <c>pack_content = 120</c>, and dividing a 210 ml
+    /// course by the first produced 210 bottles. Derived from "Volume / Weight" and "Strength" — see
+    /// <c>PackUnitRules.Resolve</c>.</para>
+    ///
+    /// <para>NULL where the workbook records nothing to derive it from, which is a real answer: the quantity
+    /// check then reports NotChecked naming this column, rather than a box count computed from a guess.</para>
+    /// </remarks>
+    public decimal? PackContent { get; set; }
+
     /// <summary>Whether a pack can be broken. NULL is NOT "yes": assuming splittable is the dangerous default
     /// because it silently permits a fractional inhaler. Defaults from the dosage form but is overridable per
     /// product — "the form is a good heuristic and a poor law".</summary>

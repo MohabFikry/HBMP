@@ -34,6 +34,7 @@ public sealed class MasterDataDbContext(DbContextOptions<MasterDataDbContext> op
         {
             e.Property(x => x.PrescribingUnit).HasColumnName("prescribing_unit");        // 29.6
             e.Property(x => x.PackSize).HasColumnName("pack_size");
+            e.Property(x => x.PackContent).HasColumnName("pack_content");                // 31.3
             e.Property(x => x.PackUnit).HasColumnName("pack_unit");
             e.Property(x => x.IsPackSplittable).HasColumnName("is_pack_splittable");
             e.Property(x => x.UnitDataIncomplete).HasColumnName("unit_data_incomplete");

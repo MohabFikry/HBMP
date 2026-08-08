@@ -223,7 +223,7 @@ public sealed class AmendExecutor(PharmacyDbContext db)
         {
             PrescriptionLineId = newLineId, TenantId = original.TenantId,
             PrescriptionId = original.PrescriptionId,
-            DrugId = original.DrugId, DrugName = original.DrugName,
+            DrugId = original.DrugId, DrugName = original.DrugName, QuantityUnit = original.QuantityUnit,
             Dose = original.Dose, Route = original.Route, Frequency = original.Frequency,
             DurationDays = original.DurationDays, RefillsAllowed = original.RefillsAllowed,
             QuantityPrescribed = newQuantity,

@@ -1133,6 +1133,14 @@ function DiagnosisPicker({
       open={open}
       onOpenChange={setOpen}
       title={t(S.codePicker)}
+      /*
+       * WIDE. Every row here is a code beside a title read by scanning — "I11.0 Hypertensive heart disease
+       * with (congestive) heart failure" — and at the default 520px those titles wrapped to two and three
+       * lines, so a list of six results filled the modal and the staged rows below it had to be scrolled to.
+       * A staged row is worse still: code, title, rank picker and remove control on ONE line, with the
+       * picker holding a fixed 9rem, which left the title about a hundred pixels.
+       */
+      wide
       trigger={
         // Ghost, matching "Visit timeline" and "Patient file" in the context bar directly above it. It was
         // `secondary` — a bordered, filled control — so the workspace showed three actions of the same weight
@@ -1639,6 +1647,7 @@ function PrescriptionsTab({
             id: l.id,
             label: l.drug ? t(l.drug) : t(S.rxDrugMissing),
             quantity: l.quantityPrescribed,
+            quantityUnit: l.quantityUnit ?? null,
             // Dispensed is the lock that matters here: a medicine the patient already has cannot be
             // un-given, and the amount is what the pharmacy metered against.
             locked: l.quantityDispensed > 0 ? t(S.lockedDispensed)

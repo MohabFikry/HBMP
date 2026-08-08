@@ -13,12 +13,37 @@ ALTER TABLE masterdata.drug
 
 -- The vocabulary from design 45 §6. NULL is permitted and is NOT a failure state — it is "the sheet did not
 -- say", which the quantity check reports as NotChecked naming the field rather than guessing.
-ALTER TABLE masterdata.drug DROP CONSTRAINT IF EXISTS ck_drug_prescribing_unit;
-ALTER TABLE masterdata.drug
-    ADD CONSTRAINT ck_drug_prescribing_unit CHECK (
-        prescribing_unit IS NULL OR prescribing_unit IN (
-            'Tablet','Capsule','ML','Puff','Spray','IU','Drop','Sachet','Suppository',
-            'Vial','Ampoule','Patch','Gram'));
+--
+-- ============================================================================================================
+-- ADDED ONLY IF ABSENT — and the DROP that used to precede it is gone (31.3)
+-- ============================================================================================================
+-- Migrations here are re-run from 0001 on every loader invocation and every service start, so each one has to
+-- be safe to apply to a database that already has all of them. This one was not. `DROP` then `ADD` re-imposed
+-- the ORIGINAL thirteen-value vocabulary, and 0018 widened it to twenty-one — so the second run over a
+-- database holding any row loaded under 0018 failed:
+--
+--     23514: check constraint "ck_drug_prescribing_unit" of relation "drug" is violated by some row
+--
+-- and the whole load aborted before touching a table. The first load succeeded, which is what made it
+-- invisible: the failure needs 0018's data to exist, so it appears only on the run after the one that worked.
+--
+-- Guarding the ADD instead of dropping first makes the migration a no-op wherever the constraint already
+-- exists — in whatever form the latest migration left it — and still gives a fresh database this vocabulary
+-- at 0016 and the wider one at 0018. Any future narrowing of a CHECK that a later migration widens has the
+-- same trap in it.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'ck_drug_prescribing_unit' AND conrelid = 'masterdata.drug'::regclass)
+    THEN
+        ALTER TABLE masterdata.drug
+            ADD CONSTRAINT ck_drug_prescribing_unit CHECK (
+                prescribing_unit IS NULL OR prescribing_unit IN (
+                    'Tablet','Capsule','ML','Puff','Spray','IU','Drop','Sachet','Suppository',
+                    'Vial','Ampoule','Patch','Gram'));
+    END IF;
+END $$;
 
 ALTER TABLE masterdata.drug DROP CONSTRAINT IF EXISTS ck_drug_pack_size_positive;
 ALTER TABLE masterdata.drug

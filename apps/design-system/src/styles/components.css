@@ -1165,10 +1165,16 @@ nav.mrs-rail {
 .mrs-modal > h2 {
   padding-inline-end: var(--sp10);
 }
+/*
+ * The card's own padding is 20px against the frame's 24px. It was 16px, which is the one measurement on a
+ * modal that a reader perceives as a MISTAKE rather than as a choice: content sat closer to the edge of the
+ * card it is on than the card sits to the edge of the dialog, so the inner box looked overfull while the
+ * outer one looked roomy. Inset content should be no tighter than the thing insetting it.
+ */
 .mrs-modal .mrs-modal-body {
   background: var(--surface-1);
   border-radius: var(--r-md);
-  padding: var(--sp4);
+  padding: var(--sp5);
   margin-top: var(--sp3);
 }
 /*

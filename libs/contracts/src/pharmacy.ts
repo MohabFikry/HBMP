@@ -13,6 +13,18 @@ export const zPrescriptionLine = z.object({
   quantity: z.number().int().positive(),
   /** Already dispensed against this line (supports partial dispensing across visits). */
   dispensed: z.number().int().nonnegative(),
+  /**
+   * 31.3 — what `quantity` and `dispensed` COUNT: `boxes`, or the prescribing unit (`tabs`, `IU`, `ml`).
+   *
+   * <p>A prescription's quantity is a box count wherever the catalogue records what a box holds, and the
+   * dose total where it does not. This screen renders those figures and takes the number the pharmacist
+   * hands over, so the unit has to be on it: a pharmacist reading "1" against a 24-tablet box and giving one
+   * TABLET is an error the record otherwise gives them no way to catch.</p>
+   *
+   * <p>Null on lines written before 31.3 and wherever the catalogue records no unit — shown as no unit,
+   * never as a plausible default.</p>
+   */
+  quantityUnit: z.string().nullish(),
   dose: z.string(),
   /** How it is taken and how often — "Oral", "BD". Display strings from the prescription, not codes. */
   route: z.string().nullish(),

@@ -995,6 +995,10 @@
             "type": "integer",
             "format": "int32",
             "nullable": true
+          },
+          "quantityUnit": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -1108,7 +1112,7 @@
             "type": "boolean",
             "nullable": true
           },
-          "packSize": {
+          "packContent": {
             "type": "number",
             "format": "double",
             "nullable": true

@@ -174,19 +174,47 @@ Console.WriteLine($"\nreport written: {reportPath}");
 {
     var withUnit = drugs.Count(d => !string.IsNullOrWhiteSpace(d.PrescribingUnit));
     var withPack = drugs.Count(d => d.PackSize is > 0);
+    var withContent = drugs.Count(d => d.PackContent is > 0);
     var withSplit = drugs.Count(d => d.IsPackSplittable is not null);
     var complete = drugs.Count(d => !d.UnitDataIncomplete);
     var total = drugs.Count;
     string Pct(int n) => total == 0 ? "n/a" : $"{100.0 * n / total:F1}%";
 
     Console.WriteLine();
-    Console.WriteLine("=== 29.6 pack-data coverage (design 45 §6) ===");
+    Console.WriteLine("=== 29.6 / 31.3 pack-data coverage (design 45 §6) ===");
     Console.WriteLine($"  prescribing_unit    {withUnit,7:N0} / {total:N0}  ({Pct(withUnit)})");
     Console.WriteLine($"  pack_size           {withPack,7:N0} / {total:N0}  ({Pct(withPack)})");
+    Console.WriteLine($"  pack_content        {withContent,7:N0} / {total:N0}  ({Pct(withContent)})  ← the divisor");
     Console.WriteLine($"  is_pack_splittable  {withSplit,7:N0} / {total:N0}  ({Pct(withSplit)})");
     Console.WriteLine($"  ALL THREE (usable)  {complete,7:N0} / {total:N0}  ({Pct(complete)})");
     Console.WriteLine($"  unit_data_incomplete{total - complete,7:N0} — these report NotChecked NAMING the missing field,");
     Console.WriteLine( "                               never a guessed quantity (invariant 8).");
+
+    /*
+     * 31.3 — THE ROWS ONE CELL SHORT OF A BOX COUNT, listed rather than counted.
+     *
+     * A product whose unit and splittability are known but whose CONTENT is not is a row where the workbook
+     * has everything except the volume: "Lantus Solostar 100 I.U./ML 5 Pens" states its concentration and
+     * omits how many millilitres a pen holds, so the box's contents in IU are unknowable and the composer
+     * says so instead of dividing. These are worth naming because each is fixable by filling one cell, and
+     * a percentage does not tell anybody which cell.
+     */
+    var oneCellShort = drugs
+        .Where(d => !string.IsNullOrWhiteSpace(d.PrescribingUnit) && d.IsPackSplittable is not null
+                    && d.PackContent is null)
+        .OrderBy(d => d.Name, StringComparer.Ordinal)
+        .ToList();
+
+    if (oneCellShort.Count > 0)
+    {
+        var contentPath = Path.Combine(reportDir, $"pack-content-missing-{release}.txt");
+        await File.WriteAllLinesAsync(contentPath, oneCellShort.Select(d =>
+            $"{d.SourceRowId,-8} {d.Name}  [unit={d.PrescribingUnit}, form={d.PackUnit}, strength={d.Strength}]"));
+        Console.WriteLine();
+        Console.WriteLine($"  {oneCellShort.Count:N0} products know their unit but not their box's contents —");
+        Console.WriteLine( "  a 'Volume / Weight' away from a box count. Listed in:");
+        Console.WriteLine($"    {contentPath}");
+    }
 }
 
 // --- 29.2: CPT routing reconciliation (design 45 §2) ---------------------------------------------------

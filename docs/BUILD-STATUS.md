@@ -896,3 +896,91 @@ Invariant registry OK with two new entries. Loader re-run is idempotent.
 - `tools/ci/check-kong-route-coverage.py` still only proves a prefix is routed SOMEWHERE, not to the service
   that serves it. That gap is what let `/api/v1/patients/{id}/service-history` route to profile-service for a
   whole phase.
+
+---
+
+## Phase 31.3 — what a box holds (ADR-0040 addendum)
+
+Seven fixes reported from screenshots of the running encounter workspace. Two of them were cosmetic; the
+other five were a single wrong number and the ways it reached the screen.
+
+### The number
+
+**A course was being divided by the wrong thing.** `pack_size` is the catalogue's "Minor Units (total)", and
+it counts whatever the catalogue counts — tablets for a box of tablets, but *containers* for everything
+measured. So:
+
+| product | `pack_size` | what a 210 ml / 750 IU course produced |
+|---|---|---|
+| 120 ml bottle of syrup | 1 | **210 bottles** |
+| box of 5 insulin pens | 5 | *"boxes cannot be counted for this product"* |
+| box of 24 tablets | 24 | 1 box — correct, and the only case that was |
+
+`masterdata.drug.pack_content` (migration 0019) is the missing number: how many PRESCRIBING units one box
+holds. It is derived at load time from two columns the loader had been reading past — "Volume / Weight" and
+"Strength" — times "Major Units (per box)", which is the container count. A concentration in IU per millilitre
+also decides the UNIT: insulin arrives in vials, cartridges and pens and is dosed in IU in all three, so the
+container stopped naming the dose.
+
+`QuantityMath.Compute` now takes `packContent` in place of `packSize`, and `PackUnitRules.PackCounts` — the
+"does the pack count the same thing the dose does?" gate — is gone, because with the content known the
+question does not arise.
+
+**Coverage: 19,213 / 22,653 rows (84.8%) have a real divisor**, down from a nominal 96.1% that included every
+syrup, cream and pen it was wrong for. The 2,610 rows that know their unit but not their box's contents are
+LISTED by name in `reports/pack-content-missing-<release>.txt`, each one a "Volume / Weight" cell away from a
+box count.
+
+**Where it is unknown it stays unknown.** "Lantus Solostar 100 I.U./ML 5 Pens" states its concentration and
+never its volume. Three millilitres is the usual fill of an insulin pen and the platform does not assume it:
+the composer shows the dose total, labels the field with the unit rather than "boxes", and says the
+catalogue does not record what a box holds.
+
+### The screen
+
+- **The Quantity field holds BOXES** where the box's contents are known, and the label says which — "Quantity
+  (boxes)" or "Quantity (IU)". An unlabelled 2 and an unlabelled 2250 are the same control saying two very
+  different things.
+- **And the unit travels with the number** (`pharmacy.prescription_line.quantity_unit`, migration 0017),
+  snapshotted at prescribing time like `drug_name`. Making the quantity a box count without this would have
+  put "1" against a 24-tablet box on the dispensing counter, which renders the figure alone and takes the
+  pharmacist's number against it — 1 box and 1 tablet are the same character. It is shown on the counter, on
+  the amend/withdraw dialog and in the prescription detail, and it is absent rather than guessed on any line
+  written before 31.3.
+- **The dose field is labelled with its unit**, in the short form a prescription is written in: `Dose (tabs)`,
+  `Dose (caps)`, `Dose (IU)`, `Dose (puffs)`. `PackUnitRules.ShortUnit` is server-side, beside the vocabulary
+  the drug table's CHECK constraint owns. An oral spray is now `puffs` and a nasal one `sprays`; both were
+  "Spray".
+- **The rank picker on the diagnosis modal was rendering blank options.** `.dx-staged-list li` is a DESCENDANT
+  selector, and a `Select` renders its listbox *inside* the row that owns it — so every option inherited the
+  row's four-column grid and its label landed in a track that resolved to 0px. Every bare ` li` rule in
+  app.css is now child-scoped, with a guard over the whole sheet.
+- **Modal actions moved into the footer slot** on the transaction and service-history dialogs; the body card's
+  padding went from 16px to 20px, which is no longer tighter than the 24px frame around it.
+- The ICD picker is `wide`.
+
+### Verified
+
+`prescribing` 186, `clinical-validation` 121, `pharmacy` **164 with the DB attached** (0 skipped), web
+**1,144 / 89 files**; the whole .NET solution green under `--with-db`. OpenAPI drift regenerated
+(`pharmacy.json`); invariant registry OK with three new entries; master data reloaded end to end.
+
+Driven in a real browser against the deployed stack: the ICD picker's rank options render their labels, the
+dose field reads "Dose (IU)" for insulin and "Dose (tabs)" for a tablet, Panadol's quantity is 1 box with
+"21 tabs — 24 tabs per box" beneath it, Lantus says its box contents are unrecorded, and a prescription
+submitted end to end comes back onto the amend dialog labelled "Quantity (box)".
+
+### Fixed on the way
+
+**Migration 0016 could not be applied twice.** It dropped and re-added `ck_drug_prescribing_unit` with the
+original thirteen-value vocabulary, and 0018 widened it to twenty-one — so the second load over a database
+holding any row written under 0018 aborted with `23514 ... violated by some row` before touching a table. The
+first load succeeded, which is exactly what hid it. The ADD is now guarded on the constraint's absence and the
+DROP is gone.
+
+### Not done in 31.3
+
+- **2,610 products still have no box count** because the workbook records no volume for them — 582 of them
+  dosed in IU, including both Lantus rows. Filling one cell per row fixes each.
+- The 21 pre-existing `DROP CONSTRAINT` lines across five migrations still fail `check-migration-compat`.
+  Unchanged by this phase and still unacknowledged.

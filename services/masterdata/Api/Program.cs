@@ -674,7 +674,7 @@ v1.MapPost("/drugs/pack-facts/by-ids", async (DrugIdCheckRequest req, MasterData
     var ids = (req.DrugIds ?? []).ToHashSet();
     var rows = await db.Drugs.AsNoTracking()
         .Where(d => ids.Contains(d.DrugId))
-        .Select(d => new { d.DrugId, d.IsPackSplittable, d.PackSize, d.PrescribingUnit })
+        .Select(d => new { d.DrugId, d.IsPackSplittable, d.PackSize, d.PackContent, d.PrescribingUnit })
         .ToListAsync(ct);
 
     return Results.Ok(new
@@ -685,6 +685,9 @@ v1.MapPost("/drugs/pack-facts/by-ids", async (DrugIdCheckRequest req, MasterData
             // Nulls travel as nulls. This is the one field where a tidy default is a dispensing error.
             isPackSplittable = r.IsPackSplittable,
             packSize = r.PackSize,
+            // 31.3 — what the box HOLDS, in prescribing units. The divisor for every quantity; `packSize`
+            // above is the catalogue's own count and is only the same number for the countable forms.
+            packContent = r.PackContent,
             prescribingUnit = r.PrescribingUnit,
         }),
     });

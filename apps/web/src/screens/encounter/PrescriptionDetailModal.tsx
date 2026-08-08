@@ -296,7 +296,11 @@ function RxLineCard({
         </div>
         <div className="rxv-cell">
           <dt>{t(S.quantity)}</dt>
-          <dd className="tnum">{fmt.number(line.quantityPrescribed)}</dd>
+          {/* 31.3 — with its unit. A prescription's quantity is a box count wherever the catalogue records
+              what a box holds, and the dose total where it does not; the figure alone does not say which. */}
+          <dd className="tnum">
+            {fmt.number(line.quantityPrescribed)}{line.quantityUnit ? ` ${line.quantityUnit}` : ""}
+          </dd>
         </div>
         {/*
           Kept apart from the prescribed quantity and never subtracted from it. This dialog answers "what did

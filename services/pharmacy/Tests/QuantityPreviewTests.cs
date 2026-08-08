@@ -31,7 +31,7 @@ public class QuantityPreviewTests(PrescribingApiFactory f) : IClassFixture<Presc
         Skip.If(PrescribingApiFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
 
         var drug = Guid.NewGuid();
-        f.Packs[drug] = new DrugPack(IsPackSplittable: true, PackSize: 20m, PrescribingUnit: "Tablet");
+        f.Packs[drug] = new DrugPack(IsPackSplittable: true, PackSize: 20m, PrescribingUnit: "Tablet", PackContent: 20m);
 
         var r = await PostAsync(new { drugId = drug, doseAmount = 1m, timesPerDay = 3, durationDays = 7 });
 
@@ -50,7 +50,7 @@ public class QuantityPreviewTests(PrescribingApiFactory f) : IClassFixture<Presc
         Skip.If(PrescribingApiFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
 
         var drug = Guid.NewGuid();
-        f.Packs[drug] = new DrugPack(IsPackSplittable: false, PackSize: 200m, PrescribingUnit: "Puff");
+        f.Packs[drug] = new DrugPack(IsPackSplittable: false, PackSize: 200m, PrescribingUnit: "Puff", PackContent: 200m);
 
         var r = await PostAsync(new { drugId = drug, doseAmount = 2m, timesPerDay = 2, durationDays = 30 });
 
@@ -69,7 +69,7 @@ public class QuantityPreviewTests(PrescribingApiFactory f) : IClassFixture<Presc
         Skip.If(PrescribingApiFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
 
         var drug = Guid.NewGuid();
-        f.Packs[drug] = new DrugPack(IsPackSplittable: null, PackSize: null);
+        f.Packs[drug] = new DrugPack(IsPackSplittable: null, PackSize: null, PackContent: null);
 
         var r = await PostAsync(new { drugId = drug, doseAmount = 1m, timesPerDay = 1, durationDays = 30 });
 
@@ -87,7 +87,7 @@ public class QuantityPreviewTests(PrescribingApiFactory f) : IClassFixture<Presc
         Skip.If(PrescribingApiFactory.Db is null, "test DB not configured — set the *_TEST_DB env var to run this DB integration test.");
 
         var drug = Guid.NewGuid();
-        f.Packs[drug] = new DrugPack(IsPackSplittable: true, PackSize: 20m, PrescribingUnit: "Tablet");
+        f.Packs[drug] = new DrugPack(IsPackSplittable: true, PackSize: 20m, PrescribingUnit: "Tablet", PackContent: 20m);
 
         var r = await PostAsync(new { drugId = drug, doseAmount = 1m, timesPerDay = 3 });   // no duration
 

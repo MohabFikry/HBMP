@@ -124,7 +124,7 @@ public sealed class ChronicAmendExecutor(PharmacyDbContext db)
             var successor = new PrescriptionLine
             {
                 PrescriptionLineId = newLineId, TenantId = line.TenantId, PrescriptionId = rxId,
-                DrugId = line.DrugId, DrugName = line.DrugName,
+                DrugId = line.DrugId, DrugName = line.DrugName, QuantityUnit = line.QuantityUnit,
                 Dose = line.Dose, Route = line.Route, Frequency = line.Frequency,
                 RefillsAllowed = line.RefillsAllowed,
                 DurationDays = req.NewDurationDays,

@@ -2128,7 +2128,7 @@ invariants:
     # omission is the false assurance the five-state model exists to prevent.
     tests:
       - Mersal.ClinicalValidation.Tests.QuantityCheckTests.Unknown_splittability_yields_NotChecked_NAMING_the_field
-      - Mersal.ClinicalValidation.Tests.QuantityCheckTests.A_missing_pack_size_yields_NotChecked_NAMING_the_field
+      - Mersal.ClinicalValidation.Tests.QuantityCheckTests.A_missing_pack_CONTENT_yields_NotChecked_NAMING_the_field
       - Mersal.ClinicalValidation.Tests.QuantityCheckTests.The_check_reports_Unavailable_when_master_data_could_not_be_reached
       - Mersal.ClinicalValidation.Tests.QuantityCheckTests.The_check_never_BLOCKS_a_prescription
 
@@ -2146,3 +2146,59 @@ invariants:
       - Mersal.Pharmacy.Tests.ChronicPrescribingIsWiredTests.The_COUNTER_refuses_a_collection_outside_its_window_and_names_the_date
       - Mersal.Pharmacy.Tests.ChronicPrescribingIsWiredTests.An_ACUTE_script_is_unchanged_and_carries_no_schedule
       - Mersal.Pharmacy.Tests.ChronicPrescribingIsWiredTests.An_unknown_or_inactive_refill_frequency_is_refused_rather_than_producing_no_windows
+
+  - id: INV-A-BOX-COUNT-IS-DIVIDED-BY-WHAT-THE-BOX-HOLDS
+    statement: >-
+      A course is converted into boxes by dividing it by how many PRESCRIBING units the box holds — never by
+      the catalogue's pack size, which counts containers for every measured form. Where the box's contents
+      are not recorded, no box count is offered and the composer says so.
+    source: 45-encounter-and-prescription-adjustments.md §6
+    severity: Critical
+    # The two numbers are the same only for tablets and their kin, and the catalogue is mostly not tablets.
+    # A 120 ml bottle of syrup is `pack_size = 1`, so a 210 ml course divided to 210 BOTTLES; a box of five
+    # insulin pens is `pack_size = 5` and could not be divided at all. Both failures were printed with the
+    # same confidence as a correct answer, at a dispensing counter.
+    #
+    # And the withheld case is half the invariant: "Lantus Solostar 100 I.U./ML 5 Pens" states its
+    # concentration and never its volume. Three millilitres is the usual fill of an insulin pen; assuming it
+    # would produce a box count that is right most of the time, which is the worst kind (invariant 8).
+    tests:
+      - Mersal.Prescribing.Tests.BoxCountTests.A_bottle_of_syrup_is_counted_in_BOTTLES_not_in_millilitres
+      - Mersal.Prescribing.Tests.BoxCountTests.A_course_of_insulin_is_counted_in_boxes_once_the_pen_s_contents_are_known
+      - Mersal.Prescribing.Tests.BoxCountTests.An_unknown_pack_content_yields_no_box_count_and_no_guess
+      - Mersal.Prescribing.Tests.PackContentTests.An_IU_product_with_no_volume_anywhere_derives_NO_content
+      - Mersal.Prescribing.Tests.PackContentTests.Two_columns_that_contradict_each_other_derive_NO_content
+
+  - id: INV-A-LIST-RULE-DOES-NOT-RESTYLE-A-POPUP-INSIDE-IT
+    statement: >-
+      A stylesheet rule written for a list's own rows is scoped to them, so a listbox opened from inside a
+      row keeps its own layout.
+    source: apps/web/test/popup-not-restyled.test.ts
+    severity: Medium
+    # `.dx-staged-list li` also matched `li.mrs-select-option`, because a Select renders its popup inside the
+    # row that owns it. Every option inherited a four-column grid, the label landed in a track that resolved
+    # to 0px, and the rank picker on the diagnosis modal opened a list of two BLANK rows. Nothing was wrong
+    # with the data, the markup or the component — and jsdom performs no layout, so no rendering test in the
+    # suite could have seen it. What is checkable without a layout engine is whether the selector MATCHES.
+    tests:
+      - apps/web/test/popup-not-restyled.test.ts::a listbox inside .dx-staged-list keeps its own layout
+      - apps/web/test/popup-not-restyled.test.ts::has lists to check (a guard over an empty set is a guard that passed by finding nothing)
+
+  - id: INV-A-QUANTITY-IS-NEVER-SHOWN-WITHOUT-ITS-UNIT
+    statement: >-
+      A prescribed quantity carries what it COUNTS — "boxes", or the prescribing unit — from the composer,
+      through the record, onto the dispensing counter. Where the unit is unknown, no unit is shown.
+    source: 45-encounter-and-prescription-adjustments.md §6; ADR-0040 addendum (31.3)
+    severity: Critical
+    # 31.3 made the Quantity field a BOX COUNT wherever the catalogue records what a box holds, because a box
+    # is what the patient carries home. That is the right number to write and the wrong number to store
+    # unlabelled: a seven-day course of a 24-tablet product is "1", the dispensing screen renders the figure
+    # alone, and 1 box and 1 tablet are the same character. The unit is snapshotted onto the line at
+    # prescribing time, like drug_name, so what the catalogue says next year cannot change what a
+    # prescription meant.
+    tests:
+      - apps/web/test/chronic-prescribing-wiring.test.ts::sends quantityUnit beside quantityPrescribed
+      - apps/web/test/chronic-prescribing-wiring.test.ts::sends no unit rather than a plausible one when nothing was computed
+      - apps/web/test/unit-aware-dosing.test.tsx::sends what the quantity COUNTS, not just how many
+      - apps/web/test/unit-aware-dosing.test.tsx::sends NO unit when nothing was computed, rather than a plausible one
+

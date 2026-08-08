@@ -443,9 +443,13 @@ describe("the prescription page", () => {
     // visually-hidden class — rather than absent. jsdom applies no stylesheet, so a "not in the document"
     // check here would pass just as happily against a label that had been deleted outright, which is the one
     // outcome this must not permit.
+    // 31.3 — the label also carries the UNIT the box counts in. A prescription's quantity is a box count
+    // wherever the catalogue records what a box holds, and a screen-reader user typing here hears the label
+    // and nothing else; "Dispense now — Panadol" over a field counting boxes is the one place the unit
+    // cannot be left to a column header they cannot see.
     const box = within(table).getAllByRole("spinbutton")[0];
-    expect(box).toHaveAccessibleName(/Dispense now — Amoxicillin 500mg/);
-    const label = within(table).getByText(/^Dispense now — Amoxicillin 500mg/);
+    expect(box).toHaveAccessibleName(/Dispense now \(caps\) — Amoxicillin 500mg/);
+    const label = within(table).getByText(/^Dispense now \(caps\) — Amoxicillin 500mg/);
     expect(label.tagName).toBe("LABEL");
     expect(label).toHaveClass("sr-only");
   });

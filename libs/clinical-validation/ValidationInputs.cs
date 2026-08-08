@@ -427,5 +427,11 @@ public sealed record ValidationSnapshot(
 /// way is the error invariant 8 exists to prevent: assuming splittable permits a fractional inhaler, and
 /// assuming not would round a tablet count up to whole boxes.
 /// </param>
-/// <param name="PackSize">How many prescribing units are in one pack. Null ⇒ not recorded.</param>
-public sealed record DrugPackFacts(bool? IsPackSplittable, decimal? PackSize);
+/// <param name="PackSize">The catalogue's own count for one pack, as recorded. Null ⇒ not recorded.</param>
+/// <param name="PackContent">
+/// 31.3 — how many PRESCRIBING units one box holds, which is what a course is divided by. The same number as
+/// <paramref name="PackSize"/> for tablets and capsules; 120 rather than 1 for a 120 ml bottle of syrup, and
+/// 1500 rather than 5 for a box of five insulin pens. Null ⇒ the catalogue records nothing to derive it from,
+/// and the check then reports NotChecked naming this column.
+/// </param>
+public sealed record DrugPackFacts(bool? IsPackSplittable, decimal? PackSize, decimal? PackContent = null);

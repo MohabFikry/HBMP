@@ -430,7 +430,7 @@ nav.mrs-rail {
   display: grid;
   gap: var(--sp3);
 }
-.bars li {
+.bars > li {
   display: grid;
   grid-template-columns: 120px 1fr 56px;
   align-items: center;
@@ -1006,7 +1006,7 @@ nav.mrs-rail {
 .cc-360 { display: flex; flex-direction: column; gap: var(--sp4); }
 .cc-360 section { border-top: 1px solid var(--border); padding-top: var(--sp3); }
 .cc-appts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp2); }
-.cc-appts li { display: flex; align-items: center; justify-content: space-between; gap: var(--sp4); flex-wrap: wrap; }
+.cc-appts > li { display: flex; align-items: center; justify-content: space-between; gap: var(--sp4); flex-wrap: wrap; }
 .cc-wrapup { display: flex; gap: var(--sp4); flex-wrap: wrap; align-items: flex-end; }
 /* The call's own metadata — reason and direction — side by side above the summary. Wraps to one column on a
    narrow screen rather than squeezing two selects into an unreadable width. */
@@ -1184,7 +1184,7 @@ nav.mrs-rail {
 /* The general-information strip. Icon + value pairs, wrapping — never a fixed row, because a phone number and
    a two-letter nationality do not want the same width and a grid would give them one. */
 .mem-info { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp1) var(--sp4); }
-.mem-info li { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-2); font-size: 0.9rem; }
+.mem-info > li { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-2); font-size: 0.9rem; }
 .mem-info svg { color: var(--text-3); flex: 0 0 auto; }
 
 .mem-facts {
@@ -1259,7 +1259,7 @@ nav.mrs-rail {
 .pol-editor-head { display: flex; gap: var(--sp3); align-items: center; flex-wrap: wrap; }
 .pol-editor-actions { display: flex; gap: var(--sp2); flex-wrap: wrap; margin-block-start: var(--sp3); }
 .pol-problems, .pol-diff, .pol-versions { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--sp2); }
-.pol-versions li { display: flex; gap: var(--sp3); align-items: center; flex-wrap: wrap; }
+.pol-versions > li { display: flex; gap: var(--sp3); align-items: center; flex-wrap: wrap; }
 
 /* Notes. A cancelled note is dimmed and struck through — and STILL RENDERED, with its canceller, reason and
    timestamp. Opacity never carries the status on its own: the chip says the word "Cancelled". */
@@ -1299,7 +1299,7 @@ nav.mrs-rail {
 .pol-doc-meta { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; }
 
 .pol-timeline { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--sp3); }
-.pol-timeline li { border-inline-start: 3px solid var(--border); padding-inline-start: var(--sp3); }
+.pol-timeline > li { border-inline-start: 3px solid var(--border); padding-inline-start: var(--sp3); }
 .pol-timeline p { margin: var(--sp1) 0 0; }
 .pol-timeline-head { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; font-size: 0.85rem; color: var(--text-2); }
 /* The origin is the anchor, not the newest thing that happened — it carries the accent rail and a label so
@@ -1517,7 +1517,7 @@ nav.mrs-rail {
   flex-wrap: wrap;
   gap: var(--sp1) var(--sp4);
 }
-.profile-idfacts li { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-2); font-size: 0.9rem; }
+.profile-idfacts > li { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-2); font-size: 0.9rem; }
 .profile-idfacts svg { color: var(--text-3); flex: 0 0 auto; }
 /* A fact that is present but UNRECORDED (blood group, today). Dimmed and italic rather than hidden: the slot
    stays so the reader sees that the question was asked and has no answer. Never the only cue — the value
@@ -1885,7 +1885,7 @@ nav.mrs-rail {
 /* Named explicitly rather than reached as `.book-hits li`: the row is a component now — a pickable button
    or a blocked line — and a descendant selector hid that from anyone reading either half on its own. */
 .book-hit,
-.book-hits li,
+.book-hits > li,
 .book-chosen {
   display: flex;
   align-items: center;
@@ -2959,8 +2959,8 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   display: grid;
   gap: var(--sp2);
 }
-.reg-docs li,
-.reg-failures li {
+.reg-docs > li,
+.reg-failures > li {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
@@ -2974,13 +2974,13 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   max-block-size: var(--scroll-picker);
   overflow-y: auto;
 }
-.reg-bulklist li {
+.reg-bulklist > li {
   display: flex;
   align-items: center;
   gap: var(--sp2);
 }
 /* The refusal reason wraps under the name rather than pushing it off the modal. */
-.reg-failures li { display: grid; gap: 2px; }
+.reg-failures > li { display: grid; gap: 2px; }
 
 /* ---- advanced search on the Beneficiaries roster ----------------------------------------------------------
    Ten filters. A flex row would leave a ragged last line and fields of three different widths; the grid gives
@@ -3495,7 +3495,20 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   display: grid;
   gap: var(--sp2);
 }
-.dx-staged-list li {
+/*
+ * `> li`, NOT ` li` — and the same everywhere else in this sheet.
+ *
+ * The rank picker on each staged row is a `Select`, which renders its own listbox as a `<ul>` of `<li>`
+ * INSIDE the row it belongs to. Under a descendant selector every option therefore inherited this
+ * four-column grid: the check glyph took track one, the label landed in `minmax(0, 1fr)`, which resolves to
+ * 0px once the fixed 9rem track is placed — and both options rendered as empty rows. Measured in the
+ * browser: option 200px wide, its label 0px wide, its text 54px of it out of view.
+ *
+ * Nothing was wrong with the data, the markup or the component. A rule for THIS list's rows simply also
+ * described elements that are not its rows. See test/popup-not-restyled.test.ts, which asserts it of every
+ * list in this file rather than of this one.
+ */
+.dx-staged-list > li {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) 9rem auto;
   align-items: center;
@@ -3511,7 +3524,7 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   gap: 0;
 }
 @media (max-width: 560px) {
-  .dx-staged-list li {
+  .dx-staged-list > li {
     grid-template-columns: auto minmax(0, 1fr) auto;
   }
   .dx-staged-list .mrs-field {
@@ -4046,19 +4059,10 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   flex: 0 1 11rem;
 }
 
-/* ---- 29.6 — the dose, and the unit master data records for it ------------------------------- */
-.rx-dose {
-  display: flex;
-  align-items: center;
-  gap: var(--sp2);
-}
-/* The unit is a FACT about the product, not a choice — so it reads as a suffix on the field rather than as
-   another control. A drug whose unit the catalogue does not record simply has no suffix. */
-.rx-dose-unit {
-  font-size: 0.8125rem;
-  color: var(--text-2);
-  white-space: nowrap;
-}
+/* 31.3 — `.rx-dose` and `.rx-dose-unit` were deleted here. The unit used to render as a chip beside the
+   dose input, which cost a column of width on the composer's narrowest row and left the label reading
+   "Dose" on every medicine in the catalogue. It is now IN the label — "Dose (IU)", "Dose (tabs)" — so the
+   pair had nothing left to style. */
 /* How the quantity was reached, or which master-data field stopped it being reached. A prescriber can
    overrule the number; they cannot check it unless they are told what it came from. */
 .rx-quantity-note {
@@ -4124,13 +4128,25 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   display: grid;
   gap: var(--sp2);
 }
+/*
+ * `center`, not `flex-end`. The row holds a medicine name — one line of text — beside a labelled quantity
+ * field, which is a label stacked over a box. Bottom-aligning the two put the name on the INPUT's baseline,
+ * a whole label's height below the row's top edge, so each row read as a name that had slipped downwards.
+ * The padding is the row's own; it was 8px against a 16px-inset card, which is tighter than anything else
+ * on the dialog.
+ */
 .txn-line {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
   gap: var(--sp3);
-  padding: var(--sp2) 0;
+  padding: var(--sp3) 0;
   border-bottom: 1px solid var(--border);
+}
+/* The last row's rule would otherwise draw a line directly above the reason picker, reading as a divider
+   between two things that are not divided. */
+.txn-line:last-child {
+  border-bottom: 0;
 }
 /* The line's own name leads and takes the slack, because it is what the doctor is deciding about; the
    quantity and the lock chip are fixed-width facts beside it. `min-inline-size` lets a long medicine name

@@ -140,6 +140,14 @@ export const zRxRowLine = z.object({
   quantityPrescribed: z.number(),
   /** Fulfilment to date, shown apart from the prescribed figure and never subtracted from it. */
   quantityDispensed: z.number(),
+  /**
+   * 31.3 — what those two figures COUNT: `boxes`, or the prescribing unit (`tabs`, `IU`, `ml`).
+   *
+   * <p>A quantity of 1 against a 24-tablet box and a quantity of 2250 against a box of insulin pens are both
+   * correct and are counted in different things. Absent on lines written before 31.3, and on any line whose
+   * unit the catalogue does not record — rendered as no unit, never as a guess.</p>
+   */
+  quantityUnit: z.string().nullish(),
   refillsAllowed: z.number().int(),
   status: zStatus,
 });

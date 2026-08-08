@@ -9,17 +9,17 @@ namespace Mersal.Prescribing;
 /// packs for one that cannot be broken, because half an inhaler is not a thing anyone can dispense.
 /// </param>
 /// <param name="Packs">Whole packs, when the pack cannot be split. Null when it can.</param>
+/// <param name="PackContent">How many prescribing units one box holds — the divisor everything here used.</param>
 /// <param name="Boxes">
 /// 31.2 — how many BOXES to hand over, which is what a pharmacy actually counts.
 ///
-/// <para>NULL when the question has no answer, and it often has none: <c>pack_size</c> counts the
-/// catalogue's MINOR UNITS — the countable items in a box — and that is only the same thing the dose counts
-/// for forms like tablets and ampoules. "Lantus Solostar 100 I.U./ML 5 Pens" holds 5 PENS and is dosed in
-/// IU; 180 IU over a pack of 5 divides to 36 boxes, when 180 IU is less than a single 300-IU pen. Withheld
-/// rather than printed.</para>
+/// <para>NULL when the box's contents are not recorded. That is not a rare state and it is not defaulted:
+/// the workbook gives no volume for "Lantus Solostar 100 I.U./ML 5 Pens", so how much insulin the box holds
+/// is genuinely unknown, and three millilitres per pen — the usual fill — is a guess this refuses to make.
+/// A wrong box count looks exactly like a right one at a dispensing counter.</para>
 /// </param>
 public sealed record QuantityPlan(
-    decimal TotalUnits, decimal DispenseQuantity, decimal? Packs, decimal? PackSize, decimal? Boxes = null);
+    decimal TotalUnits, decimal DispenseQuantity, decimal? Packs, decimal? PackContent, decimal? Boxes = null);
 
 /// <summary>The outcome of asking for a quantity: a plan, or the NAME of the fact that is missing.</summary>
 /// <param name="Plan">Null when the quantity could not be computed.</param>
@@ -50,17 +50,18 @@ public sealed record QuantityOutcome(QuantityPlan? Plan, string? MissingField)
 /// </summary>
 public static class QuantityMath
 {
-    /// <param name="packCountsDoses">
-    /// 31.2 — whether <paramref name="packSize"/> counts the SAME thing the dose does.
+    /// <param name="packContent">
+    /// 31.3 — how many PRESCRIBING UNITS one box holds: 24 tablets, 120 millilitres, 1500 IU.
     ///
-    /// <para>True for tablets, capsules, sachets, ampoules and the rest of the countable forms. False for a
-    /// bottle of syrup dosed in millilitres or a box of pens dosed in IU, where the pack counts CONTAINERS.
-    /// Defaults false, which is the safe direction: a box count is simply not offered rather than being
-    /// computed from two different units and presented as fact.</para>
+    /// <para>It replaced <c>packSize</c>, which counts the catalogue's minor units and is therefore only the
+    /// same number for the countable forms. Under the old divisor a 210 ml course of syrup — <c>pack_size =
+    /// 1</c> for a 120 ml bottle — came out as 210 packs, and a box of insulin pens could not be divided at
+    /// all. See <see cref="PackUnitRules"/> for where the content is derived.</para>
+    ///
+    /// <para>Null is a real answer and it is carried through as one.</para>
     /// </param>
     public static QuantityOutcome Compute(
-        decimal? doseAmount, int? timesPerDay, int? durationDays, bool? isPackSplittable, decimal? packSize,
-        bool packCountsDoses = false)
+        decimal? doseAmount, int? timesPerDay, int? durationDays, bool? isPackSplittable, decimal? packContent)
     {
         // The commonest case on a free-text dose. Stated rather than passed silently: an "Ok" here would
         // read as "the quantity is right" about a quantity nobody computed.
@@ -74,18 +75,19 @@ public static class QuantityMath
 
         // Boxes round UP and never to zero: a ten-tablet course from a box of thirty is one box, and eight
         // boxes of seven is 56 against a 60-tablet course — four days short, which reads as a completed one.
-        var boxes = packCountsDoses && packSize is > 0 ? Math.Ceiling(total / packSize.Value) : (decimal?)null;
+        var boxes = packContent is > 0 ? Math.Ceiling(total / packContent.Value) : (decimal?)null;
 
         // A splittable pack is dispensed to the exact requirement — 21 of a 20-tablet box is one box and one
         // strip's worth, and the pharmacy counts them out.
-        if (splittable) return QuantityOutcome.Of(new QuantityPlan(total, total, null, packSize, boxes));
+        if (splittable) return QuantityOutcome.Of(new QuantityPlan(total, total, null, packContent, boxes));
 
-        // A pack that cannot be broken is dispensed WHOLE, so the total rounds up to a multiple of it — and
-        // that needs the pack size. Without it the arithmetic is unfinishable, so it is reported, not
-        // approximated.
-        if (packSize is not { } size || size <= 0) return QuantityOutcome.NotChecked("pack_size");
+        // A pack that cannot be broken is dispensed WHOLE, so the total rounds up to a multiple of what the
+        // box HOLDS. Without that the arithmetic is unfinishable, so it is reported, not approximated — and
+        // it is the box's contents that are needed, not its pack size: dividing 210 ml of syrup by a pack
+        // size of 1 produced 210 bottles rather than an admission that the bottle's volume was unread.
+        if (packContent is not { } content || content <= 0) return QuantityOutcome.NotChecked("pack_content");
 
-        var packs = Math.Ceiling(total / size);
-        return QuantityOutcome.Of(new QuantityPlan(total, packs * size, packs, size, boxes ?? packs));
+        var packs = Math.Ceiling(total / content);
+        return QuantityOutcome.Of(new QuantityPlan(total, packs * content, packs, content, boxes ?? packs));
     }
 }

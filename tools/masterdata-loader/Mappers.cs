@@ -148,25 +148,38 @@ public static class Mappers
         PackUnit = Clean(r.DosageForm),
         PrescribingUnit = PackFactsOf(r).PrescribingUnit,
         IsPackSplittable = PackFactsOf(r).IsPackSplittable,
+        // 31.3 — how many prescribing units the box HOLDS, from "Volume / Weight" and "Strength". Null where
+        // they do not say; see PackUnitRules.ContentOf for why that is left as null.
+        PackContent = PackFactsOf(r).PackContent,
         // Rows missing ANY of the three are flagged and LISTED in the load report — "not silently defaulted".
+        // The third is the CONTENT, not the pack size: a syrup with pack_size = 1 looked complete and its
+        // quantity divided a 210 ml course into 210 bottles.
         UnitDataIncomplete = !PackUnitRules.IsComplete(
-            PackFactsOf(r).PrescribingUnit, PackFactsOf(r).PackSize, PackFactsOf(r).IsPackSplittable),
+            PackFactsOf(r).PrescribingUnit, PackFactsOf(r).PackContent, PackFactsOf(r).IsPackSplittable),
     };
 
     /// <summary>
-    /// The three pack facts for one workbook row, from every source in order of authority.
+    /// Every pack fact for one workbook row, from every source in order of authority.
     /// </summary>
     /// <remarks>
-    /// The workbook records no product-level override of either fact today, so both stated arguments are
-    /// null — they are passed explicitly rather than omitted because the override is the design's stated
-    /// intent ("overridable per product") and the seam it will arrive through is this one.
+    /// <para>The workbook records no product-level override of either fact today, so both stated arguments
+    /// are null — they are passed explicitly rather than omitted because the override is the design's stated
+    /// intent ("overridable per product") and the seam it will arrive through is this one.</para>
+    ///
+    /// <para>31.3 adds the last three: the two measurement columns the loader used to read past, and the
+    /// trade name as a fallback source for both. The name is NOT treated as a data column — it is consulted
+    /// only where a column is empty, because "toujeo solostar 300 i.u./ml 1.5 ml 3 pens" states its
+    /// concentration properly while its own Strength cell drops the "/ml".</para>
     /// </remarks>
     public static DerivedPackFacts PackFactsOf(DrugListXlsxRow r) => PackUnitRules.Resolve(
         form: r.DosageForm,
         statedSplittable: null,
         statedUnit: null,
         majorUnits: MasterDataNormalize.Price(r.MajorUnits),
-        minorUnits: MasterDataNormalize.Price(r.MinorUnits));
+        minorUnits: MasterDataNormalize.Price(r.MinorUnits),
+        volumeWeight: r.VolumeWeight,
+        strength: r.Strength,
+        tradeName: r.TradeNameEn);
 
     /// <summary>ATC classification nodes from an xlsx row — same truncation rule as the CSV path.</summary>
     public static IEnumerable<AtcClass> ToAtcClasses(DrugListXlsxRow r, string release)

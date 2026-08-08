@@ -2015,8 +2015,8 @@ export class DevApiClient implements ApiClient {
       const total = dose * perDay * days;
       return ok(zQuantityPreview, {
         totalUnits: total, dispenseQuantity: total, packs: null,
-        // Tablets: the pack counts the same thing the dose does, so a box count exists.
-        boxes: Math.ceil(total / 30), packSize: 30,
+        // Tablets: a box of 30 holds 30 of the thing the dose counts, so a box count exists.
+        boxes: Math.ceil(total / 30), packContent: 30,
         prescribingUnit: "Tablet", isPackSplittable: true,
       });
     });
@@ -2118,6 +2118,7 @@ export class DevApiClient implements ApiClient {
               drug: { system: "ATC", code: "d-amox-500", label: loc("Amoxicillin 500mg", "أموكسيسيلين ٥٠٠ملغ") },
               quantity: 21,
               dispensed: disp("RX-33110", "RXL-1"),
+              quantityUnit: "caps",
               dose: "1 capsule",
               route: "Oral",
               frequency: "TDS",
@@ -2135,6 +2136,7 @@ export class DevApiClient implements ApiClient {
               drug: { system: "ATC", code: "d-guaifenesin", label: loc("Guaifenesin syrup", "شراب جوايفينيسين") },
               quantity: 1,
               dispensed: disp("RX-33110", "RXL-2"),
+              quantityUnit: "caps",
               dose: "10 ml",
               route: "Oral",
               frequency: "TDS",
@@ -2168,6 +2170,7 @@ export class DevApiClient implements ApiClient {
               drug: { system: "ATC", code: "d-metformin-500", label: loc("Metformin 500mg", "ميتفورمين ٥٠٠ملغ") },
               quantity: 60,
               dispensed: 0,
+              quantityUnit: "tabs",
               route: "Oral",
               frequency: "BD",
               durationDays: 30,

@@ -130,6 +130,19 @@ public sealed class PrescriptionLine
     public string? Route { get; set; }
     public string? Frequency { get; set; }
     public decimal QuantityPrescribed { get; set; }
+
+    /// <summary>
+    /// 31.3 — what <see cref="QuantityPrescribed"/> COUNTS: "boxes", or the prescribing unit ("tabs", "IU").
+    /// </summary>
+    /// <remarks>
+    /// A quantity of 1 against a 24-tablet box and a quantity of 2250 against a box of insulin pens are both
+    /// correct and are counted in different things, and a dispensing screen shows the figure alone. A
+    /// SNAPSHOT taken at prescribing time for the same reason <see cref="DrugName"/> is one: what the
+    /// catalogue says today must not change what a prescription written last year meant. NULL where the
+    /// catalogue records no unit — rendered as no unit, never as a guess.
+    /// </remarks>
+    public string? QuantityUnit { get; set; }
+
     public decimal QuantityDispensed { get; set; }       // accumulator, 0 ≤ dispensed ≤ prescribed (phase 6)
     public int RefillsAllowed { get; set; }
 

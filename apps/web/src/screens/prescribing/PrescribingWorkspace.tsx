@@ -26,19 +26,18 @@ const S = {
   dose: { en: "Dose", ar: "الجرعة" },
   timesPerDay: { en: "Times per day", ar: "مرات يومياً" },
   duration: { en: "Duration (days)", ar: "المدة (أيام)" },
-  // 29.6 — what the quantity was computed from, said beside it. The doctor can overrule the number; they
-  // cannot check it unless they are told how it was reached.
-  quantityPacks: { en: "whole pack(s) of", ar: "عبوة كاملة سعة" },
   // 31.2 — what the pharmacy counts out. Stated beside the units it came from, so the prescriber can check
   // the conversion rather than take it on trust.
   boxes: { en: "box", ar: "علبة" },
   boxesPlural: { en: "boxes", ar: "علب" },
-  boxesOf: { en: "of", ar: "سعة" },
   boxesUnknown: {
-    en: "Boxes cannot be counted for this product: the catalogue's pack size counts containers, not the "
-      + "unit this is dosed in.",
-    ar: "لا يمكن حساب عدد العلب لهذا المنتج: حجم العبوة في الكتالوج يحسب الأوعية، وليس الوحدة التي تُوصف بها.",
+    en: "The catalogue does not record how much one box of this holds, so this is the total dose, not a "
+      + "box count.",
+    ar: "لا يسجّل الكتالوج سعة العبوة الواحدة من هذا المنتج، لذلك هذه هي الجرعة الإجمالية وليست عدد العلب.",
   },
+  // 31.3 — the box's contents, said once beside the box count. The prescriber can overrule the number; they
+  // cannot check it unless they are told what one box holds.
+  perBox: { en: "per box", ar: "لكل علبة" },
   quantityNotChecked: {
     en: "The quantity to dispense could not be computed.",
     ar: "تعذّر حساب الكمية المطلوب صرفها.",
@@ -196,7 +195,9 @@ function newLine(): PrescriptionDraftLine {
   return {
     lineId: crypto.randomUUID(), drug: null, dose: "",
     doseAmount: null, timesPerDay: null, durationDays: null,
-    quantity: 1, quantityEdited: false,
+    // 31.3 — no unit until something has been computed. A new line's "1" counts nothing yet, and labelling
+    // it with a guess would be the one place this screen invents a fact.
+    quantity: 1, quantityUnit: "", quantityEdited: false,
   };
 }
 
@@ -209,6 +210,20 @@ function newLine(): PrescriptionDraftLine {
  *
  * <p>Empty while the dose is unset — an absent instruction must not render as a formatted one.</p>
  */
+/**
+ * 31.3 — the unit this line is counted in, as a prescriber writes it: `tabs`, `caps`, `IU`, `ml`.
+ *
+ * <p>Empty while no medicine is chosen, and empty for the 838 catalogue rows whose unit cannot be derived —
+ * a label reading "Dose" alone is honest, and a word invented to fill the gap would sit beside the field
+ * reading as data.</p>
+ *
+ * <p>The short form comes from the SERVER, which owns the vocabulary. `prescribingUnit` — "Tablet" — is the
+ * database's word and is kept for the stored sig; it is not what goes on a label.</p>
+ */
+function unitOf(line: PrescriptionDraftLine): string {
+  return line.drug?.prescribingUnitShort ?? line.drug?.prescribingUnit ?? "";
+}
+
 function sigOf(line: PrescriptionDraftLine): string {
   if (line.doseAmount === null) return "";
   const unit = line.drug?.prescribingUnit ? ` ${line.drug.prescribingUnit}` : "";
@@ -420,44 +435,47 @@ export function PrescribingWorkspace({
         setLines((prev) => prev.map((x) =>
           // `quantityEdited` is re-checked HERE, not only above: the doctor may have typed while the request
           // was in flight, and answering it afterwards would overwrite what they just wrote.
-          x.lineId === l.lineId && !x.quantityEdited ? { ...x, quantity: p.dispenseQuantity } : x));
+          //
+          // 31.3 — BOXES where the box's contents are known, and the raw dispensing units where they are
+          // not. A prescription is written in the thing the patient carries home; "2250" beside an insulin
+          // pen is a number of international units, and no pharmacy counts those out. The field's LABEL
+          // says which of the two this is, so the number is never ambiguous.
+          //
+          // The unit is set with the number and travels with it: it labels the field here, it is persisted
+          // in the draft, and it is SENT, so a dispensing counter reading the figure back never reads it
+          // without knowing what it counts.
+          x.lineId === l.lineId && !x.quantityEdited
+            ? {
+                ...x,
+                quantity: p.boxes ?? p.dispenseQuantity,
+                quantityUnit: p.boxes ? t(p.boxes === 1 ? S.boxes : S.boxesPlural) : unitOf(l),
+              }
+            : x));
         setQuantityNote((prev) => ({
           ...prev,
           /*
-           * 31.2 — SAY IT IN BOXES, because that is what leaves the counter.
+           * ONLY WHAT THE NUMBER DOES NOT ALREADY SAY.
            *
-           * "180" beside a medicine tells a prescriber nothing about what the patient carries home. The
-           * units it came FROM stay in the sentence so the conversion is checkable rather than trusted.
-           *
-           * And where boxes cannot be counted, the sentence says so. `pack_size` counts the catalogue's
-           * minor units, which is only the same thing the dose counts for forms like tablets — a box of 5
-           * insulin pens dosed in IU would divide to a box count wrong by the pen's contents, and it would
-           * look exactly as confident as a right one.
+           * "Computed from dose x frequency x duration" used to sit under every quantity, restating the
+           * three fields immediately to its left. What remains is the conversion the number cannot carry:
+           * the dose total it came from and what one box holds, so a prescriber can CHECK the box count
+           * rather than trust it — or, where the catalogue does not record the box's contents, the fact
+           * that this is a dose total and not a box count at all.
            */
-          /*
-           * 31.2 — ONLY WHAT THE NUMBER DOES NOT ALREADY SAY.
-           *
-           * "Computed from dose x frequency x duration" used to sit under every quantity. It restates the
-           * three fields immediately to its left, so it was two lines of prose explaining nothing, on the
-           * one control the prescriber most needs to read quickly.
-           *
-           * What remains is information the number cannot carry: how many BOXES that is, or — where boxes
-           * cannot be counted, because `pack_size` counts containers and the dose counts millilitres or IU
-           * — the fact that they cannot.
-           */
-          [l.lineId]: p.boxes
-            ? `${p.totalUnits} ${p.prescribingUnit ?? ""} — ${p.boxes} `
-              + `${t(p.boxes === 1 ? S.boxes : S.boxesPlural)}`
-              + (p.packSize ? ` ${t(S.boxesOf)} ${p.packSize}` : "")
-            : p.packSize
-              ? t(S.boxesUnknown)
-              : "",
+          [l.lineId]: p.boxes && p.packContent
+            ? `${p.totalUnits} ${unitOf(l)} — ${p.packContent} ${unitOf(l)} ${t(S.perBox)}`
+            : p.boxes
+              ? `${p.totalUnits} ${unitOf(l)}`
+              : t(S.boxesUnknown),
         }));
       } catch (err) {
         if (!live) return;
         // ABSENCE IS NEVER A NUMBER (invariant 8). The missing field is NAMED and the quantity is left
         // alone — a guessed quantity is a dispensing error that looks exactly like a correct one.
         const problem = (err as { problem?: { title?: string; detail?: string } })?.problem;
+        // Nothing was computed, so the field is whatever the prescriber last saw and the label must not
+        // claim it is a box count. Cleared to a bare "Quantity"; the note below says what was missing.
+        setLines((prev) => prev.map((x) => x.lineId === l.lineId ? { ...x, quantityUnit: "" } : x));
         setQuantityNote((prev) => ({
           ...prev,
           [l.lineId]: problem?.title === "quantity-not-checked" && problem.detail
@@ -788,34 +806,35 @@ export function PrescribingWorkspace({
                   The unit comes from MASTER DATA and is shown, not chosen: it is a fact about the product.
                   A drug whose unit the catalogue does not record shows the field bare rather than a guess.
                 */}
-                <div className="rx-field">
-                  <label className="rx-field-label" htmlFor={`rx-dose-${line.lineId}`}>{t(S.dose)}</label>
-                  <span className="rx-dose">
-                    <input
-                      id={`rx-dose-${line.lineId}`}
-                      className="rx-field-input"
-                      type="number"
-                      min={0}
-                      step="any"
-                      inputMode="decimal"
-                      value={line.doseAmount ?? ""}
-                      disabled={busy}
-                      // The unit DESCRIBES the field rather than naming it — "Dose", described as "Tablet".
-                      // Folding it into the name would make the field announce as "Dose Tablet", which is
-                      // not what it is called.
-                      aria-describedby={line.drug?.prescribingUnit ? `rx-unit-${line.lineId}` : undefined}
-                      onChange={(e) => {
-                        const raw = e.currentTarget.value;
-                        patch(line.lineId, { doseAmount: raw === "" ? null : Number(raw) });
-                      }}
-                    />
-                    {line.drug?.prescribingUnit && (
-                      <span id={`rx-unit-${line.lineId}`} className="rx-dose-unit">
-                        {line.drug.prescribingUnit}
-                      </span>
-                    )}
+                {/*
+                  31.3 — THE LABEL CARRIES THE UNIT, because the unit is what the field means.
+
+                  It used to sit as a separate chip beside the box, which cost a column of width on the
+                  narrowest row of the composer and left the label saying "Dose" on every medicine in the
+                  catalogue. "Dose (IU)" for insulin, "Dose (tabs)" for a tablet, "Dose (puffs)" for an
+                  inhaler — one field, read at a glance, in the words a prescription is written in.
+
+                  A drug whose unit the catalogue does not record shows the label bare. That is honest; a
+                  word invented for it would sit beside the field reading as data.
+                */}
+                <label className="rx-field">
+                  <span className="rx-field-label">
+                    {t(S.dose)}{unitOf(line) && ` (${unitOf(line)})`}
                   </span>
-                </div>
+                  <input
+                    className="rx-field-input"
+                    type="number"
+                    min={0}
+                    step="any"
+                    inputMode="decimal"
+                    value={line.doseAmount ?? ""}
+                    disabled={busy}
+                    onChange={(e) => {
+                      const raw = e.currentTarget.value;
+                      patch(line.lineId, { doseAmount: raw === "" ? null : Number(raw) });
+                    }}
+                  />
+                </label>
                 <label className="rx-field">
                   <span className="rx-field-label">{t(S.timesPerDay)}</span>
                   <input
@@ -854,7 +873,11 @@ export function PrescribingWorkspace({
                   is travelling must not watch it snap back on the next keystroke.
                 */}
                 <div className="rx-field">
-                  <label className="rx-field-label" htmlFor={`rx-qty-${line.lineId}`}>{t(S.quantity)}</label>
+                  {/* 31.3 — "Quantity (boxes)" or "Quantity (IU)". The number alone does not say which, and
+                      the difference between them is one box and two thousand two hundred and fifty units. */}
+                  <label className="rx-field-label" htmlFor={`rx-qty-${line.lineId}`}>
+                    {t(S.quantity)}{line.quantityUnit && ` (${line.quantityUnit})`}
+                  </label>
                   <input
                     id={`rx-qty-${line.lineId}`}
                     className="rx-field-input"

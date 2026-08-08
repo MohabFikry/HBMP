@@ -28,7 +28,7 @@ public class QuantityCheckTests
 
         var result = Fx.Run(
             Fx.Request([line]),
-            Fx.Snapshot(packFacts: Fx.PackFacts((line.DrugId, isSplittable: true, packSize: 20m))));
+            Fx.Snapshot(packFacts: Fx.PackFacts((line.DrugId, isSplittable: true, packContent: 20m))));
 
         Quantity(result, line.LineId).State.Should().Be(CheckState.Ok);
         Quantity(result, line.LineId).MessageEn.Should().Contain("90");
@@ -44,7 +44,7 @@ public class QuantityCheckTests
 
         var result = Fx.Run(
             Fx.Request([line]),
-            Fx.Snapshot(packFacts: Fx.PackFacts((line.DrugId, isSplittable: false, packSize: 100m))));
+            Fx.Snapshot(packFacts: Fx.PackFacts((line.DrugId, isSplittable: false, packContent: 100m))));
 
         Quantity(result, line.LineId).State.Should().Be(CheckState.Ok);
         Quantity(result, line.LineId).MessageEn.Should().Contain("200");
@@ -58,7 +58,7 @@ public class QuantityCheckTests
 
         var result = Fx.Run(
             Fx.Request([line]),
-            Fx.Snapshot(packFacts: Fx.PackFacts((line.DrugId, isSplittable: null, packSize: 20m))));
+            Fx.Snapshot(packFacts: Fx.PackFacts((line.DrugId, isSplittable: null, packContent: 20m))));
 
         Quantity(result, line.LineId).State.Should().Be(CheckState.NotChecked);
         Quantity(result, line.LineId).MessageEn.Should().Contain("is_pack_splittable",
@@ -66,16 +66,18 @@ public class QuantityCheckTests
     }
 
     [Fact]
-    public void A_missing_pack_size_yields_NotChecked_NAMING_the_field()
+    public void A_missing_pack_CONTENT_yields_NotChecked_NAMING_the_field()
     {
         var line = Fx.Line(doseAmount: 1, doseUnit: "puff", timesPerDay: 2, durationDays: 30);
 
         var result = Fx.Run(
             Fx.Request([line]),
-            Fx.Snapshot(packFacts: Fx.PackFacts((line.DrugId, isSplittable: false, packSize: null))));
+            Fx.Snapshot(packFacts: Fx.PackFacts((line.DrugId, isSplittable: false, packContent: null))));
 
         Quantity(result, line.LineId).State.Should().Be(CheckState.NotChecked);
-        Quantity(result, line.LineId).MessageEn.Should().Contain("pack_size");
+        // 31.3 — the column named is `pack_content`: how much one box holds. `pack_size` is populated on
+        // most of these rows and is not the number the arithmetic was missing.
+        Quantity(result, line.LineId).MessageEn.Should().Contain("pack_content");
     }
 
     [Fact]
@@ -115,7 +117,7 @@ public class QuantityCheckTests
 
         var result = Fx.Run(
             Fx.Request([line]),
-            Fx.Snapshot(packFacts: Fx.PackFacts((line.DrugId, isSplittable: null, packSize: null))));
+            Fx.Snapshot(packFacts: Fx.PackFacts((line.DrugId, isSplittable: null, packContent: null))));
 
         Quantity(result, line.LineId).IsBlocking.Should().BeFalse();
         Quantity(result, line.LineId).RequiresAcknowledgement.Should().BeFalse(
@@ -130,7 +132,7 @@ public class QuantityCheckTests
 
         var result = Fx.Run(
             Fx.Request([line]),
-            Fx.Snapshot(packFacts: Fx.PackFacts((line.DrugId, isSplittable: true, packSize: 20m))));
+            Fx.Snapshot(packFacts: Fx.PackFacts((line.DrugId, isSplittable: true, packContent: 20m))));
 
         Quantity(result, line.LineId).State.Should().Be(CheckState.NotChecked);
     }

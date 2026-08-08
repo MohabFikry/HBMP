@@ -176,6 +176,29 @@ describe.each(TABS)("The %s tab's transactions table", (_label, tab) => {
     expect(await screen.findByRole("dialog")).toBeTruthy();
     expect(api.cancelled).toEqual([]);   // nothing has happened yet
   });
+
+  it("puts its actions in the modal's footer, not at the bottom of the body card", async () => {
+    /*
+     * A Modal renders its children on an opaque card inset inside the glass frame, and its `footer` slot
+     * BELOW that card, right-aligned, with its own spacing. Every action button here was written as the last
+     * child instead — so "Back" and "Withdraw" sat tucked against the bottom-left corner of the white card
+     * with nothing between them and the content above, on a dialog whose every other edge is 24px clear.
+     *
+     * This is asserted structurally rather than by measuring, because jsdom has no layout: the fact that
+     * makes the spacing right is WHERE the buttons are in the tree, and that is checkable here.
+     */
+    const { user } = await openTab(tab);
+    await screen.findByRole("table", {}, { timeout: 5000 });
+
+    const firstRow = transactionsTable().querySelector("tbody tr") as HTMLElement;
+    await user.click(within(firstRow).getByRole("button", { name: /withdraw/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    for (const name of [/^back$/i, /^withdraw$/i]) {
+      const button = within(dialog).getByRole("button", { name });
+      expect(button.closest(".mrs-modal-body"), `"${button.textContent}" is inside the body card`).toBeNull();
+    }
+  });
 });
 
 describe("The service-line history icon", () => {
