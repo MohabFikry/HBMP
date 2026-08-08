@@ -1395,19 +1395,36 @@ nav.mrs-rail {
    to tell "you may not see this" from "it broke" from "there is nothing" at a glance, in both themes and
    without relying on hue (0B four-cue rule). */
 .patient-profile { display: grid; gap: var(--sp4); }
-/* The tab bar sticks at the same offset the old side nav used. Sticky + the opaque backdrop live on
-   `.profile-tabs` itself (the Tabs `Root`, a plain block-level div, full width by default) rather than on
-   `.mrs-tabs--pill` — that inner element is `display: inline-flex` (shrink-to-fit), so an opaque background
-   on it only ever covered the pill track's own width, and full-width content scrolling up showed beside it.
-   This also leaves `.mrs-tabs--pill`'s own `background: var(--surface-2)` rule unshadowed — a rule here at
-   the same specificity previously overrode it, so the pill track lost the `.mrs-seg` tint it was built to
-   reuse. */
-.profile-tabs {
+/* The tab bar sticks at the same offset the old side nav used. Sticky lives on `.mrs-tabs--pill` (the Radix
+   `List`) rather than on `.profile-tabs` (the Tabs `Root`) — a previous version of this rule had it the other
+   way round and that broke stickiness itself: `Root`'s own box is exactly `List`-height +
+   active-`Content`-height combined (the seven `Content` panes are `forceMount`ed siblings of `List` inside
+   `Root`, but `hidden` when inactive, so only the active one has layout), which leaves `Root` no taller
+   container to visibly travel within — a sticky element needs room in its *containing block* to still "stick"
+   while a sibling scrolls past, and `Root` has none of its own. `List` does, because `Root` (List height +
+   Content height) is taller than `List` alone.
+
+   The backdrop still needs to be OPAQUE and FULL WIDTH so page content scrolling up doesn't show through
+   beside it — but `.mrs-tabs--pill` is `display: inline-flex` (shrink-to-fit) and carries its own
+   `background: var(--surface-2)` pill-track tint plus a border and `--r-pill` radius. Stretching the element
+   itself to `width: 100%` would stretch that bordered, rounded track into a full-row stadium shape with the
+   pills bunched at one end — not the look. Setting `background` here directly would also collide at higher
+   specificity with `.mrs-tabs--pill`'s own `background: var(--surface-2)` and re-lose the tint, which is the
+   exact bug the old `.profile-tabs`-not-`.mrs-tabs--pill` placement was chosen to dodge — moving sticky back
+   onto `List` without solving this would just trade one bug for the other.
+
+   So the backdrop is a `box-shadow` bled out to `100vmax` (opaque, painted BEHIND the element's own
+   background within its own bounds, so the surface-2 tint on the actual track is undisturbed — only visible
+   in the margin beyond the track, which is the point) and `clip-path` clipped back to the element's own row
+   height so it doesn't bleed into the row above/below. Nothing here touches `display`, `width`, or
+   `background` on `.mrs-tabs--pill`, so the pill buttons stay exactly as compact as they already were. */
+.profile-tabs .mrs-tabs--pill {
   position: sticky;
   top: var(--sp4);
   z-index: 1;
-  background: var(--surface-0);
   padding-block: var(--sp2);
+  box-shadow: 0 0 0 100vmax var(--surface-0);
+  clip-path: inset(0 -100vmax);
 }
 .profile-sections { display: grid; gap: var(--sp4); }
 .profile-section-head { display: flex; flex-wrap: wrap; gap: var(--sp3); align-items: baseline; justify-content: space-between; }
