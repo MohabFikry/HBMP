@@ -963,6 +963,44 @@ function CallRow({
 // ---------------------------------------------------------------- the patient context bar
 
 /**
+ * Up to 2 named allergens as warning chips, then a "+N more" chip — or a bare count when `namedAllergens`
+ * is false. Shared by `PatientContextBar` (the encounter workspace's identity strip) and the profile's own
+ * always-visible identity card (Task 3), so the two read identically rather than drifting.
+ *
+ * `alertData: null` means "nothing to show" — the caller decides separately (via whether it passes real
+ * data at all) whether that silence is because there is nothing recorded or because this viewer's payload
+ * never carried an alerts section; this component only renders what it is given.
+ */
+function AllergyChips({ alertData, namedAllergens }: { alertData: ProfileAlerts | null; namedAllergens: boolean }) {
+  const t = useLoc();
+  const alertCount = alertData ? alertData.allergies.length + (alertData.criticalFlags?.length ?? 0) : 0;
+  // Two named substances, then a remainder. A strip is a fixed-height safety control, and an eight-allergy
+  // patient must not push the identity it exists to confirm onto a second line.
+  const named = namedAllergens ? alertData?.allergies.slice(0, 2) ?? [] : [];
+  const namedRest = alertCount - named.length;
+
+  return (
+    <>
+      {named.map((a) => (
+        <span key={a.allergen} className="profile-chip profile-chip--critical" data-shape="octagon">
+          <span aria-hidden="true" className="profile-chip-icon">⚠</span>
+          <span>{t(STR.allergyTo)} {a.allergen}</span>
+        </span>
+      ))}
+      {(namedAllergens ? namedRest : alertCount) > 0 ? (
+        <span className="profile-chip profile-chip--critical" data-shape="octagon">
+          <span aria-hidden="true" className="profile-chip-icon">⚠</span>
+          <span>
+            {namedAllergens ? namedRest : alertCount}{" "}
+            {namedAllergens ? t(STR.moreAlerts) : t(STR.alerts)}
+          </span>
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+/**
  * The compact identity strip that follows a user into encounter, order, dispense, approval and call-centre
  * screens (design 39 §6).
  *
@@ -1027,11 +1065,6 @@ export function PatientContextBar({
 
   const alerts = profile.sections.find((s) => s.key === "alerts");
   const alertData = alerts?.state === "Visible" ? (alerts.data as ProfileAlerts) : null;
-  const alertCount = alertData ? alertData.allergies.length + (alertData.criticalFlags?.length ?? 0) : 0;
-  // Two named substances, then a remainder. A strip is a fixed-height safety control, and an eight-allergy
-  // patient must not push the identity it exists to confirm onto a second line.
-  const named = namedAllergens ? alertData?.allergies.slice(0, 2) ?? [] : [];
-  const namedRest = alertCount - named.length;
 
   return (
     <aside className="patient-context-bar" aria-label={t(STR.title)}>
@@ -1045,25 +1078,7 @@ export function PatientContextBar({
         // `?? null` matters: when the alerts section is withheld or failed, `alertData` is null and the
         // strip must still show "not recorded" rather than dropping the fact — `undefined` would drop it.
         bloodGroup={showBloodGroup ? alertData?.bloodGroup ?? null : undefined}
-        chips={
-          <>
-            {named.map((a) => (
-              <span key={a.allergen} className="profile-chip profile-chip--critical" data-shape="octagon">
-                <span aria-hidden="true" className="profile-chip-icon">⚠</span>
-                <span>{t(STR.allergyTo)} {a.allergen}</span>
-              </span>
-            ))}
-            {(namedAllergens ? namedRest : alertCount) > 0 ? (
-              <span className="profile-chip profile-chip--critical" data-shape="octagon">
-                <span aria-hidden="true" className="profile-chip-icon">⚠</span>
-                <span>
-                  {namedAllergens ? namedRest : alertCount}{" "}
-                  {namedAllergens ? t(STR.moreAlerts) : t(STR.alerts)}
-                </span>
-              </span>
-            ) : null}
-          </>
-        }
+        chips={<AllergyChips alertData={alertData} namedAllergens={namedAllergens} />}
       />
     </aside>
   );
