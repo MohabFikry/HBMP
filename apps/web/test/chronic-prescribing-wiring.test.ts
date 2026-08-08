@@ -124,7 +124,7 @@ describe("29.5 — the preview asks the SERVER to resolve the drug's pack facts"
     // And it does NOT invent pack facts. A guessed `isPackSplittable: true` here permits a fractional
     // inhaler — the exact silently-wrong quantity invariant 8 exists to forbid.
     expect(b.isPackSplittable).toBeUndefined();
-    expect(b.packSize).toBeUndefined();
+    expect(b.packContent).toBeUndefined();
   });
 });
 
@@ -151,7 +151,7 @@ describe("29.5 — the composer can preview the window schedule before submittin
 
     const p = await new HttpApiClient().chronicPreview({
       durationDays: 90, refillFrequencyCode: "Monthly", doseAmount: 1, timesPerDay: 1,
-      isPackSplittable: true, packSize: 20,
+      isPackSplittable: true, packContent: 20,
     });
 
     expect(p.total).toBe(100);

@@ -1586,7 +1586,9 @@ function PrescriptionsTab({
                 label: l.drug ? t(l.drug) : t(S.rxDrugMissing),
                 quantity: l.quantityPrescribed,
                 quantityUnit: l.quantityUnit ?? null,
-                durationDays: null,
+                doseAmount: l.doseAmount ?? null,
+                timesPerDay: l.timesPerDay ?? null,
+                durationDays: l.durationDays ?? null,
               })).filter((i) => i.drugId !== ""),
             })}
           >

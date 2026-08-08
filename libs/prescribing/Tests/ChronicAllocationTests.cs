@@ -21,7 +21,7 @@ public class ChronicAllocationTests
         // The document's own worked example: 1 × 3 × 90 = 270 tablets, over ⌈90 ÷ 30⌉ = 3 windows.
         var plan = ChronicAllocation.Plan(new AllocationRequest(
             DosePerAdministration: 1m, TimesPerDay: 3, DurationDays: 90,
-            FrequencyMonths: 1, IsPackSplittable: true, PackSize: 20m));
+            FrequencyMonths: 1, IsPackSplittable: true, PackContent: 20m));
 
         plan.Total.Should().Be(270m);
         plan.Windows.Should().Equal(90m, 90m, 90m);
@@ -43,7 +43,7 @@ public class ChronicAllocationTests
         // and the document's phrasing ("60 days' worth, then 30") is the check that they do.
         var plan = ChronicAllocation.Plan(new AllocationRequest(
             DosePerAdministration: 1m, TimesPerDay: 1, DurationDays: 90,
-            FrequencyMonths: 2, IsPackSplittable: true, PackSize: 30m));
+            FrequencyMonths: 2, IsPackSplittable: true, PackContent: 30m));
 
         plan.Total.Should().Be(90m);
         plan.Windows.Should().Equal(45m, 45m);
@@ -56,7 +56,7 @@ public class ChronicAllocationTests
         // to 2 canisters — once, before the split — and the windows are whole canisters.
         var plan = ChronicAllocation.Plan(new AllocationRequest(
             DosePerAdministration: 2m, TimesPerDay: 2, DurationDays: 90,
-            FrequencyMonths: 1, IsPackSplittable: false, PackSize: 200m));
+            FrequencyMonths: 1, IsPackSplittable: false, PackContent: 200m));
 
         plan.Total.Should().Be(2m, "360 puffs is two whole canisters, rounded UP at the total");
         plan.Unit.Should().Be(AllocationUnit.WholePacks);
@@ -158,17 +158,35 @@ public class ChronicAllocationTests
     // ---- Missing unit data ---------------------------------------------------------------------------------
 
     [Fact]
+    public void A_chronic_syrup_is_allocated_in_BOTTLES_not_in_millilitres()
+    {
+        /*
+         * THE CASE 31.3 MISSED. It replaced `pack_size` with `pack_content` in `QuantityMath` — the acute
+         * path — and left this one dividing by the pack size, which for a 120 ml bottle of syrup is 1. A
+         * ninety-day course at 10 ml twice a day is 1,800 ml; over a pack size of 1 that allocated
+         * EIGHTEEN HUNDRED bottles across the windows, and the composer would have shown the number.
+         */
+        var plan = ChronicAllocation.Plan(new AllocationRequest(
+            DosePerAdministration: 10m, TimesPerDay: 2, DurationDays: 90,
+            FrequencyMonths: 1, IsPackSplittable: false, PackContent: 120m));
+
+        plan.NotChecked.Should().BeFalse();
+        plan.Total.Should().Be(15m, "1,800 ml over 120 ml bottles is fifteen bottles");
+        plan.Windows.Sum().Should().Be(15m, "the windows add up to the total, exactly");
+    }
+
+    [Fact]
     public void Missing_pack_data_on_a_non_splittable_form_yields_NotChecked_naming_the_field()
     {
         // Invariant 8: "Missing unit data ⇒ NotChecked, NEVER a guessed quantity." A non-splittable form
-        // cannot be converted to whole packs without a pack size, and assuming one would produce a plausible
-        // number that is wrong — which is a dispensing error, not a rounding error.
+        // cannot be converted to whole packs without knowing what a pack HOLDS, and assuming it would
+        // produce a plausible number that is wrong — a dispensing error, not a rounding error.
         var plan = ChronicAllocation.Plan(new AllocationRequest(
             DosePerAdministration: 2m, TimesPerDay: 2, DurationDays: 90,
-            FrequencyMonths: 1, IsPackSplittable: false, PackSize: null));
+            FrequencyMonths: 1, IsPackSplittable: false, PackContent: null));
 
         plan.NotChecked.Should().BeTrue();
-        plan.MissingField.Should().Be("pack_size");
+        plan.MissingField.Should().Be("pack_content");
         plan.Windows.Should().BeEmpty("a quantity that could not be computed is absent, never zero");
     }
 
@@ -178,7 +196,7 @@ public class ChronicAllocationTests
         // Assuming splittable is the DANGEROUS default: it silently permits a fractional inhaler.
         var plan = ChronicAllocation.Plan(new AllocationRequest(
             DosePerAdministration: 1m, TimesPerDay: 3, DurationDays: 90,
-            FrequencyMonths: 1, IsPackSplittable: null, PackSize: 20m));
+            FrequencyMonths: 1, IsPackSplittable: null, PackContent: 20m));
 
         plan.NotChecked.Should().BeTrue();
         plan.MissingField.Should().Be("is_pack_splittable");

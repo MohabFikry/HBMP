@@ -1529,6 +1529,11 @@ export class HttpApiClient implements ApiClient {
           quantityUnit: typeof l.quantityUnit === "string" && l.quantityUnit.length > 0
             ? l.quantityUnit
             : null,
+          // 31.5 — read strictly. A line written before the numbers were kept carries none, and 0 or 1 in
+          // their place would be a dose and a frequency nobody wrote.
+          doseAmount: typeof l.doseAmount === "number" ? l.doseAmount : null,
+          timesPerDay: typeof l.timesPerDay === "number" ? l.timesPerDay : null,
+          durationDays: typeof l.durationDays === "number" ? l.durationDays : null,
           refillsAllowed: Math.trunc(Number(l.refillsAllowed ?? 0)),
           status: rxStatus(l.status),
         })),
@@ -2144,7 +2149,10 @@ export class HttpApiClient implements ApiClient {
     // fetch them to hand back — a second reader of the catalogue is a second thing that can disagree with it.
     drugId?: string;
     isPackSplittable?: boolean | null;
-    packSize?: number | null;
+    /** 31.5 — what one box HOLDS, renamed from `packSize`: the pack size counts CONTAINERS for every
+     *  measured product and is the wrong divisor for all of them (31.3). Normally omitted — the server
+     *  resolves it from `drugId`. */
+    packContent?: number | null;
   }) {
     const r = (await postRaw(`/prescriptions/chronic-preview`, req)) as any;
     return parseOr(zChronicPreview, {

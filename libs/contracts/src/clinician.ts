@@ -148,6 +148,19 @@ export const zRxRowLine = z.object({
    * unit the catalogue does not record — rendered as no unit, never as a guess.</p>
    */
   quantityUnit: z.string().nullish(),
+  /**
+   * 31.5 — the numbers the sig was FORMATTED FROM: how much per administration, how often, for how long.
+   *
+   * <p>`dose` above is a sentence this application built — "1 Tablet x 3/day" — and until 31.5 it was the
+   * only trace of them the record kept. Copying a prescription then meant retyping its dose, and re-checking
+   * one against the numbers it was graded on meant parsing that sentence back, which is reading clinical
+   * values out of display text.</p>
+   *
+   * <p>Absent on lines written before 31.5. Never defaulted to 1 — a dose nobody wrote.</p>
+   */
+  doseAmount: z.number().nullish(),
+  timesPerDay: z.number().int().nullish(),
+  durationDays: z.number().int().nullish(),
   refillsAllowed: z.number().int(),
   status: zStatus,
 });

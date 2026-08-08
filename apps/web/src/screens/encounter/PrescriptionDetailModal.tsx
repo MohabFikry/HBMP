@@ -45,6 +45,10 @@ const S = {
   dose: { en: "Dose", ar: "الجرعة" },
   route: { en: "Route", ar: "طريق الإعطاء" },
   frequency: { en: "Frequency", ar: "التكرار" },
+  // 31.5 — the course length, which the record has always held and this dialog never showed. A prescriber
+  // reading back their own script cannot check a quantity without it.
+  duration: { en: "Duration", ar: "المدة" },
+  days: { en: "{n} day(s)", ar: "{n} يوم" },
   quantity: { en: "Quantity prescribed", ar: "الكمية الموصوفة" },
   dispensed: { en: "Dispensed to date", ar: "المصروف حتى الآن" },
   refills: { en: "Refills allowed", ar: "مرات الصرف المسموح بها" },
@@ -293,6 +297,14 @@ function RxLineCard({
         <div className="rxv-cell">
           <dt>{t(S.frequency)}</dt>
           <dd>{line.frequency ?? DASH}</dd>
+        </div>
+        <div className="rxv-cell">
+          <dt>{t(S.duration)}</dt>
+          {/* NULL is "the prescriber recorded none", and it says so in words. A missing duration and a
+              one-day course look identical in an empty cell, and only one of them is worth a phone call. */}
+          <dd className="tnum">
+            {line.durationDays ? t(S.days).replace("{n}", String(line.durationDays)) : DASH}
+          </dd>
         </div>
         <div className="rxv-cell">
           <dt>{t(S.quantity)}</dt>

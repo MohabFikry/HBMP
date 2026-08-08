@@ -100,7 +100,8 @@ public static class PrescriptionEndpoints
                 DurationDays: req.DurationDays,
                 FrequencyMonths: frequency.Months,
                 IsPackSplittable: req.IsPackSplittable ?? pack?.IsPackSplittable,
-                PackSize: req.PackSize ?? pack?.PackSize));
+                // 31.5 — what the box HOLDS, like every other quantity since 31.3.
+                PackContent: req.PackContent ?? pack?.PackContent));
 
             // ABSENCE OF DATA IS NEVER A CLEAN RESULT (invariant 8). The missing field is NAMED, because
             // "could not compute" on its own sends a prescriber to guess, and a silently wrong quantity is
@@ -354,7 +355,7 @@ public static class PrescriptionEndpoints
                         DurationDays: l.DurationDays ?? req.DurationDays!.Value,
                         FrequencyMonths: frequency!.Months,
                         IsPackSplittable: pack?.IsPackSplittable,
-                        PackSize: pack?.PackSize));
+                        PackContent: pack?.PackContent));
 
                     // ABSENCE OF DATA IS NEVER A CLEAN RESULT. The field that is missing is named, because
                     // "could not compute" without it sends a prescriber to guess.
@@ -394,6 +395,9 @@ public static class PrescriptionEndpoints
                         Frequency = l.Frequency, QuantityPrescribed = l.QuantityPrescribed,
                         // 31.3 — the unit travels with the number, snapshotted like the drug name above.
                         QuantityUnit = l.QuantityUnit,
+                        // 31.5 — the numbers the checks above were RUN ON, kept rather than discarded once
+                        // they had been used. `Dose` is the sentence they were formatted into.
+                        DoseAmount = l.DoseAmount, TimesPerDay = l.TimesPerDay,
                         RefillsAllowed = l.RefillsAllowed, DurationDays = l.DurationDays,
                         Status = RxLineStatus.Active,
                     };
@@ -524,7 +528,21 @@ public static class PrescriptionEndpoints
 
             var alertViews = screening.Alerts.Select(a => new AlertView(a.Kind.ToString(), a.Severity, a.Detail)).ToList();
             return Results.Created($"/api/v1/prescriptions/{rx.PrescriptionId}", PrescriptionResponse.From(rx, alertViews));
-        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("rx:write"))
+        /*
+         * 31.5 — THE RESPONSE SHAPE IS PART OF THE CONTRACT, so it is declared.
+         *
+         * The drift gate compares the committed specs against the running services and had been passing
+         * over every response body on this service, because a minimal API that returns `Results.Ok(x)`
+         * publishes no schema for `x`. That is how 31.5 added three fields to a prescription line and the
+         * gate reported "every committed spec matches" — it was comparing requests and routes only.
+         *
+         * Declared on the endpoints that return a TYPED contract, which is the clinical record: what a
+         * prescription is, and what its lines say. Endpoints returning anonymous objects still publish
+         * nothing, and that is stated in BUILD-STATUS rather than left to be discovered the same way.
+         */
+        .Produces<PrescriptionResponse>(StatusCodes.Status201Created);
 
         // ------------------------------------------------------------------ 26.4 step 1: advisory validation
         //
@@ -631,7 +649,7 @@ public static class PrescriptionEndpoints
             var denied = await gate.CheckAsync(PharmacyPolicies.RxRead, "prescription", id.ToString(), rx.BeneficiaryId, http.Headers.Authorization.ToString(), ct);
             if (denied is not null) return denied;
             return Results.Ok(PrescriptionResponse.From(rx));
-        });
+        }).Produces<PrescriptionResponse>();
 
         // My prescriptions (prescriber's worklist, US-033) — the e-prescriptions I authored, newest first,
         // scoped by CreatedBy == subject. No treating-gate needed (you always relate to what you prescribed).
@@ -655,7 +673,9 @@ public static class PrescriptionEndpoints
             // succeeded with 201, and the encounter's Prescriptions tab, which reads this endpoint and
             // filters it to the patient in the browser, got a 403 and rendered an empty list. A prescriber
             // had no way to see that their own prescription existed.
-        }).RequireAuthorization(HbmpPolicies.Scope("rx:read"));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("rx:read"))
+        .Produces<IEnumerable<PrescriptionResponse>>();
 
         v1.MapPost("/{id:guid}/cancel", async (
             Guid id, CancelRequest req, HttpRequest http, PharmacyDbContext db, PharmacyGate gate,

@@ -75,7 +75,9 @@ public sealed record ChronicPreviewRequest(
     decimal? DoseAmount = null,
     int? TimesPerDay = null,
     bool? IsPackSplittable = null,
-    decimal? PackSize = null,
+    /// <summary>31.5 — what one box HOLDS, renamed from `PackSize` for the reason 31.3 gives: the pack size
+    /// counts containers for every measured product and is the wrong divisor for all of them.</summary>
+    decimal? PackContent = null,
     Guid? DrugId = null);
 
 /// <summary>
@@ -148,16 +150,25 @@ public sealed record CreateReferralRequest(
 /// </param>
 public sealed record CancelRequest(string? Reason, string? ReasonCode = null);
 
+/// <param name="DoseAmount">31.5 — how much per administration. Null where the record does not hold it.</param>
+/// <param name="TimesPerDay">31.5 — administrations per day. Null where the record does not hold it.</param>
+/// <param name="DurationDays">How long the course runs. Null ⇒ the prescriber recorded none.</param>
 public sealed record RxLineResponse(
     Guid PrescriptionLineId, Guid DrugId, string? DrugName, string? Dose, string? Route, string? Frequency,
     decimal QuantityPrescribed, decimal QuantityDispensed, int RefillsAllowed, string Status,
     // 31.3 — what the two quantities above are counted in. Null on a line written before 31.3, and rendered
     // as no unit rather than as a guessed one.
-    string? QuantityUnit = null)
+    string? QuantityUnit = null,
+    // 31.5 — the numbers the sig was FORMATTED FROM, which the record used to discard. Without them a
+    // prescription cannot be copied without retyping its dose, and cannot be re-checked at all.
+    decimal? DoseAmount = null,
+    int? TimesPerDay = null,
+    int? DurationDays = null)
 {
     public static RxLineResponse From(PrescriptionLine l) => new(
         l.PrescriptionLineId, l.DrugId, l.DrugName, l.Dose, l.Route, l.Frequency,
-        l.QuantityPrescribed, l.QuantityDispensed, l.RefillsAllowed, l.Status.ToString(), l.QuantityUnit);
+        l.QuantityPrescribed, l.QuantityDispensed, l.RefillsAllowed, l.Status.ToString(), l.QuantityUnit,
+        l.DoseAmount, l.TimesPerDay, l.DurationDays);
 }
 
 public sealed record AlertView(string Kind, string Severity, string Detail);

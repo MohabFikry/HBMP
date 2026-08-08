@@ -34,7 +34,10 @@ public static class DispensingEndpoints
             var items = await Dispensable(db, queueNow).OrderBy(p => p.SubmittedAt).Take(100).ToListAsync(ct);
             await AuditRead(audit, me, "queue", items.Count);
             return Results.Ok(items.Select(p => DispensableRxView.From(p, queueNow)));
-        }).RequireAuthorization(HbmpPolicies.Scope("pharmacy:read"));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("pharmacy:read"))
+        // 31.5 — the response shape is contract. See Prescriptions.cs for why these are declared at all.
+        .Produces<IEnumerable<DispensableRxView>>();
 
         // ---- 6.1 Search: only dispensable prescriptions, projected to dispensing-relevant fields ----
         v1.MapGet("/search", async (
@@ -96,7 +99,9 @@ public static class DispensingEndpoints
             var items = await q.OrderBy(p => p.SubmittedAt).Take(100).ToListAsync(ct);
             await AuditRead(audit, me, "search", items.Count);
             return Results.Ok(items.Select(p => DispensableRxView.From(p, now)));
-        }).RequireAuthorization(HbmpPolicies.Scope("pharmacy:read"));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("pharmacy:read"))
+        .Produces<IEnumerable<DispensableRxView>>();
 
         // ---- 6.1 Open one prescription for dispensing — enforces the reject rule with a clear reason ----
         v1.MapGet("/{id:guid}/dispensing", async (
@@ -124,7 +129,9 @@ public static class DispensingEndpoints
 
             await AuditRead(audit, me, "open", rx.Lines.Count);
             return Results.Ok(DispensableRxView.From(rx, openNow));
-        }).RequireAuthorization(HbmpPolicies.Scope("pharmacy:read"));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("pharmacy:read"))
+        .Produces<DispensableRxView>();
 
         // ---- 6.2 + 6.3 Dispense a line: atomic + idempotent + no-reuse, with batch/expiry + approved substitution ----
         v1.MapPost("/{rxId:guid}/lines/{lineId:guid}/dispense", async (

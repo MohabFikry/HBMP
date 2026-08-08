@@ -288,6 +288,9 @@ export interface PrescriptionClone {
     /** 31.3's unit, carried with its number — a bare "1" copied off a box count is the ambiguity that field
      *  exists to close, and it would be reintroduced by dropping it here. */
     quantityUnit: string | null;
+    /** 31.5 — the numbers the original was written from. Null on a line written before they were kept. */
+    doseAmount: number | null;
+    timesPerDay: number | null;
     durationDays: number | null;
   }[];
 }
@@ -368,9 +371,10 @@ export function PrescribingWorkspace({
    * It does not silently drop a medicine the catalogue no longer offers — the count that failed is stated.
    * A short prescription that looks complete is worse than one that says it is short.
    *
-   * And it does not carry the dose or the frequency, because the RECORD DOES NOT HOLD THEM: `doseAmount`
-   * and `timesPerDay` are sent at prescribing time for the checks and are never persisted. Guessing them by
-   * parsing the sig string this app formatted would be inventing clinical numbers from display text.
+   * What it carries of the ORIGINAL is what the record actually holds. Since 31.5 that includes the dose,
+   * the frequency and the duration; before it, those three were sent at prescribing time, used by the
+   * checks and discarded, so a copy arrived with the fields empty. A line written before 31.5 still does —
+   * absent is carried through as absent rather than filled in by parsing the sig this app formatted.
    */
   useEffect(() => {
     if (!clone) return;
@@ -405,6 +409,11 @@ export function PrescribingWorkspace({
               drug: drug!,
               quantity: item.quantity,
               quantityUnit: item.quantityUnit ?? "",
+              // 31.5 — the dose and frequency come across because the RECORD NOW HOLDS THEM. Until it did,
+              // a copy arrived with these two fields empty and the quantity check with nothing to compute
+              // from; the only route back to them was parsing the sig this app had formatted.
+              doseAmount: item.doseAmount,
+              timesPerDay: item.timesPerDay,
               durationDays: item.durationDays,
             })),
           ]);

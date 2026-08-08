@@ -1044,7 +1044,69 @@ Copy control on every row, and copying RX-2026-002719 filling the composer with 
 
 ### Not done in 31.4
 
-- **The numeric dose is still not persisted.** It is the reason a copy cannot carry a dose, and a wider gap
-  than that: a prescription cannot be re-checked later against the numbers it was written from. Two nullable
-  columns would close it.
+- **The numeric dose is still not persisted.** *(Closed by 31.5, below.)*
+
+---
+
+## Phase 31.5 — the numbers a prescription was written from
+
+### The record kept the sentence and threw away the numbers
+
+`doseAmount` and `timesPerDay` arrived on every line of every prescription. The daily-dose rule compared
+against them, the quantity check divided by them, the chronic allocation split a course by them — and then
+they were dropped. What the row kept was `dose`: a SENTENCE this application had formatted, "1 Tablet x
+3/day".
+
+Three costs, in ascending order of seriousness:
+
+- a prescription could not be **copied** without retyping its dose, because there was no dose to copy;
+- a prescription could not be **re-checked** — re-running a rule over a written script needs the numbers it
+  was graded on, and the only route back to them was parsing a string built for humans to read;
+- the sentence and the numbers **could disagree and nothing would know**, because after compose time there
+  was nothing left to derive the sentence from.
+
+`pharmacy.prescription_line.dose_amount` and `.times_per_day` (migration 0018) close it. Expand-only,
+nullable, no backfill: a line written before this reads NULL, which is the honest answer for a row whose
+numbers were never kept — never 1, which would assert a dose nobody wrote.
+
+**They are signed clinical content**, so 0013's guard now freezes them like the rest. `quantity_unit` (0017)
+is frozen with them: it says what a signed quantity COUNTS, and editing it in place changes what the quantity
+means without changing the quantity — the quietest possible way to alter a prescription.
+
+### Three things this fixed downstream
+
+**Copy carries the dose.** The reason for doing it: a copied prescription now arrives with its dose, frequency
+and duration, and the quantity check has something to compute from.
+
+**The chronic allocation was dividing by the wrong number.** 31.3 replaced `pack_size` with `pack_content` in
+`QuantityMath` — the acute path — and MISSED `ChronicAllocation`. A 120 ml bottle of syrup is `pack_size = 1`,
+so a ninety-day course at 10 ml twice a day allocated **1,800 "packs"** across its windows, and the composer
+would have shown the number. It is fifteen bottles, and a test says so.
+
+**A chronic amendment stopped reverse-engineering a dose.** `ChronicAmendExecutor` divided the original total
+by its duration and called the result one administration a day — its own comment explained that "inventing a
+times-per-day the line does not record would be a guess". The line records it now. The old derivation stays as
+the fallback for pre-31.5 lines, where it recovers the same daily rate.
+
+### And the drift gate was passing over every response body
+
+Adding three fields to a prescription line changed no committed spec, because a minimal API returning
+`Results.Ok(x)` publishes no schema for `x` — the gate had been comparing **requests and routes only**.
+Declaring the response type on pharmacy's typed endpoints made 328 lines of `pharmacy.json` appear, including
+`RxLineResponse` with the new fields. The gate now bites on a response-shape change for the clinical record.
+
+**It does not yet for anything else: 490 of the platform's 496 endpoints still declare no response type**,
+most because they return anonymous objects that have no type to declare. Naming those is real design work —
+what the response contract IS — and is not done here.
+
+### Not done in 31.5
+
+- **490 endpoints still publish no response schema.** Six do. The gate cannot see a response-shape change
+  anywhere else, which is how three fields were added to a prescription line under a green drift gate.
+
+### Verified
+
+Web 1,168 / 89 files; pharmacy 167 with the DB attached, 0 skipped, including three new tests that go through
+HTTP: the dose comes back (1.5 stays 1.5), an absent one reports null rather than 1, and both survive an
+amendment onto the successor version. Prescribing lib 190.
 

@@ -52,6 +52,8 @@ function rxRow(n: number): RxRow {
       drugId: "11111111-0000-4000-8000-000000000001",
       drug: loc("Metformin 500mg tablet", "ميتفورمين 500مجم قرص"),
       dose: "500 mg", route: "PO", frequency: "BD",
+      // 31.5 — the numbers the sig was formatted from, which the record now keeps.
+      doseAmount: 2, timesPerDay: 3, durationDays: 10,
       quantityPrescribed: 60, quantityDispensed: 0, refillsAllowed: 0,
       status: { kind: "info", label: loc("Active", "نشطة") },
     }],
@@ -248,6 +250,35 @@ describe.each(TABS)("The %s tab's layout", (_label, tab) => {
 
     // The confirmation says what was copied and from where, and says nothing has been sent.
     expect(await screen.findByText(/copied 1 .*from (RX|ORD)-/i, {}, { timeout: 5000 })).toBeTruthy();
+  });
+
+  it("carries the dose, the frequency and the duration into the copy", async () => {
+    /*
+     * 31.5 — the point of persisting `doseAmount` and `timesPerDay`.
+     *
+     * Before it, a copied prescription arrived with those two fields EMPTY and the quantity check honestly
+     * reporting it had nothing to compute from, because the record kept only the sig — "1 Tablet x 3/day",
+     * a sentence this application had formatted. Copying meant retyping the clinical numbers.
+     *
+     * Only the Prescriptions tab: an order line carries no dose, and asserting one on the Labs tab would be
+     * asserting a field that does not exist there.
+     */
+    if (!/prescriptions/i.test(String(tab))) return;
+
+    const { user } = await openTab(tab);
+    await screen.findByRole("table", {}, { timeout: 5000 });
+
+    const firstRow = transactionsTable().querySelector("tbody tr") as HTMLElement;
+    await user.click(within(firstRow).getByRole("button", { name: /copy into the composer/i }));
+    await screen.findByText(/copied 1 .*from RX-/i, {}, { timeout: 5000 });
+
+    // The `value` PROPERTY, not the attribute: React does not reliably reflect a controlled input's value
+    // into the attribute, so an attribute assertion can pass or fail for reasons that have nothing to do
+    // with what the prescriber sees.
+    const value = (el: HTMLElement) => (el as HTMLInputElement).value;
+    expect(value(await screen.findByRole("spinbutton", { name: /^dose/i }))).toBe("2");
+    expect(value(screen.getByRole("spinbutton", { name: /times per day/i }))).toBe("3");
+    expect(value(screen.getByRole("spinbutton", { name: /duration/i }))).toBe("10");
   });
 
   it("says so when there is nothing on the row it can copy", async () => {

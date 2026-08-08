@@ -126,7 +126,27 @@ public sealed class PrescriptionLine
     /// trade name, strength and form, because that is what identifies the box on the shelf. NULL for rows
     /// written before it; a dispensing screen shows "(not recorded)", never the uuid.</summary>
     public string? DrugName { get; set; }
+    /// <summary>The sig a pharmacist reads — "1 Tablet x 3/day". DERIVED from the two numbers below.</summary>
     public string? Dose { get; set; }
+
+    /// <summary>
+    /// 31.5 — how much per administration, in the drug's prescribing unit.
+    /// </summary>
+    /// <remarks>
+    /// <para>The number the daily-dose rule was compared against and the quantity check divided by. It used
+    /// to arrive on every line, drive both, and then be discarded — leaving <see cref="Dose"/>, a sentence
+    /// this application formatted, as the only trace. A prescription could not be re-checked against the
+    /// numbers it was written from without parsing that sentence back, which is reading clinical values out
+    /// of display text.</para>
+    ///
+    /// <para>NULL on a line written before 31.5. Never 1: a default here would assert a dose nobody
+    /// wrote.</para>
+    /// </remarks>
+    public decimal? DoseAmount { get; set; }
+
+    /// <summary>31.5 — administrations per day. See <see cref="DoseAmount"/>.</summary>
+    public int? TimesPerDay { get; set; }
+
     public string? Route { get; set; }
     public string? Frequency { get; set; }
     public decimal QuantityPrescribed { get; set; }

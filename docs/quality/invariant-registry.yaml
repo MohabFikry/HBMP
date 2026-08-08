@@ -2164,6 +2164,9 @@ invariants:
     # would produce a box count that is right most of the time, which is the worst kind (invariant 8).
     tests:
       - Mersal.Prescribing.Tests.BoxCountTests.A_bottle_of_syrup_is_counted_in_BOTTLES_not_in_millilitres
+      # 31.5 — the CHRONIC path, which 31.3 changed the acute half of and missed. A ninety-day syrup was
+      # allocated as 1,800 "packs" across its windows.
+      - Mersal.Prescribing.Tests.ChronicAllocationTests.A_chronic_syrup_is_allocated_in_BOTTLES_not_in_millilitres
       - Mersal.Prescribing.Tests.BoxCountTests.A_course_of_insulin_is_counted_in_boxes_once_the_pen_s_contents_are_known
       - Mersal.Prescribing.Tests.BoxCountTests.An_unknown_pack_content_yields_no_box_count_and_no_guess
       - Mersal.Prescribing.Tests.PackContentTests.An_IU_product_with_no_volume_anywhere_derives_NO_content
@@ -2221,4 +2224,21 @@ invariants:
       - apps/web/test/encounter-transaction-actions.test.tsx::offers Copy on the row, and copying writes nothing
       - apps/web/test/encounter-transaction-actions.test.tsx::fills the composer from the copied transaction
       - apps/web/test/encounter-transaction-actions.test.tsx::says so when there is nothing on the row it can copy
+
+  - id: INV-A-PRESCRIPTION-KEEPS-THE-NUMBERS-IT-WAS-WRITTEN-FROM
+    statement: >-
+      The dose and frequency a prescriber sent are stored on the line, come back on every read, and carry onto
+      a superseding version. Where they were never sent they read as absent, never as 1.
+    source: 45-encounter-and-prescription-adjustments.md §6; docs/BUILD-STATUS.md 31.5
+    severity: Critical
+    # They used to be spent and discarded: the daily-dose rule and the quantity check ran on them, and the row
+    # kept only `dose` — a sentence this application formatted. So a written script could not be re-checked
+    # against the numbers it was graded on except by parsing display text, and a copy could not carry a dose.
+    # The absent case is half the invariant: a default of 1 looks like an ordinary once-daily prescription and
+    # would be one nobody wrote (invariant 8).
+    tests:
+      - Mersal.Pharmacy.Tests.NumericDoseIsKeptTests.The_dose_and_frequency_a_prescriber_sent_come_back_on_the_line
+      - Mersal.Pharmacy.Tests.NumericDoseIsKeptTests.A_line_written_WITHOUT_them_reports_null_rather_than_one
+      - Mersal.Pharmacy.Tests.NumericDoseIsKeptTests.They_survive_an_amendment_onto_the_new_version
+      - apps/web/test/encounter-transaction-actions.test.tsx::carries the dose, the frequency and the duration into the copy
 

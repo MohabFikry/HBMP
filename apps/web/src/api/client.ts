@@ -549,7 +549,10 @@ export interface ApiClient {
     /** The product, so the SERVER resolves its pack facts — the same lookup the write path makes. */
     drugId?: string;
     isPackSplittable?: boolean | null;
-    packSize?: number | null;
+    /** 31.5 — what one box HOLDS, renamed from `packSize`: the pack size counts CONTAINERS for every
+     *  measured product and is the wrong divisor for all of them (31.3). Normally omitted — the server
+     *  resolves it from `drugId`. */
+    packContent?: number | null;
   }): Promise<ChronicPreview>;
 
   // Investigation ordering workspace — the lab / imaging counterpart of the prescribing trio above.

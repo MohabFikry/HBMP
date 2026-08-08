@@ -2029,14 +2029,15 @@ export class DevApiClient implements ApiClient {
     timesPerDay?: number;
     drugId?: string;
     isPackSplittable?: boolean | null;
-    packSize?: number | null;
+    packContent?: number | null;
   }) {
     return this.gate(() => {
       const months = { Monthly: 1, Every2Months: 2, Every3Months: 3 }[req.refillFrequencyCode] ?? 1;
       const raw = (req.doseAmount ?? 1) * (req.timesPerDay ?? 1) * req.durationDays;
       // Round once, at the TOTAL. A non-splittable pack rounds UP to whole packs.
-      const total = req.isPackSplittable === false && (req.packSize ?? 0) > 0
-        ? Math.ceil(raw / req.packSize!) * req.packSize!
+      // 31.5 — divided by what the box HOLDS, like the server. See ChronicAllocation.
+      const total = req.isPackSplittable === false && (req.packContent ?? 0) > 0
+        ? Math.ceil(raw / req.packContent!) * req.packContent!
         : Math.round(raw);
 
       const count = Math.ceil(req.durationDays / (months * 30));
