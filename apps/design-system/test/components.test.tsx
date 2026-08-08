@@ -11,7 +11,6 @@ import {
   Select,
   StatusChip,
   Tabs,
-  TabItem,
   type Column,
   type StatusKind,
 } from "../src";
