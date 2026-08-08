@@ -503,6 +503,29 @@ html[dir="rtl"] .mrs-search input {
   padding: var(--sp5) 0;
 }
 
+/* Pill variant — same tablist/tab/tabpanel semantics as the underline style above, `.mrs-seg`'s look. */
+.mrs-tabs--pill {
+  border-bottom: 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  padding: 3px;
+  gap: 3px;
+}
+.mrs-tabs--pill .mrs-tab {
+  border-bottom: 0;
+  border-radius: var(--r-pill);
+  padding: 0 14px;
+  font-size: var(--fs-caption);
+}
+.mrs-tabs--pill .mrs-tab[aria-selected="true"] {
+  background: var(--surface-1);
+  color: var(--accent);
+  box-shadow: var(--elev-1);
+}
+
 /* ---------- Scrolling ----------------------------------------------------
  *
  * One treatment for every region that scrolls INSIDE the page — dropdowns, panel bodies, in-card lists,
