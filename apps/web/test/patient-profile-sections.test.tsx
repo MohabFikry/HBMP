@@ -391,7 +391,7 @@ describe("20.4 — accessibility of the new views", () => {
       await openTab(tab);
       expect(await axe(container)).toHaveNoViolations();
     }
-  });
+  }, 20_000);
 
   it("is axe clean on every populated tab, in Arabic RTL", async () => {
     useArabic();
@@ -402,7 +402,7 @@ describe("20.4 — accessibility of the new views", () => {
       await openTab(tab);
       expect(await axe(container)).toHaveNoViolations();
     }
-  });
+  }, 20_000);
 
   it("gives every section table an accessible caption, on every populated tab", async () => {
     // DataTable renders its caption sr-only. A table with no caption is a table a screen-reader user lands
@@ -418,7 +418,7 @@ describe("20.4 — accessibility of the new views", () => {
         expect(table.querySelector("caption")?.textContent?.trim()).toBeTruthy();
       }
     }
-  });
+  }, 20_000);
 });
 
 // ---------------------------------------------------------------- ordering

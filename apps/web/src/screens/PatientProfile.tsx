@@ -365,7 +365,7 @@ function ProfileBody({ profile, onRetry }: { profile: PatientProfileContract; on
   return (
     <div className="patient-profile">
       {header ? (
-        <section aria-label={t(SECTION_TITLES.header)} className="profile-identity-card">
+        <section aria-label={t(SECTION_TITLES.header)}>
           <Card style={{ padding: "var(--sp5)" }}>
             {header.state === "Visible" ? (
               <ProfileIdentity
