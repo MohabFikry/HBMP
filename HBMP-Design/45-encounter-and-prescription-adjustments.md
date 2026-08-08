@@ -83,6 +83,17 @@ The composer carries a **type combobox** — Physiotherapy, Minor Surgery, Injec
 
 **Sessions are a property of the type, not a hard-coded exception for physiotherapy.** `procedure_type.is_session_based` drives the UI: selecting a session-based type reveals a **number of sessions** field; selecting any other type does not. Physiotherapy is session-based today; dialysis and rehabilitation obviously are too, and making the behaviour follow a flag means the second one costs nothing. Hard-coding `if (type === 'Physiotherapy')` would guarantee that conversation twice more.
 
+> **SUPERSEDED by [ADR-0040](../docs/adr/0040-procedure-courses-unit-dosing-and-transaction-level-actions.md) (phase 31.1).**
+> The procedure type and the session count now live on the **ORDER**, and a line's quantity is what is
+> delivered at **each attendance**. This model could not express an outpatient course: with the kind and the
+> count on each line, a two-item course could carry two kinds and two session counts, and there was nowhere to
+> record "three of these at each attendance". What the ADR keeps is the sentence below's real point —
+> `quantity_ordered` is still the single metered number the atomic consume path decrements, now
+> `sessions x per-session`, and sessions delivered is derived from it rather than stored.
+>
+> The paragraph is left in place rather than edited away: a design doc that quietly matches the code loses the
+> record of why it changed.
+
 **Sessions are the order line's quantity.** Not a parallel counter — the existing invariant already says consume is atomic and idempotent and *partial fulfilment leaves the remainder active*. Ten sessions is quantity 10, consumed one at a time, with the same concurrency proofs that protect every other consume path.
 
 **Type must agree with the code.** Each type carries the CPT categories or ranges it may accompany; a physiotherapy type on a minor-surgery code is a data error and is refused with a clear message. Left unvalidated the field becomes decorative, and any reporting built on it is quietly wrong.
@@ -197,7 +208,14 @@ The drug master needs three facts it does not have:
 
 | Field | Meaning | Examples |
 |---|---|---|
-| `prescribing_unit` | The unit a doctor prescribes in | Tablet, Capsule, mL, Puff, Spray, **IU**, Drop, Sachet, Suppository, Vial, Ampoule, Patch, Gram |
+| `prescribing_unit` | The unit a doctor prescribes in | Tablet, Capsule, mL, Puff, Spray, **IU**, Drop, Sachet, Suppository, Vial, Ampoule, Patch, Gram — **widened by `masterdata/0018`** with Syringe, Cartridge, Lozenge, Pessary, Gummy, Bar, Enema, Dressing. The vocabulary was not wrong, it was short: 2,495 real products carried a dosage form it did not cover and loaded with **no unit at all**, which made them unusable for any quantity calculation. |
+
+> **REVISED by [ADR-0040](../docs/adr/0040-procedure-courses-unit-dosing-and-transaction-level-actions.md) (phase 31.1).**
+> `is_pack_splittable` no longer derives from the dosage form. Measured over all 22,653 workbook rows the form
+> is wrong in both directions — it calls a box of three ampoules unsplittable, and says nothing about the 38
+> forms it does not recognise. It comes from the catalogue's measured `Major Units (per box)` / `Minor Units
+> (total)` pair instead: **a pack holding more than one prescribing unit can be split; a pack that *is* one
+> unit cannot.** The dosage form keeps the job it is good for — naming the unit above.
 | `pack_size` | How many prescribing units are in one pack | 20 tablets · 200 puffs · 300 IU (a 3 mL 100 IU/mL pen) · 120 mL |
 | `is_pack_splittable` | Whether a pack can be broken | Tablets/capsules yes; inhalers, pens, vials no |
 

@@ -94,6 +94,43 @@ public static class DbUpsert
     /// alone: reference data is never hard-deleted.
     /// </remarks>
     /// <summary>
+    /// Re-case every stored drug name and active ingredient, including rows this load did not touch.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why a sweep and not just the mapper.</b> The workbook supersedes the CSV, so a workbook load
+    /// writes 22,653 rows and leaves the 8,998 that came from the legacy CSV exactly as they were — in
+    /// capitals. Casing only what the current source happens to carry would leave the catalogue split down
+    /// the middle by which file a product arrived in, which is the thing this is meant to fix.</para>
+    ///
+    /// <para>It calls the same <see cref="MasterDataNormalize.DisplayName"/> the mappers do, so there is one
+    /// rule; and that rule is idempotent, so a second run reports nothing changed rather than drifting.</para>
+    ///
+    /// <para>Only the DISPLAY text moves. <c>drug_code</c> is derived from the raw name and upper-cases, so
+    /// every indication, interaction and prescription line keeps pointing at the row it already did.</para>
+    /// </remarks>
+    public static async Task RecaseDrugNamesAsync(MasterDataDbContext db, LoadReport report, CancellationToken ct)
+    {
+        var drugs = await db.Drugs.ToListAsync(ct);
+        var changed = 0;
+
+        foreach (var drug in drugs)
+        {
+            var name = MasterDataNormalize.DisplayName(drug.Name)!;
+            var scientific = MasterDataNormalize.DisplayName(drug.ScientificName);
+            if (name == drug.Name && scientific == drug.ScientificName) continue;
+
+            drug.Name = name;
+            drug.ScientificName = scientific;
+            changed++;
+        }
+
+        await db.SaveChangesAsync(ct);
+        report.Note(
+            $"display casing: {changed:N0} of {drugs.Count:N0} row(s) re-cased. Applied to the WHOLE table, not "
+            + "only this load's source — the catalogue holds rows from two files that disagree about capitals.");
+    }
+
+    /// <summary>
     /// 29.7 — recompute every drug's lowest-price label (design 45 §7).
     ///
     /// <para>Run after the drugs are upserted, because it reads the prices that upsert just wrote. It lives

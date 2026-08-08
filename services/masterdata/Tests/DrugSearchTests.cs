@@ -242,4 +242,63 @@ public class DrugSearchTests
         plan.Should().NotContain("Seq Scan on drug",
             "a sequential scan per keystroke is the failure this index exists to prevent");
     }
+
+    // ---- 29.7 (design 45 §7) — the price/availability facts the combobox renders ------------------------
+    //
+    // `LowestPrice.Compute` and `DbUpsert.RecomputeLowestPriceAsync` were correct and tested, and the
+    // columns were populated on every load — but THIS query never selected them, so the value stopped at
+    // the database. The chip could not render against a real backend however right the computation was.
+    // A unit test of the computation cannot see that; only a test of the endpoint the UI actually calls can.
+
+    [SkippableFact]
+    public async Task An_option_carries_the_lowest_price_verdict_and_the_per_unit_price_it_rests_on()
+    {
+        Skip.If(MasterDataApiFactory.Db is null, "MASTERDATA_TEST_DB not set — DB integration test skipped.");
+        await using var app = new MasterDataApiFactory();
+        try
+        {
+            await app.SeedAsync();
+            await using (var db = MasterDataApiFactory.Ctx())
+            {
+                var d = await db.Drugs.FirstAsync(x => x.DrugId == app.BrandDrugId);
+                (d.IsLowestPrice, d.PricePerUnit) = (true, 10.50m);
+                await db.SaveChangesAsync();
+            }
+            using var client = app.ClinicalClient();
+
+            var hit = Items(await Search(client, "zykomentin")).Single(i => i.GetProperty("drugId").GetGuid() == app.BrandDrugId);
+
+            hit.GetProperty("isLowestPrice").GetBoolean().Should().BeTrue();
+            hit.GetProperty("pricePerUnit").GetDecimal().Should().Be(10.50m,
+                "the per-unit figure is the comparison basis — price ÷ pack size, never the pack price");
+        }
+        finally { await app.CleanupAsync(); }
+    }
+
+    [SkippableFact]
+    public async Task An_option_carries_its_availability_and_defaults_to_Unknown()
+    {
+        Skip.If(MasterDataApiFactory.Db is null, "MASTERDATA_TEST_DB not set — DB integration test skipped.");
+        await using var app = new MasterDataApiFactory();
+        try
+        {
+            await app.SeedAsync();
+            await using (var db = MasterDataApiFactory.Ctx())
+            {
+                (await db.Drugs.FirstAsync(x => x.DrugId == app.BrandDrugId)).Availability = "Unavailable";
+                await db.SaveChangesAsync();
+            }
+            using var client = app.ClinicalClient();
+
+            var items = Items(await Search(client, "zykomentin"));
+            items.Single(i => i.GetProperty("drugId").GetGuid() == app.BrandDrugId)
+                .GetProperty("availability").GetString().Should().Be("Unavailable");
+
+            // An untouched row carries the catalogue default, which renders NOTHING. A boolean here would
+            // have shown the whole catalogue as out of stock on day one.
+            Items(await Search(client, "fixturevax")).Single(i => i.GetProperty("drugId").GetGuid() == app.VaccineDrugId)
+                .GetProperty("availability").GetString().Should().Be("Unknown");
+        }
+        finally { await app.CleanupAsync(); }
+    }
 }

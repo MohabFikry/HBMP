@@ -17,6 +17,18 @@
         }
       }
     },
+    "/api/v1/refill-frequencies": {
+      "get": {
+        "tags": [
+          "Mersal.Pharmacy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/prescriptions/{prescriptionId}/pricing": {
       "get": {
         "tags": [
@@ -137,6 +149,50 @@
         }
       }
     },
+    "/api/v1/prescriptions/chronic-preview": {
+      "post": {
+        "tags": [
+          "Mersal.Pharmacy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChronicPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/prescriptions/quantity-preview": {
+      "post": {
+        "tags": [
+          "Mersal.Pharmacy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuantityPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/prescriptions": {
       "post": {
         "tags": [
@@ -174,6 +230,36 @@
           },
           "required": true
         },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/prescriptions/history/{beneficiaryId}": {
+      "get": {
+        "tags": [
+          "Mersal.Pharmacy.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "parameters": [
+          {
+            "name": "beneficiaryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK"
@@ -694,6 +780,10 @@
           "reason": {
             "type": "string",
             "nullable": true
+          },
+          "reasonCode": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -721,6 +811,44 @@
           },
           "reasonText": {
             "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChronicPreviewRequest": {
+        "type": "object",
+        "properties": {
+          "durationDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "refillFrequencyCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "doseAmount": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "timesPerDay": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "isPackSplittable": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "packSize": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "drugId": {
+            "type": "string",
+            "format": "uuid",
             "nullable": true
           }
         },
@@ -803,6 +931,14 @@
             "nullable": true
           },
           "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "requestedServiceCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "requestedServiceCodeSystem": {
             "type": "string",
             "nullable": true
           }
@@ -940,6 +1076,41 @@
           },
           "note": {
             "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "QuantityPreviewRequest": {
+        "type": "object",
+        "properties": {
+          "drugId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "doseAmount": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "timesPerDay": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "durationDays": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "isPackSplittable": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "packSize": {
+            "type": "number",
+            "format": "double",
             "nullable": true
           }
         },

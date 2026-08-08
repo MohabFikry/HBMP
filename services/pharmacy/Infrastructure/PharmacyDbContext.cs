@@ -155,6 +155,9 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
             e.ToTable("referral");
             e.HasKey(x => x.ReferralId);
             e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            // 29.2 — the CPT code the referral was raised for (design 45 §2).
+            e.Property(x => x.RequestedServiceCode).HasColumnName("requested_service_code");
+            e.Property(x => x.RequestedServiceCodeSystem).HasColumnName("requested_service_code_system");
             e.HasIndex(x => x.ReferralNo).IsUnique();
             e.HasIndex(x => new { x.BeneficiaryId, x.Status });
             e.HasIndex(x => x.IdempotencyKey);

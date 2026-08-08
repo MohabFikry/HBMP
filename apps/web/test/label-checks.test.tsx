@@ -21,7 +21,7 @@ function renderWorkspace() {
   return render(
     <AppProviders authClient={new DevAuthClient()} apiClient={new DevApiClient({ latencyMs: 0 })}>
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <PrescribingWorkspace encounterId="enc-77" diagnosisIcdCodes={["E11.9"]} />
+        <PrescribingWorkspace encounterId="enc-77" beneficiaryId="aaaaaaaa-0000-0000-0000-000000000231" diagnosisIcdCodes={["E11.9"]} />
       </MemoryRouter>
     </AppProviders>,
   );

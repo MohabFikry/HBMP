@@ -49,9 +49,12 @@ public static class OrdersEndpoints
             // Validate every line code against masterdata (unknown → 422 problem+json). Fail-closed.
             foreach (var line in req.Lines)
             {
-                if (line.QuantityOrdered <= 0)
+                // 31.1 — whichever field the caller used to state the amount. A pre-31.1 caller sends
+                // `quantityOrdered`; a 31.1 one sends `quantityPerSession` and leaves the other at zero,
+                // and reading only the first would refuse every course composed by the new client.
+                if ((line.QuantityPerSession ?? line.QuantityOrdered) <= 0)
                     return Results.Problem(statusCode: 422, title: "invalid-quantity", type: "urn:hbmp:invalid-quantity",
-                        detail: $"Line '{line.Code}' must have quantityOrdered > 0.");
+                        detail: $"Line '{line.Code}' must have a quantity greater than zero.");
                 if (!await codes.IsValidAsync(line.CodeSystem, line.Code, bearer, ct))
                     return Results.Problem(statusCode: 422, title: "unknown-code", type: "urn:hbmp:unknown-code",
                         detail: $"{line.CodeSystem} code '{line.Code}' is not present in master data.");
@@ -79,22 +82,36 @@ public static class OrdersEndpoints
             // check above is written under. Design 45 §2 is explicit about the cost of skipping it: "left
             // unvalidated the field becomes decorative, and any reporting built on it is quietly wrong", which
             // is worse than having no field at all, because the reports still render.
+            //
+            // 31.1 — the KIND and the SESSION COUNT are the ORDER's, so they are read from the order and
+            // checked against EVERY line's section. A per-line kind let a two-item course carry two kinds
+            // and two session counts, which is not a course any centre can deliver. A line-level code is
+            // still accepted from a pre-31.1 caller and still validated — an accepted-but-ignored type field
+            // is decorative, and every report built on it would be quietly wrong.
             foreach (var line in req.Lines)
             {
+                var typeCode = req.ProcedureTypeCode ?? line.ProcedureTypeCode;
+
                 // Skip the round-trip entirely when there is nothing to check: a Lab/Radiology line with no
                 // type is the overwhelmingly common case, and it is already correct by construction.
                 if (OrderTypes.Canonical(req.OrderType) != OrderType.Procedure
-                    && string.IsNullOrWhiteSpace(line.ProcedureTypeCode)) continue;
+                    && string.IsNullOrWhiteSpace(typeCode)) continue;
 
                 var lookup = await procedureTypes.ResolveAsync(
-                    line.ProcedureTypeCode, line.CodeSystem == CodeSystem.CPT ? line.Code : null, bearer, ct);
+                    typeCode, line.CodeSystem == CodeSystem.CPT ? line.Code : null, bearer, ct);
+
+                // The count the session rules are checked against is the COURSE LENGTH, not the metered
+                // total: "at most 12 sessions" is a statement about attendances, and comparing it to
+                // sessions x per-session would refuse a perfectly ordinary 6-session course of a 3-per-visit
+                // item as though 18 sessions had been asked for.
+                var sessionCount = req.Sessions ?? line.QuantityOrdered;
 
                 var procError = ProcedureLineChecks.Validate(
-                    req.OrderType, line.ProcedureTypeCode, lookup.Section, line.QuantityOrdered, lookup.Facts);
+                    req.OrderType, typeCode, lookup.Section, sessionCount, lookup.Facts);
                 if (procError != ProcedureLineError.None)
                 {
                     var (en, ar) = ProcedureLineChecks.Explain(
-                        procError, line.ProcedureTypeCode, line.Code, lookup.Section, lookup.Facts);
+                        procError, typeCode, line.Code, lookup.Section, lookup.Facts);
                     return Results.Problem(statusCode: 422, title: "procedure-type-invalid",
                         type: "urn:hbmp:procedure-type-invalid", detail: en,
                         extensions: new Dictionary<string, object?> { ["reason"] = procError.ToString(), ["detailAr"] = ar });
@@ -147,15 +164,28 @@ public static class OrdersEndpoints
                 OrderingBranchId = branch.Context.ActiveBranchId,   // phase 14.4 — pin the raising branch
                 OrderType = req.OrderType, Status = OrderStatus.Requested, RequestedAt = now, ExpiresAt = expiresAt,
                 IdempotencyKey = idem, CreatedBy = actor,
+                // 31.1 — the course: one kind and one session count for the whole order.
+                ProcedureTypeCode = req.ProcedureTypeCode,
+                Sessions = req.Sessions,
                 Lines = req.Lines.Select(l => new OrderLine
                 {
                     OrderLineId = Guid.NewGuid(), CodeSystem = l.CodeSystem, Code = l.Code,
-                    Description = l.Description, QuantityOrdered = l.QuantityOrdered, Status = OrderLineStatus.Active,
+                    Description = l.Description,
+                    // 31.1 — the METERED TOTAL, derived: sessions x what is delivered at each attendance.
+                    // `quantity_ordered` keeps its meaning exactly, which is what leaves the atomic consume
+                    // path, the partial-approval arithmetic and the centre's queue untouched.
+                    QuantityPerSession = l.QuantityPerSession ?? l.QuantityOrdered,
+                    QuantityOrdered = ProcedureCourse.MeteredTotal(
+                        req.Sessions, l.QuantityPerSession ?? l.QuantityOrdered),
+                    Status = OrderLineStatus.Active,
                     // 29.2 — what was ASKED FOR, pinned at creation and never rewritten. On an auto-activated
                     // order the two are equal; when the order is routed to approval, QuantityOrdered is later
                     // narrowed to the APPROVED scope while this stays put (ProcedureSessions.ApplyApproval).
-                    RequestedQuantity = l.QuantityOrdered,
-                    ProcedureTypeCode = l.ProcedureTypeCode,
+                    RequestedQuantity = ProcedureCourse.MeteredTotal(
+                        req.Sessions, l.QuantityPerSession ?? l.QuantityOrdered),
+                    // Still written, so a rollback to the previous build finds the data it expects. The
+                    // ORDER's code is the one that is read.
+                    ProcedureTypeCode = req.ProcedureTypeCode ?? l.ProcedureTypeCode,
                     ExaminationTypeId = l.ExaminationTypeId,
                     SensitivityLevel = l.ExaminationTypeId is { } etId ? classifications[etId].SensitivityLevel : SensitivityLevel.Standard,
                 }).ToList(),

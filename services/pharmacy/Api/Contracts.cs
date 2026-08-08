@@ -47,6 +47,49 @@ public sealed record CreateRxLine(
 public sealed record LineAcknowledgement(Guid ClientLineId, string FindingKind, string Reason);
 
 /// <summary>
+/// 29.5 — what the composer asks for a schedule preview (design 45 §5). Carries the doctor's numbers and the
+/// drug's pack facts, and NO patient data: the allocation is arithmetic, so previewing it is not a PHI read
+/// and nothing about the beneficiary needs to cross the wire to answer it.
+/// </summary>
+/// <param name="DrugId">
+/// The product being prescribed. When given, the endpoint RESOLVES that drug's pack facts from master data
+/// itself — the same lookup the write path makes — so the preview and the prescription cannot disagree.
+///
+/// <para>This is the field whose absence made the whole preview useless: the composer does not hold pack
+/// facts and has no business fetching them to hand back, so it sent nulls and every call answered
+/// <c>quantity-not-checked</c> regardless of what the catalogue recorded.</para>
+/// </param>
+/// <param name="IsPackSplittable">Null means master data does not say, which yields NotChecked NAMING the
+/// field — never a guessed quantity. Assuming splittable is the dangerous default: it permits a fractional
+/// inhaler. Supplied DIRECTLY only by callers that genuinely hold the facts; <paramref name="DrugId"/> is
+/// the normal path.</param>
+public sealed record ChronicPreviewRequest(
+    int DurationDays,
+    string? RefillFrequencyCode,
+    decimal? DoseAmount = null,
+    int? TimesPerDay = null,
+    bool? IsPackSplittable = null,
+    decimal? PackSize = null,
+    Guid? DrugId = null);
+
+/// <summary>
+/// 29.6 — "how much of this will actually be dispensed?", asked before the doctor commits (design 45 §6).
+/// </summary>
+/// <remarks>
+/// The same shape and the same rules as <see cref="ChronicPreviewRequest"/>, and for the same reason: the
+/// pack facts are MASTER DATA, so <see cref="DrugId"/> is the normal path and the endpoint resolves them
+/// itself. A composer that fetched a pack size and handed it back would be a second place deciding what the
+/// catalogue says, and the version that drifted would be the one on screen.
+/// </remarks>
+public sealed record QuantityPreviewRequest(
+    Guid? DrugId = null,
+    decimal? DoseAmount = null,
+    int? TimesPerDay = null,
+    int? DurationDays = null,
+    bool? IsPackSplittable = null,
+    decimal? PackSize = null);
+
+/// <summary>
 /// Body for POST /prescriptions/validate — step 1, advisory (doc 43 §5).
 /// </summary>
 /// <remarks>
@@ -74,10 +117,25 @@ public sealed record ValidationResultView(
     IReadOnlyList<FindingView> Findings,
     IReadOnlyDictionary<Guid, string> LineStates);
 
+/// <param name="RequestedServiceCode">
+/// 29.2 — the CPT code the referral is raised for (design 45 §2). Optional, because referrals predate this
+/// and are raised from paths with no code; when present it must be a code the routing map actually sends to
+/// a referral, so the map is enforced in BOTH directions.
+/// </param>
 public sealed record CreateReferralRequest(
-    Guid BeneficiaryId, Guid EncounterId, string TargetSpecialty, Guid? TargetProviderId, string? Reason);
+    Guid BeneficiaryId, Guid EncounterId, string TargetSpecialty, Guid? TargetProviderId, string? Reason,
+    string? RequestedServiceCode = null, string? RequestedServiceCodeSystem = null);
 
-public sealed record CancelRequest(string? Reason);
+/// <summary>
+/// Withdrawing a whole prescription.
+/// </summary>
+/// <param name="Reason">Free text — what happened here.</param>
+/// <param name="ReasonCode">
+/// 30.6 — the CODED reason from the served vocabulary (design 46 §7), which is what makes "how often do we
+/// withdraw, and why" answerable at all. Optional so every existing caller still compiles, but the audit
+/// event records it in preference to the free text: a decision reason that is a sentence cannot be counted.
+/// </param>
+public sealed record CancelRequest(string? Reason, string? ReasonCode = null);
 
 public sealed record RxLineResponse(
     Guid PrescriptionLineId, Guid DrugId, string? DrugName, string? Dose, string? Route, string? Frequency,
@@ -209,9 +267,13 @@ public sealed record OutOfStockRequest(Guid PrescriptionLineId, decimal? Quantit
 
 public sealed record ReferralResponse(
     Guid ReferralId, string ReferralNo, Guid BeneficiaryId, Guid EncounterId, Guid ReferringProviderId,
-    string TargetSpecialty, Guid? TargetProviderId, string? Reason, string Status, DateTimeOffset RequestedAt)
+    string TargetSpecialty, Guid? TargetProviderId, string? Reason, string Status, DateTimeOffset RequestedAt,
+    // 29.2 — what the referral was raised FOR. Returned as well as stored: the loop closes against a
+    // specific service, and the ordering doctor's worklist is where that is read.
+    string? RequestedServiceCode = null, string? RequestedServiceCodeSystem = null)
 {
     public static ReferralResponse From(Referral r) => new(
         r.ReferralId, r.ReferralNo, r.BeneficiaryId, r.EncounterId, r.ReferringProviderId,
-        r.TargetSpecialty, r.TargetProviderId, r.Reason, r.Status.ToString(), r.RequestedAt);
+        r.TargetSpecialty, r.TargetProviderId, r.Reason, r.Status.ToString(), r.RequestedAt,
+        r.RequestedServiceCode, r.RequestedServiceCodeSystem);
 }

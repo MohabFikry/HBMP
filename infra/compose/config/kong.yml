@@ -240,13 +240,35 @@ services:
           - /api/v1/report-access
         strip_path: false
 
+      # 29.4 — THE SERVICE-HISTORY ENDPOINT (design 45 §4).
+      #
+      # It lives in orders-service but hangs off `/api/v1/patients`, which is PROFILE-SERVICE's namespace.
+      # Without this route the gateway sent every call to profile-service, which does not serve it: the
+      # modal 404'd in every deployed environment from the day it was written, while orders-service answered
+      # 200 to anything that reached it directly.
+      #
+      # Nothing caught it. The endpoint existed, the component existed, and `check-kong-route-coverage` was
+      # satisfied because `/api/v1/patients` IS routed — just to the wrong service. The guard asks whether a
+      # prefix is routed somewhere, not whether it is routed to the service that serves it.
+      #
+      # A REGEX route, because a plain prefix cannot be more specific than profile-service's: Kong scores
+      # regex routes above prefix routes, so this wins for exactly this path and nothing else moves.
+      - name: orders-service-history
+        paths:
+          - ~/api/v1/patients/[^/]+/service-history$
+        strip_path: false
+
   # --- pharmacy-service: prescriptions + dispensing + referrals ---
   - name: pharmacy-service
     url: http://pharmacy-service:8080
     plugins: *edge_jwt
     routes:
       - name: pharmacy-routes
-        paths: ["/api/v1/prescriptions", "/api/v1/referrals"]
+        # 29.5 — `refill-frequencies` is the supervisor-configurable cadence table the chronic composer
+        # offers (design 45 §5). It is a sibling prefix rather than a child of /prescriptions because it is
+        # master data, not a prescription. The schedule preview sits under /prescriptions and needs no
+        # entry of its own.
+        paths: ["/api/v1/prescriptions", "/api/v1/referrals", "/api/v1/refill-frequencies"]
         strip_path: false
 
   # --- approvals-service: authorization worklist + decisions ---

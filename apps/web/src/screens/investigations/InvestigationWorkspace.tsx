@@ -1,21 +1,73 @@
-import { useMemo, useState, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, type SetStateAction } from "react";
 import { z } from "zod";
 import { Button, Icon, InlineAlert, Modal, useToast } from "@mersal/design-system";
 import type {
   CheckState, CptSection, InvestigationDraftLine, InvestigationOrderType, Localized,
-  OrderAcknowledgement, OrderCheckKind, OrderFinding, OrderValidationResult,
+  OrderAcknowledgement, OrderCheckKind, OrderFinding, OrderValidationResult, ProcedureType,
 } from "@mersal/contracts";
 import { zInvestigationDraftLine, zOrderAcknowledgement, zOrderValidationResult } from "@mersal/contracts";
 import { useApi } from "../../api/ApiProvider";
 import { useDraft } from "../draftStore";
 import { useLoc } from "../_shared";
+import { ServiceHistoryModal } from "../ServiceHistoryModal";
 import { CptCombobox } from "./CptCombobox";
 import { LineStatusChip } from "../prescribing/LineStatusChip";
 
 const S = {
   addLine: { en: "Add another", ar: "إضافة سطر آخر" },
   removeLine: { en: "Remove", ar: "إزالة" },
+  emptyLine: { en: "empty line", ar: "سطر فارغ" },
+  // 29.4 (design 45 §4) — asked on the line being COMPOSED, which is the only moment the answer can still
+  // change what is ordered. Duplicate ordering is the thing this question exists to prevent.
+  lineHistory: { en: "Previous occurrences of this service", ar: "الحالات السابقة لهذه الخدمة" },
   quantity: { en: "Quantity", ar: "الكمية" },
+  // 29.2 (design 45 §2) — the OP-Procedure kind, and the sessions field its flag reveals.
+  procedureType: { en: "Procedure type", ar: "نوع الإجراء" },
+  chooseType: { en: "Choose a type…", ar: "اختر النوع…" },
+  sessions: { en: "Sessions", ar: "عدد الجلسات" },
+  // 31.1 — the course, at the level it is decided.
+  courseLegend: { en: "Procedure course", ar: "خطة الإجراء" },
+  quantityPerSession: { en: "Quantity per session", ar: "الكمية لكل جلسة" },
+  courseTotal: { en: "Total to deliver", ar: "الإجمالي المطلوب تنفيذه" },
+  courseHint: {
+    en: "One kind and one number of sessions for the whole order — a course is one decision. Each line's "
+      + "quantity is what is delivered at EACH session.",
+    ar: "نوع واحد وعدد جلسات واحد للطلب كله — الخطة قرار واحد. كمية كل سطر هي ما يُنفَّذ في كل جلسة.",
+  },
+  needCourseType: {
+    en: "Choose a procedure type. The type decides how the order is delivered and counted.",
+    ar: "اختر نوع الإجراء. النوع يحدد كيفية تنفيذ الطلب واحتسابه.",
+  },
+  // 29.2 — the vehicle, said in the doctor's words rather than as an enum. The difference between the two
+  // is not cosmetic: a referral is not finished until a report comes back.
+  willCreate: { en: "Creates", ar: "سيُنشئ" },
+  vehicleProcedure: { en: "Procedure order", ar: "طلب إجراء" },
+  vehicleReferral: { en: "Referral", ar: "إحالة" },
+  vehicleHintReferral: {
+    en: "An external evaluation is a referral. It is not complete until a report comes back.",
+    ar: "التقييم الخارجي إحالة. لا تكتمل إلا بعودة التقرير.",
+  },
+  targetSpecialty: { en: "Referred to (specialty)", ar: "الإحالة إلى (التخصص)" },
+  specialtyPlaceholder: { en: "e.g. Cardiology", ar: "مثال: القلب" },
+  needSpecialty: {
+    en: "Name the specialty each referral is addressed to. A referral without one cannot be routed.",
+    ar: "حدّد التخصص لكل إحالة. الإحالة بدون تخصص لا يمكن توجيهها.",
+  },
+  notOrderable: {
+    en: "This code cannot be raised from here.",
+    ar: "لا يمكن طلب هذا الكود من هنا.",
+  },
+  sentReferral: { en: "Referral raised.", ar: "تم إنشاء الإحالة." },
+  needType: {
+    en: "Choose a procedure type for every line. The type decides how the order is delivered and counted.",
+    ar: "اختر نوع الإجراء لكل سطر. النوع يحدد كيفية تنفيذ الطلب واحتسابه.",
+  },
+  typesUnavailable: {
+    en: "The procedure types could not be loaded, so an order cannot be composed. This is NOT a report that "
+      + "none are configured — nothing has changed, and it is worth trying again in a moment.",
+    ar: "تعذّر تحميل أنواع الإجراءات، لذلك لا يمكن إعداد الطلب. هذا ليس تقريراً بعدم وجود أنواع مضبوطة — "
+      + "لم يتغيّر شيء، ويمكن المحاولة مرة أخرى بعد قليل.",
+  },
   note: { en: "Note for the site", ar: "ملاحظة للمنفّذ" },
   notePlaceholder: { en: "e.g. left knee, fasting", ar: "مثال: الركبة اليسرى، صائم" },
   status: { en: "Status", ar: "الحالة" },
@@ -47,10 +99,26 @@ const S = {
   viewChecks: { en: "Checks for", ar: "فحوصات" },
   sources: { en: "Sources", ar: "المصادر" },
   sentLab: { en: "Lab order sent.", ar: "تم إرسال طلب المختبر." },
-  sentImaging: { en: "Imaging order sent.", ar: "تم إرسال طلب الأشعة." },
+  // 29.1 — was "Imaging order sent." The rename left this behind, and because the toast was chosen by
+  // `orderType === "Imaging"` — never true after the switch — a RADIOLOGY order confirmed itself as a lab
+  // order. Both halves of that were wrong, in a sentence the doctor reads and believes.
+  sentRadiology: { en: "Radiology order sent.", ar: "تم إرسال طلب الأشعة." },
+  sentProcedure: { en: "Procedure order sent.", ar: "تم إرسال طلب الإجراء." },
   sentForApproval: { en: "Sent to the approval team.", ar: "تم الإرسال إلى فريق الموافقات." },
   submitFailed: { en: "The order was refused.", ar: "تم رفض الطلب." },
   checkFailed: { en: "The check could not run.", ar: "تعذّر إجراء التحقق." },
+};
+
+/**
+ * What the confirmation says, per order type. A total map rather than a ternary chain, for the reason
+ * `sectionsFor` is one: the chain here picked its arm on `orderType === "Imaging"`, which stopped being
+ * true at the 29.1 switch, so radiology and procedure orders both confirmed themselves as lab orders.
+ */
+const SENT: Record<InvestigationOrderType, Localized> = {
+  Lab: S.sentLab,
+  Radiology: S.sentRadiology,
+  Imaging: S.sentRadiology,
+  Procedure: S.sentProcedure,
 };
 
 const KIND_LABEL: Record<OrderCheckKind, Localized> = {
@@ -70,11 +138,25 @@ const ORDER_DRAFT = z.object({
   result: zOrderValidationResult.nullable(),
   validatedFingerprint: z.string().nullable(),
   acknowledgements: z.array(zOrderAcknowledgement),
+
+  // ---- 31.1 — the OP-Procedure COURSE, at the level it is decided (design 45 §2, revised) ---------
+  //
+  // Held at the DRAFT level because a procedure order is ONE clinical decision: one kind, one number of
+  // attendances. Per line, a two-item course could carry two kinds and two session counts — not a course
+  // any centre can deliver — and there was nowhere at all to record "three of these each time", because
+  // the quantity slot was spent on the session count.
+  procedureTypeCode: z.string().nullable().default(null),
+  /** The course length in attendances. NULL when the chosen type is not session-based — a different fact
+   *  from 1, and only the second should ever render a session field. */
+  sessions: z.number().int().nullable().default(null),
 });
 type OrderDraft = z.infer<typeof ORDER_DRAFT>;
 
 function emptyDraft(): OrderDraft {
-  return { lines: [newLine()], result: null, validatedFingerprint: null, acknowledgements: [] };
+  return {
+    lines: [newLine()], result: null, validatedFingerprint: null, acknowledgements: [],
+    procedureTypeCode: null, sessions: null,
+  };
 }
 
 /**
@@ -83,16 +165,70 @@ function emptyDraft(): OrderDraft {
  * be closed. See the prescribing workspace, which draws the same line for the same reason.
  */
 function isEmptyDraft(d: OrderDraft): boolean {
-  return d.result === null && d.lines.length === 1 && d.lines[0].test === null;
+  return d.result === null && d.lines.length === 1 && d.lines[0].test === null
+    // 31.1 — the course counts as composition. Choosing a procedure type or a session count is work the
+    // doctor did, and without this the store discards it: a remount would silently blank both, and the
+    // encounter screen would report the composer clean and close the visit over it.
+    && d.procedureTypeCode === null && d.sessions === null;
 }
 
 function newLine(): InvestigationDraftLine {
-  return { lineId: crypto.randomUUID(), test: null, quantity: 1, note: "" };
+  return {
+    lineId: crypto.randomUUID(), test: null, quantity: 1, note: "",
+    procedureTypeCode: null, vehicle: null, targetSpecialty: null,
+  };
+}
+
+/** 29.2 — an E/M line becomes a referral; everything else on this tab becomes an order. */
+function isReferral(line: InvestigationDraftLine): boolean {
+  return line.vehicle === "Referral";
 }
 
 /** Changing any of this invalidates the last check — the same staleness rule the prescribing workspace uses. */
-function fingerprint(lines: InvestigationDraftLine[]): string {
-  return lines.map((l) => `${l.lineId}|${l.test?.code ?? ""}|${l.quantity}|${l.note}`).join(";");
+function fingerprint(lines: InvestigationDraftLine[], typeCode: string | null, sessions: number | null): string {
+  // The COURSE is part of the fingerprint: changing the kind or the session count changes what is being
+  // ordered, and a check run against the old pair is stale in exactly the way a changed line is.
+  return `${typeCode ?? ""}/${sessions ?? ""}::` + lines
+    .map((l) => `${l.lineId}|${l.test?.code ?? ""}|${l.quantity}|${l.note}`
+      + `|${l.vehicle ?? ""}|${l.targetSpecialty ?? ""}`)
+    .join(";");
+}
+
+/**
+ * Which CPT sections this tab's catalogue search is narrowed to.
+ *
+ * <p><b>A TAB IS NOT A SECTION.</b> Radiology is one; Labs is two, because a sample run on an analyser
+ * (Laboratory) and a specimen read by a pathologist (Pathology) are ordered from the same tab and are not
+ * the same kind of work. OP Procedures is two as well — design 45 §2 routes Surgery and Medicine to a
+ * Procedure order.</p>
+ *
+ * <p><b>Why this is a function and not a ternary.</b> It WAS a ternary —
+ * `orderType === "Imaging" ? ["Imaging"] : [...]` — written before 29.1 renamed the order type. After the
+ * rename the encounter passes `"Radiology"`, that test was never true again, and the radiology tab
+ * silently searched a catalogue of blood panels while every test stayed green. `"Procedure"` inherited the
+ * same wrong arm. A union that has grown twice needs an exhaustive map, not a fall-through.</p>
+ *
+ * <p>E/M appears ONLY in the Procedure arm, and choosing one raises a REFERRAL rather than an order
+ * (invariant 3). It is offered rather than hidden because the tab's job is to take a clinical decision and
+ * route it; what must never happen is an E/M code becoming a Procedure ORDER, and that is enforced on the
+ * write path by pharmacy's `not-a-referral-service` refusal, not by this list.</p>
+ */
+export function sectionsFor(orderType: InvestigationOrderType): CptSection[] {
+  switch (orderType) {
+    // Both spellings, until the legacy value is dropped. `Imaging` is retained on pre-switch orders for
+    // the life of the order, and the SECTION vocabulary keeps that name regardless — it is masterdata's
+    // chapter title, not the role or the order type that 29.1 renamed.
+    case "Radiology":
+    case "Imaging":
+      return ["Imaging"];
+    case "Procedure":
+      // Surgery and Medicine become a Procedure ORDER; E/M becomes a REFERRAL. All three are offered here
+      // because "the doctor picks a service; the SYSTEM decides the vehicle" (design 45 §2) — hiding E/M
+      // would make the doctor's next move a phone call rather than a referral.
+      return ["Surgery", "Medicine", "EvaluationAndManagement"];
+    case "Lab":
+      return ["Laboratory", "Pathology"];
+  }
 }
 
 /**
@@ -118,11 +254,15 @@ function fingerprint(lines: InvestigationDraftLine[]): string {
  */
 export function InvestigationWorkspace({
   encounterId,
+  beneficiaryId,
   orderType,
   diagnosisIcdCodes,
   onDone,
 }: {
   encounterId: string;
+  /** 29.4 — whose history the composer may ask about. The service-history endpoint is keyed on the
+   *  BENEFICIARY; an encounter id in that slot answers for nobody. */
+  beneficiaryId: string;
   orderType: InvestigationOrderType;
   diagnosisIcdCodes: string[];
   onDone?: () => void;
@@ -131,12 +271,30 @@ export function InvestigationWorkspace({
   const t = useLoc();
   const { toast } = useToast();
 
-  // A TAB IS NOT A SECTION. Imaging is one; Labs is two, because a sample run on an analyser (Laboratory,
-  // 80047–87999 + 89049–89398) and a specimen read by a pathologist (Pathology, 88000–88749) are ordered
-  // from the same tab and are not the same kind of work. The Labs tab used to be "codes beginning 8", which
-  // happened to cover both without saying so — and could not be narrowed or widened without also changing
-  // what "beginning 8" means.
-  const sections: CptSection[] = orderType === "Imaging" ? ["Imaging"] : ["Laboratory", "Pathology"];
+  const sections = sectionsFor(orderType);
+
+  // 29.2 — the OP-Procedure kinds, from MASTER DATA (design 45 §2). Fetched only for the tab that needs
+  // them: the Labs and Radiology tabs neither show the field nor pay for the call.
+  const isProcedure = orderType === "Procedure";
+  const [procedureTypes, setProcedureTypes] = useState<ProcedureType[]>([]);
+  const [typesFailed, setTypesFailed] = useState(false);
+  useEffect(() => {
+    if (!isProcedure) return;
+    let live = true;
+    api.procedureTypes().then(
+      (rows) => { if (live) { setProcedureTypes(rows); setTypesFailed(false); } },
+      // Absence is never a clean result. An empty combobox would read as "this platform offers no procedure
+      // kinds", when the truth is that masterdata could not be reached — and the doctor would compose an
+      // order the write path is certain to refuse.
+      () => { if (live) setTypesFailed(true); },
+    );
+    return () => { live = false; };
+  }, [api, isProcedure]);
+
+  const typeByCode = useMemo(
+    () => new Map(procedureTypes.map((p) => [p.code, p])),
+    [procedureTypes],
+  );
 
   /**
    * The composer's whole state, kept across a reload — see `draftStore`.
@@ -153,7 +311,7 @@ export function InvestigationWorkspace({
     emptyDraft,
     isEmptyDraft,
   );
-  const { lines, result, validatedFingerprint, acknowledgements } = draft;
+  const { lines, result, validatedFingerprint, acknowledgements, procedureTypeCode, sessions } = draft;
 
   // Field-shaped setters over the single object, so every call site below reads exactly as it did when these
   // were four separate states — including the updater form, which keeps them free of stale closures.
@@ -168,8 +326,15 @@ export function InvestigationWorkspace({
   const [discarding, setDiscarding] = useState(false);
   const composed = !isEmptyDraft(draft);
   const [openChecks, setOpenChecks] = useState<string | null>(null);
+  /** 29.4 — which service's history is open, if any. One modal for every line. */
+  const [historyFor, setHistoryFor] = useState<InvestigationDraftLine["test"]>(null);
 
-  const current = fingerprint(lines);
+  /** The ORDER's chosen kind, resolved once. Its `isSessionBased` flag is what reveals the session field
+   *  and relabels each line's quantity — never the type's NAME, because dialysis and rehabilitation are
+   *  session-based too and a check against "Physiotherapy" would be wrong for both. */
+  const selectedType = procedureTypeCode ? typeByCode.get(procedureTypeCode) : undefined;
+
+  const current = fingerprint(lines, procedureTypeCode, sessions);
   const stale = result !== null && validatedFingerprint !== current;
   const allLinesHaveTests = lines.every((l) => l.test !== null);
 
@@ -182,8 +347,25 @@ export function InvestigationWorkspace({
   );
   const blocked = (result?.findings ?? []).filter((f) => f.isBlocking);
 
+  // 29.2 — a Procedure line without a type is refused 422 by orders-service. Stopping it here turns a
+  // rejected submission into a field the doctor can see is unfilled; the write path still decides.
+  // A type is required on a Procedure ORDER line. A referral has no procedure type — it is not delivered
+  // by a centre against a session count — so requiring one would make E/M unsubmittable.
+  // 31.1 — ONE type for the order. A referral carries none — it is not delivered by a centre against a
+  // session count — so an order composed entirely of referrals needs no type at all.
+  const orderNeedsType = isProcedure && lines.some((l) => l.test !== null && !isReferral(l));
+  const allLinesHaveTypes = !orderNeedsType || (procedureTypeCode ?? "") !== "";
+
+  // 29.2 — a referral needs the specialty it is addressed to, and every Procedure line needs a RESOLVED
+  // vehicle: submitting with a null vehicle would mean guessing which object to create.
+  const allReferralsAddressed = lines.every((l) => !isReferral(l) || (l.targetSpecialty ?? "").trim() !== "");
+  const allVehiclesKnown = !isProcedure || lines.every((l) => l.test === null || l.vehicle !== null);
+  const noUnorderableLines = lines.every((l) => l.vehicle !== "NotOrderable");
+
   const canSubmit =
-    allLinesHaveTests && result !== null && !stale && unacknowledged.length === 0 && blocked.length === 0 && !busy;
+    allLinesHaveTests && allLinesHaveTypes && allReferralsAddressed && allVehiclesKnown && noUnorderableLines
+    && result !== null && !stale
+    && unacknowledged.length === 0 && blocked.length === 0 && !busy;
 
   function patch(lineId: string, change: Partial<InvestigationDraftLine>) {
     setLines((prev) => prev.map((l) => (l.lineId === lineId ? { ...l, ...change } : l)));
@@ -192,11 +374,35 @@ export function InvestigationWorkspace({
     setAcknowledgements((prev) => prev.filter((a) => a.lineId !== lineId));
   }
 
+  /**
+   * 29.2 — choosing a service, and learning what it will become (design 45 §2).
+   *
+   * <p>The vehicle is asked for on SELECTION rather than on submit, because the whole point is that the
+   * doctor sees it while the choice is still free. Only the Procedure tab asks: Labs and Radiology have one
+   * vehicle each and always did.</p>
+   *
+   * <p>If the lookup fails the line keeps a null vehicle, the composer shows no claim about what it will
+   * create, and submit is blocked — rather than guessing "order" and raising the wrong object.</p>
+   */
+  async function chooseTest(lineId: string, test: InvestigationDraftLine["test"]) {
+    patch(lineId, { test, vehicle: null, targetSpecialty: null });
+    if (!isProcedure || !test) return;
+
+    try {
+      const matches = await api.orderableServices(test.code, ["ProcedureOrder", "Referral"]);
+      const hit = matches.find((m) => m.code === test.code) ?? null;
+      patch(lineId, { test, vehicle: hit?.orderable ? hit.vehicle : hit ? "NotOrderable" : null });
+    } catch {
+      // Absence is never a clean result: no vehicle claim, and canSubmit refuses below.
+      patch(lineId, { test, vehicle: null });
+    }
+  }
+
   async function validate() {
     setBusy(true);
     try {
       const r = await api.validateInvestigationOrder({ encounterId, orderType, lines, diagnosisIcdCodes });
-      setChecked(r, fingerprint(lines));
+      setChecked(r, fingerprint(lines, procedureTypeCode, sessions));
     } catch {
       setChecked(null, null);
       toast(t(S.checkFailed), "bad");
@@ -208,13 +414,51 @@ export function InvestigationWorkspace({
   async function submit() {
     setBusy(true);
     try {
-      const res = await api.submitInvestigationOrder({ encounterId, orderType, lines, acknowledgements });
+      /*
+       * 29.2 — THE DOCTOR PICKS A SERVICE; THE SYSTEM DECIDES THE VEHICLE (design 45 §2, invariant 3).
+       *
+       * E/M lines become REFERRALS and everything else becomes an order, and both may be composed in one
+       * sitting — a knee arthroscopy and a cardiology opinion are one clinical decision. Each referral is
+       * raised individually because a referral IS individual: it carries one specialty and closes with one
+       * report, and batching them would give the loop nothing specific to close against.
+       */
+      const referralLines = lines.filter(isReferral);
+      const orderLines = lines.filter((l) => !isReferral(l));
+
+      const referrals = [];
+      for (const l of referralLines) {
+        referrals.push(await api.createReferral({
+          encounterId,
+          targetSpecialty: (l.targetSpecialty ?? "").trim(),
+          reason: l.note.trim() || undefined,
+          requestedServiceCode: l.test?.code ?? "",
+        }));
+      }
+
+      if (orderLines.length === 0) {
+        toast(`${t(S.sentReferral)} ${referrals.map((r) => r.referralNo).join(", ")}`, "ok");
+        setDraft(emptyDraft());
+        setOpenChecks(null);
+        onDone?.();
+        return;
+      }
+
+      const res = await api.submitInvestigationOrder({
+        encounterId, orderType, lines: orderLines, acknowledgements,
+        // 31.1 — the COURSE travels with the order, not with each line.
+        procedureTypeCode, sessions,
+      });
       // Which of the two happened is not a detail: an order that went for approval is NOT with the lab yet,
       // and a doctor who reads "sent" and expects a result tomorrow has been misinformed by one word.
+      // Both outcomes are named when both happened. "Order sent" alone, after a referral was also raised,
+      // would leave the doctor believing the referral did not go.
+      const orderMsg = res.requiresApproval
+        ? `${t(S.sentForApproval)} ${res.orderNo}`
+        : `${t(SENT[orderType])} ${res.orderNo}`;
       toast(
-        res.requiresApproval
-          ? `${t(S.sentForApproval)} ${res.orderNo}`
-          : `${t(orderType === "Imaging" ? S.sentImaging : S.sentLab)} ${res.orderNo}`,
+        referrals.length > 0
+          ? `${orderMsg} ${t(S.sentReferral)} ${referrals.map((r) => r.referralNo).join(", ")}`
+          : orderMsg,
         "ok",
       );
       // Back to empty, with the findings and acknowledgements going WITH the lines they were derived from.
@@ -240,6 +484,75 @@ export function InvestigationWorkspace({
     <div className="rx-workspace stack">
       {diagnosisIcdCodes.length === 0 && <InlineAlert tone="info">{t(S.noDiagnosis)}</InlineAlert>}
 
+      {/*
+        31.1 — THE COURSE, ABOVE THE LINES (design 45 §2, revised).
+
+        A procedure order is ONE clinical decision: one kind, one number of attendances. Per line, a two-item
+        course could carry two kinds and two session counts, which is not a course any centre can deliver —
+        and there was nowhere to record "three of these each time", because the quantity slot was already
+        spent on the session count.
+      */}
+      {isProcedure && (
+        <fieldset className="rx-course">
+          <legend className="rx-field-label">{t(S.courseLegend)}</legend>
+          <div className="rx-course-fields">
+            <label className="rx-field">
+              <span className="rx-field-label">{t(S.procedureType)}</span>
+              <select
+                className="rx-field-input"
+                value={procedureTypeCode ?? ""}
+                disabled={busy || typesFailed}
+                onChange={(e) => {
+                  // Read the value BEFORE the updater — `setDraft`'s callback runs after React has released
+                  // the synthetic event, and reaching for `currentTarget` there throws inside a state
+                  // updater and takes the whole composer down with it.
+                  const code = e.currentTarget.value || null;
+                  const picked = code ? typeByCode.get(code) : undefined;
+                  setDraft((d) => ({
+                    ...d,
+                    procedureTypeCode: code,
+                    // A session-based type starts at its own default rather than blank — six is the
+                    // commonest physiotherapy course, and a blank field makes the common case a typing
+                    // task. A non-session type gets NULL, not 1: "this kind has no sessions" and "a
+                    // one-session course" are different facts, and only the second shows a count.
+                    sessions: picked?.isSessionBased ? (picked.defaultSessions ?? 1) : null,
+                  }));
+                }}
+              >
+                <option value="">{t(S.chooseType)}</option>
+                {procedureTypes.map((p) => (
+                  <option key={p.code} value={p.code}>{t(p.name)}</option>
+                ))}
+              </select>
+            </label>
+
+            {/* Revealed by the TYPE's `isSessionBased` flag and never by its NAME — dialysis and
+                rehabilitation are session-based too, so a check written against the physiotherapy name
+                would be wrong for both. */}
+            {selectedType?.isSessionBased && (
+              <label className="rx-field">
+                <span className="rx-field-label">{t(S.sessions)}</span>
+                <input
+                  className="rx-field-input"
+                  type="number"
+                  min={1}
+                  // The type's own ceiling, so the composer stops the doctor where masterdata does. The
+                  // verdict that BINDS is still the write path's — this one is display state.
+                  max={selectedType.maxSessions ?? undefined}
+                  value={sessions ?? ""}
+                  disabled={busy}
+                  onChange={(e) => {
+                    const raw = e.currentTarget.value;
+                    setDraft((d) => ({ ...d, sessions: raw === "" ? null : Math.max(1, Number(raw)) }));
+                  }}
+                />
+              </label>
+            )}
+          </div>
+          <p className="muted">{t(S.courseHint)}</p>
+        </fieldset>
+      )}
+
       <ul className="rx-lines">
         {lines.map((line) => (
           <li key={line.lineId} className="rx-line">
@@ -247,12 +560,65 @@ export function InvestigationWorkspace({
               <CptCombobox
                 value={line.test}
                 sections={sections}
-                onChange={(test) => patch(line.lineId, { test })}
+                onChange={(test) => void chooseTest(line.lineId, test)}
                 disabled={busy}
               />
+
+              {/*
+                29.2 — WHAT THIS WILL CREATE, before the doctor commits (design 45 §2). The stated purpose
+                of `/orderable-services`, which existed with no caller: "so the UI can show the doctor what
+                will happen before they commit". A referral and a procedure order are different objects with
+                different endings, and the doctor choosing between them is entitled to know which they are
+                choosing.
+              */}
+              {isProcedure && line.vehicle && (
+                <p className="rx-vehicle">
+                  <span className="rx-field-label">{t(S.willCreate)}</span>{" "}
+                  <span className="rx-combobox-chip" data-kind={isReferral(line) ? "referral" : "order"}>
+                    {t(isReferral(line) ? S.vehicleReferral : S.vehicleProcedure)}
+                  </span>
+                  {isReferral(line) && <span className="muted"> {t(S.vehicleHintReferral)}</span>}
+                </p>
+              )}
               <div className="rx-line-fields">
+                {/*
+                  31.1 — the procedure TYPE is no longer here. It belongs to the ORDER: one kind for one
+                  clinical decision (see the course block above). What remains on the line is how much of
+                  THIS item is delivered at each attendance.
+                */}
+                {isProcedure && isReferral(line) && (
+                  <label className="rx-field rx-field--wide">
+                    <span className="rx-field-label">{t(S.targetSpecialty)}</span>
+                    <input
+                      className="rx-field-input"
+                      placeholder={t(S.specialtyPlaceholder)}
+                      value={line.targetSpecialty ?? ""}
+                      disabled={busy}
+                      onChange={(e) => {
+                        const v = e.currentTarget.value;   // read before the updater
+                        patch(line.lineId, { targetSpecialty: v });
+                      }}
+                    />
+                  </label>
+                )}
+
+
+                {/*
+                  31.1 — THE QUANTITY IS NOW PER SESSION on a session-based course, and separate from the
+                  session count above.
+
+                  They used to be the same field: "sessions ARE the quantity" (design 45 §2). That left
+                  nowhere to record "three of these at each attendance", which is an ordinary thing to
+                  prescribe. The metered total the server stores is sessions x this, so consume, partial
+                  approval and the delivering centre's queue all count the same units they always did.
+                */}
+                {/* A referral has no quantity: it is one request for one opinion, and a "quantity 3"
+                    referral is not a thing the state machine can close three times. */}
+                {!isReferral(line) && (
                 <label className="rx-field">
-                  <span className="rx-field-label">{t(S.quantity)}</span>
+                  <span className="rx-field-label">
+                    {t(selectedType?.isSessionBased ? S.quantityPerSession : S.quantity)}
+                  </span>
                   <input
                     className="rx-field-input"
                     type="number"
@@ -261,7 +627,16 @@ export function InvestigationWorkspace({
                     disabled={busy}
                     onChange={(e) => patch(line.lineId, { quantity: Math.max(1, Number(e.currentTarget.value) || 1) })}
                   />
+                  {/* The total the centre will be asked to deliver, stated where the two numbers that
+                      produce it can both be seen. A course whose total only appears after submission is a
+                      course nobody checked. */}
+                  {selectedType?.isSessionBased && sessions !== null && (
+                    <span className="muted">
+                      {t(S.courseTotal)}: <span className="tnum">{sessions * line.quantity}</span>
+                    </span>
+                  )}
                 </label>
+                )}
                 <label className="rx-field rx-field--wide">
                   <span className="rx-field-label">{t(S.note)}</span>
                   <input
@@ -287,19 +662,38 @@ export function InvestigationWorkspace({
               </div>
             </div>
 
-            {lines.length > 1 && (
-              <button
-                type="button"
-                className="rx-line-remove"
-                disabled={busy}
-                onClick={() => {
-                  setLines((prev) => prev.filter((l) => l.lineId !== line.lineId));
-                  setAcknowledgements((prev) => prev.filter((a) => a.lineId !== line.lineId));
-                }}
-              >
-                {t(S.removeLine)}
-              </button>
-            )}
+            {/*
+              29.4 — "HAS THIS PATIENT HAD THIS BEFORE?" ON THE LINE BEING COMPOSED. The same icon, modal and
+              endpoint the sent rows use, at the one moment the answer can still stop a duplicate order.
+            */}
+            <div className="rx-line-actions">
+              {line.test && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  aria-label={`${t(S.lineHistory)} — ${line.test.code}`}
+                  onClick={() => setHistoryFor(line.test)}
+                >
+                  <Icon name="clock" />
+                </Button>
+              )}
+              {lines.length > 1 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="rx-line-remove"
+                  disabled={busy}
+                  aria-label={`${t(S.removeLine)} — ${line.test ? line.test.code : t(S.emptyLine)}`}
+                  onClick={() => {
+                    setLines((prev) => prev.filter((l) => l.lineId !== line.lineId));
+                    setAcknowledgements((prev) => prev.filter((a) => a.lineId !== line.lineId));
+                  }}
+                >
+                  <Icon name="cross" />
+                </Button>
+              )}
+            </div>
 
             {result && !stale && (
               <OrderChecksModal
@@ -320,9 +714,12 @@ export function InvestigationWorkspace({
         ))}
       </ul>
 
+      {/* Frameless — see the prescribing workspace. Adding a line is not a decision of the same weight as
+          Check or Send order, and a bordered button beside them reads as though it were. */}
       <Button
-        variant="secondary"
+        variant="ghost"
         size="sm"
+        className="rx-add-line"
         disabled={busy}
         onClick={() => setLines((prev) => [...prev, newLine()])}
         leadingIcon={<Icon name="plus" width={16} height={16} aria-hidden="true" />}
@@ -334,6 +731,12 @@ export function InvestigationWorkspace({
       {blocked.length > 0 && <InlineAlert tone="bad">{t(S.blocked)}</InlineAlert>}
       {result && !stale && unacknowledged.length > 0 && <InlineAlert tone="warn">{t(S.unacknowledged)}</InlineAlert>}
       {!allLinesHaveTests && <InlineAlert tone="info">{t(S.needTest)}</InlineAlert>}
+      {typesFailed && <InlineAlert tone="bad">{t(S.typesUnavailable)}</InlineAlert>}
+      {allLinesHaveTests && !allLinesHaveTypes && !typesFailed && (
+        <InlineAlert tone="info">{t(S.needCourseType)}</InlineAlert>
+      )}
+      {allLinesHaveTests && !allReferralsAddressed && <InlineAlert tone="info">{t(S.needSpecialty)}</InlineAlert>}
+      {!noUnorderableLines && <InlineAlert tone="warn">{t(S.notOrderable)}</InlineAlert>}
 
       <div className="rx-actions">
         {/*
@@ -356,6 +759,17 @@ export function InvestigationWorkspace({
         persistence to save a composed order and then letting one mis-click wipe it would be the two halves
         of the same feature disagreeing.
       */}
+      {/* 29.4 — THE shared modal, one component and one endpoint, exactly as the tabs above open it. */}
+      {historyFor && (
+        <ServiceHistoryModal
+          beneficiaryId={beneficiaryId}
+          serviceType={orderType}
+          code={historyFor.code}
+          label={historyFor.description}
+          onClose={() => setHistoryFor(null)}
+        />
+      )}
+
       <Modal
         open={discarding}
         onOpenChange={setDiscarding}

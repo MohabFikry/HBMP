@@ -68,14 +68,14 @@ public sealed class HttpDrugValidator(HttpClient http, IMemoryCache cache) : IDr
 
         // ABSENCE IS CARRIED THROUGH. A null is_pack_splittable is not "true": the allocation reports
         // NotChecked and names the missing field, because a silently wrong quantity is a dispensing error.
-        var pack = new DrugPack(body.IsPackSplittable, body.PackSize);
+        var pack = new DrugPack(body.IsPackSplittable, body.PackSize, body.PrescribingUnit);
         cache.Set(key, pack, TimeSpan.FromMinutes(30));
         return pack;
     }
 
     private sealed record DrugDto(
         Guid DrugId, string? Name, string? Strength, string? Form,
-        bool? IsPackSplittable, decimal? PackSize);
+        bool? IsPackSplittable, decimal? PackSize, string? PrescribingUnit);
 }
 
 /// <summary>

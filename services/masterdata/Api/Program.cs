@@ -662,6 +662,34 @@ v1.MapPost("/examination-types/prices/by-codes", async (ExamPriceRequest req, Ma
     });
 });
 
+// 29.6 — pack facts for a set of catalogue products (design 45 §6). Catalogue data only.
+//
+// A drug is returned ONLY when the catalogue actually describes its pack. An id asked about and missing
+// from the answer means "master data does not record this", which the quantity check reports as NotChecked
+// NAMING the field — as opposed to this whole call failing, which is Unavailable. Padding the response with
+// rows of nulls would collapse that distinction, and padding it with defaults would be the guessed quantity
+// invariant 8 exists to forbid.
+v1.MapPost("/drugs/pack-facts/by-ids", async (DrugIdCheckRequest req, MasterDataDbContext db, CancellationToken ct) =>
+{
+    var ids = (req.DrugIds ?? []).ToHashSet();
+    var rows = await db.Drugs.AsNoTracking()
+        .Where(d => ids.Contains(d.DrugId))
+        .Select(d => new { d.DrugId, d.IsPackSplittable, d.PackSize, d.PrescribingUnit })
+        .ToListAsync(ct);
+
+    return Results.Ok(new
+    {
+        items = rows.ConvertAll(r => new
+        {
+            drugId = r.DrugId,
+            // Nulls travel as nulls. This is the one field where a tidy default is a dispensing error.
+            isPackSplittable = r.IsPackSplittable,
+            packSize = r.PackSize,
+            prescribingUnit = r.PrescribingUnit,
+        }),
+    });
+});   // the v1 group already requires masterdata:read — same as its sibling above
+
 // Active ingredients for a set of catalogue products. Catalogue data only — no patient context is accepted
 // or returned. The prescribing path uses it to look manufacturer labels up by ingredient, so that the drug
 // ids stay inside the platform and only a molecule name is sent to the external label source.

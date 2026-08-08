@@ -30,7 +30,18 @@ public sealed record DrugSearchHit(
     string? Form,
     decimal? PriceEgp,
     string? AtcCode,
-    bool HasIndicationData);
+    bool HasIndicationData,
+    // 29.7 (design 45 §7) — DERIVED by the loader, rendered by the combobox. These reached the database and
+    // stopped there: the columns were populated on every load and this projection never selected them, so
+    // the chip could not render however correct the computation was.
+    bool IsLowestPrice,
+    decimal? PricePerUnit,
+    string Availability,
+    // 29.6 — the pack facts, so the composer can label the dose field and say how much will be dispensed
+    // without a second call. Every one of them is nullable, and a null renders as an absence.
+    string? PrescribingUnit,
+    decimal? PackSize,
+    bool? IsPackSplittable);
 
 public static class DrugSearch
 {
@@ -87,6 +98,12 @@ public static class DrugSearch
                         SELECT 1 FROM masterdata.drug_indication di
                         WHERE di.drug_id = d.drug_id AND di.deleted_at IS NULL
                     ) AS has_indication_data,
+                    d.is_lowest_price,
+                    d.price_per_unit,
+                    d.availability,
+                    d.prescribing_unit,
+                    d.pack_size,
+                    d.is_pack_splittable,
                     CASE
                         WHEN masterdata.search_key(d.name)            LIKE q.k || '%' THEN 0
                         WHEN masterdata.search_key(d.name_ar)         LIKE q.k || '%' THEN 1
@@ -104,6 +121,8 @@ public static class DrugSearch
 
         return [.. rows.Select(r => new DrugSearchHit(
             r.DrugId, r.Name, r.NameAr, r.ScientificName,
-            r.Strength, r.Form, r.PriceEgp, r.AtcCode, r.HasIndicationData))];
+            r.Strength, r.Form, r.PriceEgp, r.AtcCode, r.HasIndicationData,
+            r.IsLowestPrice, r.PricePerUnit, r.Availability,
+            r.PrescribingUnit, r.PackSize, r.IsPackSplittable))];
     }
 }

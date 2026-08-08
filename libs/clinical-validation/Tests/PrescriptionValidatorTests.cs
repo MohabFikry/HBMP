@@ -1024,7 +1024,11 @@ public class PrescriptionValidatorTests
     {
         // Guards the guard: if every state collapsed to Unavailable the invariant tests above would pass
         // vacuously. A clean line must actually be able to reach Ok.
-        var line = Fx.Line();
+        // 29.6 — the line now carries a numeric dose and duration, and the snapshot carries the drug's pack
+        // facts. Without them the quantity check reports NotChecked, which is CORRECT and which is exactly
+        // why they belong here: "nothing to report" has to mean every check had what it needed, or this
+        // guard stops guarding as soon as a new check is added.
+        var line = Fx.Line(doseAmount: 500, doseUnit: "mg", timesPerDay: 2, durationDays: 5);
         var result = Fx.Run(
             Fx.Request([line]),
             Fx.Snapshot(
@@ -1032,7 +1036,8 @@ public class PrescriptionValidatorTests
                 interactions: Fx.Interactions(knownPairCount: 40),
                 allergies: Fx.Allergies(recordedCount: 2),
                 dosingRules: Fx.DosingRules(new DosingRuleFact(line.DrugId, MaxDailyDose: 4000, DoseUnit: "mg")),
-                benefit: Fx.Benefit(new BenefitOutcome(line.LineId, BenefitState.Allowed, "Covered.", "مغطى."))), diagnoses: ["E11.9"]);
+                benefit: Fx.Benefit(new BenefitOutcome(line.LineId, BenefitState.Allowed, "Covered.", "مغطى.")),
+                packFacts: Fx.PackFacts((line.DrugId, isSplittable: true, packSize: 20m))), diagnoses: ["E11.9"]);
 
         result.StateFor(line.LineId).Should().Be(CheckState.Ok);
         result.UnacknowledgedBlockers(line.LineId).Should().BeEmpty();

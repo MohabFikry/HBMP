@@ -26,7 +26,7 @@ function renderWorkspace(
   return render(
     <AppProviders authClient={new DevAuthClient()} apiClient={api}>
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <InvestigationWorkspace encounterId="enc-77" orderType={orderType} diagnosisIcdCodes={diagnoses} />
+        <InvestigationWorkspace encounterId="enc-77" beneficiaryId="aaaaaaaa-0000-0000-0000-000000000231" orderType={orderType} diagnosisIcdCodes={diagnoses} />
       </MemoryRouter>
     </AppProviders>,
   );

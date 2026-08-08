@@ -1196,6 +1196,11 @@
           "procedureTypeCode": {
             "type": "string",
             "nullable": true
+          },
+          "quantityPerSession": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -1224,6 +1229,15 @@
             "items": {
               "$ref": "#/components/schemas/CreateOrderLine"
             },
+            "nullable": true
+          },
+          "procedureTypeCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "sessions": {
+            "type": "integer",
+            "format": "int32",
             "nullable": true
           }
         },

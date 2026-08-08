@@ -54,6 +54,8 @@ Five sheets; the loader reads **`Drug List`** and validates against `masterdata.
 | E | `Manufacturer` | 98.5% | `drug.manufacturer` |
 | H | `ATC Code` | 85.2% | `drug.atc_code` |
 | J,L,N,P,R | `ATC L1–L5 Name` | 85.2→83.9% | `atc_class` (derived by truncation, as for the CSV) |
+| **W** | **`Major Units (per box)`** | **100.0%** | pack facts — strips/containers per box (see below) |
+| **X** | **`Minor Units (total)`** | **100%** | `drug.pack_size` **and** `drug.is_pack_splittable` (see below) |
 | **T** | **`Related ICDs`** | **100%** | **`drug_indication.icd_code`** — comma-separated |
 | U | `ICD Count` | 100% | checksum for T; not stored |
 | V | `ICD Basis` | 100% | `drug_indication.source` |
@@ -80,6 +82,51 @@ Columns are bound **by header name**; a rename or reorder throws rather than loa
    authoritative drug-to-indication mapping exists. Spot-validate a stratified sample against EDA leaflets or
    FDA/EMA labels before this gates live claims."* That sentence is why `source` is mandatory, is surfaced to
    the prescriber, and why an indication mismatch may only ever **warn** (doc 43 §1).
+
+#### The pack columns decide splittability — the dosage form does not
+
+`Major Units (per box)` (W) is strips/blisters/containers per box; `Minor Units (total)` (X) is the total
+**prescribing units** in the box. Measured over all 22,653 rows:
+
+```
+X > W   12,956     tablets in strips, capsules, sachets, suppositories
+X == W   9,647     mostly 1/1 — one bottle, one tube, one inhaler; but also 3 ampoules, 5 penfills
+X < W       46     incoherent: a box cannot hold fewer units than the containers it is made of
+missing      4
+```
+
+So the rule is about **X alone**: a pack holding more than one prescribing unit can be split, a pack that *is*
+one unit cannot. `pack_size` = X; `is_pack_splittable` = X > 1; an incoherent or absent pair derives **nothing**
+and the quantity check reports NotChecked naming the field.
+
+This replaced deriving splittability from `Dosage Form`, which is wrong in both directions on real rows: it
+calls a box of three ampoules unsplittable — three separate items, and giving one is routine — and it has
+nothing to say about the 38 forms it does not recognise. The form now supplies only `prescribing_unit`, the
+word shown beside the dose field, and its vocabulary was widened by migration `0018` to cover the 2,495
+products that previously loaded with no unit at all. `pack_unit` was widened to `varchar(64)` in the same
+migration: it stores the source's free-text `Dosage Form`, and `varchar(16)` could not hold
+"prefilled syringe".
+
+Observed coverage after the change (release `phase-29-packfacts`):
+
+```
+prescribing_unit     21,815 / 22,653  (96.3%)
+pack_size            22,607 / 22,653  (99.8%)
+is_pack_splittable   22,647 / 22,653  (100.0%)
+ALL THREE (usable)   21,775 / 22,653  (96.1%)
+```
+
+#### Display casing is applied at load, over the whole table
+
+One source shouts (`PARTEN MASSAGE SPRAY`) and the other whispers (`gastrodomina 40mg 10 tab`), and they sit
+in the same list. `MasterDataNormalize.DisplayName` capitalises each alphabetic run, leaves any token
+containing a digit alone (`40mg` stays `40mg` — a re-spelt strength is a second spelling of a dose), and keeps
+units of measure upper (`MG`, `ML`, `IU`). It is idempotent, and it cannot orphan a row: the natural key
+`drug_code` is derived from the raw name and upper-cases anyway.
+
+`DbUpsert.RecaseDrugNamesAsync` applies it to **every** row, not only the current source's — a workbook load
+writes 22,653 rows and would otherwise leave the 8,998 that came from the CSV in capitals, splitting the
+catalogue down the middle by which file a product arrived in.
 
 #### What this file cannot supply
 

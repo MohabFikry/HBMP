@@ -120,6 +120,10 @@ if (!dryRun)
     await DbUpsert.UpsertCptAsync(db, cpt, cptReport, default);
     await DbUpsert.UpsertAtcAsync(db, atc, atcReport, default);      // parents-before-children, before drugs
     await DbUpsert.UpsertDrugsAsync(db, drugs, drugReport, default);
+    // Casing over the WHOLE table, not only this load's rows — the catalogue holds products from two files
+    // that disagree about capitals, and they sit in the same list. Before the price recompute, which reads
+    // the scientific name to group comparable products.
+    await DbUpsert.RecaseDrugNamesAsync(db, drugReport, default);
     // 29.7 — DERIVED, never authored: recomputed on every load, right after the prices land.
     await DbUpsert.RecomputeLowestPriceAsync(db, DateTimeOffset.UtcNow, drugReport, default);
     // A drug whose uuid was ADOPTED from an earlier load keeps its own id, so the links — built against the

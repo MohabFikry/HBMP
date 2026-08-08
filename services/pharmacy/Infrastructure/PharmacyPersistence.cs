@@ -30,7 +30,15 @@ public interface IDrugValidator
 
 /// <param name="IsPackSplittable">Null ⇒ master data does not say. The allocation refuses to compute rather
 /// than guessing.</param>
-public sealed record DrugPack(bool? IsPackSplittable, decimal? PackSize);
+/// <summary>
+/// A drug's pack facts, as pharmacy needs them.
+/// </summary>
+/// <param name="PrescribingUnit">
+/// 29.6 — what the dose and the quantity are COUNTED IN: Tablet, ML, Puff. Carried because the composer puts
+/// it beside the dose field, and a bare "60" next to a medicine is a number whose unit the prescriber has to
+/// infer from the product name. Null is honest: 838 catalogue rows have no derivable unit.
+/// </param>
+public sealed record DrugPack(bool? IsPackSplittable, decimal? PackSize, string? PrescribingUnit = null);
 
 public sealed class AllowAllDrugValidator : IDrugValidator
 {

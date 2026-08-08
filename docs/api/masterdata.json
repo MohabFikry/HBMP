@@ -811,6 +811,28 @@
         }
       }
     },
+    "/api/v1/drugs/pack-facts/by-ids": {
+      "post": {
+        "tags": [
+          "Mersal.MasterData.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DrugIdCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/drugs/ingredients/by-ids": {
       "post": {
         "tags": [

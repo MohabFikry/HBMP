@@ -1,5 +1,12 @@
 import type {
+  ChronicPreview,
+  QuantityPreview,
+  OrderableService,
   ProcedureQueueItem,
+  ProcedureType,
+  ReferralCreated,
+  PrescriptionKind,
+  RefillFrequency,
   SessionProgress,
   ServiceHistory,
   RxPricing,
@@ -138,6 +145,7 @@ import type {
   AutoDecisionSwitch,
   SetAutoDecision,
   AmendReasonOption,
+  WithdrawResult,
 } from "@mersal/contracts";
 
 /**
@@ -227,6 +235,16 @@ export interface ApiClient {
   amendPrescriptionLine(
     rxId: string, lineId: string, quantityPrescribed: number, reasonCode: string, reasonText?: string,
   ): Promise<void>;
+  /**
+   * Withdraw a WHOLE transaction — every line of it that can still be withdrawn.
+   *
+   * <p>Reached from the row rather than from inside the record, because "withdraw this prescription" is the
+   * act a doctor actually intends; withdrawing four lines one at a time is that act performed four times,
+   * with four chances to stop halfway. The result reports PARTIAL success plainly (design 46 §3) — a line
+   * already dispensed cannot be withdrawn, and the doctor has to be told which.</p>
+   */
+  withdrawPrescription(rxId: string, reasonCode: string, reasonText?: string): Promise<WithdrawResult>;
+  withdrawOrder(orderId: string, reasonCode: string, reasonText?: string): Promise<WithdrawResult>;
   /** Start the visit for a checked-in appointment (CheckedIn → an open encounter). Server-gated: the caller
    * must be the assigned practitioner, or the appointment must name none. Returns the encounter id. */
   startVisit(appointmentId: string, beneficiaryId: string): Promise<{ encounterId: string }>;
@@ -333,6 +351,30 @@ export interface ApiClient {
 
   // Lab / imaging — queue + consume (Phase 5)
   labQueue(kind: "lab" | "radiology"): Promise<LabOrder[]>;
+
+  /**
+   * 29.2 — the OP-Procedure kinds the composer offers (design 45 §2). Master data, so the list grows by a
+   * data change rather than a release. The composer reveals its sessions field from `isSessionBased`.
+   */
+  procedureTypes(): Promise<ProcedureType[]>;
+
+  /**
+   * 29.2 — what each code will actually CREATE (design 45 §2). Read as the doctor picks, so the composer
+   * can say so before they commit; `kinds` narrows to the vehicles a tab can raise.
+   */
+  orderableServices(query: string, kinds?: readonly string[]): Promise<OrderableService[]>;
+
+  /**
+   * 29.2 — raise a REFERRAL for an E/M code (invariant 3). The server re-derives the vehicle and refuses
+   * `not-a-referral-service` for a code that routes elsewhere, so this call cannot bypass the routing map.
+   */
+  createReferral(req: {
+    encounterId: string;
+    targetSpecialty: string;
+    reason?: string;
+    requestedServiceCode: string;
+    targetProviderId?: string | null;
+  }): Promise<ReferralCreated>;
 
   // ---- 29.2b — the external delivering provider's portal (design 45 §2b) ----
   /** The orders routed to THIS centre. Server-scoped by assigned_provider_id; the client never filters. */
@@ -460,7 +502,43 @@ export interface ApiClient {
     lines: PrescriptionDraftLine[];
     diagnosisIcdCodes: string[];
     acknowledgements: LineAcknowledgement[];
+    // 29.5 — the script's own shape (design 45 §5). Omitted entirely for an acute prescription.
+    kind?: PrescriptionKind;
+    refillFrequencyCode?: string | null;
+    durationDays?: number | null;
   }): Promise<PrescriptionSubmitResult>;
+
+  // ---- 29.5 — acute / chronic prescribing (design 45 §5) ----
+  /** The supervisor-configurable refill cadences. ACTIVE rows only. */
+  refillFrequencies(): Promise<RefillFrequency[]>;
+  /**
+   * The computed window schedule, BEFORE submit — so the doctor sees 34/33/33 and can adjust.
+   * Computed SERVER-side by the same allocation the write path runs, so the two cannot drift.
+   */
+  /**
+   * 29.6 — how much will actually be dispensed, before the doctor commits (design 45 §6).
+   *
+   * <p>Answered by the SERVER because `QuantityMath` is the one implementation of that arithmetic — the
+   * validation check grades against it and the counter meters against it. Send the DRUG, not pack facts:
+   * they are master data, and a client that fetched them to hand back would be a second reader of the
+   * catalogue and therefore a second thing that can disagree with it.</p>
+   */
+  quantityPreview(req: {
+    drugId?: string;
+    doseAmount?: number | null;
+    timesPerDay?: number | null;
+    durationDays?: number | null;
+  }): Promise<QuantityPreview>;
+  chronicPreview(req: {
+    durationDays: number;
+    refillFrequencyCode: string;
+    doseAmount?: number;
+    timesPerDay?: number;
+    /** The product, so the SERVER resolves its pack facts — the same lookup the write path makes. */
+    drugId?: string;
+    isPackSplittable?: boolean | null;
+    packSize?: number | null;
+  }): Promise<ChronicPreview>;
 
   // Investigation ordering workspace — the lab / imaging counterpart of the prescribing trio above.
   /**
@@ -494,6 +572,14 @@ export interface ApiClient {
     orderType: InvestigationOrderType;
     lines: InvestigationDraftLine[];
     acknowledgements: OrderAcknowledgement[];
+    /**
+     * 31.1 — the OP-Procedure COURSE: one kind and one session count for the whole order.
+     *
+     * <p>They were per-line, which let a two-item course carry two kinds and two session counts — not a
+     * course any centre can deliver. Absent on Lab and Radiology orders, which have neither.</p>
+     */
+    procedureTypeCode?: string | null;
+    sessions?: number | null;
   }): Promise<InvestigationOrderResult>;
 
   // Approvals — worklist + decision (Phase 7)

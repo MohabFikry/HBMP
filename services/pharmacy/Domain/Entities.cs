@@ -248,6 +248,17 @@ public sealed class Referral
     public string TargetSpecialty { get; set; } = default!;
     public Guid? TargetProviderId { get; set; }
     public string? Reason { get; set; }
+
+    /// <summary>
+    /// 29.2 — the CPT code this referral was raised FOR (design 45 §2). NULL means NOT RECORDED, which is
+    /// not the same as "no service": referrals raised before this existed, and those raised from paths that
+    /// carry no code, are legitimately null.
+    /// </summary>
+    public string? RequestedServiceCode { get; set; }
+
+    /// <summary>The coding system of <see cref="RequestedServiceCode"/>. Named, never assumed.</summary>
+    public string? RequestedServiceCodeSystem { get; set; }
+
     public ReferralStatus Status { get; set; } = ReferralStatus.Requested;
     public DateTimeOffset RequestedAt { get; set; }
     public string? IdempotencyKey { get; set; }

@@ -66,6 +66,34 @@ export const zInvestigationDraftLine = z.object({
   quantity: z.number().int().min(1),
   /** Free-text detail for the performing site — "left knee", "fasting". Never a substitute for the code. */
   note: z.string(),
+
+  /**
+   * 29.2 — the OP-Procedure kind (design 45 §2). Null on every Lab and Radiology line, where orders-service
+   * refuses a type rather than ignoring it.
+   *
+   * <p>Required on a Procedure line: `ProcedureLineChecks.Validate` returns `TypeMissing` without one and
+   * the write path answers 422. Leaving it off this schema is what made the OP Procedures tab compose
+   * orders the server could only refuse.</p>
+   *
+   * <p>There is deliberately no `sessions` field beside it — <b>sessions ARE the quantity</b> (design 45
+   * §2), metered by the same atomic consume as every other line.</p>
+   */
+  procedureTypeCode: z.string().nullable().optional(),
+
+  /**
+   * 29.2 — what choosing this code will actually CREATE (design 45 §2).
+   *
+   * <p>Resolved from `/orderable-services` as the doctor picks, so the composer can say so before they
+   * commit. Display state only: pharmacy and orders each re-derive the vehicle on their own write path, and
+   * a forged value here changes nothing except what this screen shows.</p>
+   */
+  vehicle: z.enum(["ProcedureOrder", "Referral", "LabOrder", "RadiologyOrder", "NotOrderable"]).nullable().optional(),
+
+  /**
+   * The specialty a REFERRAL line is addressed to. Required on a referral — pharmacy refuses
+   * `missing-specialty` — and meaningless on an order line.
+   */
+  targetSpecialty: z.string().nullable().optional(),
 });
 export type InvestigationDraftLine = z.infer<typeof zInvestigationDraftLine>;
 

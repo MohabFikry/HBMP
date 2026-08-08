@@ -21,7 +21,7 @@ public static class ReferralEndpoints
         v1.MapPost("", async (
             CreateReferralRequest req, HttpRequest http, PharmacyDbContext db, PharmacyGate gate,
             SequenceIssuer seq, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me,
-            TimeProvider clock, CancellationToken ct) =>
+            IReferralServiceResolver services, TimeProvider clock, CancellationToken ct) =>
         {
             var idem = http.Headers["Idempotency-Key"].ToString();
             if (string.IsNullOrWhiteSpace(idem))
@@ -38,6 +38,41 @@ public static class ReferralEndpoints
             var denied = await gate.CheckAsync(PharmacyPolicies.ReferralCreate, "referral", null, req.BeneficiaryId, bearer, ct);
             if (denied is not null) return denied;
 
+            /*
+             * 29.2 — THE ROUTING MAP, ENFORCED IN BOTH DIRECTIONS (design 45 §2, invariant 3).
+             *
+             * An E/M code creates a Referral. The half that is easy to forget is the converse: a code that
+             * routes to a PROCEDURE ORDER must not be raised as a referral, because doing so bypasses the
+             * consume / authorise / claim path the order type exists to travel — the same class of mistake
+             * as routing E/M to a procedure, pointing the other way.
+             *
+             * FAIL-CLOSED. An unknown code and an unreachable masterdata both resolve to null, and both are
+             * refused: "we could not find out which vehicle this code takes" is not a reason to write a
+             * referral for it.
+             */
+            if (!string.IsNullOrWhiteSpace(req.RequestedServiceCode))
+            {
+                var lookup = await services.ResolveAsync(req.RequestedServiceCode, bearer, ct);
+                if (!string.Equals(lookup.Vehicle, "Referral", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.Problem(
+                        statusCode: 422, title: "not-a-referral-service",
+                        type: "urn:hbmp:not-a-referral-service",
+                        detail: lookup.Vehicle is null
+                            ? $"'{req.RequestedServiceCode}' is not a code this platform can route. It is "
+                              + "either absent from the CPT catalogue or the catalogue could not be reached, "
+                              + "and a referral is not raised for a service nobody can report against."
+                            : $"'{req.RequestedServiceCode}' is a {lookup.Section} code, which is ordered as "
+                              + $"a {lookup.Vehicle} rather than referred. Raise it from the OP Procedures "
+                              + "tab so it travels the consume and claim path.",
+                        extensions: new Dictionary<string, object?>
+                        {
+                            ["vehicle"] = lookup.Vehicle,
+                            ["section"] = lookup.Section,
+                        });
+                }
+            }
+
             var now = clock.GetUtcNow();
             var actor = me.Principal?.Subject;
             var providerId = Guid.TryParse(me.Principal?.ProviderId, out var pg) ? pg : Guid.Empty;
@@ -47,6 +82,11 @@ public static class ReferralEndpoints
                 ReferralId = Guid.NewGuid(), ReferralNo = ReferralNo.Format(now.Year, await seq.NextAsync("referral_seq", now.Year, ct)),
                 BeneficiaryId = req.BeneficiaryId, EncounterId = req.EncounterId, ReferringProviderId = providerId,
                 TargetSpecialty = req.TargetSpecialty, TargetProviderId = req.TargetProviderId, Reason = req.Reason,
+                // 29.2 — what this referral was raised FOR. The loop closes against a specific service.
+                RequestedServiceCode = req.RequestedServiceCode,
+                RequestedServiceCodeSystem = string.IsNullOrWhiteSpace(req.RequestedServiceCode)
+                    ? null
+                    : req.RequestedServiceCodeSystem ?? "CPT",
                 Status = ReferralStatus.Requested, RequestedAt = now, IdempotencyKey = idem, CreatedBy = actor,
             };
 

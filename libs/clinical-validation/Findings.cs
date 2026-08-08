@@ -49,6 +49,17 @@ public enum CheckKind
     Benefit,
 
     /// <summary>
+    /// 29.6 — how much to dispense, from the drug's pack facts (design 45 §6).
+    ///
+    /// <para>Its whole reason for existing is the NEGATIVE case: where the master data does not record
+    /// <c>is_pack_splittable</c> or <c>pack_size</c>, this reports <b>NotChecked naming the missing
+    /// field</b> — never a guessed quantity, because a silently wrong quantity is a dispensing error. The
+    /// write path already refused such a script; this is what tells the prescriber WHICH fact is absent
+    /// while they can still act on it.</para>
+    /// </summary>
+    Quantity,
+
+    /// <summary>
     /// Two lines that duplicate each other — the same molecule, or the same therapeutic class.
     /// </summary>
     /// <remarks>

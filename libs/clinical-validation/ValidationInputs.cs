@@ -414,4 +414,18 @@ public sealed record ValidationSnapshot(
     Fetched<DiagnosisContext> Diagnoses,
     Fetched<IReadOnlyDictionary<Guid, DrugComposition>> Compositions,
     Fetched<PatientContext> Patient,
-    Fetched<ContraindicationTable> Contraindications);
+    Fetched<ContraindicationTable> Contraindications,
+    // 29.6 (design 45 §6) — the drug's pack facts, behind Fetched like every other fetched fact, so
+    // "masterdata was unreachable" stays distinguishable from "master data does not record this".
+    Fetched<IReadOnlyDictionary<Guid, DrugPackFacts>> PackFacts);
+
+/// <summary>
+/// 29.6 — what the drug master records about how a product is packed (design 45 §6).
+/// </summary>
+/// <param name="IsPackSplittable">
+/// <b>Null means the master data does not say</b>, and that is not the same as false. Defaulting it either
+/// way is the error invariant 8 exists to prevent: assuming splittable permits a fractional inhaler, and
+/// assuming not would round a tablet count up to whole boxes.
+/// </param>
+/// <param name="PackSize">How many prescribing units are in one pack. Null ⇒ not recorded.</param>
+public sealed record DrugPackFacts(bool? IsPackSplittable, decimal? PackSize);

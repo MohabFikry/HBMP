@@ -25,7 +25,7 @@ function renderWorkspace(
   return render(
     <AppProviders authClient={new DevAuthClient()} apiClient={api}>
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <PrescribingWorkspace encounterId="enc-77" diagnosisIcdCodes={diagnoses} />
+        <PrescribingWorkspace encounterId="enc-77" beneficiaryId="aaaaaaaa-0000-0000-0000-000000000231" diagnosisIcdCodes={diagnoses} />
       </MemoryRouter>
     </AppProviders>,
   );
@@ -305,7 +305,7 @@ describe("severity is a first-class cue", () => {
     render(
       <AppProviders authClient={new DevAuthClient()} apiClient={apiReturning("Contraindicated", true)}>
         <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-          <PrescribingWorkspace encounterId="enc-77" diagnosisIcdCodes={["E11.9"]} />
+          <PrescribingWorkspace encounterId="enc-77" beneficiaryId="aaaaaaaa-0000-0000-0000-000000000231" diagnosisIcdCodes={["E11.9"]} />
         </MemoryRouter>
       </AppProviders>,
     );
@@ -327,7 +327,7 @@ describe("severity is a first-class cue", () => {
     render(
       <AppProviders authClient={new DevAuthClient()} apiClient={apiReturning("Moderate", false)}>
         <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-          <PrescribingWorkspace encounterId="enc-77" diagnosisIcdCodes={["E11.9"]} />
+          <PrescribingWorkspace encounterId="enc-77" beneficiaryId="aaaaaaaa-0000-0000-0000-000000000231" diagnosisIcdCodes={["E11.9"]} />
         </MemoryRouter>
       </AppProviders>,
     );
@@ -347,7 +347,7 @@ describe("severity is a first-class cue", () => {
     render(
       <AppProviders authClient={new DevAuthClient()} apiClient={apiReturning(null, true)}>
         <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-          <PrescribingWorkspace encounterId="enc-77" diagnosisIcdCodes={["E11.9"]} />
+          <PrescribingWorkspace encounterId="enc-77" beneficiaryId="aaaaaaaa-0000-0000-0000-000000000231" diagnosisIcdCodes={["E11.9"]} />
         </MemoryRouter>
       </AppProviders>,
     );
@@ -364,7 +364,7 @@ describe("severity is a first-class cue", () => {
     const { container } = render(
       <AppProviders authClient={new DevAuthClient()} apiClient={apiReturning("Major", true)}>
         <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-          <PrescribingWorkspace encounterId="enc-77" diagnosisIcdCodes={["E11.9"]} />
+          <PrescribingWorkspace encounterId="enc-77" beneficiaryId="aaaaaaaa-0000-0000-0000-000000000231" diagnosisIcdCodes={["E11.9"]} />
         </MemoryRouter>
       </AppProviders>,
     );
@@ -444,7 +444,7 @@ describe("the real-uuid regression", () => {
     render(
       <AppProviders authClient={new DevAuthClient()} apiClient={api}>
         <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-          <PrescribingWorkspace encounterId="enc-77" diagnosisIcdCodes={["E11.9"]} onDone={onDone} />
+          <PrescribingWorkspace encounterId="enc-77" beneficiaryId="aaaaaaaa-0000-0000-0000-000000000231" diagnosisIcdCodes={["E11.9"]} onDone={onDone} />
         </MemoryRouter>
       </AppProviders>,
     );

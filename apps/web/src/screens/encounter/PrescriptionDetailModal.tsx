@@ -3,6 +3,7 @@ import { Button, InlineAlert, Modal, StatusChip } from "@mersal/design-system";
 import type { AmendReasonOption, RxRow, RxRowLine } from "@mersal/contracts";
 import { useApi } from "../../api/ApiProvider";
 import { AmendLineDialog } from "../AmendLineDialog";
+import { ServiceHistoryModal } from "../ServiceHistoryModal";
 import type { AmendAction, LineLockedReason } from "../AmendLineDialog";
 import { useFormat } from "../../i18n/useFormat";
 import { useLoc } from "../_shared";
@@ -47,6 +48,9 @@ const S = {
   quantity: { en: "Quantity prescribed", ar: "الكمية الموصوفة" },
   dispensed: { en: "Dispensed to date", ar: "المصروف حتى الآن" },
   refills: { en: "Refills allowed", ar: "مرات الصرف المسموح بها" },
+  // 29.4 (design 45 §4) — "has this patient had this medicine before, and what happened?"
+  history: { en: "History", ar: "السجل" },
+  viewHistory: { en: "Previous prescriptions of this medicine", ar: "الوصفات السابقة لهذا الدواء" },
   noLines: { en: "This prescription has no lines.", ar: "لا تحتوي هذه الوصفة على أسطر." },
 
   // ---- 30.6 amend / cancel (design 46 §1-§3, §10) — worded identically to the order twin, because they
@@ -98,6 +102,8 @@ export function PrescriptionDetailModal({
   const api = useApi();
 
   const [acting, setActing] = useState<{ line: RxRowLine; action: AmendAction } | null>(null);
+  /** 29.4 — which medicine's history is open. One at a time; it is read, not compared. */
+  const [historyFor, setHistoryFor] = useState<RxRowLine | null>(null);
   const [reasons, setReasons] = useState<AmendReasonOption[]>([]);
   const [failed, setFailed] = useState(false);
 
@@ -189,12 +195,31 @@ export function PrescriptionDetailModal({
               key={line.id} line={line} index={i + 1} t={t} fmt={fmt}
               lock={lockOf(rx, line)}
               onAct={(action) => { setFailed(false); setActing({ line, action }); }}
+              // 29.4 — "has this patient had this medicine before?" (design 45 §4). THE shared modal and
+              // THE one endpoint, opened from a prescription line exactly as it is from a lab line — the
+              // half of design 45 §4 that named prescriptions first and reached them last.
+              onHistory={line.drugId ? () => setHistoryFor(line) : undefined}
             />
           ))}
         </ol>
       )}
 
       {failed && <InlineAlert tone="bad">{t(S.failed)}</InlineAlert>}
+
+      {/*
+        29.4 — THE shared service-history modal (design 45 §4). Design 45 §4 names prescriptions FIRST in
+        "every service line — prescription, lab, radiology, OP procedure", and this is where that reaches
+        them. One component and one endpoint: not a prescription-shaped copy of the investigation one.
+      */}
+      {historyFor?.drugId && (
+        <ServiceHistoryModal
+          beneficiaryId={rx.beneficiary.id}
+          serviceType="Prescription"
+          code={historyFor.drugId}
+          label={historyFor.drug ? t(historyFor.drug) : undefined}
+          onClose={() => setHistoryFor(null)}
+        />
+      )}
 
       <AmendLineDialog
         open={acting !== null}
@@ -216,6 +241,7 @@ function RxLineCard({
   fmt,
   lock,
   onAct,
+  onHistory,
 }: {
   line: RxRowLine;
   index: number;
@@ -223,6 +249,8 @@ function RxLineCard({
   fmt: ReturnType<typeof useFormat>;
   lock: LineLockedReason | null;
   onAct: (action: AmendAction) => void;
+  /** 29.4 — open this medicine's history. Undefined when the row carries no drug id to ask about. */
+  onHistory?: () => void;
 }) {
   const lockedWord =
     lock?.what === "Dispensed" ? S.lockedDispensed
@@ -244,6 +272,17 @@ function RxLineCard({
           </span>
         )}
         <StatusChip kind={line.status.kind} label={t(line.status.label)} />
+        {/* 29.4 — the SAME icon, the same modal and the same endpoint the investigation tabs use. */}
+        {onHistory && (
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`${t(S.viewHistory)} — ${line.drug ? t(line.drug) : t(S.drugMissing)}`}
+            onClick={onHistory}
+          >
+            {t(S.history)}
+          </Button>
+        )}
       </div>
       <dl className="rxv-grid">
         <div className="rxv-cell">

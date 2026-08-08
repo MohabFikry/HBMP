@@ -89,6 +89,76 @@ export const zServiceHistoryRow = z.object({
 });
 export type ServiceHistoryRow = z.infer<typeof zServiceHistoryRow>;
 
+/**
+ * 29.2 — an OP-Procedure KIND, as masterdata administers it (design 45 §2).
+ *
+ * <p><b>Master data, not an enum.</b> Adding "Hydrotherapy" must be a data change, not a release, so this
+ * schema describes a row rather than a closed union.</p>
+ *
+ * <p><b>`isSessionBased` is the whole point.</b> The composer reveals its sessions field from this FLAG and
+ * never from the code — physiotherapy is session-based today, and dialysis and rehabilitation obviously are
+ * too. branching on the type's NAME would guarantee that conversation twice more.</p>
+ */
+export const zProcedureType = z.object({
+  code: z.string(),
+  name: zLocalized,
+  isSessionBased: z.boolean(),
+  /** What the sessions field starts at. Null on a non-session type, which has no such field. */
+  defaultSessions: z.number().int().nullable().optional(),
+  /** The composer stops the doctor here; orders-service refuses above it regardless. */
+  maxSessions: z.number().int().nullable().optional(),
+  /**
+   * The CPT sections this type may accompany. A physiotherapy type on a minor-surgery code is a data error.
+   * Held here so the composer can say so as the doctor picks — but the verdict that BINDS is the write
+   * path's, because this one is display state.
+   */
+  allowedCptScopes: z.array(z.string()),
+});
+export type ProcedureType = z.infer<typeof zProcedureType>;
+
+/**
+ * 29.2 — which VEHICLE a CPT code creates (design 45 §2).
+ *
+ * <p>The doctor picks a service; the SYSTEM decides what it becomes. That distinction matters downstream: a
+ * referral is not finished until a report comes back, and a procedure needs fulfilment and consumption. Get
+ * it backwards and the loop is never opened, so it can never be found open — the classic outpatient
+ * patient-safety failure.</p>
+ */
+export const zOrderableVehicle = z.enum([
+  "ProcedureOrder", "Referral", "LabOrder", "RadiologyOrder", "NotOrderable",
+]);
+export type OrderableVehicle = z.infer<typeof zOrderableVehicle>;
+
+/**
+ * One code the doctor may choose, and what choosing it will actually create.
+ *
+ * <p>Read BEFORE the doctor commits — that is the whole reason `/orderable-services` exists. A composer
+ * that discovers the vehicle only on submit cannot show anyone what is about to happen.</p>
+ */
+export const zOrderableService = z.object({
+  code: z.string(),
+  description: z.string(),
+  section: z.string(),
+  vehicle: zOrderableVehicle,
+  /** False ⇒ the code exists but cannot be raised. `reason` says why. */
+  orderable: z.boolean(),
+  /**
+   * Why a non-orderable code cannot be raised. Present so the option can be shown and EXPLAINED rather than
+   * filtered out: a code that vanishes from a search reads as a typo to the doctor who typed it correctly.
+   */
+  reason: zLocalized.nullable().optional(),
+});
+export type OrderableService = z.infer<typeof zOrderableService>;
+
+/** 29.2 — a raised referral, as the composer reports it back to the doctor. */
+export const zReferralCreated = z.object({
+  referralId: z.string(),
+  referralNo: z.string(),
+  status: z.string(),
+  requestedServiceCode: z.string().nullable().optional(),
+});
+export type ReferralCreated = z.infer<typeof zReferralCreated>;
+
 export const zTrendPoint = z.object({ at: z.string(), value: z.number() });
 
 export const zServiceHistory = z.object({
@@ -101,5 +171,13 @@ export const zServiceHistory = z.object({
   /** Built ONLY from rows the caller may see — a chart across restricted points leaks them by position. */
   trend: z.array(zTrendPoint),
   items: z.array(zServiceHistoryRow),
+  /**
+   * 29.4 — TRUE when the prescription half could not be loaded, so this history is INCOMPLETE rather than
+   * complete-and-short (design 45 §4).
+   *
+   * <p>The three-state rule reaches inside a single response here: the orders half answered and the
+   * pharmacy half did not, and a reader who is not told that will take a short list for the whole story.</p>
+   */
+  prescriptionsUnavailable: z.boolean().optional(),
 });
 export type ServiceHistory = z.infer<typeof zServiceHistory>;

@@ -118,10 +118,12 @@ import {
   type RoleScopeGrant,
   type ReportAccessRequestRow,
   zAmendReasonOption,
+  zQuantityPreview,
 } from "@mersal/contracts";
 import type { BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, DiagnosisRank, MasterDataEdit, SetDocumentValidity, SaveApprovalRule, ApprovalRule, SetAutoDecision} from "@mersal/contracts";
 import type { CptSection, InvestigationDraftLine, InvestigationOrderType, OrderAcknowledgement, OrderFinding, ValidityExtensionRequest } from "@mersal/contracts";
-import type { PrescriptionDraftLine, LineAcknowledgement, Finding } from "@mersal/contracts";
+import type { PrescriptionDraftLine, LineAcknowledgement, Finding, PrescriptionKind } from "@mersal/contracts";
+import type { WithdrawResult } from "@mersal/contracts";
 import type { AddAllergyRequest, AllergenOption, BloodGroup, MemberClinicalRecord } from "@mersal/contracts";
 import type { InvestigationOrder, OrderPricing, SubstitutionRequest } from "@mersal/contracts";
 import type { ApiClient, ApiScenario } from "./client";
@@ -674,6 +676,34 @@ export class DevApiClient implements ApiClient {
   async cancelPrescriptionLine(_r: string, _l: string, _c: string, _t?: string) { void _r; void _l; void _c; void _t; }
   async amendPrescriptionLine(_r: string, _l: string, _q: number, _c: string, _t?: string) {
     void _r; void _l; void _q; void _c; void _t;
+  }
+  /**
+   * 30.6 — the fixture answers PARTIAL success, not a clean one.
+   *
+   * A fixture that always reports "all withdrawn" is a fixture in which the branch the doctor most needs to
+   * see — one line already dispensed and therefore still live — can never be rendered, in the demo build or
+   * in any test that runs against it. That is exactly how the encounter tabs shipped a table nothing could
+   * be withdrawn from: the fixture never disagreed with the happy path.
+   */
+  async withdrawPrescription(_r: string, _c: string, _t?: string): Promise<WithdrawResult> {
+    void _c; void _t;
+    const rx = (await this.prescriptionsMine()).find((x) => x.id === _r);
+    const lines = (rx?.lines ?? []).map((l) => ({
+      label: l.drug ? l.drug.en : "—",
+      withdrawn: l.quantityDispensed === 0,
+      refusal: l.quantityDispensed === 0 ? null : "Dispensed",
+    }));
+    return { withdrawn: lines.filter((l) => l.withdrawn).length, total: lines.length, lines };
+  }
+  async withdrawOrder(_o: string, _c: string, _t?: string): Promise<WithdrawResult> {
+    void _c; void _t;
+    const order = (await this.ordersMine()).find((x) => x.id === _o);
+    const lines = (order?.lines ?? []).map((l) => ({
+      label: l.description ?? l.code,
+      withdrawn: l.quantityConsumed === 0,
+      refusal: l.quantityConsumed === 0 ? null : "Delivered",
+    }));
+    return { withdrawn: lines.filter((l) => l.withdrawn).length, total: lines.length, lines };
   }
   async rescheduleAppointment(_appointmentId: string, _slotId: string) { void _appointmentId; void _slotId; }
   appointmentTimeline(_appointmentId: string) {
@@ -1228,6 +1258,71 @@ export class DevApiClient implements ApiClient {
       ...o,
       sessionsRemaining: Math.max(0, o.sessionsAuthorised - o.sessionsDelivered),
       progressLabel: `${o.sessionsDelivered} of ${o.sessionsAuthorised} sessions delivered`,
+    }));
+  }
+
+  /**
+   * 29.2 — the seeded OP-Procedure kinds (masterdata migration 0015 + 0017), mirrored here so the composer
+   * behaves in dev as it does against the service.
+   *
+   * <p>Both session-based and non-session kinds are present deliberately: a fixture holding only
+   * the physiotherapy row would let a check written against that NAME pass every test while the flag it
+   * is supposed to read went unexercised.</p>
+   */
+  procedureTypes() {
+    return this.gate(() => [
+      { code: "Physiotherapy", name: loc("Physiotherapy", "العلاج الطبيعي"), isSessionBased: true, defaultSessions: 6, maxSessions: 30, allowedCptScopes: ["Medicine"] },
+      { code: "MinorSurgery", name: loc("Minor Surgery", "جراحة صغرى"), isSessionBased: false, defaultSessions: null, maxSessions: null, allowedCptScopes: ["Surgery"] },
+      { code: "InjectionInfusion", name: loc("Injection / Infusion", "حقن / تسريب"), isSessionBased: false, defaultSessions: null, maxSessions: null, allowedCptScopes: ["Medicine"] },
+      { code: "Dialysis", name: loc("Dialysis", "غسيل كلوي"), isSessionBased: true, defaultSessions: 12, maxSessions: 156, allowedCptScopes: ["Medicine"] },
+      { code: "WoundCare", name: loc("Wound Care", "العناية بالجروح"), isSessionBased: false, defaultSessions: null, maxSessions: null, allowedCptScopes: ["Surgery", "Medicine"] },
+      { code: "Rehabilitation", name: loc("Rehabilitation", "إعادة التأهيل"), isSessionBased: true, defaultSessions: 10, maxSessions: 60, allowedCptScopes: ["Medicine"] },
+      { code: "DiagnosticProcedure", name: loc("Diagnostic Procedure", "إجراء تشخيصي"), isSessionBased: false, defaultSessions: null, maxSessions: null, allowedCptScopes: ["Surgery", "Medicine"] },
+      { code: "Other", name: loc("Other", "أخرى"), isSessionBased: false, defaultSessions: null, maxSessions: null, allowedCptScopes: ["Surgery", "Medicine"] },
+    ]);
+  }
+
+  /**
+   * 29.2 — the routing verdict, from the PUBLISHED ranges (design 45 §2).
+   *
+   * <p>Deliberately not an always-ProcedureOrder stub. The whole feature is that E/M goes somewhere else,
+   * and a fixture that never produced a Referral would let the routing be deleted without a test noticing.
+   * E/M is tested FIRST because 99202-99499 sits inside Medicine's 99xxx block — checking Medicine first
+   * would swallow every office visit.</p>
+   */
+  orderableServices(query: string, kinds?: readonly string[]) {
+    return this.gate(() => {
+      const catalogue = [
+        { code: "29881", description: "Knee arthroscopy, medial or lateral", section: "Surgery" },
+        { code: "97110", description: "Therapeutic exercise", section: "Medicine" },
+        { code: "90471", description: "Immunization administration", section: "Medicine" },
+        { code: "99243", description: "Office consultation, moderate complexity", section: "EvaluationAndManagement" },
+        { code: "99213", description: "Office visit, established patient", section: "EvaluationAndManagement" },
+      ];
+      const q = query.trim().toLowerCase();
+      const rows = catalogue
+        .filter((c) => c.code.startsWith(q) || c.description.toLowerCase().includes(q))
+        .map((c) => {
+          const n = Number(c.code);
+          const vehicle = n >= 99202 && n <= 99499 ? "Referral" as const : "ProcedureOrder" as const;
+          return { ...c, vehicle, orderable: true, reason: null };
+        });
+      return kinds?.length ? rows.filter((r) => kinds.includes(r.vehicle)) : rows;
+    });
+  }
+
+  createReferral(req: {
+    encounterId: string;
+    targetSpecialty: string;
+    reason?: string;
+    requestedServiceCode: string;
+    targetProviderId?: string | null;
+  }) {
+    return this.gate(() => ({
+      referralId: crypto.randomUUID(),
+      referralNo: "REF-2026-000001",
+      status: "Requested",
+      requestedServiceCode: req.requestedServiceCode,
     }));
   }
 
@@ -1833,6 +1928,14 @@ export class DevApiClient implements ApiClient {
     orderType: InvestigationOrderType;
     lines: InvestigationDraftLine[];
     acknowledgements: OrderAcknowledgement[];
+    /**
+     * 31.1 — the OP-Procedure COURSE: one kind and one session count for the whole order.
+     *
+     * <p>They were per-line, which let a two-item course carry two kinds and two session counts — not a
+     * course any centre can deliver. Absent on Lab and Radiology orders, which have neither.</p>
+     */
+    procedureTypeCode?: string | null;
+    sessions?: number | null;
   }) {
     void req.acknowledgements;
     return this.gate(() =>
@@ -1856,11 +1959,113 @@ export class DevApiClient implements ApiClient {
     });
   }
 
+  /**
+   * 29.5 — the seeded cadences (pharmacy migration 0012). `Every6Months` is seeded INACTIVE there and is
+   * absent here for the same reason the endpoint excludes it: offering a cadence the write path refuses
+   * would let a doctor compose a script that cannot be saved.
+   */
+  refillFrequencies() {
+    return this.gate(() => [
+      { code: "Monthly", months: 1, name: loc("Monthly", "شهرياً") },
+      { code: "Every2Months", months: 2, name: loc("Every 2 months", "كل شهرين") },
+      { code: "Every3Months", months: 3, name: loc("Every 3 months", "كل ٣ أشهر") },
+    ]);
+  }
+
+  /**
+   * 29.5 — the window schedule, as the server would compute it.
+   *
+   * <p>This fixture runs the SAME two rules the domain library does, because a fixture that returned tidy
+   * equal windows would let the one thing this feature must not get wrong — <b>the windows sum exactly to
+   * the total</b> — regress without a test noticing. Round ONCE at the total, then distribute integers by
+   * largest remainder, highest first.</p>
+   */
+  /**
+   * The fixture mirrors `QuantityMath` exactly, including the branch that REFUSES.
+   *
+   * A fixture that always returns a tidy number is a fixture in which the NotChecked path — the one
+   * invariant 8 exists for, and the state 838 catalogue rows are actually in — can never be rendered. That
+   * is how this phase kept shipping screens whose failure branch nobody had seen.
+   */
+  quantityPreview(req: {
+    drugId?: string;
+    doseAmount?: number | null;
+    timesPerDay?: number | null;
+    durationDays?: number | null;
+  }) {
+    return this.gate(() => {
+      const dose = req.doseAmount ?? 0;
+      const perDay = req.timesPerDay ?? 0;
+      const days = req.durationDays ?? 0;
+      const missing = dose <= 0 ? "dose" : perDay <= 0 ? "frequency" : days <= 0 ? "duration" : null;
+      if (missing) {
+        throw Object.assign(new Error("422"), {
+          problem: {
+            title: "quantity-not-checked",
+            detail: `'${missing}' is not recorded for this drug, so the quantity to dispense cannot be `
+              + "computed. A silently wrong quantity is a dispensing error.",
+          },
+        });
+      }
+      const total = dose * perDay * days;
+      return ok(zQuantityPreview, {
+        totalUnits: total, dispenseQuantity: total, packs: null, packSize: 30,
+        prescribingUnit: "Tablet", isPackSplittable: true,
+      });
+    });
+  }
+
+  chronicPreview(req: {
+    durationDays: number;
+    refillFrequencyCode: string;
+    doseAmount?: number;
+    timesPerDay?: number;
+    drugId?: string;
+    isPackSplittable?: boolean | null;
+    packSize?: number | null;
+  }) {
+    return this.gate(() => {
+      const months = { Monthly: 1, Every2Months: 2, Every3Months: 3 }[req.refillFrequencyCode] ?? 1;
+      const raw = (req.doseAmount ?? 1) * (req.timesPerDay ?? 1) * req.durationDays;
+      // Round once, at the TOTAL. A non-splittable pack rounds UP to whole packs.
+      const total = req.isPackSplittable === false && (req.packSize ?? 0) > 0
+        ? Math.ceil(raw / req.packSize!) * req.packSize!
+        : Math.round(raw);
+
+      const count = Math.ceil(req.durationDays / (months * 30));
+      const base = Math.floor(total / count);
+      const remainder = total - base * count;
+      // Largest remainder, HIGHEST FIRST — 100 over 3 is 34/33/33, and the sum is the total by construction.
+      const windows = Array.from({ length: count }, (_, i) => base + (i < remainder ? 1 : 0));
+
+      const start = new Date("2026-08-08T00:00:00Z");
+      const day = (n: number) => new Date(start.getTime() + n * 86400000).toISOString().slice(0, 10);
+      const period = months * 30;
+
+      return {
+        total,
+        unit: req.isPackSplittable === false ? "WholeItem" : "SubUnit",
+        frequencyMonths: months,
+        windows: windows.map((q, i) => ({
+          windowNo: i + 1,
+          scheduledOpen: day(i * period),
+          // Window 1 gets no tolerance: it cannot open before the script existed.
+          opensAt: day(i === 0 ? 0 : i * period - 5),
+          closesAt: day(i === count - 1 ? req.durationDays - 1 : (i + 1) * period - 1),
+          allocatedQuantity: q,
+        })),
+      };
+    });
+  }
+
   submitPrescription(req: {
     encounterId: string;
     lines: PrescriptionDraftLine[];
     diagnosisIcdCodes: string[];
     acknowledgements: LineAcknowledgement[];
+    kind?: PrescriptionKind;
+    refillFrequencyCode?: string | null;
+    durationDays?: number | null;
   }) {
     const result = devValidation(req.lines, req.diagnosisIcdCodes);
     // The fixture mirrors the server rule rather than rubber-stamping: a warning with no acknowledgement is

@@ -27,6 +27,157 @@ public static class PrescriptionEndpoints
     {
         var v1 = app.MapGroup("/api/v1/prescriptions").RequireAuthorization();
 
+        /*
+         * 29.5 — THE REFILL-FREQUENCY MASTER TABLE (design 45 §5).
+         *
+         * Supervisor-configurable, which is the whole reason it is a table rather than an enum: adding
+         * "every 6 months" must be a DATA change, not a release. That is only true if something can read
+         * it — the table was seeded and administered and nothing ever exposed it, so the composer had no
+         * vocabulary to offer and a chronic script could not be written at all.
+         *
+         * INACTIVE rows are excluded. Offering one would let a doctor compose a script the write path then
+         * refuses with `unknown-refill-frequency`, and a composer that knows a vocabulary the server
+         * rejects produces failures nobody can explain from the screen.
+         */
+        app.MapGet("/api/v1/refill-frequencies", async (PharmacyDbContext db, CancellationToken ct) =>
+            Results.Ok(await db.RefillFrequencies.AsNoTracking()
+                .Where(x => x.IsActive)
+                .OrderBy(x => x.SortOrder).ThenBy(x => x.Code)
+                .Select(x => new { code = x.Code, months = x.Months, nameEn = x.NameEn, nameAr = x.NameAr })
+                .ToListAsync(ct)))
+            .RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+
+        /*
+         * 29.5 — THE SCHEDULE PREVIEW (design 45 §5): "show the computed window schedule with per-window
+         * quantities BEFORE submit, so the doctor sees 34/33/33 and can adjust".
+         *
+         * COMPUTED HERE, NOT IN THE CLIENT. Re-implementing largest-remainder in TypeScript would fork the
+         * one piece of arithmetic in this phase that must not be forked. The two copies would drift, and
+         * the drift would surface as a doctor being shown a schedule the pharmacy never honours — with the
+         * screen and the database each able to cite their own correct-looking numbers. So the preview calls
+         * exactly what the write path calls, and a divergence becomes impossible rather than unlikely.
+         *
+         * It is a POST because it carries a body, and it writes NOTHING: no prescription, no window, no
+         * audit of a PHI read, because it reads no patient data. The inputs are the drug's pack facts and
+         * the doctor's own numbers.
+         */
+        v1.MapPost("/chronic-preview", async (
+            ChronicPreviewRequest req, HttpRequest http, PharmacyDbContext db, IDrugValidator drugs,
+            IBusinessCalendar calendar, CancellationToken ct) =>
+        {
+            // The SAME refusals as submit, in the same order, so the preview can never be more permissive
+            // than the thing it previews. A preview that accepted what the write path rejects is worse
+            // than no preview: it tells the doctor it will work.
+            if (!ChronicAllocation.IsChronicDuration(req.DurationDays))
+                return Results.Problem(statusCode: 422, title: "not-chronic", type: "urn:hbmp:not-chronic",
+                    detail: "A chronic prescription needs a duration of more than one month. A 14-day "
+                          + "course is not chronic — write it as acute.");
+
+            var frequency = await db.RefillFrequencies.AsNoTracking()
+                .FirstOrDefaultAsync(f => f.Code == req.RefillFrequencyCode && f.IsActive, ct);
+            if (frequency is null)
+                return Results.Problem(statusCode: 422, title: "unknown-refill-frequency",
+                    type: "urn:hbmp:unknown-refill-frequency",
+                    detail: "A chronic prescription needs an ACTIVE refill frequency.");
+
+            /*
+             * THE PACK FACTS ARE MASTER DATA, SO THIS READS THEM (design 45 §6).
+             *
+             * They are NOT the composer's to supply. A screen that had to fetch a drug's pack size and hand
+             * it back would be a second place deciding what the catalogue says, and the version that drifted
+             * would be the one the doctor was shown. The same `PackAsync` the write path calls is called
+             * here, so the preview and the prescription agree by construction.
+             *
+             * An explicitly-supplied value still wins, for callers that genuinely hold the facts.
+             */
+            var pack = req.DrugId is { } drugId
+                ? await drugs.PackAsync(drugId, http.Headers.Authorization.ToString(), ct)
+                : null;
+
+            var plan = ChronicAllocation.Plan(new AllocationRequest(
+                DosePerAdministration: req.DoseAmount ?? 1,
+                TimesPerDay: req.TimesPerDay ?? 1,
+                DurationDays: req.DurationDays,
+                FrequencyMonths: frequency.Months,
+                IsPackSplittable: req.IsPackSplittable ?? pack?.IsPackSplittable,
+                PackSize: req.PackSize ?? pack?.PackSize));
+
+            // ABSENCE OF DATA IS NEVER A CLEAN RESULT (invariant 8). The missing field is NAMED, because
+            // "could not compute" on its own sends a prescriber to guess, and a silently wrong quantity is
+            // a dispensing error. Never a zero, never a default.
+            if (plan.NotChecked)
+                return Results.Problem(statusCode: 422, title: "quantity-not-checked",
+                    type: "urn:hbmp:quantity-not-checked",
+                    detail: $"Master data does not record '{plan.MissingField}' for this drug, so its refill "
+                          + "quantities cannot be computed. A silently wrong quantity is a dispensing error.");
+
+            var windows = WindowSchedule.Build(
+                plan.Windows, calendar.Today(), frequency.Months, req.DurationDays, EarlyToleranceDays);
+
+            return Results.Ok(new
+            {
+                total = plan.Total,
+                unit = plan.Unit.ToString(),
+                frequencyMonths = frequency.Months,
+                windows = windows.Select(w => new
+                {
+                    windowNo = w.WindowNo,
+                    scheduledOpen = w.ScheduledOpen.ToString("yyyy-MM-dd"),
+                    opensAt = w.OpensAt.ToString("yyyy-MM-dd"),
+                    closesAt = w.ClosesAt.ToString("yyyy-MM-dd"),
+                    allocatedQuantity = w.AllocatedQuantity,
+                }),
+            });
+        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+
+        /*
+         * 29.6 — HOW MUCH WILL BE DISPENSED, before the doctor commits (design 45 §6).
+         *
+         * The composer fills its quantity field in from this rather than multiplying three numbers of its
+         * own. `QuantityMath` is the one implementation of that arithmetic — the write path grades against
+         * it, the dispensing counter meters against it, and a TypeScript copy in the browser would be a
+         * second answer to "how much medicine does this person get".
+         *
+         * The pack facts are MASTER DATA and are read HERE, from the same `PackAsync` the write path calls.
+         * A screen that fetched a drug's pack size and handed it back would be a second place deciding what
+         * the catalogue says, and the version that drifted would be the one on screen. That is not a
+         * hypothetical: it is the defect the chronic preview above shipped with.
+         *
+         * Writes nothing, reads no patient data. The inputs are the drug and the doctor's own numbers.
+         */
+        v1.MapPost("/quantity-preview", async (
+            QuantityPreviewRequest req, HttpRequest http, IDrugValidator drugs, CancellationToken ct) =>
+        {
+            var pack = req.DrugId is { } drugId
+                ? await drugs.PackAsync(drugId, http.Headers.Authorization.ToString(), ct)
+                : null;
+
+            var outcome = QuantityMath.Compute(
+                req.DoseAmount, req.TimesPerDay, req.DurationDays,
+                req.IsPackSplittable ?? pack?.IsPackSplittable,
+                req.PackSize ?? pack?.PackSize);
+
+            // ABSENCE IS NEVER A CLEAN RESULT (invariant 8). The missing field is NAMED — "could not
+            // compute" on its own sends a prescriber to guess, and a guessed quantity is a dispensing error
+            // that looks exactly like a correct one. Never a zero, never a default.
+            if (outcome.Plan is not { } plan)
+                return Results.Problem(statusCode: 422, title: "quantity-not-checked",
+                    type: "urn:hbmp:quantity-not-checked",
+                    detail: $"'{outcome.MissingField}' is not recorded for this drug, so the quantity to "
+                          + "dispense cannot be computed. A silently wrong quantity is a dispensing error.");
+
+            return Results.Ok(new
+            {
+                totalUnits = plan.TotalUnits,
+                dispenseQuantity = plan.DispenseQuantity,
+                packs = plan.Packs,
+                packSize = plan.PackSize,
+                // What the number is COUNTED IN, so the composer can say "60 Tablet" rather than "60".
+                prescribingUnit = pack?.PrescribingUnit,
+                isPackSplittable = req.IsPackSplittable ?? pack?.IsPackSplittable,
+            });
+        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+
         v1.MapPost("", async (
             CreatePrescriptionRequest req, HttpRequest http, PharmacyDbContext db, PharmacyGate gate,
             IDrugValidator drugs, IPrescribingScreener screener, RxRoutingOptions routing, SequenceIssuer seq,
@@ -394,6 +545,72 @@ public static class PrescriptionEndpoints
             return Results.Ok(PrescriptionValidationService.ToView(result, request, run.ValidationId));
         }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
 
+        /*
+         * 29.4 — THE PRESCRIPTION HALF OF THE SERVICE HISTORY (design 45 §4).
+         *
+         * Read by orders-service, which composes the one service-history endpoint the modal calls. It is
+         * declared BEFORE `/{id:guid}` so the literal segment is unambiguous.
+         *
+         * GATED HERE, on the CALLER's token. orders-service forwards the bearer rather than acting as
+         * itself, so this is the same treating-relationship question pharmacy asks of any other read of a
+         * patient's medication record — an aggregating caller does not widen what its user may see.
+         *
+         * MIN-NECESSARY: what a prescriber needs to answer "has this patient had this medicine before?" —
+         * the drug, when, and what became of it. No dose, no diagnosis, no cost, no prescriber notes.
+         */
+        v1.MapGet("/history/{beneficiaryId:guid}", async (
+            Guid beneficiaryId, string? code, HttpRequest http, PharmacyDbContext db, PharmacyGate gate,
+            IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>
+        {
+            var bearer = http.Headers.Authorization.ToString();
+            var denied = await gate.CheckAsync(PharmacyPolicies.RxRead, "prescription", null, beneficiaryId, bearer, ct);
+            if (denied is not null) return denied;
+
+            var q = db.Prescriptions.AsNoTracking().Include(p => p.Lines)
+                .Where(p => p.BeneficiaryId == beneficiaryId);
+
+            var trimmed = code?.Trim();
+            if (!string.IsNullOrWhiteSpace(trimmed) && Guid.TryParse(trimmed, out var drugId))
+                q = q.Where(p => p.Lines.Any(l => l.DrugId == drugId));
+
+            var rows = await q.OrderByDescending(p => p.SubmittedAt).Take(200).ToListAsync(ct);
+
+            var items = rows
+                .Where(p => p.SubmittedAt is not null)
+                .SelectMany(p => p.Lines
+                    .Where(l => string.IsNullOrWhiteSpace(trimmed)
+                                || !Guid.TryParse(trimmed, out var d)
+                                || l.DrugId == d)
+                    .Select(l => new
+                    {
+                        prescriptionId = p.PrescriptionId,
+                        rxNo = p.RxNo,
+                        prescriptionLineId = l.PrescriptionLineId,
+                        drugId = l.DrugId,
+                        drugName = l.DrugName,
+                        // When the prescription was written. SubmittedAt is null on a draft, which never
+                        // reaches this history: a draft is not something the patient 'had'.
+                        occurredAt = p.SubmittedAt,
+                        status = l.Status.ToString(),
+                        prescriberId = p.PrescriberId == Guid.Empty ? null : p.PrescriberId.ToString(),
+                        branchId = (string?)null,
+                    }))
+                .ToList();
+
+            // Reading another service's copy of a patient's medication list is a PHI read here as much as
+            // anywhere else, and it is audited HERE — where the data actually left.
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "prescription_history",
+                EntityId = $"{beneficiaryId}/{trimmed ?? "*"}",
+                Action = AuditAction.Read, ActorUserId = me.Principal?.Subject,
+                DecisionOutcome = "Allow", DecisionReasonCode = $"rx-history:{items.Count}",
+                FieldClasses = ["phi"],
+            }, ct);
+
+            return Results.Ok(new { items });
+        }).RequireAuthorization(HbmpPolicies.Scope("rx:read"));
+
         v1.MapGet("/{id:guid}", async (Guid id, HttpRequest http, PharmacyDbContext db, PharmacyGate gate, CancellationToken ct) =>
         {
             var rx = await db.Prescriptions.AsNoTracking().Include(p => p.Lines).FirstOrDefaultAsync(p => p.PrescriptionId == id, ct);
@@ -458,7 +675,10 @@ public static class PrescriptionEndpoints
             await audit.EmitAsync(new AuditEventDraft
             {
                 EntityType = "prescription", EntityId = rx.PrescriptionId.ToString(), Action = AuditAction.StateChange,
-                ActorUserId = me.Principal?.Subject, DecisionOutcome = "Cancelled", DecisionReasonCode = req.Reason,
+                ActorUserId = me.Principal?.Subject, DecisionOutcome = "Cancelled",
+                // The CODE when the caller sent one — the free text is a sentence, and a sentence cannot be
+                // grouped by. Falls back to the text so an older caller still records something.
+                DecisionReasonCode = req.ReasonCode ?? req.Reason,
             }, ct);
             await tx.CommitAsync(ct);
             return Results.Ok(PrescriptionResponse.From(rx));

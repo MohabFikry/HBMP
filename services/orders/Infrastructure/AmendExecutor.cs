@@ -270,6 +270,9 @@ public sealed class AmendExecutor(OrdersDbContext db)
             CodeSystem = original.CodeSystem, Code = original.Code, Description = original.Description,
             ExaminationTypeId = original.ExaminationTypeId, SensitivityLevel = original.SensitivityLevel,
             ProcedureTypeCode = original.ProcedureTypeCode,
+            // 31.1 — the new version delivers the same amount at each attendance as the row it replaces.
+            // Losing it would silently reset the line to 1-per-session and halve a course's metered total.
+            QuantityPerSession = original.QuantityPerSession,
             // requested_quantity must cover the new ordered quantity (ck_order_line_ordered_within_requested).
             // An amendment that RAISES the delivered quantity necessarily raises what was asked for; whether
             // that needs a fresh authorisation is Gate 4's question, not this one's.

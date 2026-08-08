@@ -73,6 +73,75 @@ public class ProcedureOrderEndpointTests
         finally { await app.CleanupAsync(); }
     }
 
+    /// <summary>
+    /// 31.1 — the COURSE at the ORDER level, and a line quantity that is PER SESSION.
+    /// </summary>
+    /// <remarks>
+    /// This is the shape design 45 §2 could not express. Six attendances of three units each is one course
+    /// and eighteen metered units; under "sessions ARE the quantity" there was nowhere to put the three, and
+    /// a two-item course could carry two different session counts.
+    /// </remarks>
+    [SkippableFact]
+    public async Task The_course_is_the_ORDERS_and_the_line_quantity_is_per_session()
+    {
+        Skip.If(OrdersApiFactory.Db is null, "ORDERS_TEST_DB not set — DB integration test skipped.");
+        await using var app = new OrdersApiFactory();
+        try
+        {
+            using var doctor = app.DoctorClient();
+            var r = await Post(doctor, new CreateOrderRequest(
+                BeneficiaryId: Guid.NewGuid(), EncounterId: Guid.NewGuid(),
+                OrderType: OrderType.Procedure, ExpiresAt: null,
+                Lines: [new CreateOrderLine(CodeSystem.CPT, "97110", "Therapeutic exercise",
+                    QuantityOrdered: 0m, ExaminationTypeId: null, ProcedureTypeCode: null,
+                    QuantityPerSession: 3m)],
+                ProcedureTypeCode: "Physiotherapy",
+                Sessions: 6));
+
+            r.StatusCode.Should().Be(HttpStatusCode.Created);
+            var orderId = (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("orderId").GetGuid();
+
+            await using var db = OrdersApiFactory.Ctx();
+            var order = await db.Orders.AsNoTracking().Include(o => o.Lines)
+                .FirstAsync(o => o.OrderId == orderId);
+
+            order.ProcedureTypeCode.Should().Be("Physiotherapy", "a course is ONE clinical decision");
+            order.Sessions.Should().Be(6);
+
+            var line = order.Lines.Single();
+            line.QuantityPerSession.Should().Be(3m);
+            // The METERED total keeps its old meaning exactly — which is what leaves the atomic consume
+            // path, the partial-approval arithmetic and the delivering centre's queue untouched.
+            line.QuantityOrdered.Should().Be(18m);
+            line.RequestedQuantity.Should().Be(18m, "what was asked for is pinned at creation");
+        }
+        finally { await app.CleanupAsync(); }
+    }
+
+    [SkippableFact]
+    public async Task A_session_ceiling_is_checked_against_the_COURSE_not_the_metered_total()
+    {
+        // "At most 12 sessions" is a statement about ATTENDANCES. Comparing it to sessions x per-session
+        // would refuse an ordinary 6-session course of a 3-per-visit item as though 18 had been asked for.
+        Skip.If(OrdersApiFactory.Db is null, "ORDERS_TEST_DB not set — DB integration test skipped.");
+        await using var app = new OrdersApiFactory();
+        try
+        {
+            using var doctor = app.DoctorClient();
+            var r = await Post(doctor, new CreateOrderRequest(
+                BeneficiaryId: Guid.NewGuid(), EncounterId: Guid.NewGuid(),
+                OrderType: OrderType.Procedure, ExpiresAt: null,
+                Lines: [new CreateOrderLine(CodeSystem.CPT, "97110", "Therapeutic exercise",
+                    QuantityOrdered: 0m, ExaminationTypeId: null, ProcedureTypeCode: null,
+                    QuantityPerSession: 3m)],
+                ProcedureTypeCode: "Physiotherapy",
+                Sessions: 6));
+
+            r.StatusCode.Should().Be(HttpStatusCode.Created);
+        }
+        finally { await app.CleanupAsync(); }
+    }
+
     [SkippableFact]
     public async Task A_physiotherapy_type_on_a_minor_surgery_code_is_refused_on_the_WRITE_path()
     {

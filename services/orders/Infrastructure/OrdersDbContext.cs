@@ -75,6 +75,9 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
             e.Property(x => x.RowVersion).HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
             e.Property(x => x.OrderingBranchId).HasColumnName("ordering_branch_id");   // phase 14.4
             e.Property(x => x.SensitivityLevel).HasConversion<string>().HasColumnName("sensitivity_level");   // phase 14.6
+            // 31.1 — the COURSE, at the level it is decided: one kind and one session count per order.
+            e.Property(x => x.ProcedureTypeCode).HasColumnName("procedure_type_code");
+            e.Property(x => x.Sessions).HasColumnName("sessions");
             e.Property(x => x.AssignedProviderId).HasColumnName("assigned_provider_id");        // 29.2b
             e.Property(x => x.SharedClinicalContext).HasColumnName("shared_clinical_context");  // 29.2b
             e.Property(x => x.SharedContextBy).HasColumnName("shared_context_by");
@@ -102,6 +105,8 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
             e.Property(x => x.SensitivityLevel).HasConversion<string>().HasColumnName("sensitivity_level");   // phase 14.6
             e.Property(x => x.ProcedureTypeCode).HasColumnName("procedure_type_code");   // 29.2
             e.Property(x => x.RequestedQuantity).HasColumnName("requested_quantity");    // 29.2
+            // 31.1 — how much of this item at each attendance. `quantity_ordered` stays the metered total.
+            e.Property(x => x.QuantityPerSession).HasColumnName("quantity_per_session");
             // 30.1 — the version chain (design 46 §1). The clinical columns above are frozen by
             // trg_order_line_signed; these are the only ones an amendment writes on the ORIGINAL row.
             e.Property(x => x.VersionNo).HasColumnName("version_no");

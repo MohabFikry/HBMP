@@ -125,11 +125,14 @@ import type {
   SaveApprovalRule,
   SetAutoDecision,
 } from "@mersal/contracts";
-import type { PrescriptionDraftLine, LineAcknowledgement, AddAllergyRequest, BloodGroup } from "@mersal/contracts";
+import type { PrescriptionDraftLine, LineAcknowledgement, AddAllergyRequest, BloodGroup, PrescriptionKind } from "@mersal/contracts";
+import { zChronicPreview, zQuantityPreview, zRefillFrequency } from "@mersal/contracts";
 // 29.2b — VALUE imports (the schemas), not types: the payload is validated at the seam.
-import { zProcedureQueueItem, zSessionProgress, zServiceHistory } from "@mersal/contracts";
+import {
+  zOrderableService, zProcedureQueueItem, zProcedureType, zReferralCreated, zSessionProgress, zServiceHistory,
+} from "@mersal/contracts";
 import type { CptSection, InvestigationDraftLine, InvestigationOrderType, OrderAcknowledgement, ValidityExtensionRequest } from "@mersal/contracts";
-import type { SubstitutionRequest } from "@mersal/contracts";
+import type { SubstitutionRequest, WithdrawResult } from "@mersal/contracts";
 import { zAllergenOption, zAllergyRecord, zMemberClinicalRecord } from "@mersal/contracts";
 import type { ApiClient } from "./client";
 import { ApiError, getRaw, postRaw, putRaw, patchRaw, deleteRaw, postForm, parseOr, getAbsolute, postAbsolute, deleteAbsolute } from "./http";
@@ -738,6 +741,51 @@ export class HttpApiClient implements ApiClient {
     );
   }
 
+  /**
+   * 30.6 — withdraw a WHOLE prescription (pharmacy `POST /prescriptions/{id}/cancel`).
+   *
+   * <p>The endpoint cancels every still-active line and leaves a dispensed one alone, so the report is built
+   * from the prescription it returns rather than assumed: "withdrawn" for the lines that moved, and the
+   * refusal named for the ones that did not. Reporting a blanket success here is precisely the "silently
+   * doing half" failure design 46 §3 rules out.</p>
+   */
+  async withdrawPrescription(rxId: string, reasonCode: string, reasonText?: string): Promise<WithdrawResult> {
+    const r = (await postRaw(
+      `/prescriptions/${encodeURIComponent(rxId)}/cancel`,
+      { reasonCode, reason: reasonText ?? reasonCode },
+      crypto.randomUUID(),
+    )) as { lines?: { drugName?: string | null; drugId?: string | null; status?: string }[] };
+
+    const lines = (r.lines ?? []).map((l) => ({
+      label: l.drugName ?? l.drugId ?? "—",
+      withdrawn: l.status === "Cancelled",
+      refusal: l.status === "Cancelled" ? null : l.status ?? null,
+    }));
+    return { withdrawn: lines.filter((l) => l.withdrawn).length, total: lines.length, lines };
+  }
+
+  /**
+   * 30.6 — withdraw a WHOLE order (orders `POST /{id}/cancel-lines`).
+   *
+   * <p>The endpoint answers 200, 207 or 409 by how much of it succeeded and names every refusal per line. All
+   * three are read the same way here, because "three of five withdrawn" is a real answer that the doctor has
+   * to see rather than an error to swallow.</p>
+   */
+  async withdrawOrder(orderId: string, reasonCode: string, reasonText?: string): Promise<WithdrawResult> {
+    const r = (await postRaw(
+      `/investigation-orders/${encodeURIComponent(orderId)}/cancel-lines`,
+      { reasonCode, reasonText },
+      crypto.randomUUID(),
+    )) as { cancelled?: number; lines?: { code: string; cancelled: boolean; refusal?: string | null }[] };
+
+    const lines = (r.lines ?? []).map((l) => ({
+      label: l.code,
+      withdrawn: l.cancelled,
+      refusal: l.refusal ?? null,
+    }));
+    return { withdrawn: r.cancelled ?? lines.filter((l) => l.withdrawn).length, total: lines.length, lines };
+  }
+
   async cancelAppointment(appointmentId: string, reason: string, rowVersion?: number) {
     const r = (await postRaw(
       `/appointments/${encodeURIComponent(appointmentId)}/cancel`,
@@ -1147,6 +1195,97 @@ export class HttpApiClient implements ApiClient {
   }
 
   /** Step 1 — advisory. Display state only; the create path re-derives everything and reads none of it. */
+  /**
+   * 29.2 — the OP-Procedure kinds (design 45 §2). MASTER DATA: administered like refill frequency, so
+   * adding "Hydrotherapy" is a data change rather than a release.
+   *
+   * <p>Inactive types are excluded by the server. A retired type must not be offerable, but an order
+   * already carrying one keeps it — the row is not deleted.</p>
+   */
+  /**
+   * 29.2 — what each code will actually create (design 45 §2).
+   *
+   * <p>Gate 2's stated purpose, in as many words: "so the UI can show the doctor what will happen before
+   * they commit". The endpoint existed and had no caller, which is why an E/M code could be composed as a
+   * procedure order and nothing anywhere raised a referral.</p>
+   *
+   * @param kinds Restrict to particular vehicles — the OP Procedures tab shows the two it can create.
+   */
+  async orderableServices(query: string, kinds?: readonly string[]) {
+    const q = query.trim();
+    if (q.length < 2) return [];
+    const kindParam = kinds?.length ? `&kind=${encodeURIComponent(kinds.join(","))}` : "";
+    const r = (await getRaw(
+      `/orderable-services?q=${encodeURIComponent(q)}&pageSize=20${kindParam}`,
+    )) as any;
+    return ((r?.items ?? []) as any[]).map((s: any) =>
+      parseOr(zOrderableService, {
+        code: String(s.code ?? ""),
+        description: String(s.description ?? ""),
+        section: String(s.section ?? ""),
+        vehicle: s.vehicle ?? "NotOrderable",
+        orderable: Boolean(s.orderable),
+        // A refusal reason the service authored in both languages. Absent is null, never an empty string
+        // masquerading as an explanation.
+        reason: s.reasonEn
+          ? { en: String(s.reasonEn), ar: String(s.reasonAr ?? s.reasonEn) }
+          : null,
+      }),
+    );
+  }
+
+  /**
+   * 29.2 — raise a REFERRAL for an E/M code (design 45 §2, invariant 3).
+   *
+   * <p>The vehicle is decided by the SERVER: this call sends the CPT code and pharmacy refuses it with
+   * `not-a-referral-service` if the routing map sends that code somewhere else. The composer's verdict is
+   * display state, exactly as it is for the procedure type.</p>
+   */
+  async createReferral(req: {
+    encounterId: string;
+    targetSpecialty: string;
+    reason?: string;
+    requestedServiceCode: string;
+    targetProviderId?: string | null;
+  }) {
+    const beneficiaryId = encounterBeneficiary.get(req.encounterId) ?? req.encounterId;
+    // Keyed on the encounter, the specialty and the code — so a double-tapped "refer" is ONE referral, and
+    // a genuinely different second referral in the same encounter is not swallowed as a replay.
+    const idem = `ref:${req.encounterId}:${req.targetSpecialty}:${req.requestedServiceCode}`;
+    const r = (await postRaw(`/referrals`, {
+      beneficiaryId,
+      encounterId: req.encounterId,
+      targetSpecialty: req.targetSpecialty,
+      targetProviderId: req.targetProviderId ?? null,
+      reason: req.reason ?? null,
+      requestedServiceCode: req.requestedServiceCode,
+      // Named rather than assumed. A bare code with no system is what becomes ambiguous the first time a
+      // second coding system arrives.
+      requestedServiceCodeSystem: "CPT",
+    }, idem)) as any;
+    return parseOr(zReferralCreated, {
+      referralId: String(r?.referralId ?? ""),
+      referralNo: String(r?.referralNo ?? ""),
+      status: String(r?.status ?? ""),
+      requestedServiceCode: r?.requestedServiceCode ?? null,
+    });
+  }
+
+  async procedureTypes() {
+    const r = (await getRaw(`/procedure-types`)) as any[];
+    return ((r ?? []) as any[]).map((p: any) =>
+      parseOr(zProcedureType, {
+        code: String(p.code ?? ""),
+        // The service authors both languages for this vocabulary, so neither side is a copy of the other.
+        name: { en: String(p.nameEn ?? p.code ?? ""), ar: String(p.nameAr ?? p.nameEn ?? "") },
+        isSessionBased: Boolean(p.isSessionBased),
+        defaultSessions: typeof p.defaultSessions === "number" ? p.defaultSessions : null,
+        maxSessions: typeof p.maxSessions === "number" ? p.maxSessions : null,
+        allowedCptScopes: Array.isArray(p.allowedCptScopes) ? p.allowedCptScopes.map(String) : [],
+      }),
+    );
+  }
+
   async validateInvestigationOrder(req: {
     encounterId: string;
     orderType: InvestigationOrderType;
@@ -1187,6 +1326,14 @@ export class HttpApiClient implements ApiClient {
     orderType: InvestigationOrderType;
     lines: InvestigationDraftLine[];
     acknowledgements: OrderAcknowledgement[];
+    /**
+     * 31.1 — the OP-Procedure COURSE: one kind and one session count for the whole order.
+     *
+     * <p>They were per-line, which let a two-item course carry two kinds and two session counts — not a
+     * course any centre can deliver. Absent on Lab and Radiology orders, which have neither.</p>
+     */
+    procedureTypeCode?: string | null;
+    sessions?: number | null;
   }) {
     const beneficiaryId = encounterBeneficiary.get(req.encounterId) ?? req.encounterId;
     // Keyed on the composed CONTENT, so a double-click is one order while a genuinely different second
@@ -1196,10 +1343,19 @@ export class HttpApiClient implements ApiClient {
       beneficiaryId,
       encounterId: req.encounterId,
       orderType: req.orderType,
+      // 31.1 — the COURSE, at the level it is decided. One kind, one session count, for the whole order.
+      procedureTypeCode: req.procedureTypeCode ?? null,
+      sessions: req.sessions ?? null,
       lines: req.lines.map((l) => ({
         codeSystem: "CPT",
         code: l.test?.code ?? "",
         description: [l.test?.description, l.note.trim()].filter(Boolean).join(" — "),
+        // 31.1 — the line's quantity is now PER SESSION. The server derives the metered total
+        // (sessions x this), so `quantity_ordered` keeps its meaning and consume, partial approval and the
+        // delivering centre's queue are all untouched.
+        quantityPerSession: l.quantity,
+        // Sent for a pre-31.1 server, which reads the line-level figure as the whole quantity. Harmless on
+        // a 31.1 server, which prefers `quantityPerSession`.
         quantityOrdered: l.quantity,
       })),
     }, idem)) as any;
@@ -1360,6 +1516,8 @@ export class HttpApiClient implements ApiClient {
         // were always in this payload and were being thrown away at `lineCount`.
         lines: ((p.lines ?? []) as any[]).map((l: any) => ({
           id: l.prescriptionLineId,
+          // 29.4 — the catalogue product, so the service-history modal can be opened on this medicine.
+          drugId: l.drugId ?? null,
           drug: l.drugName ? neutral(l.drugName) : null,
           dose: l.dose ?? null,
           route: l.route ?? null,
@@ -1820,6 +1978,37 @@ export class HttpApiClient implements ApiClient {
         priceEgp: typeof d.priceEgp === "number" ? d.priceEgp : undefined,
         atcCode: d.atcCode ?? undefined,
         hasIndicationData: Boolean(d.hasIndicationData),
+
+        // ---- 29.7 (design 45 §7) --------------------------------------------------------------------
+        //
+        // Rendered by DrugCombobox, DERIVED by masterdata, and never authored here. Omitting these three
+        // from this list is what made the whole feature invisible against a real backend: the contract
+        // declares them `.optional()`, so zod parsed the gap silently and the chips simply never rendered
+        // while every fixture-driven test stayed green.
+        //
+        // `isLowestPrice` is read strictly — a missing field is NOT a label. A drug with no pack size has
+        // no per-unit price, and falling back to the pack price is the exact comparison §7 exists to
+        // prevent: a 20-tab pack at 100 EGP is dearer per tablet than a 30-tab pack at 120.
+        isLowestPrice: d.isLowestPrice === true,
+        pricePerUnit: typeof d.pricePerUnit === "number" ? d.pricePerUnit : undefined,
+        // THREE states, and absence resolves to the explicit third one rather than to `undefined`.
+        // `Unknown` is the catalogue-wide default and renders NOTHING; making that explicit here means a
+        // reader can tell the default was chosen rather than left over.
+        availability: d.availability === "Available" || d.availability === "Unavailable"
+          ? d.availability
+          : "Unknown",
+
+        // ---- 29.6 (design 45 §6) --------------------------------------------------------------------
+        //
+        // The pack facts. Read STRICTLY: `isPackSplittable` absent is NOT false, because false means
+        // "dispense whole packs" and absent means "the catalogue does not say" — and the second is
+        // reported as NotChecked naming the field rather than rounded to a pack. Same distinction the
+        // whole five-state model turns on, at the one place a wrong answer becomes a dispensing error.
+        prescribingUnit: typeof d.prescribingUnit === "string" && d.prescribingUnit.length > 0
+          ? d.prescribingUnit
+          : null,
+        packSize: typeof d.packSize === "number" ? d.packSize : null,
+        isPackSplittable: typeof d.isPackSplittable === "boolean" ? d.isPackSplittable : null,
       }),
     );
   }
@@ -1846,11 +2035,85 @@ export class HttpApiClient implements ApiClient {
     });
   }
 
+  /**
+   * 29.5 — the supervisor-configurable refill cadences (design 45 §5). Only ACTIVE rows: the server
+   * refuses an inactive one, and a composer offering a vocabulary the server rejects produces failures
+   * nobody can explain from the screen.
+   */
+  async refillFrequencies() {
+    const r = (await getRaw(`/refill-frequencies`)) as any[];
+    return ((r ?? []) as any[]).map((f: any) =>
+      parseOr(zRefillFrequency, {
+        code: String(f.code ?? ""),
+        months: Math.trunc(Number(f.months ?? 0)),
+        name: { en: String(f.nameEn ?? f.code ?? ""), ar: String(f.nameAr ?? f.nameEn ?? "") },
+      }),
+    );
+  }
+
+  /**
+   * 29.5 — the window schedule, BEFORE submit (design 45 §5).
+   *
+   * <p>The arithmetic stays on the server: this is the same `ChronicAllocation.Plan` the write path runs,
+   * so what the doctor is shown and what the pharmacy honours cannot disagree. A refusal here — a duration
+   * that is not chronic, an unknown frequency, missing pack data — is the SAME refusal submit would give,
+   * which is the point of previewing at all.</p>
+   */
+  async quantityPreview(req: {
+    drugId?: string;
+    doseAmount?: number | null;
+    timesPerDay?: number | null;
+    durationDays?: number | null;
+  }) {
+    // The DRUG, and the doctor's own three numbers. NOT pack facts — see the interface note. A 422
+    // `quantity-not-checked` travels up as an ApiError carrying the problem, and the composer renders which
+    // field is missing rather than a quantity.
+    const r = (await postRaw(`/prescriptions/quantity-preview`, req)) as any;
+    return parseOr(zQuantityPreview, {
+      totalUnits: Number(r?.totalUnits ?? 0),
+      dispenseQuantity: Number(r?.dispenseQuantity ?? 0),
+      packs: r?.packs ?? null,
+      packSize: r?.packSize ?? null,
+      prescribingUnit: r?.prescribingUnit ?? null,
+      isPackSplittable: r?.isPackSplittable ?? null,
+    });
+  }
+
+  async chronicPreview(req: {
+    durationDays: number;
+    refillFrequencyCode: string;
+    doseAmount?: number;
+    timesPerDay?: number;
+    // The DRUG, so the server resolves its pack facts itself. The composer does not hold them and must not
+    // fetch them to hand back — a second reader of the catalogue is a second thing that can disagree with it.
+    drugId?: string;
+    isPackSplittable?: boolean | null;
+    packSize?: number | null;
+  }) {
+    const r = (await postRaw(`/prescriptions/chronic-preview`, req)) as any;
+    return parseOr(zChronicPreview, {
+      total: Number(r?.total ?? 0),
+      unit: String(r?.unit ?? ""),
+      frequencyMonths: Math.trunc(Number(r?.frequencyMonths ?? 0)),
+      windows: ((r?.windows ?? []) as any[]).map((w: any) => ({
+        windowNo: Math.trunc(Number(w.windowNo ?? 0)),
+        scheduledOpen: String(w.scheduledOpen ?? ""),
+        opensAt: String(w.opensAt ?? ""),
+        closesAt: String(w.closesAt ?? ""),
+        allocatedQuantity: Number(w.allocatedQuantity ?? 0),
+      })),
+    });
+  }
+
   async submitPrescription(req: {
     encounterId: string;
     lines: PrescriptionDraftLine[];
     diagnosisIcdCodes: string[];
     acknowledgements: LineAcknowledgement[];
+    // 29.5 — additive and defaulted, so every existing caller is unaffected (design 45 §5).
+    kind?: PrescriptionKind;
+    refillFrequencyCode?: string | null;
+    durationDays?: number | null;
   }) {
     const beneficiaryId = encounterBeneficiary.get(req.encounterId) ?? req.encounterId;
     // Keyed on the composed line set, so a retry of the SAME prescription replays rather than duplicating,
@@ -1866,6 +2129,16 @@ export class HttpApiClient implements ApiClient {
         findingKind: a.findingKind,
         reason: a.reason,
       })),
+      // 29.5 — the script's own shape (design 45 §5). Sent only for a CHRONIC script: an acute one carries
+      // no schedule at all, and the server refuses `acute-has-no-schedule` if one arrives, because "is this
+      // chronic?" must have exactly one answer.
+      ...(req.kind === "Chronic"
+        ? {
+            kind: "Chronic",
+            refillFrequencyCode: req.refillFrequencyCode ?? null,
+            durationDays: req.durationDays ?? null,
+          }
+        : {}),
     }, idem)) as any;
     return parseOr(zPrescriptionSubmitResult, {
       prescriptionId: r?.prescriptionId ?? "",
@@ -3406,5 +3679,14 @@ function rxLines(lines: PrescriptionDraftLine[]) {
       refillsAllowed: 0,
       durationDays: l.durationDays,
       clientLineId: l.lineId,
+      // 29.6 — THE NUMBERS THE CHECKS RUN ON.
+      //
+      // `CreateRxLine` and `ValidateLine` have accepted these since 26.4 and nothing sent them, so the
+      // Quantity check reported "no numeric dose, frequency and duration to compute a quantity from" and
+      // the daily-dose rule had nothing to compare against — on every prescription this platform had
+      // written. Two correct checks, unfed.
+      doseAmount: l.doseAmount,
+      doseUnit: l.drug!.prescribingUnit ?? null,
+      timesPerDay: l.timesPerDay,
     }));
 }

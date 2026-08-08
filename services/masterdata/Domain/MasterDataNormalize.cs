@@ -107,6 +107,79 @@ public static class MasterDataNormalize
         return s.Length > 128 ? s[..128] : s;
     }
 
+    /// <summary>
+    /// Units of measure, which stay UPPER rather than being word-capitalised.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately short and unambiguous. Bare "g" and "l" are left out: they are single letters that occur
+    /// inside ordinary words far more often than they occur as a unit, and a rule that upper-cases them
+    /// would corrupt more names than it tidied.
+    /// </remarks>
+    private static readonly HashSet<string> Units = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "mg", "gm", "kg", "mcg", "ug", "ml", "iu", "meq", "mmol", "cm", "mm",
+    };
+
+    /// <summary>
+    /// A drug's trade name or active ingredient, cased for display.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Applied at LOAD time, on the stored value.</b> One source shouts ("PARTEN MASSAGE SPRAY") and
+    /// the other whispers ("gastrodomina 40mg 10 tab"), and they sit next to each other in the same list.
+    /// Casing this in CSS would fix whichever screen remembered to and leave the search index, the exports and
+    /// the name snapshotted onto a prescription line — the one printed on the patient's copy — still
+    /// disagreeing.</para>
+    ///
+    /// <para><b>A token carrying a digit is copied verbatim.</b> "40mg" is a strength, and a prescriber reads
+    /// it as a number; re-spelling it "40Mg" introduces a second spelling of a dose, which is the one thing a
+    /// drug list must never do. Everything else is capitalised one alphabetic RUN at a time, so "i.v." and
+    /// "hydrochlorothiazide+olmesartan" both come out right rather than getting a single capital at the
+    /// front.</para>
+    ///
+    /// <para>Idempotent, because reloads are routine. Null in, null out: 4.7% of the workbook records no
+    /// active ingredient, and absence has to survive.</para>
+    /// </remarks>
+    public static string? DisplayName(string? raw)
+    {
+        if (raw is null) return null;
+        var s = raw.Trim();
+        if (s.Length == 0) return "";
+
+        var sb = new StringBuilder(s.Length);
+        var i = 0;
+        while (i < s.Length)
+        {
+            if (char.IsWhiteSpace(s[i])) { sb.Append(s[i]); i++; continue; }
+
+            // The whole whitespace-delimited token, so "contains a digit" is asked of the token rather than
+            // of the run — "5mg/100ml" must survive intact, and its runs on their own would not.
+            var start = i;
+            while (i < s.Length && !char.IsWhiteSpace(s[i])) i++;
+            var token = s[start..i];
+
+            if (token.Any(char.IsDigit)) { sb.Append(token); continue; }
+
+            var j = 0;
+            while (j < token.Length)
+            {
+                if (!char.IsLetter(token[j])) { sb.Append(token[j]); j++; continue; }
+
+                var runStart = j;
+                while (j < token.Length && char.IsLetter(token[j])) j++;
+                var run = token[runStart..j];
+
+                if (Units.Contains(run)) sb.Append(run.ToUpperInvariant());
+                else
+                {
+                    sb.Append(char.ToUpperInvariant(run[0]));
+                    sb.Append(run[1..].ToLowerInvariant());
+                }
+            }
+        }
+
+        return sb.ToString();
+    }
+
     /// <summary>Parse a decimal price, tolerant of blanks/locale.</summary>
     public static decimal? Price(string? raw) =>
         decimal.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : null;

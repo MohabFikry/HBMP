@@ -61,9 +61,13 @@ public static class ProcedureSessions
     /// <summary>Progress for both views — the centre's queue and the ordering doctor's worklist show the same
     /// sentence ("4 of 6 sessions delivered"), because a course that reads differently at each end is a course
     /// somebody will deliver twice.</summary>
+    /// <remarks>
+    /// 31.1 — delegates to <see cref="ProcedureCourse.SessionProgress"/> rather than reading the raw totals.
+    /// Since a line's quantity became a quantity PER SESSION, the metered total is <c>sessions x per-session</c>
+    /// and eight units of a two-per-session item is FOUR attendances, not eight. Kept as a forwarding method
+    /// so both callers share one implementation — a second copy of this division is a queue and a worklist
+    /// that disagree about how much of a course is left.
+    /// </remarks>
     public static (int Delivered, int Authorised) Progress(OrderLine line)
-    {
-        ArgumentNullException.ThrowIfNull(line);
-        return ((int)line.QuantityConsumed, (int)line.QuantityOrdered);
-    }
+        => ProcedureCourse.SessionProgress(line);
 }

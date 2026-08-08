@@ -55,7 +55,14 @@ const S = {
 const ARTEFACT_LABEL: Record<string, Localized> = {
   Prescription: { en: "Prescriptions", ar: "الوصفات" },
   LabOrder: { en: "Lab orders", ar: "طلبات المختبر" },
-  ImagingOrder: { en: "Imaging orders", ar: "طلبات الأشعة" },
+  // 29.1 (design 45 §1) — the LABEL is renamed; the KEY is not.
+  //
+  // `ImagingOrder` is a persisted config vocabulary — `ValidityArtefact.ImagingOrder` keyed on
+  // `validity.imaging-order.days`, with a configured row per tenant — and renaming it would rewrite live
+  // configuration to chase a label, which is the same trade the IMAGING benefit category was left alone
+  // for. What was NOT deliberate was this English string: the Arabic beside it already read الأشعة, so the
+  // screen showed a Medical Director two different names for one setting depending on their language.
+  ImagingOrder: { en: "Radiology orders", ar: "طلبات الأشعة" },
   ProcedureOrder: { en: "Procedure orders", ar: "طلبات الإجراءات" },
 };
 

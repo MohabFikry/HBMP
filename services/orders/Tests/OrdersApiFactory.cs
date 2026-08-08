@@ -97,6 +97,11 @@ public sealed class OrdersApiFactory : WebApplicationFactory<Program>
             // answer replace it.
             services.RemoveAll<IProcedureTypeResolver>();
             services.AddSingleton<IProcedureTypeResolver>(new FakeProcedureTypes());
+            // 29.4 — the prescription half of the service history, without a pharmacy round-trip. The
+            // MERGE is what this suite is about; pharmacy's own gate is proved in pharmacy's tests.
+            services.RemoveAll<IPrescriptionHistoryClient>();
+            services.AddSingleton<IPrescriptionHistoryClient>(new FakePrescriptionHistory(this));
+
             services.RemoveAll<IReportDocumentClient>();
             services.AddSingleton<IReportDocumentClient>(new FakeReportDocuments());
             services.RemoveAll<IBranchDirectory>();
@@ -118,6 +123,15 @@ public sealed class OrdersApiFactory : WebApplicationFactory<Program>
     }
 
     /// <summary>The ordering doctor: creates and reads, and may not consume (that is the lab's action).</summary>
+    /// <summary>29.4 — the prescriptions a test wants this beneficiary to already have had.</summary>
+    public List<StubPrescriptionHistoryRow> Prescriptions { get; } = [];
+
+    /// <summary>29.4 — make pharmacy unreachable, so "could not load" can be asserted apart from "none".</summary>
+    public bool PrescriptionHistoryFails { get; set; }
+
+    /// <summary>How many times the prescription half was asked for. Zero is an assertion, not a detail.</summary>
+    public int PrescriptionHistoryCalls { get; set; }
+
     public HttpClient DoctorClient() => As(OrdersTestAuth.DoctorSub, "doctor", "orders:write orders:read");
 
     /// <summary>
@@ -282,3 +296,29 @@ public sealed class OrdersTestAuth(
             new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName)));
     }
 }
+
+
+/// <summary>
+/// 29.4 — a steerable prescription-history source (design 45 §4).
+/// </summary>
+/// <remarks>
+/// Counts its calls, so a test can assert that a LAB-scoped history never reaches into the medication
+/// record — narrowing is a privacy property, and one that is invisible unless something counts.
+/// </remarks>
+internal sealed class FakePrescriptionHistory(OrdersApiFactory f) : IPrescriptionHistoryClient
+{
+    public Task<PrescriptionHistory> ForBeneficiaryAsync(
+        Guid beneficiaryId, string? drugCode, string? bearer, CancellationToken ct = default)
+    {
+        f.PrescriptionHistoryCalls++;
+        if (f.PrescriptionHistoryFails) return Task.FromResult(PrescriptionHistory.Unavailable);
+        return Task.FromResult(new PrescriptionHistory(true, [.. f.Prescriptions.Select(p => new PrescriptionHistoryRow(
+            p.PrescriptionId, p.RxNo, p.PrescriptionLineId, p.DrugId, p.DrugName,
+            p.OccurredAt, p.Status, p.PrescriberId, p.BranchId))]));
+    }
+}
+
+/// <summary>One seeded previous prescription, in the shape pharmacy reports.</summary>
+public sealed record StubPrescriptionHistoryRow(
+    Guid PrescriptionId, string RxNo, Guid PrescriptionLineId, Guid DrugId, string? DrugName,
+    DateTimeOffset OccurredAt, string Status, string? PrescriberId, Guid? BranchId);

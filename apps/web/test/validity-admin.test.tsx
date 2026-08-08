@@ -33,9 +33,20 @@ describe("validity periods", () => {
 
     // A course of antibiotics and a follow-up scan do not go stale at the same rate. Four settings can be
     // made equal; one cannot be split later without asking every tenant what they meant by it.
-    for (const label of ["Prescriptions", "Lab orders", "Imaging orders", "Procedure orders"]) {
+    for (const label of ["Prescriptions", "Lab orders", "Radiology orders", "Procedure orders"]) {
       expect(await screen.findByText(label)).toBeInTheDocument();
     }
+  });
+
+  it("says Radiology, not Imaging — 29.1 acceptance", async () => {
+    // The stored artefact key stays `ImagingOrder`: it is a persisted config vocabulary keyed on
+    // `validity.imaging-order.days`, and renaming it would rewrite live configuration to chase a label.
+    // The LABEL is user-facing and was left behind by the rename — its Arabic already read الأشعة, so the
+    // screen was showing a director two different names for the same setting depending on their language.
+    const { container } = renderScreen(<ValidityPolicyAdmin />);
+    await screen.findByText("Prescriptions");
+
+    expect(container.textContent).not.toMatch(/imaging/i);
   });
 
   it("distinguishes a chosen period from the platform default", async () => {

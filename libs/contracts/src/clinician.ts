@@ -125,6 +125,12 @@ export type ReportAccessRequestResult = z.infer<typeof zReportAccessRequestResul
  */
 export const zRxRowLine = z.object({
   id: zId,
+  /**
+   * 29.4 — the catalogue product, which is what a service HISTORY of this medicine is keyed on (design
+   * 45 §4). The snapshotted `drug` name below is display text and changes with the catalogue; the uuid is
+   * what "has this patient had this before?" can actually be asked about.
+   */
+  drugId: zId.nullable().optional(),
   /** Trade name + strength + form, snapshotted at prescribing. Null = not recorded on this row. */
   drug: zLocalized.nullable(),
   dose: z.string().nullable(),
@@ -200,3 +206,30 @@ export const zAmendReasonOption = z.object({
   nameAr: z.string(),
 });
 export type AmendReasonOption = z.infer<typeof zAmendReasonOption>;
+
+/**
+ * The outcome of withdrawing a WHOLE transaction — a prescription or an order — rather than one line.
+ *
+ * <p><b>Partial success is a first-class answer.</b> Design 46 §3: "if some lines are already consumed it
+ * reports PARTIAL SUCCESS plainly rather than failing the lot or silently doing half." Both alternatives are
+ * worse than the truth — failing the lot leaves a doctor unable to withdraw anything, and doing half leaves
+ * them believing they have withdrawn everything.</p>
+ *
+ * <p>So the refusals are NAMED, per line, in the words the doctor needs. A count alone ("3 of 5 withdrawn")
+ * tells them something went wrong and not which two are still live.</p>
+ */
+export const zWithdrawnLine = z.object({
+  /** The service or medicine, as the doctor would name it — not the line uuid. */
+  label: z.string(),
+  withdrawn: z.boolean(),
+  /** Why this line could not be withdrawn. Null on one that was. */
+  refusal: z.string().nullable().optional(),
+});
+export type WithdrawnLine = z.infer<typeof zWithdrawnLine>;
+
+export const zWithdrawResult = z.object({
+  withdrawn: z.number().int(),
+  total: z.number().int(),
+  lines: z.array(zWithdrawnLine),
+});
+export type WithdrawResult = z.infer<typeof zWithdrawResult>;

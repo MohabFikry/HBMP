@@ -39,7 +39,8 @@ public static class ServiceHistoryEndpoints
         v1.MapGet("/{beneficiaryId:guid}/service-history", async (
             Guid beneficiaryId, string? serviceType, string? code, int? page, int? pageSize,
             HttpRequest http, OrdersDbContext db, OrdersGate gate, IAuditClient audit,
-            IHbmpPrincipalAccessor me, BranchScopeState branch, TimeProvider clock, CancellationToken ct) =>
+            IHbmpPrincipalAccessor me, BranchScopeState branch, IPrescriptionHistoryClient prescriptions,
+            TimeProvider clock, CancellationToken ct) =>
         {
             var bearer = http.Headers.Authorization.ToString();
 
@@ -75,7 +76,21 @@ public static class ServiceHistoryEndpoints
             if (!string.IsNullOrWhiteSpace(trimmed))
                 query = query.Where(o => o.Lines.Any(l => l.Code == trimmed));
 
-            var orders = await query.OrderByDescending(o => o.RequestedAt).Take(500).ToListAsync(ct);
+            /*
+             * 29.4 — WHICH HALVES TO ASK FOR (design 45 §4).
+             *
+             * A history scoped to `Prescription` has no business reading the order tables, and one scoped to
+             * a lab code has no business reading the medication record. A PHI read nobody needed is still a
+             * PHI read, and narrowing here is what keeps this aggregation from becoming a wider door than
+             * the screens it serves.
+             */
+            var wantsPrescriptions = string.IsNullOrWhiteSpace(serviceType)
+                || string.Equals(serviceType, "Prescription", StringComparison.OrdinalIgnoreCase);
+            var wantsOrders = !string.Equals(serviceType, "Prescription", StringComparison.OrdinalIgnoreCase);
+
+            var orders = wantsOrders
+                ? await query.OrderByDescending(o => o.RequestedAt).Take(500).ToListAsync(ct)
+                : [];
 
             var rows = new List<ServiceHistoryRow>();
             foreach (var order in orders)
@@ -120,6 +135,45 @@ public static class ServiceHistoryEndpoints
                 }
             }
 
+            /*
+             * 29.4 — THE PRESCRIPTION HALF, composed under the CALLER'S token (design 45 §4).
+             *
+             * ONE endpoint, as the design requires. pharmacy applies its own treating-relationship gate to
+             * the forwarded bearer, so aggregating here does not widen what this user may see — and keeping
+             * the composition in one place is what stops two implementations of the gate drifting apart.
+             *
+             * A prescription carries no RESULT and is never sensitivity-restricted: the restriction model is
+             * about diagnostic findings. So these rows are `Restricted: false` with a null summary, which is
+             * narrower than the order rows rather than a hidden value.
+             */
+            var rxHistory = wantsPrescriptions
+                ? await prescriptions.ForBeneficiaryAsync(beneficiaryId, trimmed, bearer, ct)
+                : PrescriptionHistory.None;
+
+            foreach (var rx in rxHistory.Rows)
+            {
+                rows.Add(new ServiceHistoryRow(
+                    OrderId: rx.PrescriptionId,
+                    OrderNo: rx.RxNo,
+                    OrderLineId: rx.PrescriptionLineId,
+                    ServiceType: "Prescription",
+                    CodeSystem: "DrugId",
+                    Code: rx.DrugId.ToString(),
+                    Description: rx.DrugName,
+                    OccurredAt: rx.OccurredAt,
+                    Status: rx.Status,
+                    ActorUserId: rx.PrescriberId,
+                    BranchId: rx.BranchId,
+                    Restricted: false,
+                    SensitivityLevel: null,
+                    ResultSummary: null,
+                    NumericValue: null));
+            }
+
+            // One list, newest first, whichever service each row came from — the modal shows a patient's
+            // history of a service, not two lists the reader has to interleave.
+            rows = [.. rows.OrderByDescending(r => r.OccurredAt)];
+
             // Every open is an audited PHI read NAMING the patient and the service.
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -144,7 +198,10 @@ public static class ServiceHistoryEndpoints
                     .OrderBy(r => r.OccurredAt)
                     .Select(r => new TrendPoint(r.OccurredAt, r.NumericValue!.Value))
                     .ToList(),
-                Items: page1));
+                Items: page1,
+                // The third state, carried explicitly. `false` here means pharmacy ANSWERED — an empty
+                // prescription list is then a real "none" rather than a silence.
+                PrescriptionsUnavailable: !rxHistory.Available));
         }).RequireAuthorization(HbmpPolicies.Scope("orders:read"));
     }
 
@@ -173,6 +230,13 @@ public sealed record ServiceHistoryRow(
 /// <summary>A point on the trend. Only ever built from rows the caller may see.</summary>
 public sealed record TrendPoint(DateTimeOffset At, decimal Value);
 
+/// <param name="PrescriptionsUnavailable">
+/// 29.4 — TRUE when pharmacy could not be reached, so the prescription half of this history is MISSING
+/// rather than empty (design 45 §4). The client renders "could not load" from it. Collapsing this into an
+/// empty list is the failure the three-state rule exists to prevent: a clinician reading "no previous
+/// prescriptions" over an outage will re-prescribe what the patient is already taking.
+/// </param>
 public sealed record ServiceHistoryResponse(
     Guid BeneficiaryId, string? ServiceType, string? Code, int Total, int Page, int PageSize,
-    IReadOnlyList<TrendPoint> Trend, IReadOnlyList<ServiceHistoryRow> Items);
+    IReadOnlyList<TrendPoint> Trend, IReadOnlyList<ServiceHistoryRow> Items,
+    bool PrescriptionsUnavailable = false);

@@ -39,6 +39,9 @@ import { ApiError } from "../api/http";
 import { AsyncSection, PageHeader, useBackTarget, useLoc, useOpenProfile, useWhenFilter } from "./_shared";
 import { draftKeys, useUnsentDrafts } from "./draftStore";
 import { ServiceHistoryModal } from "./ServiceHistoryModal";   // 29.4 — one modal, every tab
+import { TransactionActionsDialog } from "./TransactionActionsDialog";   // 30.6 — amend/withdraw from the row
+import type { TransactionAction } from "./TransactionActionsDialog";
+import type { AmendReasonOption } from "./AmendLineDialog";
 import { PrescribingWorkspace } from "./prescribing/PrescribingWorkspace";
 import { InvestigationWorkspace } from "./investigations/InvestigationWorkspace";
 import { EncounterTimelineButton } from "./VisitTimeline";
@@ -97,8 +100,17 @@ const S = {
   orderProcedure: { en: "Order a procedure", ar: "طلب إجراء" },
   colOpen: { en: "Open", ar: "فتح" },
   openOrder: { en: "Open the order", ar: "فتح الطلب" },
+  rxDrugMissing: { en: "Medication not recorded", ar: "الدواء غير مسجّل" },
   colHistory: { en: "History", ar: "السجل" },
   viewHistory: { en: "Previous occurrences of this service", ar: "الحالات السابقة لهذه الخدمة" },
+  // 30.6 — the two acts, on the ROW. Named for the transaction, because a column of unlabelled icons is a
+  // screen-reader user hearing "button, button" once per row with nothing to tell them apart.
+  colActions: { en: "Actions", ar: "الإجراءات" },
+  amend: { en: "Amend", ar: "تعديل" },
+  withdraw: { en: "Withdraw", ar: "سحب" },
+  lockedTerminal: { en: "Already closed — cannot be changed", ar: "مغلق بالفعل — لا يمكن تغييره" },
+  lockedDispensed: { en: "Dispensed", ar: "تم صرفه" },
+  lockedDelivered: { en: "Delivered", ar: "تم تنفيذه" },
   tabHistory: { en: "History", ar: "السجل" },
   histEncounters: { en: "Encounters", ar: "الزيارات" },
   histInvestigations: { en: "Investigations", ar: "الفحوصات" },
@@ -1449,9 +1461,7 @@ function RecordVitalsModal({ encounterId, onRecorded }: { encounterId: string; o
 // patient, then the composer that adds to it. The composer sits under its own list on purpose — the first
 // question a doctor asks before ordering something is whether they already ordered it.
 
-/** Stable accessors — an inline arrow would be a new identity each render and rebuild the filter's memo. */
-const rxSubmittedAt = (r: RxRow) => r.submittedAt;
-const orderRequestedAt = (r: OrderRow) => r.requestedAt;
+/** Stable accessor — an inline arrow would be a new identity each render and rebuild the filter's memo. */
 const encounterStartedAt = (r: PatientListItem) => r.lastVisit;
 
 /** Both tabs filter the clinician's own lists to this patient in the browser. */
@@ -1479,6 +1489,19 @@ function PrescriptionsTab({
   const rx = useAsync<RxRow[]>(useCallback(() => api.prescriptionsMine(), [api]), []);
   const rxFor = useMemo(() => forPatient(rx.data, encounter.patientId), [rx.data, encounter.patientId]);
   const [viewing, setViewing] = useState<RxRow | null>(null);
+  // 30.6 — which transaction is being amended or withdrawn, from the ROW. One at a time.
+  const [acting, setActing] = useState<{ rx: RxRow; action: TransactionAction } | null>(null);
+  const [reasons, setReasons] = useState<AmendReasonOption[]>([]);
+
+  useEffect(() => {
+    let live = true;
+    // Guarded, and the guard is not defensive clutter: the picker is an ENRICHMENT of a table that must
+    // render regardless. A throw here used to take the whole encounter screen down.
+    Promise.resolve(api.amendmentReasons?.("prescription") ?? [])
+      .then((r) => { if (live) setReasons(r); })
+      .catch(() => { if (live) setReasons([]); });
+    return () => { live = false; };
+  }, [api]);
 
   const rxCols: Column<RxRow>[] = [
     // The Rx REFERENCE, not the surrogate id. A doctor reads this column to match a prescription against
@@ -1517,24 +1540,51 @@ function PrescriptionsTab({
         />
       ),
     },
+    /*
+      30.6 — AMEND AND WITHDRAW, ON THE ROW.
+
+      Both used to live inside the detail dialog, so a doctor correcting a prescription they had just written
+      had to open it to find out whether it could be corrected. Icons rather than words because this is the
+      fifth control in a row and the reference is what the eye is scanning for; the accessible name carries
+      the reference so nothing is lost to anyone reading it aloud.
+    */
+    {
+      key: "actions",
+      header: t(S.colActions),
+      cell: (r) => (
+        <span className="row-actions">
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`${t(S.amend)} — ${r.rxNo}`}
+            onClick={() => setActing({ rx: r, action: "amend" })}
+          >
+            <Icon name="pen" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`${t(S.withdraw)} — ${r.rxNo}`}
+            onClick={() => setActing({ rx: r, action: "withdraw" })}
+          >
+            <Icon name="cross" />
+          </Button>
+        </span>
+      ),
+    },
   ];
 
   /*
-    A DATE filter, sorting and paging — but still no search box.
+    Sorting and paging. No search box and — since 31.1 — no date filter either.
 
-    The list is already narrowed to ONE patient by the tab it sits in, so a search over a dozen rows would be
-    the widest control on the tab answering a question the tab has already answered. The period is the other
-    thing entirely: a chronic patient accumulates prescriptions across years, and "what am I giving them at
-    the moment" is the question this table is opened for. Without it the answer sits under three pages of
-    history.
+    The tab has already narrowed this to ONE patient, and the table sits directly above the composer the
+    doctor came here to type into. A period chip group and eight rows of history between the two pushed that
+    composer below the fold to answer a question the tab had already answered.
   */
-  const when = useWhenFilter<RxRow>(t, rxSubmittedAt);
-  const rxFilters = useMemo(() => [when], [when]);
   const rxQuery = useTableQuery<RxRow>({
     rows: rxFor,
     columns: rxCols,
-    filters: rxFilters,
-    pageSize: 8,
+    pageSize: 5,
     initialSortKey: "submittedAt",
     initialSortDir: "descending",
   });
@@ -1560,6 +1610,7 @@ function PrescriptionsTab({
           <h4 className="section-h rx-compose-h">{t(S.prescribe)}</h4>
           <PrescribingWorkspace
             encounterId={encounter.id}
+            beneficiaryId={encounter.patientId}
             diagnosisIcdCodes={diagnoses.map((d) => d.code)}
             // Re-read the list directly above the composer. Without this the prescription a doctor just
             // wrote does not appear until the screen is reloaded — and "it is not in the list" is how a
@@ -1574,6 +1625,31 @@ function PrescriptionsTab({
         onOpenChange={(open) => !open && setViewing(null)}
         onChanged={rx.reload}
       />
+
+      {/* 30.6 — the transaction-level pair, reached from the row rather than from inside the record. */}
+      {acting && (
+        <TransactionActionsDialog
+          open
+          action={acting.action}
+          reference={acting.rx.rxNo}
+          lines={acting.rx.lines.map((l) => ({
+            id: l.id,
+            label: l.drug ? t(l.drug) : t(S.rxDrugMissing),
+            quantity: l.quantityPrescribed,
+            // Dispensed is the lock that matters here: a medicine the patient already has cannot be
+            // un-given, and the amount is what the pharmacy metered against.
+            locked: l.quantityDispensed > 0 ? t(S.lockedDispensed)
+              : l.status.label.en === "Active" ? null : t(S.lockedTerminal),
+          }))}
+          reasons={reasons}
+          onCancel={() => setActing(null)}
+          onWithdraw={({ reasonCode, reasonText }) =>
+            api.withdrawPrescription(acting.rx.id, reasonCode, reasonText)}
+          onAmend={({ lineId, quantity, reasonCode, reasonText }) =>
+            api.amendPrescriptionLine(acting.rx.id, lineId, quantity, reasonCode, reasonText)}
+          onDone={rx.reload}
+        />
+      )}
     </div>
   );
 }
@@ -1610,6 +1686,20 @@ function InvestigationsTab({
   const composeHeading = orderType === "Radiology" ? S.orderRadiology : orderType === "Procedure" ? S.orderProcedure : S.orderLab;
 
   const [viewingOrder, setViewingOrder] = useState<OrderRow | null>(null);
+  // 30.6 — which order is being amended or withdrawn, from the ROW.
+  const [acting, setActing] = useState<{ order: OrderRow; action: TransactionAction } | null>(null);
+  const [reasons, setReasons] = useState<AmendReasonOption[]>([]);
+
+  useEffect(() => {
+    let live = true;
+    // "order" scope, so the picker offers the reasons an order can be withdrawn for and never the two that
+    // belong to a medicine (dose correction, drug unavailable).
+    Promise.resolve(api.amendmentReasons?.("order") ?? [])
+      .then((r) => { if (live) setReasons(r); })
+      .catch(() => { if (live) setReasons([]); });
+    return () => { live = false; };
+  }, [api]);
+
   const orderCols: Column<OrderRow>[] = [
     { key: "orderNo", header: t(S.colRef), cell: (r) => <span className="tnum">{r.orderNo}</span>,
       sortable: true, sortValue: (r) => r.orderNo },
@@ -1664,17 +1754,41 @@ function InvestigationsTab({
         </Button>
       ),
     },
+    // 30.6 — amend and withdraw, on the ROW. See the prescriptions tab: the same two acts, worded and placed
+    // identically, because a prescriber who learns one must not have to relearn the other.
+    {
+      key: "actions",
+      header: t(S.colActions),
+      cell: (r) => (
+        <span className="row-actions">
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`${t(S.amend)} — ${r.orderNo}`}
+            onClick={() => setActing({ order: r, action: "amend" })}
+          >
+            <Icon name="pen" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`${t(S.withdraw)} — ${r.orderNo}`}
+            onClick={() => setActing({ order: r, action: "withdraw" })}
+          >
+            <Icon name="cross" />
+          </Button>
+        </span>
+      ),
+    },
   ];
 
-  // A date filter, sorting and paging — no search box. Same reasoning as the prescriptions tab: the tab has
-  // already narrowed this to one patient and one order type, and the PERIOD is what is left to ask.
-  const when = useWhenFilter<OrderRow>(t, orderRequestedAt);
-  const orderFilters = useMemo(() => [when], [when]);
+  // Sorting and paging — no search box, and since 31.1 no date filter. Same reasoning as the prescriptions
+  // tab: the tab has already narrowed this to one patient and one order type, and the composer beneath is
+  // what the doctor opened the tab to reach.
   const orderQuery = useTableQuery<OrderRow>({
     rows: mineFor,
     columns: orderCols,
-    filters: orderFilters,
-    pageSize: 8,
+    pageSize: 5,
     initialSortKey: "requestedAt",
     initialSortDir: "descending",
   });
@@ -1694,6 +1808,7 @@ function InvestigationsTab({
           <h4 className="section-h rx-compose-h">{t(composeHeading)}</h4>
           <InvestigationWorkspace
             encounterId={encounter.id}
+            beneficiaryId={encounter.patientId}
             orderType={orderType}
             diagnosisIcdCodes={diagnoses.map((d) => d.code)}
             onDone={orders.reload}
@@ -1723,6 +1838,31 @@ function InvestigationsTab({
         onOpenChange={(open) => !open && setViewingOrder(null)}
         onChanged={orders.reload}
       />
+
+      {/* 30.6 — the transaction-level pair, reached from the row. */}
+      {acting && (
+        <TransactionActionsDialog
+          open
+          action={acting.action}
+          reference={acting.order.orderNo}
+          lines={(acting.order.lines ?? []).map((l) => ({
+            id: l.id,
+            label: l.description ?? l.code,
+            quantity: l.quantityOrdered,
+            // Consumed is the lock: a session already delivered or a sample already taken is work that
+            // happened, and no amendment can un-happen it.
+            locked: l.quantityConsumed > 0 ? t(S.lockedDelivered)
+              : l.status.label.en === "Placed" || l.status.label.en === "Active" ? null : t(S.lockedTerminal),
+          }))}
+          reasons={reasons}
+          onCancel={() => setActing(null)}
+          onWithdraw={({ reasonCode, reasonText }) =>
+            api.withdrawOrder(acting.order.id, reasonCode, reasonText)}
+          onAmend={({ lineId, quantity, reasonCode, reasonText }) =>
+            api.amendOrderLine(acting.order.id, lineId, quantity, reasonCode, reasonText)}
+          onDone={orders.reload}
+        />
+      )}
     </div>
   );
 }

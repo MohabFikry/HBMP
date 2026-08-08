@@ -41,6 +41,15 @@ const S = {
   },
   retry: { en: "Retry", ar: "إعادة المحاولة" },
 
+  // 29.4 — the third state, INSIDE a successful response. The orders half answered and the pharmacy half
+  // did not, so this list is incomplete rather than short — and a reader not told that will take it for the
+  // whole story, which is the same mistake as reading "could not load" as "none".
+  rxHalfMissing: {
+    en: "Previous PRESCRIPTIONS could not be loaded, so this list is incomplete. What is shown is correct; "
+      + "there may be more.",
+    ar: "تعذّر تحميل الوصفات السابقة، لذلك هذه القائمة غير مكتملة. المعروض صحيح، وقد يكون هناك المزيد.",
+  },
+
   cDate: { en: "Date", ar: "التاريخ" },
   cService: { en: "Service", ar: "الخدمة" },
   cStatus: { en: "Status", ar: "الحالة" },
@@ -131,6 +140,12 @@ export function ServiceHistoryModal({
           <InlineAlert tone="warn">{t(S.unavailable)}</InlineAlert>
           <Button variant="secondary" onClick={state.reload}>{t(S.retry)}</Button>
         </>
+      )}
+
+      {/* Rendered ABOVE both the empty and the populated case: an incomplete list and an empty-because-
+          pharmacy-was-down list are both stories a reader would otherwise get wrong. */}
+      {state.status === "success" && state.data?.prescriptionsUnavailable && (
+        <InlineAlert tone="warn">{t(S.rxHalfMissing)}</InlineAlert>
       )}
 
       {state.status === "success" && state.data && state.data.items.length === 0 && (

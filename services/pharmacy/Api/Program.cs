@@ -54,6 +54,8 @@ builder.Services.AddHttpClient("eligibility", c => c.BaseAddress = new Uri(eligi
 // PRESCRIBER's token — the endpoint is authenticated-only and discloses four integers, no patient data.
 builder.Services.AddHttpClient<IValidityPolicySource, HttpValidityPolicySource>(c => c.BaseAddress = new Uri(adminUrl));
 builder.Services.AddScoped<IBenefitPreCheck, NotYetImplementedBenefitPreCheck>();
+// 29.2 — the CPT vehicle behind a referral, resolved by masterdata rather than re-derived here.
+builder.Services.AddScoped<IReferralServiceResolver, HttpReferralServiceResolver>();
 
 // Manufacturer labels for the live interaction and dosing checks. The ONLY third-party call in the
 // prescribing path: a public U.S. FDA endpoint that receives an active-ingredient name and nothing else.

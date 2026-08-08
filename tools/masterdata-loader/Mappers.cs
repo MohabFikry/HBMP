@@ -58,8 +58,10 @@ public static class Mappers
         // upsert matching on an unchanged trade-name string.
         DrugId = MasterDataNormalize.DrugId(MasterDataNormalize.DrugCode(r.CommercialNameEn)),
         DrugCode = MasterDataNormalize.DrugCode(r.CommercialNameEn),
-        Name = r.CommercialNameEn.Trim(),
-        ScientificName = Clean(r.ScientificName),
+        // Cased for display at LOAD time, not in CSS — this source shouts every name in capitals and the
+        // workbook whispers every one of them, and the two sit in the same list.
+        Name = MasterDataNormalize.DisplayName(r.CommercialNameEn)!,
+        ScientificName = MasterDataNormalize.DisplayName(Clean(r.ScientificName)),
         Manufacturer = Clean(r.Manufacturer),
         Form = Clean(r.Route),
         AtcCode = string.IsNullOrWhiteSpace(r.AtcCode) ? null : MasterDataNormalize.Atc(r.AtcCode),
@@ -115,11 +117,14 @@ public static class Mappers
         DrugId = MasterDataNormalize.DrugId(r.SourceRowId!.Trim()),
         SourceRowId = r.SourceRowId!.Trim(),
         DrugCode = MasterDataNormalize.DrugCode(r.TradeNameEn!),
-        Name = r.TradeNameEn!.Trim(),
+        // Cased for display at LOAD time — see MasterDataNormalize.DisplayName. The natural key above is
+        // derived from the RAW name and upper-cases anyway, so re-casing adopts the existing row rather than
+        // inserting a second copy of every drug.
+        Name = MasterDataNormalize.DisplayName(r.TradeNameEn)!,
         // The workbook carries no Arabic trade name, so name_ar stays null and the UI falls back to the
         // English name rather than rendering an empty option. Documented in the loader README.
         NameAr = null,
-        ScientificName = Clean(r.ActiveIngredient),
+        ScientificName = MasterDataNormalize.DisplayName(Clean(r.ActiveIngredient)),
         Manufacturer = Clean(r.Manufacturer),
         Form = Clean(r.DosageForm),
         // "Strength" is populated on 60.4% of rows; "Volume / Weight" covers a further slice of liquids
@@ -131,20 +136,37 @@ public static class Mappers
 
         // ---- 29.6 — the pack facts (design 45 §6) ------------------------------------------------------
         //
-        // pack_size comes from "Minor Units (total)" — X — NOT from "Major Units (per box)" — W. W is
-        // strips/blisters per box: a 20-tablet pack is 2 strips of 10, so mapping W would make every tablet
-        // quantity out by a factor of ten. The two columns are adjacent and similarly named, which is exactly
-        // why this is written down rather than left to the reader.
-        PackSize = MasterDataNormalize.Price(r.MinorUnits) is > 0 and var minor ? minor : null,
+        // BOTH unit columns, resolved together. `pack_size` is "Minor Units (total)" — X — NOT "Major Units
+        // (per box)" — W: W is strips/blisters per box, so a 20-tablet pack is 2 strips of 10 and mapping W
+        // would make every tablet quantity out by a factor of ten. The two columns are adjacent and similarly
+        // named, which is exactly why this is written down rather than left to the reader.
+        //
+        // SPLITTABILITY now comes from the same pair rather than from the dosage form, because the form is
+        // wrong in both directions on real rows — it calls a box of three ampoules unsplittable, and it has
+        // nothing at all to say about the 38 forms it does not recognise. See PackUnitRules.FromPackUnits.
+        PackSize = PackFactsOf(r).PackSize,
         PackUnit = Clean(r.DosageForm),
-        PrescribingUnit = PackUnitRules.FromDosageForm(r.DosageForm).PrescribingUnit,
-        IsPackSplittable = PackUnitRules.FromDosageForm(r.DosageForm).IsPackSplittable,
+        PrescribingUnit = PackFactsOf(r).PrescribingUnit,
+        IsPackSplittable = PackFactsOf(r).IsPackSplittable,
         // Rows missing ANY of the three are flagged and LISTED in the load report — "not silently defaulted".
         UnitDataIncomplete = !PackUnitRules.IsComplete(
-            PackUnitRules.FromDosageForm(r.DosageForm).PrescribingUnit,
-            MasterDataNormalize.Price(r.MinorUnits),
-            PackUnitRules.FromDosageForm(r.DosageForm).IsPackSplittable),
+            PackFactsOf(r).PrescribingUnit, PackFactsOf(r).PackSize, PackFactsOf(r).IsPackSplittable),
     };
+
+    /// <summary>
+    /// The three pack facts for one workbook row, from every source in order of authority.
+    /// </summary>
+    /// <remarks>
+    /// The workbook records no product-level override of either fact today, so both stated arguments are
+    /// null — they are passed explicitly rather than omitted because the override is the design's stated
+    /// intent ("overridable per product") and the seam it will arrive through is this one.
+    /// </remarks>
+    public static DerivedPackFacts PackFactsOf(DrugListXlsxRow r) => PackUnitRules.Resolve(
+        form: r.DosageForm,
+        statedSplittable: null,
+        statedUnit: null,
+        majorUnits: MasterDataNormalize.Price(r.MajorUnits),
+        minorUnits: MasterDataNormalize.Price(r.MinorUnits));
 
     /// <summary>ATC classification nodes from an xlsx row — same truncation rule as the CSV path.</summary>
     public static IEnumerable<AtcClass> ToAtcClasses(DrugListXlsxRow r, string release)

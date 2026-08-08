@@ -66,9 +66,11 @@ public sealed class HttpClinicalValidationPorts(
         var diagnoses = FetchDiagnosesAsync(encounterId, clientDiagnoses, bearerToken, ct);
         var compositions = FetchCompositionsAsync(drugIds, bearerToken, ct);
         var patient = FetchPatientAsync(beneficiaryId, encounterId, bearerToken, ct);
+        var packFacts = FetchPackFactsAsync(drugIds, bearerToken, ct);   // 29.6
 
         await Task.WhenAll(
-            indications, interactions, allergies, benefit, labels, diagnoses, compositions, patient);
+            indications, interactions, allergies, benefit, labels, diagnoses, compositions, patient,
+            packFacts);
 
         // The one source that CANNOT join the parallel wave: a contraindication is a question about the
         // patient's conditions, so it needs the diagnoses and the pregnancy status before it can be asked.
@@ -85,7 +87,8 @@ public sealed class HttpClinicalValidationPorts(
 
         return new ValidationSnapshot(
             await indications, await interactions, await allergies, dosingRules, await benefit,
-            await labels, await diagnoses, await compositions, await patient, contraindications);
+            await labels, await diagnoses, await compositions, await patient, contraindications,
+            await packFacts);
     }
 
     /// <summary>
@@ -130,6 +133,39 @@ public sealed class HttpClinicalValidationPorts(
 
             return (map, new ProvenanceInfo("Mersal drug catalogue", "live", clock.GetUtcNow()));
         }, ct);
+
+    /// <summary>
+    /// 29.6 — the pack facts the quantity check computes from (design 45 §6).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A drug ABSENT from the returned map is a drug whose pack the catalogue does not describe, and the
+    /// check reports that as NotChecked naming the field. That is deliberately different from this whole
+    /// fetch failing, which is Unavailable — "master data does not record it" and "we could not ask master
+    /// data" send the prescriber to two different places.
+    /// </para>
+    /// <para>
+    /// Null fields are carried through as null rather than dropped or defaulted. Defaulting
+    /// <c>is_pack_splittable</c> either way is exactly the guess invariant 8 forbids.
+    /// </para>
+    /// </remarks>
+    private async Task<Fetched<IReadOnlyDictionary<Guid, DrugPackFacts>>> FetchPackFactsAsync(
+        IReadOnlyList<Guid> drugIds, string? bearerToken, CancellationToken ct)
+        => await GuardedAsync<IReadOnlyDictionary<Guid, DrugPackFacts>>("drug catalogue", async token =>
+        {
+            var body = await PostAsync<PackFactsDto>(
+                "masterdata", "/api/v1/drugs/pack-facts/by-ids", new { drugIds }, bearerToken, token);
+
+            var map = (body?.Items ?? []).ToDictionary(
+                i => i.DrugId,
+                i => new DrugPackFacts(i.IsPackSplittable, i.PackSize));
+
+            return ((IReadOnlyDictionary<Guid, DrugPackFacts>)map,
+                new ProvenanceInfo("Mersal drug catalogue", "live", clock.GetUtcNow()));
+        }, ct);
+
+    private sealed record PackFactsDto(List<PackFactRow>? Items);
+    private sealed record PackFactRow(Guid DrugId, bool? IsPackSplittable, decimal? PackSize);
 
     private async Task<Fetched<DiagnosisContext>> FetchDiagnosesAsync(
         Guid? encounterId, IReadOnlyList<string>? clientDiagnoses, string? bearerToken, CancellationToken ct)

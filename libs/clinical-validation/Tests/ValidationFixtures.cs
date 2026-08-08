@@ -148,7 +148,8 @@ internal static class Fx
         Fetched<DiagnosisContext>? diagnoses = null,
         Fetched<IReadOnlyDictionary<Guid, DrugComposition>>? compositions = null,
         Fetched<PatientContext>? patient = null,
-        Fetched<ContraindicationTable>? contraindications = null) =>
+        Fetched<ContraindicationTable>? contraindications = null,
+        Fetched<IReadOnlyDictionary<Guid, DrugPackFacts>>? packFacts = null) =>
         new(indications ?? Indications(),
             interactions ?? Interactions(knownPairCount: 100),
             allergies ?? Allergies(recordedCount: 1),
@@ -158,7 +159,10 @@ internal static class Fx
             diagnoses ?? Diagnoses(),
             compositions ?? Compositions(),
             patient ?? Patient(),
-            contraindications ?? Contraindications());
+            contraindications ?? Contraindications(),
+            // 29.6 — the default is an EMPTY-but-available map, so a test that says nothing about pack facts
+            // gets the honest "master data does not record this" rather than a fabricated pack.
+            packFacts ?? PackFacts());
 
     /// <summary>Every source down — the outage case.</summary>
     public static ValidationSnapshot DeadSnapshot(string reason = "masterdata unreachable") =>
@@ -171,7 +175,22 @@ internal static class Fx
             Fetched.NotAvailable<DiagnosisContext>(reason),
             Fetched.NotAvailable<IReadOnlyDictionary<Guid, DrugComposition>>(reason),
             Fetched.NotAvailable<PatientContext>(reason),
-            Fetched.NotAvailable<ContraindicationTable>(reason));
+            Fetched.NotAvailable<ContraindicationTable>(reason),
+            Fetched.NotAvailable<IReadOnlyDictionary<Guid, DrugPackFacts>>(reason));
+
+    /// <summary>
+    /// 29.6 — the drug pack facts, as master data records them (design 45 §6).
+    /// </summary>
+    /// <remarks>
+    /// Called with no arguments this is an EMPTY map that IS available — "the catalogue describes no pack
+    /// for this drug", which the quantity check must report as NotChecked. That is a different fact from an
+    /// unreachable catalogue, so the empty case deliberately does not use <c>NotAvailable</c>.
+    /// </remarks>
+    public static Fetched<IReadOnlyDictionary<Guid, DrugPackFacts>> PackFacts(
+        params (Guid DrugId, bool? isSplittable, decimal? packSize)[] rows) =>
+        Fetched.From<IReadOnlyDictionary<Guid, DrugPackFacts>>(
+            rows.ToDictionary(r => r.DrugId, r => new DrugPackFacts(r.isSplittable, r.packSize)),
+            Provenance);
 
     public static ValidationResult Run(ValidationRequest request, ValidationSnapshot snapshot) =>
         PrescriptionValidator.Validate(request, snapshot, RanAt);

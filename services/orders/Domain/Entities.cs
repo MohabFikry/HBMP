@@ -63,6 +63,30 @@ public sealed class InvestigationOrder
     public Guid? AuthorizationId { get; set; }
     public OrderType OrderType { get; set; }
 
+    // ---- 31.1 — the OP-Procedure COURSE, at the level it is actually decided (design 45 §2, revised) ------
+
+    /// <summary>
+    /// The OP-Procedure KIND (<c>masterdata.procedure_type</c>) — one per ORDER, because it is one clinical
+    /// decision. NULL on Lab and Radiology orders.
+    /// </summary>
+    /// <remarks>
+    /// It sat on each LINE until 31.1, which allowed a two-item course to carry two different kinds and two
+    /// different session counts — not a course any centre can deliver. Validated on the write path against
+    /// EVERY line's CPT section: an unvalidated type field is decorative, and every report built on it is
+    /// quietly wrong.
+    /// </remarks>
+    public string? ProcedureTypeCode { get; set; }
+
+    /// <summary>
+    /// The course length in attendances. NULL when the type is not delivered in sessions.
+    /// </summary>
+    /// <remarks>
+    /// NULL is not 1: "this kind has no sessions" and "a one-session course" are different facts, and only
+    /// the second should ever render a session count. This is what was REQUESTED — sessions AUTHORISED is
+    /// derived from <c>OrderLine.QuantityOrdered</c>, which a partial approval narrows.
+    /// </remarks>
+    public int? Sessions { get; set; }
+
     /// <summary>
     /// 29.2b — the provider this order is ROUTED TO for delivery (design 45 §2b). THE row-level ownership
     /// anchor for the external-provider portal.
@@ -134,8 +158,20 @@ public sealed class OrderLine
     /// </summary>
     public decimal RequestedQuantity { get; set; }
 
-    /// <summary>What may be delivered — for a session-based procedure, the number of SESSIONS, metered by the
-    /// existing atomic consume rather than by a parallel counter (design 45 §2).</summary>
+    /// <summary>
+    /// 31.1 — how much of THIS item is delivered at each attendance (design 45 §2, revised).
+    /// </summary>
+    /// <remarks>
+    /// Defaults to 1, under which a pre-31.1 row's stored total still equals its session count — which is
+    /// what makes the migration an expand rather than a rewrite. Sessions and the KIND live on the ORDER now:
+    /// a course is one clinical decision, and one number of attendances.
+    /// </remarks>
+    public decimal QuantityPerSession { get; set; } = 1m;
+
+    /// <summary>The METERED TOTAL — what the atomic consume path decrements, what a partial approval narrows,
+    /// and what the delivering centre counts down. For a session-based procedure it is
+    /// <c>sessions x quantity-per-session</c> (<see cref="ProcedureCourse.MeteredTotal"/>); sessions delivered
+    /// is derived from it rather than stored, never a parallel counter.</summary>
     public decimal QuantityOrdered { get; set; }
     public decimal QuantityConsumed { get; set; }        // accumulator, 0 ≤ consumed ≤ ordered (phase 5)
     public OrderLineStatus Status { get; set; } = OrderLineStatus.Active;

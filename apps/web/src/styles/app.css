@@ -3909,6 +3909,106 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
     grid-column: 1 / -1;
   }
 }
+/* ---- 29.5 (design 45 §5) — acute / chronic ------------------------------------------------------------
+   The prescription's own shape, above the lines because it belongs to the SCRIPT rather than to any one
+   medicine. A radio group rather than a switch: acute and chronic are two kinds of prescription, and "off"
+   is not a name a prescriber would give to either. */
+.rx-kind {
+  margin: 0;
+  padding: var(--sp3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+/* Two cards, side by side, wrapping on a narrow viewport rather than squeezing. Exactly two, because
+   `zPrescriptionKind` is a closed pair and so is the server's CHECK constraint. */
+.rx-kind-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--sp3);
+  margin-block-start: var(--sp2);
+}
+.rx-kind-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: var(--sp1) var(--sp2);
+  /* The whole label is the hit area — a 14px radio alone is well under the 44px target WCAG 2.2 asks for. */
+  min-block-size: 44px;
+  padding: var(--sp2) var(--sp3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+/* The hint sits under the name, in the second column, so the two read as one card rather than three
+   free-floating pieces of text. */
+.rx-kind-option .muted { grid-column: 2; font-size: 0.8125rem; }
+.rx-kind-name { font-weight: 600; }
+/* Selection is carried by the radio's own checked state, the border weight AND the tint — never by colour
+   alone (21-accessibility). `data-selected` is what lets the border and tint follow the input. */
+.rx-kind-option[data-selected="yes"] {
+  border-color: var(--brand);
+  box-shadow: inset 0 0 0 1px var(--brand);
+}
+/* ---- 31.1 — the OP-Procedure COURSE, above the lines ----------------------------------------
+   One kind and one session count for the whole order, because a course is one clinical decision. It is
+   framed like the acute/chronic fieldset for the same reason: it is a property of the TRANSACTION, and
+   things that belong to the transaction sit above the lines rather than inside one of them. */
+.rx-course {
+  margin: 0;
+  padding: var(--sp3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.rx-course-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sp3);
+  margin-block-start: var(--sp2);
+}
+
+/* ---- 29.6 — the dose, and the unit master data records for it ------------------------------- */
+.rx-dose {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+}
+/* The unit is a FACT about the product, not a choice — so it reads as a suffix on the field rather than as
+   another control. A drug whose unit the catalogue does not record simply has no suffix. */
+.rx-dose-unit {
+  font-size: 0.8125rem;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+/* How the quantity was reached, or which master-data field stopped it being reached. A prescriber can
+   overrule the number; they cannot check it unless they are told what it came from. */
+.rx-quantity-note {
+  display: block;
+  font-size: 0.75rem;
+  margin-block-start: var(--sp1);
+}
+
+.rx-chronic-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sp3);
+}
+/* The collection schedule, shown before submit. Scrolls on its own rather than widening the page: five
+   dated columns do not fit a narrow viewport, and a body that scrolls sideways loses the composer. */
+.rx-schedule {
+  display: grid;
+  gap: var(--sp2);
+  overflow-x: auto;
+}
+/* 29.2 — what a chosen code will CREATE, stated before the doctor commits (design 45 §2). Sits under the
+   combobox and above the fields, because it changes which fields are there. */
+.rx-vehicle {
+  grid-column: 1 / -1;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp2);
+}
 .rx-field {
   display: grid;
   gap: var(--sp1);
@@ -3917,16 +4017,50 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
    it holds a phrase, not a number, and sizing it like the quantity box beside it would make a free-text
    instruction scroll inside four characters of width. */
 .rx-field--wide { grid-column: span 2; }
-.rx-line-remove {
-  justify-self: end;
+/* ---- 31.1 — the per-line controls, as icons -------------------------------------------------
+   History and Remove sit together at the end of the line. Icons rather than words because the line
+   already carries a combobox, three fields and a status chip, and two more text buttons made the row
+   read as a paragraph of controls. Each carries an accessible name that NAMES the medicine or the
+   service, so nothing is lost to anyone reading it aloud — the label moved out of sight, not out of
+   the accessibility tree. */
+.rx-line-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp1);
+}
+/* Destructive, and coloured as such even though it is now a glyph — the icon alone would be the only
+   cue, and colour alone is never one (21-accessibility). The accessible name says "Remove". */
+.rx-line-remove { color: var(--st-bad-fg); }
+
+/* Frameless. Adding a line is not a decision of the same weight as Validate or Submit, and a bordered
+   button standing beside them claims that it is. */
+.rx-add-line { justify-self: start; }
+
+/* ---- 30.6 — the transaction-level amend/withdraw dialog ------------------------------------- */
+.txn-lines {
+  list-style: none;
+  margin: 0 0 var(--sp4);
   padding: 0;
-  border: 0;
-  background: none;
-  color: var(--st-bad-fg);
-  font: inherit;
-  font-size: 0.8125rem;
-  text-decoration: underline;
-  cursor: pointer;
+  display: grid;
+  gap: var(--sp2);
+}
+.txn-line {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp3);
+  padding: var(--sp2) 0;
+  border-bottom: 1px solid var(--border);
+}
+/* The line's own name leads and takes the slack, because it is what the doctor is deciding about; the
+   quantity and the lock chip are fixed-width facts beside it. */
+.txn-line-label { flex: 1 1 auto; font-weight: 600; }
+
+/* ---- 31.1 — the two row actions on a worklist table ----------------------------------------- */
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp1);
 }
 
 /* ---- the per-line checks dialog -------------------------------------------------------------

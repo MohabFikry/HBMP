@@ -728,6 +728,56 @@ Prompt: `HBMP-Design/claude-code-prompts/phase-29-encounter-and-chronic-prescrib
   invariant-registry entries each with named tests, the rename runbook, the window-model spec and the
   workbook-mapping note.
 
+### 29.9 — the reachability remediation
+
+> A reachability audit of 29.1-29.8 found the same defect four more times: **correct, tested code that
+> nothing called.** Each had a green suite. The pattern is structural — `ApiProvider` selects `DevApiClient`
+> for every test and dev run, and its fixtures supplied fields `HttpApiClient` never mapped and the services
+> never projected — so the SPA's contract with the real backend was untested at exactly the points phase 29
+> added fields. Registered as `INV-EVERY-PHASE-29-FEATURE-IS-REACHABLE`.
+
+- **29.2 the OP Procedures composer could not order a procedure.** `orders-service` requires a procedure
+  type on every Procedure line and answers 422 `TypeMissing` without one; the composer had no type field,
+  no sessions field, and `procedureTypeCode` was absent from the draft contract and the submit payload. So
+  every procedure order composed in the encounter was refused. `ProcedureOrderEndpointTests` passed because
+  its request builder hardcodes `typeCode: "Physiotherapy"`. Now: `/procedure-types` is read, the type
+  combobox is master-data-driven, the sessions field follows `is_session_based` and starts at
+  `default_sessions`, and submit is gated on a type being chosen.
+- **A worse defect found beside it.** `InvestigationWorkspace` chose its CPT sections on
+  `orderType === "Imaging"` — never true after the 29.1 rename — so the **Radiology tab searched Laboratory
+  and Pathology codes**, and the Procedure tab could not surface a single surgery code. The same
+  fall-through made every radiology and procedure order confirm itself as "Lab order sent." Replaced with an
+  exhaustive `sectionsFor()`; the toast is a total map.
+- **29.2 E/M created nothing.** `OrderableVehicle` had no consumer and `/orderable-services` had no caller,
+  so no code path raised a referral. `INV-EM-CODE-CREATES-REFERRAL` claimed "creates a Referral" while its
+  three named tests only asserted a pure function returned the right enum. Now: the composer reads the
+  vehicle as the doctor picks and SAYS which it is; an E/M line raises a referral carrying the CPT code as
+  its requested service (`pharmacy` migration 0016); and the routing map is enforced **in both directions** —
+  a Surgery code raised as a referral is refused `not-a-referral-service`, fail-closed on an unknown code.
+- **29.5 chronic prescribing had no UI.** The phase-30 fix wired the server; nothing wired the client, so
+  `submitPrescription` never sent `kind` and the server's `DEFAULT 'Acute'` took every prescription the SPA
+  wrote. Two reads were missing entirely: `GET /refill-frequencies` (the supervisor-configurable table
+  nothing exposed) and `POST /prescriptions/chronic-preview`. **The preview is computed by the server**, by
+  the same `ChronicAllocation.Plan` the write path runs — a TypeScript re-implementation would fork the one
+  calculation in this phase that must not fork, and the drift would appear as a doctor being shown a
+  schedule the pharmacy never honours.
+- **29.7 the price and availability chips could never render.** `DrugSearchHit` did not project
+  `is_lowest_price`, `price_per_unit` or `availability`, and `HttpApiClient` did not map them; the contract
+  declares them `.optional()`, so zod parsed the gap in silence. `LowestPrice.Compute` was correct and
+  tested the whole time.
+- **29.6 the prescriber never saw a quantity check.** Invariant 8 was enforced at the write path and
+  nowhere visible, so the first a doctor knew of missing pack data was a 422 naming a column they could not
+  inspect. Adds a `Quantity` check kind reporting **NotChecked naming the column**, `Unavailable` when
+  masterdata is down, and never blocking — a missing spreadsheet column is not a clinical stop.
+- **29.4 prescriptions were absent from the service history.** The endpoint queried `db.Orders` and
+  answered for three of the four line kinds design 45 §4 names, so "has this patient had this medicine
+  before?" got a confident empty answer. orders-service now composes both halves under the CALLER'S token —
+  ONE endpoint, as the design requires, rather than two places deciding what a caller may see — and reports
+  `prescriptionsUnavailable` so an incomplete list is never read as a complete one.
+- **29.1 one user-facing "Imaging" survived.** `ValidityPolicyAdmin`'s English label read "Imaging orders"
+  beside an Arabic one already reading الأشعة. The stored `ImagingOrder` key stays (a persisted config
+  vocabulary); ADR-0038's non-rename table gained the row it was missing.
+
 ## Phase 30 — amending and cancelling signed orders ✅
 
 Design: `HBMP-Design/46-order-amendment-and-cancellation.md` · ADR-0039 ·
@@ -781,3 +831,68 @@ Design: `HBMP-Design/46-order-amendment-and-cancellation.md` · ADR-0039 ·
 
 - Docker/Compose, Helm, OpenTofu: **not yet installed** (Docker needs root). Tier 1 infra authored in `infra/compose`; run once Docker is installed.
 - Repo initialized in place at `/home/mohab/Mersal` with `HBMP-Design/` as a subfolder.
+
+## Phase 31.1 — encounter composers against real data (ADR-0040)
+
+Phase 29 built the four encounter composer tabs; running them against the **real** Egyptian catalogue is what
+this phase did. The findings were mostly not bugs in what was written — they were places where the *model* did
+not fit the clinical work, plus one more instance of the defect class this project keeps producing.
+
+### The master data is now loaded
+
+`tools/masterdata-loader` had never been run since 29.6 added the pack columns, so **0 of 31,651 drugs** had
+`pack_size`, `prescribing_unit` or `is_pack_splittable` — every quantity calculation and every price chip was
+inert. Loaded (release `phase-29-packfacts`):
+
+```
+prescribing_unit     21,815 / 22,653  (96.3%)
+pack_size            22,607 / 22,653  (99.8%)
+is_pack_splittable   22,647 / 22,653  (100.0%)
+ALL THREE (usable)   21,775 / 22,653  (96.1%)
+lowest-price          12,467 labelled across 28,865 grouped rows
+```
+
+Two latent defects surfaced the moment real data went through it, and neither could have been found any other
+way: `pack_unit varchar(16)` cannot hold `"prefilled syringe"` (22001 on the very first load), and the
+`prescribing_unit` CHECK vocabulary was short by eight words the catalogue actually uses. Both fixed in
+`masterdata/0018`.
+
+### The recurring defect, found a fourth time
+
+`doseAmount` and `timesPerDay` were **never sent**. `CreateRxLine` and `ValidateLine` had accepted them since
+26.4, so the Quantity check reported *"this line has no numeric dose, frequency and duration to compute a
+quantity from"* on **every prescription this platform has ever written**, and the daily-dose rule had nothing
+to compare against. Two correct, fully-tested checks, unfed — because the fixtures supplied what
+`HttpApiClient` never mapped.
+
+### What changed
+
+- **OP-Procedure orders are COURSES.** Type and session count moved to the ORDER; a line's quantity is
+  per-attendance; `quantity_ordered` keeps its meaning as the metered total (`sessions x per-session`), so
+  consume, partial approval and the delivering-centre queue are untouched. This reverses design 45 §2 —
+  recorded in ADR-0040 and annotated in the design doc rather than edited away.
+- **Dosing is unit-aware and the quantity is computed once.** `QuantityMath` in `libs/prescribing`, exposed as
+  `POST /prescriptions/quantity-preview`; the composer prefills from it and the check grades against it. The
+  prefill is editable and an edit is sticky.
+- **Splittability comes from the pack columns, not the dosage form.** Measured over all 22,653 rows the form
+  is wrong in both directions; the `Minor Units (total)` column answers it for 100.0% of them.
+- **Names are cased at load** — one source shouts, the other whispers, and they sit in the same list.
+- **Amend/Withdraw act on the transaction, from the row**, with partial success reported BY NAME.
+- **The chronic script's length is read from its lines** — one fact, one field.
+- Four tables: no date filter, page size 5, history icon on composed lines, icon Remove, frameless add.
+
+### Verified
+
+Web 1,116 / 87 files, tsc clean; orders 213; pharmacy, masterdata, clinical-validation, prescribing green.
+Invariant registry OK with two new entries. Loader re-run is idempotent.
+
+### Not done in 31.1
+
+- The line-level `order_line.procedure_type_code` is still written for rollback safety; **dropping it is a
+  later contract step**.
+- **8,998 legacy CSV-sourced drug rows** carry no pack data. They are excluded from the prescribing combobox
+  by `source_row_id IS NOT NULL`, so they are invisible to prescribers — but they are duplicates of workbook
+  products and should be reconciled or retired.
+- `tools/ci/check-kong-route-coverage.py` still only proves a prefix is routed SOMEWHERE, not to the service
+  that serves it. That gap is what let `/api/v1/patients/{id}/service-history` route to profile-service for a
+  whole phase.

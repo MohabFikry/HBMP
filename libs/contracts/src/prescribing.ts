@@ -48,6 +48,23 @@ export const zPrescribableDrug = z.object({
    * indicator before it ever carried real data.</p>
    */
   availability: z.enum(["Available", "Unavailable", "Unknown"]).optional(),
+
+  // ---- 29.6 (design 45 §6) — the pack facts the composer shows and computes with --------------------------
+  /**
+   * What the dose and quantity are counted in — Tablet, ML, Puff.
+   *
+   * <p>Carried on the search row so the composer can label the dose field the instant a drug is chosen.
+   * ABSENT is honest and renders as no unit: 838 catalogue rows have no derivable one, and a word invented
+   * for them would sit beside the dose field reading as data.</p>
+   */
+  prescribingUnit: z.string().nullable().optional(),
+  /** Prescribing units per pack. Absent where the catalogue does not record one. */
+  packSize: z.number().nullable().optional(),
+  /**
+   * Whether fewer than a whole pack may be dispensed. ABSENT IS NOT FALSE — it means the catalogue does not
+   * say, and the quantity is reported NotChecked naming the field rather than rounded to a pack.
+   */
+  isPackSplittable: z.boolean().nullable().optional(),
 });
 export type PrescribableDrug = z.infer<typeof zPrescribableDrug>;
 
@@ -67,6 +84,10 @@ export type CheckState = z.infer<typeof zCheckState>;
 // indication mismatch is noise: off-label is legitimate and common, so that warning fires constantly.
 export const zCheckKind = z.enum([
   "Indication", "Interaction", "Allergy", "DoseDuration", "Benefit", "Duplication", "Contraindication",
+  // 29.6 (design 45 §6) — how much to dispense, from the drug's pack facts. Its reason for existing is the
+  // NEGATIVE case: missing `is_pack_splittable` or `pack_size` reports NotChecked NAMING the field, never a
+  // guessed quantity, because a silently wrong quantity is a dispensing error.
+  "Quantity",
 ]);
 export type CheckKind = z.infer<typeof zCheckKind>;
 
@@ -156,9 +177,32 @@ export const zPrescriptionDraftLine = z.object({
   /** Client-side identity, so findings and acknowledgements can name a line before the server does. */
   lineId: z.string(),
   drug: zPrescribableDrug.nullable(),
+  /**
+   * The sig as it is STORED and read back at the counter — "1 Tablet x 3/day". Derived from the three
+   * numbers below rather than typed, so the text on the label and the arithmetic behind the quantity cannot
+   * describe different prescriptions.
+   */
   dose: z.string(),
+  /**
+   * 29.6 — the NUMERIC dose, in the drug's prescribing unit.
+   *
+   * <p>Its absence is the reason the Quantity check reported "not checked: this line has no numeric dose,
+   * frequency and duration to compute a quantity from" on every prescription this platform had written. The
+   * check was correct and complete; nothing sent it a number.</p>
+   */
+  doseAmount: z.number().nullable().default(null),
+  /** Administrations per day. The second of the three numbers a quantity is computed from. */
+  timesPerDay: z.number().int().nullable().default(null),
   durationDays: z.number().nullable(),
   quantity: z.number(),
+  /**
+   * True once the prescriber has typed a quantity of their own.
+   *
+   * <p>The computed figure is a STARTING POINT, not a verdict: a doctor who deliberately writes 90 because
+   * the patient is travelling must not watch it snap back to 60 on the next keystroke. Client-side only —
+   * it is never sent, because the server has no interest in how a number was arrived at.</p>
+   */
+  quantityEdited: z.boolean().default(false),
 });
 export type PrescriptionDraftLine = z.infer<typeof zPrescriptionDraftLine>;
 
@@ -176,3 +220,78 @@ export const zPrescriptionSubmitResult = z.object({
   status: z.string(),
 });
 export type PrescriptionSubmitResult = z.infer<typeof zPrescriptionSubmitResult>;
+
+// ---- 29.5 — acute / chronic prescribing (design 45 §5) --------------------------------------------------
+
+/**
+ * <b>Acute</b> is today's behaviour, unchanged and the default. <b>Chronic</b> is one script dispensed in
+ * dated windows, under ONE authorisation, with eligibility re-validated at each collection.
+ */
+export const zPrescriptionKind = z.enum(["Acute", "Chronic"]);
+export type PrescriptionKind = z.infer<typeof zPrescriptionKind>;
+
+/**
+ * A refill cadence, as the Approval Supervisor administers it (`pharmacy.refill_frequency`).
+ *
+ * <p><b>A table, not an enum</b> — adding "every 6 months" must be a data change rather than a release, so
+ * this describes a row. `months` is carried because it is what the window COUNT is derived from; a label
+ * alone would leave the composer unable to explain the schedule it is showing.</p>
+ */
+export const zRefillFrequency = z.object({
+  code: z.string(),
+  months: z.number().int(),
+  name: zLocalized,
+});
+export type RefillFrequency = z.infer<typeof zRefillFrequency>;
+
+/** One dated collection window, as the composer previews it before submitting. */
+export const zChronicWindow = z.object({
+  windowNo: z.number().int(),
+  /** The date the window is due. Fixed — collecting early never pulls the rest of the script forward. */
+  scheduledOpen: z.string(),
+  /** Scheduled minus the early tolerance. Window 1 gets none: it cannot open before the script existed. */
+  opensAt: z.string(),
+  closesAt: z.string(),
+  allocatedQuantity: z.number(),
+});
+
+/**
+ * The computed schedule, shown BEFORE submit so the doctor sees 34/33/33 and can adjust.
+ *
+ * <p><b>Computed by the server</b>, deliberately. Re-deriving largest-remainder here would fork the one
+ * piece of arithmetic in this phase that must not be forked — the copies would drift, and the drift would
+ * appear as a doctor being shown a schedule the pharmacy never honours.</p>
+ */
+export const zChronicPreview = z.object({
+  /** The rounded total. The windows sum to it EXACTLY — round once, at the total (invariant 5). */
+  total: z.number(),
+  unit: z.string(),
+  frequencyMonths: z.number().int(),
+  windows: z.array(zChronicWindow),
+});
+export type ChronicPreview = z.infer<typeof zChronicPreview>;
+
+/**
+ * 29.6 — how much of a medicine a course needs, and how much is therefore dispensed (design 45 §6).
+ *
+ * <p><b>Computed by the SERVER.</b> `QuantityMath` is the one implementation of this arithmetic: the
+ * validation check grades against it and the dispensing counter meters against it. A copy of the
+ * multiplication in the browser would be a second answer to "how much medicine does this person get", and
+ * the two would be discovered to disagree at a counter.</p>
+ */
+export const zQuantityPreview = z.object({
+  /** Dose × times per day × days — what the patient consumes. */
+  totalUnits: z.number(),
+  /**
+   * What is handed over. Equal to `totalUnits` for a splittable pack; rounded UP to whole packs for one that
+   * cannot be broken, because half an inhaler is not a thing anyone can dispense.
+   */
+  dispenseQuantity: z.number(),
+  /** Whole packs, when the pack cannot be split. Null when it can. */
+  packs: z.number().nullable().optional(),
+  packSize: z.number().nullable().optional(),
+  /** The word the number is counted in, so the composer says "60 Tablet" and not a bare 60. */
+  prescribingUnit: z.string().nullable().optional(),
+  isPackSplittable: z.boolean().nullable().optional(),
+});
+export type QuantityPreview = z.infer<typeof zQuantityPreview>;

@@ -54,6 +54,11 @@ builder.Services.AddHttpClient("masterdata", c =>
 // resolver deliberately does not catch, because a misconfigured host is not a fail-safe "member not found".
 builder.Services.AddHttpClient("patient", c =>
     c.BaseAddress = new Uri(builder.Configuration["Patient:BaseUrl"] ?? "http://patient-service:8080"));
+// 29.4 — the prescription half of the service history (design 45 §4). ONE endpoint composes both halves,
+// so orders asks pharmacy under the caller's own bearer rather than the client merging two responses.
+builder.Services.AddHttpClient("pharmacy", c =>
+    c.BaseAddress = new Uri(builder.Configuration["Pharmacy:BaseUrl"] ?? "http://pharmacy-service:8080"));
+builder.Services.AddScoped<IPrescriptionHistoryClient, HttpPrescriptionHistoryClient>();
 builder.Services.AddHttpClient("eligibility", c =>
     c.BaseAddress = new Uri(builder.Configuration["Eligibility:BaseUrl"] ?? "http://eligibility-service:8080"));
 builder.Services.AddHttpClient<ITreatingRelationshipClient, HttpTreatingRelationshipClient>(c =>

@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Mersal.ClinicalValidation;
+using Mersal.Pharmacy.Api;
 using Mersal.Pharmacy.Infrastructure;
 using Mersal.Validity;
 using Microsoft.AspNetCore.Authentication;
@@ -42,6 +43,13 @@ public sealed class PrescribingApiFactory : WebApplicationFactory<Program>
     /// <summary>The stub the tests steer to produce a given clinical picture.</summary>
     public StubPorts Ports { get; } = new();
 
+    /// <summary>
+    /// 29.5 — what master data records about each drug's pack. A drug ABSENT from this map falls back to
+    /// the platform's commonest shape (splittable, no pack size); a drug present with NULLS is the
+    /// "catalogue records nothing" case, which must stay NotChecked rather than becoming a guess.
+    /// </summary>
+    public Dictionary<Guid, DrugPack> Packs { get; } = [];
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
@@ -65,8 +73,11 @@ public sealed class PrescribingApiFactory : WebApplicationFactory<Program>
                 .AddScheme<AuthenticationSchemeOptions, PrescribingTestAuth>(PrescribingTestAuth.SchemeName, _ => { });
 
             // Every drug exists: this suite is about validation outcomes, not master-data lookup.
+            // 29.5 — but its PACK FACTS are steerable, because the chronic path's whole behaviour turns on
+            // them and a fixture that always answered "splittable" could not express the 2,495 real
+            // products whose catalogue records nothing.
             s.RemoveAll<IDrugValidator>();
-            s.AddSingleton<IDrugValidator>(new AllowAllDrugValidator());
+            s.AddSingleton<IDrugValidator>(new SteerableDrugValidator(this));
 
             s.RemoveAll<IClinicalValidationPorts>();
             s.AddSingleton<IClinicalValidationPorts>(Ports);
@@ -82,6 +93,12 @@ public sealed class PrescribingApiFactory : WebApplicationFactory<Program>
             // setting one would still be caught here.
             s.RemoveAll<IValidityPolicySource>();
             s.AddSingleton<IValidityPolicySource>(new DefaultValidityPolicySource());
+
+            // 29.2 — the CPT vehicle, without reaching masterdata. The RANGES are masterdata's and are
+            // proved there (CptRoutingTests); what this suite is about is whether the referral endpoint
+            // ACTS on the verdict, so the stub answers from the same published ranges and nothing more.
+            s.RemoveAll<IReferralServiceResolver>();
+            s.AddSingleton<IReferralServiceResolver>(new StubReferralServiceResolver());
         });
     }
 
@@ -176,6 +193,16 @@ public sealed class StubPorts : IClinicalValidationPorts
     /// <summary>Drug id → why no manufacturer label was used for it.</summary>
     public Dictionary<Guid, string> Labels { get; } = [];
 
+    /// <summary>
+    /// 29.6 — what the catalogue records about each drug's pack (design 45 §6).
+    /// </summary>
+    /// <remarks>
+    /// Empty by default and AVAILABLE, which is the honest fixture: most of the real catalogue records no
+    /// pack, and a test that says nothing about packs should see the quantity check report NotChecked rather
+    /// than a value nobody supplied.
+    /// </remarks>
+    public Dictionary<Guid, DrugPackFacts> PackFacts { get; } = [];
+
     /// <summary>Drug id → the molecules it contains and its ATC-4 class, for the duplication check.</summary>
     public Dictionary<Guid, DrugComposition> Compositions { get; } = [];
 
@@ -246,7 +273,11 @@ public sealed class StubPorts : IClinicalValidationPorts
                     new DiagnosisContext(clientDiagnoses ?? [], DiagnosisProvenance.ClientSupplied), Source),
             Fetched.From<IReadOnlyDictionary<Guid, DrugComposition>>(Compositions, Source),
             Fetched.From(Patient, Source),
-            Fetched.From(new ContraindicationTable(Contraindications, ContraindicationRuleCount), Source)));
+            Fetched.From(new ContraindicationTable(Contraindications, ContraindicationRuleCount), Source),
+            // 29.6 — pack facts (design 45 §6). EMPTY BUT AVAILABLE by default, so the API-level
+            // fixture reports the honest "master data records no pack for this drug" rather than a
+            // fabricated one. PackFacts lets a test opt into real values.
+            Fetched.From<IReadOnlyDictionary<Guid, DrugPackFacts>>(PackFacts, Source)));
 }
 
 /// <summary>Builds a principal from X-Test-* headers, matching the other services' convention.</summary>
@@ -314,4 +345,52 @@ public sealed class FileLoggerProvider(string path) : ILoggerProvider
             }
         }
     }
+}
+
+
+/// <summary>
+/// 29.2 — the CPT routing verdict, from the published ranges (design 45 §2).
+/// </summary>
+/// <remarks>
+/// Deliberately NOT an always-Referral stub. The referral endpoint's job is to refuse a code that routes
+/// somewhere else, and a permissive stub would let that refusal be deleted without a test noticing — which
+/// is the whole failure mode this phase keeps finding.
+/// </remarks>
+internal sealed class StubReferralServiceResolver : IReferralServiceResolver
+{
+    public Task<ReferralServiceLookup> ResolveAsync(
+        string? cptCode, string? bearer, CancellationToken ct = default)
+    {
+        if (!int.TryParse(cptCode, out var code))
+        {
+            // Unknown to the catalogue — fail-closed, exactly as the HTTP resolver's 404 path does.
+            return Task.FromResult(new ReferralServiceLookup(null, null));
+        }
+
+        // E/M is carved OUT of Medicine, which is why it is tested first: 99202-99499 sits inside the 99xxx
+        // block, and checking Medicine first would swallow every office visit.
+        var (vehicle, section) = code switch
+        {
+            >= 99202 and <= 99499 => ("Referral", "EvaluationAndManagement"),
+            >= 10004 and <= 69990 => ("ProcedureOrder", "Surgery"),
+            >= 70010 and <= 79999 => ("RadiologyOrder", "Imaging"),
+            >= 80047 and <= 89398 => ("LabOrder", "Laboratory"),
+            >= 90281 and <= 99607 => ("ProcedureOrder", "Medicine"),
+            _ => (null, null),
+        };
+
+        return Task.FromResult(new ReferralServiceLookup(vehicle, section));
+    }
+}
+
+
+/// <summary>29.5 — a drug validator whose PACK FACTS a test can set (design 45 §5, §6).</summary>
+internal sealed class SteerableDrugValidator(PrescribingApiFactory f) : IDrugValidator
+{
+    public Task<string?> DrugNameAsync(Guid drugId, string? bearerToken, CancellationToken ct = default)
+        => Task.FromResult<string?>("Test drug");
+
+    public Task<DrugPack?> PackAsync(Guid drugId, string? bearerToken, CancellationToken ct = default)
+        => Task.FromResult<DrugPack?>(
+            f.Packs.TryGetValue(drugId, out var pack) ? pack : new DrugPack(IsPackSplittable: true, PackSize: null));
 }

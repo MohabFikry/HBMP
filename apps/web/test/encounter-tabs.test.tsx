@@ -129,9 +129,13 @@ describe("Encounter picker", () => {
 });
 
 describe("Encounter workspace tabs", () => {
-  it("offers a When filter on the prescriptions tab", async () => {
+  it("offers NO date filter on the prescriptions tab", async () => {
+    // 31.1 — reversed deliberately. The tab has already narrowed this list to one patient, and the table
+    // sits directly above the composer the doctor came here to type into; a period chip group plus eight
+    // rows of history pushed that composer below the fold to answer a question the tab had answered twice.
+    // The full rule, asserted across all four tabs, lives in `encounter-transaction-actions`.
     await openTab(/prescriptions/i);
-    expect(screen.getByRole("button", { name: /last 30 days/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /last 30 days/i })).toBeNull();
   });
 
   it("shows the patient's prescriptions, with a Timeline column", async () => {

@@ -18,6 +18,13 @@
   <ItemGroup>
     <ProjectReference Include="../ingredients/Mersal.Ingredients.csproj" />
     <ProjectReference Include="../clinical-codes/Mersal.ClinicalCodes.csproj" />
+    <!--
+      Mersal.Prescribing is the same kind of reference and is admitted for the same reason: pure arithmetic
+      with no I/O, and one answer that two callers must not compute differently. `QuantityMath` decides how
+      much medicine is handed over; the composer fills the field in from it and this engine grades it. Two
+      implementations of that division is two chances to hand a patient the wrong amount.
+    -->
+    <ProjectReference Include="../prescribing/Mersal.Prescribing.csproj" />
   </ItemGroup>
 
   <ItemGroup>

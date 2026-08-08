@@ -1818,10 +1818,16 @@ invariants:
     # A Procedure order is fulfilled, consumed and finished; a Referral is not done until a report comes back.
     # Route E/M to a procedure and the loop is never opened, so it can never be found open — the classic
     # outpatient patient-safety failure.
+    # The three CptRouting tests prove the DECISION; the pharmacy ones prove the CREATION. Only the first
+    # three existed, and the entry claimed "creates a Referral" while nothing anywhere created one — the
+    # routing was a pure function with no caller. An invariant whose tests do not test its statement is
+    # worse than an unregistered one, because it reports covered.
     tests:
       - Mersal.MasterData.Tests.CptRoutingTests.An_evaluation_and_management_code_creates_a_REFERRAL_not_a_procedure
       - Mersal.MasterData.Tests.CptRoutingTests.The_medicine_and_em_overlap_in_the_published_ranges_resolves_to_referral
       - Mersal.MasterData.Tests.CptRoutingTests.A_non_orderable_code_says_WHY_rather_than_simply_being_absent
+      - Mersal.Pharmacy.Tests.ReferralCarriesRequestedServiceTests.A_referral_records_the_CPT_code_it_was_raised_for
+      - Mersal.Pharmacy.Tests.ReferralCarriesRequestedServiceTests.A_NON_EM_code_is_refused_as_a_referral_service
 
   - id: INV-EXTERNAL-PROVIDER-SEES-ONLY-ITS-OWN-ROWS
     statement: >-
@@ -1853,6 +1859,38 @@ invariants:
       - Mersal.Orders.Tests.ProcedureSessionsTests.A_partial_approval_of_ten_to_six_makes_six_deliverable
       - Mersal.Orders.Tests.ProcedureSessionsTests.An_undecided_order_delivers_nothing_rather_than_what_was_requested
       - Mersal.MasterData.Tests.ProcedureTypeRulesTests.A_partial_approval_of_ten_to_six_yields_six_deliverable_sessions
+
+  - id: INV-PROCEDURE-COURSE-IS-ONE-DECISION
+    statement: >-
+      An OP-Procedure order carries ONE procedure type and ONE session count, on the ORDER. A line's quantity
+      is what is delivered at each attendance, and the metered quantity_ordered is sessions x per-session.
+    source: 45-encounter-and-prescription-adjustments.md §2 (REVISED by ADR-0040)
+    severity: High
+    # Supersedes "sessions ARE the quantity". That model could not express an outpatient course: with the
+    # kind and the count on each LINE a two-item course could carry two kinds and two session counts — not a
+    # course any centre can deliver — and there was nowhere to record "three of these at each attendance".
+    # What is UNCHANGED is quantity_ordered's meaning: it is still what the atomic consume path decrements,
+    # what a partial approval narrows, and what the centre's queue counts down. Sessions delivered is
+    # DERIVED from it, never stored, because a second stored counter is the parallel counter §2 forbade.
+    tests:
+      - Mersal.Orders.Tests.ProcedureCourseTests.The_metered_total_is_sessions_times_the_per_session_quantity
+      - Mersal.Orders.Tests.ProcedureCourseTests.Sessions_delivered_is_derived_from_what_was_consumed
+      - Mersal.Orders.Tests.ProcedureCourseTests.A_partial_approval_narrows_the_course_and_the_session_count_follows
+      - Mersal.Orders.Tests.ProcedureOrderEndpointTests.The_course_is_the_ORDERS_and_the_line_quantity_is_per_session
+
+  - id: INV-QUANTITY-IS-COMPUTED-ONCE
+    statement: >-
+      The quantity to dispense is computed by QuantityMath and nowhere else. The composer prefills its field
+      from the server; it never multiplies dose x frequency x duration itself.
+    source: 45-encounter-and-prescription-adjustments.md §6
+    severity: Critical
+    # One implementation, because this number decides how much medicine a person is handed: the validation
+    # check grades against it and the dispensing counter meters against it. A TypeScript copy in the browser
+    # would be a second answer, and the two would be found to disagree at a counter rather than in a test.
+    tests:
+      - Mersal.Prescribing.Tests.QuantityMathTests.A_pack_that_cannot_be_split_rounds_UP_to_whole_packs
+      - Mersal.Pharmacy.Tests.QuantityPreviewTests.It_reads_the_drugs_pack_facts_itself_and_answers_with_a_NUMBER
+      - Mersal.Pharmacy.Tests.QuantityPreviewTests.A_drug_with_no_recorded_splittability_reports_NotChecked_NAMING_the_column
 
   - id: INV-MISSING-UNIT-DATA-IS-NOTCHECKED
     statement: >-
@@ -2045,6 +2083,54 @@ invariants:
     tests:
       - Mersal.MasterData.Tests.ProcedureTypeIsDataNotCodeTests.No_source_file_branches_on_a_PROCEDURE_TYPE_NAME
       - Mersal.MasterData.Tests.ProcedureTypeIsDataNotCodeTests.The_two_new_therapies_are_seeded_as_session_based
+
+  - id: INV-EVERY-PHASE-29-FEATURE-IS-REACHABLE
+    statement: >-
+      Every phase-29 feature is reachable from the surface a user actually operates. A correct
+      implementation nothing calls is not an implementation: the composer must be able to produce what the
+      write path requires, and the client must map what the server sends.
+    source: 45-encounter-and-prescription-adjustments.md §2, §4, §5, §7
+    severity: Critical
+    # The defect class this phase produced four times over: the chronic library nothing called, the
+    # procedure composer that could not send a procedure type, the lowest-price columns that stopped at the
+    # database, and the E/M routing with no caller. Each was correct, tested, and unreachable — and each
+    # green suite said so. These tests assert REACHABILITY, which is the property a unit test cannot see.
+    tests:
+      - Mersal.Pharmacy.Tests.ChronicPrescribingIsWiredTests.Writing_a_chronic_script_CREATES_ITS_REFILL_WINDOWS
+      - Mersal.Pharmacy.Tests.ChronicComposerSupportTests.The_refill_frequencies_are_readable_so_the_composer_can_offer_them
+      - Mersal.Pharmacy.Tests.ChronicComposerSupportTests.The_preview_splits_an_uneven_total_highest_first_and_sums_exactly
+      - Mersal.MasterData.Tests.DrugSearchTests.An_option_carries_the_lowest_price_verdict_and_the_per_unit_price_it_rests_on
+      - Mersal.MasterData.Tests.DrugSearchTests.An_option_carries_its_availability_and_defaults_to_Unknown
+      - Mersal.Orders.Tests.ServiceHistoryIncludesPrescriptionsTests.A_prescription_line_appears_in_the_history_beside_the_orders
+
+  - id: INV-SERVICE-HISTORY-INCOMPLETE-IS-NOT-EMPTY
+    statement: >-
+      When one half of the service history cannot be loaded, the response SAYS SO. An incomplete list is
+      never presented as a complete one, and a missing prescription half is never rendered as "no previous
+      prescriptions".
+    source: 45-encounter-and-prescription-adjustments.md §4
+    severity: High
+    # The three-state rule, reaching inside a single successful response. The orders half can answer while
+    # pharmacy is down, and a reader not told that takes a short list for the whole story — which is the
+    # same clinical error as reading "could not load" as "none", arriving by a quieter route.
+    tests:
+      - Mersal.Orders.Tests.ServiceHistoryIncludesPrescriptionsTests.Pharmacy_being_unreachable_is_REPORTED_never_rendered_as_no_prescriptions
+      - Mersal.Orders.Tests.ServiceHistoryIncludesPrescriptionsTests.A_history_for_a_LAB_code_does_not_go_asking_pharmacy
+
+  - id: INV-MISSING-PACK-DATA-IS-VISIBLE-TO-THE-PRESCRIBER
+    statement: >-
+      Where the drug master lacks the pack facts a quantity needs, the PRESCRIBER sees NotChecked naming the
+      missing column — not a clean panel followed by a refusal at submit.
+    source: 45-encounter-and-prescription-adjustments.md §6, §8.8
+    severity: High
+    # Invariant 8 was enforced on the write path and nowhere the prescriber could see it, so the first they
+    # knew of it was a 422 naming a field they had no way to inspect. A quantity check that reports Ok by
+    # omission is the false assurance the five-state model exists to prevent.
+    tests:
+      - Mersal.ClinicalValidation.Tests.QuantityCheckTests.Unknown_splittability_yields_NotChecked_NAMING_the_field
+      - Mersal.ClinicalValidation.Tests.QuantityCheckTests.A_missing_pack_size_yields_NotChecked_NAMING_the_field
+      - Mersal.ClinicalValidation.Tests.QuantityCheckTests.The_check_reports_Unavailable_when_master_data_could_not_be_reached
+      - Mersal.ClinicalValidation.Tests.QuantityCheckTests.The_check_never_BLOCKS_a_prescription
 
   - id: INV-CHRONIC-PRESCRIBING-IS-REACHABLE
     statement: >-

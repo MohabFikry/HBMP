@@ -1,3 +1,4 @@
+using Mersal.Prescribing;
 using Mersal.ClinicalCodes;
 
 namespace Mersal.ClinicalValidation;
@@ -32,6 +33,7 @@ public static class PrescriptionValidator
             findings.Add(AllergyChecks.Evaluate(line, snapshot.Allergies));
             findings.Add(DoseChecks.Evaluate(line, snapshot.DosingRules, snapshot.Labels, snapshot.Patient, ranAt));
             findings.Add(ContraindicationChecks.Evaluate(line, snapshot.Contraindications));
+            findings.Add(QuantityChecks.Evaluate(line, snapshot.PackFacts));
         }
 
         findings.AddRange(InteractionChecks.Evaluate(request, snapshot.Interactions));
@@ -1046,4 +1048,119 @@ internal static class ContraindicationChecks
     private static Finding Clinical(
         PrescriptionLineInput line, ClinicalState state, string en, string ar, ProvenanceInfo? provenance)
         => Finding.Clinical(line.LineId, line.DrugId, CheckKind.Contraindication, state, en, ar, provenance);
+}
+
+/// <summary>
+/// 29.6 — how much to dispense, and the far more important case of not being able to say (design 45 §6).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Invariant 8: missing unit data yields NotChecked NAMING the field, never a guessed quantity.</b> The
+/// quantity is not a convenience — it is what the pharmacy dispenses. A silently wrong one is a dispensing
+/// error, and the two ways to produce one are both defaults: assuming a pack splits (which permits a
+/// fractional inhaler) and assuming it does not (which rounds a tablet count up to whole boxes). So absence
+/// is reported as itself, and the MISSING COLUMN is named — because the person who resolves it edits the
+/// drug table, and "quantity could not be computed" alone sends a prescriber to guess instead.
+/// </para>
+/// <para>
+/// <b>Rounding, where it happens at all, is UP and only for a pack that cannot be broken.</b> Rounding down
+/// sends a patient home short of the course they were prescribed.
+/// </para>
+/// </remarks>
+internal static class QuantityChecks
+{
+    internal static Finding Evaluate(
+        PrescriptionLineInput line, Fetched<IReadOnlyDictionary<Guid, DrugPackFacts>> packFacts)
+    {
+        if (packFacts is Fetched<IReadOnlyDictionary<Guid, DrugPackFacts>>.Unavailable u)
+        {
+            // The SOURCE was down. Not the same fact as "the data is missing", and the prescriber deciding
+            // whether to chase a master-data fix is the one who needs the difference.
+            return Clinical(line, ClinicalState.Unavailable,
+                $"Quantity check unavailable — {u.Reason}.",
+                $"تعذّر التحقق من الكمية — {u.Reason}.",
+                provenance: null);
+        }
+
+        var available = (Fetched<IReadOnlyDictionary<Guid, DrugPackFacts>>.Available)packFacts;
+        var provenance = available.Provenance;
+
+        // Nothing to compute FROM. The commonest case on a free-text dose, and it is stated rather than
+        // passed silently — an Ok here would read as "the quantity is right".
+        if (line.DoseAmount is null || line.TimesPerDay is null || line.DurationDays is null)
+        {
+            return Clinical(line, ClinicalState.NotChecked,
+                "Not checked — this line has no numeric dose, frequency and duration to compute a quantity from.",
+                "لم يتم التحقق — لا تحتوي هذه السطر على جرعة رقمية وتكرار ومدة لحساب الكمية منها.",
+                provenance);
+        }
+
+        var days = line.DurationDays.Value;
+
+        if (!available.Value.TryGetValue(line.DrugId, out var pack))
+        {
+            // No row at all is not a row of tidy defaults. 2,495 products in the catalogue are in this state.
+            return Clinical(line, ClinicalState.NotChecked,
+                "Not checked — master data records no pack information for this drug "
+                + "('is_pack_splittable', 'pack_size').",
+                "لم يتم التحقق — لا تسجّل البيانات المرجعية معلومات العبوة لهذا الدواء "
+                + "('is_pack_splittable', 'pack_size').",
+                provenance);
+        }
+
+        /*
+         * THE ARITHMETIC IS NOT DONE HERE.
+         *
+         * It moved to `Mersal.Prescribing.QuantityMath` because the composer needs the same NUMBER while the
+         * doctor is still typing, and all this check ever exposed was a formatted sentence. A composer that
+         * re-derived it in TypeScript would be a second implementation of the one division that decides how
+         * much medicine a person is handed — and the two would be discovered to disagree at a counter.
+         *
+         * What stays here is the JUDGEMENT: turning an outcome into a five-state finding, with the missing
+         * field named in the words a data administrator can act on.
+         */
+        var outcome = QuantityMath.Compute(
+            line.DoseAmount, line.TimesPerDay, line.DurationDays, pack.IsPackSplittable, pack.PackSize);
+
+        if (outcome.Plan is not { } plan)
+        {
+            var (en, ar) = outcome.MissingField switch
+            {
+                "is_pack_splittable" => (
+                    "Not checked — master data does not record 'is_pack_splittable' for this drug, so its "
+                    + "quantity cannot be computed. A guessed quantity is a dispensing error.",
+                    "لم يتم التحقق — لا تسجّل البيانات المرجعية 'is_pack_splittable' لهذا الدواء، لذلك يتعذّر "
+                    + "حساب الكمية. الكمية المُخمّنة خطأ في الصرف."),
+                "pack_size" => (
+                    "Not checked — this pack cannot be split and master data does not record 'pack_size', "
+                    + "so the number of whole packs cannot be computed.",
+                    "لم يتم التحقق — لا يمكن تجزئة هذه العبوة ولا تسجّل البيانات المرجعية 'pack_size'، "
+                    + "لذلك يتعذّر حساب عدد العبوات الكاملة."),
+                _ => (
+                    "Not checked — this line has no numeric dose, frequency and duration to compute a "
+                    + "quantity from.",
+                    "لم يتم التحقق — لا تحتوي هذه السطر على جرعة رقمية وتكرار ومدة لحساب الكمية منها."),
+            };
+            return Clinical(line, ClinicalState.NotChecked, en, ar, provenance);
+        }
+
+        if (plan.Packs is { } packs)
+        {
+            return Clinical(line, ClinicalState.Ok,
+                $"{plan.TotalUnits:0.##} units required — {packs:0} whole pack(s) of {plan.PackSize:0.##} "
+                + $"({plan.DispenseQuantity:0.##} units). This pack cannot be split.",
+                $"المطلوب {plan.TotalUnits:0.##} وحدة — {packs:0} عبوة كاملة سعة {plan.PackSize:0.##} "
+                + $"({plan.DispenseQuantity:0.##} وحدة). لا يمكن تجزئة هذه العبوة.",
+                provenance);
+        }
+
+        return Clinical(line, ClinicalState.Ok,
+            $"{plan.TotalUnits:0.##} units required over {days} day(s).",
+            $"المطلوب {plan.TotalUnits:0.##} وحدة على مدى {days} يوم.",
+            provenance);
+    }
+
+    private static Finding Clinical(
+        PrescriptionLineInput line, ClinicalState state, string en, string ar, ProvenanceInfo? provenance)
+        => Finding.Clinical(line.LineId, line.DrugId, CheckKind.Quantity, state, en, ar, provenance);
 }
