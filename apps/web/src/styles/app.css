@@ -1395,9 +1395,14 @@ nav.mrs-rail {
    to tell "you may not see this" from "it broke" from "there is nothing" at a glance, in both themes and
    without relying on hue (0B four-cue rule). */
 .patient-profile { display: grid; gap: var(--sp4); }
-/* The tab bar sticks at the same offset the old side nav used. Background matches the page so scrolled
-   content does not show through behind the (otherwise transparent-margined) pill track. */
-.profile-tabs .mrs-tabs--pill {
+/* The tab bar sticks at the same offset the old side nav used. Sticky + the opaque backdrop live on
+   `.profile-tabs` itself (the Tabs `Root`, a plain block-level div, full width by default) rather than on
+   `.mrs-tabs--pill` — that inner element is `display: inline-flex` (shrink-to-fit), so an opaque background
+   on it only ever covered the pill track's own width, and full-width content scrolling up showed beside it.
+   This also leaves `.mrs-tabs--pill`'s own `background: var(--surface-2)` rule unshadowed — a rule here at
+   the same specificity previously overrode it, so the pill track lost the `.mrs-seg` tint it was built to
+   reuse. */
+.profile-tabs {
   position: sticky;
   top: var(--sp4);
   z-index: 1;
@@ -3159,6 +3164,12 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
 .profile-section {
   display: grid;
   min-inline-size: 0;
+  /* WCAG 2.4.11 (Focus Not Obscured): the sticky `.profile-tabs` bar above sits roughly a 44px-min-height
+     pill row + ~6px track padding + `var(--sp2)` padding-block top and bottom, plus its own `top: var(--sp4)`
+     offset before it starts sticking. Without this, tabbing into a control just below the fold scrolls it
+     under the bar. `calc(var(--sp4) + 80px)` is a generous estimate, not a pixel-exact one — this can't be
+     verified without a browser in this session, so it errs generous rather than exact. */
+  scroll-margin-block-start: calc(var(--sp4) + 80px);
 }
 .profile-section > * { min-inline-size: 0; }
 
