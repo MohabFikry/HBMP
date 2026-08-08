@@ -4082,9 +4082,9 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   justify-content: flex-end;
   gap: var(--sp1);
 }
-/* Destructive, and coloured as such even though it is now a glyph — the icon alone would be the only
-   cue, and colour alone is never one (21-accessibility). The accessible name says "Remove". */
-.rx-line-remove { color: var(--st-bad-fg); }
+/* Colour and frame come from the button's own `danger` variant — see
+   `.mrs-btn.mrs-danger:has(> svg:only-child)` in the design system. Restating the colour here would be a
+   second source of truth for it, and the one that drifted would be this one. */
 
 /* Frameless. Adding a line is not a decision of the same weight as Validate or Submit, and a bordered
    button standing beside them claims that it is. */
@@ -4111,9 +4111,8 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
    shrink rather than pushing the quantity box off the row. */
 .txn-line-label { flex: 1 1 12rem; min-inline-size: 0; font-weight: 600; }
 .txn-line .rx-field { flex: 0 0 8rem; }
-/* Destructive, and coloured as such even though it is a glyph — the accessible name says "Withdraw this
-   item", and the chip beside it says so in words once it is armed. */
-.txn-line-remove { color: var(--st-bad-fg); }
+/* Colour and frame come from the button's `danger` variant. The accessible name says "Withdraw this item",
+   and once armed the chip beside it says so in words — colour is never the only cue. */
 /* A line marked for withdrawal reads as struck through AND carries a chip — never colour alone. */
 .txn-line[data-removing="yes"] .txn-line-label {
   text-decoration: line-through;

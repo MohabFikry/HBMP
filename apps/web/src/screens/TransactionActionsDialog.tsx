@@ -270,7 +270,6 @@ export function TransactionActionsDialog({
                     // that point the destructive thing is already marked and the control UNDOES it.
                     variant={removing.has(l.id) ? "ghost" : "danger"}
                     size="sm"
-                    className="txn-line-remove"
                     disabled={busy}
                     aria-pressed={removing.has(l.id)}
                     aria-label={`${t(removing.has(l.id) ? S.keepLine : S.removeLine)} — ${l.label}`}

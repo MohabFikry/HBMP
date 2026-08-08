@@ -92,6 +92,31 @@ html[data-theme="dark"] .mrs-btn.mrs-primary {
   color: var(--st-bad-fg);
   border-color: var(--st-bad-fg);
 }
+/* ---------- An icon-only DANGER button carries no frame -----------------------------------------
+ *
+ * A destructive action stated in WORDS earns an outline: "Withdraw" beside "Amend" is a choice, and the
+ * heavier of the two should look heavier. A destructive action stated as a GLYPH does not — a worklist
+ * column of outlined red boxes, one per row, reads as an alarm about the rows themselves rather than as a
+ * control that acts on one. The colour is enough: it is the only red in the row, and the accessible name
+ * says the word.
+ *
+ * Matched on the CONTENT rather than on a prop, so it cannot be forgotten. `svg:only-child` is precisely
+ * "this button is an icon and nothing else" — a button with `leadingIcon` and a label has two children and
+ * keeps its outline, which is the distinction the rule is actually about. Adding an `iconOnly` prop instead
+ * would put the same decision at every one of the call sites, where it would be got wrong exactly once.
+ *
+ * The hover tint stays: without it the only feedback on a 44px target is the cursor.
+ */
+.mrs-btn.mrs-danger:has(> svg:only-child) {
+  border-color: transparent;
+  background: transparent;
+  padding: 0 8px;
+}
+.mrs-btn.mrs-danger:has(> svg:only-child):hover:not(:disabled) {
+  background: var(--st-bad-bg);
+  border-color: transparent;
+  box-shadow: none;
+}
 .mrs-btn.mrs-warn {
   color: var(--st-warn-fg);
   border-color: var(--st-warn-fg);

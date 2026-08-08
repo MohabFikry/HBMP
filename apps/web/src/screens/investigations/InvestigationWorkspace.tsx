@@ -684,7 +684,6 @@ export function InvestigationWorkspace({
                   // sits next to a history icon that is not.
                   variant="danger"
                   size="sm"
-                  className="rx-line-remove"
                   disabled={busy}
                   aria-label={`${t(S.removeLine)} — ${line.test ? line.test.code : t(S.emptyLine)}`}
                   onClick={() => {

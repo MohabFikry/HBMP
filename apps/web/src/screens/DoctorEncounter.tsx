@@ -1562,7 +1562,10 @@ function PrescriptionsTab({
             <Icon name="pen" />
           </Button>
           <Button
-            variant="ghost"
+            // DANGER, and frameless because it is a glyph — see `.mrs-btn.mrs-danger:has(> svg:only-child)`.
+            // It is the only red in the row; a column of outlined red boxes would read as an alarm about
+            // the rows themselves rather than as a control that acts on one.
+            variant="danger"
             size="sm"
             aria-label={`${t(S.withdraw)} — ${r.rxNo}`}
             onClick={() => setActing({ rx: r, action: "withdraw" })}
@@ -1773,7 +1776,10 @@ function InvestigationsTab({
             <Icon name="pen" />
           </Button>
           <Button
-            variant="ghost"
+            // DANGER, and frameless because it is a glyph — see `.mrs-btn.mrs-danger:has(> svg:only-child)`.
+            // It is the only red in the row; a column of outlined red boxes would read as an alarm about
+            // the rows themselves rather than as a control that acts on one.
+            variant="danger"
             size="sm"
             aria-label={`${t(S.withdraw)} — ${r.orderNo}`}
             onClick={() => setActing({ order: r, action: "withdraw" })}

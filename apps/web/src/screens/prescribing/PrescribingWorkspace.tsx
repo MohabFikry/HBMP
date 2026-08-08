@@ -929,7 +929,6 @@ export function PrescribingWorkspace({
                   // that does it should not look like the one beside it that opens a history panel.
                   variant="danger"
                   size="sm"
-                  className="rx-line-remove"
                   disabled={busy}
                   // The line is NAMED. A column of bare crosses is a screen-reader user hearing "Remove"
                   // five times with no way to tell which medicine they are about to drop.
