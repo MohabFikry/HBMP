@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Card, Icon, InlineAlert, Select, useTheme } from "@mersal/design-system";
-import type { IconName } from "@mersal/design-system";
+import { Button, Card, Icon, InlineAlert, Select, Tabs, useTheme } from "@mersal/design-system";
+import type { IconName, TabItem } from "@mersal/design-system";
 import type {
   CallHistoryRow,
   ProfileExportSummary,
@@ -11,8 +11,8 @@ import type {
   ProfileAlerts,
   ProfileHeader,
   ProfileSection,
+  ProfileSectionKey,
 } from "@mersal/contracts";
-import { PROFILE_SECTION_KEYS } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAuth } from "../auth/AuthProvider";
 import { permissionsForRole, hasPermission, type Permission, type Role } from "../authz/permissions";
@@ -41,7 +41,7 @@ const STR = {
     ar: "افتح مريضًا من قائمة عمل أو من «بحث / إدارة» لعرض ملفّه.",
   },
   title: { en: "Patient Profile", ar: "ملف المريض" },
-  jumpTo: { en: "Jump to section", ar: "الانتقال إلى قسم" },
+  tabsLabel: { en: "Profile sections", ar: "أقسام الملف" },
   restricted: { en: "Restricted", ar: "مقيّد" },
   unavailable: { en: "Temporarily unavailable", ar: "غير متاح مؤقتًا" },
   empty: { en: "No records", ar: "لا توجد سجلات" },
@@ -64,6 +64,7 @@ const STR = {
   inbound: { en: "Inbound", ar: "وارد" },
   outbound: { en: "Outbound", ar: "صادر" },
   alerts: { en: "Alerts", ar: "تنبيهات" },
+  historyTab: { en: "History", ar: "السجل الطبي" },
   allergyTo: { en: "Allergy:", ar: "حساسية:" },
   moreAlerts: { en: "more alerts", ar: "تنبيهات أخرى" },
   actions: { en: "Actions", ar: "إجراءات" },
@@ -304,40 +305,92 @@ function openPrintable(summary: ProfileExportSummary) {
   w.print();
 }
 
+type ProfileTabKey = "coverage" | "history" | "authorizations" | "documents" | "notes" | "timeline" | "callHistory";
+
+/**
+ * Section keys grouped into the profile's tabs (design spec
+ * docs/superpowers/specs/2026-08-08-patient-profile-tabs-redesign.md). Each group's `sections` list is in
+ * `PROFILE_SECTION_KEYS` order, which is also render order within the tab — alerts-before-encounters is a
+ * safety property (design 39), not a layout choice this table is free to reorder.
+ */
+const PROFILE_TAB_GROUPS: { key: ProfileTabKey; title: Localized; sections: ProfileSectionKey[] }[] = [
+  { key: "coverage", title: SECTION_TITLES.coverage, sections: ["coverage"] },
+  {
+    key: "history",
+    title: STR.historyTab,
+    sections: ["alerts", "pastMedicalHistory", "encounters", "investigations", "prescriptions", "caseManagement"],
+  },
+  { key: "authorizations", title: SECTION_TITLES.authorizations, sections: ["authorizations", "referrals", "financial"] },
+  { key: "documents", title: SECTION_TITLES.documents, sections: ["documents"] },
+  { key: "notes", title: SECTION_TITLES.notes, sections: ["notes"] },
+  { key: "timeline", title: SECTION_TITLES.timeline, sections: ["timeline"] },
+  { key: "callHistory", title: SECTION_TITLES.callHistory, sections: ["callHistory"] },
+];
+
 function ProfileBody({ profile, onRetry }: { profile: PatientProfileContract; onRetry: () => void }) {
   const t = useLoc();
+  const [activeTab, setActiveTab] = useState<ProfileTabKey>("coverage");
 
-  // Render in the server's order, which is design 39 §3 order. Sorting here would be a second opinion about
-  // the order alerts appear in, and alerts being second is a safety property, not a layout choice.
-  const ordered = useMemo(() => {
-    const rank = new Map(PROFILE_SECTION_KEYS.map((k, i) => [k as string, i]));
-    return [...profile.sections].sort(
-      (a, b) => (rank.get(a.key) ?? 999) - (rank.get(b.key) ?? 999),
-    );
-  }, [profile.sections]);
+  const byKey = useMemo(() => new Map(profile.sections.map((s) => [s.key, s] as const)), [profile.sections]);
+  const header = byKey.get("header");
+  const alerts = byKey.get("alerts");
+  const alertData = alerts?.state === "Visible" ? (alerts.data as ProfileAlerts) : null;
+
+  const tabItems: TabItem[] = useMemo(() => {
+    const assigned = new Set(PROFILE_TAB_GROUPS.flatMap((g) => g.sections as string[]));
+    // A server ahead of this client sends a key none of the groups above know. It must still be shown
+    // (design 39 §6: an unknown section is rendered, not reported as empty) — it lands in History, the
+    // catch-all clinical tab, rather than being silently dropped.
+    const orphaned = profile.sections.map((s) => s.key).filter((k) => k !== "header" && !assigned.has(k));
+
+    return PROFILE_TAB_GROUPS.map((group) => {
+      const keys = group.key === "history" ? [...group.sections, ...orphaned] : group.sections;
+      return {
+        value: group.key,
+        label: t(group.title),
+        content: (
+          <div className="profile-sections">
+            {keys
+              .map((key) => byKey.get(key))
+              .filter((s): s is ProfileSection => s !== undefined)
+              .map((section) => (
+                <SectionCard key={section.key} section={section} beneficiaryId={profile.beneficiaryId} onRetry={onRetry} />
+              ))}
+          </div>
+        ),
+      };
+    });
+  }, [byKey, profile.sections, profile.beneficiaryId, onRetry, t]);
 
   return (
     <div className="patient-profile">
-      <nav className="profile-jump" aria-label={t(STR.jumpTo)}>
-        <ul>
-          {ordered.map((s) => (
-            <li key={s.key}>
-              <a href={`#section-${s.key}`}>{t(SECTION_TITLES[s.key] ?? { en: s.key, ar: s.key })}</a>
-            </li>
-          ))}
-        </ul>
-      </nav>
+      {header ? (
+        <section aria-label={t(SECTION_TITLES.header)} className="profile-identity-card">
+          <Card style={{ padding: "var(--sp5)" }}>
+            {header.state === "Visible" ? (
+              <ProfileIdentity
+                data={header.data as ProfileHeader}
+                // `alerts` PRESENCE, not just its state, gates the fact: a role whose payload never carries
+                // an alerts section at all (reception) gets `undefined` here and no blood-group fact renders
+                // — this screen must not invent a "not recorded" claim about data that role has no access to.
+                bloodGroup={alerts ? (alertData?.bloodGroup ?? null) : undefined}
+                chips={<AllergyChips alertData={alertData} namedAllergens />}
+              />
+            ) : (
+              <SectionState section={header} beneficiaryId={profile.beneficiaryId} onRetry={onRetry} />
+            )}
+          </Card>
+        </section>
+      ) : null}
 
-      <div className="profile-sections">
-        {ordered.map((section) => (
-          <SectionCard
-            key={section.key}
-            section={section}
-            beneficiaryId={profile.beneficiaryId}
-            onRetry={onRetry}
-          />
-        ))}
-      </div>
+      <Tabs
+        variant="pill"
+        className="profile-tabs"
+        aria-label={t(STR.tabsLabel)}
+        value={activeTab}
+        onValueChange={(v) => setActiveTab(v as ProfileTabKey)}
+        items={tabItems}
+      />
     </div>
   );
 }
@@ -510,7 +563,6 @@ function SectionState({
  * rather than reporting absence.
  */
 function SectionContent({ section, beneficiaryId }: { section: ProfileSection; beneficiaryId: string }) {
-  if (section.key === "header") return <HeaderView data={section.data as ProfileHeader} />;
   if (section.key === "alerts") return <AlertsView data={section.data as ProfileAlerts} />;
   if (section.key === "callHistory") {
     return <CallHistoryView data={section.data as CallHistorySection} beneficiaryId={beneficiaryId} />;
@@ -536,10 +588,6 @@ function SectionContent({ section, beneficiaryId }: { section: ProfileSection; b
  * Every fact is rendered only if the SERVER sent it. This screen invents nothing: a role whose projection
  * omits the phone renders no phone chip, rather than an empty one that implies none is recorded.
  */
-function HeaderView({ data }: { data: ProfileHeader }) {
-  return <ProfileIdentity data={data} />;
-}
-
 /**
  * The identity block — avatar, name + status, member number + relationship, and a hairline-separated strip of
  * icon-per-fact details.

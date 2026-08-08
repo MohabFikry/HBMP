@@ -1394,14 +1394,16 @@ nav.mrs-rail {
    The three withheld states must be visually distinct, not three shades of grey — a user has to be able
    to tell "you may not see this" from "it broke" from "there is nothing" at a glance, in both themes and
    without relying on hue (0B four-cue rule). */
-.patient-profile { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp4); }
-@media (min-width: 60rem) {
-  .patient-profile { grid-template-columns: 14rem minmax(0, 1fr); align-items: start; }
-  .profile-jump { position: sticky; top: var(--sp4); }
+.patient-profile { display: grid; gap: var(--sp4); }
+/* The tab bar sticks at the same offset the old side nav used. Background matches the page so scrolled
+   content does not show through behind the (otherwise transparent-margined) pill track. */
+.profile-tabs .mrs-tabs--pill {
+  position: sticky;
+  top: var(--sp4);
+  z-index: 1;
+  background: var(--surface-0);
+  padding-block: var(--sp2);
 }
-.profile-jump ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp1); }
-.profile-jump a { display: block; padding: var(--sp2); border-radius: var(--r-md); text-decoration: none; }
-.profile-jump a:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .profile-sections { display: grid; gap: var(--sp4); }
 .profile-section-head { display: flex; flex-wrap: wrap; gap: var(--sp3); align-items: baseline; justify-content: space-between; }
 .profile-section-actions { display: flex; flex-wrap: wrap; gap: var(--sp2); }
