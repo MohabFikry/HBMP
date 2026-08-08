@@ -65,6 +65,7 @@ const STR = {
   outbound: { en: "Outbound", ar: "صادر" },
   alerts: { en: "Alerts", ar: "تنبيهات" },
   historyTab: { en: "History", ar: "السجل الطبي" },
+  coverageTab: { en: "Coverage", ar: "التغطية" },
   allergyTo: { en: "Allergy:", ar: "حساسية:" },
   moreAlerts: { en: "more alerts", ar: "تنبيهات أخرى" },
   actions: { en: "Actions", ar: "إجراءات" },
@@ -313,8 +314,8 @@ type ProfileTabKey = "coverage" | "history" | "authorizations" | "documents" | "
  * `PROFILE_SECTION_KEYS` order, which is also render order within the tab — alerts-before-encounters is a
  * safety property (design 39), not a layout choice this table is free to reorder.
  */
-const PROFILE_TAB_GROUPS: { key: ProfileTabKey; title: Localized; sections: ProfileSectionKey[] }[] = [
-  { key: "coverage", title: SECTION_TITLES.coverage, sections: ["coverage"] },
+export const PROFILE_TAB_GROUPS: { key: ProfileTabKey; title: Localized; sections: ProfileSectionKey[] }[] = [
+  { key: "coverage", title: STR.coverageTab, sections: ["coverage"] },
   {
     key: "history",
     title: STR.historyTab,
@@ -329,13 +330,17 @@ const PROFILE_TAB_GROUPS: { key: ProfileTabKey; title: Localized; sections: Prof
 
 function ProfileBody({ profile, onRetry }: { profile: PatientProfileContract; onRetry: () => void }) {
   const t = useLoc();
-  const [activeTab, setActiveTab] = useState<ProfileTabKey>("coverage");
+  const [activeTab, setActiveTab] = useState<ProfileTabKey | undefined>(undefined);
 
   const byKey = useMemo(() => new Map(profile.sections.map((s) => [s.key, s] as const)), [profile.sections]);
   const header = byKey.get("header");
   const alerts = byKey.get("alerts");
   const alertData = alerts?.state === "Visible" ? (alerts.data as ProfileAlerts) : null;
 
+  // Filtered by actual content BEFORE building JSX. A role whose payload never carries a group's sections at
+  // all (lab/imaging techs: header+alerts+investigations only; org/super admin: header+timeline only) must
+  // not land on an empty tab beside six more empty tabs — that reads as "this patient has no records", the
+  // exact failure the three-state design exists to prevent (design 39 §6).
   const tabItems: TabItem[] = useMemo(() => {
     const assigned = new Set(PROFILE_TAB_GROUPS.flatMap((g) => g.sections as string[]));
     // A server ahead of this client sends a key none of the groups above know. It must still be shown
@@ -343,24 +348,30 @@ function ProfileBody({ profile, onRetry }: { profile: PatientProfileContract; on
     // catch-all clinical tab, rather than being silently dropped.
     const orphaned = profile.sections.map((s) => s.key).filter((k) => k !== "header" && !assigned.has(k));
 
-    return PROFILE_TAB_GROUPS.map((group) => {
-      const keys = group.key === "history" ? [...group.sections, ...orphaned] : group.sections;
-      return {
+    return PROFILE_TAB_GROUPS
+      .map((group) => {
+        const keys = group.key === "history" ? [...group.sections, ...orphaned] : group.sections;
+        const sections = keys.map((key) => byKey.get(key)).filter((s): s is ProfileSection => s !== undefined);
+        return { group, sections };
+      })
+      .filter(({ sections }) => sections.length > 0)
+      .map(({ group, sections }) => ({
         value: group.key,
         label: t(group.title),
         content: (
           <div className="profile-sections">
-            {keys
-              .map((key) => byKey.get(key))
-              .filter((s): s is ProfileSection => s !== undefined)
-              .map((section) => (
-                <SectionCard key={section.key} section={section} beneficiaryId={profile.beneficiaryId} onRetry={onRetry} />
-              ))}
+            {sections.map((section) => (
+              <SectionCard key={section.key} section={section} beneficiaryId={profile.beneficiaryId} onRetry={onRetry} />
+            ))}
           </div>
         ),
-      };
-    });
+      }));
   }, [byKey, profile.sections, profile.beneficiaryId, onRetry, t]);
+
+  // Derived from the filtered list rather than stored, so it is always valid: if `activeTab` names a tab that
+  // no longer exists (or none has been picked yet), this falls back to the first surviving tab automatically
+  // — no `useEffect` needed, and it recomputes correctly if the payload changes on retry.
+  const effectiveTab = tabItems.find((it) => it.value === activeTab)?.value ?? tabItems[0]?.value;
 
   return (
     <div className="patient-profile">
@@ -370,28 +381,35 @@ function ProfileBody({ profile, onRetry }: { profile: PatientProfileContract; on
             {header.state === "Visible" ? (
               <ProfileIdentity
                 data={header.data as ProfileHeader}
-                // `alerts` PRESENCE, not just its state, gates the fact: a role whose payload never carries
-                // an alerts section at all (reception) gets `undefined` here and no blood-group fact renders
-                // — this screen must not invent a "not recorded" claim about data that role has no access to.
-                bloodGroup={alerts ? (alertData?.bloodGroup ?? null) : undefined}
+                // Gated on alerts actually being VISIBLE, not merely present in the payload: an `Unavailable`
+                // alerts section (a real fetch failure) must not let this card assert "not recorded" while the
+                // Alerts card one tab away correctly says "temporarily unavailable" — two contradictory claims
+                // about the same fact. A role whose payload never carries an alerts section at all (reception)
+                // gets `undefined` here and no blood-group fact renders at all.
+                bloodGroup={alerts?.state === "Visible" ? (alertData?.bloodGroup ?? null) : undefined}
                 chips={<AllergyChips alertData={alertData} namedAllergens />}
                 actions={<SectionActions section={header} beneficiaryId={profile.beneficiaryId} />}
               />
             ) : (
-              <SectionState section={header} beneficiaryId={profile.beneficiaryId} onRetry={onRetry} />
+              <>
+                <h2 style={{ margin: 0, fontSize: "1.05rem" }}>{t(SECTION_TITLES.header)}</h2>
+                <SectionState section={header} beneficiaryId={profile.beneficiaryId} onRetry={onRetry} />
+              </>
             )}
           </Card>
         </section>
       ) : null}
 
-      <Tabs
-        variant="pill"
-        className="profile-tabs"
-        aria-label={t(STR.tabsLabel)}
-        value={activeTab}
-        onValueChange={(v) => setActiveTab(v as ProfileTabKey)}
-        items={tabItems}
-      />
+      {tabItems.length > 0 ? (
+        <Tabs
+          variant="pill"
+          className="profile-tabs"
+          aria-label={t(STR.tabsLabel)}
+          value={effectiveTab!}
+          onValueChange={(v) => setActiveTab(v as ProfileTabKey)}
+          items={tabItems}
+        />
+      ) : null}
     </div>
   );
 }
