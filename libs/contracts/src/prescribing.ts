@@ -289,6 +289,15 @@ export const zQuantityPreview = z.object({
   dispenseQuantity: z.number(),
   /** Whole packs, when the pack cannot be split. Null when it can. */
   packs: z.number().nullable().optional(),
+  /**
+   * 31.2 — how many BOXES to hand over, which is what a pharmacy counts out.
+   *
+   * <p>NULL when the question has no answer, and it often has none: `pack_size` counts the catalogue's
+   * MINOR UNITS, which is only the same thing the dose counts for forms like tablets and ampoules. A box of
+   * 5 insulin pens dosed in IU divides to a box count wrong by the pen's contents — so it is withheld and
+   * the composer says why, rather than printing a confident wrong number above a dispensing counter.</p>
+   */
+  boxes: z.number().nullable().optional(),
   packSize: z.number().nullable().optional(),
   /** The word the number is counted in, so the composer says "60 Tablet" and not a bare 60. */
   prescribingUnit: z.string().nullable().optional(),

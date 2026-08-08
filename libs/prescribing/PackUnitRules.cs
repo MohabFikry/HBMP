@@ -1,7 +1,19 @@
 namespace Mersal.Prescribing;
 
 /// <summary>What a product's pack data implies. Nulls mean "not derivable", never a default.</summary>
-public sealed record DerivedPackFacts(string? PrescribingUnit, bool? IsPackSplittable, decimal? PackSize = null);
+/// <param name="PackCountsPrescribingUnits">
+/// 31.2 — whether <c>pack_size</c> counts the SAME thing <c>PrescribingUnit</c> names.
+///
+/// <para>It counts the catalogue's MINOR UNITS: 20 tablets, 10 sachets, 3 ampoules — but also 5 PENS, and
+/// ONE bottle of a 120 ml syrup. So it lines up with the dose for the countable forms and does not for the
+/// measured ones, where the pack counts containers and the dose counts millilitres, grams, puffs or IU.</para>
+///
+/// <para>Only where it lines up can a box count be computed. Where it does not, the number is withheld:
+/// 180 IU over a pack of 5 pens divides to 36 boxes, and 180 IU is less than one 300-IU pen.</para>
+/// </param>
+public sealed record DerivedPackFacts(
+    string? PrescribingUnit, bool? IsPackSplittable, decimal? PackSize = null,
+    bool PackCountsPrescribingUnits = false);
 
 /// <summary>
 /// 29.6 — derives the prescribing unit, the pack size and splittability (design 45 §6).
@@ -22,6 +34,21 @@ public sealed record DerivedPackFacts(string? PrescribingUnit, bool? IsPackSplit
 /// </summary>
 public static class PackUnitRules
 {
+    /// <summary>
+    /// Units that name a COUNTABLE ITEM — the same thing a box holds a number of.
+    /// </summary>
+    /// <remarks>
+    /// The complement is the measured units: ML, Gram, Puff, IU, Drop, Spray. A box of those counts
+    /// CONTAINERS (one bottle, five pens), so dividing a dose total by the pack size mixes two different
+    /// things. Kept as a set of UNITS rather than of forms, because the unit is what the dose is expressed
+    /// in and it is the unit the comparison is actually about.
+    /// </remarks>
+    private static readonly HashSet<string> CountableUnits = new(StringComparer.Ordinal)
+    {
+        "Tablet", "Capsule", "Sachet", "Suppository", "Pessary", "Lozenge", "Gummy",
+        "Vial", "Ampoule", "Syringe", "Cartridge", "Patch", "Dressing", "Enema", "Bar",
+    };
+
     /// <summary>Form fragment → (unit, splittable). Matched as a SUBSTRING, because the workbook's forms are
     /// free text: "f.c. tablet", "film coated tablets" and "tablet" are all one thing.</summary>
     /// <remarks>
@@ -104,7 +131,7 @@ public static class PackUnitRules
         foreach (var (fragment, unit, splittable) in Forms)
         {
             if (form.Contains(fragment, StringComparison.Ordinal))
-                return new DerivedPackFacts(unit, splittable);
+                return new DerivedPackFacts(unit, splittable, null, CountableUnits.Contains(unit));
         }
 
         // Unrecognised. NOT defaulted — see the class remarks.
@@ -154,10 +181,14 @@ public static class PackUnitRules
         var fromForm = FromDosageForm(form);
         var fromPack = FromPackUnits(majorUnits, minorUnits);
 
+        var unit = statedUnit ?? fromForm.PrescribingUnit;
         return new DerivedPackFacts(
-            statedUnit ?? fromForm.PrescribingUnit,
+            unit,
             statedSplittable ?? fromPack.IsPackSplittable ?? fromForm.IsPackSplittable,
-            statedPackSize ?? fromPack.PackSize);
+            statedPackSize ?? fromPack.PackSize,
+            // Asked of the RESOLVED unit, so a product-level override of the unit carries the comparison
+            // with it rather than leaving the flag describing the unit the form guessed.
+            unit is not null && CountableUnits.Contains(unit));
     }
 
     /// <summary>
@@ -168,6 +199,11 @@ public static class PackUnitRules
     /// into whole packs, and reporting it as complete would produce exactly the confident wrong number
     /// invariant 8 forbids.
     /// </remarks>
+    /// <summary>Whether a pack size counts the same thing this unit names — see
+    /// <see cref="DerivedPackFacts.PackCountsPrescribingUnits"/>.</summary>
+    public static bool PackCounts(string? prescribingUnit) =>
+        prescribingUnit is not null && CountableUnits.Contains(prescribingUnit);
+
     public static bool IsComplete(string? unit, decimal? packSize, bool? splittable) =>
         !string.IsNullOrWhiteSpace(unit) && packSize is > 0 && splittable is not null;
 }

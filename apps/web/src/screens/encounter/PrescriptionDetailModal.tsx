@@ -128,13 +128,10 @@ export function PrescriptionDetailModal({
       if (!rx || !acting) return;
       setFailed(false);
       try {
-        if (acting.action === "cancel") {
-          await api.cancelPrescriptionLine(rx.id, acting.line.id, input.reasonCode, input.reasonText);
-        } else {
-          await api.amendPrescriptionLine(
-            rx.id, acting.line.id, input.quantity ?? acting.line.quantityPrescribed,
-            input.reasonCode, input.reasonText);
-        }
+        // Withdraw only — 31.2 moved amending to the transaction row, so there is no longer a control here
+        // that can raise any other action. An `else` branch calling `amendPrescriptionLine` would be code
+        // nothing reaches, which is the kind that rots without anyone noticing.
+        await api.cancelPrescriptionLine(rx.id, acting.line.id, input.reasonCode, input.reasonText);
         setActing(null);
         onChanged?.();
         onOpenChange(false);
@@ -316,14 +313,18 @@ function RxLineCard({
         </div>
       </dl>
 
-      {/* Disabled, not hidden, with the reason beside it and tied to it for a screen reader (design 46 §10). */}
+      {/*
+        31.2 — AMEND IS NOT OFFERED HERE.
+
+        This dialog answers "what did I write"; amending is a different act, and it now lives on the
+        transaction row where the doctor can reach it without opening the record first. Two entry points to
+        one act meant two dialogs to keep in step, and the per-line one could only ever change a quantity —
+        so the way to remove a line from a prescription was to amend it to zero, which the write path
+        refuses. Withdraw stays, because withdrawing THIS line is a genuinely per-line decision.
+
+        Disabled, not hidden, with the reason beside it and tied to it for a screen reader (design 46 §10).
+      */}
       <div className="rxv-line-actions">
-        <Button
-          variant="secondary" size="sm" disabled={lock !== null} onClick={() => onAct("amend")}
-          aria-describedby={lock ? `rxlock-${line.id}` : undefined}
-        >
-          {t(S.amend)}
-        </Button>
         <Button
           variant="danger" size="sm" disabled={lock !== null} onClick={() => onAct("cancel")}
           aria-describedby={lock ? `rxlock-${line.id}` : undefined}

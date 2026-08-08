@@ -155,7 +155,11 @@ public static class PrescriptionEndpoints
             var outcome = QuantityMath.Compute(
                 req.DoseAmount, req.TimesPerDay, req.DurationDays,
                 req.IsPackSplittable ?? pack?.IsPackSplittable,
-                req.PackSize ?? pack?.PackSize);
+                req.PackSize ?? pack?.PackSize,
+                // 31.2 — only where the pack counts the SAME thing the dose does. A box of 5 pens dosed in
+                // IU divides to a box count that is wrong by the pen's contents, and it would be printed
+                // with as much confidence as a correct one.
+                PackUnitRules.PackCounts(pack?.PrescribingUnit));
 
             // ABSENCE IS NEVER A CLEAN RESULT (invariant 8). The missing field is NAMED — "could not
             // compute" on its own sends a prescriber to guess, and a guessed quantity is a dispensing error
@@ -171,6 +175,9 @@ public static class PrescriptionEndpoints
                 totalUnits = plan.TotalUnits,
                 dispenseQuantity = plan.DispenseQuantity,
                 packs = plan.Packs,
+                // 31.2 — what the pharmacy actually counts out. NULL where the pack and the dose count
+                // different things; the composer says so rather than showing a number.
+                boxes = plan.Boxes,
                 packSize = plan.PackSize,
                 // What the number is COUNTED IN, so the composer can say "60 Tablet" rather than "60".
                 prescribingUnit = pack?.PrescribingUnit,

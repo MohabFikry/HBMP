@@ -28,9 +28,17 @@ const S = {
   duration: { en: "Duration (days)", ar: "المدة (أيام)" },
   // 29.6 — what the quantity was computed from, said beside it. The doctor can overrule the number; they
   // cannot check it unless they are told how it was reached.
-  quantityFrom: { en: "Computed from dose x frequency x duration. Edit it if you mean something else.",
-                  ar: "محسوبة من الجرعة × التكرار × المدة. يمكنك تعديلها إذا كنت تقصد غير ذلك." },
   quantityPacks: { en: "whole pack(s) of", ar: "عبوة كاملة سعة" },
+  // 31.2 — what the pharmacy counts out. Stated beside the units it came from, so the prescriber can check
+  // the conversion rather than take it on trust.
+  boxes: { en: "box", ar: "علبة" },
+  boxesPlural: { en: "boxes", ar: "علب" },
+  boxesOf: { en: "of", ar: "سعة" },
+  boxesUnknown: {
+    en: "Boxes cannot be counted for this product: the catalogue's pack size counts containers, not the "
+      + "unit this is dosed in.",
+    ar: "لا يمكن حساب عدد العلب لهذا المنتج: حجم العبوة في الكتالوج يحسب الأوعية، وليس الوحدة التي تُوصف بها.",
+  },
   quantityNotChecked: {
     en: "The quantity to dispense could not be computed.",
     ar: "تعذّر حساب الكمية المطلوب صرفها.",
@@ -415,9 +423,35 @@ export function PrescribingWorkspace({
           x.lineId === l.lineId && !x.quantityEdited ? { ...x, quantity: p.dispenseQuantity } : x));
         setQuantityNote((prev) => ({
           ...prev,
-          [l.lineId]: p.packs
-            ? `${p.totalUnits} ${p.prescribingUnit ?? ""} — ${p.packs} ${t(S.quantityPacks)} ${p.packSize}`
-            : t(S.quantityFrom),
+          /*
+           * 31.2 — SAY IT IN BOXES, because that is what leaves the counter.
+           *
+           * "180" beside a medicine tells a prescriber nothing about what the patient carries home. The
+           * units it came FROM stay in the sentence so the conversion is checkable rather than trusted.
+           *
+           * And where boxes cannot be counted, the sentence says so. `pack_size` counts the catalogue's
+           * minor units, which is only the same thing the dose counts for forms like tablets — a box of 5
+           * insulin pens dosed in IU would divide to a box count wrong by the pen's contents, and it would
+           * look exactly as confident as a right one.
+           */
+          /*
+           * 31.2 — ONLY WHAT THE NUMBER DOES NOT ALREADY SAY.
+           *
+           * "Computed from dose x frequency x duration" used to sit under every quantity. It restates the
+           * three fields immediately to its left, so it was two lines of prose explaining nothing, on the
+           * one control the prescriber most needs to read quickly.
+           *
+           * What remains is information the number cannot carry: how many BOXES that is, or — where boxes
+           * cannot be counted, because `pack_size` counts containers and the dose counts millilitres or IU
+           * — the fact that they cannot.
+           */
+          [l.lineId]: p.boxes
+            ? `${p.totalUnits} ${p.prescribingUnit ?? ""} — ${p.boxes} `
+              + `${t(p.boxes === 1 ? S.boxes : S.boxesPlural)}`
+              + (p.packSize ? ` ${t(S.boxesOf)} ${p.packSize}` : "")
+            : p.packSize
+              ? t(S.boxesUnknown)
+              : "",
         }));
       } catch (err) {
         if (!live) return;
@@ -435,6 +469,41 @@ export function PrescribingWorkspace({
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, quantityKey]);
+
+  /*
+   * 31.2 — REFRESH A RESTORED DRAFT'S CATALOGUE SNAPSHOT.
+   *
+   * `useDraft` persists the whole drug object, which is right: a composer that lost its medicine on reload
+   * would be worse than one holding a stale name. But it means the name, the price, the pack facts and the
+   * lowest-price flag are frozen at the moment the line was composed — so a catalogue load between then and
+   * now leaves a doctor reading last week's data and reporting it as a bug in this week's.
+   *
+   * That is not hypothetical: it is exactly what a draft composed before the 31.1 master-data load showed —
+   * uncapitalised names and no price chip, while the API was serving both correctly.
+   *
+   * Runs ONCE per mount, and only refreshes what actually changed so it does not churn the draft. A failure
+   * leaves the snapshot alone: a stale name is still the medicine the prescriber chose.
+   */
+  const [refreshed, setRefreshed] = useState(false);
+  useEffect(() => {
+    if (refreshed) return;
+    const ids = [...new Set(lines.map((l) => l.drug?.drugId).filter((id): id is string => !!id))];
+    if (ids.length === 0) return;
+    setRefreshed(true);
+
+    let live = true;
+    void Promise.all(ids.map((id) => api.prescribableDrugById(id).catch(() => null))).then((rows) => {
+      if (!live) return;
+      const fresh = new Map(rows.filter((d) => d !== null).map((d) => [d!.drugId, d!]));
+      setLines((prev) => prev.map((l) => {
+        const next = l.drug ? fresh.get(l.drug.drugId) : undefined;
+        // Compared by VALUE, so an unchanged catalogue produces no state update and no re-render loop.
+        return next && JSON.stringify(next) !== JSON.stringify(l.drug) ? { ...l, drug: next } : l;
+      }));
+    });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api, refreshed]);
 
   /** Which line's checks are open. One at a time — they are read, not compared. */
   const [openChecks, setOpenChecks] = useState<string | null>(null);
@@ -856,7 +925,9 @@ export function PrescribingWorkspace({
               )}
               {lines.length > 1 && (
                 <Button
-                  variant="ghost"
+                  // DANGER, not ghost. Removing a composed line destroys clinical work, and the control
+                  // that does it should not look like the one beside it that opens a history panel.
+                  variant="danger"
                   size="sm"
                   className="rx-line-remove"
                   disabled={busy}
@@ -920,7 +991,9 @@ export function PrescribingWorkspace({
           if "I have changed my mind about this" is an action the screen offers. It was not: the composer
           could be filled and validated, and the only control that emptied it was a successful submit.
         */}
-        <Button variant="ghost" disabled={!composed || busy} onClick={() => setDiscarding(true)}>
+        {/* Discarding throws away a composed prescription. It is the destructive action on this row and
+            reads as one, rather than as the quietest control on the screen. */}
+        <Button variant="danger" disabled={!composed || busy} onClick={() => setDiscarding(true)}>
           {t(S.discard)}
         </Button>
         <Button variant="secondary" loading={busy} disabled={!allLinesHaveDrugs} onClick={() => void validate()}>

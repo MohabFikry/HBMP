@@ -48,6 +48,8 @@ class DosingApi extends DevApiClient {
   submitted: unknown[] = [];
   /** Set to make the preview refuse the way a catalogue gap does. */
   missingField: string | null = null;
+  /** False stands in for the insulin case: the pack counts pens and the dose counts IU. */
+  countsInBoxes = true;
   drug = DRUG;
 
   // The COMBOBOX calls this one, not `searchDrugs` — a different method on the same client, and overriding
@@ -72,8 +74,10 @@ class DosingApi extends DevApiClient {
       totalUnits: total,
       dispenseQuantity: total,
       packs: null,
+      // Null when this fixture is standing in for a product whose pack counts containers, not doses.
+      boxes: this.countsInBoxes ? Math.ceil(total / 30) : null,
       packSize: 30,
-      prescribingUnit: "Tablet",
+      prescribingUnit: this.countsInBoxes ? "Tablet" : "IU",
       isPackSplittable: true,
     };
   }
@@ -239,5 +243,38 @@ describe("29.5 — treatment duration comes from the line", () => {
 
     expect(screen.queryByRole("spinbutton", { name: /treatment duration/i })).toBeNull();
     expect(screen.getAllByRole("spinbutton", { name: /duration/i }).length).toBe(1);
+  });
+});
+
+describe("31.2 — the quantity is said in BOXES, which is what leaves the counter", () => {
+  it("states the box count beside the units it was converted from", async () => {
+    // "60" beside a medicine tells a prescriber nothing about what the patient carries home. 60 tablets
+    // from a box of 30 is two boxes — and the units stay in the sentence so the conversion is checkable.
+    const api = new DosingApi({ latencyMs: 0 });
+    const user = renderComposer(api);
+    await pickDrug(user);
+
+    await user.type(await screen.findByRole("spinbutton", { name: /^dose/i }), "1");
+    await user.type(screen.getByRole("spinbutton", { name: /times per day/i }), "2");
+    await user.type(screen.getByRole("spinbutton", { name: /duration/i }), "30");
+
+    expect(await screen.findByText(/60 Tablet — 2 boxes of 30/)).toBeTruthy();
+  });
+
+  it("REFUSES to count boxes when the pack counts containers rather than doses", async () => {
+    // The Lantus case, and the reason this is not a simple division. The catalogue records "5 pens" per box
+    // and the dose is in IU: 180 IU over a pack of 5 divides to 36 boxes, when 180 IU is less than a single
+    // 300-IU pen. Wrong by two orders of magnitude, and it would print as confidently as a right answer.
+    const api = new DosingApi({ latencyMs: 0 });
+    api.countsInBoxes = false;
+    const user = renderComposer(api);
+    await pickDrug(user);
+
+    await user.type(await screen.findByRole("spinbutton", { name: /^dose/i }), "1");
+    await user.type(screen.getByRole("spinbutton", { name: /times per day/i }), "2");
+    await user.type(screen.getByRole("spinbutton", { name: /duration/i }), "90");
+
+    expect(await screen.findByText(/pack size counts containers, not the unit/i)).toBeTruthy();
+    expect(screen.queryByText(/boxes of/i)).toBeNull();
   });
 });

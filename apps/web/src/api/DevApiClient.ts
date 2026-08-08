@@ -1987,6 +1987,11 @@ export class DevApiClient implements ApiClient {
    * invariant 8 exists for, and the state 838 catalogue rows are actually in — can never be rendered. That
    * is how this phase kept shipping screens whose failure branch nobody had seen.
    */
+  async prescribableDrugById(drugId: string) {
+    const hit = (await this.searchPrescribableDrugs("")).find((d) => d.drugId === drugId);
+    return hit ?? null;
+  }
+
   quantityPreview(req: {
     drugId?: string;
     doseAmount?: number | null;
@@ -2009,7 +2014,9 @@ export class DevApiClient implements ApiClient {
       }
       const total = dose * perDay * days;
       return ok(zQuantityPreview, {
-        totalUnits: total, dispenseQuantity: total, packs: null, packSize: 30,
+        totalUnits: total, dispenseQuantity: total, packs: null,
+        // Tablets: the pack counts the same thing the dose does, so a box count exists.
+        boxes: Math.ceil(total / 30), packSize: 30,
         prescribingUnit: "Tablet", isPackSplittable: true,
       });
     });

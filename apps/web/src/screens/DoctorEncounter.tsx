@@ -1647,6 +1647,9 @@ function PrescriptionsTab({
             api.withdrawPrescription(acting.rx.id, reasonCode, reasonText)}
           onAmend={({ lineId, quantity, reasonCode, reasonText }) =>
             api.amendPrescriptionLine(acting.rx.id, lineId, quantity, reasonCode, reasonText)}
+          // 31.2 — removing an item from the script. Its own act, not a quantity of zero.
+          onWithdrawLine={({ lineId, reasonCode, reasonText }) =>
+            api.cancelPrescriptionLine(acting.rx.id, lineId, reasonCode, reasonText)}
           onDone={rx.reload}
         />
       )}
@@ -1860,6 +1863,9 @@ function InvestigationsTab({
             api.withdrawOrder(acting.order.id, reasonCode, reasonText)}
           onAmend={({ lineId, quantity, reasonCode, reasonText }) =>
             api.amendOrderLine(acting.order.id, lineId, quantity, reasonCode, reasonText)}
+          // 31.2 — the SAME act on an order: Labs, Radiology and OP Procedures share this dialog.
+          onWithdrawLine={({ lineId, reasonCode, reasonText }) =>
+            api.cancelOrderLine(acting.order.id, lineId, reasonCode, reasonText)}
           onDone={orders.reload}
         />
       )}

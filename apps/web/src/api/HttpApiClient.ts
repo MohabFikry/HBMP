@@ -2059,6 +2059,38 @@ export class HttpApiClient implements ApiClient {
    * that is not chronic, an unknown frequency, missing pack data — is the SAME refusal submit would give,
    * which is the point of previewing at all.</p>
    */
+  async prescribableDrugById(drugId: string) {
+    try {
+      const d = (await getRaw(`/drugs/by-id/${encodeURIComponent(drugId)}`)) as any;
+      if (!d?.drugId) return null;
+      return parseOr(zPrescribableDrug, {
+        drugId: d.drugId,
+        tradeName: { en: String(d.name ?? ""), ar: String(d.nameAr ?? d.name ?? "") },
+        activeIngredient: d.scientificName ?? undefined,
+        strength: d.strength ?? undefined,
+        form: d.form ?? undefined,
+        priceEgp: typeof d.priceEgp === "number" ? d.priceEgp : undefined,
+        atcCode: d.atcCode ?? undefined,
+        // The by-id row carries no indication join; the flag is left as the search set it rather than
+        // being asserted false, which would render an unchecked medicine as one with no indications.
+        hasIndicationData: true,
+        isLowestPrice: d.isLowestPrice === true,
+        pricePerUnit: typeof d.pricePerUnit === "number" ? d.pricePerUnit : undefined,
+        availability: d.availability === "Available" || d.availability === "Unavailable"
+          ? d.availability
+          : "Unknown",
+        prescribingUnit: typeof d.prescribingUnit === "string" && d.prescribingUnit.length > 0
+          ? d.prescribingUnit
+          : null,
+        packSize: typeof d.packSize === "number" ? d.packSize : null,
+        isPackSplittable: typeof d.isPackSplittable === "boolean" ? d.isPackSplittable : null,
+      });
+    } catch {
+      // An enrichment, not a requirement. The composer keeps the snapshot it restored.
+      return null;
+    }
+  }
+
   async quantityPreview(req: {
     drugId?: string;
     doseAmount?: number | null;
@@ -2073,6 +2105,8 @@ export class HttpApiClient implements ApiClient {
       totalUnits: Number(r?.totalUnits ?? 0),
       dispenseQuantity: Number(r?.dispenseQuantity ?? 0),
       packs: r?.packs ?? null,
+      // Read strictly: an absent box count is NOT zero and NOT one, it is "this cannot be counted in boxes".
+      boxes: typeof r?.boxes === "number" ? r.boxes : null,
       packSize: r?.packSize ?? null,
       prescribingUnit: r?.prescribingUnit ?? null,
       isPackSplittable: r?.isPackSplittable ?? null,

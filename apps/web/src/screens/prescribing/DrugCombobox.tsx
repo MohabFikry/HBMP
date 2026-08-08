@@ -108,6 +108,28 @@ export function DrugCombobox({
             <span className="rx-drug-flag"> · {t(S.noIndicationData)}</span>
           )}
         </span>
+        {/*
+          31.2 — THE CHIPS SURVIVE SELECTION.
+
+          They rendered only in the dropdown, so the two facts that might change a prescriber's mind
+          vanished at the exact moment the line was being reviewed and signed — which is the same mistake
+          this component's own header calls out about the ingredient. "Where is the lowest-price chip?" had
+          a simple answer: one keystroke ago.
+
+          `Unknown` availability still renders NOTHING (design 45 §7, invariant 10) — only a positive
+          Unavailable earns a badge, because an indicator that fires on every row is one prescribers stop
+          seeing.
+        */}
+        <span className="rx-drug-chips">
+          {value.isLowestPrice && (
+            <span className="rx-combobox-chip" data-kind="lowest-price">{t(S.lowestPrice)}</span>
+          )}
+          {value.availability === "Unavailable" && (
+            <span className="rx-combobox-chip" data-kind="unavailable" title={t(S.unavailableHint)}>
+              {t(S.unavailable)}
+            </span>
+          )}
+        </span>
         <button
           type="button"
           className="rx-drug-change"

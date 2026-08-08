@@ -3635,8 +3635,11 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
    Prescribing workspace (phase 26.5, design 43 §6)
    ============================================================================================ */
 
+/* No minimum width. It was `min(720px, 80vw)`, from when this composer lived in a dialog that could
+   be squeezed; inline in a card it is a floor the enclosing grid track cannot enforce, so a narrow
+   column overflows rather than the composer shrinking. The card gives it its width now. */
 .rx-workspace {
-  min-inline-size: min(720px, 80vw);
+  min-inline-size: 0;
 }
 
 /* ---- the per-line check status -------------------------------------------------------------
@@ -3855,6 +3858,14 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   display: grid;
   gap: 2px;
 }
+/* 31.2 — the price and availability chips, kept after selection. They rendered only in the dropdown, so
+   the two facts that might change a prescriber's mind disappeared at the moment the line was signed. */
+.rx-drug-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp1);
+}
+.rx-drug-chips:empty { display: none; }
 .rx-drug-change {
   justify-self: start;
   padding: 0;
@@ -3887,26 +3898,55 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
    numeric-ish fields are narrow by nature, and the status chip sizes to its own word. Stacking these — which
    is what a narrow dialog forced — turned a single prescription line into a full screen of scrolling and put
    the status cue far from the drug it describes. */
+/* A WRAPPING row, not a fixed column count.
+   =============================================================================================
+   It was `grid-template-columns: minmax(220px,2.4fr) repeat(3, minmax(88px,1fr)) auto` — five
+   columns, hard-coded to the fields the line had at the time. Every field added since put a child
+   into an IMPLICIT sixth column: the prescribing line grew Times-per-day, and the investigation
+   line's note spans two. Implicit columns are auto-sized and the row simply got wider than its
+   grid track, so the composer painted underneath the sticky vitals rail — which, being positioned,
+   wins the paint order. The Status column and the row actions disappeared under it.
+
+   Flex-wrap cannot have that failure: there is no column count to fall out of step with the
+   markup, and a row too narrow for its fields folds onto a second line instead of overflowing.
+   `min-inline-size: 0` on the items is what actually lets them shrink — a flex item's default
+   `auto` minimum is its content width, which is how a wrapping row still manages to overflow. */
 .rx-line-main {
-  display: grid;
-  grid-template-columns: minmax(220px, 2.4fr) repeat(3, minmax(88px, 1fr)) auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: var(--sp3);
-  align-items: start;
 }
-/* The wrapper exists for grouping in the markup, not for layout: `contents` lets its four children become
-   direct grid items of the row above, so all five columns align on one track. */
+/* The wrapper exists for grouping in the markup, not for layout: `contents` lets its children become
+   direct flex items of the row above, so every field sits on one track. */
 .rx-line-fields {
   display: contents;
 }
-/* Below this the five columns cannot hold their minimums without the row becoming unreadable, so the line
-   folds into two rows rather than overflowing horizontally. */
+.rx-line-main > * {
+  flex: 1 1 90px;
+  min-inline-size: 0;
+}
+/* The medicine or test leads and takes the slack — it holds a name, not a number. */
+.rx-combobox,
+.rx-drug-chosen {
+  flex: 3 1 220px;
+}
+/* A free-text instruction needs room to be read; sizing it like the quantity box beside it makes a
+   phrase scroll inside four characters of width. */
+.rx-field--wide {
+  flex: 2 1 200px;
+}
+/* The two icons are their own size and stay at the end of the row. */
+.rx-line-actions {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+}
+/* Below this the fields cannot hold their minimums without the row becoming unreadable, so the
+   medicine takes a line of its own and the numbers wrap beneath it. */
 @media (max-width: 760px) {
-  .rx-line-main {
-    grid-template-columns: 1fr 1fr;
-  }
   .rx-combobox,
   .rx-drug-chosen {
-    grid-column: 1 / -1;
+    flex: 1 1 100%;
   }
 }
 /* ---- 29.5 (design 45 §5) — acute / chronic ------------------------------------------------------------
@@ -3966,6 +4006,20 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   margin-block-start: var(--sp2);
 }
 
+/* ---- 31.2 — the numeric fields are NARROW ---------------------------------------------------
+   A dose, a frequency, a duration and a quantity are two or three digits each. Given an equal share of
+   a wrapping row they stretched to the width of the medicine name beside them, which reads as though a
+   long value were expected and pushed the row to wrap a field earlier than it needed to. Sized to their
+   content instead, so the name keeps the slack. */
+.rx-line-fields > .rx-field {
+  flex: 0 1 7.5rem;
+}
+/* The note beneath the quantity is a sentence, so the field it belongs to gets a little more room —
+   still nothing like an equal share. */
+.rx-line-fields > .rx-field:has(.rx-quantity-note) {
+  flex: 0 1 11rem;
+}
+
 /* ---- 29.6 — the dose, and the unit master data records for it ------------------------------- */
 .rx-dose {
   display: flex;
@@ -4013,10 +4067,9 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   display: grid;
   gap: var(--sp1);
 }
-/* The note a doctor writes for the performing site — "left knee", "fasting". It takes two columns because
-   it holds a phrase, not a number, and sizing it like the quantity box beside it would make a free-text
-   instruction scroll inside four characters of width. */
-.rx-field--wide { grid-column: span 2; }
+/* `.rx-field--wide` is sized where the row is defined — see `.rx-line-main`. The `grid-column: span 2`
+   that used to be here belonged to the fixed column template that row no longer uses, and left over it
+   would have made the note claim a second flex track that does not exist. */
 /* ---- 31.1 — the per-line controls, as icons -------------------------------------------------
    History and Remove sit together at the end of the line. Icons rather than words because the line
    already carries a combobox, three fields and a status chip, and two more text buttons made the row
@@ -4047,14 +4100,25 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
 }
 .txn-line {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: var(--sp3);
   padding: var(--sp2) 0;
   border-bottom: 1px solid var(--border);
 }
 /* The line's own name leads and takes the slack, because it is what the doctor is deciding about; the
-   quantity and the lock chip are fixed-width facts beside it. */
-.txn-line-label { flex: 1 1 auto; font-weight: 600; }
+   quantity and the lock chip are fixed-width facts beside it. `min-inline-size` lets a long medicine name
+   shrink rather than pushing the quantity box off the row. */
+.txn-line-label { flex: 1 1 12rem; min-inline-size: 0; font-weight: 600; }
+.txn-line .rx-field { flex: 0 0 8rem; }
+/* Destructive, and coloured as such even though it is a glyph — the accessible name says "Withdraw this
+   item", and the chip beside it says so in words once it is armed. */
+.txn-line-remove { color: var(--st-bad-fg); }
+/* A line marked for withdrawal reads as struck through AND carries a chip — never colour alone. */
+.txn-line[data-removing="yes"] .txn-line-label {
+  text-decoration: line-through;
+  color: var(--text-2);
+}
 
 /* ---- 31.1 — the two row actions on a worklist table ----------------------------------------- */
 .row-actions {

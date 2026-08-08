@@ -114,13 +114,9 @@ export function OrderDetailModal({
       if (!order || !acting) return;
       setFailed(false);
       try {
-        if (acting.action === "cancel") {
-          await api.cancelOrderLine(order.id, acting.line.id, input.reasonCode, input.reasonText);
-        } else {
-          await api.amendOrderLine(
-            order.id, acting.line.id, input.quantity ?? acting.line.quantityOrdered,
-            input.reasonCode, input.reasonText);
-        }
+        // Withdraw only — 31.2 moved amending to the transaction row, so no control here can raise any
+        // other action. An `else` branch calling `amendOrderLine` would be code nothing reaches.
+        await api.cancelOrderLine(order.id, acting.line.id, input.reasonCode, input.reasonText);
         setActing(null);
         onChanged?.();
         onOpenChange(false);
@@ -266,12 +262,6 @@ function OrderLineCard({
         button rather than as unrelated text further down.
       */}
       <div className="rxv-line-actions">
-        <Button
-          variant="secondary" size="sm" disabled={lock !== null} onClick={() => onAct("amend")}
-          aria-describedby={lock ? `lock-${line.id}` : undefined}
-        >
-          {t(S.amend)}
-        </Button>
         <Button
           variant="danger" size="sm" disabled={lock !== null} onClick={() => onAct("cancel")}
           aria-describedby={lock ? `lock-${line.id}` : undefined}

@@ -523,6 +523,18 @@ export interface ApiClient {
    * they are master data, and a client that fetched them to hand back would be a second reader of the
    * catalogue and therefore a second thing that can disagree with it.</p>
    */
+  /**
+   * 31.2 — one catalogue product, in the shape the composer holds.
+   *
+   * <p>Exists so a RESTORED draft can refresh the snapshot it saved. `useDraft` persists the whole drug
+   * object, which is right — a composer that lost its medicine on reload would be worse — but it means the
+   * name, the price and the lowest-price flag are frozen at the moment the line was composed. A catalogue
+   * reload between then and now leaves a doctor reading last week's name and last week's price.</p>
+   *
+   * <p>Returns null when the product is no longer in the catalogue. The composer keeps what it had rather
+   * than blanking the line: a stale name is still the medicine they chose.</p>
+   */
+  prescribableDrugById(drugId: string): Promise<PrescribableDrug | null>;
   quantityPreview(req: {
     drugId?: string;
     doseAmount?: number | null;

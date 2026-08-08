@@ -680,7 +680,9 @@ export function InvestigationWorkspace({
               )}
               {lines.length > 1 && (
                 <Button
-                  variant="ghost"
+                  // DANGER — see the prescribing workspace. Removing a composed line is destructive and
+                  // sits next to a history icon that is not.
+                  variant="danger"
                   size="sm"
                   className="rx-line-remove"
                   disabled={busy}
@@ -743,7 +745,7 @@ export function InvestigationWorkspace({
           The other way out, and the reason the encounter screen can insist on one — closing a visit is
           refused while anything sits composed-but-unsent here. See the prescribing workspace.
         */}
-        <Button variant="ghost" disabled={!composed || busy} onClick={() => setDiscarding(true)}>
+        <Button variant="danger" disabled={!composed || busy} onClick={() => setDiscarding(true)}>
           {t(S.discard)}
         </Button>
         <Button variant="secondary" loading={busy} disabled={!allLinesHaveTests} onClick={() => void validate()}>

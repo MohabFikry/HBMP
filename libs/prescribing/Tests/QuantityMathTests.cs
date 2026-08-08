@@ -105,3 +105,55 @@ public class QuantityMathTests
         o.Plan!.TotalUnits.Should().Be(30m);
     }
 }
+
+/// <summary>
+/// 31.2 — HOW MANY BOXES, and when that question has no answer.
+///
+/// <para><b>The trap this exists to avoid.</b> `pack_size` counts the catalogue's MINOR UNITS — the countable
+/// items in a box. For tablets that is the same thing the dose counts, so boxes = total / pack_size. For
+/// "Lantus Solostar 100 I.U./ML 5 Pens" it is not: the pack holds 5 PENS and the dose is in IU. 180 IU
+/// divided by a pack of 5 gives 36 boxes, when 180 IU is less than a single 300-IU pen. That is not a
+/// rounding error; it is two orders of magnitude, printed with total confidence, at a dispensing counter.</para>
+/// </summary>
+public class BoxCountTests
+{
+    [Fact]
+    public void Boxes_are_computed_where_the_pack_counts_the_SAME_thing_the_dose_does()
+    {
+        // 1 tablet twice a day for 30 days = 60 tablets; a box holds 7. Nine boxes, because eight is 56 and
+        // the course needs 60 — rounding down sends the patient home four days short.
+        var o = QuantityMath.Compute(1m, 2, 30, isPackSplittable: true, packSize: 7m, packCountsDoses: true);
+
+        o.Plan!.TotalUnits.Should().Be(60m);
+        o.Plan.Boxes.Should().Be(9m);
+    }
+
+    [Fact]
+    public void Boxes_are_NOT_computed_where_the_pack_counts_something_else()
+    {
+        // The Lantus case. The answer is withheld and the reason named, rather than 36 being printed.
+        var o = QuantityMath.Compute(1m, 2, 90, isPackSplittable: true, packSize: 5m, packCountsDoses: false);
+
+        o.Plan!.TotalUnits.Should().Be(180m, "the units themselves are still perfectly computable");
+        o.Plan.Boxes.Should().BeNull("the pack counts pens and the dose counts IU — dividing one by the other "
+            + "is arithmetic on two different things");
+    }
+
+    [Fact]
+    public void An_unknown_pack_size_yields_no_box_count_and_no_guess()
+    {
+        var o = QuantityMath.Compute(1m, 2, 30, isPackSplittable: true, packSize: null, packCountsDoses: true);
+
+        o.Plan!.DispenseQuantity.Should().Be(60m);
+        o.Plan.Boxes.Should().BeNull();
+    }
+
+    [Fact]
+    public void A_course_that_fits_inside_one_box_is_one_box_and_never_zero()
+    {
+        // 10 tablets from a box of 30. Rounding to nearest, or truncating, dispenses nothing at all.
+        var o = QuantityMath.Compute(1m, 1, 10, isPackSplittable: true, packSize: 30m, packCountsDoses: true);
+
+        o.Plan!.Boxes.Should().Be(1m);
+    }
+}
