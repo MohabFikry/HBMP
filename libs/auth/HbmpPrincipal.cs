@@ -26,6 +26,23 @@ public sealed record HbmpPrincipal
 
     public string? TenantId { get; init; }
     public string? ProviderId { get; init; }
+
+    /// <summary>The roles whose authority is bounded to ONE provider. A token in any of these must carry a
+    /// <c>provider_id</c>; a token in none of them (the Network Team, platform admins) is legitimately
+    /// tenant-wide.</summary>
+    /// <remarks>
+    /// Here rather than in provider-service because two layers need the same answer and were reading it from
+    /// different places. provider-service rejects a provider-scoped token with no provider_id at the
+    /// endpoint; the RLS binder, which has no view of provider-service's list, saw only an absent claim and
+    /// bound the empty string — which the provider policies read as "tenant-wide". So the datastore layer,
+    /// the one that is supposed to hold when the layers above it are wrong, was the layer that opened.
+    /// One list, consulted by both.
+    /// </remarks>
+    private static readonly string[] ProviderScopedRoles =
+        ["provider_admin", "lab_tech", "imaging_tech", "radiology_tech", "pharmacist"];
+
+    /// <summary>True when this principal's authority is bounded to a single provider.</summary>
+    public bool IsProviderScoped() => ProviderScopedRoles.Any(IsInRole);
     public string? SessionId { get; init; }
     public string? SourceIp { get; init; }
 

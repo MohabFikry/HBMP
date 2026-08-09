@@ -40,7 +40,13 @@ public static class RlsRegistration
             {
                 var rls = ctx.RequestServices.GetRequiredService<RlsContext>();
                 rls.TenantId = principal.TenantId ?? "";
-                rls.ProviderId = principal.ProviderId ?? "";
+                // An absent provider id means "tenant-wide" to the provider policies, which is right for the
+                // Network Team and wrong — dangerously so — for a provider-scoped token that simply lost its
+                // claim. Distinguish the two here: a provider-scoped principal with no provider id gets a
+                // sentinel no row can match, so it reads nothing instead of every provider's rows.
+                rls.ProviderId = string.IsNullOrEmpty(principal.ProviderId) && principal.IsProviderScoped()
+                    ? RlsConnectionInterceptor.NoProviderSentinel
+                    : principal.ProviderId ?? "";
                 // 21.5 — the active membership, for ambient attribution. Bound in the SAME place as the
                 // tenant so a service cannot end up with one and not the other, and empty for machine
                 // principals, which genuinely have no membership.
