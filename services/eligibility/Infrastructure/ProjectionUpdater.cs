@@ -87,8 +87,14 @@ public sealed class ProjectionUpdater(EligibilityDbContext db, IEligibilityCache
         c.PolicyNo = Str(p, "policyNo") ?? c.PolicyNo;
         if (p.TryGetProperty("effectiveFrom", out var ef) && ef.ValueKind == JsonValueKind.String)
             c.EffectiveFrom = DateOnly.Parse(ef.GetString()!, System.Globalization.CultureInfo.InvariantCulture);
-        if (p.TryGetProperty("effectiveTo", out var et) && et.ValueKind == JsonValueKind.String)
-            c.EffectiveTo = DateOnly.Parse(et.GetString()!, System.Globalization.CultureInfo.InvariantCulture);
+        // Same absent-vs-null discipline as waitingPeriodEndsOn and planVersionId below, and for the same
+        // reason in the opposite direction: a termination CLOSES the window and a reinstatement REOPENS it.
+        // While an explicit null was treated as "unchanged", a reinstated member kept the end date their
+        // termination had written and stayed refused at the counter with nothing to explain it.
+        if (p.TryGetProperty("effectiveTo", out var et))
+            c.EffectiveTo = et.ValueKind == JsonValueKind.String
+                ? DateOnly.Parse(et.GetString()!, System.Globalization.CultureInfo.InvariantCulture)
+                : null;
         // 19.2 waiting period. Explicit null CLEARS it — a plan amendment that removes the waiting period
         // must be able to make the member payable, and "absent means leave it alone" would strand the old
         // boundary forever. An absent property still means "unchanged", so a publisher that predates this

@@ -409,6 +409,34 @@ public sealed class MembershipCommands(
         await db.Coverages.Where(c => c.EnrollmentId == enrollmentId)
             .ExecuteUpdateAsync(s => s.SetProperty(c => c.EffectiveTo, effectiveDate), ct);
 
+        // The ROW-LEVEL events for the coverages just closed. MemberTerminated below announces that the
+        // membership ended; eligibility-service builds its coverage projection from CoverageChanged and from
+        // nothing else, exactly as the enrolment path above says, and has no case for MemberTerminated at all
+        // — it falls through its switch's default. So a terminated member kept every coverage row the
+        // enrolment published, still open-ended, and the engine went on answering Eligible at the counter for
+        // a membership that had ended. The end date is the whole fact; publishing it is what closes the cover.
+        //
+        // INLINE, and duplicated in Reinstate below, for the reason the enrolment path gives: these have to be
+        // provably inside this method's transaction by reading the code, and a helper would move them into a
+        // body with no transaction in it — the shape the rule exists to forbid.
+        var terminated = await db.Coverages.AsNoTracking()
+            .Where(c => c.EnrollmentId == enrollmentId)
+            .Select(c => new { c.TenantId, c.CoverageId, c.BeneficiaryId, c.BenefitCategoryId, c.Status })
+            .ToListAsync(ct);
+        var termCodes = await CategoryCodesAsync(terminated.Select(c => c.BenefitCategoryId), ct);
+        foreach (var coverage in terminated)
+        {
+            await outbox.EnqueueAsync("CoverageChanged", "policy.events", new
+            {
+                tenantId = coverage.TenantId,
+                coverageId = coverage.CoverageId,
+                beneficiaryId = coverage.BeneficiaryId,
+                category = termCodes.GetValueOrDefault(coverage.BenefitCategoryId),
+                status = coverage.Status.ToString(),
+                effectiveTo = effectiveDate,
+            }, ct);
+        }
+
         db.EnrollmentEvents.Add(Event(e, EnrollmentEventType.Terminated, effectiveDate, reason, actor, now, null));
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<Enrollment>(default, conflict);
 
@@ -457,6 +485,28 @@ public sealed class MembershipCommands(
         e.UpdatedBy = actor.UserId;
         await db.Coverages.Where(c => c.EnrollmentId == enrollmentId)
             .ExecuteUpdateAsync(s => s.SetProperty(c => c.EffectiveTo, (DateOnly?)null), ct);
+
+        // The mirror of the terminate case: reopening the coverage window has to reach the projection too, or
+        // a reinstated member stays refused by the end date their termination wrote. The explicit null is what
+        // clears it — ProjectionUpdater.OnCoverageChanged reads effectiveTo with the absent-means-unchanged,
+        // null-means-clear discipline it already applies to waitingPeriodEndsOn and planVersionId.
+        var reinstated = await db.Coverages.AsNoTracking()
+            .Where(c => c.EnrollmentId == enrollmentId)
+            .Select(c => new { c.TenantId, c.CoverageId, c.BeneficiaryId, c.BenefitCategoryId, c.Status })
+            .ToListAsync(ct);
+        var reinCodes = await CategoryCodesAsync(reinstated.Select(c => c.BenefitCategoryId), ct);
+        foreach (var coverage in reinstated)
+        {
+            await outbox.EnqueueAsync("CoverageChanged", "policy.events", new
+            {
+                tenantId = coverage.TenantId,
+                coverageId = coverage.CoverageId,
+                beneficiaryId = coverage.BeneficiaryId,
+                category = reinCodes.GetValueOrDefault(coverage.BenefitCategoryId),
+                status = coverage.Status.ToString(),
+                effectiveTo = (DateOnly?)null,
+            }, ct);
+        }
 
         db.EnrollmentEvents.Add(Event(e, EnrollmentEventType.Reinstated, effectiveDate, reason, actor, now, null));
         if (await SaveOrConflict(ct) is { } conflict) return new MembershipResult<Enrollment>(default, conflict);
@@ -598,6 +648,19 @@ public sealed class MembershipCommands(
         var bag = new Dictionary<string, (string?, string?)>(StringComparer.Ordinal);
         foreach (var (field, before, after) in fields) bag[field] = (before, after);
         return bag;
+    }
+
+    /// <summary>Benefit-category CODEs for a set of ids. The coverage projection downstream keys on the code
+    /// ("LAB"), not the id — it holds no category table to resolve a Guid against. A pure read, so unlike the
+    /// enqueues it serves it carries no transactional obligation and may live in a helper.</summary>
+    private async Task<Dictionary<Guid, string>> CategoryCodesAsync(
+        IEnumerable<Guid> categoryIds, CancellationToken ct)
+    {
+        var ids = categoryIds.Distinct().ToList();
+        if (ids.Count == 0) return [];
+        return await db.BenefitCategories.AsNoTracking()
+            .Where(c => ids.Contains(c.BenefitCategoryId))
+            .ToDictionaryAsync(c => c.BenefitCategoryId, c => c.Code, ct);
     }
 
     /// <summary>Dates in the diff are ISO, and formatted invariantly: the entry is rendered in whichever
