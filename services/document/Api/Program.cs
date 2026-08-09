@@ -20,6 +20,10 @@ builder.Services.AddHbmpAuthorization(DocumentPolicies.Bundle());
 builder.Services.AddHbmpBreakGlass(builder.Configuration); // live break-glass elevation (16.6, H5)
 builder.Services.AddHbmpEvents(builder.Configuration);
 builder.Services.AddHbmpDurableOutbox<DocumentDbContext>();
+// The relay belongs with the outbox. Without it this service staged every event it ever raised — including
+// the audit events AddHbmpEvents routes through the outbox — into document.outbox and delivered none of
+// them, so uploads and downloads of identified-person extracts left no trail beyond this box.
+builder.Services.AddHbmpOutboxRelay();
 builder.Services.AddDocumentInfrastructure(builder.Configuration);
 builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService("document-service"))
     .WithTracing(t => t.AddAspNetCoreInstrumentation().AddOtlpExporter())

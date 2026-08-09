@@ -362,6 +362,10 @@ services:
       Auth__ValidIssuers__0: "http://localhost:8090/"
       Messaging__Uri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       Messaging__Queue: "audit.events"
+      # Messaging__* is the ingest consumer; Events__RabbitUri is the publisher this service now uses to
+      # emit its OWN audit.read events onto the same queue. Both point at the same broker; without this
+      # the publisher would fall back to the guest:guest default and fail to connect.
+      Events__RabbitUri: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"
       Worm__Endpoint: "http://minio:9000"
       Worm__AccessKey: "${MINIO_ROOT_USER}"
       Worm__SecretKey: "${MINIO_ROOT_PASSWORD}"
