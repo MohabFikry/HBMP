@@ -37,6 +37,9 @@ public static class AppointmentsModule
     /// </summary>
     private static DateOnly ClinicDateOf(DateTimeOffset instant)
     {
+        // Cairo's offset is looked up BY date, so the UTC date is the only key available before the
+        // conversion on the next line. It is never the answer.
+        // cairo-date: offset-probe (keys the offset lookup below)
         var utcDate = DateOnly.FromDateTime(instant.UtcDateTime);
         return DateOnly.FromDateTime(instant.ToOffset(CairoOffset(utcDate)).DateTime);
     }
@@ -206,6 +209,7 @@ public static class AppointmentsModule
             // two-hour mismatch AppointmentDay exists to prevent on the day board.
             var days = rows
                 .Where(r => !taken.Contains(r.SlotId))
+                // cairo-date: offset-probe (the inner UTC date keys the offset lookup; the value grouped on is the Cairo date)
                 .GroupBy(r => DateOnly.FromDateTime(r.SlotStart.ToOffset(CairoOffset(DateOnly.FromDateTime(r.SlotStart.UtcDateTime))).DateTime))
                 .Select(g => new AppointmentDayResponse(g.Key, g.Count()))
                 .OrderBy(d => d.Day)

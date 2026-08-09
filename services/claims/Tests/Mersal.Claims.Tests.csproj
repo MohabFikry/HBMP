@@ -15,6 +15,9 @@
     <ProjectReference Include="../Api/Mersal.Claims.Api.csproj" />
     <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />
     <ProjectReference Include="../../../libs/audit-client/Mersal.Audit.Client.csproj" />
+    <!-- TheTwoClampsAgreeTests pins ClaimDecision.Cap against Money.CapTo while claims is still
+         in decimals; see that file for why both clamps exist. -->
+    <ProjectReference Include="../../../libs/money/Mersal.Money.csproj" />
   </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
 </Project>

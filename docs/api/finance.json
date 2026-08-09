@@ -453,6 +453,10 @@
           "lineTotal": {
             "type": "number",
             "format": "double"
+          },
+          "priceSource": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false

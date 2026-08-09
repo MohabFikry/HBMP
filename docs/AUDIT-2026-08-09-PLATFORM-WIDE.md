@@ -181,7 +181,12 @@ Postgres and broker, not just compiled. `--with-db` throughout, so the DB-gated 
 | H | the fixture backend and the bypass sign-in shipped in the LIVE bundle | **Fixed** | Verified first (`MRS-M-10231`, `Amal Hassan`, `أمل حسن` were plain strings in a `VITE_LIVE=1` `dist/`). `DevApiClient`, `DevAuthClient` and the role picker now sit behind `@dev/fixtures`, aliased to a refusing stub for a live build; `check-live-bundle-clean.py` rebuilds both variants and reads the emitted JS |
 | H | `policyApi`/`branchApi` skipped zod on ~80 operations | **Fixed** | 62 shapes rewritten as `z.object` with `z.infer` types — one definition, not two, which answers the objection the file's own header raised. `.passthrough()` keeps a server that ADDS a field from breaking an older bundle |
 | H | `HttpApiClient` defaulted required fields BEFORE validating | **Fixed** | `money()` refused `?? 0` (10 sites) and `required()` refuses `?? ""` on 21 identifiers, both naming the field. Narrow on purpose: the rule is about values that would be BELIEVED, not a ban on `??` |
-| H | CallCentre's private `fetch` could not report a transport failure | **Partly fixed** | A dropped connection now raises `ApiError("network")` instead of escaping as `TypeError: Failed to fetch`. Surfacing a 5xx `detail` still needs the `"ok" \| "conflict" \| "error"` unions widened to carry a message — named in the code, not smuggled |
+| H | CallCentre's private `fetch` could not report a transport failure | **Fixed** | A dropped connection raises `ApiError("network")` instead of escaping as `TypeError: Failed to fetch`; verdicts are now `CcOutcome` so the server's RFC-7807 `detail` reaches the agent on the generic failure (the named ones — 409/412/422/403 — keep their own sentences) |
+| H | nothing the SPA started could be cancelled | **Fixed** | Every `http.ts` verb takes an `AbortSignal`, `useAsync` supplies and aborts one, the three per-keystroke comboboxes forward it. A cancellation is `ApiError("aborted")`, never `network`. *Stated precisely:* this was never a correctness bug — `live` guards already discarded superseded answers — it was the inability to stop the work |
+| M | chronic refill windows evaluated on the UTC date | **Fixed** | The audit named 2 pharmacy sites; a new `NoUtcBusinessDateArchitectureTests` found **20 in 12 files**. 16 now go through `BusinessCalendar.DateIn`; the 4 that are genuine offset probes acknowledge themselves inline. The counter test runs at 00:30 Cairo — the only time the defect exists, which is why it survived |
+| M | conflicting rounding (`AwayFromZero` in policy/reporting vs the mandated `ToEven`) | **Fixed** | The 3 money sites now round banker's; the rule is ratcheted by scale (2dp ⇒ `ToEven`), which holds across the four services that have *not* adopted the `Money` type. Every remaining `AwayFromZero` is a 1dp displayed percentage, plus one acknowledged month count |
+| M | `Money.CapTo` dead while claims re-implements the clamp | **Fixed differently** | Not deleted. There are two clamps because there are two type worlds, and deleting the `Money` one removes what the migration lands on. `TheTwoClampsAgreeTests` pins them equal across the boundaries — including the clause a re-implementation drops, that no tariff caps at *billed*, not at infinity |
+| H | settlement priced unpriced codes at the provider's own uncapped observed **average** | **Fixed** | Now the observed **floor**, and the line records `PriceSource` so the reviewer issuing the draft can see which prices have no tariff behind them. Test: two deliveries at 100 and one mispriced at 400 settled at 200/unit — double the real rate — and said nothing |
 
 Gates re-run clean after the changes: OpenAPI drift (22 specs), migration-compat, architecture suite (23),
 `libs/auth` token byte-compat (62). The two contract changes (removed `stepUpSatisfied` and
@@ -195,6 +200,14 @@ reading one file, and gate-health downloads both artifacts.
 One measurement worth stating plainly rather than rounding up: removing the fixture backend takes **~18 kB
 off the minified bundle**, not the ~200 kB its 4,111 source lines suggest — that file is mostly comment. The
 case for the change was never the weight.
+
+**Two invariants added to the registry**, both scale/shape rules rather than type rules, which is what lets
+them hold across services mid-migration: `INV-DATE-IS-CAIRO` and `INV-ONE-ROUNDING-MODE`.
+
+**Deliberately NOT done, and it is the larger half of §3's money paragraph:** adopting the `Mersal.Money`
+TYPE in pharmacy, finance, policy and reporting. That is hundreds of signatures plus the EF mapping layer —
+a migration, not a defect fix. What has been closed is the thing that made the split *harmful*: those four
+services no longer disagree with claims and eligibility about how an amount rounds.
 
 ### What closing the saga turned up (C1+C2, ADR-0041)
 

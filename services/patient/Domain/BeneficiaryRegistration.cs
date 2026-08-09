@@ -1,3 +1,5 @@
+using Mersal.Time;
+
 namespace Mersal.Patient.Domain;
 
 /// <summary>Port: check whether an identifier already exists on an active (non-deleted) beneficiary.</summary>
@@ -117,7 +119,7 @@ public sealed class BeneficiaryRegistrar(IIdentifierLookup lookup, TimeProvider 
 
         // A birth date in the future is not a typo the desk can be left to notice: it silently inverts every
         // age-banded eligibility rule that reads it.
-        if (req.BirthDate is { } dob && dob > DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime))
+        if (req.BirthDate is { } dob && dob > BusinessCalendar.DateIn(clock.GetUtcNow()))
             errors.Add("birthDate cannot be in the future");
 
         if (req.Enrolment is { } intent)

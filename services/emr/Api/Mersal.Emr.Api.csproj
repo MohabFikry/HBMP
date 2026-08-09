@@ -6,6 +6,7 @@
     <InternalsVisibleTo Include="Mersal.Emr.Tests" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../../../libs/time/Mersal.Time.csproj" />
     <ProjectReference Include="../Domain/Mersal.Emr.Domain.csproj" />
     <ProjectReference Include="../Infrastructure/Mersal.Emr.Infrastructure.csproj" />
     <ProjectReference Include="../../../libs/auth/Mersal.Auth.csproj" />

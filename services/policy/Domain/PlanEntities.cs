@@ -180,7 +180,11 @@ public sealed class BenefitRuleTier
     {
         ArgumentNullException.ThrowIfNull(rule);
         if (rule.LimitValue is not { } limit) return null;
-        return LimitMultiplier is { } m ? decimal.Round(limit * m, 2, MidpointRounding.AwayFromZero) : limit;
+        // BANKER'S, matching Mersal.Money. This is an amount in EGP at the platform's 2dp settlement scale,
+        // and it used to round half AWAY FROM ZERO — so a tier limit landing on a half-piastre came out a
+        // piastre higher here than the same figure does anywhere claims or eligibility computes it. See the
+        // rule in libs/money/Tests: at Money.Scale there is one rounding mode.
+        return LimitMultiplier is { } m ? decimal.Round(limit * m, 2, MidpointRounding.ToEven) : limit;
     }
 }
 

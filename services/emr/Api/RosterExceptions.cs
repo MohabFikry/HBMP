@@ -236,6 +236,7 @@ public static class RosterExceptionEndpoints
     private static DateOnly ClinicToday(TimeProvider clock)
     {
         var now = clock.GetUtcNow();
+        // cairo-date: offset-probe (the inner UTC date only selects the offset; the returned date is Cairo's)
         return DateOnly.FromDateTime(now.ToOffset(CairoOffsetOn(DateOnly.FromDateTime(now.UtcDateTime))).DateTime);
     }
 

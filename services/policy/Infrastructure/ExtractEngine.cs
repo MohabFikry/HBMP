@@ -7,6 +7,7 @@ using Mersal.Audit.Client;
 using Mersal.Authz;
 using Mersal.Policy.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Policy.Infrastructure;
 
@@ -216,7 +217,7 @@ public sealed class ExtractEngine(
                 eventsByEnrollment[group.Key] = [.. group.Select(AsOfEvent.From)];
         }
 
-        var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+        var today = BusinessCalendar.DateIn(clock.GetUtcNow());
         var rows = new List<Dictionary<string, object?>>(enrollments.Count);
         foreach (var e in enrollments)
         {

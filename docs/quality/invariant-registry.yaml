@@ -368,6 +368,47 @@ invariants:
       - Mersal.Architecture.Tests.AuditAtomicityTests.The_detector_reads_handlers_and_not_proximity
       - Mersal.Architecture.Tests.AuditAtomicityTests.The_debt_register_has_no_stale_entries
 
+  - id: INV-DATE-IS-CAIRO
+    statement: >-
+      A business date is the Egyptian calendar date, never the UTC one — so a decision taken between
+      midnight and 02:00 Cairo is judged on the day the person standing at the counter is living in.
+    source: CLAUDE.md § Naming and conventions (display Africa/Cairo); libs/time/BusinessCalendar
+    severity: High
+    # The gap the no-bare-clock rule left. That rule made every service take an injected TimeProvider and
+    # then said nothing about the CONVERSION, so `DateOnly.FromDateTime(now.UtcDateTime)` passed it while
+    # being exactly as wrong. Twenty sites in twelve files; the 2026-08-09 audit named two of them. The
+    # pharmacy pair is the one with a person in front of it: a chronic refill window opening today read as
+    # not yet open turns a patient away on the morning they were right to come, and a lot expiring today
+    # read as in-date hands over expired medicine. Four sites are legitimate offset probes — converting to
+    # Cairo needs Cairo's offset ON that date, and the UTC date is the only key available first — and each
+    # says so inline with `// cairo-date: offset-probe (reason)` rather than exempting a whole file.
+    tests:
+      - Mersal.Time.Tests.NoUtcBusinessDateArchitectureTests.No_business_date_is_read_off_a_UTC_instant
+      - Mersal.Time.Tests.NoUtcBusinessDateArchitectureTests.The_detector_tells_a_UTC_date_from_a_converted_one
+      - Mersal.Time.Tests.NoUtcBusinessDateArchitectureTests.Every_acknowledgement_still_sits_on_a_line_that_needs_one
+      - Mersal.Pharmacy.Tests.CairoDateAtTheCounterTests.A_lot_expiring_today_is_refused_at_half_past_midnight
+      - Mersal.Pharmacy.Tests.CairoDateAtTheCounterTests.A_lot_expiring_tomorrow_is_still_dispensable
+
+  - id: INV-ONE-ROUNDING-MODE
+    statement: >-
+      Every amount on this platform rounds half-to-even at two decimal places, so a figure computed in one
+      service equals the same figure computed in another.
+    source: libs/money/Money.cs (Scale, banker's rounding); 22-data-dictionary numeric(14,2)
+    severity: Medium
+    # Mersal.Money rounds ToEven and says why: half-away-from-zero biases every .005 upward, which across a
+    # settlement batch of thousands of lines is a systematic overpayment. But Money is adopted by claims and
+    # eligibility only, and policy's tier limits and reporting's per-member-per-month were bare decimals
+    # rounding AwayFromZero — so a dashboard could sit a piastre above the settlement beside it with nobody
+    # able to say which was wrong. The rule is scale-based rather than type-based, which is what lets it hold
+    # across four services that have not migrated to the type: 1dp rounds are displayed percentages and are
+    # left alone, and the one 2dp non-amount (a month count) acknowledges itself inline.
+    tests:
+      - Mersal.Money.Tests.OneRoundingModeArchitectureTests.An_amount_is_rounded_half_to_even
+      - Mersal.Money.Tests.OneRoundingModeArchitectureTests.The_detector_reads_the_scale_and_the_mode
+      - Mersal.Money.Tests.OneRoundingModeArchitectureTests.Every_acknowledgement_still_sits_on_a_line_that_needs_one
+      - Mersal.Claims.Tests.TheTwoClampsAgreeTests.The_decimal_clamp_and_the_Money_clamp_produce_the_same_amount
+      - Mersal.Claims.Tests.TheTwoClampsAgreeTests.Neither_clamp_treats_a_missing_tariff_as_no_ceiling
+
   - id: INV-DEDUPE-SURVIVES-RESTART
     statement: >-
       Consumer idempotency survives a restart — a redelivered event is not applied twice after the process

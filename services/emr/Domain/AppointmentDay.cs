@@ -20,6 +20,9 @@ public static class AppointmentDay
         ArgumentNullException.ThrowIfNull(offsetFor);
         // Which Cairo date is it at that instant? Take the offset for the instant's own date first, then read
         // the local date off it — using UTC's date here is what produced the two-hour error.
+        // Named `probe` for exactly this reason: the offset is looked up by date, so the UTC date is the
+        // only key available before the conversion below.
+        // cairo-date: offset-probe (keys the offset lookup)
         var probe = offsetFor(DateOnly.FromDateTime(instant.UtcDateTime));
         var localDate = DateOnly.FromDateTime(instant.ToOffset(probe).DateTime);
 

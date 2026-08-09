@@ -43,6 +43,30 @@ public sealed class SettlementLine
     public int DeliveredQty { get; set; }
     public decimal AgreedUnitPrice { get; set; }            // from provider_contract (read, not owned)
     public decimal LineTotal { get; set; }
+
+    /// <summary>Where <see cref="AgreedUnitPrice"/> came from. See <see cref="SettlementPriceSource"/> —
+    /// a line the contract does not price is not the same kind of number as one it does, and a reviewer
+    /// issuing the draft has to be able to tell them apart.</summary>
+    public string PriceSource { get; set; } = SettlementPriceSource.Contract;
+}
+
+/// <summary>
+/// How a settlement line was priced.
+///
+/// <para>The distinction the 2026-08-09 audit asked for. An unpriced code used to be settled at the
+/// provider's own observed AVERAGE unit cost with nothing recording that it had been — contrary to the rule
+/// claims and reimbursement already apply, that the absence of a tariff is not permission to pay anything,
+/// and using the statistic a single mispriced small delivery moves most.</para>
+/// </summary>
+public static class SettlementPriceSource
+{
+    /// <summary>The provider's agreed price book named this code.</summary>
+    public const string Contract = "Contract";
+
+    /// <summary>It did not. The line is priced at the LOWEST unit cost observed for the code in the period —
+    /// a floor, pending a tariff, which can only under-state. That direction is chosen deliberately: a
+    /// provider queries an underpayment, and nobody queries an overpayment.</summary>
+    public const string ObservedFloor = "ObservedFloor";
 }
 
 /// <summary>Business-key formatter for settlements (0A §3). STL-YYYY-NNNNNN — consistent with the platform's other

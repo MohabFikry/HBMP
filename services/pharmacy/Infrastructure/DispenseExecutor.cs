@@ -1,6 +1,7 @@
 using Mersal.Events;
 using Mersal.Pharmacy.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Time;
 
 namespace Mersal.Pharmacy.Infrastructure;
 
@@ -198,7 +199,10 @@ public sealed class DispenseExecutor(PharmacyDbContext db)
             .OrderBy(w => w.WindowNo).ToListAsync(ct);
         if (windows.Count == 0) return (null, null);   // acute, or a chronic line issued before 30.x
 
-        var today = DateOnly.FromDateTime(now.UtcDateTime);
+        // THE DEFECT THE 2026-08-09 AUDIT NAMED. A refill window opening today was compared against the UTC
+        // date, which is still yesterday until 02:00 Cairo — so a patient at the counter on the morning their
+        // medicine is due was told to come back, on the one day they were right to come.
+        var today = BusinessCalendar.DateIn(now);
         Domain.ChronicDispenseDecision? firstRefusal = null;
         DateOnly? earliestOpen = null;
 

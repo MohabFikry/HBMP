@@ -51,6 +51,7 @@ public sealed class FinanceDbContext(DbContextOptions<FinanceDbContext> options)
             e.ToTable("settlement_line");
             e.HasKey(x => x.SettlementLineId);
             e.Property(x => x.AgreedUnitPrice).HasColumnType("numeric(14,2)");
+            e.Property(x => x.PriceSource).HasColumnName("price_source").HasMaxLength(32);
             e.Property(x => x.LineTotal).HasColumnType("numeric(16,2)");
             e.HasIndex(x => x.SettlementId);
         });

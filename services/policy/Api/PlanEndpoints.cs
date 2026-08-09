@@ -200,7 +200,7 @@ public static class PlanEndpoints
                 // The successor's window is open-ended and starts where the author later decides; seeding it at
                 // the predecessor's start would collide the moment it activates, so we seed "today" and let the
                 // author move it while it is still a draft.
-                EffectiveFrom = DateOnly.FromDateTime(now.UtcDateTime),
+                EffectiveFrom = BusinessCalendar.DateIn(now),
                 Status = PlanVersionStatus.Draft,
                 CreatedAt = now, UpdatedAt = now, CreatedBy = gate.SubjectId, UpdatedBy = gate.SubjectId,
                 Rules = [.. active.Rules.Select(r => CloneRule(r, now, gate.SubjectId))],

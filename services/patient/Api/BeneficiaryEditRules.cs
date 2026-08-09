@@ -1,5 +1,6 @@
 using System.Globalization;
 using Mersal.Patient.Domain;
+using Mersal.Time;
 
 namespace Mersal.Patient.Api;
 
@@ -45,7 +46,7 @@ public static class BeneficiaryEditRules
 
         // The same rule the register form applies: a birth date in the future is a transcription error, and
         // it silently breaks every age-banded eligibility rule that reads it.
-        if (req.BirthDate is { } dob && dob > DateOnly.FromDateTime(now.UtcDateTime)) errors.Add("birthDate");
+        if (req.BirthDate is { } dob && dob > BusinessCalendar.DateIn(now)) errors.Add("birthDate");
 
         if (req.Sex is not null && !Sexes.Contains(req.Sex, StringComparer.Ordinal)) errors.Add("sex");
 

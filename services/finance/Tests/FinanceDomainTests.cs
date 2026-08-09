@@ -22,7 +22,7 @@ public class FinanceDomainTests
             new Dictionary<string, decimal> { ["70450"] = 350.00m });
         book.TryPrice("70450", out var price).Should().BeTrue();
         price.Should().Be(350.00m);
-        book.TryPrice("99999", out _).Should().BeFalse();   // absent → caller falls back to observed unit cost
+        book.TryPrice("99999", out _).Should().BeFalse();   // absent → caller falls back to the observed FLOOR
         ContractPriceBook.Empty().Prices.Should().BeEmpty();
     }
 
