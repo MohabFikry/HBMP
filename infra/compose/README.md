@@ -4,6 +4,18 @@ Stands up the **entire open-source Mersal HBMP infrastructure** on one machine s
 
 > ⚠️ **This is a starter, not a production deployment.** It boots the stack with sensible defaults and dev-mode secrets so you can develop immediately. Do **not** put real beneficiary data behind it until you complete the **Production hardening** checklist below (TLS, secrets in OpenBao, OpenSearch security on, Keycloak production mode, disk encryption, backups). Hardening is [`../../claude-code-prompts/phase-11-hardening-and-nfr.md`](../../claude-code-prompts/phase-11-hardening-and-nfr.md).
 
+> 🔓 **Specifically: authentication here is relaxed.** Every service in this file sets
+> `Auth__ProtectedScopeRequiresMfa: "false"` and `Auth__RequireHttpsMetadata: "false"`, and the identity
+> seed creates demo users on a shared password. Both flags default to the SECURE value in
+> `libs/auth/HbmpAuthOptions.cs` — this stack overrides them, which is why every service here is also
+> pinned to `ASPNETCORE_ENVIRONMENT: Development`.
+>
+> That pin is now load-bearing rather than descriptive: `tools/ci/check-dev-auth-flags.py` fails CI if
+> either flag is disabled in any config that is *not* pinned to Development. The relaxation was never a
+> decision made twice — it was a laptop convenience that became the deployment, because this is the only
+> deployment artifact that exists. The gate is what stops it travelling into the first non-dev environment
+> anybody writes.
+
 ---
 
 ## Prerequisites

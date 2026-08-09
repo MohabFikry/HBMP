@@ -190,6 +190,16 @@ jobs:
         continue-on-error: true
         run: python3 tools/ci/check-login-origin.py
 
+      # MFA-off and RequireHttpsMetadata-off are laptop conveniences that became the deployment, because
+      # Compose Tier 1 is the only deployment that exists and nothing stopped them travelling. Both default
+      # to the secure value in code; this fails any config that overrides one without pinning that service
+      # to Development.
+      - name: "gate: dev-only auth relaxations stay in Development (18-security-model §3.3)"
+        id: gate_dev_auth_flags
+        if: always()
+        continue-on-error: true
+        run: python3 tools/ci/check-dev-auth-flags.py
+
       - name: "gate: integration DPIA / data-sharing (13.3)"
         id: gate_dpia
         if: always()
@@ -411,6 +421,7 @@ jobs:
             kong-route-coverage=${{ steps.gate_kong.outcome }}
             spa-scopes=${{ steps.gate_spa_scopes.outcome }}
             login-origin=${{ steps.gate_login_origin.outcome }}
+            dev-auth-flags=${{ steps.gate_dev_auth_flags.outcome }}
             integration-dpia=${{ steps.gate_dpia.outcome }}
             coverage-exclusions=${{ steps.gate_coverage_exclusions.outcome }}
             floor-monotonicity=${{ steps.gate_floor_monotonicity.outcome }}

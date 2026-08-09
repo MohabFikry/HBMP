@@ -52,6 +52,11 @@ REQUIRED_GATES = [
     # the browser, so the sign-in reports success and the next authorize reports login_required — the user is
     # told their password is wrong. If this gate stopped running, nothing else would notice.
     "login-origin",
+    # 2026-08-09 audit — dev-only auth relaxations. Listed for the same reason as the two above: what it
+    # guards fails SILENTLY and in the safe-looking direction. A stack running with MFA disabled serves
+    # every request successfully; the only sign is the one nobody looks for. If this gate stopped running,
+    # the flag would be free to travel into the first non-dev environment anybody writes.
+    "dev-auth-flags",
     # 31.6 — response-schema coverage. Same argument as openapi-drift above, one level down: that gate
     # compares the specs it is given, and the specs described no response bodies at all, so it passed while
     # three fields were added to a prescription line. This one ratchets the share of endpoints that say what
