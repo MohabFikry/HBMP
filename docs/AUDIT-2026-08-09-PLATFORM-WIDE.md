@@ -154,6 +154,32 @@ This matters for calibration — the defects above sit on top of real strength:
 
 ---
 
+## 5a. Remediation status (updated 2026-08-09, branch `fix/audit-2026-08-09-critical`)
+
+Fixes land with the evidence that they work: every item below was verified against the running Compose
+Postgres and broker, not just compiled. `--with-db` throughout, so the DB-gated suites actually ran.
+
+| # | Finding | Status | Evidence |
+|---|---|---|---|
+| C5 | document-service never relayed its outbox | **Fixed** | `AddHbmpOutboxRelay()` added; `OutboxRelayRegistrationTests` now asserts the outbox⇒relay pair across all 20 staging services |
+| C7 | audit spine self-audited into an in-memory buffer | **Fixed** | Publishes via `DirectAuditSink` onto `audit.events`, ingested through the same single write path; 22 audit tests green |
+| C3 | terminated members stayed Eligible | **Fixed** | `CoverageChanged` now published on terminate/reinstate; consumer honours explicit-null-clears; 483 policy + 66 eligibility tests green |
+| C4 | rejected messages were dropped (no DLX anywhere) | **Fixed** | `hbmp.dlx`/`hbmp.dead-letter` + policy applied by `rabbitmq-init`; **proven end-to-end** — a message rejected with `requeue:false` arrived in the DLQ; approvals hot-loop bounded; `DeadLetterQueueNotEmpty` alert added |
+| C6 | MFA-off/HTTPS-off could travel out of dev | **Fixed** | `check-dev-auth-flags.py` in backend-ci + `REQUIRED_GATES`; verified it catches both a `Production` pin and a missing environment |
+| H | operational-document PHI downloads ungated | **Fixed** | Gated on `document:write` through the authorization engine so denials are audited; 3 new policy tests |
+| H | provider RLS failed **open** on a missing `provider_id` | **Fixed** | `(no-provider)` sentinel; role list unified onto `HbmpPrincipal` so both layers agree; 9 new tests |
+| H | break-glass step-up was client-asserted | **Fixed** | Reads `principal.MfaSatisfied`; field removed from the contract. *Known limit recorded:* proves session MFA, not per-action freshness — that needs `auth_time` in the frozen token contract |
+| H | provider "dual control" accepted any typed string | **Fixed** | Two-call flow; approver acts under their own token; `approved_by <> requested_by` and one-open-request enforced **at the database**; 4 tests |
+
+Gates re-run clean after the changes: OpenAPI drift (22 specs), migration-compat, architecture suite (23),
+`libs/auth` token byte-compat (62). The two contract changes (removed `stepUpSatisfied` and
+`secondApproverSubject`) are reflected in `docs/api/` — the drift gate caught both, which is what it is for.
+
+**Not yet started:** C1+C2 (the approval saga — the largest remaining item), and Highs #9–#12 plus Mediums
+#13–#14 in the plan below. The saga is deliberately not half-built: it needs a routing queue, consumers in
+orders and pharmacy, and a rejection-compensation path, and a partially wired state machine on the
+gated-benefit path would be worse than the current honest gap.
+
 ## 6. Proposed remediation plan
 
 Ordered by risk-reduction per unit effort. Phases are independent enough to parallelize within a phase.
