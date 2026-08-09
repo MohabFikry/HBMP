@@ -8,7 +8,13 @@ public sealed record BreakGlassRequestBody(string ReasonCode, string Justificati
     IReadOnlyList<string> ScopedResourceTypes, IReadOnlyList<string>? ScopedResourceIds = null,
     int WindowMinutes = 60, string? Tenant = null);
 public sealed record BreakGlassRejectBody(string Reason, string? Tenant = null);
-public sealed record BreakGlassActivateBody(bool StepUpSatisfied, string? Tenant = null);
+/// <remarks>
+/// This carried a <c>StepUpSatisfied</c> boolean until the 2026-08-09 audit. The service trusted it, so the
+/// documented "requires step-up MFA to activate" amounted to the requester POSTing
+/// <c>{"stepUpSatisfied": true}</c> — the elevated window opened with no second factor anywhere in the flow.
+/// A caller cannot be asked to attest to their own authentication; the evidence has to come from the token.
+/// </remarks>
+public sealed record BreakGlassActivateBody(string? Tenant = null);
 public sealed record BreakGlassAccessBody(string ResourceType, string? ResourceId, string Action, string? Tenant = null);
 
 /// <summary>Tenant administration, break-glass lifecycle, and governance-dashboard endpoints (phase 8b.3).</summary>
@@ -113,7 +119,9 @@ public static class PlatformEndpoints
             var scope = gate.BindTenant(req.Tenant);
             if (!scope.IsAllowed) return scope.ToProblem();
             var tenant = scope.Tenant!;
-            var r = await svc.ActivateAsync(AdminContracts.Actor(p), tenant, grantId, req.StepUpSatisfied, ct);
+            // From the TOKEN, never from the body. MfaSatisfied is derived by MfaEvaluator from the acr/amr
+            // the issuer signed, so it is evidence the caller cannot author.
+            var r = await svc.ActivateAsync(AdminContracts.Actor(p), tenant, grantId, p.MfaSatisfied, ct);
             return r.Ok
                 ? Results.Ok(new GrantActivationView(grantId, r.Grant!.Status.ToString(), r.Grant.ExpiresAt))
                 : ProblemResults.Invalid(r.ReasonCode ?? "error");

@@ -24,9 +24,15 @@ public sealed record CapabilityView(string ServiceType, string CodeSystem, strin
 // --- 2b.2 onboarding ---------------------------------------------------------------------------
 public sealed record ProvisionUser(string SubjectRef, string Role);
 
-/// <summary>Suspend/terminate carry a mandatory reason (audited). Terminate is dual-controlled: the
-/// second approver must differ from the acting user (SoD).</summary>
-public sealed record StateChange(string Reason, string? SecondApproverSubject);
+/// <summary>Suspend/terminate carry a mandatory reason (audited).</summary>
+/// <remarks>
+/// This carried a <c>SecondApproverSubject</c> until the 2026-08-09 audit, and terminate enforced dual
+/// control by checking that string differed from the caller's subject. The named approver never
+/// authenticated and was never checked to exist, so the control amounted to typing someone else's name.
+/// Terminate is now a two-call flow where the approver acts under their own token; the field is gone rather
+/// than merely unused, because a request field that looks like a control and is not is worse than no field.
+/// </remarks>
+public sealed record StateChange(string Reason);
 
 // --- 14.1 branch (internal Mersal facilities; org reference data, no PHI) -----------------------
 public sealed record CreateBranch(

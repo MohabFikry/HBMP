@@ -98,3 +98,35 @@ public sealed class ProviderCredential
     public bool IsMandatory { get; set; }                    // gates activation (FR-NET-004)
     public bool IsDeleted { get; set; }
 }
+
+/// <summary>Lifecycle of a request to terminate a provider (2026-08-09 audit).</summary>
+public enum TerminationRequestStatus { Requested, Approved, Withdrawn, Superseded }
+
+/// <summary>
+/// A pending, dual-controlled provider termination.
+/// </summary>
+/// <remarks>
+/// <para>Termination flips a provider out of the routable network, revokes every provider-scoped user's
+/// access and publishes both facts platform-wide. It was advertised as dual-controlled and enforced by
+/// comparing the actor's subject against a <c>secondApproverSubject</c> STRING in the request body — a value
+/// the person terminating typed themselves. The named approver never authenticated, never consented, and was
+/// never checked to exist.</para>
+///
+/// <para>The approver is now whoever holds the bearer token on the second call, mirroring the admin
+/// break-glass flow (Requested → Approved) that this platform already implements correctly. "Who agreed to
+/// this" becomes something the system observed rather than something the requester asserted.</para>
+/// </remarks>
+public sealed class ProviderTerminationRequest
+{
+    public Guid RequestId { get; set; }
+    public string TenantId { get; set; } = default!;
+    public Guid ProviderId { get; set; }
+    public string Reason { get; set; } = default!;
+    public TerminationRequestStatus Status { get; set; } = TerminationRequestStatus.Requested;
+    public string RequestedBy { get; set; } = default!;
+    public DateTimeOffset RequestedAt { get; set; }
+    /// <summary>The subject that APPROVED, read from their own token — never supplied by the requester.</summary>
+    public string? ApprovedBy { get; set; }
+    public DateTimeOffset? ApprovedAt { get; set; }
+    public DateTimeOffset? WithdrawnAt { get; set; }
+}

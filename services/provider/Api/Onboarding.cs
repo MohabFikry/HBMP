@@ -67,24 +67,74 @@ public static class OnboardingEndpoints
             return Results.Ok(new { p.ProviderId, status = p.Status.ToString(), usersRevoked = revoked });
         });
 
-        // --- Terminate: dual-controlled (second approver must differ from actor) ---------------------------
+        // --- Terminate: dual-controlled, two tokens -------------------------------------------------------
+        //
+        // This used to be one request that compared `req.SecondApproverSubject` against the actor's subject
+        // and terminated if they differed. The "second approver" was a STRING the person terminating typed:
+        // they never authenticated, never consented, and were never checked to exist. Naming a colleague was
+        // the entire control, on an action that drops a provider out of the routable network, revokes every
+        // provider-scoped user's access and publishes both facts platform-wide.
+        //
+        // Now the approver is whoever holds the bearer token on the SECOND call — the shape admin break-glass
+        // already uses (Requested → Approved). First authorised POST opens a request and changes nothing
+        // about the provider; a POST from a different authenticated subject approves it and terminates.
         write.MapPost("/providers/{id:guid}/terminate", async (Guid id, StateChange req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(req.Reason)) return Results.Problem(statusCode: 400, title: "a reason is required");
             var actor = me.Principal?.Subject;
-            if (string.IsNullOrWhiteSpace(req.SecondApproverSubject) || string.Equals(req.SecondApproverSubject, actor, StringComparison.Ordinal))
-                return Results.Problem(statusCode: 422, title: "terminate is dual-controlled", detail: "a distinct second approver is required");
+            if (string.IsNullOrWhiteSpace(actor)) return Results.Unauthorized();
 
             var (p, tenant) = await Load(db, id, me, ct);
             if (p is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+            if (p.Status == ProviderStatus.Terminated)
+                return Results.Problem(statusCode: 409, title: "already terminated", type: "urn:hbmp:provider-already-terminated");
+
+            var pending = await db.TerminationRequests.FirstOrDefaultAsync(
+                r => r.ProviderId == id && r.Status == TerminationRequestStatus.Requested, ct);
+
+            // ---- First leg: open the request. The provider is untouched until somebody else agrees. ----
+            if (pending is null)
+            {
+                if (string.IsNullOrWhiteSpace(req.Reason))
+                    return Results.Problem(statusCode: 400, title: "a reason is required");
+
+                var opened = new ProviderTerminationRequest
+                {
+                    RequestId = Guid.NewGuid(), TenantId = tenant!, ProviderId = id,
+                    Reason = req.Reason, RequestedBy = actor, RequestedAt = clock.GetUtcNow(),
+                };
+                await using var openTx = await db.Database.BeginTransactionAsync(ct);
+                db.TerminationRequests.Add(opened);
+                await db.SaveChangesAsync(ct);
+                await audit.EmitAsync(Draft(p, AuditAction.StateChange, me, tenant,
+                    outcome: "TerminationRequested", reason: req.Reason), ct);
+                await openTx.CommitAsync(ct);
+
+                return Results.Accepted($"/api/v1/providers/{id}", new
+                {
+                    p.ProviderId, status = p.Status.ToString(),
+                    termination = new { opened.RequestId, status = opened.Status.ToString(), opened.RequestedBy },
+                    detail = "Termination requested. A different user must repeat this call to approve it.",
+                });
+            }
+
+            // ---- Second leg: approve and terminate, but only under a DIFFERENT token. ----
+            if (string.Equals(pending.RequestedBy, actor, StringComparison.Ordinal))
+                return Results.Problem(statusCode: 422, title: "terminate is dual-controlled",
+                    type: "urn:hbmp:dual-control-required",
+                    detail: "This termination was requested by you; a different user must approve it.");
 
             await using var tx = await db.Database.BeginTransactionAsync(ct);
+            pending.Status = TerminationRequestStatus.Approved;
+            pending.ApprovedBy = actor;
+            pending.ApprovedAt = clock.GetUtcNow();
             p.Status = ProviderStatus.Terminated;
             p.OnboardingState = OnboardingState.Terminated;
             p.UpdatedAt = clock.GetUtcNow();
             var revoked = await RevokeUsers(db, id, clock, ct);
             await db.SaveChangesAsync(ct);
-            await audit.EmitAsync(Draft(p, AuditAction.StateChange, me, tenant, outcome: "Terminated", reason: $"{req.Reason} (2nd approver: {req.SecondApproverSubject})"), ct);
+            // Both subjects, and both are now facts the system observed rather than one it was told.
+            await audit.EmitAsync(Draft(p, AuditAction.StateChange, me, tenant, outcome: "Terminated",
+                reason: $"{pending.Reason} (requested by: {pending.RequestedBy}; approved by: {actor})"), ct);
             await outbox.EnqueueAsync("ProviderStatusChanged", "provider.events", new { providerId = p.ProviderId, status = "Terminated", tenantId = tenant }, ct);
             await outbox.EnqueueAsync("ProviderUsersRevoked", "provider.events", new { providerId = p.ProviderId, count = revoked, reason = "provider-terminated", tenantId = tenant }, ct);
             await tx.CommitAsync(ct);

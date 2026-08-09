@@ -1994,10 +1994,6 @@
           "reason": {
             "type": "string",
             "nullable": true
-          },
-          "secondApproverSubject": {
-            "type": "string",
-            "nullable": true
           }
         },
         "additionalProperties": false

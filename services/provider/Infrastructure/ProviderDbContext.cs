@@ -22,9 +22,26 @@ public sealed class ProviderDbContext(DbContextOptions<ProviderDbContext> option
     public DbSet<PractitionerBranchAssignment> PractitionerBranchAssignments => Set<PractitionerBranchAssignment>();   // 14.5
     public DbSet<NetworkTier> NetworkTiers => Set<NetworkTier>();                                   // 19.1b
     public DbSet<ProviderNetworkAssignment> NetworkAssignments => Set<ProviderNetworkAssignment>(); // 19.1b
+    public DbSet<ProviderTerminationRequest> TerminationRequests => Set<ProviderTerminationRequest>();  // 2026-08-09 audit
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        b.Entity<ProviderTerminationRequest>(e =>
+        {
+            e.ToTable("provider_termination_request");
+            e.HasKey(x => x.RequestId);
+            e.Property(x => x.RequestId).HasColumnName("request_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id").IsRequired();
+            e.Property(x => x.ProviderId).HasColumnName("provider_id");
+            e.Property(x => x.Reason).HasColumnName("reason").IsRequired();
+            e.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
+            e.Property(x => x.RequestedBy).HasColumnName("requested_by").IsRequired();
+            e.Property(x => x.RequestedAt).HasColumnName("requested_at");
+            e.Property(x => x.ApprovedBy).HasColumnName("approved_by");
+            e.Property(x => x.ApprovedAt).HasColumnName("approved_at");
+            e.Property(x => x.WithdrawnAt).HasColumnName("withdrawn_at");
+        });
+
         b.AddOutbox("provider");
         b.HasDefaultSchema(Schema);
 
