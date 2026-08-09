@@ -349,6 +349,25 @@ invariants:
       - Mersal.Architecture.Tests.OutboxAtomicityTests.A_state_change_and_its_event_share_one_transaction
       - Mersal.Architecture.Tests.OutboxAtomicityTests.The_debt_register_has_no_stale_entries
 
+  - id: INV-AUDIT-SURVIVES-CRASH
+    statement: >-
+      A mutation's audit record survives a process kill between the business commit and the emit: the audit
+      event is staged in the same transaction as the state change, so a change the platform made can never
+      be a change it cannot prove it made.
+    source: CLAUDE.md § Audit; 19-audit-strategy.md
+    severity: Critical
+    # The audit twin of INV-OUTBOX-SURVIVES-CRASH, and the sharper of the two. A lost domain event is a
+    # projection that falls behind and can be rebuilt from the source of truth; a lost audit event is a hole
+    # in the hash chain's coverage, discovered by whoever is trying to answer for the decision. IAuditClient
+    # writes through the service's own outbox, so EfOutbox.EnqueueRawAsync commits on its own SaveChanges and
+    # atomicity is a property of the CALL SITE — exactly as it is for domain events. 24 sites across 21 files
+    # emitted after their commit; all are fixed, and docs/quality/audit-atomicity-debt.txt holds the
+    # one-way ratchet at zero.
+    tests:
+      - Mersal.Architecture.Tests.AuditAtomicityTests.An_audit_event_is_emitted_before_its_transaction_commits
+      - Mersal.Architecture.Tests.AuditAtomicityTests.The_detector_reads_handlers_and_not_proximity
+      - Mersal.Architecture.Tests.AuditAtomicityTests.The_debt_register_has_no_stale_entries
+
   - id: INV-DEDUPE-SURVIVES-RESTART
     statement: >-
       Consumer idempotency survives a restart — a redelivered event is not applied twice after the process

@@ -102,7 +102,6 @@ public sealed class RoleAdminService(AdminDbContext db, IAuditClient audit, Time
 
         db.RoleBindings.Add(binding);
         await db.SaveChangesAsync(ct);
-        await tx.CommitAsync(ct);
 
         await audit.EmitAsync(new AuditEventDraft
         {
@@ -112,6 +111,7 @@ public sealed class RoleAdminService(AdminDbContext db, IAuditClient audit, Time
             AfterState = JsonSerializer.Serialize(new { subject, role, scope = scope.ToString(), tier = tier.ToString(), justification }, Json),
             Purpose = "role-assignment", Severity = AuditSeverity.Notice,
         }, ct);
+        await tx.CommitAsync(ct);
         return new GrantResult(true, null, binding, []);
     }
 

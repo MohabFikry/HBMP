@@ -426,10 +426,10 @@ public static class ClinicalEndpoints
                     appointmentId = appt.AppointmentId, beneficiaryId = appt.BeneficiaryId,
                     encounterId = encounter.EncounterId, locationId = appt.LocationId,
                 }, ct);
-            await tx.CommitAsync(ct);
 
             await EmitAsync(audit, "encounter", encounter.EncounterId, AuditAction.StateChange, me,
                 $"{{\"status\":\"Completed\",\"appointmentClosed\":{(appt is not null).ToString().ToLowerInvariant()}}}", ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(EncounterResponse.From(encounter));
         }).RequireAuthorization(HbmpPolicies.Scope("emr:write"))
         .Produces<EncounterResponse>();

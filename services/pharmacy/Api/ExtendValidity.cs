@@ -78,7 +78,6 @@ public static class ExtendValidityEndpoints
                 authorizationId = req.AuthorizationId, req.AuthNo, previousExpiry = previous, newExpiry,
             }, ct);
             await db.SaveChangesAsync(ct);
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -89,6 +88,7 @@ public static class ExtendValidityEndpoints
                 DecisionOutcome = "ValidityExtended", DecisionReasonCode = req.AuthNo,
                 Purpose = "validity-extension", Severity = AuditSeverity.Notice,
             }, ct);
+            await tx.CommitAsync(ct);
 
             return Results.Ok(new { prescriptionId = rx.PrescriptionId, rx.RxNo, expiresAt = newExpiry, replayed = false });
         }).RequireAuthorization(HbmpPolicies.Scope("auth:decide"));

@@ -117,7 +117,6 @@ public static class BreakGlass
             // person deciding it, so `CreatedBy` is the decider — and telling somebody the thing they just did
             // has been done is the noise that teaches a team to ignore the channel. The retrospective-review
             // flag and the audit event are what make this decision visible to somebody else.
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -127,6 +126,7 @@ public static class BreakGlass
                 DecisionOutcome = req.Decision.ToString(), DecisionReasonCode = req.Rationale, BreakGlass = true,
                 Severity = AuditSeverity.High,
             }, ct);
+            await tx.CommitAsync(ct);
 
             return Results.Created($"/api/v1/authorizations/{auth.AuthorizationId}", DecisionView.From(auth, row));
         }).RequireAuthorization(HbmpPolicies.Scope("auth:manual"))

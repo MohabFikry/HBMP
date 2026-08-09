@@ -320,7 +320,6 @@ public static class InventoryEndpoints
                 transferRef, req.FromBranchId, ct);
             if (MapFailure(inbound) is { } inFailed) { await tx.RollbackAsync(ct); return inFailed; }
 
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -328,6 +327,7 @@ public static class InventoryEndpoints
                 ActorUserId = me.Principal?.Subject, TenantId = me.Principal?.TenantId,
                 DecisionOutcome = "Transferred", DecisionReasonCode = req.Reason,
             }, ct);
+            await tx.CommitAsync(ct);
 
             return Results.Ok(new
             {

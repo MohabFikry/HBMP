@@ -250,9 +250,9 @@ public static class PractitionerEndpoints
             else
                 target.IsPrimary = true;
             await db.SaveChangesAsync(ct);
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(Draft(p, AuditAction.Update, me, tenant, "primary-specialty-set", req.SpecialtyCode), ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(new { p.PractitionerId, req.SpecialtyCode, IsPrimary = true });
         });
 

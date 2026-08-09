@@ -163,13 +163,13 @@ public static class Cases
             await deps.Db.SaveChangesAsync(ct);
             await deps.Outbox.EnqueueAsync("CaseUnassigned", "case.events",
                 new { caseId = id, caseManagerId = req.CaseManagerId }, ct);
-            await tx.CommitAsync(ct);
             await deps.Audit.EmitAsync(new AuditEventDraft
             {
                 EntityType = "case", EntityId = id.ToString(), Action = AuditAction.Update,
                 ActorUserId = deps.Subject, ActorRole = deps.Roles, TenantId = deps.Tenant,
                 DecisionOutcome = "CaseUnassigned", AfterState = $"revoked:{req.CaseManagerId}", Severity = AuditSeverity.Notice,
             }, ct);
+            await tx.CommitAsync(ct);
             return Results.NoContent();
         }).RequireAuthorization(HbmpPolicies.Scope("case:manage"));
 
@@ -302,13 +302,13 @@ public static class Cases
             await deps.Db.SaveChangesAsync(ct);
             await deps.Outbox.EnqueueAsync("CaseEscalated", "case.events",
                 new { caseId = id, escalationId = e.EscalationId, raisedToRole = e.RaisedToRole, reason = e.Reason }, ct);
-            await tx.CommitAsync(ct);
             await deps.Audit.EmitAsync(new AuditEventDraft
             {
                 EntityType = "case", EntityId = id.ToString(), Action = AuditAction.Create,
                 ActorUserId = deps.Subject, ActorRole = deps.Roles, TenantId = deps.Tenant,
                 DecisionOutcome = "CaseEscalated", AfterState = e.RaisedToRole, Severity = AuditSeverity.Notice,
             }, ct);
+            await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/cases/{id}/escalations/{e.EscalationId}", EscalationView.From(e));
         }).RequireAuthorization(HbmpPolicies.Scope("case:write"))
         .Produces<EscalationView>();

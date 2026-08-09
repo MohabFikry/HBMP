@@ -95,7 +95,6 @@ public static class ReferralEndpoints
             await db.SaveChangesAsync(ct);
             await outbox.EnqueueAsync("ReferralRequested", "pharmacy.events",
                 new { tenantId = referral.TenantId, referralId = referral.ReferralId, referral.ReferralNo, referral.TargetSpecialty, beneficiaryId = referral.BeneficiaryId }, ct);
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -103,6 +102,7 @@ public static class ReferralEndpoints
                 ActorUserId = actor, DecisionOutcome = "Requested",
                 AfterState = $"{{\"referralNo\":\"{referral.ReferralNo}\",\"specialty\":\"{referral.TargetSpecialty}\"}}",
             }, ct);
+            await tx.CommitAsync(ct);
 
             return Results.Created($"/api/v1/referrals/{referral.ReferralId}", ReferralResponse.From(referral));
         }).RequireAuthorization(HbmpPolicies.Scope("referral:write"))

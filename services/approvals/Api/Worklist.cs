@@ -113,7 +113,6 @@ public static class Worklist
                     // the two facts an approvals dashboard exists to show.
                     priority = auth.Priority.ToString(), slaDueAt = auth.SlaDueAt,
                 }, ct);
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -122,6 +121,7 @@ public static class Worklist
                 DecisionOutcome = auth.Status.ToString(),
                 AfterState = $"{{\"authNo\":\"{auth.AuthNo}\",\"status\":\"{auth.Status}\",\"source\":\"{auth.Source}\"}}",
             }, ct);
+            await tx.CommitAsync(ct);
 
             return Results.Created($"/api/v1/authorizations/{auth.AuthorizationId}", AuthorizationStateView.From(auth));
         }).RequireAuthorization(HbmpPolicies.Scope("auth:ingest"))
@@ -246,7 +246,6 @@ public static class Worklist
                     // re-deriving it against a rule set that may since have moved on.
                     queue = auth.RoutedQueue, routedByRule = auth.RoutedByRule,
                 }, ct);
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -254,6 +253,7 @@ public static class Worklist
                 ActorUserId = me.Principal?.Subject, TenantId = me.Principal?.TenantId,
                 BeforeState = before.ToString(), AfterState = auth.Status.ToString(), DecisionOutcome = "UnderReview",
             }, ct);
+            await tx.CommitAsync(ct);
 
             return Results.Ok(AuthorizationStateView.From(auth));
         }).RequireAuthorization(HbmpPolicies.Scope("auth:review"))

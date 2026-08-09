@@ -85,7 +85,6 @@ public static class Decisions
             catch (DbUpdateConcurrencyException) { return Conflict(); }
             await outbox.EnqueueAsync("AuthInfoSupplied", "approvals.events",
                 new { tenantId = auth.TenantId, authorizationId = auth.AuthorizationId, auth.AuthNo }, ct);
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -93,6 +92,7 @@ public static class Decisions
                 ActorUserId = me.Principal?.Subject, TenantId = me.Principal?.TenantId,
                 BeforeState = before.ToString(), AfterState = auth.Status.ToString(), DecisionOutcome = "InfoSupplied",
             }, ct);
+            await tx.CommitAsync(ct);
             return Results.Ok(AuthorizationStateView.From(auth));
         }).RequireAuthorization(HbmpPolicies.Scope("auth:decide"))
         .Produces<AuthorizationStateView>();
@@ -282,7 +282,6 @@ public static class Decisions
         // the helper, and it was atomic only because this one caller happened to hold a transaction open.
         if (DecisionNotification(auth) is { } notice)
             await deps.Outbox.EnqueueAsync(eventType, "notification.domain-events", notice, ct);
-        await tx.CommitAsync(ct);
 
         await deps.Audit.EmitAsync(new AuditEventDraft
         {
@@ -292,6 +291,7 @@ public static class Decisions
             DecisionOutcome = decision.ToString(), DecisionReasonCode = rationale, BreakGlass = breakGlass,
             Severity = breakGlass ? AuditSeverity.High : AuditSeverity.Notice,
         }, ct);
+        await tx.CommitAsync(ct);
 
         return Results.Ok(DecisionView.From(auth, row));
     }

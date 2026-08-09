@@ -100,7 +100,7 @@ public class OutboxAtomicityTests
             // BeginTransactionAsync appears here in prose only
             """;
 
-        var code = CodeOnly(src);
+        var code = SourceScan.CodeOnly(src);
 
         code.Should().HaveLength(src.Length, "offsets and line numbers must survive blanking");
         code.Count(c => c == '\n').Should().Be(src.Count(c => c == '\n'));
@@ -122,7 +122,7 @@ public class OutboxAtomicityTests
     /// and have no transaction around them.</summary>
     private static SortedDictionary<string, List<int>> Scan()
     {
-        var root = RepoRoot();
+        var root = SourceScan.RepoRoot();
         var results = new SortedDictionary<string, List<int>>(StringComparer.Ordinal);
 
         foreach (var path in Directory.EnumerateFiles(Path.Combine(root, "services"), "*.cs", SearchOption.AllDirectories))
@@ -139,7 +139,7 @@ public class OutboxAtomicityTests
             // `EnqueueAsync(` written inside a comment as a real site, and — the dangerous direction — let a
             // `BeginTransactionAsync` mentioned only in a comment CLEAR a genuine offender. A rule this one
             // is load-bearing cannot be steerable by prose.
-            var src = CodeOnly(File.ReadAllText(path));
+            var src = SourceScan.CodeOnly(File.ReadAllText(path));
             if (!src.Contains("EnqueueAsync", StringComparison.Ordinal)) continue;
 
             foreach (Match m in Regex.Matches(src, @"EnqueueAsync\("))
@@ -157,7 +157,7 @@ public class OutboxAtomicityTests
                 // rule blind to 40 sites, concentrated in the money paths. So the question is simply: is
                 // this enqueue inside a transaction? An enqueue that genuinely announces nothing (a pure
                 // notification with no state behind it) is rare enough to earn a register entry.
-                var scope = EnclosingBlocks(src, m.Index).ToList();
+                var scope = SourceScan.EnclosingBlocks(src, m.Index).ToList();
                 if (scope.Any(b => b.Contains("BeginTransactionAsync", StringComparison.Ordinal))) continue;
                 if (InsideTransactionCallback(src, m.Index)) continue;
 
@@ -185,7 +185,7 @@ public class OutboxAtomicityTests
         if (marker < 0) return false;
         var open = src.IndexOf('{', marker);
         if (open < 0 || open > index) return false;
-        return MatchingClose(src, open) > index;
+        return SourceScan.MatchingClose(src, open) > index;
     }
 
     /// <summary>A block writes state if it saves directly OR through the house helpers that save. Keying
@@ -198,170 +198,10 @@ public class OutboxAtomicityTests
         || block.Contains("ExecuteUpdateAsync", StringComparison.Ordinal)
         || block.Contains("ExecuteDeleteAsync", StringComparison.Ordinal);
 
-    /// <summary>
-    /// The brace-delimited blocks enclosing <paramref name="index"/>, innermost first, stopping at the
-    /// HANDLER that owns it.
-    ///
-    /// <para>Where the walk stops decides what the rule can see, in both directions. Stop too early — at the
-    /// innermost block that saves — and a transaction declared before a <c>switch</c> is invisible, so a
-    /// correctly-wrapped handler reads as an offender. Walk too far — into the method holding a dozen
-    /// minimal-API lambdas, or into the class — and one lambda's <c>BeginTransactionAsync</c> clears every
-    /// other lambda beside it, which is a false negative exactly where a file is big enough for two writes to
-    /// drift apart.</para>
-    ///
-    /// <para>So the walk ends after the first LAMBDA body (a block whose head ends in <c>=&gt;</c>) or method
-    /// body, and never crosses a type or namespace declaration. That is the handler: the unit a transaction
-    /// belongs to.</para>
-    /// </summary>
-    private static IEnumerable<string> EnclosingBlocks(string src, int index)
-    {
-        var pos = index;
-        for (var level = 0; level < 8; level++)
-        {
-            var start = OpenBraceBefore(src, pos);
-            if (start < 0) yield break;
-            var head = src[Math.Max(0, start - 400)..start];
-            if (Regex.IsMatch(head, @"\b(class|record|struct|interface|enum|namespace)\s+\w+[^;{]*$", RegexOptions.Singleline))
-                yield break;
-
-            var end = MatchingClose(src, start);
-            if (end < 0) yield break;
-            yield return src[start..(end + 1)];
-
-            // A LAMBDA body ends the handler: minimal-API files put a dozen of them in one method, and
-            // walking past it would let one lambda's transaction clear every sibling beside it.
-            //
-            // Nothing else stops the walk. A `\)$` test for "method signature" looks right and is wrong —
-            // `switch (...)`, `if (...)`, `foreach (...)` all end in `)`, so it stopped at the first control
-            // block and reported four correctly-wrapped ReportAccess handlers as offenders because their
-            // `await using var tx` sits before the `switch` rather than inside it. For a real method body
-            // the type-declaration check above is the boundary, which is the right one.
-            if (Regex.IsMatch(head, @"=>\s*$")) yield break;
-            pos = start;
-        }
-    }
-
-    /// <summary>
-    /// The same source with every comment, string literal and char literal blanked to spaces — newlines
-    /// preserved, so every offset and line number is unchanged and the detector can still report where.
-    ///
-    /// <para>Blanking is not cosmetic. The brace walk and the keyword tests below both read raw text, so a
-    /// brace inside a JSON string (<c>AfterState = $"{{\"enabled\":true}}"</c>), a <c>//</c> inside a URL, or
-    /// an English sentence containing the word <c>record</c> all steer a rule that is supposed to be reading
-    /// code. Delimiters go too: nothing downstream needs them, and leaving them invites the next reader to
-    /// assume the string is still there.</para>
-    /// </summary>
-    private static string CodeOnly(string src)
-    {
-        var buf = src.ToCharArray();
-        void Erase(int from, int to)
-        {
-            for (var k = from; k < to && k < buf.Length; k++)
-                if (buf[k] is not ('\n' or '\r')) buf[k] = ' ';
-        }
-
-        for (var i = 0; i < src.Length; i++)
-        {
-            if (src[i] == '/' && i + 1 < src.Length && src[i + 1] == '/')
-            {
-                var end = src.IndexOf('\n', i);
-                if (end < 0) end = src.Length;
-                Erase(i, end);
-                i = end;
-                continue;
-            }
-            if (src[i] == '/' && i + 1 < src.Length && src[i + 1] == '*')
-            {
-                var close = src.IndexOf("*/", i + 2, StringComparison.Ordinal);
-                var end = close < 0 ? src.Length : close + 2;
-                Erase(i, end);
-                i = end - 1;
-                continue;
-            }
-            if (src[i] == '\'')
-            {
-                var k = i + 1;
-                while (k < src.Length && src[k] != '\'') k += src[k] == '\\' ? 2 : 1;
-                Erase(i, Math.Min(k + 1, src.Length));
-                i = k;
-                continue;
-            }
-
-            // A string literal may carry any run of $ and @ prefixes: "", @"", $"", $@"", @$"", """ raw """.
-            var p = i;
-            while (p < src.Length && (src[p] == '$' || src[p] == '@')) p++;
-            if (p >= src.Length || src[p] != '"') continue;
-
-            var verbatim = src.AsSpan(i, p - i).Contains('@');
-            var q = p;
-            while (q < src.Length && src[q] == '"') q++;
-            var quotes = q - p;
-
-            int stop;
-            if (quotes >= 3)
-            {
-                // Raw string: the terminator is a quote run of the same length.
-                var close = src.IndexOf(new string('"', quotes), q, StringComparison.Ordinal);
-                stop = close < 0 ? src.Length : close + quotes;
-            }
-            else if (quotes == 2)
-            {
-                stop = q;   // the empty string
-            }
-            else if (verbatim)
-            {
-                var k = p + 1;
-                while (k < src.Length)
-                {
-                    if (src[k] != '"') { k++; continue; }
-                    if (k + 1 < src.Length && src[k + 1] == '"') { k += 2; continue; }   // "" is one quote
-                    break;
-                }
-                stop = Math.Min(k + 1, src.Length);
-            }
-            else
-            {
-                var k = p + 1;
-                while (k < src.Length && src[k] != '"' && src[k] != '\n') k += src[k] == '\\' ? 2 : 1;
-                stop = Math.Min(k + 1, src.Length);
-            }
-
-            Erase(i, stop);
-            i = stop - 1;
-        }
-        return new string(buf);
-    }
-
-    private static int OpenBraceBefore(string src, int from)
-    {
-        var depth = 0;
-        for (var i = from - 1; i >= 0; i--)
-        {
-            if (src[i] == '}') depth++;
-            else if (src[i] == '{')
-            {
-                if (depth == 0) return i;
-                depth--;
-            }
-        }
-        return -1;
-    }
-
-    private static int MatchingClose(string src, int open)
-    {
-        var depth = 0;
-        for (var i = open; i < src.Length; i++)
-        {
-            if (src[i] == '{') depth++;
-            else if (src[i] == '}' && --depth == 0) return i;
-        }
-        return -1;
-    }
-
     /// <summary>file → permitted number of non-transactional enqueue sites.</summary>
     private static Dictionary<string, int> ReadDebt()
     {
-        var path = Path.Combine(RepoRoot(), DebtFile);
+        var path = Path.Combine(SourceScan.RepoRoot(), DebtFile);
         File.Exists(path).Should().BeTrue("{0} is the debt register this rule ratchets down", DebtFile);
 
         var debt = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -376,11 +216,4 @@ public class OutboxAtomicityTests
         return debt;
     }
 
-    private static string RepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "HbmpPlatform.sln")))
-            dir = dir.Parent;
-        return dir?.FullName ?? throw new InvalidOperationException("repository root not found");
-    }
 }

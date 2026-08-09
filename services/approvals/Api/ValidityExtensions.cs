@@ -127,7 +127,6 @@ public static class ValidityExtensionEndpoints
                 requestedByUserId = auth.CreatedBy,
             }, ct);
             await db.SaveChangesAsync(ct);
-            await tx.CommitAsync(ct);
 
             await audit.EmitAsync(new AuditEventDraft
             {
@@ -136,6 +135,7 @@ public static class ValidityExtensionEndpoints
                 AfterState = $"{{\"authNo\":\"{auth.AuthNo}\",\"source\":\"ValidityExtension\",\"itemType\":\"{itemType}\"}}",
                 Purpose = "validity-extension", Severity = AuditSeverity.Notice,
             }, ct);
+            await tx.CommitAsync(ct);
 
             _ = applier;   // resolved here so a misconfigured callback fails at startup, not at decision time
 

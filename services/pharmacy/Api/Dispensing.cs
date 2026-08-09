@@ -32,7 +32,7 @@ public static class DispensingEndpoints
 
             var queueNow = clock.GetUtcNow();
             var items = await Dispensable(db, queueNow).OrderBy(p => p.SubmittedAt).Take(100).ToListAsync(ct);
-            await AuditRead(audit, me, "queue", items.Count);
+            await AuditRead(audit, me, "queue", [.. items.Select(p => p.PrescriptionId)]);
             return Results.Ok(items.Select(p => DispensableRxView.From(p, queueNow)));
         })
         .RequireAuthorization(HbmpPolicies.Scope("pharmacy:read"))
@@ -97,7 +97,7 @@ public static class DispensingEndpoints
             }
 
             var items = await q.OrderBy(p => p.SubmittedAt).Take(100).ToListAsync(ct);
-            await AuditRead(audit, me, "search", items.Count);
+            await AuditRead(audit, me, "search", [.. items.Select(p => p.PrescriptionId)]);
             return Results.Ok(items.Select(p => DispensableRxView.From(p, now)));
         })
         .RequireAuthorization(HbmpPolicies.Scope("pharmacy:read"))
@@ -127,7 +127,7 @@ public static class DispensingEndpoints
                     detail: reject);
             }
 
-            await AuditRead(audit, me, "open", rx.Lines.Count);
+            await AuditRead(audit, me, "open", [rx.PrescriptionId]);
             return Results.Ok(DispensableRxView.From(rx, openNow));
         })
         .RequireAuthorization(HbmpPolicies.Scope("pharmacy:read"))
@@ -440,11 +440,43 @@ public static class DispensingEndpoints
         return null;
     }
 
-    private static async Task AuditRead(IAuditClient audit, IHbmpPrincipalAccessor me, string op, int count) =>
-        await audit.EmitAsync(new AuditEventDraft
+    /// <summary>
+    /// Audit a PHI read with the RECORDS it disclosed, one event each.
+    /// </summary>
+    /// <remarks>
+    /// <para>This recorded <c>EntityId = "queue" | "search" | "open"</c> and a count. Both facts are true and
+    /// neither is the one an audit exists to answer: "who has looked at RX-2026-000410?" had no answer,
+    /// because no row on the chain named that prescription. The REJECT path on the same endpoint already did
+    /// it properly, which is how the gap was visible at all — the same handler audits a refusal by id and a
+    /// successful disclosure by the word "open".</para>
+    /// <para>One event per disclosed record, matching patient-service's <c>BeneficiaryReadGuard</c> — the
+    /// entity id is the queryable anchor, so a list read that collapses to one row makes every prescription
+    /// on that page unsearchable. The page size caps this at 100; a work queue refreshed all day is exactly
+    /// the surface where "nobody can tell who saw it" would otherwise hold.</para>
+    /// <para>An EMPTY result still emits one event. A search that returned nothing is still an act — on an
+    /// identifier search it confirms a person has no live prescription — and dropping it would leave the
+    /// least explicable lookups as the only unrecorded ones.</para>
+    /// </remarks>
+    private static async Task AuditRead(
+        IAuditClient audit, IHbmpPrincipalAccessor me, string op, IReadOnlyCollection<Guid> disclosed)
+    {
+        if (disclosed.Count == 0)
         {
-            EntityType = "prescription", EntityId = op, Action = AuditAction.Read,
-            ActorUserId = me.Principal?.Subject, DecisionOutcome = "Allow",
-            DecisionReasonCode = $"pharmacist-{op}:{count}", FieldClasses = ["phi"],
-        });
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "prescription", EntityId = "(none)", Action = AuditAction.Read,
+                ActorUserId = me.Principal?.Subject, DecisionOutcome = "Allow",
+                DecisionReasonCode = $"pharmacist-{op}:0", FieldClasses = ["phi"],
+            });
+            return;
+        }
+
+        foreach (var id in disclosed)
+            await audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "prescription", EntityId = id.ToString(), Action = AuditAction.Read,
+                ActorUserId = me.Principal?.Subject, DecisionOutcome = "Allow",
+                DecisionReasonCode = $"pharmacist-{op}:{disclosed.Count}", FieldClasses = ["phi"],
+            });
+    }
 }
