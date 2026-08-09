@@ -195,6 +195,46 @@ services:
       retries: 10
     networks: [hbmp]
 
+  # ------------------------------------------------------- RabbitMQ dead-letter topology (one-shot)
+  # Every consumer on this platform rejects a failed message with requeue:false and its comments call
+  # that "dead-lettering". It was not: no queue declared x-dead-letter-exchange and no dead-letter
+  # exchange existed, so the broker did the only other thing it can with a rejected, non-requeued
+  # message — dropped it. A transient database blip while applying OrderLinesConsumed destroyed a
+  # benefit-accumulator movement; a dropped BeneficiaryRegistered left a person unknown at every desk.
+  # Nothing alarmed, because from the broker's point of view nothing had gone wrong.
+  #
+  # A POLICY, not queue arguments: arguments are immutable after declaration, so adding
+  # x-dead-letter-exchange to the twelve QueueDeclare call sites would fail every service with
+  # PRECONDITION_FAILED against the queues already on the broker. A policy attaches to queues that
+  # already exist and to any queue a later service adds without it having to remember this rule.
+  #
+  # A one-shot container, not load_definitions: RabbitMQ skips RABBITMQ_DEFAULT_USER creation when a
+  # definitions file is loaded, so that route silently leaves the broker with no users at all — and
+  # putting the credentials in the definitions file to compensate would commit them to the repo.
+  # This reads them from the environment like every other service.
+  rabbitmq-init:
+    image: rabbitmq:3.13-management
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+    environment:
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        A="rabbitmqadmin -H rabbitmq -u $$RABBITMQ_USER -p $$RABBITMQ_PASSWORD"
+        $$A declare exchange name=hbmp.dlx type=fanout durable=true
+        $$A declare queue name=hbmp.dead-letter durable=true
+        $$A declare binding source=hbmp.dlx destination=hbmp.dead-letter destination_type=queue
+        # The DLQ is excluded from its own policy: a queue that dead-letters to the exchange feeding it
+        # would loop a poison message forever instead of parking it.
+        $$A declare policy name=hbmp-dead-letter pattern='^(?!hbmp\.dead-letter$$).*' \
+          apply-to=queues priority=0 definition='{"dead-letter-exchange":"hbmp.dlx"}'
+        echo "dead-letter topology applied"
+    restart: "no"
+    networks: [hbmp]
+
   # ---------------------------------------------------------------- NATS JetStream (event stream)
   nats:
     image: nats:2.10
