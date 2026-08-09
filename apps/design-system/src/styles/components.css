@@ -503,14 +503,23 @@ html[dir="rtl"] .mrs-search input {
   padding: var(--sp5) 0;
 }
 
-/* Pill variant — same tablist/tab/tabpanel semantics as the underline style above, `.mrs-seg`'s look. */
+/* Pill variant — same tablist/tab/tabpanel semantics as the underline style above, `.mrs-seg`'s look.
+ *
+ * The track radius is `--r-lg`, NOT `--r-pill`, and that is the one place this variant deliberately parts
+ * company with `.mrs-seg`. `.mrs-seg` is a handful of short filter labels that stay on one line, so a 999px
+ * radius always resolves to a stadium. A tab bar carries as many labels as the screen has sections and sets
+ * `flex-wrap: wrap` to cope, so its height is not knowable here: the patient profile's seven tabs wrap below
+ * 688px (English) / 780px (Arabic), and at 360px the track is three rows and 156px tall, where a 999px
+ * radius clamps to half the height and draws the whole bar as a lozenge that curves through the first and
+ * last rows. `--r-lg` is correct at every row count. A consumer that knows its bar is one row can restore
+ * the capsule inside its own width query — see `.profile-tabs` in the web app's app.css. */
 .mrs-tabs--pill {
   border-bottom: 0;
   display: inline-flex;
   flex-wrap: wrap;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: var(--r-pill);
+  border-radius: var(--r-lg);
   padding: 3px;
   gap: 3px;
 }

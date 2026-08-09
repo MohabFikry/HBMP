@@ -1417,14 +1417,33 @@ nav.mrs-rail {
    background within its own bounds, so the surface-2 tint on the actual track is undisturbed — only visible
    in the margin beyond the track, which is the point) and `clip-path` clipped back to the element's own row
    height so it doesn't bleed into the row above/below. Nothing here touches `display`, `width`, or
-   `background` on `.mrs-tabs--pill`, so the pill buttons stay exactly as compact as they already were. */
+   `background` on `.mrs-tabs--pill`, so the pill buttons stay exactly as compact as they already were.
+
+   ALL OF THAT APPLIES ONLY WHERE THE BAR IS ONE ROW. Measured in Chromium against the real webfonts, the
+   seven tabs wrap below 688px in English and below 780px in Arabic; at 360px they are three rows and the
+   track is 156px tall. A sticky bar that tall is wrong twice over: `.profile-section`'s
+   `scroll-margin-block-start` below is sized against the one-row height, so a focused control lands UNDER
+   the bar — WCAG 2.4.11, the requirement that margin exists to meet — and the bar itself then holds 24% of
+   a 360x640 viewport for the whole session. So sticky, and the capsule radius for the same reason, live
+   inside the width query.
+
+   60rem (960px) is the breakpoint the old `.profile-jump` sticky used, and it sits deliberately well above
+   the 780px measurement rather than snug to it: the labels are translated strings and the fonts are remote,
+   so the wrap point is not a constant this file can pin down. Erring high costs a non-sticky bar on a
+   narrow desktop window; erring low restores a defect that nothing in jsdom can see. */
 .profile-tabs .mrs-tabs--pill {
-  position: sticky;
-  top: var(--sp4);
-  z-index: 1;
   padding-block: var(--sp2);
-  box-shadow: 0 0 0 100vmax var(--surface-0);
-  clip-path: inset(0 -100vmax);
+}
+@media (min-width: 60rem) {
+  .profile-tabs .mrs-tabs--pill {
+    position: sticky;
+    top: var(--sp4);
+    z-index: 1;
+    /* The stadium track `.mrs-seg` wears, restored where the row count is known to be one. */
+    border-radius: var(--r-pill);
+    box-shadow: 0 0 0 100vmax var(--surface-0);
+    clip-path: inset(0 -100vmax);
+  }
 }
 .profile-sections { display: grid; gap: var(--sp4); }
 .profile-section-head { display: flex; flex-wrap: wrap; gap: var(--sp3); align-items: baseline; justify-content: space-between; }
@@ -3181,11 +3200,12 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
 .profile-section {
   display: grid;
   min-inline-size: 0;
-  /* WCAG 2.4.11 (Focus Not Obscured): the sticky `.profile-tabs` bar above sits roughly a 44px-min-height
-     pill row + ~6px track padding + `var(--sp2)` padding-block top and bottom, plus its own `top: var(--sp4)`
-     offset before it starts sticking. Without this, tabbing into a control just below the fold scrolls it
-     under the bar. `calc(var(--sp4) + 80px)` is a generous estimate, not a pixel-exact one — this can't be
-     verified without a browser in this session, so it errs generous rather than exact. */
+  /* WCAG 2.4.11 (Focus Not Obscured): without this, tabbing into a control just below the fold scrolls it
+     under the sticky `.profile-tabs` bar. The bar is only sticky at >=60rem, and there it is measurably one
+     row: 44px pill + 2x var(--sp2) padding-block + 2x1px border = 62px, plus its own top: var(--sp4) offset
+     = 78px to clear. `calc(var(--sp4) + 80px)` = 96px, an 18px margin over the measured worst case rather
+     than the guess this used to be. The wrapped case is not covered here because it cannot arise: below
+     60rem nothing is sticky, so there is nothing to be obscured by. */
   scroll-margin-block-start: calc(var(--sp4) + 80px);
 }
 .profile-section > * { min-inline-size: 0; }
