@@ -1,3 +1,4 @@
+import { FIXTURE_MODE } from "@dev/fixture-mode";
 import type { Role } from "./authz/permissions";
 
 /**
@@ -25,9 +26,16 @@ const env = (import.meta as { env?: Record<string, string | undefined> }).env ??
 const fromEnv = (value: string | undefined, fallback: string): string =>
   value !== undefined && value.trim() !== "" ? value : fallback;
 
-/** Live mode. Accepts `1` or `true`: compose and the Dockerfile disagreed on spelling, and the losing
- * spelling silently downgraded the app to fixture mode against a fully working backend. */
-export const LIVE = ["1", "true"].includes((env.VITE_LIVE ?? "").trim().toLowerCase());
+/**
+ * Live mode.
+ *
+ * Derived from WHICH FIXTURE MODULE WAS BUNDLED, not from a second reading of `VITE_LIVE`. `vite.config.ts`
+ * parses that variable once (accepting `1` or `true` — compose and the Dockerfile disagreed on spelling, and
+ * the losing spelling silently downgraded the app to fixture mode against a fully working backend) and uses
+ * it to alias both `@dev/fixture-mode` and `@dev/fixtures`. So "the app believes it is live" and "the demo
+ * backend is not in this bundle" are now one fact. See `src/dev/fixtures.ts` for what that buys.
+ */
+export const LIVE = !FIXTURE_MODE;
 
 /**
  * The origin this bundle is running on, or `""` where there is no document (node, some test runners).

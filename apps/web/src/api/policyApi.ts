@@ -1,4 +1,5 @@
-import { deleteRaw, getRaw, getText, postForm, postRaw, putRaw } from "./http";
+import { z } from "zod";
+import { deleteRaw, getRaw, getText, parseOr, postForm, postRaw, putRaw } from "./http";
 
 /**
  * Phase 19.6 — the typed surface the policy-administration and beneficiary-management screens consume.
@@ -21,109 +22,130 @@ import { deleteRaw, getRaw, getText, postForm, postRaw, putRaw } from "./http";
  * MIN-NECESSARY IS THE SERVER'S JOB HERE, NOT THIS FILE'S. Every response type below carries nullable fields
  * where the service projects by role (amounts, contract terms, termination reasons, note bodies). The screens
  * render "withheld" states from those nulls; they never decide entitlement themselves.
+ *
+ * SCHEMA FIRST, TYPE INFERRED. Every shape below is a `z.object` and its interface is `z.infer` of it — one
+ * definition, validated at the seam by `parsed()`. The module used to be plain `interface`s cast onto the
+ * response with `as Promise<T>`, and a cast asserts a shape rather than checking one: a field the server
+ * renamed arrived as `undefined` and reached the screen as an empty cell, a missing sort key or `NaN`.
+ *
+ * That mattered most exactly here. This surface is where an officer reads a member's annual limit, what they
+ * have consumed against it, the deductible and the coinsurance percentage, and then decides whether to move
+ * them to a different plan mid-treatment. A blank where a number should be is not a rendering glitch on that
+ * screen. The `.nullable()`s above are the deliberate withholdings; `undefined` never was one.
  */
 
 // ── Shared value shapes ─────────────────────────────────────────────────────────────────────────────────
 
-export interface QueryPage<T> {
-  items: T[];
-  page: number;
-  pageSize: number;
-  totalCount: number;
-  totalPages: number;
-  sortedBy: string;
-  /** The caller's payer restriction narrowed this page. Rendered, not swallowed: without it a scoped user
-   *  reads "12 policies" as "the organisation has 12 policies". */
-  payerScopeApplied: boolean;
-  identityMatchTruncated: boolean;
-  unavailable: string[];
-}
+/** A factory rather than a schema: the page is generic in its row, so the row's schema is the argument. */
+export const zQueryPage = <T>(item: z.ZodType<T>) =>
+  z.object({
+    items: z.array(item),
+    page: z.number(),
+    pageSize: z.number(),
+    totalCount: z.number(),
+    totalPages: z.number(),
+    sortedBy: z.string(),
+    /** The caller's payer restriction narrowed this page. Rendered, not swallowed: without it a scoped user
+     *  reads "12 policies" as "the organisation has 12 policies". */
+    payerScopeApplied: z.boolean(),
+    identityMatchTruncated: z.boolean(),
+    unavailable: z.array(z.string()),
+  }).passthrough();
+export type QueryPage<T> = z.infer<ReturnType<typeof zQueryPage<T>>>;
 
-export interface PayerView {
-  payerId: string;
-  payerCode: string;
-  nameEn: string;
-  nameAr: string;
-  payerType: string;
-  status: string;
-}
+export const zPayerView = z.object({
+  payerId: z.string(),
+  payerCode: z.string(),
+  nameEn: z.string(),
+  nameAr: z.string(),
+  payerType: z.string(),
+  status: z.string(),
+}).passthrough();
+export type PayerView = z.infer<typeof zPayerView>;
 
-export interface PlanView {
-  planId: string;
-  planCode: string;
-  nameEn: string;
-  nameAr: string;
-  description?: string | null;
-  category: string;
-  status: string;
-}
+export const zPlanView = z.object({
+  planId: z.string(),
+  planCode: z.string(),
+  nameEn: z.string(),
+  nameAr: z.string(),
+  description: z.string().nullable().optional(),
+  category: z.string(),
+  status: z.string(),
+}).passthrough();
+export type PlanView = z.infer<typeof zPlanView>;
 
-export interface BenefitCategoryView {
-  benefitCategoryId: string;
-  code: string;
-  name: string;
-}
+export const zBenefitCategoryView = z.object({
+  benefitCategoryId: z.string(),
+  code: z.string(),
+  name: z.string(),
+}).passthrough();
+export type BenefitCategoryView = z.infer<typeof zBenefitCategoryView>;
 
-export interface BenefitRuleTierView {
-  ruleTierId: string;
-  networkTierId: string;
-  tierCode: string;
-  isCovered: boolean;
-  copayFixed?: number | null;
-  copayPercent?: number | null;
-  coinsurancePercent?: number | null;
-  copayCountsTowardDeductible: boolean;
-  requiresPreauthOverride?: boolean | null;
-  limitMultiplier?: number | null;
+export const zBenefitRuleTierView = z.object({
+  ruleTierId: z.string(),
+  networkTierId: z.string(),
+  tierCode: z.string(),
+  isCovered: z.boolean(),
+  copayFixed: z.number().nullable().optional(),
+  copayPercent: z.number().nullable().optional(),
+  coinsurancePercent: z.number().nullable().optional(),
+  copayCountsTowardDeductible: z.boolean(),
+  requiresPreauthOverride: z.boolean().nullable().optional(),
+  limitMultiplier: z.number().nullable().optional(),
   /** Resolved server-side so the editor, eligibility, approvals and claims cannot disagree about what
    *  actually applies at this tier. */
-  effectiveRequiresPreauth: boolean;
-  effectiveLimitValue?: number | null;
-}
+  effectiveRequiresPreauth: z.boolean(),
+  effectiveLimitValue: z.number().nullable().optional(),
+}).passthrough();
+export type BenefitRuleTierView = z.infer<typeof zBenefitRuleTierView>;
 
-export interface BenefitRuleView {
-  ruleId: string;
-  benefitCategoryId: string;
+export const zBenefitRuleView = z.object({
+  ruleId: z.string(),
+  benefitCategoryId: z.string(),
   /** 19.6 — the code the rules PUT writes back. Null only when the server had no catalogue to hand. */
-  benefitCategoryCode?: string | null;
-  isCovered: boolean;
-  limitType?: string | null;
-  limitValue?: number | null;
-  resetPeriod: string;
-  deductible?: number | null;
-  deductibleWaived: boolean;
-  waitingPeriodDays: number;
-  requiresPreauth: boolean;
-  preauthCostThreshold?: number | null;
-  exclusions: string;
-  notes?: string | null;
-  tiers: BenefitRuleTierView[];
-}
+  benefitCategoryCode: z.string().nullable().optional(),
+  isCovered: z.boolean(),
+  limitType: z.string().nullable().optional(),
+  limitValue: z.number().nullable().optional(),
+  resetPeriod: z.string(),
+  deductible: z.number().nullable().optional(),
+  deductibleWaived: z.boolean(),
+  waitingPeriodDays: z.number(),
+  requiresPreauth: z.boolean(),
+  preauthCostThreshold: z.number().nullable().optional(),
+  exclusions: z.string(),
+  notes: z.string().nullable().optional(),
+  tiers: z.array(zBenefitRuleTierView),
+}).passthrough();
+export type BenefitRuleView = z.infer<typeof zBenefitRuleView>;
 
-export interface PlanVersionView {
-  planVersionId: string;
-  planId: string;
-  versionNo: number;
-  effectiveFrom: string;
-  effectiveTo?: string | null;
-  status: string;
+export const zPlanVersionView = z.object({
+  planVersionId: z.string(),
+  planId: z.string(),
+  versionNo: z.number(),
+  effectiveFrom: z.string(),
+  effectiveTo: z.string().nullable().optional(),
+  status: z.string(),
   /** Projected by the server rather than derived from `status` here — the read-only affordance and the API's
    *  409 must agree, and deriving the rule twice is how they drift apart. */
-  editable: boolean;
-  activatedAt?: string | null;
-  supersededByVersionId?: string | null;
-  rules: BenefitRuleView[];
-}
+  editable: z.boolean(),
+  activatedAt: z.string().nullable().optional(),
+  supersededByVersionId: z.string().nullable().optional(),
+  rules: z.array(zBenefitRuleView),
+}).passthrough();
+export type PlanVersionView = z.infer<typeof zPlanVersionView>;
 
-export interface ActivationProblem {
-  code: string;
-  detail: string;
-}
+export const zActivationProblem = z.object({
+  code: z.string(),
+  detail: z.string(),
+}).passthrough();
+export type ActivationProblem = z.infer<typeof zActivationProblem>;
 
-export interface ValidationResult {
-  valid: boolean;
-  problems: ActivationProblem[];
-}
+export const zValidationResult = z.object({
+  valid: z.boolean(),
+  problems: z.array(zActivationProblem),
+}).passthrough();
+export type ValidationResult = z.infer<typeof zValidationResult>;
 
 export interface BenefitRuleTierInput {
   networkTierId: string;
@@ -152,149 +174,173 @@ export interface BenefitRuleInput {
   tiers?: BenefitRuleTierInput[] | null;
 }
 
-export interface PolicyQueryRow {
-  policyId: string;
-  policyNo: string;
-  payerId?: string | null;
-  status: string;
-  effectiveFrom: string;
-  effectiveTo?: string | null;
-  memberCount: number;
-  memberCountBand: string;
-  maxMembers?: number | null;
-  planCount: number;
-  totalLimit?: number | null;
-  totalConsumed?: number | null;
-  percentUsed?: number | null;
-  utilizationBand: string;
-}
+export const zPolicyQueryRow = z.object({
+  policyId: z.string(),
+  policyNo: z.string(),
+  payerId: z.string().nullable().optional(),
+  status: z.string(),
+  effectiveFrom: z.string(),
+  effectiveTo: z.string().nullable().optional(),
+  memberCount: z.number(),
+  memberCountBand: z.string(),
+  maxMembers: z.number().nullable().optional(),
+  planCount: z.number(),
+  totalLimit: z.number().nullable().optional(),
+  totalConsumed: z.number().nullable().optional(),
+  percentUsed: z.number().nullable().optional(),
+  utilizationBand: z.string(),
+}).passthrough();
+export type PolicyQueryRow = z.infer<typeof zPolicyQueryRow>;
 
-export interface MemberQueryRow {
-  enrollmentId: string;
-  beneficiaryId: string;
-  memberNo: string;
-  givenName?: string | null;
-  familyName?: string | null;
-  beneficiaryStatus?: string | null;
+export const zMemberQueryRow = z.object({
+  enrollmentId: z.string(),
+  beneficiaryId: z.string(),
+  memberNo: z.string(),
+  givenName: z.string().nullable().optional(),
+  familyName: z.string().nullable().optional(),
+  beneficiaryStatus: z.string().nullable().optional(),
   /** The number printed on the card the beneficiary hands over — how a desk matches person to row. */
-  cardNumber?: string | null;
-  policyId: string;
-  policyPlanId: string;
-  planLabel?: string | null;
-  groupId?: string | null;
-  payerId?: string | null;
-  relationship: string;
-  status: string;
-  effectiveFrom: string;
-  effectiveTo?: string | null;
-  waitingPeriodEndsOn?: string | null;
-  waitingPeriodState: string;
-  branchId?: string | null;
-  terminationReason?: string | null;
-  totalLimit?: number | null;
-  totalConsumed?: number | null;
-  totalRemaining?: number | null;
-  percentUsed?: number | null;
-  utilizationBand: string;
-}
+  cardNumber: z.string().nullable().optional(),
+  policyId: z.string(),
+  policyPlanId: z.string(),
+  planLabel: z.string().nullable().optional(),
+  groupId: z.string().nullable().optional(),
+  payerId: z.string().nullable().optional(),
+  relationship: z.string(),
+  status: z.string(),
+  effectiveFrom: z.string(),
+  effectiveTo: z.string().nullable().optional(),
+  waitingPeriodEndsOn: z.string().nullable().optional(),
+  waitingPeriodState: z.string(),
+  branchId: z.string().nullable().optional(),
+  terminationReason: z.string().nullable().optional(),
+  totalLimit: z.number().nullable().optional(),
+  totalConsumed: z.number().nullable().optional(),
+  totalRemaining: z.number().nullable().optional(),
+  percentUsed: z.number().nullable().optional(),
+  utilizationBand: z.string(),
+}).passthrough();
+export type MemberQueryRow = z.infer<typeof zMemberQueryRow>;
 
 /** One person on the same cover. Names ride on the same per-request lookup the roster uses, so they are null
  *  under exactly the same conditions — patient-service could not be asked. */
-export interface CoveredFamilyMember {
-  enrollmentId: string;
-  beneficiaryId: string;
-  memberNo: string;
-  givenName?: string | null;
-  familyName?: string | null;
-  relationship: string;
-  status: string;
-  isPrincipal: boolean;
-  planLabel?: string | null;
-  effectiveFrom?: string | null;
-  effectiveTo?: string | null;
+export const zCoveredFamilyMember = z.object({
+  enrollmentId: z.string(),
+  beneficiaryId: z.string(),
+  memberNo: z.string(),
+  givenName: z.string().nullable().optional(),
+  familyName: z.string().nullable().optional(),
+  relationship: z.string(),
+  status: z.string(),
+  isPrincipal: z.boolean(),
+  planLabel: z.string().nullable().optional(),
+  effectiveFrom: z.string().nullable().optional(),
+  effectiveTo: z.string().nullable().optional(),
   /** The member the list was opened from. Marked rather than removed — a family list missing the person you
    *  are looking at reads as a list with somebody missing. */
-  isSubject: boolean;
-}
+  isSubject: z.boolean(),
+}).passthrough();
+export type CoveredFamilyMember = z.infer<typeof zCoveredFamilyMember>;
 
-export interface FamilyView {
-  enrollmentId: string;
-  members: CoveredFamilyMember[];
-  unavailable: string[];
+export const zFamilyView = z.object({
+  enrollmentId: z.string(),
+  members: z.array(zCoveredFamilyMember),
+  unavailable: z.array(z.string()),
   /** Household members behind a payer this caller may not read. Counted, so a family of five never renders as
    *  three with nothing to say why. */
-  withheld: number;
-}
+  withheld: z.number(),
+}).passthrough();
+export type FamilyView = z.infer<typeof zFamilyView>;
 
-export interface PolicyPlanView {
-  policyPlanId: string;
-  policyId: string;
-  planVersionId: string;
-  planLabel: string;
-  effectiveFrom: string;
-  effectiveTo?: string | null;
-  isDefault: boolean;
-  eligibilityRule?: string | null;
-  maxMembers?: number | null;
-  status: string;
-  memberCount: number;
-}
+export const zPolicyPlanView = z.object({
+  policyPlanId: z.string(),
+  policyId: z.string(),
+  planVersionId: z.string(),
+  planLabel: z.string(),
+  effectiveFrom: z.string(),
+  effectiveTo: z.string().nullable().optional(),
+  isDefault: z.boolean(),
+  eligibilityRule: z.string().nullable().optional(),
+  maxMembers: z.number().nullable().optional(),
+  status: z.string(),
+  memberCount: z.number(),
+}).passthrough();
+export type PolicyPlanView = z.infer<typeof zPolicyPlanView>;
 
-export interface MemberGroupView {
-  groupId: string;
-  policyId: string;
-  groupCode: string;
-  nameEn: string;
-  nameAr: string;
-  groupType: string;
-  effectiveFrom: string;
-  effectiveTo?: string | null;
-  status: string;
-}
+export const zMemberGroupView = z.object({
+  groupId: z.string(),
+  policyId: z.string(),
+  groupCode: z.string(),
+  nameEn: z.string(),
+  nameAr: z.string(),
+  groupType: z.string(),
+  effectiveFrom: z.string(),
+  effectiveTo: z.string().nullable().optional(),
+  status: z.string(),
+}).passthrough();
+export type MemberGroupView = z.infer<typeof zMemberGroupView>;
 
-export interface EnrollmentView {
-  enrollmentId: string;
-  beneficiaryId: string;
-  policyId: string;
-  policyPlanId: string;
-  groupId?: string | null;
-  memberNo: string;
-  relationship: string;
-  principalEnrollmentId?: string | null;
-  effectiveFrom: string;
-  effectiveTo?: string | null;
-  waitingPeriodEndsOn?: string | null;
-  status: string;
-  terminationReason?: string | null;
-  sourcePlanVersionId?: string | null;
-  coveragesGenerated: number;
-}
+export const zEnrollmentView = z.object({
+  enrollmentId: z.string(),
+  beneficiaryId: z.string(),
+  policyId: z.string(),
+  policyPlanId: z.string(),
+  groupId: z.string().nullable().optional(),
+  memberNo: z.string(),
+  relationship: z.string(),
+  principalEnrollmentId: z.string().nullable().optional(),
+  effectiveFrom: z.string(),
+  effectiveTo: z.string().nullable().optional(),
+  waitingPeriodEndsOn: z.string().nullable().optional(),
+  status: z.string(),
+  terminationReason: z.string().nullable().optional(),
+  sourcePlanVersionId: z.string().nullable().optional(),
+  coveragesGenerated: z.number(),
+}).passthrough();
+export type EnrollmentView = z.infer<typeof zEnrollmentView>;
 
-export interface CarriedLimitView {
-  benefitCategoryId: string;
-  benefitCategoryCode?: string | null;
-  limitValue?: number | null;
-  consumedValue: number;
-  remaining?: number | null;
-  exhausted: boolean;
-}
+export const zCarriedLimitView = z.object({
+  benefitCategoryId: z.string(),
+  benefitCategoryCode: z.string().nullable().optional(),
+  limitValue: z.number().nullable().optional(),
+  consumedValue: z.number(),
+  remaining: z.number().nullable().optional(),
+  exhausted: z.boolean(),
+}).passthrough();
+export type CarriedLimitView = z.infer<typeof zCarriedLimitView>;
 
 /** A benefit the member holds today and would not hold after the change. */
-export interface DroppedCategoryView {
-  benefitCategoryId: string;
-  benefitCategoryCode?: string | null;
-  currentLimitValue?: number | null;
-  consumedValue: number;
-}
+export const zDroppedCategoryView = z.object({
+  benefitCategoryId: z.string(),
+  benefitCategoryCode: z.string().nullable().optional(),
+  currentLimitValue: z.number().nullable().optional(),
+  consumedValue: z.number(),
+}).passthrough();
+export type DroppedCategoryView = z.infer<typeof zDroppedCategoryView>;
 
-export interface PlanChangeView {
-  enrollmentId: string;
-  policyPlanId: string;
-  planVersionId: string;
-  consumptionPolicy: string;
-  carriedLimits: CarriedLimitView[];
-  droppedCategories: DroppedCategoryView[];
-}
+export const zPlanChangeView = z.object({
+  enrollmentId: z.string(),
+  policyPlanId: z.string(),
+  planVersionId: z.string(),
+  consumptionPolicy: z.string(),
+  carriedLimits: z.array(zCarriedLimitView),
+  droppedCategories: z.array(zDroppedCategoryView),
+}).passthrough();
+export type PlanChangeView = z.infer<typeof zPlanChangeView>;
+
+export const zCarryPreviewRow = z.object({
+  benefitCategoryId: z.string(),
+  benefitCategoryCode: z.string().nullable().optional(),
+  /** False when the new plan ADDS this benefit — distinguishes "unbounded today" from "not covered today",
+   *  which a null current limit alone cannot. */
+  held: z.boolean(),
+  currentLimitValue: z.number().nullable().optional(),
+  consumedValue: z.number(),
+  newLimitValue: z.number().nullable().optional(),
+  remaining: z.number().nullable().optional(),
+  exhausted: z.boolean(),
+}).passthrough();
+export type CarryPreviewRow = z.infer<typeof zCarryPreviewRow>;
 
 /**
  * The plan-change DRY RUN. One row per category the new plan covers, carrying BOTH ceilings so the officer can
@@ -305,44 +351,34 @@ export interface PlanChangeView {
  * estimate assembled here would disagree with the outcome exactly when somebody is deciding whether to move a
  * patient mid-treatment.
  */
-export interface PlanChangePreviewView {
-  enrollmentId: string;
-  fromPolicyPlanId: string;
-  toPolicyPlanId: string;
-  toPlanLabel: string;
-  planVersionId: string;
-  effectiveDate: string;
-  consumptionPolicy: string;
-  rows: CarryPreviewRow[];
-  droppedCategories: DroppedCategoryView[];
-}
+export const zPlanChangePreviewView = z.object({
+  enrollmentId: z.string(),
+  fromPolicyPlanId: z.string(),
+  toPolicyPlanId: z.string(),
+  toPlanLabel: z.string(),
+  planVersionId: z.string(),
+  effectiveDate: z.string(),
+  consumptionPolicy: z.string(),
+  rows: z.array(zCarryPreviewRow),
+  droppedCategories: z.array(zDroppedCategoryView),
+}).passthrough();
+export type PlanChangePreviewView = z.infer<typeof zPlanChangePreviewView>;
 
-export interface CarryPreviewRow {
-  benefitCategoryId: string;
-  benefitCategoryCode?: string | null;
-  /** False when the new plan ADDS this benefit — distinguishes "unbounded today" from "not covered today",
-   *  which a null current limit alone cannot. */
-  held: boolean;
-  currentLimitValue?: number | null;
-  consumedValue: number;
-  newLimitValue?: number | null;
-  remaining?: number | null;
-  exhausted: boolean;
-}
 
 
 // ── Analytics (19.6b) ───────────────────────────────────────────────────────────────────────────────────
 
 /** One plotted value. `dimensionId` is what makes a drill-down possible without the client resolving a label
  *  back to an id — a round trip that guesses, and guesses wrong the moment two plans share a label. */
-export interface AnalyticsPoint {
-  key: string;
-  labelEn: string;
-  labelAr: string;
-  value: number;
-  dimensionId?: string | null;
-  secondary?: number | null;
-}
+export const zAnalyticsPoint = z.object({
+  key: z.string(),
+  labelEn: z.string(),
+  labelAr: z.string(),
+  value: z.number(),
+  dimensionId: z.string().nullable().optional(),
+  secondary: z.number().nullable().optional(),
+}).passthrough();
+export type AnalyticsPoint = z.infer<typeof zAnalyticsPoint>;
 
 /**
  * A chart AND the accessible table that always accompanies it.
@@ -351,56 +387,60 @@ export interface AnalyticsPoint {
  * client invents drifts from the data the moment a series changes shape, and the R2 audit finding (U6) is
  * specifically that an alternative nobody maintains is not an alternative.
  */
-export interface AnalyticsSeries {
-  key: string;
-  titleEn: string;
-  titleAr: string;
-  unit: "count" | "currency" | "percent" | string;
-  points: AnalyticsPoint[];
-  summaryEn: string;
-  summaryAr: string;
+export const zAnalyticsSeries = z.object({
+  key: z.string(),
+  titleEn: z.string(),
+  titleAr: z.string(),
+  unit: z.string(),
+  points: z.array(zAnalyticsPoint),
+  summaryEn: z.string(),
+  summaryAr: z.string(),
   /**
    * Bilingual, like every other label on the series. It was `string[]` — the last monolingual text on the
    * dashboard, and it sat on the accessible table, so an Arabic reader who could not see the chart got the
    * one part naming what each number IS in English (audit §3.1). Authored server-side rather than mapped
    * here: a client-side table of header translations is a second place deciding what "Net payable" is called.
    */
-  columns: { en: string; ar: string }[];
-}
+  columns: z.array(z.object({ en: z.string(), ar: z.string() })),
+}).passthrough();
+export type AnalyticsSeries = z.infer<typeof zAnalyticsSeries>;
 
 /** A period-over-period movement. `direction` is a WORD because the four-cue rule needs a text cue, and
  *  `better` is separate because direction and desirability are different facts. */
-export interface AnalyticsDelta {
-  key: string;
-  labelEn: string;
-  labelAr: string;
-  current: number;
-  previous: number;
-  percentChange?: number | null;
-  direction: "Up" | "Down" | "Flat";
-  better?: boolean | null;
-}
+export const zAnalyticsDelta = z.object({
+  key: z.string(),
+  labelEn: z.string(),
+  labelAr: z.string(),
+  current: z.number(),
+  previous: z.number(),
+  percentChange: z.number().nullable().optional(),
+  direction: z.enum(["Up", "Down", "Flat"]),
+  better: z.boolean().nullable().optional(),
+}).passthrough();
+export type AnalyticsDelta = z.infer<typeof zAnalyticsDelta>;
 
-export interface AnalyticsViewResult {
-  view: string;
-  series: AnalyticsSeries[];
-  deltas: AnalyticsDelta[];
+export const zAnalyticsViewResult = z.object({
+  view: z.string(),
+  series: z.array(zAnalyticsSeries),
+  deltas: z.array(zAnalyticsDelta),
   /** True when the caller's payer scope narrowed the aggregate — surfaced so a small number reads as
    *  "your scope" rather than "the programme shrank". */
-  payerScopeApplied: boolean;
-  unavailable: string[];
-}
+  payerScopeApplied: z.boolean(),
+  unavailable: z.array(z.string()),
+}).passthrough();
+export type AnalyticsViewResult = z.infer<typeof zAnalyticsViewResult>;
 
 /** A drill-down row: pointers and figures, never identity. Resolving the person is the audited step after. */
-export interface OutlierRow {
-  enrollmentId: string;
-  beneficiaryId: string;
-  policyId: string;
-  policyPlanId?: string | null;
-  limit: number;
-  consumed: number;
-  band: string;
-}
+export const zOutlierRow = z.object({
+  enrollmentId: z.string(),
+  beneficiaryId: z.string(),
+  policyId: z.string(),
+  policyPlanId: z.string().nullable().optional(),
+  limit: z.number(),
+  consumed: z.number(),
+  band: z.string(),
+}).passthrough();
+export type OutlierRow = z.infer<typeof zOutlierRow>;
 
 /** The shared filter bar, in the same vocabulary as policy/member query. Serialised straight into the URL. */
 export interface AnalyticsFilters {
@@ -421,374 +461,400 @@ export interface AnalyticsFilters {
   compare?: string;
 }
 
-export interface TierCostShare {
-  networkTierId: string;
-  tierCode: string;
-  isCovered: boolean;
-  copayFixed?: number | null;
-  copayPercent?: number | null;
-  coinsurancePercent?: number | null;
-  copayCountsTowardDeductible: boolean;
-  requiresPreauth: boolean;
-  limitAtTier?: number | null;
-}
+export const zTierCostShare = z.object({
+  networkTierId: z.string(),
+  tierCode: z.string(),
+  isCovered: z.boolean(),
+  copayFixed: z.number().nullable().optional(),
+  copayPercent: z.number().nullable().optional(),
+  coinsurancePercent: z.number().nullable().optional(),
+  copayCountsTowardDeductible: z.boolean(),
+  requiresPreauth: z.boolean(),
+  limitAtTier: z.number().nullable().optional(),
+}).passthrough();
+export type TierCostShare = z.infer<typeof zTierCostShare>;
 
-export interface CategoryCoverageDetail {
-  benefitCategoryCode: string;
-  isCovered: boolean;
-  limitType?: string | null;
-  limit?: number | null;
-  consumed: number;
-  remaining?: number | null;
-  percentUsed?: number | null;
-  currencyCode: string;
-  resetPeriod: string;
-  resetsOn?: string | null;
-  configuredLimit?: number | null;
+export const zCategoryCoverageDetail = z.object({
+  benefitCategoryCode: z.string(),
+  isCovered: z.boolean(),
+  limitType: z.string().nullable().optional(),
+  limit: z.number().nullable().optional(),
+  consumed: z.number(),
+  remaining: z.number().nullable().optional(),
+  percentUsed: z.number().nullable().optional(),
+  currencyCode: z.string(),
+  resetPeriod: z.string(),
+  resetsOn: z.string().nullable().optional(),
+  configuredLimit: z.number().nullable().optional(),
   /** The member's generated ceiling differs from what the plan in force would grant today — a real and
    *  legitimate divergence after an amendment, surfaced rather than hidden. */
-  limitDiffersFromPlan: boolean;
-  waitingPeriodEndsOn?: string | null;
-  waitingPeriodState: string;
-  requiresPreauth: boolean;
-  preauthCostThreshold?: number | null;
-  deductible?: number | null;
-  deductibleWaived: boolean;
-  exclusions: string[];
-  costShareByTier: TierCostShare[];
-}
+  limitDiffersFromPlan: z.boolean(),
+  waitingPeriodEndsOn: z.string().nullable().optional(),
+  waitingPeriodState: z.string(),
+  requiresPreauth: z.boolean(),
+  preauthCostThreshold: z.number().nullable().optional(),
+  deductible: z.number().nullable().optional(),
+  deductibleWaived: z.boolean(),
+  exclusions: z.array(z.string()),
+  costShareByTier: z.array(zTierCostShare),
+}).passthrough();
+export type CategoryCoverageDetail = z.infer<typeof zCategoryCoverageDetail>;
 
-export interface MemberCoverageDetail {
-  enrollmentId: string;
-  beneficiaryId: string;
-  memberNo: string;
-  policyId: string;
-  policyPlanId: string;
-  planLabel: string;
-  planId?: string | null;
-  planVersionInForceId?: string | null;
-  planVersionNo?: number | null;
-  planVersionFrom?: string | null;
-  planVersionTo?: string | null;
-  planVersionStatus?: string | null;
-  enrolledUnderPlanVersionId?: string | null;
-  planVersionChangedSinceEnrolment: boolean;
-  asOf: string;
-  enrollmentStatus: string;
-  effectiveFrom: string;
-  effectiveTo?: string | null;
-  categories: CategoryCoverageDetail[];
-}
+export const zMemberCoverageDetail = z.object({
+  enrollmentId: z.string(),
+  beneficiaryId: z.string(),
+  memberNo: z.string(),
+  policyId: z.string(),
+  policyPlanId: z.string(),
+  planLabel: z.string(),
+  planId: z.string().nullable().optional(),
+  planVersionInForceId: z.string().nullable().optional(),
+  planVersionNo: z.number().nullable().optional(),
+  planVersionFrom: z.string().nullable().optional(),
+  planVersionTo: z.string().nullable().optional(),
+  planVersionStatus: z.string().nullable().optional(),
+  enrolledUnderPlanVersionId: z.string().nullable().optional(),
+  planVersionChangedSinceEnrolment: z.boolean(),
+  asOf: z.string(),
+  enrollmentStatus: z.string(),
+  effectiveFrom: z.string(),
+  effectiveTo: z.string().nullable().optional(),
+  categories: z.array(zCategoryCoverageDetail),
+}).passthrough();
+export type MemberCoverageDetail = z.infer<typeof zMemberCoverageDetail>;
 
-export interface NoteView {
-  noteId: string;
-  scope: string;
-  scopeRef: string;
-  noteType: string;
-  visibilityClass: string;
+export const zNoteView = z.object({
+  noteId: z.string(),
+  scope: z.string(),
+  scopeRef: z.string(),
+  noteType: z.string(),
+  visibilityClass: z.string(),
   /** Null WITH `bodyWithheld` true is a projection, not an empty note. The screens render a locked state. */
-  body?: string | null;
-  bodyWithheld: boolean;
-  withheldReason?: string | null;
-  authoredByUsername: string;
-  authoredByDisplay: string;
-  authoredAt: string;
-  status: string;
-  cancelledByUsername?: string | null;
-  cancelledAt?: string | null;
-  cancellationReason?: string | null;
-  supersedesNoteId?: string | null;
-  pinned: boolean;
-  canCancel: boolean;
-}
+  body: z.string().nullable().optional(),
+  bodyWithheld: z.boolean(),
+  withheldReason: z.string().nullable().optional(),
+  authoredByUsername: z.string(),
+  authoredByDisplay: z.string(),
+  authoredAt: z.string(),
+  status: z.string(),
+  cancelledByUsername: z.string().nullable().optional(),
+  cancelledAt: z.string().nullable().optional(),
+  cancellationReason: z.string().nullable().optional(),
+  supersedesNoteId: z.string().nullable().optional(),
+  pinned: z.boolean(),
+  canCancel: z.boolean(),
+}).passthrough();
+export type NoteView = z.infer<typeof zNoteView>;
 
-export interface PolicyDocumentView {
-  linkId: string;
-  scope: string;
-  scopeRef: string;
-  documentId: string;
-  versionNo: number;
-  supersedesLinkId?: string | null;
-  documentClass: string;
-  visibilityClass: string;
-  sensitiveCategory?: string | null;
-  title: string;
-  description?: string | null;
-  documentDate?: string | null;
-  issuingProvider?: string | null;
-  uploadedByUsername: string;
-  uploadedByDisplay: string;
-  uploadedAt: string;
-  status: string;
-  withdrawnByUsername?: string | null;
-  withdrawnAt?: string | null;
-  withdrawalReason?: string | null;
-  expiresOn?: string | null;
-  expired: boolean;
-  verifiedByUsername?: string | null;
-  verifiedAt?: string | null;
-  canDownload: boolean;
-}
+export const zPolicyDocumentView = z.object({
+  linkId: z.string(),
+  scope: z.string(),
+  scopeRef: z.string(),
+  documentId: z.string(),
+  versionNo: z.number(),
+  supersedesLinkId: z.string().nullable().optional(),
+  documentClass: z.string(),
+  visibilityClass: z.string(),
+  sensitiveCategory: z.string().nullable().optional(),
+  title: z.string(),
+  description: z.string().nullable().optional(),
+  documentDate: z.string().nullable().optional(),
+  issuingProvider: z.string().nullable().optional(),
+  uploadedByUsername: z.string(),
+  uploadedByDisplay: z.string(),
+  uploadedAt: z.string(),
+  status: z.string(),
+  withdrawnByUsername: z.string().nullable().optional(),
+  withdrawnAt: z.string().nullable().optional(),
+  withdrawalReason: z.string().nullable().optional(),
+  expiresOn: z.string().nullable().optional(),
+  expired: z.boolean(),
+  verifiedByUsername: z.string().nullable().optional(),
+  verifiedAt: z.string().nullable().optional(),
+  canDownload: z.boolean(),
+}).passthrough();
+export type PolicyDocumentView = z.infer<typeof zPolicyDocumentView>;
 
-export interface TimelineEntryView {
-  entryId: string;
-  scope: string;
-  scopeRef: string;
-  occurredAt: string;
-  eventType: string;
-  eventCategory: string;
-  actorUsername?: string | null;
-  actorDisplay?: string | null;
-  summaryEn: string;
-  summaryAr: string;
-  changeDiff?: string | null;
-  diffWithheld: boolean;
-  visibilityClass: string;
-  sourceService: string;
-  correlationId?: string | null;
-  targetRef?: string | null;
-  targetKind?: string | null;
+export const zTimelineEntryView = z.object({
+  entryId: z.string(),
+  scope: z.string(),
+  scopeRef: z.string(),
+  occurredAt: z.string(),
+  eventType: z.string(),
+  eventCategory: z.string(),
+  actorUsername: z.string().nullable().optional(),
+  actorDisplay: z.string().nullable().optional(),
+  summaryEn: z.string(),
+  summaryAr: z.string(),
+  changeDiff: z.string().nullable().optional(),
+  diffWithheld: z.boolean(),
+  visibilityClass: z.string(),
+  sourceService: z.string(),
+  correlationId: z.string().nullable().optional(),
+  targetRef: z.string().nullable().optional(),
+  targetKind: z.string().nullable().optional(),
   /** True when the entry was read off the membership record rather than projected from an event. Only the
    *  origin entry is ever derived, and the panel says so on the row. */
-  derived?: boolean;
-}
+  derived: z.boolean().optional(),
+}).passthrough();
+export type TimelineEntryView = z.infer<typeof zTimelineEntryView>;
 
-export interface TimelinePage {
-  entries: TimelineEntryView[];
-  nextCursor?: string | null;
+export const zTimelinePage = z.object({
+  entries: z.array(zTimelineEntryView),
+  nextCursor: z.string().nullable().optional(),
   /** The record's creation, returned on the first page only and excluded from `entries`. Null on a policy
    *  timeline and on an id the service does not know. */
-  origin?: TimelineEntryView | null;
-}
+  origin: zTimelineEntryView.nullable().optional(),
+}).passthrough();
+export type TimelinePage = z.infer<typeof zTimelinePage>;
 
-export interface CategoryUtilizationView {
-  benefitCategory: string;
-  limitType?: string | null;
-  limit?: number | null;
-  consumed: number;
-  remaining?: number | null;
-  percentUsed?: number | null;
-  unlimited: boolean;
-  currencyCode: string;
-  resetPeriod: string;
-  resetsOn?: string | null;
-  windowActivity?: number | null;
-  windowEvents: number;
-}
+export const zCategoryUtilizationView = z.object({
+  benefitCategory: z.string(),
+  limitType: z.string().nullable().optional(),
+  limit: z.number().nullable().optional(),
+  consumed: z.number(),
+  remaining: z.number().nullable().optional(),
+  percentUsed: z.number().nullable().optional(),
+  unlimited: z.boolean(),
+  currencyCode: z.string(),
+  resetPeriod: z.string(),
+  resetsOn: z.string().nullable().optional(),
+  windowActivity: z.number().nullable().optional(),
+  windowEvents: z.number(),
+}).passthrough();
+export type CategoryUtilizationView = z.infer<typeof zCategoryUtilizationView>;
 
-export interface TierUtilizationView {
-  tierCode: string;
-  outOfNetwork: boolean;
+export const zTierUtilizationView = z.object({
+  tierCode: z.string(),
+  outOfNetwork: z.boolean(),
   /** False = the movement's provider was unknown. Never folded into in-network, which would flatter the
    *  network on the single number it is judged by. */
-  attributed: boolean;
-  netQuantity: number;
-  events: number;
-}
+  attributed: z.boolean(),
+  netQuantity: z.number(),
+  events: z.number(),
+}).passthrough();
+export type TierUtilizationView = z.infer<typeof zTierUtilizationView>;
 
-export interface ExternalUtilizationView {
-  encounters?: number | null;
-  authorizationsRaised?: number | null;
-  authorizationsApproved?: number | null;
-  authorizationsDenied?: number | null;
-  claimedAmount?: number | null;
-  approvedAmount?: number | null;
-  memberShareAmount?: number | null;
-  currencyCode: string;
+export const zExternalUtilizationView = z.object({
+  encounters: z.number().nullable().optional(),
+  authorizationsRaised: z.number().nullable().optional(),
+  authorizationsApproved: z.number().nullable().optional(),
+  authorizationsDenied: z.number().nullable().optional(),
+  claimedAmount: z.number().nullable().optional(),
+  approvedAmount: z.number().nullable().optional(),
+  memberShareAmount: z.number().nullable().optional(),
+  currencyCode: z.string(),
   /** Services that did not answer. A null here means "could not ask", never "zero". */
-  unavailable: string[];
-}
+  unavailable: z.array(z.string()),
+}).passthrough();
+export type ExternalUtilizationView = z.infer<typeof zExternalUtilizationView>;
 
-export interface ReconciliationView {
-  accumulatorTotal: number;
-  reportedTotal: number;
-  reconciled: boolean;
-}
+export const zReconciliationView = z.object({
+  accumulatorTotal: z.number(),
+  reportedTotal: z.number(),
+  reconciled: z.boolean(),
+}).passthrough();
+export type ReconciliationView = z.infer<typeof zReconciliationView>;
 
-export interface MemberUtilizationView {
-  beneficiaryId: string;
-  enrollmentId: string;
-  memberNo: string;
-  asOf: string;
-  windowFrom: string;
-  windowTo: string;
-  categories: CategoryUtilizationView[];
-  byNetworkTier: TierUtilizationView[];
-  external: ExternalUtilizationView;
-  reconciliation: ReconciliationView;
-}
+export const zMemberUtilizationView = z.object({
+  beneficiaryId: z.string(),
+  enrollmentId: z.string(),
+  memberNo: z.string(),
+  asOf: z.string(),
+  windowFrom: z.string(),
+  windowTo: z.string(),
+  categories: z.array(zCategoryUtilizationView),
+  byNetworkTier: z.array(zTierUtilizationView),
+  external: zExternalUtilizationView,
+  reconciliation: zReconciliationView,
+}).passthrough();
+export type MemberUtilizationView = z.infer<typeof zMemberUtilizationView>;
 
-export interface MemberRowView {
-  beneficiaryId: string;
-  enrollmentId: string;
-  memberNo: string;
-  policyPlanId: string;
-  groupId?: string | null;
-  totalLimit: number;
-  totalConsumed: number;
-  totalRemaining: number;
-  percentUsed?: number | null;
-  anyUnlimited: boolean;
-}
+export const zMemberRowView = z.object({
+  beneficiaryId: z.string(),
+  enrollmentId: z.string(),
+  memberNo: z.string(),
+  policyPlanId: z.string(),
+  groupId: z.string().nullable().optional(),
+  totalLimit: z.number(),
+  totalConsumed: z.number(),
+  totalRemaining: z.number(),
+  percentUsed: z.number().nullable().optional(),
+  anyUnlimited: z.boolean(),
+}).passthrough();
+export type MemberRowView = z.infer<typeof zMemberRowView>;
 
-export interface ScopeUtilizationView {
-  scope: string;
-  scopeId: string;
-  asOf: string;
-  windowFrom: string;
-  windowTo: string;
-  memberCount: number;
-  totalLimit: number;
-  totalConsumed: number;
-  totalRemaining: number;
-  percentUsed?: number | null;
-  outlierThresholdPercent: number;
-  members: MemberRowView[];
-  outliers: MemberRowView[];
-  distribution: { label: string; memberCount: number }[];
-  byNetworkTier: TierUtilizationView[];
-  external: ExternalUtilizationView;
-  reconciliation: ReconciliationView;
-}
+export const zScopeUtilizationView = z.object({
+  scope: z.string(),
+  scopeId: z.string(),
+  asOf: z.string(),
+  windowFrom: z.string(),
+  windowTo: z.string(),
+  memberCount: z.number(),
+  totalLimit: z.number(),
+  totalConsumed: z.number(),
+  totalRemaining: z.number(),
+  percentUsed: z.number().nullable().optional(),
+  outlierThresholdPercent: z.number(),
+  members: z.array(zMemberRowView),
+  outliers: z.array(zMemberRowView),
+  distribution: z.array(z.object({ label: z.string(), memberCount: z.number() })),
+  byNetworkTier: z.array(zTierUtilizationView),
+  external: zExternalUtilizationView,
+  reconciliation: zReconciliationView,
+}).passthrough();
+export type ScopeUtilizationView = z.infer<typeof zScopeUtilizationView>;
 
 // ── Network tiers (provider-service) ────────────────────────────────────────────────────────────────────
 
-export interface NetworkTierView {
-  networkTierId: string;
-  tierCode: string;
-  nameEn: string;
-  nameAr: string;
-  rank: number;
-  description?: string | null;
-  isOutOfNetwork: boolean;
-  status: string;
-}
+export const zNetworkTierView = z.object({
+  networkTierId: z.string(),
+  tierCode: z.string(),
+  nameEn: z.string(),
+  nameAr: z.string(),
+  rank: z.number(),
+  description: z.string().nullable().optional(),
+  isOutOfNetwork: z.boolean(),
+  status: z.string(),
+}).passthrough();
+export type NetworkTierView = z.infer<typeof zNetworkTierView>;
 
-export interface TierAssignmentView {
-  assignmentId: string;
-  networkTierId: string;
-  tierCode?: string | null;
-  providerId: string;
-  scope: string;
-  scopeRef: string;
-  effectiveFrom: string;
-  effectiveTo?: string | null;
-  status: string;
-}
+export const zTierAssignmentView = z.object({
+  assignmentId: z.string(),
+  networkTierId: z.string(),
+  tierCode: z.string().nullable().optional(),
+  providerId: z.string(),
+  scope: z.string(),
+  scopeRef: z.string(),
+  effectiveFrom: z.string(),
+  effectiveTo: z.string().nullable().optional(),
+  status: z.string(),
+}).passthrough();
+export type TierAssignmentView = z.infer<typeof zTierAssignmentView>;
 
-export interface TierResolutionView {
-  networkTierId: string;
-  tierCode: string;
-  nameEn: string;
-  nameAr: string;
-  rank: number;
-  isOutOfNetwork: boolean;
+export const zTierResolutionView = z.object({
+  networkTierId: z.string(),
+  tierCode: z.string(),
+  nameEn: z.string(),
+  nameAr: z.string(),
+  rank: z.number(),
+  isOutOfNetwork: z.boolean(),
   /** "assigned to the out-of-network tier" and "out-of-network because nothing was assigned" price the same
    *  and need very different follow-up. The basis is what tells them apart. */
-  basis: string;
-  assignmentId?: string | null;
-  providerId: string;
-  locationId?: string | null;
-  serviceCode?: string | null;
-  serviceDate: string;
-}
+  basis: z.string(),
+  assignmentId: z.string().nullable().optional(),
+  providerId: z.string(),
+  locationId: z.string().nullable().optional(),
+  serviceCode: z.string().nullable().optional(),
+  serviceDate: z.string(),
+}).passthrough();
+export type TierResolutionView = z.infer<typeof zTierResolutionView>;
 
 // ── Bulk upload (19.5b) ─────────────────────────────────────────────────────────────────────────────────
 
-export interface BulkColumnView {
-  name: string;
-  kind: string;
-  required: boolean;
-  descriptionEn: string;
-  descriptionAr: string;
-}
+export const zBulkColumnView = z.object({
+  name: z.string(),
+  kind: z.string(),
+  required: z.boolean(),
+  descriptionEn: z.string(),
+  descriptionAr: z.string(),
+}).passthrough();
+export type BulkColumnView = z.infer<typeof zBulkColumnView>;
 
-export interface BulkTemplateView {
-  jobType: string;
-  purposeEn: string;
-  purposeAr: string;
-  columns: BulkColumnView[];
-}
+export const zBulkTemplateView = z.object({
+  jobType: z.string(),
+  purposeEn: z.string(),
+  purposeAr: z.string(),
+  columns: z.array(zBulkColumnView),
+}).passthrough();
+export type BulkTemplateView = z.infer<typeof zBulkTemplateView>;
 
-export interface BulkJobView {
-  jobId: string;
-  jobType: string;
-  fileName: string;
-  status: string;
-  batchId: string;
-  totalRows: number;
-  validRows: number;
-  invalidRows: number;
-  appliedRows: number;
-  failedRows: number;
-  skippedRows: number;
+export const zBulkJobView = z.object({
+  jobId: z.string(),
+  jobType: z.string(),
+  fileName: z.string(),
+  status: z.string(),
+  batchId: z.string(),
+  totalRows: z.number(),
+  validRows: z.number(),
+  invalidRows: z.number(),
+  appliedRows: z.number(),
+  failedRows: z.number(),
+  skippedRows: z.number(),
   /** submitted = valid + invalid, and once complete valid = applied + failed + skipped. A job that cannot
    *  say what happened to a row is one that lost it. */
-  balances: boolean;
-  failureCode?: string | null;
-  failureDetail?: string | null;
-  fileDocumentId?: string | null;
-  errorDocumentId?: string | null;
-  submittedBy?: string | null;
-  submittedAt: string;
-  completedAt?: string | null;
-  rolledBackAt?: string | null;
-}
+  balances: z.boolean(),
+  failureCode: z.string().nullable().optional(),
+  failureDetail: z.string().nullable().optional(),
+  fileDocumentId: z.string().nullable().optional(),
+  errorDocumentId: z.string().nullable().optional(),
+  submittedBy: z.string().nullable().optional(),
+  submittedAt: z.string(),
+  completedAt: z.string().nullable().optional(),
+  rolledBackAt: z.string().nullable().optional(),
+}).passthrough();
+export type BulkJobView = z.infer<typeof zBulkJobView>;
 
-export interface BulkRowError {
-  rowNumber: number;
-  code: string;
-  detailEn: string;
-  detailAr: string;
-}
+export const zBulkRowError = z.object({
+  rowNumber: z.number(),
+  code: z.string(),
+  detailEn: z.string(),
+  detailAr: z.string(),
+}).passthrough();
+export type BulkRowError = z.infer<typeof zBulkRowError>;
 
-export interface BulkRowPreview {
-  rowNumber: number;
-  summaryEn: string;
-  summaryAr: string;
-  changes: Record<string, unknown>;
-}
+export const zBulkRowPreview = z.object({
+  rowNumber: z.number(),
+  summaryEn: z.string(),
+  summaryAr: z.string(),
+  changes: z.record(z.unknown()),
+}).passthrough();
+export type BulkRowPreview = z.infer<typeof zBulkRowPreview>;
 
-export interface BulkRowView {
-  rowNumber: number;
-  status: string;
-  errorCode?: string | null;
-  errorDetail?: string | null;
-  errorDetailAr?: string | null;
-  targetRef?: string | null;
-  appliedAt?: string | null;
-}
+export const zBulkRowView = z.object({
+  rowNumber: z.number(),
+  status: z.string(),
+  errorCode: z.string().nullable().optional(),
+  errorDetail: z.string().nullable().optional(),
+  errorDetailAr: z.string().nullable().optional(),
+  targetRef: z.string().nullable().optional(),
+  appliedAt: z.string().nullable().optional(),
+}).passthrough();
+export type BulkRowView = z.infer<typeof zBulkRowView>;
 
 /** The dry run. `wouldChange` is what earns the step: counts alone tell an operator that 9,963 rows are
  *  valid, not that the file is about to move everybody onto the wrong plan. */
-export interface BulkValidationView {
-  job: BulkJobView;
-  totalErrors: number;
-  errors: BulkRowError[];
-  wouldChange: BulkRowPreview[];
-  committable: boolean;
-}
+export const zBulkValidationView = z.object({
+  job: zBulkJobView,
+  totalErrors: z.number(),
+  errors: z.array(zBulkRowError),
+  wouldChange: z.array(zBulkRowPreview),
+  committable: z.boolean(),
+}).passthrough();
+export type BulkValidationView = z.infer<typeof zBulkValidationView>;
 
-export interface BulkCommitView {
-  job: BulkJobView;
-  totalErrors: number;
-  errors: BulkRowError[];
-}
+export const zBulkCommitView = z.object({
+  job: zBulkJobView,
+  totalErrors: z.number(),
+  errors: z.array(zBulkRowError),
+}).passthrough();
+export type BulkCommitView = z.infer<typeof zBulkCommitView>;
 
-export interface BulkReconciliationView {
-  jobId: string;
-  jobType: string;
-  status: string;
-  batchId: string;
-  submitted: number;
-  valid: number;
-  invalid: number;
-  applied: number;
-  failed: number;
-  skipped: number;
-  balances: boolean;
-  errorDocumentId?: string | null;
-}
+export const zBulkReconciliationView = z.object({
+  jobId: z.string(),
+  jobType: z.string(),
+  status: z.string(),
+  batchId: z.string(),
+  submitted: z.number(),
+  valid: z.number(),
+  invalid: z.number(),
+  applied: z.number(),
+  failed: z.number(),
+  skipped: z.number(),
+  balances: z.boolean(),
+  errorDocumentId: z.string().nullable().optional(),
+}).passthrough();
+export type BulkReconciliationView = z.infer<typeof zBulkReconciliationView>;
 
 // ── The surface ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -895,6 +961,17 @@ export interface PolicyApi {
  */
 const ANALYTICS = "/analytics";
 
+/**
+ * Validate a response against the schema its type was inferred from, turning contract drift into a loud
+ * `ApiError("schema")` instead of a screen full of blanks and NaN.
+ *
+ * Every operation below used to end in `as Promise<SomeView>` — a cast, which asserts a shape rather than
+ * checking one. The module's own header explained why (see it for the argument and why it does not hold).
+ * Roughly fifty operations, carrying limits, consumed amounts, deductibles and coinsurance percentages, were
+ * outside the loud-failure behaviour the rest of the app has relied on since phase 12.
+ */
+const parsed = <T>(schema: z.ZodType<T>, p: Promise<unknown>): Promise<T> => p.then((d) => parseOr(schema, d));
+
 const q = (filters: Record<string, string | number | undefined>): string => {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(filters)) {
@@ -907,51 +984,43 @@ const q = (filters: Record<string, string | number | undefined>): string => {
 /** provider-service sits behind the same gateway; only the path prefix differs. */
 export function createHttpPolicyApi(): PolicyApi {
   return {
-    payers: () => getRaw("/payers") as Promise<PayerView[]>,
-    plans: () => getRaw("/plans") as Promise<PlanView[]>,
-    benefitCategories: () => getRaw("/benefit-categories") as Promise<BenefitCategoryView[]>,
-    planVersions: (planId) => getRaw(`/plans/${planId}/versions`) as Promise<PlanVersionView[]>,
-    planVersion: (id) => getRaw(`/plan-versions/${id}`) as Promise<PlanVersionView>,
-    setPlanRules: (id, rules, key) => putRaw(`/plan-versions/${id}/rules`, { rules }, key) as Promise<PlanVersionView>,
-    validatePlanVersion: (id) => postRaw(`/plan-versions/${id}/validate`, {}) as Promise<ValidationResult>,
-    activatePlanVersion: (id, key) => postRaw(`/plan-versions/${id}/activate`, {}, key) as Promise<PlanVersionView>,
-    amendPlan: (planId, key) => postRaw(`/plans/${planId}/amend`, {}, key) as Promise<PlanVersionView>,
+    payers: () => parsed(z.array(zPayerView), getRaw("/payers")),
+    plans: () => parsed(z.array(zPlanView), getRaw("/plans")),
+    benefitCategories: () => parsed(z.array(zBenefitCategoryView), getRaw("/benefit-categories")),
+    planVersions: (planId) => parsed(z.array(zPlanVersionView), getRaw(`/plans/${planId}/versions`)),
+    planVersion: (id) => parsed(zPlanVersionView, getRaw(`/plan-versions/${id}`)),
+    setPlanRules: (id, rules, key) => parsed(zPlanVersionView, putRaw(`/plan-versions/${id}/rules`, { rules }, key)),
+    validatePlanVersion: (id) => parsed(zValidationResult, postRaw(`/plan-versions/${id}/validate`, {})),
+    activatePlanVersion: (id, key) => parsed(zPlanVersionView, postRaw(`/plan-versions/${id}/activate`, {}, key)),
+    amendPlan: (planId, key) => parsed(zPlanVersionView, postRaw(`/plans/${planId}/amend`, {}, key)),
 
-    policyQuery: (f) => getRaw(`/policy-query${q(f)}`) as Promise<QueryPage<PolicyQueryRow>>,
-    policyPlans: (id) => getRaw(`/policies/${id}/plans`) as Promise<PolicyPlanView[]>,
-    attachPolicyPlan: (id, body, key) => postRaw(`/policies/${id}/plans`, body, key) as Promise<PolicyPlanView>,
-    policyGroups: (id) => getRaw(`/policies/${id}/groups`) as Promise<MemberGroupView[]>,
-    createGroup: (id, body, key) => postRaw(`/policies/${id}/groups`, body, key) as Promise<MemberGroupView>,
+    policyQuery: (f) => parsed(zQueryPage(zPolicyQueryRow), getRaw(`/policy-query${q(f)}`)),
+    policyPlans: (id) => parsed(z.array(zPolicyPlanView), getRaw(`/policies/${id}/plans`)),
+    attachPolicyPlan: (id, body, key) => parsed(zPolicyPlanView, postRaw(`/policies/${id}/plans`, body, key)),
+    policyGroups: (id) => parsed(z.array(zMemberGroupView), getRaw(`/policies/${id}/groups`)),
+    createGroup: (id, body, key) => parsed(zMemberGroupView, postRaw(`/policies/${id}/groups`, body, key)),
 
-    memberQuery: (f) => getRaw(`/member-query${q(f)}`) as Promise<QueryPage<MemberQueryRow>>,
-    enrollment: (id) => getRaw(`/enrollments/${id}`) as Promise<EnrollmentView>,
-    enrol: (body, key) => postRaw("/enrollments", body, key) as Promise<EnrollmentView>,
-    terminate: (id, effectiveDate, reason, key) =>
-      postRaw(`/enrollments/${id}/terminate`, { effectiveDate, reason }, key) as Promise<EnrollmentView>,
-    reinstate: (id, effectiveDate, reason, key) =>
-      postRaw(`/enrollments/${id}/reinstate`, { effectiveDate, reason }, key) as Promise<EnrollmentView>,
-    changeGroup: (id, groupId, effectiveDate, reason, key) =>
-      postRaw(`/enrollments/${id}/change-group`, { groupId, effectiveDate, reason }, key) as Promise<EnrollmentView>,
-    changePlan: (id, policyPlanId, effectiveDate, reason, key) =>
-      postRaw(`/enrollments/${id}/change-plan`, { policyPlanId, effectiveDate, reason }, key) as Promise<PlanChangeView>,
-    previewPlanChange: (id, policyPlanId, effectiveDate) =>
-      postRaw(`/enrollments/${id}/change-plan/preview`, { policyPlanId, effectiveDate }) as Promise<PlanChangePreviewView>,
-    coverageDetails: (id, asOf) =>
-      getRaw(`/enrollments/${id}/coverage-details${q({ asOf })}`) as Promise<MemberCoverageDetail>,
-    family: (id) => getRaw(`/enrollments/${id}/family`) as Promise<FamilyView>,
+    memberQuery: (f) => parsed(zQueryPage(zMemberQueryRow), getRaw(`/member-query${q(f)}`)),
+    enrollment: (id) => parsed(zEnrollmentView, getRaw(`/enrollments/${id}`)),
+    enrol: (body, key) => parsed(zEnrollmentView, postRaw("/enrollments", body, key)),
+    terminate: (id, effectiveDate, reason, key) => parsed(zEnrollmentView, postRaw(`/enrollments/${id}/terminate`, { effectiveDate, reason }, key)),
+    reinstate: (id, effectiveDate, reason, key) => parsed(zEnrollmentView, postRaw(`/enrollments/${id}/reinstate`, { effectiveDate, reason }, key)),
+    changeGroup: (id, groupId, effectiveDate, reason, key) => parsed(zEnrollmentView, postRaw(`/enrollments/${id}/change-group`, { groupId, effectiveDate, reason }, key)),
+    changePlan: (id, policyPlanId, effectiveDate, reason, key) => parsed(zPlanChangeView, postRaw(`/enrollments/${id}/change-plan`, { policyPlanId, effectiveDate, reason }, key)),
+    previewPlanChange: (id, policyPlanId, effectiveDate) => parsed(zPlanChangePreviewView, postRaw(`/enrollments/${id}/change-plan/preview`, { policyPlanId, effectiveDate })),
+    coverageDetails: (id, asOf) => parsed(zMemberCoverageDetail, getRaw(`/enrollments/${id}/coverage-details${q({ asOf })}`)),
+    family: (id) => parsed(zFamilyView, getRaw(`/enrollments/${id}/family`)),
 
-    notes: (scope, id) => getRaw(`/${scope}/${id}/notes`) as Promise<NoteView[]>,
-    addNote: (scope, id, body, key) => postRaw(`/${scope}/${id}/notes`, body, key) as Promise<NoteView>,
-    cancelNote: (noteId, reason, key) => postRaw(`/notes/${noteId}/cancel`, { reason }, key) as Promise<NoteView>,
-    pinNote: (noteId, pinned) => postRaw(`/notes/${noteId}/${pinned ? "pin" : "unpin"}`, {}) as Promise<NoteView>,
+    notes: (scope, id) => parsed(z.array(zNoteView), getRaw(`/${scope}/${id}/notes`)),
+    addNote: (scope, id, body, key) => parsed(zNoteView, postRaw(`/${scope}/${id}/notes`, body, key)),
+    cancelNote: (noteId, reason, key) => parsed(zNoteView, postRaw(`/notes/${noteId}/cancel`, { reason }, key)),
+    pinNote: (noteId, pinned) => parsed(zNoteView, postRaw(`/notes/${noteId}/${pinned ? "pin" : "unpin"}`, {})),
 
-    documents: (scope, id) => getRaw(`/${scope}/${id}/documents`) as Promise<PolicyDocumentView[]>,
+    documents: (scope, id) => parsed(z.array(zPolicyDocumentView), getRaw(`/${scope}/${id}/documents`)),
     // `purpose` reaches the server's audit record verbatim, which is how a LOOK (the eye) is distinguishable
     // from a TAKE (the download) a year later. Both are disclosures; they are not the same disclosure.
-    documentDownloadUrl: (linkId, purpose) =>
-      getRaw(`/documents/${linkId}/download${q({ purpose })}`) as Promise<{ url: string; expiresAt?: string }>,
-    attachDocument: (scope, id, file, meta, key) =>
-      postForm(
+    documentDownloadUrl: (linkId, purpose) => parsed(z.object({ url: z.string(), expiresAt: z.string().optional() }).passthrough(), getRaw(`/documents/${linkId}/download${q({ purpose })}`)),
+    attachDocument: (scope, id, file, meta, key) => parsed(zPolicyDocumentView, postForm(
         `/${scope}/${id}/documents`,
         {
           file,
@@ -961,32 +1030,28 @@ export function createHttpPolicyApi(): PolicyApi {
           ...(meta.description ? { description: meta.description } : {}),
         },
         key,
-      ) as Promise<PolicyDocumentView>,
+      )),
 
-    timeline: (scope, id, cursor) => getRaw(`/${scope}/${id}/timeline${q({ cursor })}`) as Promise<TimelinePage>,
+    timeline: (scope, id, cursor) => parsed(zTimelinePage, getRaw(`/${scope}/${id}/timeline${q({ cursor })}`)),
 
-    memberUtilization: (beneficiaryId, from, to) =>
-      getRaw(`/utilization/members/${beneficiaryId}${q({ from, to })}`) as Promise<MemberUtilizationView>,
-    scopeUtilization: (scope, id, from, to) =>
-      getRaw(`/utilization/${scope}/${id}${q({ from, to })}`) as Promise<ScopeUtilizationView>,
+    memberUtilization: (beneficiaryId, from, to) => parsed(zMemberUtilizationView, getRaw(`/utilization/members/${beneficiaryId}${q({ from, to })}`)),
+    scopeUtilization: (scope, id, from, to) => parsed(zScopeUtilizationView, getRaw(`/utilization/${scope}/${id}${q({ from, to })}`)),
 
-    networkTiers: () => getRaw("/network-tiers") as Promise<NetworkTierView[]>,
-    createTier: (body, key) => postRaw("/network-tiers", body, key) as Promise<NetworkTierView>,
-    updateTier: (id, body) => putRaw(`/network-tiers/${id}`, body) as Promise<NetworkTierView>,
-    tierAssignments: (id) => getRaw(`/network-tiers/${id}/assignments`) as Promise<TierAssignmentView[]>,
-    assignTier: (id, body, key) => postRaw(`/network-tiers/${id}/assignments`, body, key) as Promise<TierAssignmentView>,
+    networkTiers: () => parsed(z.array(zNetworkTierView), getRaw("/network-tiers")),
+    createTier: (body, key) => parsed(zNetworkTierView, postRaw("/network-tiers", body, key)),
+    updateTier: (id, body) => parsed(zNetworkTierView, putRaw(`/network-tiers/${id}`, body)),
+    tierAssignments: (id) => parsed(z.array(zTierAssignmentView), getRaw(`/network-tiers/${id}/assignments`)),
+    assignTier: (id, body, key) => parsed(zTierAssignmentView, postRaw(`/network-tiers/${id}/assignments`, body, key)),
     revokeAssignment: async (assignmentId) => {
       await deleteRaw(`/network-tiers/assignments/${assignmentId}`);
     },
-    resolveTier: (providerId, serviceDate, locationId) =>
-      getRaw(`/network-tiers/resolve${q({ providerId, serviceDate, locationId })}`) as Promise<TierResolutionView>,
+    resolveTier: (providerId, serviceDate, locationId) => parsed(zTierResolutionView, getRaw(`/network-tiers/resolve${q({ providerId, serviceDate, locationId })}`)),
 
-    bulkTemplates: () => getRaw("/bulk-templates") as Promise<BulkTemplateView[]>,
+    bulkTemplates: () => parsed(z.array(zBulkTemplateView), getRaw("/bulk-templates")),
     // `jobType` is a query parameter on the service (the body is the multipart file), so it travels in the
     // URL rather than as a form field. The batch defaults ride alongside it: they are recorded on the JOB, so
     // stating them at upload is what makes the dry run and the commit agree about them.
-    uploadBulk: (jobType, file, key, defaults) =>
-      postForm(
+    uploadBulk: (jobType, file, key, defaults) => parsed(zBulkJobView, postForm(
         `/bulk-jobs${q({
           jobType,
           defaultPlanId: defaults?.planId ?? undefined,
@@ -995,19 +1060,17 @@ export function createHttpPolicyApi(): PolicyApi {
         })}`,
         { file },
         key,
-      ) as Promise<BulkJobView>,
-    validateBulk: (jobId) => postRaw(`/bulk-jobs/${jobId}/validate`, {}) as Promise<BulkValidationView>,
-    commitBulk: (jobId, key) => postRaw(`/bulk-jobs/${jobId}/commit`, {}, key) as Promise<BulkCommitView>,
-    bulkRows: (jobId, status) => getRaw(`/bulk-jobs/${jobId}/rows${q({ status })}`) as Promise<BulkRowView[]>,
-    bulkReconciliation: (jobId) => getRaw(`/bulk-jobs/${jobId}/reconciliation`) as Promise<BulkReconciliationView>,
+      )),
+    validateBulk: (jobId) => parsed(zBulkValidationView, postRaw(`/bulk-jobs/${jobId}/validate`, {})),
+    commitBulk: (jobId, key) => parsed(zBulkCommitView, postRaw(`/bulk-jobs/${jobId}/commit`, {}, key)),
+    bulkRows: (jobId, status) => parsed(z.array(zBulkRowView), getRaw(`/bulk-jobs/${jobId}/rows${q({ status })}`)),
+    bulkReconciliation: (jobId) => parsed(zBulkReconciliationView, getRaw(`/bulk-jobs/${jobId}/reconciliation`)),
 
     // Analytics lives under a different service, so it does NOT go through the /api/v1 policy base — Kong
     // routes /api/v1/analytics to reporting-service. `analyticsBase` keeps that explicit rather than letting
     // a relative path silently land on whichever service owns the prefix today.
-    analytics: (view, filters) =>
-      getRaw(`${ANALYTICS}/${view}${q(filters as Record<string, string | undefined>)}`) as Promise<AnalyticsViewResult>,
-    analyticsOutlierMembers: (band, filters, limit) =>
-      getRaw(`${ANALYTICS}/outliers/members${q({ ...filters, band, limit })}`) as Promise<OutlierRow[]>,
+    analytics: (view, filters) => parsed(zAnalyticsViewResult, getRaw(`${ANALYTICS}/${view}${q(filters as Record<string, string | undefined>)}`)),
+    analyticsOutlierMembers: (band, filters, limit) => parsed(z.array(zOutlierRow), getRaw(`${ANALYTICS}/outliers/members${q({ ...filters, band, limit })}`)),
     analyticsExport: (view, filters) => getText(`${ANALYTICS}/${view}/export${q(filters as Record<string, string | undefined>)}`),
 
     exportUtilization: (scope, scopeId, from, to) =>

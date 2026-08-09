@@ -12,6 +12,14 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
+    "baseUrl": ".",
+    /* The fixture seam (src/dev/fixtures.ts). Type-checking always resolves to the FIXTURE variant; the live
+       twins conform via an erased `import type` of the same interface, so tsc rejects them the moment the two
+       drift. vite.config.ts picks which one is bundled. */
+    "paths": {
+      "@dev/fixture-mode": ["src/dev/fixtureMode.ts"],
+      "@dev/fixtures": ["src/dev/fixtures.ts"]
+    },
     "isolatedModules": true,
     "types": ["vitest/globals", "@testing-library/jest-dom"]
   },

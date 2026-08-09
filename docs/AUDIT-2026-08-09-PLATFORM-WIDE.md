@@ -178,10 +178,23 @@ Postgres and broker, not just compiled. `--with-db` throughout, so the DB-gated 
 | H | provider RLS failed **open** on a missing `provider_id` | **Fixed** | `(no-provider)` sentinel; role list unified onto `HbmpPrincipal` so both layers agree; 9 new tests |
 | H | break-glass step-up was client-asserted | **Fixed** | Reads `principal.MfaSatisfied`; field removed from the contract. *Known limit recorded:* proves session MFA, not per-action freshness — that needs `auth_time` in the frozen token contract |
 | H | provider "dual control" accepted any typed string | **Fixed** | Two-call flow; approver acts under their own token; `approved_by <> requested_by` and one-open-request enforced **at the database**; 4 tests |
+| H | the fixture backend and the bypass sign-in shipped in the LIVE bundle | **Fixed** | Verified first (`MRS-M-10231`, `Amal Hassan`, `أمل حسن` were plain strings in a `VITE_LIVE=1` `dist/`). `DevApiClient`, `DevAuthClient` and the role picker now sit behind `@dev/fixtures`, aliased to a refusing stub for a live build; `check-live-bundle-clean.py` rebuilds both variants and reads the emitted JS |
+| H | `policyApi`/`branchApi` skipped zod on ~80 operations | **Fixed** | 62 shapes rewritten as `z.object` with `z.infer` types — one definition, not two, which answers the objection the file's own header raised. `.passthrough()` keeps a server that ADDS a field from breaking an older bundle |
+| H | `HttpApiClient` defaulted required fields BEFORE validating | **Fixed** | `money()` refused `?? 0` (10 sites) and `required()` refuses `?? ""` on 21 identifiers, both naming the field. Narrow on purpose: the rule is about values that would be BELIEVED, not a ban on `??` |
+| H | CallCentre's private `fetch` could not report a transport failure | **Partly fixed** | A dropped connection now raises `ApiError("network")` instead of escaping as `TypeError: Failed to fetch`. Surfacing a 5xx `detail` still needs the `"ok" \| "conflict" \| "error"` unions widened to carry a message — named in the code, not smuggled |
 
 Gates re-run clean after the changes: OpenAPI drift (22 specs), migration-compat, architecture suite (23),
 `libs/auth` token byte-compat (62). The two contract changes (removed `stepUpSatisfied` and
 `secondApproverSubject`) are reflected in `docs/api/` — the drift gate caught both, which is what it is for.
+
+Frontend: **1,192 tests across 91 files green**, `tsc --noEmit` clean, eslint 0 errors. The new
+`live-bundle` gate runs in frontend-ci and is in `REQUIRED_GATES`; because it is the first gate outside
+backend-ci, `check-gate-freshness.py` now merges `gate-heartbeats*.json` from both pipelines rather than
+reading one file, and gate-health downloads both artifacts.
+
+One measurement worth stating plainly rather than rounding up: removing the fixture backend takes **~18 kB
+off the minified bundle**, not the ~200 kB its 4,111 source lines suggest — that file is mostly comment. The
+case for the change was never the weight.
 
 ### What closing the saga turned up (C1+C2, ADR-0041)
 

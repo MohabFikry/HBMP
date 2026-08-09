@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { AppProviders } from "../src/App";
-import { DevAuthClient } from "../src/auth/authClient";
+import { DevAuthClient } from "../src/auth/devAuthClient";
 import { ApiError } from "../src/api/http";
 import type { ApiClient } from "../src/api/client";
 import type { AppointmentRow } from "@mersal/contracts";

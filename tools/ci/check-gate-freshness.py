@@ -62,23 +62,58 @@ REQUIRED_GATES = [
     # three fields were added to a prescription line. This one ratchets the share of endpoints that say what
     # they return, and its failure mode if it stopped running would be the number quietly sliding back.
     "response-schemas",
+    # 2026-08-09 audit — the live SPA bundle carries no fixture backend. Listed for the reason every gate
+    # above it is: what it guards is invisible from outside. A bundle with a demo sign-in compiled into it
+    # serves every page correctly, and the only way to know is to read the built JavaScript, which nobody
+    # does by hand. This one lives in frontend-ci, so its heartbeat arrives in a second file — see load().
+    "live-bundle",
 ]
 
 
+DEFAULT_FILE = "gate-heartbeats.json"
+
+
 def load(state_dir: str) -> dict[str, str]:
-    path = os.path.join(state_dir, "gate-heartbeats.json")
-    if not os.path.exists(path):
-        return {}
-    try:
-        return json.load(open(path, encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
+    """Every `gate-heartbeats*.json` in the directory, merged, NEWEST WINS per gate.
+
+    More than one file because the gates do not all run in one workflow: backend-ci writes
+    `gate-heartbeats.json`, frontend-ci writes `gate-heartbeats.frontend.json`, and the watchdog downloads
+    both artifacts into the same directory. Merging here rather than making the watchdog do it keeps the
+    "which pipeline owns which gate" question out of a YAML file — adding a gate means adding a line to
+    REQUIRED_GATES and recording a heartbeat from wherever it runs, and nothing else has to know.
+
+    Newest-wins rather than last-file-wins because a gate that moves between pipelines would otherwise be
+    aged by whichever pipeline stopped running it."""
+    merged: dict[str, str] = {}
+    if not os.path.isdir(state_dir):
+        return merged
+    for name in sorted(os.listdir(state_dir)):
+        if not (name.startswith("gate-heartbeats") and name.endswith(".json")):
+            continue
+        try:
+            data = json.load(open(os.path.join(state_dir, name), encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        for gate, stamp in data.items():
+            if gate not in merged or str(stamp) > str(merged[gate]):
+                merged[gate] = stamp
+    return merged
 
 
-def record(state_dir: str, gate: str, now: datetime) -> None:
+def record(state_dir: str, gate: str, now: datetime, filename: str = DEFAULT_FILE) -> None:
+    """Write into ONE file, read back from that same file only. Recording through `load()` would fold every
+    other pipeline's heartbeats into this artifact, so each upload would carry a stale copy of the others'
+    and a gate that stopped running would keep looking fresh."""
     os.makedirs(state_dir, exist_ok=True)
-    path = os.path.join(state_dir, "gate-heartbeats.json")
-    data = load(state_dir)
+    path = os.path.join(state_dir, filename)
+    data: dict[str, str] = {}
+    if os.path.exists(path):
+        try:
+            data = json.load(open(path, encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            data = {}
     data[gate] = now.isoformat()
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, sort_keys=True)
@@ -138,7 +173,27 @@ def selftest() -> int:
         if not check(tmp, 7, now):
             print("FAIL: a heartbeat outside the window should fail"); ok = False
 
-    print("selftest: PASS — never-run, stale and boundary cases all behave"
+    # 5. HEARTBEATS SPLIT ACROSS PIPELINES. backend-ci writes gate-heartbeats.json, frontend-ci writes
+    #    gate-heartbeats.frontend.json, and the watchdog downloads both into one directory. A gate whose
+    #    heartbeat lives only in the second file must count as having run — and recording it there must not
+    #    rewrite the first, or each artifact would carry a stale copy of the other's gates and a pipeline
+    #    that stopped running would keep looking fresh.
+    with tempfile.TemporaryDirectory() as tmp:
+        for g in REQUIRED_GATES:
+            if g != "live-bundle":
+                record(tmp, g, now - timedelta(days=1))
+        problems = check(tmp, 7, now)
+        if len(problems) != 1 or "live-bundle" not in problems[0]:
+            print(f"FAIL: the frontend gate should be the only one missing; got {problems}"); ok = False
+
+        record(tmp, "live-bundle", now - timedelta(days=1), filename="gate-heartbeats.frontend.json")
+        if check(tmp, 7, now):
+            print("FAIL: a heartbeat in a second file should be read"); ok = False
+        backend = json.load(open(os.path.join(tmp, DEFAULT_FILE), encoding="utf-8"))
+        if "live-bundle" in backend:
+            print("FAIL: recording into one pipeline's file must not write into another's"); ok = False
+
+    print("selftest: PASS — never-run, stale, boundary and split-pipeline cases all behave"
           if ok else "selftest: FAIL")
     return 0 if ok else 1
 
@@ -148,6 +203,8 @@ def main() -> int:
     ap.add_argument("--state-dir", default=os.path.join(REPO, ".ci-state"))
     ap.add_argument("--max-age-days", type=int, default=7)
     ap.add_argument("--record", help="record a heartbeat for this gate and exit")
+    ap.add_argument("--state-file", default=DEFAULT_FILE,
+                    help="which heartbeat file to write (one per pipeline; all are read back)")
     ap.add_argument("--now", help="ISO timestamp override, for testing")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
@@ -160,7 +217,7 @@ def main() -> int:
         now = now.replace(tzinfo=timezone.utc)
 
     if a.record:
-        record(a.state_dir, a.record, now)
+        record(a.state_dir, a.record, now, a.state_file)
         print(f"gate-freshness: recorded '{a.record}' at {now.isoformat()}")
         return 0
 

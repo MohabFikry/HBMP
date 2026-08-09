@@ -21,6 +21,9 @@ coverage/
 node_modules
 dist/
 .vite/
+# The two throwaway bundles tools/ci/check-live-bundle-clean.py builds to compare (it removes them itself
+# unless --keep; this is for the run that dies partway).
+.bundle-check/
 *.local
 .eslintcache
 playwright-report/

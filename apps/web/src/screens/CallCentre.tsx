@@ -5,6 +5,7 @@ import { Button, Card, Icon, InputField, Modal, StatusChip, useTheme } from "@me
 import { L } from "../i18n/strings";
 import { API_BASE } from "../config";
 import { getToken } from "../auth/tokenStore";
+import { ApiError } from "../api/http";
 import { PageHeader, useOpenProfile } from "./_shared";
 import { BookingForm, type BookingSelection } from "./booking/BookingForm";
 import { useApi } from "../api/ApiProvider";
@@ -133,23 +134,56 @@ const CANCEL_REASON_LABELS: Record<string, { en: string; ar: string }> = {
 };
 const OUTCOMES = ["Resolved", "FollowUpRequired", "Transferred", "Abandoned", "NoAction"];
 
+/**
+ * The call centre's own request helper.
+ *
+ * ============================================================================================================
+ * WHY IT IS STILL SEPARATE FROM `http.ts`, AND WHAT IT NO LONGER GETS WRONG
+ * ============================================================================================================
+ * `http.ts` throws on any non-2xx. Every call below distinguishes SPECIFIC statuses as ANSWERS rather than
+ * failures — 409 "someone already opened this", 412 "the appointment moved while you were on the phone", 422
+ * `summary-required`, 403 "not your call" — and each drives a different thing the agent says to the person
+ * they are speaking to. Routing those through an exception and re-reading `.status` off it would be the same
+ * branch with a longer path to it, so the `{ status, data }` shape stays.
+ *
+ * What was genuinely wrong, and is fixed here: a TRANSPORT failure — the tablet dropping its wifi mid-call —
+ * escaped as a raw `TypeError: Failed to fetch`. `writeErrorMessage` renders anything that is not an
+ * {@link ApiError} by stringifying it, so the agent read "TypeError: Failed to fetch" and had no way to tell
+ * that from a server refusal. That is precisely the RETRY / RELOAD / STOP distinction the phase-18 D1 rule
+ * exists for, and it is the one class this helper could never express.
+ *
+ * NOT fixed here, and worth naming rather than half-doing: a 5xx carrying an RFC-7807 body still renders as a
+ * generic "error". Every caller returns a fixed word from a union (`"ok" | "conflict" | "error"`), so there is
+ * nowhere for the server's `detail` to go without widening all of them to carry a message. That is a real
+ * improvement and a separate change; smuggling an unread `problem` field through this helper would only make
+ * it look done.
+ *
+ * NOT changed: the absent `X-Active-Branch` header. The call centre is deliberately cross-branch and states
+ * the branch in the body where it matters (see `zBookingRequest.branchId`); adding the header here would
+ * narrow an agent to one clinic, which is the opposite of the job.
+ */
 async function req<T>(
   method: string, path: string, body?: unknown, idempotencyKey?: string, ifMatch?: number,
 ): Promise<{ status: number; data: T | null }> {
   const token = getToken();
-  const resp = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: {
-      ...(body ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
-      // Quoted per RFC 7232. callcentre-service forwards this verbatim to emr, which has always parsed it and
-      // returned 412 on a stale write — the guarantee was implemented end to end and simply never armed,
-      // because no call-centre client ever sent the header.
-      ...(ifMatch !== undefined ? { "If-Match": `"${ifMatch}"` } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers: {
+        ...(body ? { "Content-Type": "application/json" } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+        // Quoted per RFC 7232. callcentre-service forwards this verbatim to emr, which has always parsed it and
+        // returned 412 on a stale write — the guarantee was implemented end to end and simply never armed,
+        // because no call-centre client ever sent the header.
+        ...(ifMatch !== undefined ? { "If-Match": `"${ifMatch}"` } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (e) {
+    throw new ApiError("network", e instanceof Error ? e.message : "Network request failed");
+  }
   const data = resp.status === 204 ? null : ((await resp.json().catch(() => null)) as T | null);
   return { status: resp.status, data };
 }

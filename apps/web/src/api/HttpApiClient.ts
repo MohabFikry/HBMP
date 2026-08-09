@@ -187,7 +187,43 @@ const toAllergyRecord = (a: any) => ({
  * an English currency prefix. A pre-formatted string also cannot be summed, sorted numerically, or
  * re-localised when the user switches language mid-session.
  */
-const money = (n: unknown) => { const v = Number(n ?? 0); return Number.isFinite(v) ? v : 0; };
+const money = (n: unknown, field: string): number => {
+  if (typeof n === "number" && Number.isFinite(n)) return n;
+  // A decimal serialised as text is tolerated when it parses — that is a serialisation choice, not a missing
+  // field, and only the second is what this refuses. `""`, `null` and `undefined` are not amounts.
+  if (typeof n === "string" && n.trim() !== "") {
+    const v = Number(n);
+    if (Number.isFinite(v)) return v;
+  }
+  throw new ApiError("schema", `${field}: expected an amount, got ${JSON.stringify(n)}`);
+};
+
+/**
+ * ============================================================================================================
+ * THE ADAPTER RESHAPES. IT DOES NOT INVENT.
+ * ============================================================================================================
+ * `money()` above used to read `Number(n ?? 0)` and fall back to `0` on anything unparseable, and required
+ * identifiers were written `id: r?.orderId ?? ""`. Both defaults are applied BEFORE `parseOr`, so the zod
+ * contract then validates a well-formed object and passes. Contract drift — a field the server renamed or
+ * stopped sending — became plausible wrong data instead of a loud failure, which is the one outcome the
+ * schema layer exists to prevent.
+ *
+ * What the two defaults actually assert is worth saying plainly. `?? 0` on an amount asserts that this
+ * provider is owed nothing; it appears on the finance settlement and utilization screens. `?? ""` on an id
+ * asserts an entity whose identifier is the empty string: it becomes a React key, a route parameter, and the
+ * body of the next write. `POST /orders//consume` is the shape of that mistake.
+ *
+ * These two refuse instead, and name the field. NOT a blanket rule against `??` in this file — most of the
+ * defaults here are legitimate adaptation (an absent label, an optional filter, a status the contract gives a
+ * default for) or a min-necessary null the screens deliberately render as "withheld". The rule is narrower
+ * and about consequence: where the substituted value would be BELIEVED, substitute nothing.
+ */
+const required = <T>(value: T | null | undefined, field: string): T => {
+  if (value === null || value === undefined || value === "") {
+    throw new ApiError("schema", `${field}: the service returned no value for a required identifier`);
+  }
+  return value;
+};
 /** Map a service case status (Open/Active/OnHold/Resolved/Closed) to the contract's snake_case enum. */
 const caseStatus = (s: unknown) =>
   ({ open: "open", active: "active", onhold: "on_hold", resolved: "resolved", closed: "closed" })[
@@ -287,7 +323,7 @@ function basisQuery(param: string, basis?: Record<string, number>): string {
 /** One practitioner row → the contract shape. Shared by the list and the create path. */
 function toPractitioner(p: any) {
   return parseOr(zPractitioner, {
-    id: p?.practitionerId ?? "",
+    id: required(p?.practitionerId, "practitioner.practitionerId"),
     practitionerType: String(p?.practitionerType ?? ""),
     name: { en: String(p?.fullNameEn ?? ""), ar: String(p?.fullNameAr ?? p?.fullNameEn ?? "") },
     primarySpecialty: p?.primarySpecialty ?? undefined,
@@ -556,7 +592,7 @@ export class HttpApiClient implements ApiClient {
         ? {
             planName: { en: "Benefit coverage", ar: "التغطية التأمينية" },
             band: neutral(categories.join(" · ")),
-            annualCapRemaining: cap ? money(cap.remaining) : undefined,
+            annualCapRemaining: cap ? money(cap.remaining, "coverage.annualCapRemaining") : undefined,
           }
         : null,
       visitGate: active
@@ -869,7 +905,7 @@ export class HttpApiClient implements ApiClient {
     // POST /encounters is where the CheckedIn + assigned-doctor rules are enforced, so starting a visit goes
     // through it rather than through a UI-only shortcut.
     const r = (await postRaw("/encounters", { beneficiaryId, appointmentId }, crypto.randomUUID())) as any;
-    return { encounterId: String(r?.encounterId ?? "") };
+    return { encounterId: String(required(r?.encounterId, "startEncounter.encounterId")) };
   }
 
   // Booking (Phase 3.1, US-020). Slot availability is the SERVER's answer — it holds the no-double-book
@@ -917,7 +953,7 @@ export class HttpApiClient implements ApiClient {
       crypto.randomUUID(),
     )) as any;
     return parseOr(zBookingResult, {
-      id: r?.appointmentId ?? "",
+      id: required(r?.appointmentId, "booking.appointmentId"),
       status: apptStatusChip(r?.status ?? "Booked"),
       scheduledStart: r?.scheduledStart ?? new Date().toISOString(),
     });
@@ -951,7 +987,7 @@ export class HttpApiClient implements ApiClient {
     return (r ?? []).map((e: any) =>
       parseOr(zPatientListItem, {
         id: e.encounterId,
-        beneficiaryId: String(e.beneficiaryId ?? ""),
+        beneficiaryId: String(required(e.beneficiaryId, "encounter.beneficiaryId")),
         // The name when emr has one — this is the TREATING clinician's own worklist, and they read the full
         // record behind every row. The masked token stays as the fallback for a walk-in that was never
         // booked, where no name was ever captured; blank would read as data loss.
@@ -999,7 +1035,7 @@ export class HttpApiClient implements ApiClient {
 
     return parseOr(zEncounter, {
       id: e.encounterId ?? encounterId,
-      patientId: e.beneficiaryId ?? "",
+      patientId: required(e.beneficiaryId, "encounter.beneficiaryId"),
       patientName: neutral(`Beneficiary •••${String(e.beneficiaryId ?? "").slice(-4)}`),
       openedAt: e.startedAt ?? new Date().toISOString(),
       signed: Boolean(note.isSigned),
@@ -1134,7 +1170,7 @@ export class HttpApiClient implements ApiClient {
   async requestValidityExtension(req: ValidityExtensionRequest) {
     const r = (await postRaw(`/authorizations/validity-extensions`, req, crypto.randomUUID())) as any;
     return parseOr(zValidityExtensionResult, {
-      authorizationId: r?.authorizationId ?? "",
+      authorizationId: required(r?.authorizationId, "validityExtension.authorizationId"),
       authNo: String(r?.authNo ?? ""),
       status: String(r?.status ?? ""),
     });
@@ -1264,7 +1300,7 @@ export class HttpApiClient implements ApiClient {
       requestedServiceCodeSystem: "CPT",
     }, idem)) as any;
     return parseOr(zReferralCreated, {
-      referralId: String(r?.referralId ?? ""),
+      referralId: String(required(r?.referralId, "referral.referralId")),
       referralNo: String(r?.referralNo ?? ""),
       status: String(r?.status ?? ""),
       requestedServiceCode: r?.requestedServiceCode ?? null,
@@ -1360,7 +1396,7 @@ export class HttpApiClient implements ApiClient {
       })),
     }, idem)) as any;
     return parseOr(zInvestigationOrderResult, {
-      orderId: r?.orderId ?? "",
+      orderId: required(r?.orderId, "order.orderId"),
       orderNo: String(r?.orderNo ?? ""),
       status: String(r?.status ?? ""),
       requiresApproval: String(r?.status ?? "").toLowerCase() === "pendingapproval",
@@ -2047,7 +2083,7 @@ export class HttpApiClient implements ApiClient {
       diagnosisIcdCodes: req.diagnosisIcdCodes,
     })) as any;
     return parseOr(zValidationResult, {
-      validationId: r?.validationId ?? "",
+      validationId: required(r?.validationId, "validation.validationId"),
       ranAt: String(r?.ranAt ?? ""),
       engineVersion: String(r?.engineVersion ?? ""),
       overallState: r?.overallState ?? "NotChecked",
@@ -2205,7 +2241,7 @@ export class HttpApiClient implements ApiClient {
         : {}),
     }, idem)) as any;
     return parseOr(zPrescriptionSubmitResult, {
-      prescriptionId: r?.prescriptionId ?? "",
+      prescriptionId: required(r?.prescriptionId, "prescription.prescriptionId"),
       rxNo: String(r?.rxNo ?? ""),
       status: String(r?.status ?? ""),
     });
@@ -2331,7 +2367,7 @@ export class HttpApiClient implements ApiClient {
     const codes: string[] = a?.serviceCodes ?? [];
     return parseOr(zApprovalReview, {
       id: a?.authorizationId ?? approvalId,
-      patient: { id: a?.beneficiaryId ?? "", token: caseToken({ beneficiaryId: a?.beneficiaryId }) },
+      patient: { id: required(a?.beneficiaryId, "approval.beneficiaryId"), token: caseToken({ beneficiaryId: a?.beneficiaryId }) },
       service: { system: "CPT", code: codes[0] ?? "—", label: neutral(codes[0] ?? "") },
       clinicalJustification: a?.emrSummary ?? "clinical context unavailable",
       supportingCodes: codes.slice(1).map((c) => ({ system: "CPT" as const, code: c, label: neutral(c) })),
@@ -2555,8 +2591,8 @@ export class HttpApiClient implements ApiClient {
         status: coverageChip(b.coverage?.status),
         planName: neutral(b.coverage?.policyName ?? "—"),
         coverageCategory: neutral(b.coverage?.coverageCategory ?? "—"),
-        annualCap: b.coverage?.annualLimit != null ? money(b.coverage.annualLimit) : undefined,
-        remaining: b.coverage?.remainingLimit != null ? money(b.coverage.remainingLimit) : undefined,
+        annualCap: b.coverage?.annualLimit != null ? money(b.coverage.annualLimit, "coverage.annualLimit") : undefined,
+        remaining: b.coverage?.remainingLimit != null ? money(b.coverage.remainingLimit, "coverage.remainingLimit") : undefined,
       },
       carePlan: {
         status: neutral(b.carePlan?.status ?? "None"),
@@ -2608,7 +2644,7 @@ export class HttpApiClient implements ApiClient {
     return items.map((e: any) =>
       parseOr(zEscalation, {
         id: e.escalationId ?? e.id,
-        caseId: e.caseId ?? "",
+        caseId: required(e.caseId, "caseEvent.caseId"),
         caseNo: e.caseNo ?? "",
         raisedToRole: neutral(e.raisedToRole ?? e.targetRole ?? ""),
         reason: String(e.reason ?? ""),
@@ -2633,11 +2669,11 @@ export class HttpApiClient implements ApiClient {
         providerRef: x.providerRef ?? undefined,
         authorizedQty: x.authorizedQty ?? 0,
         deliveredQty: x.deliveredQty ?? 0,
-        spend: money(x.spend),
+        spend: money(x.spend, "utilization.rows[].spend"),
       })),
       totalAuthorized: r?.totalAuthorized ?? 0,
       totalDelivered: r?.totalDelivered ?? 0,
-      totalSpend: money(r?.totalSpend),
+      totalSpend: money(r?.totalSpend, "utilization.totalSpend"),
     });
   }
   async settlements() {
@@ -2651,15 +2687,15 @@ export class HttpApiClient implements ApiClient {
         periodStart: s.periodStart ?? "",
         periodEnd: s.periodEnd ?? "",
         currency: s.currency ?? "EGP",
-        total: money(s.total),
+        total: money(s.total, "settlement.total"),
         status: "ok",
         state: String(s.state ?? s.status ?? "draft").toLowerCase(),
         lines: (s.lines ?? []).map((l: any) => ({
           serviceCode: l.serviceCode,
           serviceLine: neutral(l.serviceLine),
           deliveredQty: l.deliveredQty ?? 0,
-          agreedUnitPrice: money(l.agreedUnitPrice),
-          lineTotal: money(l.lineTotal),
+          agreedUnitPrice: money(l.agreedUnitPrice, "settlement.lines[].agreedUnitPrice"),
+          lineTotal: money(l.lineTotal, "settlement.lines[].lineTotal"),
         })),
       }),
     );
@@ -2673,10 +2709,10 @@ export class HttpApiClient implements ApiClient {
       buckets: buckets.map((b: any) => ({
         key: neutral(b.key),
         deliveredQty: b.deliveredQty ?? 0,
-        spend: money(b.spend),
+        spend: money(b.spend, "financialSummary.buckets[].spend"),
         sharePercent: Math.round((Number(b.spend ?? 0) / total) * 100),
       })),
-      totalSpend: money(r?.totalSpend ?? total),
+      totalSpend: money(r?.totalSpend ?? total, "financialSummary.totalSpend"),
     });
   }
   async exportReport(req: ExportRequest) {
@@ -2911,7 +2947,7 @@ export class HttpApiClient implements ApiClient {
   async createProvider(input: CreateProviderInput, idempotencyKey?: string) {
     const r = (await postRaw(`/providers`, { providerCode: input.code, legalName: input.legalName, providerType: input.providerType }, idempotencyKey)) as any;
     return parseOr(zProviderSummary, {
-      id: r?.providerId ?? "",
+      id: required(r?.providerId, "provider.providerId"),
       code: String(r?.providerCode ?? input.code),
       legalName: String(r?.legalName ?? input.legalName),
       providerType: String(r?.providerTypeLabel ?? r?.providerType ?? input.providerType),
@@ -2978,7 +3014,7 @@ export class HttpApiClient implements ApiClient {
     const r = (await getRaw(`/branches`)) as any[];
     return (Array.isArray(r) ? r : []).map((b: any) =>
       parseOr(zBranchSummary, {
-        id: b?.branchId ?? "",
+        id: required(b?.branchId, "branch.branchId"),
         code: String(b?.branchCode ?? ""),
         name: { en: String(b?.nameEn ?? b?.branchCode ?? ""), ar: String(b?.nameAr ?? b?.nameEn ?? "") },
         city: b?.city ?? undefined,
@@ -3105,7 +3141,7 @@ export class HttpApiClient implements ApiClient {
     const r = (await getRaw(`/booking/doctor-availability${qs}`)) as any[];
     return (Array.isArray(r) ? r : []).map((d: any) =>
       parseOr(zDoctorAvailability, {
-        doctorId: d?.doctorId ?? "",
+        doctorId: required(d?.doctorId, "doctorAvailability.doctorId"),
         branchId: d?.branchId ?? undefined,
         openSlots: Number(d?.openSlots ?? 0),
         nextSlotStart: String(d?.nextSlotStart ?? ""),
@@ -3189,7 +3225,7 @@ export class HttpApiClient implements ApiClient {
     };
     const r = (await postRaw(`/beneficiaries`, body, idem)) as any;
     return parseOr(zRegisterResult, {
-      id: r?.beneficiaryId ?? "",
+      id: required(r?.beneficiaryId, "beneficiary.beneficiaryId"),
       memberNo: r?.memberNo ?? undefined,
       status: beneficiaryStatusChip(r?.status ?? "Pending"),
     });
@@ -3393,7 +3429,7 @@ export class HttpApiClient implements ApiClient {
       retired: edit.retired,
     })) as any;
     return {
-      id: String(r?.versionId ?? ""),
+      id: String(required(r?.versionId, "masterDataVersion.versionId")),
       code: String(r?.code ?? edit.code),
       versionNo: Number(r?.versionNo ?? 0),
     };
@@ -3412,7 +3448,7 @@ export class HttpApiClient implements ApiClient {
       attributes = JSON.parse(String(r?.attributesJson ?? "{}"));
     } catch { attributes = {}; }
     return parseOr(zMasterDataAsOf, {
-      id: r?.versionId ?? "",
+      id: required(r?.versionId, "masterDataVersion.versionId"),
       versionNo: Number(r?.versionNo ?? 0),
       attributes,
       effectiveFrom: r?.effectiveFrom ?? new Date().toISOString(),
@@ -3470,7 +3506,7 @@ export class HttpApiClient implements ApiClient {
    */
   async saveApprovalRule(req: SaveApprovalRule) {
     const r = (await postRaw(`/approval-rules/`, req)) as any;
-    return { id: String(r?.ruleId ?? ""), versionNo: Number(r?.versionNo ?? 1) };
+    return { id: String(required(r?.ruleId, "approvalRule.ruleId")), versionNo: Number(r?.versionNo ?? 1) };
   }
 
   /** The tenant's auto-decision kill switch. A tenant that never touched it reads `enabled: false`. */
@@ -3617,7 +3653,7 @@ export class HttpApiClient implements ApiClient {
     return (Array.isArray(r) ? r : []).map((g: any) =>
       parseOr(zBranchScopeGrant, {
         grantId: String(g.assignmentId ?? g.grantId ?? g.id),
-        branchId: String(g.branchId ?? ""),
+        branchId: String(required(g.branchId, "branchScopeGrant.branchId")),
         isHome: g.isHome === true || g.assignmentType === "Home",
         validFrom: String(g.validFrom ?? "").slice(0, 10),
         validUntil: g.validTo || g.validUntil ? String(g.validTo ?? g.validUntil).slice(0, 10) : null,
@@ -3687,7 +3723,7 @@ function membershipRowOf(m: any) {
     userId: String(m?.userId),
     username: String(m?.username ?? ""),
     displayName: String(m?.displayName ?? m?.username ?? ""),
-    tenantId: String(m?.tenantId ?? ""),
+    tenantId: String(required(m?.tenantId, "membership.tenantId")),
     status: membershipStatusChip(status),
     roles: (Array.isArray(m?.roles) ? m.roles : []).map((r: any) => ({
       name: String(r.name ?? ""),

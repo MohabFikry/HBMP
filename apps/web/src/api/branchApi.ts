@@ -1,13 +1,31 @@
-import { getRaw, postRaw } from "./http";
+import { z } from "zod";
+import { getRaw, parseOr, postRaw } from "./http";
 
 /**
  * `getRaw`/`postRaw` return `unknown` by design — `http.ts` is the transport and does not know any screen's
- * shape. The casts below are the seam where this module takes responsibility for the response type, exactly
- * as `policyApi` does. They are casts and not zod schemas deliberately: the shapes here are read-only
- * projections the server already validates, and a second schema would be a second place to update when a
- * field is added.
+ * shape. This is the seam where the module takes responsibility for the response type.
+ *
+ * ============================================================================================================
+ * IT USED TO BE A BARE CAST, AND THE ARGUMENT FOR THAT WAS WRONG
+ * ============================================================================================================
+ * The comment here read: "casts and not zod schemas deliberately — the shapes are read-only projections the
+ * server already validates, and a second schema would be a second place to update when a field is added."
+ *
+ * The second clause is answered by writing the schema FIRST and inferring the interface from it, which is
+ * what every `export type X = z.infer<typeof zX>` below does. There is exactly one definition; there always
+ * was room for exactly one.
+ *
+ * The first clause mistakes what the validation is for. Nobody suspects the server of emitting malformed
+ * JSON. The failure this catches is DRIFT — a field renamed or removed on the server while this file still
+ * names the old one. A cast makes that `undefined`, and `undefined` renders as an empty cell, sorts as
+ * missing, and formats as `NaN`. On this surface those cells are licence expiry dates, on-hand stock counts
+ * and money. The rest of the app has had the loud-schema-failure behaviour since phase 12 and these two
+ * modules — roughly eighty operations — opted out of it.
+ *
+ * `.passthrough()` on every object, deliberately: a server that ADDS a field must not break an older bundle.
+ * Drift is only an error in the direction where the client is left with less than it needs.
  */
-const asJson = <T>(p: Promise<unknown>): Promise<T> => p as Promise<T>;
+const parsed = <T>(schema: z.ZodType<T>, p: Promise<unknown>): Promise<T> => p.then((d) => parseOr(schema, d));
 
 /**
  * 25.7 — the typed surface the Branch Management portal consumes (design 42 §6).
@@ -24,108 +42,111 @@ const asJson = <T>(p: Promise<unknown>): Promise<T> => p as Promise<T>;
 
 // ── Practitioners & licences ────────────────────────────────────────────────────────────────────────────
 
-export interface BranchPractitioner {
-  practitionerId: string;
-  practitionerType: string;
-  fullNameEn: string;
-  fullNameAr: string;
-  primarySpecialty: string | null;
-  specialties: string[];
-  branches: string[];
-  status: string;
+export const zBranchPractitioner = z.object({
+  practitionerId: z.string(),
+  practitionerType: z.string(),
+  fullNameEn: z.string(),
+  fullNameAr: z.string(),
+  primarySpecialty: z.string().nullable(),
+  specialties: z.array(z.string()),
+  branches: z.array(z.string()),
+  status: z.string(),
   /** Masked to the licence-maintaining scopes. Null means "not shown to you", never "none recorded". */
-  licenseNo: string | null;
+  licenseNo: z.string().nullable(),
   /** The DATE is returned even where the number is masked — it is what the status chip renders. */
-  licenseExpiry: string | null;
-  licenceValid: boolean | null;
-  daysUntilExpiry: number | null;
-}
+  licenseExpiry: z.string().nullable(),
+  licenceValid: z.boolean().nullable(),
+  daysUntilExpiry: z.number().nullable(),
+}).passthrough();
+export type BranchPractitioner = z.infer<typeof zBranchPractitioner>;
 
-export interface LicenceAlert {
-  practitionerId: string;
-  fullNameEn: string;
-  fullNameAr: string;
-  practitionerType: string;
-  licenseNo: string | null;
-  licenseExpiry: string | null;
-  daysUntilExpiry: number | null;
+export const zLicenceAlert = z.object({
+  practitionerId: z.string(),
+  fullNameEn: z.string(),
+  fullNameAr: z.string(),
+  practitionerType: z.string(),
+  licenseNo: z.string().nullable(),
+  licenseExpiry: z.string().nullable(),
+  daysUntilExpiry: z.number().nullable(),
   /** "Expiring" | "Expired" — named by the SERVER, not derived from a negative number on the client. */
-  status: string;
-  branches: string[];
-}
+  status: z.string(),
+  branches: z.array(z.string()),
+}).passthrough();
+export type LicenceAlert = z.infer<typeof zLicenceAlert>;
 
-export interface LicenceAlertsResponse {
-  asOf: string;
-  withinDays: number;
-  alerts: LicenceAlert[];
-}
+export const zLicenceAlertsResponse = z.object({
+  asOf: z.string(),
+  withinDays: z.number(),
+  alerts: z.array(zLicenceAlert),
+}).passthrough();
+export type LicenceAlertsResponse = z.infer<typeof zLicenceAlertsResponse>;
 
 /** An appointment stranded by a lapsed licence or a closed clinic. FLAGGED, never cancelled. */
-export interface FlaggedAppointment {
-  appointmentId: string;
-  beneficiaryId: string;
-  branchId: string | null;
-  doctorId: string | null;
-  scheduledStart: string;
-  scheduledEnd: string;
-  status: string;
-  reassignmentNeededAt: string;
-  beneficiaryName: string | null;
-}
+export const zFlaggedAppointment = z.object({
+  appointmentId: z.string(),
+  beneficiaryId: z.string(),
+  branchId: z.string().nullable(),
+  doctorId: z.string().nullable(),
+  scheduledStart: z.string(),
+  scheduledEnd: z.string(),
+  status: z.string(),
+  reassignmentNeededAt: z.string(),
+  beneficiaryName: z.string().nullable(),
+}).passthrough();
+export type FlaggedAppointment = z.infer<typeof zFlaggedAppointment>;
 
 export const branchApi = {
   practitioners: (params: { branchId?: string; asOf?: string; includeUnlicensed?: boolean } = {}) =>
-    asJson<BranchPractitioner[]>(getRaw(`/practitioners${qs(params)}`)),
+    parsed(z.array(zBranchPractitioner), getRaw(`/practitioners${qs(params)}`)),
 
   licenceAlerts: (withinDays = 90) =>
-    asJson<LicenceAlertsResponse>(getRaw(`/practitioners/licence-alerts?withinDays=${withinDays}`)),
+    parsed(zLicenceAlertsResponse, getRaw(`/practitioners/licence-alerts?withinDays=${withinDays}`)),
 
   /** Record or renew a licence. BOTH fields required — an expiry is what makes it enforceable (25.3). */
   updateLicence: (practitionerId: string, body: { licenseNo: string; licenseExpiry: string }) =>
-    asJson<{ practitionerId: string; licenseNo: string; licenseExpiry: string }>(
+    parsed(
+      z.object({ practitionerId: z.string(), licenseNo: z.string(), licenseExpiry: z.string() }).passthrough(),
       postRaw(`/practitioners/${practitionerId}/licence`, body)),
 
   assignBranch: (practitionerId: string, body: { branchId: string; validFrom: string; validTo?: string }) =>
-    asJson<{ practitionerId: string; branchId: string }>(
+    parsed(
+      z.object({ practitionerId: z.string(), branchId: z.string() }).passthrough(),
       postRaw(`/practitioners/${practitionerId}/branches`, body)),
 
   reassignmentNeeded: (params: { branchId?: string; doctorId?: string } = {}) =>
-    asJson<{ asOf: string; count: number; appointments: FlaggedAppointment[] }>(
+    parsed(
+      z.object({ asOf: z.string(), count: z.number(), appointments: z.array(zFlaggedAppointment) }).passthrough(),
       getRaw(`/appointments/reassignment-needed${qs(params)}`)),
 };
 
 // ── Roster ──────────────────────────────────────────────────────────────────────────────────────────────
 
-export type RosterKind = "Leave" | "PublicHoliday" | "ClinicClosed" | "AdHocClinic";
+export const zRosterKind = z.enum(["Leave", "PublicHoliday", "ClinicClosed", "AdHocClinic"]);
+export type RosterKind = z.infer<typeof zRosterKind>;
 
-export interface RosterException {
-  exceptionId: string;
-  branchId: string | null;
-  practitionerId: string | null;
-  dateFrom: string;
-  dateTo: string;
-  kind: RosterKind;
-  startTime: string | null;
-  endTime: string | null;
-  reason: string;
-  wholeDay: boolean;
-  subtractive: boolean;
-  createdAt: string;
-  createdBy: string | null;
-}
+export const zRosterException = z.object({
+  exceptionId: z.string(),
+  branchId: z.string().nullable(),
+  practitionerId: z.string().nullable(),
+  dateFrom: z.string(),
+  dateTo: z.string(),
+  kind: zRosterKind,
+  startTime: z.string().nullable(),
+  endTime: z.string().nullable(),
+  reason: z.string(),
+  wholeDay: z.boolean(),
+  subtractive: z.boolean(),
+  createdAt: z.string(),
+  createdBy: z.string().nullable(),
+}).passthrough();
+export type RosterException = z.infer<typeof zRosterException>;
 
-export interface RosterImpact {
-  dryRun: true;
-  affectedCount: number;
-  affected: Array<{
-    appointmentId: string;
-    beneficiaryId: string;
-    beneficiaryName: string | null;
-    scheduledStart: string;
-    doctorId: string | null;
-    branchId: string | null;
-  }>;
-}
+export const zRosterImpact = z.object({
+  dryRun: z.literal(true),
+  affectedCount: z.number(),
+  affected: z.array(z.object({ appointmentId: z.string(), beneficiaryId: z.string(), beneficiaryName: z.string().nullable(), scheduledStart: z.string(), doctorId: z.string().nullable(), branchId: z.string().nullable() })),
+}).passthrough();
+export type RosterImpact = z.infer<typeof zRosterImpact>;
 
 export interface CreateRosterExceptionBody {
   kind: RosterKind;
@@ -142,7 +163,7 @@ export interface CreateRosterExceptionBody {
 
 export const rosterApi = {
   list: (params: { branchId?: string; practitionerId?: string; from?: string; to?: string } = {}) =>
-    asJson<RosterException[]>(getRaw(`/roster-exceptions${qs(params)}`)),
+    parsed(z.array(zRosterException), getRaw(`/roster-exceptions${qs(params)}`)),
 
   /**
    * THE IMPACT PREVIEW. Always called before the apply — never optional, and the apply below sends back the
@@ -150,82 +171,94 @@ export const rosterApi = {
    * a locked building.
    */
   preview: (body: CreateRosterExceptionBody) =>
-    asJson<RosterImpact>(postRaw(`/roster-exceptions?dryRun=true`, body)),
+    parsed(zRosterImpact, postRaw(`/roster-exceptions?dryRun=true`, body)),
 
   apply: (body: CreateRosterExceptionBody) =>
-    asJson<{ exceptionId: string; affectedCount: number; flagged: number; cancelled: number }>(
+    parsed(
+      z.object({ exceptionId: z.string(), affectedCount: z.number(), flagged: z.number(), cancelled: z.number() })
+        .passthrough(),
       postRaw(`/roster-exceptions`, body)),
 
   withdraw: (exceptionId: string) =>
-    asJson<{ exceptionId: string; withdrawn: boolean }>(
+    parsed(
+      z.object({ exceptionId: z.string(), withdrawn: z.boolean() }).passthrough(),
       postRaw(`/roster-exceptions/${exceptionId}/withdraw`, {})),
 };
 
 // ── Inventory ───────────────────────────────────────────────────────────────────────────────────────────
 
-export type ItemCategory = "Medical" | "NonMedical";
+export const zItemCategory = z.enum(["Medical", "NonMedical"]);
+export type ItemCategory = z.infer<typeof zItemCategory>;
 
-export type MovementKind =
-  | "Receipt" | "Issue" | "TransferOut" | "TransferIn"
-  | "Adjustment" | "WriteOff" | "Return" | "Count";
+export const zMovementKind = z.enum([
+  "Receipt", "Issue", "TransferOut", "TransferIn",
+  "Adjustment", "WriteOff", "Return", "Count",
+]);
+export type MovementKind = z.infer<typeof zMovementKind>;
 
-export interface StockLine {
-  branchId: string;
-  itemId: string;
-  sku: string;
-  nameEn: string;
-  nameAr: string;
-  category: ItemCategory;
-  unitOfMeasure: string;
-  coldChain: boolean;
-  batchId: string | null;
-  batchNo: string | null;
-  expiryDate: string | null;
-  onHand: number;
-  reorderLevel: number;
-  isLow: boolean;
+export const zStockLine = z.object({
+  branchId: z.string(),
+  itemId: z.string(),
+  sku: z.string(),
+  nameEn: z.string(),
+  nameAr: z.string(),
+  category: zItemCategory,
+  unitOfMeasure: z.string(),
+  coldChain: z.boolean(),
+  batchId: z.string().nullable(),
+  batchNo: z.string().nullable(),
+  expiryDate: z.string().nullable(),
+  onHand: z.number(),
+  reorderLevel: z.number(),
+  isLow: z.boolean(),
   /** Expired medical stock: blocked from issue, clearable only by a write-off with a reason. */
-  isQuarantined: boolean;
-}
+  isQuarantined: z.boolean(),
+}).passthrough();
+export type StockLine = z.infer<typeof zStockLine>;
 
-export interface StockResponse {
-  asOf: string;
-  branches: string[];
-  stock: StockLine[];
-}
+export const zStockResponse = z.object({
+  asOf: z.string(),
+  branches: z.array(z.string()),
+  stock: z.array(zStockLine),
+}).passthrough();
+export type StockResponse = z.infer<typeof zStockResponse>;
 
-export interface Movement {
-  movementId: string;
-  branchId: string;
-  itemId: string;
-  batchId: string | null;
-  kind: MovementKind;
+export const zMovement = z.object({
+  movementId: z.string(),
+  branchId: z.string(),
+  itemId: z.string(),
+  batchId: z.string().nullable(),
+  kind: zMovementKind,
   /** SIGNED. On-hand is the sum of these; there is no stored balance anywhere. */
-  quantity: number;
-  reason: string | null;
-  transferRef: string | null;
-  counterpartyBranchId: string | null;
-  actor: string;
-  occurredAt: string;
-}
+  quantity: z.number(),
+  reason: z.string().nullable(),
+  transferRef: z.string().nullable(),
+  counterpartyBranchId: z.string().nullable(),
+  actor: z.string(),
+  occurredAt: z.string(),
+}).passthrough();
+export type Movement = z.infer<typeof zMovement>;
 
-export interface InventoryAlerts {
-  asOf: string;
-  branches: string[];
-  lowStock: Array<{ branchId: string; itemId: string; name: string; onHand: number; reorderLevel: number; leadTimeDays: number }>;
-  expiring: Array<{ branchId: string; itemId: string; batchId: string; batchNo: string; expiryDate: string; name: string; onHand: number; daysRemaining: number; quarantined: boolean }>;
-  quarantined: Array<{ branchId: string; itemId: string; batchId: string; batchNo: string; expiryDate: string; name: string; onHand: number; daysRemaining: number; quarantined: boolean }>;
-}
+export const zInventoryAlerts = z.object({
+  asOf: z.string(),
+  branches: z.array(z.string()),
+  lowStock: z.array(z.object({ branchId: z.string(), itemId: z.string(), name: z.string(), onHand: z.number(), reorderLevel: z.number(), leadTimeDays: z.number() })),
+  expiring: z.array(z.object({ branchId: z.string(), itemId: z.string(), batchId: z.string(), batchNo: z.string(), expiryDate: z.string(), name: z.string(), onHand: z.number(), daysRemaining: z.number(), quarantined: z.boolean() })),
+  quarantined: z.array(z.object({ branchId: z.string(), itemId: z.string(), batchId: z.string(), batchNo: z.string(), expiryDate: z.string(), name: z.string(), onHand: z.number(), daysRemaining: z.number(), quarantined: z.boolean() })),
+}).passthrough();
+export type InventoryAlerts = z.infer<typeof zInventoryAlerts>;
 
 export const inventoryApi = {
   stock: (params: { branchId?: string; category?: ItemCategory; lowStock?: boolean; expiringWithinDays?: number } = {}) =>
-    asJson<StockResponse>(getRaw(`/inventory/stock${qs(params)}`)),
+    parsed(zStockResponse, getRaw(`/inventory/stock${qs(params)}`)),
 
   movements: (params: { branchId?: string; itemId?: string; kind?: MovementKind; page?: number; pageSize?: number } = {}) =>
-    asJson<{ total: number; page: number; pageSize: number; movements: Movement[] }>(
+    parsed(
+      z.object({ total: z.number(), page: z.number(), pageSize: z.number(), movements: z.array(zMovement) })
+        .passthrough(),
       getRaw(`/inventory/movements${qs(params)}`)),
 
-  alerts: (branchId?: string) => asJson<InventoryAlerts>(getRaw(`/inventory/alerts${qs({ branchId })}`)),
+  alerts: (branchId?: string) => parsed(zInventoryAlerts, getRaw(`/inventory/alerts${qs({ branchId })}`)),
 
   /**
    * Post a movement. The `Idempotency-Key` is REQUIRED and must be stable per INTENT: the same key is reused
@@ -237,14 +270,18 @@ export const inventoryApi = {
     idempotencyKey: string,
     body: { branchId: string; itemId: string; kind: MovementKind; quantity: number; batchId?: string; reason?: string },
   ) =>
-    asJson<{ movementId: string; replayed: boolean; quantity: number; onHand: number }>(
+    parsed(
+      z.object({ movementId: z.string(), replayed: z.boolean(), quantity: z.number(), onHand: z.number() })
+        .passthrough(),
       postRaw(`/inventory/movements`, body, idempotencyKey)),
 
   transfer: (
     idempotencyKey: string,
     body: { fromBranchId: string; toBranchId: string; itemId: string; quantity: number; batchId?: string; reason?: string },
   ) =>
-    asJson<{ transferRef: string; outMovementId: string; inMovementId: string; netChange: number }>(
+    parsed(
+      z.object({ transferRef: z.string(), outMovementId: z.string(), inMovementId: z.string(),
+                 netChange: z.number() }).passthrough(),
       postRaw(`/inventory/transfers`, body, idempotencyKey)),
 };
 

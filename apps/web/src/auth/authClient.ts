@@ -1,4 +1,4 @@
-import { permissionsForRole, type Permission, type Role } from "../authz/permissions";
+import type { Permission, Role } from "../authz/permissions";
 
 /**
  * Authenticated session. In production `permissions` are derived from the issuer's token + admin-service
@@ -20,8 +20,9 @@ export interface Session {
 
 /**
  * AuthClient abstraction. The real implementation wraps an OIDC (identity-service) client — authorization-code +
- * PKCE, MFA via the IdP, silent renew. The dev client below simulates the same shape so the portal shell,
- * routing, and session-timeout logic are identical regardless of backend availability.
+ * PKCE, MFA via the IdP, silent renew. `DevAuthClient` (src/auth/devAuthClient.ts, fixture builds only)
+ * simulates the same shape so the portal shell, routing, and session-timeout logic are identical regardless
+ * of backend availability.
  */
 export interface AuthClient {
   /** Begin login. Dev: resolves after the caller supplies role + MFA. Prod: redirects to the issuer. */
@@ -37,98 +38,8 @@ export interface AuthClient {
   renew?(): Promise<Session | null>;
 }
 
-const STORAGE_KEY = "mersal-session";
-const SESSION_TTL_MS = 30 * 60 * 1000; // 30 min absolute — matches session-policy default tier.
-
-const DISPLAY_NAMES: Record<Role, string> = {
-  reception: "Reham (Reception)",
-  doctor: "Dr. Karim",
-  nurse: "Nurse Mona",
-  lab: "Al-Shifa Lab",
-  radiology: "Nile Radiology",
-  procedure_provider: "Cairo Physiotherapy Centre",
-  pharmacy: "Mersal Pharmacy",
-  medical_approval: "Dr. Reviewer",
-  beneficiary_mgmt: "Registration Desk",
-  beneficiary_mgmt_supervisor: "Registration Supervisor",
-  case_manager: "Case Manager Layla",
-  call_center: "Call Agent Sara",
-  claims_officer: "Claims Officer Tarek",
-  finance: "Finance Officer",
-  provider_admin: "Network Admin",
-  policy_admin: "Policy Administrator",
-  org_admin: "Org Admin",
-  super_admin: "Super Admin",
-  branch_coordinator: "Nadia (Maadi Coordinator)",
-  clinics_manager: "Tarek (Clinics Manager)",
-  medical_director: "Medical Director",
-};
-
 /**
- * Dev auth client — no live issuer required. Accepts any 6-digit MFA code (the *presence* of a code
- * models the step-up), persists the session to localStorage, and enforces the same expiry the real token
- * would carry. Swap for the OIDC client without touching AuthProvider or the router.
+ * Absolute session lifetime — 30 min, matching the session-policy default tier. Lives here rather than in
+ * the dev client because the OIDC path extends the same window on "stay signed in".
  */
-export class DevAuthClient implements AuthClient {
-  async login(role: Role, mfaCode: string): Promise<Session> {
-    if (!/^\d{6}$/.test(mfaCode)) throw new Error("mfa-required");
-    const session: Session = {
-      userId: `dev-${role}`,
-      displayName: DISPLAY_NAMES[role],
-      role,
-      permissions: permissionsForRole(role),
-      mfaSatisfied: true,
-      expiresAt: Date.now() + SESSION_TTL_MS,
-    };
-    persist(session);
-    return session;
-  }
-
-  async logout(): Promise<void> {
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      /* ignore */
-    }
-  }
-
-  async restore(): Promise<Session | null> {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as { userId: string; displayName: string; role: Role; expiresAt: number };
-      if (parsed.expiresAt <= Date.now()) {
-        localStorage.removeItem(STORAGE_KEY);
-        return null;
-      }
-      return {
-        userId: parsed.userId,
-        displayName: parsed.displayName,
-        role: parsed.role,
-        permissions: permissionsForRole(parsed.role),
-        mfaSatisfied: true,
-        expiresAt: parsed.expiresAt,
-      };
-    } catch {
-      return null;
-    }
-  }
-}
-
-function persist(session: Session) {
-  try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        userId: session.userId,
-        displayName: session.displayName,
-        role: session.role,
-        expiresAt: session.expiresAt,
-      }),
-    );
-  } catch {
-    /* ignore */
-  }
-}
-
-export const SESSION_TTL = SESSION_TTL_MS;
+export const SESSION_TTL = 30 * 60 * 1000;

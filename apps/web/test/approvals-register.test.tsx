@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { axe } from "jest-axe";
 import { AppProviders } from "../src/App";
-import { DevAuthClient } from "../src/auth/authClient";
+import { DevAuthClient } from "../src/auth/devAuthClient";
 import { DevApiClient } from "../src/api/DevApiClient";
 import type { ApiClient } from "../src/api/client";
 import { ApprovalsRegister } from "../src/screens/ApprovalsRegister";

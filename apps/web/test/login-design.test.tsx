@@ -7,7 +7,7 @@ import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@mersal/design-system";
 import { LoginPage } from "../src/pages/LoginPage";
 import { AuthProvider } from "../src/auth/AuthProvider";
-import { DevAuthClient } from "../src/auth/authClient";
+import { DevAuthClient } from "../src/auth/devAuthClient";
 
 /**
  * Phase 28.8 — the redesigned sign-in screen.

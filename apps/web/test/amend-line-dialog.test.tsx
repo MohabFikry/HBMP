@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
 import { AppProviders } from "../src/App";
-import { DevAuthClient } from "../src/auth/authClient";
+import { DevAuthClient } from "../src/auth/devAuthClient";
 import { DevApiClient } from "../src/api/DevApiClient";
 import { AmendLineDialog } from "../src/screens/AmendLineDialog";
 import type { AmendLineDialogProps } from "../src/screens/AmendLineDialog";

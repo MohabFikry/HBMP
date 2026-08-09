@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppProviders } from "../src/App";
-import { DevAuthClient } from "../src/auth/authClient";
+import { DevAuthClient } from "../src/auth/devAuthClient";
 import { DevApiClient } from "../src/api/DevApiClient";
 import { PrescribingWorkspace } from "../src/screens/prescribing/PrescribingWorkspace";
 import { seedSession } from "./helpers";

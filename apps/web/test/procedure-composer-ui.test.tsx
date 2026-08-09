@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { AppProviders } from "../src/App";
 import { AppRouter } from "../src/routing/AppRouter";
-import { DevAuthClient } from "../src/auth/authClient";
+import { DevAuthClient } from "../src/auth/devAuthClient";
 import { DevApiClient } from "../src/api/DevApiClient";
 import { seedSession } from "./helpers";
 

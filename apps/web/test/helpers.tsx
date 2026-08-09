@@ -4,7 +4,7 @@ import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AppProviders } from "../src/App";
 import { AppRouter } from "../src/routing/AppRouter";
-import { DevAuthClient } from "../src/auth/authClient";
+import { DevAuthClient } from "../src/auth/devAuthClient";
 import { DevApiClient } from "../src/api/DevApiClient";
 import type { ApiClient } from "../src/api/client";
 import type { Role } from "../src/authz/permissions";
