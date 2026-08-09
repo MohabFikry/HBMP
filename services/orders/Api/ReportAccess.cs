@@ -86,7 +86,8 @@ public static class ReportAccessEndpoints
                 new { tenantId = r.TenantId, r.RequestId, r.OrderLineId, orderingProviderId = order.OrderingProviderId, purposeCode = purpose.ToString() }, ct);
             await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/report-access-requests/{r.RequestId}", new ReportAccessStatusView(r.RequestId, r.Status.ToString()));
-        });
+        })
+        .Produces<ReportAccessStatusView>();
 
         // Decide (Approve | Deny | RequestInfo). Decider = authoring doctor OR Medical Director.
         v1.MapPost("/report-access-requests/{id:guid}/decision", async (Guid id, AccessDecision dec, OrdersDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
@@ -187,7 +188,8 @@ public static class ReportAccessEndpoints
             await db.SaveChangesAsync(ct);
             await audit.EmitAsync(Draft(r.RequestId, AuditAction.StateChange, me, r.BeneficiaryId, "ReportAccessUnderReview", null, AuditSeverity.Notice), ct);
             return Results.Ok(new ReportAccessStatusView(r.RequestId, r.Status.ToString()));
-        });
+        })
+        .Produces<ReportAccessStatusView>();
 
         // 18.A4 — supply-info: InfoRequested → UnderReview. A request that entered InfoRequested had NO
         // path back, so the requester could never answer the question and the release was permanently
@@ -216,7 +218,8 @@ public static class ReportAccessEndpoints
             await outbox.EnqueueAsync("ReportAccessInfoSupplied", "orders.events", new { tenantId = r.TenantId, r.RequestId }, ct);
             await tx.CommitAsync(ct);
             return Results.Ok(new ReportAccessStatusView(r.RequestId, r.Status.ToString()));
-        });
+        })
+        .Produces<ReportAccessStatusView>();
 
         // Revoke a grant (author, Medical Director, or DPO) — audited + notified.
         v1.MapPost("/report-access-grants/{id:guid}/revoke", async (Guid id, OrdersDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>

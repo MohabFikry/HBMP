@@ -43,7 +43,8 @@ public static class PractitionerEndpoints
         // --- Reference specialties (org data) ----------------------------------------------------
         read.MapGet("/specialties", async (ProviderDbContext db, CancellationToken ct) =>
             Results.Ok((await db.Specialties.AsNoTracking().Where(s => !s.IsDeleted).OrderBy(s => s.NameEn).ToListAsync(ct))
-                .Select(s => new { s.SpecialtyCode, s.NameEn, s.NameAr, s.ParentCode })));
+                .Select(s => new SpecialtyView(s.SpecialtyCode, s.NameEn, s.NameAr, s.ParentCode))))
+        .Produces<IEnumerable<SpecialtyView>>();
 
         // --- Create a practitioner ---------------------------------------------------------------
         // D3 (ADR-0029): a branch coordinator MAY create a practitioner. Central-only creation makes every new
@@ -378,7 +379,8 @@ public static class PractitionerEndpoints
                 rows = [.. rows.Where(p => PractitionerLicence.IsValidAt(p.LicenseExpiry, on))];
 
             return Results.Ok(rows.Select(p => ToView(p, canSeeLicense, on)));
-        });
+        })
+        .Produces<IEnumerable<PractitionerView>>();
 
         // --- Licence alerts worklist (the coordinator's screen) ----------------------------------
         //

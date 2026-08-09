@@ -27,7 +27,8 @@ public static class BranchEndpoints
             if (status is not null && Enum.TryParse<BranchStatus>(status, out var s)) q = q.Where(b => b.Status == s);
             var rows = await q.OrderBy(b => b.BranchCode).ToListAsync(ct);
             return Results.Ok(rows.Select(ToView));
-        });
+        })
+        .Produces<IEnumerable<BranchView>>();
 
         read.MapGet("/{id:guid}", async (Guid id, ProviderDbContext db, CancellationToken ct) =>
         {
@@ -87,7 +88,8 @@ public static class BranchEndpoints
             await outbox.EnqueueAsync("BranchUpdated", "provider.events", new { branchId = b.BranchId, b.BranchCode }, ct);
             await tx.CommitAsync(ct);
             return Results.Ok(ToView(b));
-        });
+        })
+        .Produces<BranchView>();
 
         // --- Change status (Active/Suspended/Closed) → BranchStatusChanged -----------------------
         write.MapPost("/{id:guid}/status", async (Guid id, ChangeBranchStatus req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>

@@ -355,7 +355,8 @@ public static class RxAmendmentEndpoints
                 : cancelled < reports.Count
                     ? Results.Json(new CancelLinesResultView(rxId, cancelled, [.. reports]), statusCode: 207)
                     : Results.Ok(new CancelLinesResultView(rxId, cancelled, [.. reports]));
-        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"))
+        .Produces<CancelLinesResultView>();
     }
 
     /// <summary>Design 45 §5's default. Held here rather than read from system_config for the same reason the

@@ -43,7 +43,8 @@ public static class AmendmentEndpoints
         v1.MapGet("/amendment-reasons", () =>
                 Results.Ok(AmendmentReasons.For(ReasonScope.Order)
                     .Select(r => new AmendmentReasonView(r.Code, r.NameEn, r.NameAr))))
-            .RequireAuthorization(HbmpPolicies.Scope("orders:read"));
+            .RequireAuthorization(HbmpPolicies.Scope("orders:read"))
+        .Produces<IEnumerable<AmendmentReasonView>>();
 
         // ---- Cancel ONE line ---------------------------------------------------------------------------
         v1.MapPost("/{orderId:guid}/lines/{lineId:guid}/cancel", async Task<IResult> (

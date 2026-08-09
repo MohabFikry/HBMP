@@ -579,7 +579,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcedureTypeValidationView"
+                }
+              }
+            }
           }
         }
       }
@@ -1210,6 +1217,27 @@
             "items": {
               "type": "string"
             },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProcedureTypeValidationView": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string",
+            "nullable": true
+          },
+          "cptCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "section": {
+            "type": "string",
             "nullable": true
           }
         },

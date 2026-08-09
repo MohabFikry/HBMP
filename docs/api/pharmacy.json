@@ -805,7 +805,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelLinesResultView"
+                }
+              }
+            }
           }
         }
       }
@@ -946,6 +953,25 @@
           },
           "nameAr": {
             "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CancelLinesResultView": {
+        "type": "object",
+        "properties": {
+          "rxId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cancelled": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lines": {
+            "type": "array",
+            "items": { },
             "nullable": true
           }
         },

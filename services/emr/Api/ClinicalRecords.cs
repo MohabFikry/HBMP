@@ -84,7 +84,8 @@ public static class ClinicalEndpoints
                 var appt = e.AppointmentId is { } id ? byAppt.GetValueOrDefault(id) : null;
                 return EncounterResponse.From(e, appt?.BeneficiaryName, appt?.BranchId);
             }));
-        });
+        })
+        .Produces<IEnumerable<EncounterResponse>>();
 
         // ---- Full clinical record (US-030) — treating clinician or approval team only ----
         enc.MapGet("/{id:guid}/clinical", async (

@@ -390,7 +390,8 @@ v1.MapGet("/procedure-types/{code}/validate", async (
     return Results.Problem(statusCode: 422, title: "procedure-type-mismatch",
         type: "urn:hbmp:procedure-type-mismatch", detail: en,
         extensions: new Dictionary<string, object?> { ["reason"] = error.ToString(), ["detailAr"] = ar });
-});
+})
+        .Produces<ProcedureTypeValidationView>();
 
 // 29.7 — the lowest-price labels are recomputed BY THE LOADER, not by an endpoint here.
 //

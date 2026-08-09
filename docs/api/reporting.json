@@ -40,7 +40,24 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalTatReport"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobHandleView"
+                }
+              }
+            }
           }
         }
       }
@@ -52,7 +69,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingApprovalsReport"
+                }
+              }
+            }
           }
         }
       }
@@ -80,7 +104,24 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClinicWorkloadReport"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobHandleView"
+                }
+              }
+            }
           }
         }
       }
@@ -115,7 +156,24 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UtilizationReport"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobHandleView"
+                }
+              }
+            }
           }
         }
       }
@@ -143,7 +201,24 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoShowReport"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobHandleView"
+                }
+              }
+            }
           }
         }
       }
@@ -171,7 +246,24 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RejectedRequestsReport"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobHandleView"
+                }
+              }
+            }
           }
         }
       }
@@ -199,7 +291,24 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopCodesReport"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobHandleView"
+                }
+              }
+            }
           }
         }
       }
@@ -227,7 +336,24 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopCodesReport"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobHandleView"
+                }
+              }
+            }
           }
         }
       }
@@ -278,7 +404,24 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinancialSummaryReport"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobHandleView"
+                }
+              }
+            }
           }
         }
       }
@@ -364,7 +507,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutiveDashboard"
+                }
+              }
+            }
           }
         }
       }
@@ -601,6 +751,35 @@
         },
         "additionalProperties": false
       },
+      "ApprovalTatReport": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "avgTatSeconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "p95TatSeconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "slaBreaches": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "byPriority": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TatRow"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "BiText": {
         "type": "object",
         "properties": {
@@ -615,6 +794,312 @@
           "isComplete": {
             "type": "boolean",
             "readOnly": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChartSeries": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/BiText"
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SeriesPoint"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ClinicWorkloadReport": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkloadRow"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CodeRankRow": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DashboardWidget": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "nullable": true
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WidgetKind"
+          },
+          "zone": {
+            "type": "string",
+            "nullable": true
+          },
+          "title": {
+            "$ref": "#/components/schemas/BiText"
+          },
+          "xAxis": {
+            "$ref": "#/components/schemas/BiText"
+          },
+          "yAxis": {
+            "$ref": "#/components/schemas/BiText"
+          },
+          "units": {
+            "type": "string",
+            "nullable": true
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChartSeries"
+            },
+            "nullable": true
+          },
+          "dataTable": {
+            "$ref": "#/components/schemas/DataTable"
+          },
+          "periodFrom": {
+            "type": "string",
+            "format": "date"
+          },
+          "periodTo": {
+            "type": "string",
+            "format": "date"
+          },
+          "lastRefreshedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "isAccessible": {
+            "type": "boolean",
+            "readOnly": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DataTable": {
+        "type": "object",
+        "properties": {
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BiText"
+            },
+            "nullable": true
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExecutiveDashboard": {
+        "type": "object",
+        "properties": {
+          "contractVersion": {
+            "type": "string",
+            "nullable": true
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "widgets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardWidget"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "FinancialRow": {
+        "type": "object",
+        "properties": {
+          "serviceLine": {
+            "type": "string",
+            "nullable": true
+          },
+          "amount": {
+            "type": "number",
+            "format": "double"
+          },
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FinancialSummaryReport": {
+        "type": "object",
+        "properties": {
+          "totalAmount": {
+            "type": "number",
+            "format": "double"
+          },
+          "totalCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "byServiceLine": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FinancialRow"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "JobHandleView": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "progressPercent": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pollUrl": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "NoShowReport": {
+        "type": "object",
+        "properties": {
+          "booked": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "attended": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "noShow": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "noShowRate": {
+            "type": "number",
+            "format": "double"
+          },
+          "byClinic": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NoShowRow"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "NoShowRow": {
+        "type": "object",
+        "properties": {
+          "clinicId": {
+            "type": "string",
+            "nullable": true
+          },
+          "booked": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "attended": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "noShow": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "noShowRate": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PendingApprovalsReport": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "slaBreaches": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingRow"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PendingRow": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "priority": {
+            "type": "string",
+            "nullable": true
+          },
+          "ageBucket": {
+            "type": "string",
+            "nullable": true
+          },
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "slaBreaches": {
+            "type": "integer",
+            "format": "int64"
           }
         },
         "additionalProperties": false
@@ -645,6 +1130,155 @@
             "type": "string",
             "format": "date-time",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "RejectedRequestsReport": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "byReason": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RejectionReasonRow"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "RejectionReasonRow": {
+        "type": "object",
+        "properties": {
+          "reasonCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SeriesPoint": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "nullable": true
+          },
+          "value": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TatRow": {
+        "type": "object",
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "nullable": true
+          },
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "avgTatSeconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "p95TatSeconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "slaBreaches": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TopCodesReport": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "nullable": true
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CodeRankRow"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "UtilizationReport": {
+        "type": "object",
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "nullable": true
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UtilizationRow"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "UtilizationRow": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "WidgetKind": {
+        "enum": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
+      "WorkloadRow": {
+        "type": "object",
+        "properties": {
+          "clinicId": {
+            "type": "string",
+            "nullable": true
+          },
+          "period": {
+            "type": "string",
+            "format": "date"
+          },
+          "encounters": {
+            "type": "integer",
+            "format": "int64"
           }
         },
         "additionalProperties": false

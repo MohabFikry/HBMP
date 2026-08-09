@@ -244,7 +244,8 @@ read.MapGet("/providers", async (ProviderDbContext db, IHbmpPrincipalAccessor me
         q = q.Where(p => p.ProviderId.ToString() == principal.ProviderId);
     if (status is not null && Enum.TryParse<ProviderStatus>(status, out var s)) q = q.Where(p => p.Status == s);
     return Results.Ok((await q.ToListAsync(ct)).Select(ToView));
-});
+})
+.Produces<IEnumerable<ProviderView>>();
 
 read.MapGet("/providers/{id:guid}", async (Guid id, ProviderDbContext db, ProviderAccessGuard guard, IHbmpPrincipalAccessor me, CancellationToken ct) =>
 {
@@ -255,7 +256,8 @@ read.MapGet("/providers/{id:guid}", async (Guid id, ProviderDbContext db, Provid
     var decision = await guard.AuthorizeAsync(me.Require(), p.TenantId, p.ProviderId.ToString(), ct);
     if (!decision.IsAllowed) return Results.Problem(statusCode: 403, title: "provider access denied", detail: decision.ReasonCode);
     return Results.Ok(ToView(p));
-});
+})
+.Produces<ProviderView>();
 
 // --- Add location (primary rule enforced by partial-unique index) ------------------------------
 write.MapPost("/providers/{id:guid}/locations", async (Guid id, CreateLocation req, ProviderDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, CancellationToken ct) =>

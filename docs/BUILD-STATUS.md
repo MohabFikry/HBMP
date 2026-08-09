@@ -1141,7 +1141,9 @@ because those are the ones where a silent shape change breaks a screen. Each rec
 property names the anonymous object carried, so **the JSON is byte-identical** — what changes is that the
 shape is now in the spec. Pharmacy, masterdata and orders are done; their suites pass unchanged.
 
-Coverage went **1% → 27.9%** (160 of 574 operations), and **51 → 42** for the SPA-called subset.
+Coverage went **1% → 31.9%** (183 of 574 operations), and **51 → 28** for the SPA-called subset. Pharmacy,
+masterdata, orders, provider, reporting, emr and patient are done to the extent their responses have a type;
+their suites pass unchanged, and the full solution is 3,636 green with 0 skipped.
 
 ### And a ratchet, so the remainder cannot stay invisible
 
@@ -1152,6 +1154,7 @@ a bar that can be lowered to pass is not a bar. It is in `REQUIRED_GATES`, so it
 
 ### Not done in 31.6
 
-- **414 operations still declare no response body**, 42 of them called by the SPA. The floors hold the line
-  and name the remainder per service; the work is mechanical but not automatable — each anonymous object is a
-  contract decision about what the response IS.
+- **391 operations still declare no response body**, 28 of them called by the SPA — admin (12) is the largest
+  block, then finance, case, approvals, claims and the provider write paths. The floors hold the line and
+  name the remainder per service; the work is mechanical but not automatable, because each anonymous object
+  is a contract decision about what the response IS rather than a rename.

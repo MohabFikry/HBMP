@@ -9,19 +9,19 @@
     "claims": 9,
     "document": 0,
     "eligibility": 3,
-    "emr": 23,
+    "emr": 24,
     "finance": 4,
     "identity": 1,
     "interop": 0,
     "inventory": 1,
-    "masterdata": 3,
+    "masterdata": 4,
     "notification": 4,
-    "orders": 13,
+    "orders": 17,
     "patient": 4,
-    "pharmacy": 18,
+    "pharmacy": 19,
     "policy": 37,
     "profile": 0,
-    "provider": 7,
-    "reporting": 1
+    "provider": 13,
+    "reporting": 11
   }
 }
