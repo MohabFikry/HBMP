@@ -81,7 +81,8 @@ public static class EngineRules
 
             return Results.Ok(new RuleListView(rows, Queues.OrderBy(x => x).ToList(),
                 RuleEvaluator.DefaultQueue));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:configure"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:configure"))
+        .Produces<RuleListView>();
 
         // ---- the kill switch ---------------------------------------------------------------------------
         //
@@ -103,7 +104,8 @@ public static class EngineRules
                 row?.Enabled ?? false,
                 row?.Reason ?? "Auto-decision has never been turned on for this tenant.",
                 row?.UpdatedBy, row?.UpdatedAt, AutoApproval.HardMaximumEgp));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:configure"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:configure"))
+        .Produces<AutoDecisionSwitchView>();
 
         v1.MapPut("/auto-decision", async (
             SetAutoDecisionRequest req, ApprovalsDbContext db, ApprovalsGate gate, IAuditClient audit,
@@ -154,7 +156,8 @@ public static class EngineRules
 
             return Results.Ok(new AutoDecisionSwitchView(
                 row.Enabled, row.Reason, row.UpdatedBy, row.UpdatedAt, AutoApproval.HardMaximumEgp));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:configure"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:configure"))
+        .Produces<AutoDecisionSwitchView>();
 
         // ---- author -----------------------------------------------------------------------------------
         v1.MapPost("/", async (

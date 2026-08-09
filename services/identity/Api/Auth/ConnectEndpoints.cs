@@ -255,7 +255,8 @@ public static class ConnectEndpoints
                 [.. facts.Scopes.OrderBy(s => s, StringComparer.Ordinal)]));
         })
         .RequireAuthorization(IdentityAdminPolicies.Authenticated)
-        .RequireRateLimiting(IssuerRateLimits.Token);
+        .RequireRateLimiting(IssuerRateLimits.Token)
+        .Produces<EntitlementResponse>();
 
         // ---- Password sign-in (17.3 login UI); routes to TOTP when the account has 2FA enabled -------------
         app.MapGet("/connect/login", (HttpContext http, IAntiforgery antiforgery, string? returnUrl) =>

@@ -42,7 +42,7 @@ public static class AmendmentEndpoints
         // ---- The coded vocabulary the picker renders ---------------------------------------------------
         v1.MapGet("/amendment-reasons", () =>
                 Results.Ok(AmendmentReasons.For(ReasonScope.Order)
-                    .Select(r => new { code = r.Code, nameEn = r.NameEn, nameAr = r.NameAr })))
+                    .Select(r => new AmendmentReasonView(r.Code, r.NameEn, r.NameAr))))
             .RequireAuthorization(HbmpPolicies.Scope("orders:read"));
 
         // ---- Cancel ONE line ---------------------------------------------------------------------------

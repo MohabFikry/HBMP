@@ -60,7 +60,8 @@ public static class ValidityPolicyEndpoints
 
             return Results.Ok(new ValidityPolicyView(tenant, ValidityPolicy.DefaultDays,
                 ValidityPolicy.MinDays, ValidityPolicy.MaxDays, items));
-        }).RequireAuthorization();
+        }).RequireAuthorization()
+        .Produces<ValidityPolicyView>();
 
         app.MapPut("/api/v1/admin/validity-policy", async (
             SetValidityPolicyRequest req, AdminGate gate, GovernanceService svc, CancellationToken ct) =>

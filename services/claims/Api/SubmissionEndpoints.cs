@@ -80,7 +80,8 @@ public static class SubmissionEndpoints
                     await tx.CommitAsync(ct);
                     return Results.Created($"/api/v1/claims/submissions/{r.Submission!.SubmissionId}", SubmissionView.From(r.Submission));
             }
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:submit"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:submit"))
+        .Produces<SubmissionView>();
 
         // --- attach a document reference -------------------------------------------------------------------
         v1.MapPost("/{id:guid}/documents", async (
@@ -130,7 +131,8 @@ public static class SubmissionEndpoints
                 FieldClasses = ["financials"],
             }, ct);
             return Results.Ok(SubmissionView.From(s));
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"))
+        .Produces<SubmissionView>();
     }
 
     private static IReadOnlyList<SubmissionLineInput>? ParseLines(IReadOnlyList<SubmissionLineBody> lines)

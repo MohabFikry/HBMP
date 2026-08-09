@@ -368,19 +368,10 @@ v1.MapGet("/procedure-types", async (bool? includeInactive, MasterDataDbContext 
     var q = db.ProcedureTypes.AsNoTracking();
     if (includeInactive != true) q = q.Where(x => x.IsActive);
     var rows = await q.OrderBy(x => x.SortOrder).ThenBy(x => x.Code).ToListAsync(ct);
-    return Results.Ok(rows.ConvertAll(x => new
-    {
-        code = x.Code,
-        nameEn = x.NameEn,
-        nameAr = x.NameAr,
-        isSessionBased = x.IsSessionBased,
-        defaultSessions = x.DefaultSessions,
-        maxSessions = x.MaxSessions,
-        allowedCptScopes = x.Scopes(),
-        isActive = x.IsActive,
-        sortOrder = x.SortOrder,
-    }));
-});
+    return Results.Ok(rows.ConvertAll(x => new ProcedureTypeView(
+        x.Code, x.NameEn, x.NameAr, x.IsSessionBased, x.DefaultSessions, x.MaxSessions,
+        [.. x.Scopes()], x.IsActive, x.SortOrder)));
+}).Produces<IEnumerable<ProcedureTypeView>>();
 
 // 29.2 — may this type accompany this code, with this many sessions? Asked by the composer as the doctor
 // picks, and re-asked by orders-service on the write path, because the composer's verdict is display state.
@@ -393,7 +384,7 @@ v1.MapGet("/procedure-types/{code}/validate", async (
 
     var error = ProcedureTypeRules.Validate(spec, cptCode, sessions);
     if (error == ProcedureTypeError.None)
-        return Results.Ok(new { ok = true, type = code, cptCode, section = CptSections.SectionOf(cptCode) });
+        return Results.Ok(new ProcedureTypeValidationView(true, code, cptCode, CptSections.SectionOf(cptCode)));
 
     var (en, ar) = ProcedureTypeRules.Explain(error, spec, cptCode);
     return Results.Problem(statusCode: 422, title: "procedure-type-mismatch",
@@ -475,7 +466,8 @@ v1.MapGet("/drugs/by-id/{id:guid}", async (Guid id, MasterDataDbContext db, Canc
         : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found"));
 
 v1.MapGet("/allergens/{id:guid}/exists", async (Guid id, MasterDataDbContext db, CancellationToken ct) =>
-    Results.Ok(new { id, exists = await db.Allergens.AsNoTracking().AnyAsync(x => x.AllergenId == id, ct) }));
+    Results.Ok(new ExistsView(id, await db.Allergens.AsNoTracking().AnyAsync(x => x.AllergenId == id, ct))))
+    .Produces<ExistsView>();
 
 // Policy-approved alternatives for a drug (phase 6.3 formulary): the other drugs in the SAME ATC-5 class
 // (same therapeutic substance) — a clinically-sound generic-substitution set from real master data. Returns
@@ -712,28 +704,23 @@ v1.MapPost("/drugs/ingredients/by-ids", async (DrugIdCheckRequest req, MasterDat
         .Select(x => new { x.DrugId, x.IngredientKey })
         .ToListAsync(ct);
 
-    return Results.Ok(new
+    // Every id asked about is answered for, including the ones with no ingredient recorded — 2,786
+    // products are in that state, and "not recorded" is the answer that makes the check say so rather
+    // than quietly omit the line.
+    return Results.Ok(new DrugIngredientsView([.. ids.Select(id =>
     {
-        // Every id asked about is answered for, including the ones with no ingredient recorded — 2,786
-        // products are in that state, and "not recorded" is the answer that makes the check say so rather
-        // than quietly omit the line.
-        items = ids.Select(id =>
-        {
-            var row = rows.FirstOrDefault(r => r.DrugId == id);
-            return new
-            {
-                drugId = id,
-                // The name MASTER DATA holds, never one the client sent — the same rule the prescription-create
-                // path enforces, and for the same reason: a client-supplied label would let the medicine named in
-                // a safety warning differ from the drug actually prescribed.
-                name = row?.Name,
-                scientificName = row?.ScientificName,
-                atcCode = row?.AtcCode,
-                ingredientKeys = composition.Where(c => c.DrugId == id).Select(c => c.IngredientKey).Order(StringComparer.Ordinal),
-            };
-        }),
-    });
-});
+        var row = rows.FirstOrDefault(r => r.DrugId == id);
+        return new DrugIngredientView(
+            id,
+            // The name MASTER DATA holds, never one the client sent — the same rule the prescription-create
+            // path enforces, and for the same reason: a client-supplied label would let the medicine named in
+            // a safety warning differ from the drug actually prescribed.
+            row?.Name,
+            row?.ScientificName,
+            row?.AtcCode,
+            [.. composition.Where(c => c.DrugId == id).Select(c => c.IngredientKey).Order(StringComparer.Ordinal)]);
+    })]));
+}).Produces<DrugIngredientsView>();
 
 /*
  * 28.7 — the ancestors of a set of ICD codes, so the indication check can walk the hierarchy instead of

@@ -129,7 +129,8 @@ public static class BreakGlass
             }, ct);
 
             return Results.Created($"/api/v1/authorizations/{auth.AuthorizationId}", DecisionView.From(auth, row));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:manual"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:manual"))
+        .Produces<DecisionView>();
 
         // RETROSPECTIVE-REVIEW QUEUE: break-glass cases awaiting post-hoc review (min-necessary, no clinical payload).
         v1.MapGet("/retrospective-queue", async (
@@ -142,7 +143,8 @@ public static class BreakGlass
                 .Where(a => a.RetrospectiveReviewRequired && !a.RetrospectiveReviewed)
                 .OrderByDescending(a => a.DecidedAt).Take(200).ToListAsync(ct);
             return Results.Ok(items.Select(a => WorklistItemView.From(a, now)));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"))
+        .Produces<IEnumerable<WorklistItemView>>();
 
         // TAT / SLA AGGREGATE for the reporting read-model (phase 8). Count by status + avg/p95 TAT + breach count.
         v1.MapGet("/tat-summary", async (ApprovalsDbContext db, ApprovalsGate gate, CancellationToken ct) =>

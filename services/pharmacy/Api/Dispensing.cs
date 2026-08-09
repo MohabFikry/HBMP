@@ -336,7 +336,8 @@ public static class DispensingEndpoints
                 default:
                     return Results.Problem(statusCode: 400, title: "invalid-dispense");
             }
-        }).RequireAuthorization(HbmpPolicies.Scope("pharmacy:dispense"));
+        }).RequireAuthorization(HbmpPolicies.Scope("pharmacy:dispense"))
+        .Produces<DispenseResponse>();
 
         // ---- 6.3 Out-of-stock: flag WITHOUT consuming; the unfilled quantity stays available; notify prescriber/beneficiary ----
         v1.MapPost("/{rxId:guid}/lines/{lineId:guid}/out-of-stock", async (

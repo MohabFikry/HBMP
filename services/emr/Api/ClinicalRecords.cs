@@ -217,7 +217,8 @@ public static class ClinicalEndpoints
             await db.SaveChangesAsync(ct);
             await EmitAsync(audit, "emr_note", note.NoteId, AuditAction.Create, me, $"{{\"encounterId\":\"{id}\",\"type\":\"{note.NoteType}\"}}", ct);
             return Results.Created($"/api/v1/encounters/{id}/notes/{note.NoteId}", NoteResponse.From(note));
-        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"))
+        .Produces<NoteResponse>();
 
         // ---- SOAP note edit (unsigned, author only) ----
         enc.MapPut("/{id:guid}/notes/{noteId:guid}", async (
@@ -247,7 +248,8 @@ public static class ClinicalEndpoints
             await db.SaveChangesAsync(ct);
             await EmitAsync(audit, "emr_note", note.NoteId, AuditAction.Update, me, "{\"edited\":true}", ct);
             return Results.Ok(NoteResponse.From(note));
-        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"))
+        .Produces<NoteResponse>();
 
         // ---- Sign a note (locks it) ----
         enc.MapPost("/{id:guid}/notes/{noteId:guid}/sign", async (
@@ -281,7 +283,8 @@ public static class ClinicalEndpoints
             await db.SaveChangesAsync(ct);
             await EmitAsync(audit, "emr_note", note.NoteId, AuditAction.StateChange, me, "{\"isSigned\":true}", ct);
             return Results.Ok(NoteResponse.From(note));
-        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"))
+        .Produces<NoteResponse>();
 
         // ---- Addendum to a (signed) note — the ONLY way to correct after signing ----
         enc.MapPost("/{id:guid}/notes/{noteId:guid}/addendum", async (
@@ -308,7 +311,8 @@ public static class ClinicalEndpoints
             await db.SaveChangesAsync(ct);
             await EmitAsync(audit, "emr_note", addendum.NoteId, AuditAction.Create, me, $"{{\"addendumOf\":\"{noteId}\"}}", ct);
             return Results.Created($"/api/v1/encounters/{id}/notes/{addendum.NoteId}", NoteResponse.From(addendum));
-        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"))
+        .Produces<NoteResponse>();
 
         // ---- Diagnosis (US-031): ICD-10 validated vs masterdata ----
         enc.MapPost("/{id:guid}/diagnoses", async (
@@ -341,7 +345,8 @@ public static class ClinicalEndpoints
             await db.SaveChangesAsync(ct);
             await EmitAsync(audit, "diagnosis", dx.DiagnosisId, AuditAction.Create, me, $"{{\"icd\":\"{dx.IcdCode}\"}}", ct);
             return Results.Created($"/api/v1/encounters/{id}/diagnoses/{dx.DiagnosisId}", DiagnosisResponse.From(dx));
-        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"))
+        .Produces<DiagnosisResponse>();
 
         // ---- End the visit (23 §6) — the transition nothing in this platform performed ----
         //
@@ -425,7 +430,8 @@ public static class ClinicalEndpoints
             await EmitAsync(audit, "encounter", encounter.EncounterId, AuditAction.StateChange, me,
                 $"{{\"status\":\"Completed\",\"appointmentClosed\":{(appt is not null).ToString().ToLowerInvariant()}}}", ct);
             return Results.Ok(EncounterResponse.From(encounter));
-        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"))
+        .Produces<EncounterResponse>();
 
         // ---- Diagnosis retract (US-031) — a mis-keyed code, taken off the working assessment ----
         //
@@ -486,7 +492,8 @@ public static class ClinicalEndpoints
             await db.SaveChangesAsync(ct);
             await EmitAsync(audit, "vital", vital.VitalId, AuditAction.Create, me, $"{{\"type\":\"{vital.VitalType}\"}}", ct);
             return Results.Created($"/api/v1/encounters/{id}/vitals/{vital.VitalId}", VitalResponse.From(vital));
-        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"))
+        .Produces<VitalResponse>();
 
         /* ---- GET /encounters/{id}/validation-context — what the prescribing engine must NOT take from the
          * client (28.2, design 44 §1.3).
@@ -663,7 +670,8 @@ public static class ClinicalEndpoints
             await db.SaveChangesAsync(ct);
             await EmitAsync(audit, "allergy", allergy.AllergyId, AuditAction.Create, me, $"{{\"severity\":\"{allergy.Severity}\"}}", ct);
             return Results.Created($"/api/v1/beneficiaries/{beneficiaryId}/allergies/{allergy.AllergyId}", AllergyResponse.From(allergy));
-        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"))
+        .Produces<AllergyResponse>();
 
         // ---- Blood group (beneficiary-level, migration 0021) ----
         //
@@ -719,7 +727,8 @@ public static class ClinicalEndpoints
             await db.SaveChangesAsync(ct);
             await EmitAsync(audit, "medication_history", med.MedHistoryId, AuditAction.Create, me, $"{{\"source\":\"{med.Source}\"}}", ct);
             return Results.Created($"/api/v1/beneficiaries/{beneficiaryId}/medication-history/{med.MedHistoryId}", MedicationHistoryResponse.From(med));
-        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("emr:write"))
+        .Produces<MedicationHistoryResponse>();
 
         // ---- FHIR R4 read projection over the canonical tables (interop, treating-gated) ----
         enc.MapGet("/{id:guid}/fhir", async (

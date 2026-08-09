@@ -40,8 +40,9 @@ public static class RxAmendmentEndpoints
 
         v1.MapGet("/amendment-reasons", () =>
                 Results.Ok(AmendmentReasons.For(ReasonScope.Prescription)
-                    .Select(r => new { code = r.Code, nameEn = r.NameEn, nameAr = r.NameAr })))
-            .RequireAuthorization(HbmpPolicies.Scope("rx:read"));
+                    .Select(r => new AmendmentReasonView(r.Code, r.NameEn, r.NameAr))))
+            .RequireAuthorization(HbmpPolicies.Scope("rx:read"))
+            .Produces<IEnumerable<AmendmentReasonView>>();
 
         // ---- Cancel ONE line ---------------------------------------------------------------------------
         v1.MapPost("/{rxId:guid}/lines/{lineId:guid}/cancel", async Task<IResult> (
@@ -350,10 +351,10 @@ public static class RxAmendmentEndpoints
 
             var cancelled = reports.Count(r => r.Cancelled);
             return cancelled == 0
-                ? Results.Json(new { rxId, cancelled, lines = reports }, statusCode: 409)
+                ? Results.Json(new CancelLinesResultView(rxId, cancelled, [.. reports]), statusCode: 409)
                 : cancelled < reports.Count
-                    ? Results.Json(new { rxId, cancelled, lines = reports }, statusCode: 207)
-                    : Results.Ok(new { rxId, cancelled, lines = reports });
+                    ? Results.Json(new CancelLinesResultView(rxId, cancelled, [.. reports]), statusCode: 207)
+                    : Results.Ok(new CancelLinesResultView(rxId, cancelled, [.. reports]));
         }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
     }
 

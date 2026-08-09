@@ -124,7 +124,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementView"
+                }
+              }
+            }
           }
         }
       },
@@ -174,7 +181,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementView"
+                }
+              }
+            }
           }
         }
       }
@@ -197,7 +211,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementView"
+                }
+              }
+            }
           }
         }
       }
@@ -220,7 +241,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettlementView"
+                }
+              }
+            }
           }
         }
       }
@@ -346,6 +374,82 @@
           "occurredAt": {
             "type": "string",
             "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SettlementLineView": {
+        "type": "object",
+        "properties": {
+          "serviceCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "serviceLine": {
+            "type": "string",
+            "nullable": true
+          },
+          "deliveredQty": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "agreedUnitPrice": {
+            "type": "number",
+            "format": "double"
+          },
+          "lineTotal": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SettlementView": {
+        "type": "object",
+        "properties": {
+          "settlementId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "settlementNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "providerRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "contractId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "periodStart": {
+            "type": "string",
+            "format": "date"
+          },
+          "periodEnd": {
+            "type": "string",
+            "format": "date"
+          },
+          "currencyCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "total": {
+            "type": "number",
+            "format": "double"
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SettlementLineView"
+            },
+            "nullable": true
           }
         },
         "additionalProperties": false

@@ -140,7 +140,8 @@ public static class ValidityExtensionEndpoints
             _ = applier;   // resolved here so a misconfigured callback fails at startup, not at decision time
 
             return Results.Created($"/api/v1/authorizations/{auth.AuthorizationId}", AuthorizationStateView.From(auth));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:request-extension"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:request-extension"))
+        .Produces<AuthorizationStateView>();
     }
 }
 

@@ -35,7 +35,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoverageSummaryResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -57,7 +64,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EligibilityCheckResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -101,7 +115,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionSearchResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -109,6 +130,107 @@
   },
   "components": {
     "schemas": {
+      "CostSharePreviewResponse": {
+        "type": "object",
+        "properties": {
+          "tierCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "tierBasis": {
+            "type": "string",
+            "nullable": true
+          },
+          "isCoveredAtTier": {
+            "type": "boolean"
+          },
+          "requiresPreauthAtTier": {
+            "type": "boolean"
+          },
+          "determinate": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "estimatedAllowedAmount": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "estimatedMemberShare": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "estimatedPayerShare": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "deductible": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "deductibleWaived": {
+            "type": "boolean"
+          },
+          "copayFixed": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "copayPercent": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "coinsurancePercent": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CoverageSummaryResponse": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "nullable": true
+          },
+          "memberId": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "policyName": {
+            "type": "string",
+            "nullable": true
+          },
+          "coverageCategory": {
+            "type": "string",
+            "nullable": true
+          },
+          "annualLimit": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "remainingLimit": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "EligibilityCheckRequest": {
         "type": "object",
         "properties": {
@@ -151,6 +273,198 @@
           "estimatedAmount": {
             "type": "number",
             "format": "double",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "EligibilityCheckResponse": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "nullable": true
+          },
+          "coverageId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "limitState": {
+            "$ref": "#/components/schemas/LimitStateResponse"
+          },
+          "snapshotExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fromCache": {
+            "type": "boolean"
+          },
+          "costShare": {
+            "$ref": "#/components/schemas/CostSharePreviewResponse"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LimitStateResponse": {
+        "type": "object",
+        "properties": {
+          "limitType": {
+            "type": "string",
+            "nullable": true
+          },
+          "limitValue": {
+            "type": "number",
+            "format": "double"
+          },
+          "consumedValue": {
+            "type": "number",
+            "format": "double"
+          },
+          "remaining": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReceptionIdentity": {
+        "type": "object",
+        "properties": {
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "memberNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "statusSemantics": {
+            "$ref": "#/components/schemas/StatusSemantics"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReceptionResultCard": {
+        "type": "object",
+        "properties": {
+          "identity": {
+            "$ref": "#/components/schemas/ReceptionIdentity"
+          },
+          "coverage": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "remainingLimits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RemainingLimit"
+            },
+            "nullable": true
+          },
+          "visitHistory": {
+            "$ref": "#/components/schemas/VisitHistorySummary"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReceptionSearchResponse": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "nullable": true
+          },
+          "count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceptionResultCard"
+            },
+            "nullable": true
+          },
+          "emptyStateHint": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "RemainingLimit": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "nullable": true
+          },
+          "limitType": {
+            "type": "string",
+            "nullable": true
+          },
+          "remaining": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StatusSemantics": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "nullable": true
+          },
+          "icon": {
+            "type": "string",
+            "nullable": true
+          },
+          "shape": {
+            "type": "string",
+            "nullable": true
+          },
+          "tone": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "VisitHistorySummary": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lastVisitDate": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "lastVisitType": {
+            "type": "string",
             "nullable": true
           }
         },

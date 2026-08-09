@@ -202,7 +202,8 @@ public static class ServiceHistoryEndpoints
                 // The third state, carried explicitly. `false` here means pharmacy ANSWERED — an empty
                 // prescription list is then a real "none" rather than a silence.
                 PrescriptionsUnavailable: !rxHistory.Available));
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"))
+        .Produces<IEnumerable<TrendPoint>>();
     }
 
     /// <summary>A result value as a number, or null when it is not one. Deliberately conservative: "Positive",

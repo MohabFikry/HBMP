@@ -43,9 +43,10 @@ public static class PrescriptionEndpoints
             Results.Ok(await db.RefillFrequencies.AsNoTracking()
                 .Where(x => x.IsActive)
                 .OrderBy(x => x.SortOrder).ThenBy(x => x.Code)
-                .Select(x => new { code = x.Code, months = x.Months, nameEn = x.NameEn, nameAr = x.NameAr })
+                .Select(x => new RefillFrequencyView(x.Code, x.Months, x.NameEn, x.NameAr))
                 .ToListAsync(ct)))
-            .RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+            .RequireAuthorization(HbmpPolicies.Scope("rx:write"))
+            .Produces<IEnumerable<RefillFrequencyView>>();
 
         /*
          * 29.5 — THE SCHEDULE PREVIEW (design 45 §5): "show the computed window schedule with per-window
@@ -115,21 +116,19 @@ public static class PrescriptionEndpoints
             var windows = WindowSchedule.Build(
                 plan.Windows, calendar.Today(), frequency.Months, req.DurationDays, EarlyToleranceDays);
 
-            return Results.Ok(new
-            {
-                total = plan.Total,
-                unit = plan.Unit.ToString(),
-                frequencyMonths = frequency.Months,
-                windows = windows.Select(w => new
-                {
-                    windowNo = w.WindowNo,
-                    scheduledOpen = w.ScheduledOpen.ToString("yyyy-MM-dd"),
-                    opensAt = w.OpensAt.ToString("yyyy-MM-dd"),
-                    closesAt = w.ClosesAt.ToString("yyyy-MM-dd"),
-                    allocatedQuantity = w.AllocatedQuantity,
-                }),
-            });
-        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+            return Results.Ok(new ChronicPreviewView(
+                plan.Total,
+                plan.Unit.ToString(),
+                frequency.Months,
+                [.. windows.Select(w => new ChronicWindowView(
+                    w.WindowNo,
+                    w.ScheduledOpen.ToString("yyyy-MM-dd"),
+                    w.OpensAt.ToString("yyyy-MM-dd"),
+                    w.ClosesAt.ToString("yyyy-MM-dd"),
+                    w.AllocatedQuantity))]));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("rx:write"))
+        .Produces<ChronicPreviewView>();
 
         /*
          * 29.6 — HOW MUCH WILL BE DISPENSED, before the doctor commits (design 45 §6).
@@ -175,20 +174,20 @@ public static class PrescriptionEndpoints
                     detail: $"'{outcome.MissingField}' is not recorded for this drug, so the quantity to "
                           + "dispense cannot be computed. A silently wrong quantity is a dispensing error.");
 
-            return Results.Ok(new
-            {
-                totalUnits = plan.TotalUnits,
-                dispenseQuantity = plan.DispenseQuantity,
-                packs = plan.Packs,
-                // 31.2 — what the pharmacy actually counts out. NULL where the pack and the dose count
-                // different things; the composer says so rather than showing a number.
-                boxes = plan.Boxes,
-                packContent = plan.PackContent,
-                // What the number is COUNTED IN, so the composer can say "60 Tablet" rather than "60".
-                prescribingUnit = pack?.PrescribingUnit,
-                isPackSplittable = req.IsPackSplittable ?? pack?.IsPackSplittable,
-            });
-        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+            return Results.Ok(new QuantityPreviewView(
+                plan.TotalUnits,
+                plan.DispenseQuantity,
+                plan.Packs,
+                // 31.2 — what the pharmacy actually counts out. NULL where the catalogue does not record
+                // what a box holds; the composer says so rather than showing a number.
+                plan.Boxes,
+                plan.PackContent,
+                // What the number is COUNTED IN, so the composer can say "60 tabs" rather than "60".
+                pack?.PrescribingUnit,
+                req.IsPackSplittable ?? pack?.IsPackSplittable));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("rx:write"))
+        .Produces<QuantityPreviewView>();
 
         v1.MapPost("", async (
             CreatePrescriptionRequest req, HttpRequest http, PharmacyDbContext db, PharmacyGate gate,
@@ -574,7 +573,9 @@ public static class PrescriptionEndpoints
             await db.SaveChangesAsync(ct);
 
             return Results.Ok(PrescriptionValidationService.ToView(result, request, run.ValidationId));
-        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("rx:write"))
+        .Produces<ValidationResultView>();
 
         /*
          * 29.4 — THE PRESCRIPTION HALF OF THE SERVICE HISTORY (design 45 §4).
@@ -639,8 +640,10 @@ public static class PrescriptionEndpoints
                 FieldClasses = ["phi"],
             }, ct);
 
-            return Results.Ok(new { items });
-        }).RequireAuthorization(HbmpPolicies.Scope("rx:read"));
+            return Results.Ok(new RxHistoryView(items));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("rx:read"))
+        .Produces<RxHistoryView>();
 
         v1.MapGet("/{id:guid}", async (Guid id, HttpRequest http, PharmacyDbContext db, PharmacyGate gate, CancellationToken ct) =>
         {
@@ -715,6 +718,7 @@ public static class PrescriptionEndpoints
             }, ct);
             await tx.CommitAsync(ct);
             return Results.Ok(PrescriptionResponse.From(rx));
-        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("rx:write"))
+        .Produces<PrescriptionResponse>();
     }
 }

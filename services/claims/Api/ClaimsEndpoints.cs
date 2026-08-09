@@ -55,7 +55,8 @@ public static class ClaimsEndpoints
                     detail: "You are not permitted to read this claim.");
             await AuditRead(deps, "claim", claim.ClaimNo);
             return Results.Ok(ClaimView.From(claim));
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"))
+        .Produces<ClaimView>();
 
         // --- Pre-adjudication (10b.3) ----------------------------------------------------------------------
         v1.MapPost("/{id:guid}/adjudicate", async (Guid id, HttpRequest http, ClaimsDeps deps,

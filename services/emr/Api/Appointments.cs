@@ -150,7 +150,8 @@ public static class AppointmentsModule
                 skippedExisting = existingSet.Count,
                 slots = fresh.Select(s => SlotResponse.From(s, open: true)),
             });
-        });
+        })
+        .Produces<IEnumerable<SlotResponse>>();
 
         // GET /appointment-slots — min-necessary slot list (scheduling only); onlyOpen hides held/past slots.
         read.MapGet("/appointment-slots", async (
@@ -524,7 +525,8 @@ public static class AppointmentsModule
             }
 
             return Results.Created($"/api/v1/appointments/{booked.AppointmentId}", AppointmentResponse.From(booked));
-        });
+        })
+        .Produces<AppointmentResponse>();
 
         // GET /appointments — reception's day board (US-020). Defaults to today's appointments; an optional
         // ?status= filters to a single status (e.g. Scheduled for the check-in worklist). Ordered by start time.
@@ -597,7 +599,8 @@ public static class AppointmentsModule
             var asOf = clock.GetUtcNow();
             return Results.Ok(rows.Select(a =>
                 AppointmentResponse.From(a, asOf, a.BeneficiaryName ?? nameByAppt.GetValueOrDefault(a.AppointmentId))));
-        });
+        })
+        .Produces<IEnumerable<AppointmentResponse>>();
 
         // GET /appointments/reassignment-needed — the OTHER half of the licence worklist (25.3).
         //
@@ -673,7 +676,8 @@ public static class AppointmentsModule
                 Total: byStatus.Sum(x => x.Count),
                 CheckedIn: Of(AppointmentStatus.CheckedIn),
                 NoShow: Of(AppointmentStatus.NoShow)));
-        });
+        })
+        .Produces<AppointmentSummaryResponse>();
 
         read.MapGet("/appointments/{id:guid}", async (Guid id, HttpResponse resp, BranchScopeState branch, EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
@@ -684,7 +688,8 @@ public static class AppointmentsModule
                 return Results.Problem(statusCode: 403, title: "branch-scope-denied", detail: "this appointment is not in your active branch");
             resp.Headers.ETag = $"\"{a.RowVersion}\"";   // clients echo this back as If-Match on transitions
             return Results.Ok(AppointmentResponse.From(a, clock.GetUtcNow()));
-        });
+        })
+        .Produces<AppointmentResponse>();
 
         // POST /appointments/{id}/reschedule — atomic release-old + book-new (US-021).
         reserve.MapPost("/appointments/{id:guid}/reschedule", async (
@@ -721,7 +726,8 @@ public static class AppointmentsModule
             }, ct);
             await Record(idem, key, "reschedule", id, 200, db, ct);   // the event committed with the move
             return Results.Ok(AppointmentResponse.From(appt));
-        });
+        })
+        .Produces<AppointmentResponse>();
 
         // POST /appointments/{id}/cancel — release slot + reason; promote waitlist (US-021).
         reserve.MapPost("/appointments/{id:guid}/cancel", async (
@@ -761,7 +767,8 @@ public static class AppointmentsModule
             }, ct);
             await Record(idem, key, "cancel", id, 200, db, ct);
             return Results.Ok(AppointmentResponse.From(result.Appointment!));
-        });
+        })
+        .Produces<AppointmentResponse>();
 
         // POST /appointments/{id}/note — amend the general/administrative booking note.
         //
@@ -809,7 +816,8 @@ public static class AppointmentsModule
             }, ct);
 
             return Results.Ok(AppointmentResponse.From(appt, clock.GetUtcNow(), appt.BeneficiaryName));
-        });
+        })
+        .Produces<AppointmentResponse>();
 
         // POST /appointments/{id}/no-show — guarded; reporting flag + backfill (US-022).
         write.MapPost("/appointments/{id:guid}/no-show", async (
@@ -855,7 +863,8 @@ public static class AppointmentsModule
             }, ct);
             await Record(idem, key, "no-show", id, 200, db, ct);
             return Results.Ok(AppointmentResponse.From(appt));
-        });
+        })
+        .Produces<AppointmentResponse>();
     }
 
     private const int RepeatNoShowThreshold = 3;

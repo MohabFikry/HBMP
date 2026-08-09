@@ -156,7 +156,8 @@ public static class NoteEndpoints
             return Results.Created($"/api/v1/investigation-orders/{orderId}/lines/{lineId}/notes/{note.NoteId}",
                 new NoteResponse(note.NoteId, lineId, note.Visibility, note.Body, note.AuthorDisplayName,
                     note.AuthoredAt, note.Status, null, null));
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:write"))
+        .Produces<NoteResponse>();
 
         // ---- Cancel one: marks, never deletes ----------------------------------------------------------
         v1.MapPost("/notes/{noteId:guid}/cancel", async Task<IResult> (

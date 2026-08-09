@@ -186,7 +186,8 @@ v1.MapPost("", async (
         default:
             return Results.Problem(statusCode: 500, title: "unexpected");
     }
-});
+})
+        .Produces<BeneficiaryDto>();
 
 // GET /beneficiaries — search by identifier / name / status (cursor-ish paging).
 read.MapGet("", async (string? identifierType, string? identifierValue, string? name, string? status,

@@ -94,7 +94,8 @@ public static class Decisions
                 BeforeState = before.ToString(), AfterState = auth.Status.ToString(), DecisionOutcome = "InfoSupplied",
             }, ct);
             return Results.Ok(AuthorizationStateView.From(auth));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:decide"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:decide"))
+        .Produces<AuthorizationStateView>();
     }
 
     /// <summary>The shared decide path: idempotency → gate → transition guard → append-only decision row + status +

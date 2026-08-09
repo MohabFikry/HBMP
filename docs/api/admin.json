@@ -24,7 +24,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidityPolicyView"
+                }
+              }
+            }
           }
         }
       },
@@ -56,7 +63,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentValidityView"
+                }
+              }
+            }
           }
         }
       },
@@ -1367,6 +1381,83 @@
         },
         "additionalProperties": false
       },
+      "DocumentValidityItem": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "nullable": true
+          },
+          "key": {
+            "type": "string",
+            "nullable": true
+          },
+          "days": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "warnDays": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "nullable": true
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "warnConfigured": {
+            "type": "boolean"
+          },
+          "identity": {
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DocumentValidityView": {
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "type": "string",
+            "nullable": true
+          },
+          "defaultDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "minDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "maxDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "defaultWarnDays": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "nullable": true
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DocumentValidityItem"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "GrantRoleRequest": {
         "type": "object",
         "properties": {
@@ -1692,6 +1783,61 @@
           },
           "active": {
             "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ValidityPolicyItem": {
+        "type": "object",
+        "properties": {
+          "artefact": {
+            "type": "string",
+            "nullable": true
+          },
+          "key": {
+            "type": "string",
+            "nullable": true
+          },
+          "days": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ValidityPolicyView": {
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "type": "string",
+            "nullable": true
+          },
+          "defaultDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "minDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "maxDays": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ValidityPolicyItem"
+            },
+            "nullable": true
           }
         },
         "additionalProperties": false

@@ -82,7 +82,8 @@ public static class ProfileAuthorizationsEndpoint
             }, ct);
 
             return Results.Ok(new ProfileAuthorizationsView(rows));
-        }).RequireAuthorization(HbmpPolicies.Scope("profile:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("profile:read"))
+        .Produces<ProfileAuthorizationsView>();
     }
 }
 

@@ -107,7 +107,8 @@ public static class Worklist
             }, ct);
 
             return Results.Created($"/api/v1/authorizations/{auth.AuthorizationId}", AuthorizationStateView.From(auth));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:ingest"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:ingest"))
+        .Produces<AuthorizationStateView>();
 
         // ---- Worklist inbox (min-necessary projection). ----
         //
@@ -143,7 +144,8 @@ public static class Worklist
                 : q.OrderBy(a => a.SlaDueAt ?? DateTimeOffset.MaxValue).ThenBy(a => a.SubmittedAt);
             var rows = await ordered.Take(200).ToListAsync(ct);
             return Results.Ok(rows.Select(a => WorklistItemView.From(a, now)));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"))
+        .Produces<IEnumerable<WorklistItemView>>();
 
         // ---- What was actually delivered against this authorization (ADR-0034). ----
         // Empty for a review request, which is the honest answer: nothing has been delivered against a
@@ -173,7 +175,8 @@ public static class Worklist
 
             var a = await db.Authorizations.AsNoTracking().FirstOrDefaultAsync(x => x.AuthorizationId == id, ct);
             return a is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(WorklistItemView.From(a, clock.GetUtcNow()));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"))
+        .Produces<WorklistItemView>();
 
         // ---- Assign: pick up a request (Submitted → UnderReview), start the SLA timer. ----
         v1.MapPost("/{id:guid}/assign", async (
@@ -235,6 +238,7 @@ public static class Worklist
             }, ct);
 
             return Results.Ok(AuthorizationStateView.From(auth));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:review"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:review"))
+        .Produces<AuthorizationStateView>();
     }
 }

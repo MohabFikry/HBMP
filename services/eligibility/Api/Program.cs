@@ -180,7 +180,8 @@ v1.MapPost("/check", async (
     }, ct);
 
     return Results.Ok(EligibilityCheckResponse.From(outcome.Result, outcome.ExpiresAt, outcome.FromCache, preview));
-});
+})
+        .Produces<EligibilityCheckResponse>();
 
 // Lightweight member-status read for visit gating (2.3): emr-service reads this before creating a visit.
 v1.MapGet("/members/{beneficiaryId:guid}/status", async (
@@ -224,7 +225,8 @@ reception.MapGet("/search", async (
 
     var hint = cards.Count == 0 ? "No match — try another identifier (Passport / Card / Policy / Phone) or register the beneficiary." : null;
     return Results.Ok(new ReceptionSearchResponse(q, cards.Count, cards, hint));
-});
+})
+        .Produces<ReceptionSearchResponse>();
 
 app.MapPrometheusScrapingEndpoint(); // /metrics — golden signals (Phase 11.3)
 

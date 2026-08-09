@@ -386,7 +386,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyticsViewResult"
+                }
+              }
+            }
           }
         }
       }
@@ -445,6 +452,173 @@
   },
   "components": {
     "schemas": {
+      "AnalyticsDelta": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "nullable": true
+          },
+          "labelEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "labelAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "current": {
+            "type": "number",
+            "format": "double"
+          },
+          "previous": {
+            "type": "number",
+            "format": "double"
+          },
+          "percentChange": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "direction": {
+            "type": "string",
+            "nullable": true
+          },
+          "better": {
+            "type": "boolean",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "AnalyticsPoint": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "nullable": true
+          },
+          "labelEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "labelAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "value": {
+            "type": "number",
+            "format": "double"
+          },
+          "dimensionId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "secondary": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "AnalyticsSeries": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "nullable": true
+          },
+          "titleEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "titleAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "unit": {
+            "type": "string",
+            "nullable": true
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnalyticsPoint"
+            },
+            "nullable": true
+          },
+          "summaryEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "summaryAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BiText"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "AnalyticsViewResult": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "type": "string",
+            "nullable": true
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnalyticsSeries"
+            },
+            "nullable": true
+          },
+          "deltas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnalyticsDelta"
+            },
+            "nullable": true
+          },
+          "payerScopeApplied": {
+            "type": "boolean"
+          },
+          "unavailable": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "BiText": {
+        "type": "object",
+        "properties": {
+          "en": {
+            "type": "string",
+            "nullable": true
+          },
+          "ar": {
+            "type": "string",
+            "nullable": true
+          },
+          "isComplete": {
+            "type": "boolean",
+            "readOnly": true
+          }
+        },
+        "additionalProperties": false
+      },
       "ProjectionRequest": {
         "type": "object",
         "properties": {

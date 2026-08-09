@@ -55,7 +55,8 @@ public static class CallHistory
 
             return Results.Ok(new CallHistoryResponse(
                 effective.ToString(), rows, hasMore ? (skip + take + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) : null));
-        }).RequireAuthorization(HbmpPolicies.Scope("callcentre:history:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("callcentre:history:read"))
+        .Produces<CallHistoryResponse>();
 
         // ---- "Copy all visible" ----------------------------------------------------------------------------
         // A copy is logged like an EXPORT, not like a read: moving PHI to the clipboard is the moment it leaves

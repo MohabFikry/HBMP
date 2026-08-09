@@ -107,7 +107,8 @@ public static class ResultEndpoints
 
             await tx.CommitAsync(ct);
             return Results.Ok(ResultResponse.From(target));
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:consume")).DisableAntiforgery();
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:consume")).DisableAntiforgery()
+        .Produces<ResultResponse>();
 
         // ---- Read a line's result (ordering doctor [treating] or approval team) ----
         v1.MapGet("/{orderId:guid}/lines/{lineId:guid}/result", async (
@@ -138,11 +139,9 @@ public static class ResultEndpoints
                         ActorUserId = subject, DecisionOutcome = "ExistenceOnly", DecisionReasonCode = "sensitive-restricted", Severity = AuditSeverity.Notice,
                     }, ct);
                     // Existence metadata ONLY — never values, never a document ref.
-                    return Results.Ok(new
-                    {
-                        restricted = true, orderId, lineId, sensitivityLevel = line.SensitivityLevel.ToString(),
-                        category = line.CodeSystem.ToString(), status = line.Status.ToString(), orderingBranchId = order.OrderingBranchId,
-                    });
+                    return Results.Ok(new RestrictedResultView(
+                        true, orderId, lineId, line.SensitivityLevel.ToString(),
+                        line.CodeSystem.ToString(), line.Status.ToString(), order.OrderingBranchId));
                 }
 
                 var sensitive = await db.Fulfillments.AsNoTracking()

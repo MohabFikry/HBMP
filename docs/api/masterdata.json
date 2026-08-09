@@ -531,7 +531,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProcedureTypeView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -695,7 +705,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistsView"
+                }
+              }
+            }
           }
         }
       }
@@ -850,7 +867,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DrugIngredientsView"
+                }
+              }
+            }
           }
         }
       }
@@ -1110,6 +1134,48 @@
         },
         "additionalProperties": false
       },
+      "DrugIngredientView": {
+        "type": "object",
+        "properties": {
+          "drugId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "scientificName": {
+            "type": "string",
+            "nullable": true
+          },
+          "atcCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "ingredientKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DrugIngredientsView": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DrugIngredientView"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "ExamPriceRequest": {
         "type": "object",
         "properties": {
@@ -1123,6 +1189,19 @@
         },
         "additionalProperties": false
       },
+      "ExistsView": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "exists": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
       "IcdCodeListRequest": {
         "type": "object",
         "properties": {
@@ -1132,6 +1211,51 @@
               "type": "string"
             },
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProcedureTypeView": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "isSessionBased": {
+            "type": "boolean"
+          },
+          "defaultSessions": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "maxSessions": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "allowedCptScopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "format": "int32"
           }
         },
         "additionalProperties": false

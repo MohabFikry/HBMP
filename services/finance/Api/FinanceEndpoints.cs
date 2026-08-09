@@ -86,7 +86,8 @@ public static class FinanceEndpoints
             }
             await Audit(deps, AuditAction.Create, s.SettlementId.ToString(), "SettlementGenerated", null, s.Status.ToString());
             return Results.Created($"/api/v1/finance/settlements/{s.SettlementId}", SettlementView.From(s));
-        }).RequireAuthorization(HbmpPolicies.Scope("finance:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("finance:write"))
+        .Produces<SettlementView>();
 
         v1.MapGet("/settlements", async (FinanceDeps deps, CancellationToken ct, Guid? providerId, string? status) =>
         {
@@ -106,7 +107,8 @@ public static class FinanceEndpoints
             var s = await deps.Db.Settlements.AsNoTracking().Include(x => x.Lines)
                 .FirstOrDefaultAsync(x => x.SettlementId == id && x.TenantId == deps.Tenant, ct);
             return s is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(SettlementView.From(s));
-        }).RequireAuthorization(HbmpPolicies.Scope("finance:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("finance:read"))
+        .Produces<SettlementView>();
 
         v1.MapPost("/settlements/{id:guid}/submit", async (Guid id, FinanceDeps deps, CancellationToken ct) =>
         {
@@ -124,7 +126,8 @@ public static class FinanceEndpoints
             catch (DbUpdateConcurrencyException) { return Conflict("This settlement changed concurrently."); }
             await Audit(deps, AuditAction.StateChange, id.ToString(), "SettlementSubmitted", "Draft", "Submitted");
             return Results.Ok(SettlementView.From(s));
-        }).RequireAuthorization(HbmpPolicies.Scope("finance:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("finance:write"))
+        .Produces<SettlementView>();
 
         // SoD (11-permission-matrix release rule): the approver MUST be a different principal than the submitter.
         v1.MapPost("/settlements/{id:guid}/approve", async (Guid id, FinanceDeps deps, CancellationToken ct) =>
@@ -152,7 +155,8 @@ public static class FinanceEndpoints
             await Audit(deps, AuditAction.Decision, id.ToString(), "SettlementApproved", "Submitted", "Approved", AuditSeverity.Notice);
             await tx.CommitAsync(ct);
             return Results.Ok(SettlementView.From(s));
-        }).RequireAuthorization(HbmpPolicies.Scope("finance:approve"));
+        }).RequireAuthorization(HbmpPolicies.Scope("finance:approve"))
+        .Produces<SettlementView>();
 
         // --- Export (distinct elevated action; masked PII; high-severity data.export audit) -----------------
         v1.MapPost("/exports", async (ExportRequest req, HttpRequest http, FinanceDeps deps, CancellationToken ct) =>

@@ -41,7 +41,8 @@ public static class QueueEndpoints
             await AuditRead(audit, me, "queue", items.Count);
             var now = clock.GetUtcNow();
             return Results.Ok(items.Select(o => QueueItemResponse.From(o, now)));
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"))
+        .Produces<IEnumerable<QueueItemResponse>>();
 
         // ---- Search by patient (beneficiary id) OR order number ----
         v1.MapGet("/search", async (
@@ -114,7 +115,8 @@ public static class QueueEndpoints
             await AuditRead(audit, me, "search", items.Count);
             var searchNow = clock.GetUtcNow();
             return Results.Ok(items.Select(o => QueueItemResponse.From(o, searchNow)));
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"))
+        .Produces<IEnumerable<QueueItemResponse>>();
 
         // ---- Awaiting result: lines THIS provider has consumed but not yet uploaded a result for (US-042). ----
         // Drives the result-upload worklist; a result may only be attached to a line this provider consumed.
@@ -138,7 +140,8 @@ public static class QueueEndpoints
 
             await AuditRead(audit, me, "awaiting-result", rows.Count);
             return Results.Ok(rows);
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"))
+        .Produces<IEnumerable<AwaitingResultResponse>>();
     }
 
     /// <summary>A consumed line still awaiting its result upload (US-042) — the provider's result worklist row.</summary>

@@ -66,7 +66,8 @@ public static class DocumentValidityEndpoints
             return Results.Ok(new DocumentValidityView(
                 tenant, DocumentValidityPolicy.DefaultDays, DocumentValidityPolicy.MinDays,
                 DocumentValidityPolicy.MaxDays, DocumentValidityPolicy.DefaultWarnDays, items));
-        }).RequireAuthorization(HbmpPolicies.Scope("admin:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("admin:read"))
+        .Produces<DocumentValidityView>();
 
         app.MapPut("/api/v1/admin/document-validity", async (
             SetDocumentValidityRequest req, AdminGate gate, GovernanceService svc, CancellationToken ct) =>

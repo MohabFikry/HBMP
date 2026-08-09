@@ -277,13 +277,15 @@ v1.MapPost("", async (
     await tx.CommitAsync(ct);
 
     return Results.Created($"/api/v1/encounters/{encounter.EncounterId}", EncounterResponse.From(encounter));
-});
+})
+        .Produces<EncounterResponse>();
 
 v1.MapGet("/{id:guid}", async (Guid id, EmrDbContext db, CancellationToken ct) =>
 {
     var e = await db.Encounters.AsNoTracking().FirstOrDefaultAsync(x => x.EncounterId == id, ct);
     return e is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(EncounterResponse.From(e));
-}).RequireAuthorization();
+}).RequireAuthorization()
+        .Produces<EncounterResponse>();
 
 // Clinician worklist — beneficiaries who have checked in and are waiting.
 v1.MapGet("/queue", async (EmrDbContext db, CancellationToken ct) =>

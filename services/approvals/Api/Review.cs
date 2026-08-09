@@ -46,6 +46,7 @@ public static class Review
             }, ct);
 
             return Results.Ok(ReviewView.From(auth, ctx));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:review"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:review"))
+        .Produces<ReviewView>();
     }
 }

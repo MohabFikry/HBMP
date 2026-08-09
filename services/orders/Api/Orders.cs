@@ -240,7 +240,8 @@ public static class OrdersEndpoints
             }, ct);
 
             return Results.Created($"/api/v1/investigation-orders/{order.OrderId}", OrderResponse.From(order));
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:write"))
+        .Produces<OrderResponse>();
 
         // ---- Read (treating clinician) ----
         v1.MapGet("/{id:guid}", async (Guid id, HttpRequest http, OrdersDbContext db, OrdersGate gate, CancellationToken ct) =>
@@ -250,7 +251,8 @@ public static class OrdersEndpoints
             var denied = await gate.CheckAsync(OrdersPolicies.Read, id.ToString(), order.BeneficiaryId, http.Headers.Authorization.ToString(), ct);
             if (denied is not null) return denied;
             return Results.Ok(OrderResponse.From(order));
-        });
+        })
+        .Produces<OrderResponse>();
 
         // ---- My orders (ordering clinician's worklist, US-032) ----
         // The orders I created, newest first, optionally filtered by status (e.g. Completed = the results inbox).
@@ -308,6 +310,7 @@ public static class OrdersEndpoints
             }, ct);
             await tx.CommitAsync(ct);
             return Results.Ok(OrderResponse.From(order));
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:write"));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:write"))
+        .Produces<OrderResponse>();
     }
 }

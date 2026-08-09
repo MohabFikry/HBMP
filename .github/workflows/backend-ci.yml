@@ -377,6 +377,16 @@ jobs:
         # refuse to compare nothing (24.1), report which specs drifted — are unchanged.
         run: bash tools/ci/check-openapi-drift.sh artifacts/openapi
 
+      # 31.6 — the drift gate above compares the specs it is GIVEN, and until 31.5 those described no
+      # response bodies at all: it reported "every committed spec matches" while three fields were added to a
+      # prescription line. This ratchets the share of endpoints that say what they return, per service, so
+      # the remainder can only shrink.
+      - name: "gate: response schemas (every endpoint says what it returns)"
+        id: gate_response_schemas
+        if: always()
+        continue-on-error: true
+        run: python3 tools/ci/check-response-schemas.py --specs artifacts/openapi
+
       # ADVISORY: artefact upload. Losing the upload loses convenience, not a verdict — every number it
       # carries was already asserted by a counted gate above.
       - name: Upload coverage + OpenAPI specs + test results
@@ -414,6 +424,7 @@ jobs:
             coverage=${{ steps.gate_coverage.outcome }}
             openapi-generate=${{ steps.gate_openapi_generate.outcome }}
             openapi-drift=${{ steps.gate_openapi_drift.outcome }}
+            response-schemas=${{ steps.gate_response_schemas.outcome }}
         run: |
           echo "## Gate results" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"

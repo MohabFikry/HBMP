@@ -49,14 +49,12 @@ public static class ReportAccessEndpoints
                 rows = [.. rows.Where(r => mineSet.Contains(r.OrderId))];
             }
 
-            return Results.Ok(rows.Select(r => new
-            {
+            return Results.Ok(rows.Select(r => new ReportAccessRequestView(
                 r.RequestId, r.OrderId, r.OrderLineId, r.BeneficiaryId,
-                requestedBy = r.RequestedBy, requestedForRole = r.RequestedForRole,
-                purposeCode = r.PurposeCode.ToString(), r.Justification, r.RequestedTtlHours,
-                status = r.Status.ToString(), r.CreatedAt,
-            }));
-        });
+                r.RequestedBy, r.RequestedForRole,
+                r.PurposeCode.ToString(), r.Justification, r.RequestedTtlHours,
+                r.Status.ToString(), r.CreatedAt)));
+        }).Produces<IEnumerable<ReportAccessRequestView>>();
 
         // Raise a request (purpose + justification REQUIRED → else 422). Routes to the authoring doctor.
         v1.MapPost("/report-access-requests", async (RaiseAccessRequest req, OrdersDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
@@ -87,7 +85,7 @@ public static class ReportAccessEndpoints
             await outbox.EnqueueAsync("ReportAccessRequested", "orders.events",
                 new { tenantId = r.TenantId, r.RequestId, r.OrderLineId, orderingProviderId = order.OrderingProviderId, purposeCode = purpose.ToString() }, ct);
             await tx.CommitAsync(ct);
-            return Results.Created($"/api/v1/report-access-requests/{r.RequestId}", new { r.RequestId, status = r.Status.ToString() });
+            return Results.Created($"/api/v1/report-access-requests/{r.RequestId}", new ReportAccessStatusView(r.RequestId, r.Status.ToString()));
         });
 
         // Decide (Approve | Deny | RequestInfo). Decider = authoring doctor OR Medical Director.
@@ -141,7 +139,7 @@ public static class ReportAccessEndpoints
                     await audit.EmitAsync(Draft(r.RequestId, AuditAction.Decision, me, r.BeneficiaryId, "ReportAccessApproved", r.DecidedByRole, severity), ct);
                     await outbox.EnqueueAsync("ReportAccessApproved", "orders.events", new { tenantId = r.TenantId, r.RequestId, grant.GrantId, grant.GranteeUserId, grant.OrderLineId, grant.ExpiresAt, decidedByRole = r.DecidedByRole }, ct);
                     await tx.CommitAsync(ct);
-                    return Results.Ok(new { r.RequestId, status = r.Status.ToString(), grant.GrantId, grant.ExpiresAt });
+                    return Results.Ok(new ReportAccessGrantView(r.RequestId, r.Status.ToString(), grant.GrantId, grant.ExpiresAt));
 
                 case "deny":
                     if (string.IsNullOrWhiteSpace(dec.Reason)) return Results.Problem(statusCode: 422, title: "reason-required", detail: "a deny reason is required");
@@ -150,14 +148,14 @@ public static class ReportAccessEndpoints
                     await audit.EmitAsync(Draft(r.RequestId, AuditAction.Decision, me, r.BeneficiaryId, "ReportAccessDenied", r.DecidedByRole, severity), ct);
                     await outbox.EnqueueAsync("ReportAccessDenied", "orders.events", new { tenantId = r.TenantId, r.RequestId, reason = dec.Reason, decidedByRole = r.DecidedByRole }, ct);
                     await tx.CommitAsync(ct);
-                    return Results.Ok(new { r.RequestId, status = r.Status.ToString() });
+                    return Results.Ok(new ReportAccessStatusView(r.RequestId, r.Status.ToString()));
 
                 case "requestinfo":
                     r.Status = ReportAccessStatus.InfoRequested; r.DecisionReason = dec.Reason;
                     await db.SaveChangesAsync(ct);
                     await outbox.EnqueueAsync("ReportAccessInfoRequested", "orders.events", new { tenantId = r.TenantId, r.RequestId, note = dec.Reason }, ct);
                     await tx.CommitAsync(ct);
-                    return Results.Ok(new { r.RequestId, status = r.Status.ToString() });
+                    return Results.Ok(new ReportAccessStatusView(r.RequestId, r.Status.ToString()));
 
                 default:
                     return Results.Problem(statusCode: 400, title: "unknown-decision", detail: "decision must be Approve, Deny or RequestInfo");
@@ -188,7 +186,7 @@ public static class ReportAccessEndpoints
             r.DecidedBy = me.Principal?.Subject;             // decider identity recorded when the SLA timer starts
             await db.SaveChangesAsync(ct);
             await audit.EmitAsync(Draft(r.RequestId, AuditAction.StateChange, me, r.BeneficiaryId, "ReportAccessUnderReview", null, AuditSeverity.Notice), ct);
-            return Results.Ok(new { r.RequestId, status = r.Status.ToString() });
+            return Results.Ok(new ReportAccessStatusView(r.RequestId, r.Status.ToString()));
         });
 
         // 18.A4 — supply-info: InfoRequested → UnderReview. A request that entered InfoRequested had NO
@@ -217,7 +215,7 @@ public static class ReportAccessEndpoints
             await audit.EmitAsync(Draft(r.RequestId, AuditAction.Update, me, r.BeneficiaryId, "ReportAccessInfoSupplied", null, AuditSeverity.Notice), ct);
             await outbox.EnqueueAsync("ReportAccessInfoSupplied", "orders.events", new { tenantId = r.TenantId, r.RequestId }, ct);
             await tx.CommitAsync(ct);
-            return Results.Ok(new { r.RequestId, status = r.Status.ToString() });
+            return Results.Ok(new ReportAccessStatusView(r.RequestId, r.Status.ToString()));
         });
 
         // Revoke a grant (author, Medical Director, or DPO) — audited + notified.

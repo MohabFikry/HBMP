@@ -1062,7 +1062,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkTierView"
+                }
+              }
+            }
           }
         }
       }
@@ -1085,7 +1092,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkTierView"
+                }
+              }
+            }
           }
         }
       },
@@ -1116,7 +1130,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkTierView"
+                }
+              }
+            }
           }
         }
       }
@@ -1139,7 +1160,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TierAssignmentView"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -1170,7 +1201,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TierAssignmentView"
+                }
+              }
+            }
           }
         }
       }
@@ -1217,7 +1255,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TierResolutionView"
+                }
+              }
+            }
           }
         }
       }
@@ -1250,7 +1295,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkTierView"
+                }
+              }
+            }
           }
         }
       }
@@ -1598,6 +1650,43 @@
         },
         "additionalProperties": false
       },
+      "NetworkTierView": {
+        "type": "object",
+        "properties": {
+          "networkTierId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tierCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "rank": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "isOutOfNetwork": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "ProvisionUser": {
         "type": "object",
         "properties": {
@@ -1652,6 +1741,104 @@
           "secondApproverSubject": {
             "type": "string",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "TierAssignmentView": {
+        "type": "object",
+        "properties": {
+          "assignmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "networkTierId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tierCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "providerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope": {
+            "type": "string",
+            "nullable": true
+          },
+          "scopeRef": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date"
+          },
+          "effectiveTo": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "TierResolutionView": {
+        "type": "object",
+        "properties": {
+          "networkTierId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tierCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "rank": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "isOutOfNetwork": {
+            "type": "boolean"
+          },
+          "basis": {
+            "type": "string",
+            "nullable": true
+          },
+          "assignmentId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "providerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "serviceCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "serviceDate": {
+            "type": "string",
+            "format": "date"
           }
         },
         "additionalProperties": false

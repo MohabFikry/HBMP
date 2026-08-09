@@ -153,7 +153,8 @@ public static class PolicyDocumentEndpoints
             return Results.Ok(new IdentityPhotoView(
                 photo.LinkId, photo.VersionNo, url.ToString(),
                 clock.GetUtcNow().Add(IdentityPhotoRules.SignedUrlTtl)));
-        });
+        })
+        .Produces<IdentityPhotoView>();
     }
 
     // ---- Attach ------------------------------------------------------------------------------------------

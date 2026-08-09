@@ -44,7 +44,8 @@ public static class NotificationsEndpoints
             var n = await db.Notifications.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.NotificationId == id && x.RecipientUserId == uid, ct);
             return n is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(DeliveryView.From(n));
-        }).RequireAuthorization(HbmpPolicies.Scope("notification:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("notification:read"))
+        .Produces<DeliveryView>();
 
         // Mark read — acting on the notification (stops its escalation timer).
         v1.MapPost("/{id:guid}/read", async (Guid id, NotificationDbContext db, NotificationGate gate,
@@ -58,7 +59,8 @@ public static class NotificationsEndpoints
             if (n is null) return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
             if (n.ReadAt is null) { n.ReadAt = clock.GetUtcNow(); await db.SaveChangesAsync(ct); }
             return Results.Ok(InboxItemView.From(n));
-        }).RequireAuthorization(HbmpPolicies.Scope("notification:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("notification:read"))
+        .Produces<InboxItemView>();
 
         // Mark ALL of the caller's unread in-app notifications read, in one transaction. Self-service like the
         // single-item route (row-filtered by recipient == caller), and idempotent: a second call marks nothing
@@ -72,7 +74,8 @@ public static class NotificationsEndpoints
 
             var marked = await InboxOperations.MarkAllReadAsync(db, me.Principal!.Subject, clock.GetUtcNow(), ct);
             return Results.Ok(new MarkAllReadView(marked));
-        }).RequireAuthorization(HbmpPolicies.Scope("notification:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("notification:read"))
+        .Produces<MarkAllReadView>();
 
         // The fan-out seam — a routed domain event drives notification creation + dispatch (idempotent on event id).
         v1.MapPost("/ingest", async (IngestRequest req, NotificationDispatcher dispatcher, NotificationGate gate, CancellationToken ct) =>
@@ -82,6 +85,7 @@ public static class NotificationsEndpoints
 
             var result = await dispatcher.DispatchAsync(req.ToEnvelope(), ct);
             return Results.Ok(new IngestResultView(result.Deduplicated, result.Created));
-        }).RequireAuthorization(HbmpPolicies.Scope("notification:ingest"));
+        }).RequireAuthorization(HbmpPolicies.Scope("notification:ingest"))
+        .Produces<IngestResultView>();
     }
 }

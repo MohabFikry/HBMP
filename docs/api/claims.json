@@ -309,7 +309,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimView"
+                }
+              }
+            }
           }
         }
       }
@@ -376,7 +383,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchView"
+                }
+              }
+            }
           }
         }
       },
@@ -428,7 +442,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchView"
+                }
+              }
+            }
           }
         }
       }
@@ -467,7 +488,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchView"
+                }
+              }
+            }
           }
         }
       }
@@ -591,7 +619,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchView"
+                }
+              }
+            }
           }
         }
       }
@@ -723,7 +758,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionView"
+                }
+              }
+            }
           }
         }
       }
@@ -779,7 +821,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionView"
+                }
+              }
+            }
           }
         }
       }
@@ -801,7 +850,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReimbursementView"
+                }
+              }
+            }
           }
         }
       }
@@ -857,7 +913,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReimbursementView"
+                }
+              }
+            }
           }
         }
       }
@@ -1073,6 +1136,96 @@
         "type": "integer",
         "format": "int32"
       },
+      "BatchView": {
+        "type": "object",
+        "properties": {
+          "batchId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "batchNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "batchType": {
+            "type": "string",
+            "nullable": true
+          },
+          "selectionMode": {
+            "type": "string",
+            "nullable": true
+          },
+          "payeeProviderId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "providerLocationId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "periodFrom": {
+            "type": "string",
+            "format": "date"
+          },
+          "periodTo": {
+            "type": "string",
+            "format": "date"
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "totalClaimed": {
+            "type": "number",
+            "format": "double"
+          },
+          "totalPriced": {
+            "type": "number",
+            "format": "double"
+          },
+          "totalApproved": {
+            "type": "number",
+            "format": "double"
+          },
+          "totalAdjusted": {
+            "type": "number",
+            "format": "double"
+          },
+          "totalDenied": {
+            "type": "number",
+            "format": "double"
+          },
+          "netPayable": {
+            "type": "number",
+            "format": "double"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "frozenAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "claimIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "CancelBatchRequest": {
         "type": "object",
         "properties": {
@@ -1163,6 +1316,188 @@
           "occurredAt": {
             "type": "string",
             "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ClaimLineView": {
+        "type": "object",
+        "properties": {
+          "claimLineId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fulfillmentRef": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "fulfillmentType": {
+            "type": "string",
+            "nullable": true
+          },
+          "codeSystem": {
+            "type": "string",
+            "nullable": true
+          },
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "quantity": {
+            "type": "number",
+            "format": "double"
+          },
+          "billedAmount": {
+            "type": "number",
+            "format": "double"
+          },
+          "contractPrice": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "allowedAmount": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "memberShare": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "systemRecommendation": {
+            "type": "string",
+            "nullable": true
+          },
+          "reasonCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "authorizationId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "ruleVersion": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ClaimView": {
+        "type": "object",
+        "properties": {
+          "claimId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "claimNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "origin": {
+            "type": "string",
+            "nullable": true
+          },
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "providerId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "providerLocationId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "authorizationId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "batchId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "serviceDateFrom": {
+            "type": "string",
+            "format": "date"
+          },
+          "serviceDateTo": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "currencyCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "claimedAmount": {
+            "type": "number",
+            "format": "double"
+          },
+          "pricedAmount": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "approvedAmount": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "adjustedAmount": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "netPayable": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClaimLineView"
+            },
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -1264,6 +1599,36 @@
         "type": "integer",
         "format": "int32"
       },
+      "OcrFieldView": {
+        "type": "object",
+        "properties": {
+          "fieldName": {
+            "type": "string",
+            "nullable": true
+          },
+          "value": {
+            "type": "string",
+            "nullable": true
+          },
+          "confidence": {
+            "type": "number",
+            "format": "double"
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "region": {
+            "type": "string",
+            "nullable": true
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
       "PaymentReferenceBody": {
         "type": "object",
         "properties": {
@@ -1351,6 +1716,67 @@
         },
         "additionalProperties": false
       },
+      "ReimbursementView": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "claimId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actingFor": {
+            "type": "string",
+            "nullable": true
+          },
+          "receiptTotal": {
+            "type": "number",
+            "format": "double"
+          },
+          "currencyCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "matchConfidence": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "matchMethod": {
+            "type": "string",
+            "nullable": true
+          },
+          "linkedOrderId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "linkedPrescriptionId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "ocr": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OcrFieldView"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "SubmissionLineBody": {
         "type": "object",
         "properties": {
@@ -1386,6 +1812,56 @@
         },
         "additionalProperties": false
       },
+      "SubmissionLineView": {
+        "type": "object",
+        "properties": {
+          "submissionLineId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "codeSystem": {
+            "type": "string",
+            "nullable": true
+          },
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "serviceDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "quantity": {
+            "type": "number",
+            "format": "double"
+          },
+          "billedAmount": {
+            "type": "number",
+            "format": "double"
+          },
+          "outcome": {
+            "type": "string",
+            "nullable": true
+          },
+          "claimLineId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "priceVariance": {
+            "type": "boolean"
+          },
+          "reasonCode": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "SubmissionRequestBody": {
         "type": "object",
         "properties": {
@@ -1409,6 +1885,56 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SubmissionLineBody"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SubmissionView": {
+        "type": "object",
+        "properties": {
+          "submissionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "claimId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "providerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "invoiceNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "currencyCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "submittedOnBehalfOf": {
+            "type": "string",
+            "nullable": true
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubmissionLineView"
             },
             "nullable": true
           }

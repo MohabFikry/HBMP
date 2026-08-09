@@ -142,7 +142,8 @@ public static class SubstitutionRequestEndpoints
             }, ct);
 
             return Results.Created($"/api/v1/authorizations/{auth.AuthorizationId}", AuthorizationStateView.From(auth));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:request-substitution"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:request-substitution"))
+        .Produces<AuthorizationStateView>();
     }
 }
 

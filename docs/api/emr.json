@@ -120,7 +120,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EncounterResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -143,7 +150,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EncounterResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -177,7 +191,17 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SlotResponse"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -262,7 +286,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -447,7 +478,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AppointmentResponse"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -467,7 +508,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -527,7 +575,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentSummaryResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -550,7 +605,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -583,7 +645,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -616,7 +685,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -649,7 +725,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -682,7 +765,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -722,7 +812,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueItemView"
+                }
+              }
+            }
           }
         }
       }
@@ -853,7 +950,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/QueueItemView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -1042,7 +1149,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1084,7 +1198,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1116,7 +1237,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1158,7 +1286,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1191,7 +1326,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosisResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1214,7 +1356,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EncounterResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1279,7 +1428,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VitalResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1379,7 +1535,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AllergyResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1491,7 +1654,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MedicationHistoryResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1588,6 +1758,40 @@
         },
         "additionalProperties": false
       },
+      "AllergyResponse": {
+        "type": "object",
+        "properties": {
+          "allergyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "allergenId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "allergenDisplay": {
+            "type": "string",
+            "nullable": true
+          },
+          "reaction": {
+            "type": "string",
+            "nullable": true
+          },
+          "severity": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "AllergySeverity": {
         "enum": [
           0,
@@ -1605,6 +1809,117 @@
         ],
         "type": "integer",
         "format": "int32"
+      },
+      "AppointmentResponse": {
+        "type": "object",
+        "properties": {
+          "appointmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "providerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slotId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "appointmentType": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "scheduledStart": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "scheduledEnd": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "referralRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "originEncounterId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "rowVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "branchId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "doctorId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "noShowEligible": {
+            "type": "boolean"
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          },
+          "beneficiaryName": {
+            "type": "string",
+            "nullable": true
+          },
+          "needsReassignment": {
+            "type": "boolean"
+          },
+          "noteBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "noteAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "noteByName": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "AppointmentSummaryResponse": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "checkedIn": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "noShow": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
       },
       "BookAppointmentRequest": {
         "type": "object",
@@ -1874,6 +2189,117 @@
         "type": "integer",
         "format": "int32"
       },
+      "DiagnosisResponse": {
+        "type": "object",
+        "properties": {
+          "diagnosisId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "encounterId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "icdCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "diagnosisRank": {
+            "type": "string",
+            "nullable": true
+          },
+          "clinicalStatus": {
+            "type": "string",
+            "nullable": true
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "EncounterResponse": {
+        "type": "object",
+        "properties": {
+          "encounterId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "encounterNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "appointmentId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "providerId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "beneficiaryName": {
+            "type": "string",
+            "nullable": true
+          },
+          "branchId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "MedicationHistoryResponse": {
+        "type": "object",
+        "properties": {
+          "medHistoryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "drugId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source": {
+            "type": "string",
+            "nullable": true
+          },
+          "startDate": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "endDate": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "MedicationSource": {
         "enum": [
           0,
@@ -1891,6 +2317,56 @@
         "type": "integer",
         "format": "int32"
       },
+      "NoteResponse": {
+        "type": "object",
+        "properties": {
+          "noteId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "encounterId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "noteType": {
+            "type": "string",
+            "nullable": true
+          },
+          "subjective": {
+            "type": "string",
+            "nullable": true
+          },
+          "objective": {
+            "type": "string",
+            "nullable": true
+          },
+          "assessment": {
+            "type": "string",
+            "nullable": true
+          },
+          "plan": {
+            "type": "string",
+            "nullable": true
+          },
+          "addendumOfNoteId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "authoredBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "authoredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "isSigned": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
       "NoteType": {
         "enum": [
           0,
@@ -1899,6 +2375,44 @@
         ],
         "type": "integer",
         "format": "int32"
+      },
+      "QueueItemView": {
+        "type": "object",
+        "properties": {
+          "queueId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "appointmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "memberNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true
+          },
+          "appointmentType": {
+            "type": "string",
+            "nullable": true
+          },
+          "state": {
+            "type": "string",
+            "nullable": true
+          },
+          "waitSeconds": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
       },
       "RescheduleRequest": {
         "type": "object",
@@ -1916,6 +2430,40 @@
           "bloodGroup": {
             "type": "string",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SlotResponse": {
+        "type": "object",
+        "properties": {
+          "slotId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "providerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "doctorId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "slotStart": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "slotEnd": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "open": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -1948,6 +2496,41 @@
           "plan": {
             "type": "string",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "VitalResponse": {
+        "type": "object",
+        "properties": {
+          "vitalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "encounterId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "vitalType": {
+            "type": "string",
+            "nullable": true
+          },
+          "valueNum": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "unit": {
+            "type": "string",
+            "nullable": true
+          },
+          "loincCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "measuredAt": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "additionalProperties": false

@@ -139,7 +139,8 @@ public static class InventoryEndpoints
                 ActorUserId = me.Principal?.Subject, TenantId = tenant, DecisionOutcome = category.ToString(),
             }, ct);
             return Results.Created($"/api/v1/inventory/items/{item.ItemId}", ItemView.From(item));
-        });
+        })
+        .Produces<ItemView>();
 
         // ---- stock: the DERIVED balance ---------------------------------------------------------------
 

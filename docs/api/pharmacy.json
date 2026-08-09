@@ -24,7 +24,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RefillFrequencyView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -121,7 +131,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfilePrescriptionsView"
+                }
+              }
+            }
           }
         }
       }
@@ -144,7 +161,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileReferralsView"
+                }
+              }
+            }
           }
         }
       }
@@ -166,7 +190,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChronicPreviewView"
+                }
+              }
+            }
           }
         }
       }
@@ -188,7 +219,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuantityPreviewView"
+                }
+              }
+            }
           }
         }
       }
@@ -239,7 +277,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationResultView"
+                }
+              }
+            }
           }
         }
       }
@@ -269,7 +314,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RxHistoryView"
+                }
+              }
+            }
           }
         }
       }
@@ -363,7 +415,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrescriptionResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -516,7 +575,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispenseResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -570,7 +636,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AmendmentReasonView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -751,7 +827,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferralResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -774,7 +857,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferralResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -837,6 +927,24 @@
             "nullable": true
           },
           "reasonText": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "AmendmentReasonView": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
             "type": "string",
             "nullable": true
           }
@@ -919,6 +1027,57 @@
             "type": "string",
             "format": "uuid",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChronicPreviewView": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number",
+            "format": "double"
+          },
+          "unit": {
+            "type": "string",
+            "nullable": true
+          },
+          "frequencyMonths": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "windows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChronicWindowView"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChronicWindowView": {
+        "type": "object",
+        "properties": {
+          "windowNo": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "scheduledOpen": {
+            "type": "string",
+            "nullable": true
+          },
+          "opensAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "closesAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "allocatedQuantity": {
+            "type": "number",
+            "format": "double"
           }
         },
         "additionalProperties": false
@@ -1184,6 +1343,49 @@
         },
         "additionalProperties": false
       },
+      "DispenseEventView": {
+        "type": "object",
+        "properties": {
+          "dispenseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "prescriptionLineId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "number",
+            "format": "double"
+          },
+          "batchNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiryDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "substitutedDrugId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "substitutionReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          },
+          "dispensedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
       "DispenseRequest": {
         "type": "object",
         "properties": {
@@ -1215,6 +1417,25 @@
         },
         "additionalProperties": false
       },
+      "DispenseResponse": {
+        "type": "object",
+        "properties": {
+          "rxStatus": {
+            "type": "string",
+            "nullable": true
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "dispense": {
+            "$ref": "#/components/schemas/DispenseEventView"
+          },
+          "prescription": {
+            "$ref": "#/components/schemas/DispensableRxView"
+          }
+        },
+        "additionalProperties": false
+      },
       "ExtendValidityRequest": {
         "type": "object",
         "properties": {
@@ -1223,6 +1444,73 @@
             "format": "uuid"
           },
           "authNo": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "FindingView": {
+        "type": "object",
+        "properties": {
+          "lineId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "drugId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "kind": {
+            "type": "string",
+            "nullable": true
+          },
+          "state": {
+            "type": "string",
+            "nullable": true
+          },
+          "messageEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "messageAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "sourceName": {
+            "type": "string",
+            "nullable": true
+          },
+          "sourceVersion": {
+            "type": "string",
+            "nullable": true
+          },
+          "checkedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "caveat": {
+            "type": "string",
+            "nullable": true
+          },
+          "severity": {
+            "type": "string",
+            "nullable": true
+          },
+          "relatedLineId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "requiresAcknowledgement": {
+            "type": "boolean"
+          },
+          "isBlocking": {
+            "type": "boolean"
+          },
+          "referenceText": {
             "type": "string",
             "nullable": true
           }
@@ -1332,6 +1620,103 @@
         },
         "additionalProperties": false
       },
+      "ProfilePrescriptionView": {
+        "type": "object",
+        "properties": {
+          "rxNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "drugDisplay": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "prescribedOn": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dispensedOn": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "batchNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiryDate": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "substitutedWith": {
+            "type": "string",
+            "nullable": true
+          },
+          "encounterId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProfilePrescriptionsView": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProfilePrescriptionView"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProfileReferralView": {
+        "type": "object",
+        "properties": {
+          "referralNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "targetSpecialty": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "closedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProfileReferralsView": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProfileReferralView"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "QuantityPreviewRequest": {
         "type": "object",
         "properties": {
@@ -1362,6 +1747,131 @@
           "packContent": {
             "type": "number",
             "format": "double",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "QuantityPreviewView": {
+        "type": "object",
+        "properties": {
+          "totalUnits": {
+            "type": "number",
+            "format": "double"
+          },
+          "dispenseQuantity": {
+            "type": "number",
+            "format": "double"
+          },
+          "packs": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "boxes": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "packContent": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "prescribingUnit": {
+            "type": "string",
+            "nullable": true
+          },
+          "isPackSplittable": {
+            "type": "boolean",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReferralResponse": {
+        "type": "object",
+        "properties": {
+          "referralId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "referralNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "encounterId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "referringProviderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "targetSpecialty": {
+            "type": "string",
+            "nullable": true
+          },
+          "targetProviderId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "requestedServiceCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "requestedServiceCodeSystem": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "RefillFrequencyView": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "months": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "RxHistoryView": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { },
             "nullable": true
           }
         },
@@ -1453,6 +1963,42 @@
           "diagnosisIcdCodes": {
             "type": "array",
             "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ValidationResultView": {
+        "type": "object",
+        "properties": {
+          "validationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ranAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "engineVersion": {
+            "type": "string",
+            "nullable": true
+          },
+          "overallState": {
+            "type": "string",
+            "nullable": true
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FindingView"
+            },
+            "nullable": true
+          },
+          "lineStates": {
+            "type": "object",
+            "additionalProperties": {
               "type": "string"
             },
             "nullable": true

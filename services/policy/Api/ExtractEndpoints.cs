@@ -114,7 +114,8 @@ public static class ExtractEndpoints
 
             return Results.Created($"/api/v1/extracts/definitions/{definition.DefinitionId}",
                 ExtractDefinitionView.From(definition));
-        });
+        })
+        .Produces<ExtractDefinitionView>();
 
         read.MapGet("/definitions", async (PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
         {
@@ -193,7 +194,8 @@ public static class ExtractEndpoints
                 result.Withheld, result.DocumentId,
                 result.DocumentId is null ? null : $"/api/v1/operational-documents/{result.DocumentId}/content",
                 result.Run.AsOf, result.Run.Status.ToString(), result.Run.StartedAt, result.Run.CompletedAt));
-        });
+        })
+        .Produces<ExtractRunView>();
 
         read.MapGet("/runs", async (Guid? definitionId, int? page, int? pageSize,
             PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
@@ -217,7 +219,8 @@ public static class ExtractEndpoints
                     r.FileDocumentId is null ? null : $"/api/v1/operational-documents/{r.FileDocumentId}/content",
                     r.AsOf, r.Status.ToString(), r.StartedAt, r.CompletedAt)),
             });
-        });
+        })
+        .Produces<IEnumerable<ExtractRunView>>();
     }
 
     /// <summary>The caller's column capabilities, taken from the SAME role lists 19.5's projections use — so a

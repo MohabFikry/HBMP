@@ -68,7 +68,8 @@ public static class ReimbursementEndpoints
                     return Results.Created($"/api/v1/reimbursement-requests/{r.Request.RequestId}",
                         ReimbursementView.From(r.Request, await OcrOf(deps, r.Request.RequestId, ct)));
             }
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:reimburse:submit"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:reimburse:submit"))
+        .Produces<ReimbursementView>();
 
         // --- confirm (human gate) --------------------------------------------------------------------------
         v1.MapPost("/{id:guid}/confirm", async (
@@ -119,7 +120,8 @@ public static class ReimbursementEndpoints
                 ActorUserId = deps.Subject, ActorRole = deps.Roles, TenantId = deps.Tenant, FieldClasses = ["financials"],
             }, ct);
             return Results.Ok(ReimbursementView.From(r, await OcrOf(deps, id, ct)));
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"))
+        .Produces<ReimbursementView>();
     }
 
     private static async Task<List<OcrExtraction>> OcrOf(ClaimsDeps deps, Guid requestId, CancellationToken ct) =>

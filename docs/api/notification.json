@@ -56,7 +56,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryView"
+                }
+              }
+            }
           }
         }
       }
@@ -79,7 +86,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxItemView"
+                }
+              }
+            }
           }
         }
       }
@@ -91,7 +105,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkAllReadView"
+                }
+              }
+            }
           }
         }
       }
@@ -113,7 +134,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResultView"
+                }
+              }
+            }
           }
         }
       }
@@ -121,6 +149,88 @@
   },
   "components": {
     "schemas": {
+      "DeliveryView": {
+        "type": "object",
+        "properties": {
+          "notificationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "channel": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lastError": {
+            "type": "string",
+            "nullable": true
+          },
+          "sentAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "deliveredAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "failedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "InboxItemView": {
+        "type": "object",
+        "properties": {
+          "notificationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "statusText": {
+            "type": "string",
+            "nullable": true
+          },
+          "subject": {
+            "type": "string",
+            "nullable": true
+          },
+          "body": {
+            "type": "string",
+            "nullable": true
+          },
+          "locale": {
+            "type": "string",
+            "nullable": true
+          },
+          "entityRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "sourceEventType": {
+            "type": "string",
+            "nullable": true
+          },
+          "read": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
       "IngestRequest": {
         "type": "object",
         "properties": {
@@ -156,6 +266,29 @@
               }
             },
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "IngestResultView": {
+        "type": "object",
+        "properties": {
+          "deduplicated": {
+            "type": "boolean"
+          },
+          "created": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MarkAllReadView": {
+        "type": "object",
+        "properties": {
+          "marked": {
+            "type": "integer",
+            "format": "int32"
           }
         },
         "additionalProperties": false

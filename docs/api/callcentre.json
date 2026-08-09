@@ -96,7 +96,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InteractionView"
+                }
+              }
+            }
           }
         }
       },
@@ -155,7 +162,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InteractionView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -188,7 +205,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationView"
+                }
+              }
+            }
           }
         }
       }
@@ -221,7 +245,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InteractionView"
+                }
+              }
+            }
           }
         }
       }
@@ -253,7 +284,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InteractionView"
+                }
+              }
+            }
           }
         }
       }
@@ -286,7 +324,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InteractionView"
+                }
+              }
+            }
           }
         }
       }
@@ -567,7 +612,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallHistoryResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -706,6 +758,27 @@
         "type": "integer",
         "format": "int32"
       },
+      "CallHistoryResponse": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "string",
+            "nullable": true
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectedCallRow"
+            },
+            "nullable": true
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "CallOutcome": {
         "enum": [
           0,
@@ -730,6 +803,23 @@
         ],
         "type": "integer",
         "format": "int32"
+      },
+      "CallVerificationView": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "type": "string",
+            "nullable": true
+          },
+          "identifierTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
       },
       "CancelFromCallRequest": {
         "type": "object",
@@ -765,6 +855,79 @@
         },
         "additionalProperties": false
       },
+      "InteractionView": {
+        "type": "object",
+        "properties": {
+          "interactionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "callRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "direction": {
+            "$ref": "#/components/schemas/CallDirection"
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "reasonCode": {
+            "$ref": "#/components/schemas/CallReasonCode"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/CallOutcome"
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "summary": {
+            "type": "string",
+            "nullable": true
+          },
+          "summaryEdited": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "verified": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LinkedArtifactView": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "nullable": true
+          },
+          "ref": {
+            "type": "string",
+            "nullable": true
+          },
+          "action": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "OpenInteractionRequest": {
         "type": "object",
         "properties": {
@@ -773,6 +936,71 @@
           },
           "reasonCode": {
             "$ref": "#/components/schemas/CallReasonCode"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProjectedCallRow": {
+        "type": "object",
+        "properties": {
+          "callRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "direction": {
+            "type": "string",
+            "nullable": true
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "durationSeconds": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "branchCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "agentDisplayName": {
+            "type": "string",
+            "nullable": true
+          },
+          "reasonCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "outcome": {
+            "type": "string",
+            "nullable": true
+          },
+          "verification": {
+            "$ref": "#/components/schemas/CallVerificationView"
+          },
+          "summary": {
+            "type": "string",
+            "nullable": true
+          },
+          "summaryEdited": {
+            "type": "boolean"
+          },
+          "linkedArtifacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LinkedArtifactView"
+            },
+            "nullable": true
+          },
+          "copyText": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -845,6 +1073,43 @@
           "summary": {
             "type": "string",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "VerificationView": {
+        "type": "object",
+        "properties": {
+          "verificationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "verifiedIdentifierTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "result": {
+            "type": "string",
+            "nullable": true
+          },
+          "method": {
+            "type": "string",
+            "nullable": true
+          },
+          "failureReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "verifiedAt": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "additionalProperties": false

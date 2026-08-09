@@ -1101,8 +1101,7 @@ what the response contract IS — and is not done here.
 
 ### Not done in 31.5
 
-- **490 endpoints still publish no response schema.** Six do. The gate cannot see a response-shape change
-  anywhere else, which is how three fields were added to a prescription line under a green drift gate.
+- **490 endpoints still publish no response schema.** *(31.6 below takes this on.)*
 
 ### Verified
 
@@ -1110,3 +1109,49 @@ Web 1,168 / 89 files; pharmacy 167 with the DB attached, 0 skipped, including th
 HTTP: the dose comes back (1.5 stays 1.5), an absent one reports null rather than 1, and both survive an
 amendment onto the successor version. Prescribing lib 190.
 
+---
+
+## Phase 31.6 — every endpoint says what it returns
+
+### The gate could only see half a contract
+
+`check-openapi-drift.sh` compares the committed specs against the running services, and the specs described
+**no response bodies at all**: a minimal API returning `Results.Ok(x)` publishes no schema for `x`. That is
+how 31.5 added three fields to a prescription line and the drift gate reported "every committed spec matches".
+
+The SPA parses those bodies with zod. A response shape that changes with nothing noticing is a screen that
+fails to parse at a dispensing counter, and it arrives as "could not load" rather than as a build error.
+
+### What the 535 endpoints actually were
+
+| | count | what it needed |
+|---|---|---|
+| already declared | 6 | — |
+| returns a **named type** | 162 | one line each |
+| returns an **anonymous object** | 198 | a named record each |
+| returns a variable or primitive | 104 | inspection |
+| no body (Problem / 204 only) | 65 | nothing |
+
+**The 162 were done by codemod** — a conservative one that derives the type only from shapes it can read
+unambiguously, requires every success branch of an endpoint to agree, and skips anything else for a human. It
+declared 141 and left 323. Solution builds clean; **3,636 tests unchanged**.
+
+**The anonymous ones are being named service by service**, starting with the endpoints the SPA actually calls,
+because those are the ones where a silent shape change breaks a screen. Each record carries exactly the
+property names the anonymous object carried, so **the JSON is byte-identical** — what changes is that the
+shape is now in the spec. Pharmacy, masterdata and orders are done; their suites pass unchanged.
+
+Coverage went **1% → 27.9%** (160 of 574 operations), and **51 → 42** for the SPA-called subset.
+
+### And a ratchet, so the remainder cannot stay invisible
+
+`tools/ci/check-response-schemas.py` records a per-service floor and fails when one drops. Demanding 100% in
+one change would mean inventing a DTO for every anonymous object on the platform at once, which is how a gate
+acquires a `# TODO: re-enable` comment above it. Same shape as the coverage floors, and for the same reason:
+a bar that can be lowered to pass is not a bar. It is in `REQUIRED_GATES`, so its *silence* alarms too.
+
+### Not done in 31.6
+
+- **414 operations still declare no response body**, 42 of them called by the SPA. The floors hold the line
+  and name the remainder per service; the work is mechanical but not automatable — each anonymous object is a
+  contract decision about what the response IS.
