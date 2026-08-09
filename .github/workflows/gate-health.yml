@@ -50,7 +50,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p .ci-state
-          for pair in "backend-ci:gate-heartbeats" "frontend-ci:gate-heartbeats-frontend"; do
+          for pair in "backend-ci:gate-heartbeats" "frontend-ci:gate-heartbeats-frontend" \
+                      "security-ci:gate-heartbeats-secret-scan" "security-ci:gate-heartbeats-sca"; do
             workflow=${pair%%:*}; artifact=${pair##*:}
             run_id=$(gh run list --workflow "$workflow" --limit 1 --json databaseId -q '.[0].databaseId' || true)
             if [ -n "$run_id" ]; then

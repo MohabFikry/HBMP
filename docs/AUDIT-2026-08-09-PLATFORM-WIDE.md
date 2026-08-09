@@ -219,6 +219,49 @@ wrong, and wrong in the direction that would have justified not doing it: readin
 *arithmetic* rather than for fields that merely hold amounts found two that needed it, one already typed
 through a shared library, and one correct without it.
 
+### Two security gates that were red before any of this, found on opening the PR (2026-08-10)
+
+Both predate the branch and both fail on `master`. Neither was in the audit, because the audit read the
+code and these are only visible from the CI scoreboard.
+
+**`sca-sast-image` had never executed — not once.** The action was pinned to `aquasecurity/trivy-action@0.24.0`,
+and that tag does not exist: every tag this action publishes is `v`-prefixed. GitHub resolves actions during
+*Set up job*, so the job died before its first step and the scoreboard showed a red X with no step attached,
+which reads as infrastructure flake. Fixed to `@v0.33.1`.
+
+Making it run turned it green-then-red on one real finding: **the SPA container ran nginx as root**. The
+Dockerfile's own comment said "nginx:alpine already runs worker processes unprivileged", which is true and
+beside the point — the master process, the one an nginx compromise gets you, was root. The image already
+listened on 8080, so `nginxinc/nginx-unprivileged` was a base-image swap rather than a re-plumb. Verified by
+building and running it: serves 200, master and workers both uid 101, CSP header rendered through envsubst,
+SPA deep-route fallback intact.
+
+**`secret-scan` fails on 17 findings, of which zero are live secrets.** Eight are in a fresh checkout of
+HEAD, nine exist only in history. Triaged individually:
+
+- *Nine historical* — dev MinIO access keys in tracked `appsettings.json`, `Dev_*_20YY` literals in a
+  Keycloak provisioning script and two documents, and a baked `${POSTGRES_PASSWORD:-default}` in the DR
+  rehearsal script. All were removed from the tree by the 18.B1 R2 purge; gitleaks scans all 482 commits, so
+  they fail forever regardless. Pinned by fingerprint in `.gitleaksignore`, one line each with its reason.
+- *Seven false positives* — five pharmaceutical names in the ATC/CPT reference exports that score like
+  high-entropy keys (`CAPIXY HAIR MASK 250ML,CAPIXYL+GLYCERIN+ALOE VERA+SHEA BUTTER`), a portal nav key, and
+  a synthetic seed UUID. Allowlisted by data-file path and by stopword, not by blanket rule disablement.
+- *One live* — `amqp://hbmp:ci_hbmp_rmq_pw@localhost` in backend-ci. A throwaway credential for an ephemeral
+  service container, already documented as such in the workflow, and flagged only because it happens to be
+  URI-shaped while the identical `ci_hbmp_pw` beside it is not. The allowlist encodes the existing convention
+  and is keyed to `ci_<name>_pw@localhost`, so the same value pointed at a real host still fails the build —
+  verified against five planted secrets, all five caught.
+
+**Still outstanding, and not fixable from this repository:** those historical `Dev_*_2026` values are still
+the live passwords in `infra/compose/.env` today. History exposure plus a still-current value means the real
+remediation is rotating them in the dev environment. Severity is low — private repository, local-only
+services, no production reach — which is why this is recorded rather than escalated, but it is not closed by
+anything in this branch.
+
+Both gates are now in `REQUIRED_GATES` and write heartbeats, which is the durable half of the fix: a gate
+that has never run was exactly the failure `check-gate-freshness.py` exists to catch, and these two sat
+outside its coverage because it listed only the gates in `tools/ci/`.
+
 ### What closing the saga turned up (C1+C2, ADR-0041)
 
 Wiring it surfaced three things that only a real caller could have found, because each path had never had

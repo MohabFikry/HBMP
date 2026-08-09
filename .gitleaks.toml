@@ -37,6 +37,20 @@ description = "Credential embedded in a connection URI (amqp/redis/postgres/http
 regex = '''(?i:amqp|amqps|redis|postgres|postgresql|mongodb|https?)://[A-Za-z0-9._%-]+:[^@\s"/]{4,}@'''
 tags = ["password", "config", "mersal"]
 
+# Throwaway credentials for CI's own ephemeral service containers. These protect a Postgres/RabbitMQ that
+# lives for the minutes of one job, on a runner nobody else can reach, bound to localhost — they are not
+# secrets and there is nothing to rotate. backend-ci.yml already says so in prose; this encodes the SAME
+# convention for the scanner, so the rule stops firing on the one value that happens to be URI-shaped while
+# staying silent about the identical values beside it that are not.
+#
+# Keyed to the `ci_<name>_pw` naming convention AND to localhost, rather than to the workflow path: a real
+# credential pasted into a workflow matches neither and still fails the build. `regexTarget = "line"` because
+# the rule's own match stops at the `@`, so the host is not in the captured secret.
+[rules.allowlist]
+description = "CI service-container throwaway credentials (ephemeral, localhost-only, nothing to rotate)"
+regexTarget = "line"
+regexes = ['''://[a-z0-9_-]+:ci_[a-z0-9_]+_pw@localhost''']
+
 [[rules]]
 id = "mersal-code-secret-fallback"
 description = "C# ?? fallback to a literal secret/password — a missing secret must fail fast, never default"
@@ -45,7 +59,7 @@ path = '''\.cs$'''
 tags = ["password", "mersal"]
 
 [allowlist]
-description = "Non-secret matches: env-var placeholders and build artifacts."
+description = "Non-secret matches: env-var placeholders, build artifacts, and third-party reference data."
 paths = [
   '''(^|/)node_modules/''',
   '''(^|/)bin/''',
@@ -53,6 +67,13 @@ paths = [
   '''\.deps\.json$''',      # NuGet hash paths, not secrets
   '''pnpm-lock\.yaml$''',
   '''package-lock\.json$''',
+  # Third-party clinical reference exports (ATC drug catalogue, CPT, ICD-10) — data, not code or config.
+  # `generic-api-key` is an ENTROPY rule, and pharmaceutical names score like keys: the four current hits are
+  # "CAPIXY HAIR MASK 250ML,CAPIXYL+GLYCERIN+ALOE VERA+SHEA BUTTER" and
+  # "ANTI-DIABETIC.SECRETAGOGUES.DPP-4 INHIBITORS". No credential is ever authored here — these files are
+  # regenerated wholesale from the source workbooks by tools/masterdata-loader. Scoped to the data
+  # extensions so a stray .sh or .env dropped in this directory is still scanned.
+  '''^Raw Files/.*\.(csv|xlsx)$''',
 ]
 # ${VAR} interpolation in compose/config is a placeholder, not a secret — the value lives in
 # the gitignored .env (local) / OpenBao (prod). Allow those specific shapes only.
@@ -62,4 +83,9 @@ regexes = [
   '''secretKeyRef:''',                 # k8s secret references
   '''change-me[-a-z0-9]*''',           # documented placeholders in *.env.example, never live values
   '''//guest:guest@''',                # RabbitMQ's own published default; compose overrides it
+]
+# Known non-secret literals, matched against the captured value rather than the line.
+stopwords = [
+  "beneficiary360",                      # a portal nav section key in apps/web/src/portals/catalog.ts
+  "a592d99a-ca90-4111-aeab-e2da16469fc1", # synthetic dev doctor id in infra/compose/seed (never real PHI)
 ]

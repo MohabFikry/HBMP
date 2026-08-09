@@ -22,17 +22,45 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - name: gitleaks (secret hygiene — 100% secrets outside code, NFR-034)
+        id: gate_secret_scan
         uses: gitleaks/gitleaks-action@v2
         env:
           GITLEAKS_CONFIG: .gitleaks.toml
+
+      # Heartbeat, so check-gate-freshness.py can tell "passing" from "never ran" — the same reason
+      # backend-ci and frontend-ci write one. Own file: the watchdog merges every gate-heartbeats*.json in
+      # the directory, newest wins, and an artifact carrying another workflow's gates would carry them stale.
+      # ADVISORY (`|| true`, always()): a missed heartbeat makes the watchdog alarm tomorrow, so losing this
+      # step raises the alarm rather than silencing it.
+      - name: Record gate heartbeat
+        if: always()
+        run: |
+          [ "${{ steps.gate_secret_scan.outcome }}" = "skipped" ] && exit 0
+          python3 tools/ci/check-gate-freshness.py --record secret-scan \
+            --state-dir .ci-state --state-file gate-heartbeats.secret-scan.json >/dev/null || true
+      - name: Upload gate heartbeats
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-heartbeats-secret-scan
+          path: .ci-state
+          retention-days: 30
 
   sca-sast-image:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       # SCA + SAST (IaC/config/filesystem) — fail on Critical/High
+      #
+      # The tag is `v`-prefixed. It was written `@0.24.0`, which does not exist — every tag this action has
+      # ever published is `v0.24.0`-shaped — so the job died in "Set up job", before a single step ran, on
+      # every push since it was added. GitHub resolves actions during job setup, which is why the failure
+      # never named Trivy and read as infrastructure flake. A gate that has never once executed is not a
+      # gate, which is the case check-gate-freshness.py was written for; this one predates its coverage.
       - name: Trivy filesystem (SCA + config/SAST)
-        uses: aquasecurity/trivy-action@0.24.0
+        id: gate_sca_sast
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           scan-type: fs
           scan-ref: .
@@ -45,6 +73,23 @@ jobs:
         if: always()
         uses: github/codeql-action/upload-sarif@v3
         with: { sarif_file: trivy-fs.sarif }
+
+      # See the heartbeat note in secret-scan above. This job is the reason both are now in REQUIRED_GATES:
+      # it never executed once, and nothing said so.
+      - name: Record gate heartbeat
+        if: always()
+        run: |
+          [ "${{ steps.gate_sca_sast.outcome }}" = "skipped" ] && exit 0
+          python3 tools/ci/check-gate-freshness.py --record sca-sast-image \
+            --state-dir .ci-state --state-file gate-heartbeats.sca.json >/dev/null || true
+      - name: Upload gate heartbeats
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-heartbeats-sca
+          path: .ci-state
+          retention-days: 30
 
   codeql-dotnet:
     runs-on: ubuntu-latest

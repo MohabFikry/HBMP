@@ -71,6 +71,14 @@ REQUIRED_GATES = [
     # that has drifted looks exactly like one that has not, and the three copies of the service count sat at
     # 14, 21 and 17 against a real 22 for as long as it took someone to audit them by hand.
     "service-inventory",
+    # 2026-08-10 — the two security-ci gates, added after `sca-sast-image` was found never to have executed
+    # AT ALL. Its action was pinned to `aquasecurity/trivy-action@0.24.0`, a tag that does not exist (every
+    # tag this action publishes is `v`-prefixed), so GitHub failed the job while resolving actions, before
+    # any step ran. The scoreboard showed a red X that read as flake, and no gate here noticed the silence.
+    # That is precisely the case this file exists for, and these two were outside its coverage — which is
+    # the argument for listing every gate rather than only the ones in tools/ci/.
+    "secret-scan",
+    "sca-sast-image",
 ]
 
 
