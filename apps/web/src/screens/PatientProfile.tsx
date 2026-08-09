@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Card, Icon, InlineAlert, Select, useTheme } from "@mersal/design-system";
-import type { IconName } from "@mersal/design-system";
+import { Button, Card, Icon, InlineAlert, Select, Tabs, useTheme } from "@mersal/design-system";
+import type { IconName, TabItem } from "@mersal/design-system";
 import type {
   CallHistoryRow,
   ProfileExportSummary,
@@ -11,8 +11,8 @@ import type {
   ProfileAlerts,
   ProfileHeader,
   ProfileSection,
+  ProfileSectionKey,
 } from "@mersal/contracts";
-import { PROFILE_SECTION_KEYS } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAuth } from "../auth/AuthProvider";
 import { permissionsForRole, hasPermission, type Permission, type Role } from "../authz/permissions";
@@ -41,7 +41,7 @@ const STR = {
     ar: "افتح مريضًا من قائمة عمل أو من «بحث / إدارة» لعرض ملفّه.",
   },
   title: { en: "Patient Profile", ar: "ملف المريض" },
-  jumpTo: { en: "Jump to section", ar: "الانتقال إلى قسم" },
+  tabsLabel: { en: "Profile sections", ar: "أقسام الملف" },
   restricted: { en: "Restricted", ar: "مقيّد" },
   unavailable: { en: "Temporarily unavailable", ar: "غير متاح مؤقتًا" },
   empty: { en: "No records", ar: "لا توجد سجلات" },
@@ -64,6 +64,8 @@ const STR = {
   inbound: { en: "Inbound", ar: "وارد" },
   outbound: { en: "Outbound", ar: "صادر" },
   alerts: { en: "Alerts", ar: "تنبيهات" },
+  historyTab: { en: "History", ar: "السجل الطبي" },
+  coverageTab: { en: "Coverage", ar: "التغطية" },
   allergyTo: { en: "Allergy:", ar: "حساسية:" },
   moreAlerts: { en: "more alerts", ar: "تنبيهات أخرى" },
   actions: { en: "Actions", ar: "إجراءات" },
@@ -304,40 +306,110 @@ function openPrintable(summary: ProfileExportSummary) {
   w.print();
 }
 
+type ProfileTabKey = "coverage" | "history" | "authorizations" | "documents" | "notes" | "timeline" | "callHistory";
+
+/**
+ * Section keys grouped into the profile's tabs (design spec
+ * docs/superpowers/specs/2026-08-08-patient-profile-tabs-redesign.md). Each group's `sections` list is in
+ * `PROFILE_SECTION_KEYS` order, which is also render order within the tab — alerts-before-encounters is a
+ * safety property (design 39), not a layout choice this table is free to reorder.
+ */
+export const PROFILE_TAB_GROUPS: { key: ProfileTabKey; title: Localized; sections: ProfileSectionKey[] }[] = [
+  { key: "coverage", title: STR.coverageTab, sections: ["coverage"] },
+  {
+    key: "history",
+    title: STR.historyTab,
+    sections: ["alerts", "pastMedicalHistory", "encounters", "investigations", "prescriptions", "caseManagement"],
+  },
+  { key: "authorizations", title: SECTION_TITLES.authorizations, sections: ["authorizations", "referrals", "financial"] },
+  { key: "documents", title: SECTION_TITLES.documents, sections: ["documents"] },
+  { key: "notes", title: SECTION_TITLES.notes, sections: ["notes"] },
+  { key: "timeline", title: SECTION_TITLES.timeline, sections: ["timeline"] },
+  { key: "callHistory", title: SECTION_TITLES.callHistory, sections: ["callHistory"] },
+];
+
 function ProfileBody({ profile, onRetry }: { profile: PatientProfileContract; onRetry: () => void }) {
   const t = useLoc();
+  const [activeTab, setActiveTab] = useState<ProfileTabKey | undefined>(undefined);
 
-  // Render in the server's order, which is design 39 §3 order. Sorting here would be a second opinion about
-  // the order alerts appear in, and alerts being second is a safety property, not a layout choice.
-  const ordered = useMemo(() => {
-    const rank = new Map(PROFILE_SECTION_KEYS.map((k, i) => [k as string, i]));
-    return [...profile.sections].sort(
-      (a, b) => (rank.get(a.key) ?? 999) - (rank.get(b.key) ?? 999),
-    );
-  }, [profile.sections]);
+  const byKey = useMemo(() => new Map(profile.sections.map((s) => [s.key, s] as const)), [profile.sections]);
+  const header = byKey.get("header");
+  const alerts = byKey.get("alerts");
+  const alertData = alerts?.state === "Visible" ? (alerts.data as ProfileAlerts) : null;
+
+  // Filtered by actual content BEFORE building JSX. A role whose payload never carries a group's sections at
+  // all (lab/imaging techs: header+alerts+investigations only; org/super admin: header+timeline only) must
+  // not land on an empty tab beside six more empty tabs — that reads as "this patient has no records", the
+  // exact failure the three-state design exists to prevent (design 39 §6).
+  const tabItems: TabItem[] = useMemo(() => {
+    const assigned = new Set(PROFILE_TAB_GROUPS.flatMap((g) => g.sections as string[]));
+    // A server ahead of this client sends a key none of the groups above know. It must still be shown
+    // (design 39 §6: an unknown section is rendered, not reported as empty) — it lands in History, the
+    // catch-all clinical tab, rather than being silently dropped.
+    const orphaned = profile.sections.map((s) => s.key).filter((k) => k !== "header" && !assigned.has(k));
+
+    return PROFILE_TAB_GROUPS
+      .map((group) => {
+        const keys = group.key === "history" ? [...group.sections, ...orphaned] : group.sections;
+        const sections = keys.map((key) => byKey.get(key)).filter((s): s is ProfileSection => s !== undefined);
+        return { group, sections };
+      })
+      .filter(({ sections }) => sections.length > 0)
+      .map(({ group, sections }) => ({
+        value: group.key,
+        label: t(group.title),
+        content: (
+          <div className="profile-sections">
+            {sections.map((section) => (
+              <SectionCard key={section.key} section={section} beneficiaryId={profile.beneficiaryId} onRetry={onRetry} />
+            ))}
+          </div>
+        ),
+      }));
+  }, [byKey, profile.sections, profile.beneficiaryId, onRetry, t]);
+
+  // Derived from the filtered list rather than stored, so it is always valid: if `activeTab` names a tab that
+  // no longer exists (or none has been picked yet), this falls back to the first surviving tab automatically
+  // — no `useEffect` needed, and it recomputes correctly if the payload changes on retry.
+  const effectiveTab = tabItems.find((it) => it.value === activeTab)?.value ?? tabItems[0]?.value;
 
   return (
     <div className="patient-profile">
-      <nav className="profile-jump" aria-label={t(STR.jumpTo)}>
-        <ul>
-          {ordered.map((s) => (
-            <li key={s.key}>
-              <a href={`#section-${s.key}`}>{t(SECTION_TITLES[s.key] ?? { en: s.key, ar: s.key })}</a>
-            </li>
-          ))}
-        </ul>
-      </nav>
+      {header ? (
+        <section aria-label={t(SECTION_TITLES.header)}>
+          <Card style={{ padding: "var(--sp5)" }}>
+            {header.state === "Visible" ? (
+              <ProfileIdentity
+                data={header.data as ProfileHeader}
+                // Gated on alerts actually being VISIBLE, not merely present in the payload: an `Unavailable`
+                // alerts section (a real fetch failure) must not let this card assert "not recorded" while the
+                // Alerts card one tab away correctly says "temporarily unavailable" — two contradictory claims
+                // about the same fact. A role whose payload never carries an alerts section at all (reception)
+                // gets `undefined` here and no blood-group fact renders at all.
+                bloodGroup={alerts?.state === "Visible" ? (alertData?.bloodGroup ?? null) : undefined}
+                chips={<AllergyChips alertData={alertData} namedAllergens />}
+                actions={<SectionActions section={header} beneficiaryId={profile.beneficiaryId} />}
+              />
+            ) : (
+              <>
+                <h2 style={{ margin: 0, fontSize: "1.05rem" }}>{t(SECTION_TITLES.header)}</h2>
+                <SectionState section={header} beneficiaryId={profile.beneficiaryId} onRetry={onRetry} />
+              </>
+            )}
+          </Card>
+        </section>
+      ) : null}
 
-      <div className="profile-sections">
-        {ordered.map((section) => (
-          <SectionCard
-            key={section.key}
-            section={section}
-            beneficiaryId={profile.beneficiaryId}
-            onRetry={onRetry}
-          />
-        ))}
-      </div>
+      {tabItems.length > 0 ? (
+        <Tabs
+          variant="pill"
+          className="profile-tabs"
+          aria-label={t(STR.tabsLabel)}
+          value={effectiveTab!}
+          onValueChange={(v) => setActiveTab(v as ProfileTabKey)}
+          items={tabItems}
+        />
+      ) : null}
     </div>
   );
 }
@@ -510,7 +582,6 @@ function SectionState({
  * rather than reporting absence.
  */
 function SectionContent({ section, beneficiaryId }: { section: ProfileSection; beneficiaryId: string }) {
-  if (section.key === "header") return <HeaderView data={section.data as ProfileHeader} />;
   if (section.key === "alerts") return <AlertsView data={section.data as ProfileAlerts} />;
   if (section.key === "callHistory") {
     return <CallHistoryView data={section.data as CallHistorySection} beneficiaryId={beneficiaryId} />;
@@ -536,10 +607,6 @@ function SectionContent({ section, beneficiaryId }: { section: ProfileSection; b
  * Every fact is rendered only if the SERVER sent it. This screen invents nothing: a role whose projection
  * omits the phone renders no phone chip, rather than an empty one that implies none is recorded.
  */
-function HeaderView({ data }: { data: ProfileHeader }) {
-  return <ProfileIdentity data={data} />;
-}
-
 /**
  * The identity block — avatar, name + status, member number + relationship, and a hairline-separated strip of
  * icon-per-fact details.
@@ -963,6 +1030,44 @@ function CallRow({
 // ---------------------------------------------------------------- the patient context bar
 
 /**
+ * Up to 2 named allergens as warning chips, then a "+N more" chip — or a bare count when `namedAllergens`
+ * is false. Shared by `PatientContextBar` (the encounter workspace's identity strip) and the profile's own
+ * always-visible identity card (Task 3), so the two read identically rather than drifting.
+ *
+ * `alertData: null` means "nothing to show" — the caller decides separately (via whether it passes real
+ * data at all) whether that silence is because there is nothing recorded or because this viewer's payload
+ * never carried an alerts section; this component only renders what it is given.
+ */
+function AllergyChips({ alertData, namedAllergens }: { alertData: ProfileAlerts | null; namedAllergens: boolean }) {
+  const t = useLoc();
+  const alertCount = alertData ? alertData.allergies.length + (alertData.criticalFlags?.length ?? 0) : 0;
+  // Two named substances, then a remainder. A strip is a fixed-height safety control, and an eight-allergy
+  // patient must not push the identity it exists to confirm onto a second line.
+  const named = namedAllergens ? alertData?.allergies.slice(0, 2) ?? [] : [];
+  const namedRest = alertCount - named.length;
+
+  return (
+    <>
+      {named.map((a) => (
+        <span key={a.allergen} className="profile-chip profile-chip--critical" data-shape="octagon">
+          <span aria-hidden="true" className="profile-chip-icon">⚠</span>
+          <span>{t(STR.allergyTo)} {a.allergen}</span>
+        </span>
+      ))}
+      {(namedAllergens ? namedRest : alertCount) > 0 ? (
+        <span className="profile-chip profile-chip--critical" data-shape="octagon">
+          <span aria-hidden="true" className="profile-chip-icon">⚠</span>
+          <span>
+            {namedAllergens ? namedRest : alertCount}{" "}
+            {namedAllergens ? t(STR.moreAlerts) : t(STR.alerts)}
+          </span>
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+/**
  * The compact identity strip that follows a user into encounter, order, dispense, approval and call-centre
  * screens (design 39 §6).
  *
@@ -1027,11 +1132,6 @@ export function PatientContextBar({
 
   const alerts = profile.sections.find((s) => s.key === "alerts");
   const alertData = alerts?.state === "Visible" ? (alerts.data as ProfileAlerts) : null;
-  const alertCount = alertData ? alertData.allergies.length + (alertData.criticalFlags?.length ?? 0) : 0;
-  // Two named substances, then a remainder. A strip is a fixed-height safety control, and an eight-allergy
-  // patient must not push the identity it exists to confirm onto a second line.
-  const named = namedAllergens ? alertData?.allergies.slice(0, 2) ?? [] : [];
-  const namedRest = alertCount - named.length;
 
   return (
     <aside className="patient-context-bar" aria-label={t(STR.title)}>
@@ -1045,25 +1145,7 @@ export function PatientContextBar({
         // `?? null` matters: when the alerts section is withheld or failed, `alertData` is null and the
         // strip must still show "not recorded" rather than dropping the fact — `undefined` would drop it.
         bloodGroup={showBloodGroup ? alertData?.bloodGroup ?? null : undefined}
-        chips={
-          <>
-            {named.map((a) => (
-              <span key={a.allergen} className="profile-chip profile-chip--critical" data-shape="octagon">
-                <span aria-hidden="true" className="profile-chip-icon">⚠</span>
-                <span>{t(STR.allergyTo)} {a.allergen}</span>
-              </span>
-            ))}
-            {(namedAllergens ? namedRest : alertCount) > 0 ? (
-              <span className="profile-chip profile-chip--critical" data-shape="octagon">
-                <span aria-hidden="true" className="profile-chip-icon">⚠</span>
-                <span>
-                  {namedAllergens ? namedRest : alertCount}{" "}
-                  {namedAllergens ? t(STR.moreAlerts) : t(STR.alerts)}
-                </span>
-              </span>
-            ) : null}
-          </>
-        }
+        chips={<AllergyChips alertData={alertData} namedAllergens={namedAllergens} />}
       />
     </aside>
   );

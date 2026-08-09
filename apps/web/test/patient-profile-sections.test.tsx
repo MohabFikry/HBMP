@@ -55,6 +55,16 @@ function useArabic() {
   localStorage.setItem("mersal-lang", "ar");
 }
 
+/**
+ * Activate a tab by its label before querying inside it — Radix `Tabs` hides inactive panels via the
+ * `hidden` attribute, which `getByRole`/`findByRole`/`queryByRole` respect. The pattern must be anchored
+ * (e.g. `/^history$/i`, not `/history/i`): "History" and "Call history" both contain the substring
+ * "history", so an unanchored pattern matches both tabs and `findByRole` throws on the ambiguity.
+ */
+async function openTab(name: RegExp) {
+  await userEvent.setup().click(await screen.findByRole("tab", { name }));
+}
+
 afterEach(() => {
   localStorage.clear();
 });
@@ -98,6 +108,7 @@ describe("20.4 — nested payloads are rendered, not silently dropped", () => {
       }),
     ]);
 
+    await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /past medical history/i });
     expect(within(section).getByText("Type 2 diabetes mellitus")).toBeInTheDocument();
     expect(within(section).getByText(/E11\.9/)).toBeInTheDocument();
@@ -115,6 +126,7 @@ describe("20.4 — nested payloads are rendered, not silently dropped", () => {
       }),
     ]);
 
+    await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /case management/i });
     expect(within(section).getByText("CASE-2026-0217")).toBeInTheDocument();
     expect(within(section).getByText("Confirm endocrinology follow-up")).toBeInTheDocument();
@@ -132,6 +144,7 @@ describe("20.4 — nested payloads are rendered, not silently dropped", () => {
       }),
     ]);
 
+    await openTab(/authorizations/i);
     const section = await screen.findByRole("region", { name: /financial/i });
     expect(within(section).getByText("CLM-2026-3391")).toBeInTheDocument();
     expect(within(section).getByText(/1,800/)).toBeInTheDocument();
@@ -143,6 +156,7 @@ describe("20.4 — nested payloads are rendered, not silently dropped", () => {
     // ordinary fact and it must still read as one.
     renderSections([visible("prescriptions", { items: [] })]);
 
+    await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /prescriptions/i });
     expect(within(section).getByText(/no records/i)).toBeInTheDocument();
   });
@@ -163,6 +177,7 @@ describe("20.4 — a field the projection dropped renders as nothing, not as an 
       }),
     ]);
 
+    await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /encounters/i });
     expect(within(section).getByText("ENC-2026-1")).toBeInTheDocument();
     expect(within(section).queryByRole("columnheader", { name: /reason/i })).not.toBeInTheDocument();
@@ -177,6 +192,7 @@ describe("20.4 — a field the projection dropped renders as nothing, not as an 
       }),
     ]);
 
+    await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /encounters/i });
     expect(within(section).getByRole("columnheader", { name: /reason/i })).toBeInTheDocument();
     expect(within(section).getByText("Follow-up, diabetes")).toBeInTheDocument();
@@ -191,6 +207,7 @@ describe("20.4 — a field the projection dropped renders as nothing, not as an 
       }),
     ]);
 
+    await openTab(/authorizations/i);
     const section = await screen.findByRole("region", { name: /authorizations/i });
     expect(within(section).getByText("AUTH-1")).toBeInTheDocument();
     expect(within(section).queryByRole("columnheader", { name: /rationale/i })).not.toBeInTheDocument();
@@ -200,6 +217,7 @@ describe("20.4 — a field the projection dropped renders as nothing, not as an 
   it("renders financial headline facts with no claims table under the summary projection", async () => {
     renderSections([visible("financial", { currency: "EGP", costShareOwed: 420, settlementStatus: "Pending" })]);
 
+    await openTab(/authorizations/i);
     const section = await screen.findByRole("region", { name: /financial/i });
     expect(within(section).getByText(/cost share owed/i)).toBeInTheDocument();
     expect(within(section).queryByRole("table")).not.toBeInTheDocument();
@@ -221,6 +239,7 @@ describe("20.4 — row-level gates are rendered as gates", () => {
       }),
     ]);
 
+    await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /investigations/i });
     // Restricted: said in words, with its sensitivity level.
     expect(within(section).getByText(/sensitivity-restricted/i)).toBeInTheDocument();
@@ -244,6 +263,7 @@ describe("20.4 — row-level gates are rendered as gates", () => {
       }),
     ]);
 
+    await openTab(/documents/i);
     const section = await screen.findByRole("region", { name: /documents/i });
     // Both rows exist — the gated one is not hidden, only its content is.
     expect(within(section).getByText("Radiology report — lumbar MRI")).toBeInTheDocument();
@@ -262,6 +282,7 @@ describe("20.4 — row-level gates are rendered as gates", () => {
       }),
     ]);
 
+    await openTab(/^notes$/i);
     const section = await screen.findByRole("region", { name: /^notes$/i });
     expect(within(section).getByText("Prefers afternoon appointments.")).toBeInTheDocument();
     // The withheld note is present, named and dated — so a user requests access rather than assuming nothing
@@ -280,6 +301,7 @@ describe("20.4 — row-level gates are rendered as gates", () => {
       }),
     ]);
 
+    await openTab(/authorizations/i);
     const section = await screen.findByRole("region", { name: /referrals/i });
     expect(within(section).getByText("Open")).toBeInTheDocument();
     expect(within(section).getByText("Closed")).toBeInTheDocument();
@@ -335,6 +357,7 @@ describe("20.4 — labels are translated, never raw payload keys", () => {
       }),
     ]);
 
+    await openTab(/الموافقات/);
     const section = await screen.findByRole("region", { name: /الإحالات/ });
     expect(within(section).getByText("نشط")).toBeInTheDocument();
     expect(within(section).getByText("SomeBrandNewState")).toBeInTheDocument();
@@ -348,6 +371,7 @@ describe("20.4 — an unknown section key is shown, not reported as empty", () =
     // A server ahead of this client. The honest failure is an ugly render; the dishonest one is "No records".
     renderSections([visible("someFutureSection", { headline: "Something new", rows: [{ id: 1, label: "kept" }] })]);
 
+    await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /someFutureSection/i });
     expect(within(section).getByText(/something new/i)).toBeInTheDocument();
     // The nested array survives rather than being filtered away for being an object.
@@ -359,33 +383,42 @@ describe("20.4 — an unknown section key is shown, not reported as empty", () =
 // ---------------------------------------------------------------- accessibility
 
 describe("20.4 — accessibility of the new views", () => {
-  it("is axe clean with all twelve sections visible, in English", async () => {
+  it("is axe clean on every populated tab, in English", async () => {
     const { container } = renderSections(FULL_PROFILE);
-    await screen.findByRole("region", { name: /timeline/i });
+    await screen.findByRole("region", { name: /coverage/i });
 
-    const results = await axe(container);
-    expect(results).toHaveNoViolations();
-  });
+    for (const tab of [/coverage/i, /^history$/i, /authorizations/i, /documents/i, /^notes$/i, /timeline/i]) {
+      await openTab(tab);
+      expect(await axe(container)).toHaveNoViolations();
+    }
+  }, 20_000);
 
-  it("is axe clean in Arabic RTL", async () => {
+  it("is axe clean on every populated tab, in Arabic RTL", async () => {
     useArabic();
     const { container } = renderSections(FULL_PROFILE);
-    await screen.findByRole("region", { name: /السجل الزمني/ });
+    await screen.findByRole("region", { name: /التغطية/ });
 
-    const results = await axe(container);
-    expect(results).toHaveNoViolations();
-  });
-
-  it("gives every section table an accessible caption", async () => {
-    // DataTable renders its caption sr-only. A table with no caption is a table a screen-reader user lands in
-    // with no idea which section they are reading — and this screen stacks a dozen of them.
-    renderSections(FULL_PROFILE);
-    await screen.findByRole("region", { name: /timeline/i });
-
-    for (const table of screen.getAllByRole("table")) {
-      expect(table.querySelector("caption")?.textContent?.trim()).toBeTruthy();
+    for (const tab of [/التغطية/, /السجل الطبي/, /الموافقات/, /المستندات/, /^الملاحظات$/, /السجل الزمني/]) {
+      await openTab(tab);
+      expect(await axe(container)).toHaveNoViolations();
     }
-  });
+  }, 20_000);
+
+  it("gives every section table an accessible caption, on every populated tab", async () => {
+    // DataTable renders its caption sr-only. A table with no caption is a table a screen-reader user lands
+    // in with no idea which section they are reading — and each tab here stacks more than one.
+    renderSections(FULL_PROFILE);
+    await screen.findByRole("region", { name: /coverage/i });
+
+    for (const tab of [/coverage/i, /^history$/i, /authorizations/i, /documents/i, /^notes$/i, /timeline/i]) {
+      await openTab(tab);
+      // Notes has no DataTable at all (it's a list of cards), so this must tolerate zero tables on a tab
+      // rather than fail the sweep — `getAllByRole` throws on no match, `queryAllByRole` does not.
+      for (const table of screen.queryAllByRole("table")) {
+        expect(table.querySelector("caption")?.textContent?.trim()).toBeTruthy();
+      }
+    }
+  }, 20_000);
 });
 
 // ---------------------------------------------------------------- ordering
@@ -402,6 +435,7 @@ describe("20.4 — timeline order", () => {
       }),
     ]);
 
+    await openTab(/timeline/i);
     const section = await screen.findByRole("region", { name: /timeline/i });
     const rows = within(section).getAllByRole("row").slice(1); // drop the header row
     expect(rows[0]).toHaveTextContent("ProfileOpened");
@@ -495,6 +529,7 @@ describe("20.4 — the visit-details modal", () => {
 
   async function openModal(over: Partial<ApiClient> = {}) {
     renderSections([visible("encounters", { items: [ROW] })], over);
+    await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /encounters/i });
     await userEvent.setup().click(within(section).getByRole("button", { name: /view visit details/i }));
     return screen.findByRole("dialog");
@@ -555,6 +590,7 @@ describe("20.4 — the visit-details modal", () => {
       patientProfile: patientProfile as never,
       getEncounter: vi.fn().mockResolvedValue(RECORD),
     });
+    await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /encounters/i });
     const user = userEvent.setup();
     await user.click(within(section).getByRole("button", { name: /view visit details/i }));
@@ -577,6 +613,7 @@ describe("20.4 — the visit-details modal", () => {
     renderSections([visible("encounters", { items: [metaRow] })], {
       patientProfile: patientProfile as never,
     });
+    await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /encounters/i });
     const user = userEvent.setup();
     await user.click(within(section).getByRole("button", { name: /view visit details/i }));
@@ -588,6 +625,7 @@ describe("20.4 — the visit-details modal", () => {
 
   it("pins the View column so the control is reachable without scrolling sideways", async () => {
     renderSections([visible("encounters", { items: [ROW] })]);
+    await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /encounters/i });
     // Seven columns overflow the card on a laptop, and the column that falls past the fold is the last —
     // which is the one with the button in it.
@@ -602,6 +640,7 @@ describe("20.4 — the visit-details modal", () => {
       [visible("encounters", { items: [{ ...ROW, encounterId: undefined }] })],
       { getEncounter },
     );
+    await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /encounters/i });
     await userEvent.setup().click(within(section).getByRole("button", { name: /view visit details/i }));
 

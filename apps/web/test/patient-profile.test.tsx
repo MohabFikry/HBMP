@@ -3,10 +3,11 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
 import { renderNode, seedSession } from "./helpers";
-import { PatientProfile, PatientContextBar } from "../src/screens/PatientProfile";
+import { PatientProfile, PatientContextBar, PROFILE_TAB_GROUPS } from "../src/screens/PatientProfile";
 import { DevApiClient } from "../src/api/DevApiClient";
 import type { ApiClient } from "../src/api/client";
 import type { PatientProfile as PatientProfileContract } from "@mersal/contracts";
+import { PROFILE_SECTION_KEYS } from "@mersal/contracts";
 import { ApiProvider } from "../src/api/ApiProvider";
 import { useLocation } from "react-router-dom";
 
@@ -64,6 +65,21 @@ function setupWithClipboard() {
   return { user, writeText };
 }
 
+/**
+ * Activate a tab by its (English) label before querying inside it. The pattern must be anchored (e.g.
+ * `/^history$/i`, not `/history/i`): "History" and "Call history" tab labels both contain the substring
+ * "history", so an unanchored pattern matches both tabs and `findByRole` throws on the ambiguity.
+ *
+ * Accepts an EXISTING user-event instance where the test already has one (e.g. from
+ * `setupWithClipboard()`). `userEvent.setup()` reinstalls its own `navigator.clipboard` stub every time
+ * it runs — see the doc comment on `stubClipboard` above — so a second, throwaway instance created here
+ * would silently clobber a clipboard mock the test installed earlier and any assertion against it would
+ * fail for a reason that looks like the component not calling it.
+ */
+async function openTab(name: RegExp, user: ReturnType<typeof userEvent.setup> = userEvent.setup()) {
+  await user.click(await screen.findByRole("tab", { name }));
+}
+
 beforeEach(() => {
   stubClipboard({ writeText: vi.fn().mockResolvedValue(undefined) });
 });
@@ -86,6 +102,7 @@ describe("20.4 — Restricted, Unavailable and Empty are three distinct states",
     });
     renderProfile(api);
 
+    await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /investigations/i });
     // Four cues: the WORD is present, not only a colour or an icon.
     expect(within(section).getByText("Restricted")).toBeInTheDocument();
@@ -106,6 +123,7 @@ describe("20.4 — Restricted, Unavailable and Empty are three distinct states",
     void reload;
     renderProfile(api);
 
+    await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /encounters/i });
     expect(within(section).getByText(/temporarily unavailable/i)).toBeInTheDocument();
     expect(within(section).getByRole("button", { name: /retry/i })).toBeInTheDocument();
@@ -118,6 +136,7 @@ describe("20.4 — Restricted, Unavailable and Empty are three distinct states",
     });
     renderProfile(api);
 
+    await openTab(/authorizations/i);
     const section = await screen.findByRole("region", { name: /referrals/i });
     expect(within(section).getByText(/no records/i)).toBeInTheDocument();
     expect(within(section).queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
@@ -135,6 +154,7 @@ describe("20.4 — Restricted, Unavailable and Empty are three distinct states",
       ),
     });
     const { container } = renderProfile(api);
+    await openTab(/authorizations/i);
     await screen.findByRole("region", { name: /referrals/i });
 
     expect(container.querySelector('[data-state="restricted"]')).toBeTruthy();
@@ -177,7 +197,7 @@ describe("20.4 — the screen renders the payload and invents nothing", () => {
     expect(container.querySelector(".profile-avatar--initials")).toBeTruthy();
   });
 
-  it("orders sections with alerts pinned directly under the header", async () => {
+  it("shows identity with no visible heading, and pins alerts first inside the History tab", async () => {
     const api = fakeApi({
       patientProfile: vi.fn().mockResolvedValue(
         profile([
@@ -188,11 +208,17 @@ describe("20.4 — the screen renders the payload and invents nothing", () => {
       ),
     });
     renderProfile(api);
-    await screen.findByRole("region", { name: /identity/i });
 
+    // The identity card is reachable as a landmark (an accessible name, for assistive tech and for this
+    // query) but renders no VISIBLE "Identity" heading — that label is what this redesign removed.
+    await screen.findByRole("region", { name: /identity/i });
+    expect(screen.queryByRole("heading", { name: /^identity$/i })).not.toBeInTheDocument();
+
+    // Alerts is still the first thing inside History — pinned directly after the section it protects
+    // against acting blind on, same safety property, now inside a tab instead of at the top of a stack.
+    await openTab(/^history$/i);
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(headings[0]).toMatch(/identity/i);
-    expect(headings[1]).toMatch(/alerts/i);
+    expect(headings[0]).toMatch(/alerts/i);
   });
 });
 
@@ -201,6 +227,7 @@ describe("20.4 — the screen renders the payload and invents nothing", () => {
 describe("20.4 — call history: four cues and a server-generated clipboard", () => {
   it("renders direction with the WORD and an arrow icon, not colour alone", async () => {
     renderProfile(fakeApi({ patientProfile: vi.fn().mockResolvedValue(profile([callHistorySection()])) }));
+    await openTab(/call history/i);
     const section = await screen.findByRole("region", { name: /call history/i });
     // Scoped to the ROWS, because the direction filter's <option>s carry the same words.
     const rows = within(section).getByRole("list", { name: "" }) ?? section;
@@ -221,6 +248,7 @@ describe("20.4 — call history: four cues and a server-generated clipboard", ()
   it("copies the SERVER-PROVIDED copyText verbatim, by keyboard, and announces it", async () => {
     const { user, writeText } = setupWithClipboard();
     renderProfile(fakeApi({ patientProfile: vi.fn().mockResolvedValue(profile([callHistorySection()])) }));
+    await openTab(/call history/i, user);
     await screen.findByRole("region", { name: /call history/i });
 
     // The accessible name identifies WHICH call — "Copy" repeated down a list is useless to a screen reader.
@@ -267,6 +295,7 @@ describe("20.4 — call history: four cues and a server-generated clipboard", ()
       }),
     );
 
+    await openTab(/call history/i, user);
     await screen.findByRole("region", { name: /call history/i });
     // Absence of a summary is stated, not left blank — blank would read as "the agent wrote nothing".
     expect(screen.getByText(/summary not available at your access level/i)).toBeInTheDocument();
@@ -289,6 +318,7 @@ describe("20.4 — call history: four cues and a server-generated clipboard", ()
         copyCallSummaries,
       }),
     );
+    await openTab(/call history/i, user);
     await screen.findByRole("region", { name: /call history/i });
 
     await user.click(screen.getByRole("button", { name: /copy all visible/i }));
@@ -303,6 +333,7 @@ describe("20.4 — call history: four cues and a server-generated clipboard", ()
     const user = userEvent.setup();
     stubClipboard(undefined);
     renderProfile(fakeApi({ patientProfile: vi.fn().mockResolvedValue(profile([callHistorySection()])) }));
+    await openTab(/call history/i, user);
     await screen.findByRole("region", { name: /call history/i });
 
     await user.click(screen.getByRole("button", { name: /copy summary of outbound call on/i }));
@@ -314,6 +345,7 @@ describe("20.4 — call history: four cues and a server-generated clipboard", ()
     const patientProfile = vi.fn().mockResolvedValue(profile([callHistorySection()]));
     const user = userEvent.setup();
     renderProfile(fakeApi({ patientProfile }));
+    await openTab(/call history/i, user);
     await screen.findByRole("region", { name: /call history/i });
 
     // The design-system Select renders its own listbox — a native <select> cannot style the OS-drawn popup,
@@ -392,6 +424,7 @@ describe("20.4 — module deep-links and the print summary", () => {
         ),
       }),
     );
+    await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /encounters/i });
     const action = within(section).getByRole("button", { name: /start encounter/i });
     expect(action).not.toHaveAttribute("href");
@@ -406,6 +439,7 @@ describe("20.4 — module deep-links and the print summary", () => {
         ),
       }),
     );
+    await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /encounters/i });
     expect(within(section).queryByRole("link", { name: /start encounter/i })).not.toBeInTheDocument();
   });
@@ -420,6 +454,7 @@ describe("20.4 — module deep-links and the print summary", () => {
         ),
       }),
     );
+    await openTab(/^history$/i);
     const section = await screen.findByRole("region", { name: /investigations/i });
     // Queried as a BUTTON, which is what these are now. Left as `link` this assertion would have passed
     // whether or not the action rendered — a negative test against a role nothing uses proves nothing.
@@ -470,7 +505,7 @@ describe("20.4 — module deep-links and the print summary", () => {
 // ---------------------------------------------------------------- accessibility
 
 describe("20.4 — accessibility", () => {
-  it("is axe-clean with all four section states on screen", async () => {
+  it("is axe-clean on every tab, with all four section states represented", async () => {
     const { container } = renderProfile(
       fakeApi({
         patientProfile: vi.fn().mockResolvedValue(
@@ -485,9 +520,13 @@ describe("20.4 — accessibility", () => {
         ),
       }),
     );
-    await screen.findByRole("region", { name: /call history/i });
-    expect(await axe(container)).toHaveNoViolations();
-  });
+    await screen.findByRole("region", { name: /identity/i });
+
+    for (const tab of [/^history$/i, /authorizations/i, /call history/i]) {
+      await openTab(tab);
+      expect(await axe(container)).toHaveNoViolations();
+    }
+  }, 20_000);
 });
 
 // ---------------------------------------------------------------- fixtures
@@ -577,6 +616,7 @@ describe("20.4 — the encounters section opens an encounter", () => {
       </ApiProvider>,
     );
 
+    await openTab(/^history$/i);
     await user.click(await screen.findByText("ENC-2026-000074"));
     // Carries the id, not the ref — the ref addresses nothing.
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("encounter=e-77"));
@@ -597,6 +637,7 @@ describe("20.4 — the encounters section opens an encounter", () => {
       </ApiProvider>,
     );
 
+    await openTab(/^history$/i);
     await user.click(await screen.findByRole("button", { name: /view visit details/i }));
     expect(await screen.findByRole("dialog")).toHaveTextContent("Dokki");
     // The row is a click target too — without stopPropagation the eye would open the modal AND navigate.
@@ -616,6 +657,7 @@ describe("20.4 — the encounters section opens an encounter", () => {
       }),
     );
 
+    await openTab(/^history$/i);
     await user.click(await screen.findByRole("button", { name: /view visit details/i }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("ENC-2026-000074");
@@ -677,5 +719,183 @@ describe("20.4 — past medical history names the condition", () => {
     );
 
     await waitFor(() => expect(screen.getAllByText("I10").length).toBeGreaterThan(0));
+  });
+});
+
+// ---------------------------------------------------------------- the identity card: blood group + allergy
+
+describe("the identity card shows blood group and allergy, sourced from alerts", () => {
+  it("shows blood group as recorded when alerts carries one", async () => {
+    renderProfile(
+      fakeApi({
+        patientProfile: vi.fn().mockResolvedValue(
+          profile([
+            { key: "header", state: "Visible", data: header() },
+            { key: "alerts", state: "Visible", data: { allergies: [], bloodGroup: "O+" } },
+          ]),
+        ),
+      }),
+    );
+    const identity = await screen.findByRole("region", { name: /identity/i });
+    expect(within(identity).getByText("O+")).toBeInTheDocument();
+  });
+
+  it("shows blood group as NOT RECORDED, in words, when alerts carries none", async () => {
+    renderProfile(
+      fakeApi({
+        patientProfile: vi.fn().mockResolvedValue(
+          profile([
+            { key: "header", state: "Visible", data: header() },
+            { key: "alerts", state: "Visible", data: { allergies: [], bloodGroup: null } },
+          ]),
+        ),
+      }),
+    );
+    const identity = await screen.findByRole("region", { name: /identity/i });
+    expect(within(identity).getByText(/blood group not recorded/i)).toBeInTheDocument();
+  });
+
+  it("omits blood group entirely for a role whose payload never carries alerts", async () => {
+    // Reception's projection has no alerts section at all — the identity card must not invent a "not
+    // recorded" claim about clinical data this role has no access to.
+    renderProfile(
+      fakeApi({
+        patientProfile: vi.fn().mockResolvedValue(profile([{ key: "header", state: "Visible", data: header() }])),
+      }),
+    );
+    const identity = await screen.findByRole("region", { name: /identity/i });
+    expect(within(identity).queryByText(/blood group/i)).not.toBeInTheDocument();
+  });
+
+  it("omits blood group entirely when alerts is present but Unavailable, not just absent", async () => {
+    // A real fetch failure — the alerts SECTION is present in the payload but withheld with `Unavailable`.
+    // The identity card must not confidently assert "not recorded" here: that would contradict the Alerts
+    // card one tab away, which correctly says "temporarily unavailable" for the very same fact.
+    renderProfile(
+      fakeApi({
+        patientProfile: vi.fn().mockResolvedValue(
+          profile([
+            { key: "header", state: "Visible", data: header() },
+            { key: "alerts", state: "Unavailable", reasonCode: "timeout" },
+          ]),
+        ),
+      }),
+    );
+    const identity = await screen.findByRole("region", { name: /identity/i });
+    expect(within(identity).queryByText(/blood group/i)).not.toBeInTheDocument();
+  });
+
+  it("shows up to 2 named allergens on the identity card, plus a remainder count", async () => {
+    renderProfile(
+      fakeApi({
+        patientProfile: vi.fn().mockResolvedValue(
+          profile([
+            { key: "header", state: "Visible", data: header() },
+            {
+              key: "alerts",
+              state: "Visible",
+              data: {
+                allergies: [
+                  { allergen: "Penicillin", severity: "High" },
+                  { allergen: "Latex", severity: "Moderate" },
+                  { allergen: "Peanuts", severity: "High" },
+                ],
+              },
+            },
+          ]),
+        ),
+      }),
+    );
+    const identity = await screen.findByRole("region", { name: /identity/i });
+    expect(within(identity).getByText(/penicillin/i)).toBeInTheDocument();
+    expect(within(identity).getByText(/latex/i)).toBeInTheDocument();
+    expect(within(identity).getByText(/1 more alerts/i)).toBeInTheDocument();
+    expect(within(identity).queryByText(/peanuts/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("the profile tab bar", () => {
+  it("renders 7 tabs, defaulting to Coverage, when the payload has content for all 7", async () => {
+    // One section per tab group — under the empty-tab-group fix, a payload with content for only ONE group
+    // (as this test used to send) legitimately produces only 1 tab. That is the fix working correctly, not a
+    // regression: this test now proves the OTHER half of the property, that all 7 render when the payload
+    // actually has something for each of them.
+    renderProfile(
+      fakeApi({
+        patientProfile: vi.fn().mockResolvedValue(
+          profile([
+            { key: "header", state: "Visible", data: header() },
+            { key: "coverage", state: "Visible", data: { payerName: "Mersal Foundation" } },
+            { key: "alerts", state: "Visible", data: { allergies: [] } },
+            { key: "authorizations", state: "Visible", data: { items: [] } },
+            { key: "documents", state: "Visible", data: { items: [] } },
+            { key: "notes", state: "Visible", data: { items: [] } },
+            { key: "timeline", state: "Visible", data: { items: [] } },
+            { key: "callHistory", state: "Visible", data: { level: "Full", items: [] } },
+          ]),
+        ),
+      }),
+    );
+    await screen.findByRole("region", { name: /identity/i });
+    for (const name of [/coverage/i, /^history$/i, /authorizations/i, /documents/i, /notes/i, /timeline/i, /call history/i]) {
+      expect(screen.getByRole("tab", { name })).toBeInTheDocument();
+    }
+    // Coverage stays tabItems[0] — PROFILE_TAB_GROUPS' own order starts with Coverage.
+    expect(screen.getByRole("tab", { name: /coverage/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Mersal Foundation")).toBeVisible();
+  });
+
+  it("lands on the first tab that actually has content when the payload has no coverage section", async () => {
+    // Roles like lab_tech/imaging_tech/radiology_tech never carry a coverage section — the tab bar must not
+    // hard-default to Coverage and show it blank beside six more empty tabs. It must skip straight to the
+    // first tab that has something, with that content visible without any click.
+    renderProfile(
+      fakeApi({
+        patientProfile: vi.fn().mockResolvedValue(
+          profile([
+            { key: "header", state: "Visible", data: header() },
+            { key: "investigations", state: "Visible", data: { items: [] } },
+          ]),
+        ),
+      }),
+    );
+    await screen.findByRole("region", { name: /identity/i });
+
+    // Only History survives filtering (it is the only group with content), so it is both the sole tab and
+    // the selected one.
+    const historyTab = screen.getByRole("tab", { name: /^history$/i });
+    expect(historyTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("tab", { name: /coverage/i })).not.toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: /investigations/i })).toBeVisible();
+  });
+
+  it("switching tabs does not re-request the profile", async () => {
+    const patientProfile = vi.fn().mockResolvedValue(
+      profile([
+        { key: "header", state: "Visible", data: header() },
+        { key: "documents", state: "Visible", data: { items: [] } },
+      ]),
+    );
+    renderProfile(fakeApi({ patientProfile }));
+    await screen.findByRole("region", { name: /identity/i });
+    await openTab(/documents/i);
+    await screen.findByRole("region", { name: /documents/i });
+    expect(patientProfile).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------- the tab table stays exhaustive
+
+describe("PROFILE_TAB_GROUPS stays exhaustive", () => {
+  it("covers exactly the non-header section keys, with no duplicates", () => {
+    // The static table's own sections lists — NOT the History group's runtime-only `orphaned` additions,
+    // which exist to catch a server-ahead-of-client key and are never part of this static table. If a new
+    // section key is ever added to the contract without a home in a tab group, this must fail loudly rather
+    // than let that section silently never render.
+    const flattened = PROFILE_TAB_GROUPS.flatMap((g) => g.sections);
+    const expected = PROFILE_SECTION_KEYS.filter((k) => k !== "header");
+
+    expect(new Set(flattened).size).toBe(flattened.length); // no duplicates
+    expect([...flattened].sort()).toEqual([...expected].sort()); // same elements, nothing missing, nothing extra
   });
 });

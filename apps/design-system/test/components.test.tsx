@@ -10,6 +10,7 @@ import {
   SegmentedControl,
   Select,
   StatusChip,
+  Tabs,
   type Column,
   type StatusKind,
 } from "../src";
@@ -226,5 +227,50 @@ describe("Select", () => {
       <Select aria-label="Branch" options={options} value={null} placeholder="All branches" onChange={vi.fn()} />,
     );
     expect(screen.getByRole("combobox", { name: "Branch" })).toHaveTextContent("All branches");
+  });
+});
+
+describe("Tabs", () => {
+  it("is a tablist with correct roles and switches panels on click", async () => {
+    const onValueChange = vi.fn();
+    function Demo() {
+      const [value, setValue] = useState("a");
+      return (
+        <Tabs
+          aria-label="Sections"
+          value={value}
+          onValueChange={(v) => {
+            setValue(v);
+            onValueChange(v);
+          }}
+          items={[
+            { value: "a", label: "First", content: <p>First content</p> },
+            { value: "b", label: "Second", content: <p>Second content</p> },
+          ]}
+        />
+      );
+    }
+    renderDS(<Demo />);
+    expect(screen.getByRole("tablist", { name: "Sections" })).toBeInTheDocument();
+    expect(screen.getByText("First content")).toBeVisible();
+    expect(screen.queryByText("Second content")).not.toBeVisible();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Second" }));
+    expect(onValueChange).toHaveBeenCalledWith("b");
+    expect(screen.getByText("Second content")).toBeVisible();
+  });
+
+  it("applies the pill visual variant without changing tab semantics", () => {
+    renderDS(
+      <Tabs
+        variant="pill"
+        aria-label="Sections"
+        value="a"
+        onValueChange={() => {}}
+        items={[{ value: "a", label: "First", content: <p>First</p> }]}
+      />,
+    );
+    expect(screen.getByRole("tablist")).toHaveClass("mrs-tabs--pill");
+    expect(screen.getByRole("tab", { name: "First" })).toBeInTheDocument();
   });
 });
