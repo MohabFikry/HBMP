@@ -1141,9 +1141,10 @@ because those are the ones where a silent shape change breaks a screen. Each rec
 property names the anonymous object carried, so **the JSON is byte-identical** — what changes is that the
 shape is now in the spec. Pharmacy, masterdata and orders are done; their suites pass unchanged.
 
-Coverage went **1% → 31.9%** (183 of 574 operations), and **51 → 28** for the SPA-called subset. Pharmacy,
-masterdata, orders, provider, reporting, emr and patient are done to the extent their responses have a type;
-their suites pass unchanged, and the full solution is 3,636 green with 0 skipped.
+Coverage went **1% → 42.2%** (242 of 574 operations), and the SPA-called subset went **51 → 0**: every
+endpoint the browser calls now declares what it returns. That subset is the one that mattered, because those
+are the bodies parsed with zod — a shape change anywhere else is a documentation gap, and a shape change
+there is a screen that fails to load with nothing else failing first.
 
 ### And a ratchet, so the remainder cannot stay invisible
 
@@ -1154,7 +1155,12 @@ a bar that can be lowered to pass is not a bar. It is in `REQUIRED_GATES`, so it
 
 ### Not done in 31.6
 
-- **391 operations still declare no response body**, 28 of them called by the SPA — admin (12) is the largest
-  block, then finance, case, approvals, claims and the provider write paths. The floors hold the line and
-  name the remainder per service; the work is mechanical but not automatable, because each anonymous object
-  is a contract decision about what the response IS rather than a rename.
+- **332 operations still declare no response body — and none of them is called by the SPA.** What remains is
+  service-to-service and administrative: write acknowledgements, internal lookups, health probes. The floors
+  hold the line per service and name the remainder, so it can only shrink.
+
+  Two shapes in that remainder are deliberately undeclarable rather than undone, and are worth separating
+  from the backlog: the beneficiary search and the approver queue return **field-level minimum-necessary
+  projections**, where a receptionist and a doctor asking the same question receive different KEYS. Only the
+  paging envelope is fixed, and that is what is declared. Publishing a fixed item schema there would be a
+  lie that reads as documentation.

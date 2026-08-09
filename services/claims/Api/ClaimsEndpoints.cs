@@ -34,7 +34,8 @@ public static class ClaimsEndpoints
             var rows = await deps.Queries.ListAsync(deps.Tenant, effectiveProvider, beneficiaryId, st, take ?? 50, ct);
             await AuditRead(deps, "claim_list", $"count={rows.Count}");
             return Results.Ok(rows.Select(ClaimView.From).ToList());
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"))
+        .Produces<IEnumerable<ClaimView>>();
 
         v1.MapGet("/{id:guid}", async (Guid id, ClaimsDeps deps, CancellationToken ct) =>
         {

@@ -233,8 +233,9 @@ read.MapGet("", async (string? identifierType, string? identifierValue, string? 
         if (await guard.AuthorizeAsync(b, ct) is not null) continue;
         disclosed.Add(await guard.DiscloseAsync(b, "search", ct));
     }
-    return Results.Ok(new { page = p, pageSize = ps, items = disclosed });
-});
+    return Results.Ok(new DisclosedPageView(p, ps, disclosed));
+})
+        .Produces<DisclosedPageView>();
 
 // ================================================================ RESOLVE (26.6, doc 43 §7)
 //
@@ -520,8 +521,9 @@ regRead.MapGet("", async (int? page, int? pageSize, PatientDbContext db, Benefic
     // `total` counts the queue; `items` is what THIS caller may read of this page. They differ when the
     // engine drops a row, and reporting the post-filter count as the total would silently shrink the queue
     // for a scoped user — a number that says "you are nearly done" when they are not.
-    return Results.Ok(new { page = p, pageSize = ps, total, items });
-});
+    return Results.Ok(new DisclosedQueueView(p, ps, total, items));
+})
+        .Produces<DisclosedQueueView>();
 
 // Create a registration for an existing (Pending) beneficiary — the re-review path (a Rejected application
 // is final, so a fresh look is a fresh row) and the backfill for beneficiaries registered before
@@ -549,8 +551,9 @@ reg.MapPost("", async (CreateRegistration req, HttpRequest http, PatientDbContex
     db.Registrations.Add(r);
     await db.SaveChangesAsync(ct);
     await audit.EmitAsync(new AuditEventDraft { EntityType = "registration", EntityId = r.RegistrationId.ToString(), Action = AuditAction.Create, ActorUserId = me.Principal?.Subject }, ct);
-    return Results.Created($"/api/v1/registrations/{r.RegistrationId}", new { r.RegistrationId, status = r.Status.ToString() });
-});
+    return Results.Created($"/api/v1/registrations/{r.RegistrationId}", new RegistrationCreatedView(r.RegistrationId, r.Status.ToString()));
+})
+        .Produces<RegistrationCreatedView>();
 
 // Set step data (documents verified / coverage bound / notes).
 reg.MapPatch("/{id:guid}", async (Guid id, PatchRegistration req, PatientDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>

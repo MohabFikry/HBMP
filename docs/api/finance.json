@@ -65,7 +65,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UtilizationView"
+                }
+              }
+            }
           }
         }
       }
@@ -102,7 +109,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinancialSummaryView"
+                }
+              }
+            }
           }
         }
       }
@@ -158,7 +172,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SettlementView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -270,7 +294,15 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string",
+                  "format": "byte"
+                }
+              }
+            }
           }
         }
       }
@@ -327,6 +359,27 @@
             "type": "string",
             "format": "uuid",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "FinancialSummaryView": {
+        "type": "object",
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "nullable": true
+          },
+          "buckets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SummaryBucket"
+            },
+            "nullable": true
+          },
+          "totalSpend": {
+            "type": "number",
+            "format": "double"
           }
         },
         "additionalProperties": false
@@ -450,6 +503,87 @@
               "$ref": "#/components/schemas/SettlementLineView"
             },
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SummaryBucket": {
+        "type": "object",
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "nullable": true
+          },
+          "key": {
+            "type": "string",
+            "nullable": true
+          },
+          "deliveredQty": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "spend": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UtilizationRow": {
+        "type": "object",
+        "properties": {
+          "serviceCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "serviceLine": {
+            "type": "string",
+            "nullable": true
+          },
+          "coverageCategory": {
+            "type": "string",
+            "nullable": true
+          },
+          "providerRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "authorizedQty": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "deliveredQty": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "spend": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UtilizationView": {
+        "type": "object",
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UtilizationRow"
+            },
+            "nullable": true
+          },
+          "totalAuthorized": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalDelivered": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalSpend": {
+            "type": "number",
+            "format": "double"
           }
         },
         "additionalProperties": false

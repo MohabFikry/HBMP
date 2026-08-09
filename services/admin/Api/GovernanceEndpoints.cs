@@ -59,8 +59,9 @@ public static class GovernanceEndpoints
             var v = await svc.UpsertMasterDataAsync(AdminContracts.Actor(gate.Principal!), req.SystemEnum, req.Code,
                 req.Attributes, req.Rationale, req.Retired, ct);
             return Results.Created($"/api/v1/admin/master-data/{req.System}/{req.Code}",
-                new { v.VersionId, system = v.System.ToString(), v.Code, v.VersionNo, v.EffectiveFrom });
-        });
+                new MasterDataCreatedView(v.VersionId, v.System.ToString(), v.Code, v.VersionNo, v.EffectiveFrom));
+        })
+        .Produces<MasterDataCreatedView>();
 
         // Resolve the version in force at a given date (how a historical record resolves the code).
         g.MapGet("/master-data/{system}/{code}/as-of", async (string system, string code, DateTimeOffset at,
@@ -71,8 +72,9 @@ public static class GovernanceEndpoints
             if (!Enum.TryParse<CodeSystem>(system, ignoreCase: true, out var sys)) return ProblemResults.Invalid("unknown-code-system");
 
             var v = await svc.ResolveAsOfAsync(sys, code, at, ct);
-            return v is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(new { v.VersionId, v.VersionNo, v.AttributesJson, v.EffectiveFrom, v.EffectiveTo });
-        });
+            return v is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(new MasterDataVersionView(v.VersionId, v.VersionNo, v.AttributesJson, v.EffectiveFrom, v.EffectiveTo));
+        })
+        .Produces<MasterDataVersionView>();
 
         // List the master-data versions currently in force (effective_to IS NULL) — the governance read surface.
         g.MapGet("/master-data", async (AdminGate gate, AdminDbContext db, CancellationToken ct) =>
@@ -82,10 +84,11 @@ public static class GovernanceEndpoints
             var rows = await db.MasterDataVersions.AsNoTracking()
                 .Where(v => v.EffectiveTo == null)
                 .OrderBy(v => v.System).ThenBy(v => v.Code).Take(500)
-                .Select(v => new { v.VersionId, system = v.System.ToString(), v.Code, v.VersionNo, v.Retired, v.EffectiveFrom, v.Rationale })
+                .Select(v => new MasterDataInForceView(
+                    v.VersionId, v.System.ToString(), v.Code, v.VersionNo, v.Retired, v.EffectiveFrom, v.Rationale))
                 .ToListAsync(ct);
             return Results.Ok(rows);
-        });
+        }).Produces<IEnumerable<MasterDataInForceView>>();
 
         // List the system-config entries currently in force for the caller's scope — the config read surface.
         g.MapGet("/system-config", async (AdminGate gate, AdminDbContext db, CancellationToken ct) =>
@@ -95,10 +98,11 @@ public static class GovernanceEndpoints
             var rows = await db.SystemConfigs.AsNoTracking()
                 .Where(c => c.EffectiveTo == null)
                 .OrderBy(c => c.TenantId).ThenBy(c => c.Key).Take(500)
-                .Select(c => new { c.ConfigId, c.TenantId, c.Key, type = c.ValueType.ToString(), c.Value, c.VersionNo, c.EffectiveFrom })
+                .Select(c => new SystemConfigInForceView(
+                    c.ConfigId, c.TenantId, c.Key, c.ValueType.ToString(), c.Value, c.VersionNo, c.EffectiveFrom))
                 .ToListAsync(ct);
             return Results.Ok(rows);
-        });
+        }).Produces<IEnumerable<SystemConfigInForceView>>();
 
         // Notification template — linted (PHI-safe + AR/EN parity) before save.
         w.MapPost("/templates", async (TemplateEditRequest req, AdminGate gate, GovernanceService svc, CancellationToken ct) =>
@@ -131,8 +135,9 @@ public static class GovernanceEndpoints
 
             var (ok, error, config) = await svc.SetConfigAsync(AdminContracts.Actor(p), tenant, req.Key, req.TypeEnum, req.Value, ct);
             return ok
-                ? Results.Ok(new { config!.ConfigId, config.Key, value = config.Value, type = config.ValueType.ToString(), config.VersionNo })
+                ? Results.Ok(new SystemConfigView(config!.ConfigId, config.Key, config.Value, config.ValueType.ToString(), config.VersionNo))
                 : ProblemResults.Invalid(error ?? "error");
-        });
+        })
+        .Produces<SystemConfigView>();
     }
 }

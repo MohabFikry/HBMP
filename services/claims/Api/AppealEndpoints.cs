@@ -80,7 +80,8 @@ public static class AppealEndpoints
                 ActorUserId = deps.Subject, ActorRole = deps.Roles, TenantId = deps.Tenant, FieldClasses = ["financials"],
             }, ct);
             return Results.Ok(result);
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:reconcile"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:reconcile"))
+        .Produces<ClaimsKpi>();
     }
 }
 

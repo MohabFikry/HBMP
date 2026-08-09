@@ -82,7 +82,8 @@ public static class NetworkTierEndpoints
             if (status is not null && Enum.TryParse<NetworkTierStatus>(status, out var s)) q = q.Where(t => t.Status == s);
             var rows = await q.OrderBy(t => t.Rank).ToListAsync(ct);
             return Results.Ok(rows.Select(NetworkTierView.From));
-        });
+        })
+        .Produces<IEnumerable<NetworkTierView>>();
 
         read.MapGet("/{id:guid}", async (Guid id, ProviderDbContext db, CancellationToken ct) =>
         {

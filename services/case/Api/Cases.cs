@@ -76,7 +76,9 @@ public static class Cases
             var page = rows.Take(take).ToList();
             var next = rows.Count > take ? page[^1].CaseId.ToString() : null;
             return Results.Ok(new CaseListResponse(page.Select(CaseListItem.From).ToList(), next));
-        }).RequireAuthorization(HbmpPolicies.Scope("case:read"));
+        })
+        .RequireAuthorization(HbmpPolicies.Scope("case:read"))
+        .Produces<CaseListResponse>();
 
         // --- Read one case ----------------------------------------------------------------------------------
         v1.MapGet("/{id:guid}", async (Guid id, CaseDeps deps, CancellationToken ct) =>
@@ -262,7 +264,8 @@ public static class Cases
                 .Where(r => !TryEscStatus(status, out var want) || r.e.Status == want)
                 .Select(r => EscalationListItem.From(r.e, r.CaseNo, r.BeneficiaryId)).ToList();
             return Results.Ok(items);
-        }).RequireAuthorization(HbmpPolicies.Scope("case:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("case:read"))
+        .Produces<IEnumerable<EscalationListItem>>();
 
         v1.MapGet("/{id:guid}/escalations", async (Guid id, CaseDeps deps, CancellationToken ct) =>
         {

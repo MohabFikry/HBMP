@@ -270,7 +270,8 @@ public static class OrdersEndpoints
             q = q.ApplyBranchScope(o => o.OrderingBranchId, (me.Principal is null ? ScopeMode.MemberScoped : BranchScopeModes.ModeFor(me.Principal)), branch.Context);
             var rows = await q.OrderByDescending(o => o.RequestedAt).Take(100).ToListAsync(ct);
             return Results.Ok(rows.Select(OrderResponse.From));
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"))
+        .Produces<IEnumerable<OrderResponse>>();
 
         // ---- Cancel (not yet fully consumed) ----
         v1.MapPost("/{id:guid}/cancel", async (

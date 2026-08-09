@@ -122,7 +122,8 @@ public static class PlanEndpoints
             var rows = await db.Payers.AsNoTracking().Where(p => !p.IsDeleted)
                 .OrderBy(p => p.PayerCode).ToListAsync(ct);
             return Results.Ok(rows.Select(PayerView.From));
-        });
+        })
+        .Produces<IEnumerable<PayerView>>();
 
         v1.MapGet("/payers/{id:guid}", async (Guid id, PolicyDbContext db, PolicyGate gate, CancellationToken ct) =>
         {
@@ -171,7 +172,8 @@ public static class PlanEndpoints
             if (denied is not null) return denied;
             var rows = await db.Plans.AsNoTracking().Where(p => !p.IsDeleted).OrderBy(p => p.PlanCode).ToListAsync(ct);
             return Results.Ok(rows.Select(PlanView.From));
-        });
+        })
+        .Produces<IEnumerable<PlanView>>();
 
         // Amend = clone the version in force into a new Draft. This is the ONLY way to change a live plan.
         v1.MapPost("/plans/{id:guid}/amend", async (Guid id, PolicyDbContext db, PolicyGate gate,

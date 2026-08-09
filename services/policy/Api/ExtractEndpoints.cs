@@ -125,7 +125,8 @@ public static class ExtractEndpoints
                 .Where(d => !d.IsDeleted && (d.IsShared || d.OwnerUserId == mine))
                 .OrderBy(d => d.Name).ToListAsync(ct);
             return Results.Ok(rows.Select(ExtractDefinitionView.From));
-        });
+        })
+        .Produces<IEnumerable<ExtractDefinitionView>>();
     }
 
     // ---- Runs --------------------------------------------------------------------------------------------

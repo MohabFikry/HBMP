@@ -175,7 +175,11 @@ public static class ResultEndpoints
                 ActorUserId = me.Principal?.Subject, DecisionOutcome = "Allow", FieldClasses = ["phi"],
             }, ct);
             return Results.Ok(results.Select(ResultResponse.From));
-        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("orders:read"))
+        // TWO shapes, and both are the contract: a caller without the clinical grant gets the
+        // existence-only projection (design 37 §6), never a results array with the values removed.
+        .Produces<IEnumerable<ResultResponse>>()
+        .Produces<RestrictedResultView>();
     }
 
     /// <summary>Result read is min-necessary (11-permission-matrix): the ordering doctor (treating) OR the approval

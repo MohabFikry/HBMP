@@ -294,7 +294,8 @@ v1.MapGet("/queue", async (EmrDbContext db, CancellationToken ct) =>
         .Where(q => q.State == QueueState.Waiting)
         .OrderBy(q => q.EnqueuedAt).ToListAsync(ct);
     return Results.Ok(items.Select(QueueItemResponse.From));
-}).RequireAuthorization();
+}).RequireAuthorization()
+        .Produces<IEnumerable<QueueItemResponse>>();
 
 app.MapAppointments();
 app.MapQueue();

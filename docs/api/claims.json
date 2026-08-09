@@ -201,7 +201,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimsKpi"
+                }
+              }
+            }
           }
         }
       }
@@ -286,7 +293,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ClaimView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -409,7 +426,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BatchView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -1077,6 +1104,20 @@
         },
         "additionalProperties": false
       },
+      "AdjustmentValue": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "nullable": true
+          },
+          "totalAbsValue": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "additionalProperties": false
+      },
       "AppealBody": {
         "type": "object",
         "properties": {
@@ -1502,6 +1543,61 @@
         },
         "additionalProperties": false
       },
+      "ClaimsKpi": {
+        "type": "object",
+        "properties": {
+          "averageTatHours": {
+            "type": "number",
+            "format": "double"
+          },
+          "approvalRate": {
+            "type": "number",
+            "format": "double"
+          },
+          "denialRate": {
+            "type": "number",
+            "format": "double"
+          },
+          "topDenialReasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReasonCount"
+            },
+            "nullable": true
+          },
+          "adjustmentValueByType": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdjustmentValue"
+            },
+            "nullable": true
+          },
+          "providerVarianceLeague": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderVariance"
+            },
+            "nullable": true
+          },
+          "ocrAutoMatchRate": {
+            "type": "number",
+            "format": "double"
+          },
+          "agedUnbilledCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "agedUnbilledValue": {
+            "type": "number",
+            "format": "double"
+          },
+          "recoveryOutstanding": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateBatchRequest": {
         "type": "object",
         "properties": {
@@ -1639,6 +1735,34 @@
           "paymentDate": {
             "type": "string",
             "format": "date"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProviderVariance": {
+        "type": "object",
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variance": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReasonCount": {
+        "type": "object",
+        "properties": {
+          "reasonCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "count": {
+            "type": "integer",
+            "format": "int32"
           }
         },
         "additionalProperties": false

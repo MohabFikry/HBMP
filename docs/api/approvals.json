@@ -279,7 +279,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AuthorizationItemView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -630,7 +640,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TatSummary"
+                }
+              }
+            }
           }
         }
       }
@@ -756,8 +773,15 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "OK"
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRuleCreatedView"
+                }
+              }
+            }
           }
         }
       }
@@ -811,6 +835,33 @@
   },
   "components": {
     "schemas": {
+      "ApprovalRuleCreatedView": {
+        "type": "object",
+        "properties": {
+          "ruleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "family": {
+            "type": "string",
+            "nullable": true
+          },
+          "versionNo": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "supersededVersion": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "ApproveRequest": {
         "type": "object",
         "properties": {
@@ -851,6 +902,52 @@
         ],
         "type": "integer",
         "format": "int32"
+      },
+      "AuthorizationItemView": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sourceLineId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "orderedCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "orderedLabel": {
+            "type": "string",
+            "nullable": true
+          },
+          "fulfilledCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "fulfilledLabel": {
+            "type": "string",
+            "nullable": true
+          },
+          "quantity": {
+            "type": "number",
+            "format": "double"
+          },
+          "substituted": {
+            "type": "boolean"
+          },
+          "substitutionReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "fulfilledAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
       },
       "AuthorizationStateView": {
         "type": "object",
@@ -1469,6 +1566,61 @@
           },
           "reason": {
             "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "TatBucket": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "avgTatSeconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "p95TatSeconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "slaBreaches": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TatSummary": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "avgTatSeconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "p95TatSeconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "slaBreaches": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "byStatus": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TatBucket"
+            },
             "nullable": true
           }
         },

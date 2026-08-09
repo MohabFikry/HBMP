@@ -575,7 +575,8 @@ public static class ClinicalEndpoints
             var allergies = await db.Allergies.AsNoTracking()
                 .Where(a => a.BeneficiaryId == beneficiaryId && !a.IsDeleted).ToListAsync(ct);
             return Results.Ok(allergies.Select(AllergyResponse.From));
-        });
+        })
+        .Produces<IEnumerable<AllergyResponse>>();
 
         // ---- Standing clinical facts: blood group + allergies, in ONE gated read (migration 0021). ----
         //

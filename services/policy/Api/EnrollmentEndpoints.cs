@@ -242,7 +242,8 @@ public static class EnrollmentEndpoints
             var rows = await db.MemberGroups.AsNoTracking()
                 .Where(g => g.PolicyId == id && !g.IsDeleted).OrderBy(g => g.GroupCode).ToListAsync(ct);
             return Results.Ok(rows.Select(MemberGroupView.From));
-        });
+        })
+        .Produces<IEnumerable<MemberGroupView>>();
     }
 
     // ---- Enrolment ---------------------------------------------------------------------------------------
@@ -305,7 +306,8 @@ public static class EnrollmentEndpoints
             var rows = await db.EnrollmentEvents.AsNoTracking()
                 .Where(e => e.EnrollmentId == id).OrderByDescending(e => e.OccurredAt).ToListAsync(ct);
             return Results.Ok(rows.Select(EnrollmentEventView.From));
-        });
+        })
+        .Produces<IEnumerable<EnrollmentEventView>>();
     }
 
     // ---- Lifecycle: every one of these is an EVENT ---------------------------------------------------------

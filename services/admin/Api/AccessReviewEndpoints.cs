@@ -68,7 +68,8 @@ public static class AccessReviewEndpoints
             var t = scope.Tenant!;
 
             var expired = await svc.SweepExpiredAsync(AdminContracts.Actor(p), t, campaignId, ct);
-            return Results.Ok(new { campaignId, autoExpired = expired });
-        });
+            return Results.Ok(new AccessReviewSweepView(campaignId, expired));
+        })
+        .Produces<AccessReviewSweepView>();
     }
 }

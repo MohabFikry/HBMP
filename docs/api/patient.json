@@ -219,7 +219,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisclosedPageView"
+                }
+              }
+            }
           }
         }
       }
@@ -384,7 +391,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationCreatedView"
+                }
+              }
+            }
           }
         }
       },
@@ -412,7 +426,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisclosedQueueView"
+                }
+              }
+            }
           }
         }
       }
@@ -701,6 +722,51 @@
         },
         "additionalProperties": false
       },
+      "DisclosedPageView": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pageSize": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": { }
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DisclosedQueueView": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pageSize": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "items": {
+            "type": "array",
+            "items": { },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "EnrolmentIntentDto": {
         "type": "object",
         "properties": {
@@ -907,6 +973,20 @@
             "items": {
               "$ref": "#/components/schemas/RegistrationNoteDto"
             },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "RegistrationCreatedView": {
+        "type": "object",
+        "properties": {
+          "registrationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
             "nullable": true
           }
         },

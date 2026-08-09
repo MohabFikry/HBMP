@@ -169,7 +169,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/QueueItemResponse"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -1514,7 +1524,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AllergyResponse"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -2385,6 +2405,37 @@
         ],
         "type": "integer",
         "format": "int32"
+      },
+      "QueueItemResponse": {
+        "type": "object",
+        "properties": {
+          "queueEntryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "encounterId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "beneficiaryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "providerId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "state": {
+            "type": "string",
+            "nullable": true
+          },
+          "enqueuedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
       },
       "QueueItemView": {
         "type": "object",

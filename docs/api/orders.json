@@ -228,7 +228,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OrderResponse"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -975,7 +985,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestrictedResultView"
+                }
+              }
+            }
           }
         }
       }
@@ -1927,6 +1944,40 @@
           },
           "status": {
             "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "RestrictedResultView": {
+        "type": "object",
+        "properties": {
+          "restricted": {
+            "type": "boolean"
+          },
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lineId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sensitivityLevel": {
+            "type": "string",
+            "nullable": true
+          },
+          "category": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "orderingBranchId": {
+            "type": "string",
+            "format": "uuid",
             "nullable": true
           }
         },

@@ -164,7 +164,8 @@ public static class Worklist
                 .OrderBy(i => i.FulfilledAt)
                 .ToListAsync(ct);
             return Results.Ok(items.Select(AuthorizationItemView.From));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"))
+        .Produces<IEnumerable<AuthorizationItemView>>();
 
         // ---- Worklist detail (min-necessary — still NO clinical payload; that is /review only). ----
         v1.MapGet("/{id:guid}", async (

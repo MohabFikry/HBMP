@@ -63,7 +63,8 @@ public static class PayerAssignmentEndpoints
             if (!scope.IsAllowed) return scope.ToProblem();
             var rows = await svc.ListAsync(scope.Tenant!, subject, ct);
             return Results.Ok(rows.Select(PayerAssignmentView.Of));
-        });
+        })
+        .Produces<IEnumerable<PayerAssignmentView>>();
 
         // --- self-service scope (any authenticated user; read by IPayerDirectory) -----------------------
         var me = app.MapGroup("/api/v1/me").RequireAuthorization().WithTags("me-payers");
@@ -73,8 +74,9 @@ public static class PayerAssignmentEndpoints
             var p = accessor.Principal;
             if (p?.TenantId is null) return Results.Problem(statusCode: 403, title: "no tenant scope on principal");
             var ids = await svc.EffectivePayerIdsAsync(p.TenantId, p.Subject, ct);
-            return Results.Ok(new { unrestricted = ids.Count == 0, payerIds = ids });
-        });
+            return Results.Ok(new PayerScopeView(ids.Count == 0, [.. ids]));
+        })
+        .Produces<PayerScopeView>();
     }
 }
 

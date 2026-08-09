@@ -188,7 +188,8 @@ v1.MapGet("/drugs/{drugCode}", async (string drugCode, MasterDataDbContext db, C
     await db.Drugs.AsNoTracking().FirstOrDefaultAsync(x => x.DrugCode == drugCode, ct) is { } d ? Results.Ok(d) : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found"));
 
 v1.MapGet("/allergens", async (MasterDataDbContext db, CancellationToken ct) =>
-    Results.Ok(await db.Allergens.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct)));
+    Results.Ok(await db.Allergens.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct)))
+    .Produces<IEnumerable<Allergen>>();
 
 // One allergen by id. emr-service calls this when RECORDING an allergy: it needs the name, not just an
 // existence bit, so the clinical record can say which substance rather than storing a uuid nobody can read
@@ -196,7 +197,8 @@ v1.MapGet("/allergens", async (MasterDataDbContext db, CancellationToken ct) =>
 v1.MapGet("/allergens/{id:guid}", async (Guid id, MasterDataDbContext db, CancellationToken ct) =>
     await db.Allergens.AsNoTracking().FirstOrDefaultAsync(x => x.AllergenId == id, ct) is { } a
         ? Results.Ok(a)
-        : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found"));
+        : Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found"))
+    .Produces<Allergen>();
 
 // 14.6 — examination types (filter by category / sensitivity) + a single fetch orders uses to pin sensitivity.
 v1.MapGet("/examination-types", async (string? category, string? sensitivity, MasterDataDbContext db, CancellationToken ct) =>
@@ -206,7 +208,8 @@ v1.MapGet("/examination-types", async (string? category, string? sensitivity, Ma
     if (Enum.TryParse<SensitivityLevel>(sensitivity, out var s)) q = q.Where(x => x.SensitivityLevel == s);
     var rows = await q.OrderBy(x => x.NameEn).ToListAsync(ct);
     return Results.Ok(rows.Select(ExamView.Of));
-});
+})
+        .Produces<IEnumerable<ExamView>>();
 
 v1.MapGet("/examination-types/{id:guid}", async (Guid id, MasterDataDbContext db, CancellationToken ct) =>
 {

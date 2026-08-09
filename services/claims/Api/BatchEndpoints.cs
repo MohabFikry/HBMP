@@ -96,7 +96,8 @@ public static class BatchEndpoints
             if (Enum.TryParse<BatchStatus>(status, true, out var st)) q = q.Where(b => b.Status == st);
             var rows = await q.OrderByDescending(b => b.CreatedAt).Take(100).ToListAsync(ct);
             return Results.Ok(rows.Select(BatchView.From).ToList());
-        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("claims:read"))
+        .Produces<IEnumerable<BatchView>>();
 
         v1.MapGet("/{id:guid}", async (Guid id, ClaimsDeps deps, CancellationToken ct) =>
         {

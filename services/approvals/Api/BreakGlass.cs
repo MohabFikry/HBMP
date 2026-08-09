@@ -152,6 +152,7 @@ public static class BreakGlass
             var denied = await gate.CheckAsync(ApprovalsPolicies.List, null, "reporting", ct);
             if (denied is not null) return denied;
             return Results.Ok(await TatReporting.SummaryAsync(db, ct));
-        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"));
+        }).RequireAuthorization(HbmpPolicies.Scope("auth:read"))
+        .Produces<TatSummary>();
     }
 }

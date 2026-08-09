@@ -34,7 +34,8 @@ public static class BranchEndpoints
         {
             var b = await db.Branches.AsNoTracking().FirstOrDefaultAsync(x => x.BranchId == id && !x.IsDeleted, ct);
             return b is null ? Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found") : Results.Ok(ToView(b));
-        });
+        })
+        .Produces<BranchView>();
 
         // --- Create branch → BranchCreated -------------------------------------------------------
         write.MapPost("", async (CreateBranch req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>
@@ -64,7 +65,8 @@ public static class BranchEndpoints
             await outbox.EnqueueAsync("BranchCreated", "provider.events", new { branchId = branch.BranchId, branch.BranchCode, branch.NameEn, branch.NameAr }, ct);
             await tx.CommitAsync(ct);
             return Results.Created($"/api/v1/branches/{branch.BranchId}", ToView(branch));
-        });
+        })
+        .Produces<BranchView>();
 
         // --- Update branch metadata → BranchUpdated ----------------------------------------------
         write.MapPut("/{id:guid}", async (Guid id, UpdateBranch req, ProviderDbContext db, IAuditClient audit, IOutbox outbox, IHbmpPrincipalAccessor me, TimeProvider clock, CancellationToken ct) =>

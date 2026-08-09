@@ -62,7 +62,8 @@ public static class BranchAssignmentEndpoints
             var t = scope.Tenant!;
             var rows = await svc.ListAsync(t, subject, ct);
             return Results.Ok(rows.Select(BranchAssignmentView.Of));
-        });
+        })
+        .Produces<IEnumerable<BranchAssignmentView>>();
 
         // --- self-service context (any authenticated user) --------------------------------------
         var me = app.MapGroup("/api/v1/me").RequireAuthorization().WithTags("me-branches");
@@ -73,12 +74,11 @@ public static class BranchAssignmentEndpoints
             var p = accessor.Principal;
             if (p?.TenantId is null) return Results.Problem(statusCode: 403, title: "no tenant scope on principal");
             var res = await svc.ResolveAsync(p.TenantId, p.Subject, requested: null, ct);
-            return Results.Ok(new
-            {
-                homeBranch = res.Outcome == BranchAssignmentRules.ResolveOutcome.ResolvedHome ? res.BranchId : null,
-                permittedBranches = res.Permitted,
-            });
-        });
+            return Results.Ok(new BranchScopeView(
+                res.Outcome == BranchAssignmentRules.ResolveOutcome.ResolvedHome ? res.BranchId : null,
+                [.. res.Permitted]));
+        })
+        .Produces<BranchScopeView>();
 
         // Switch the active branch (validated against the permitted set → ActiveBranchSwitched or 403).
         me.MapPost("/active-branch", async (SwitchBranchRequest req, HttpContext http, IHbmpPrincipalAccessor accessor, BranchAssignmentService svc, CancellationToken ct) =>
@@ -93,7 +93,8 @@ public static class BranchAssignmentEndpoints
             // and emr already echoes. The switcher shows the confirmed value rather than its own optimistic
             // one, so a request that was silently resolved elsewhere cannot look like a successful switch.
             http.Response.Headers[BranchHeaders.ActiveBranch] = res.BranchId.ToString();
-            return Results.Ok(new { activeBranch = res.BranchId, activeBranchId = res.BranchId, permittedBranches = res.Permitted });
-        });
+            return Results.Ok(new ActiveBranchView(res.BranchId, res.BranchId, [.. res.Permitted]));
+        })
+        .Produces<ActiveBranchView>();
     }
 }

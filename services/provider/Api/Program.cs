@@ -231,7 +231,8 @@ write.MapPost("/providers", async (CreateProvider req, ProviderDbContext db, IAu
     await outbox.EnqueueAsync("ProviderCreated", "provider.events", new { providerId = p.ProviderId, p.ProviderCode, providerType = p.ProviderType.ToString(), tenantId = tenant }, ct);
     await tx.CommitAsync(ct);
     return Results.Created($"/api/v1/providers/{p.ProviderId}", ToView(p));
-});
+})
+        .Produces<ProviderView>();
 
 // --- List / get (tenant-scoped) ----------------------------------------------------------------
 read.MapGet("/providers", async (ProviderDbContext db, IHbmpPrincipalAccessor me, string? status, CancellationToken ct) =>

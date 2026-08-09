@@ -98,7 +98,8 @@ public static class PractitionerEndpoints
             }
             await audit.EmitAsync(Draft(p, AuditAction.Create, me, tenant, "created"), ct);
             return Results.Created($"/api/v1/practitioners/{p.PractitionerId}", await ViewAsync(db, p.PractitionerId, canSeeLicense: true, ct));
-        });
+        })
+        .Produces<PractitionerView>();
 
         // --- Maintain a practitioner's licence ---------------------------------------------------
         //

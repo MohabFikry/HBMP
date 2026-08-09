@@ -47,7 +47,8 @@ public static class InventoryEndpoints
             if (includeDiscontinued != true) q = q.Where(i => i.Status == ItemStatus.Active);
             var rows = await q.OrderBy(i => i.NameEn).Take(1000).ToListAsync(ct);
             return Results.Ok(rows.Select(ItemView.From));
-        });
+        })
+        .Produces<IEnumerable<ItemView>>();
 
         write.MapPost("/items", async (CreateItemRequest req, InventoryDbContext db, IAuditClient audit, IHbmpPrincipalAccessor me, TimeProvider clock, [FromServices] IMedicinesDirectory medicines, CancellationToken ct) =>
         {

@@ -296,7 +296,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Allergen"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -319,7 +329,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Allergen"
+                }
+              }
+            }
           }
         }
       }
@@ -347,7 +364,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExamView"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -1021,6 +1048,63 @@
   },
   "components": {
     "schemas": {
+      "Allergen": {
+        "type": "object",
+        "properties": {
+          "allergenId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "category": {
+            "$ref": "#/components/schemas/AllergenCategory"
+          },
+          "sourceRelease": {
+            "type": "string",
+            "nullable": true
+          },
+          "atcScopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "isDrugMappable": {
+            "type": "boolean"
+          },
+          "mappingSource": {
+            "type": "string",
+            "nullable": true
+          },
+          "mappingReviewedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "mappingReviewedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "AllergenCategory": {
+        "enum": [
+          0,
+          1,
+          2
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
       "AllergyCheckRequest": {
         "type": "object",
         "properties": {
@@ -1191,6 +1275,48 @@
             "items": {
               "type": "string"
             },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExamView": {
+        "type": "object",
+        "properties": {
+          "examinationTypeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameEn": {
+            "type": "string",
+            "nullable": true
+          },
+          "nameAr": {
+            "type": "string",
+            "nullable": true
+          },
+          "category": {
+            "type": "string",
+            "nullable": true
+          },
+          "defaultCodeSystem": {
+            "type": "string",
+            "nullable": true
+          },
+          "defaultCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "sensitivityLevel": {
+            "type": "string",
+            "nullable": true
+          },
+          "sensitiveCategory": {
+            "type": "string",
             "nullable": true
           }
         },
