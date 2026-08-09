@@ -11,6 +11,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Domain/Mersal.Finance.Domain.csproj" />
+    <ProjectReference Include="../../../libs/money/Mersal.Money.csproj" />
     <ProjectReference Include="../Infrastructure/Mersal.Finance.Infrastructure.csproj" />
     <ProjectReference Include="../Api/Mersal.Finance.Api.csproj" />
     <ProjectReference Include="../../../libs/authz/Mersal.Authz.csproj" />

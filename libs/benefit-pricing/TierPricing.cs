@@ -1,4 +1,4 @@
-using Mersal.Money;
+using Mersal.Amounts;
 
 namespace Mersal.BenefitPricing;
 
@@ -68,7 +68,7 @@ public interface IBenefitCostShareSource
 
 /// <summary>What to price.</summary>
 public sealed record TierPricingRequest(
-    Guid PlanVersionId, string BenefitCategoryCode, TierQuery Tier, Money.Money AllowedAmount);
+    Guid PlanVersionId, string BenefitCategoryCode, TierQuery Tier, Money AllowedAmount);
 
 /// <summary>The priced answer: which tier applied, what was agreed there, the split, and whether
 /// pre-authorization is required — the tier's override having already been resolved.</summary>

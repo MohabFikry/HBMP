@@ -58,7 +58,7 @@ public sealed class TierAwareAdjudicationFacts(
 
         // Price against the CONTRACT price where there is one — the allowed amount the split applies to is
         // what the payer agreed, not what the provider billed.
-        var allowed = Mersal.Money.Money.Egp(line.ContractPrice ?? line.BilledAmount);
+        var allowed = Mersal.Amounts.Money.Egp(line.ContractPrice ?? line.BilledAmount);
         var result = await pricing.PriceAsync(
             new TierPricingRequest(versionId, category, query, allowed), bearer, ct);
 

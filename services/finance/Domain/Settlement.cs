@@ -1,3 +1,5 @@
+using Mersal.Amounts;
+
 namespace Mersal.Finance.Domain;
 
 /// <summary>Settlement lifecycle. Draft → Submitted → Approved → Paid. Submit/approve are split for segregation of
@@ -18,6 +20,20 @@ public sealed class Settlement
     public DateOnly PeriodStart { get; set; }
     public DateOnly PeriodEnd { get; set; }
     public string CurrencyCode { get; set; } = "EGP";
+
+    /// <summary>
+    /// The settlement's currency, TYPED (ADR-0043).
+    ///
+    /// <para>Every amount on this settlement and its lines is in this currency — the lines carry no currency
+    /// of their own, deliberately: a line denominated differently from the settlement it belongs to is not a
+    /// thing anyone wants to be able to represent. Arithmetic goes through <see cref="Money"/> in this
+    /// currency; the columns stay <c>numeric</c>.</para>
+    ///
+    /// <para>Throws on a code the platform does not settle in, at the point of reading. That is the whole
+    /// value of the property: the alternative is an amount that quietly becomes EGP.</para>
+    /// </summary>
+    public Currency Currency => Currencies.Parse(CurrencyCode);
+
     public decimal Total { get; set; }
     public SettlementStatus Status { get; set; } = SettlementStatus.Draft;
     public string? SubmittedBy { get; set; }
@@ -43,6 +59,14 @@ public sealed class SettlementLine
     public int DeliveredQty { get; set; }
     public decimal AgreedUnitPrice { get; set; }            // from provider_contract (read, not owned)
     public decimal LineTotal { get; set; }
+
+    /// <summary>This line's unit price as money, in the SETTLEMENT's currency — the line has none of its own
+    /// (see <see cref="Settlement.Currency"/>). Pass the parent's; there is no other correct answer.</summary>
+    public Money UnitPriceIn(Currency currency) => new(AgreedUnitPrice, currency);
+
+    /// <summary>This line's total as money. Recomputed from unit × quantity rather than read from the stored
+    /// column, so a caller comparing the two is comparing something to something.</summary>
+    public Money TotalIn(Currency currency) => UnitPriceIn(currency) * DeliveredQty;
 
     /// <summary>Where <see cref="AgreedUnitPrice"/> came from. See <see cref="SettlementPriceSource"/> —
     /// a line the contract does not price is not the same kind of number as one it does, and a reviewer

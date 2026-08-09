@@ -1,8 +1,8 @@
 using FluentAssertions;
 using Mersal.Claims.Domain;
-// Aliased because `Mersal.Money` is both the namespace and the type: a plain `using Mersal.Money;`
+// Aliased because `Mersal.Money` is both the namespace and the type: a plain `using Mersal.Amounts;`
 // makes `Money.Egp` resolve against the namespace and fail to compile.
-using MoneyValue = Mersal.Money.Money;
+using MoneyValue = Mersal.Amounts.Money;
 
 namespace Mersal.Claims.Tests;
 

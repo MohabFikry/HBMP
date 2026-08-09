@@ -1,6 +1,7 @@
 using System.Globalization;
 using Mersal.Finance.Domain;
 using Microsoft.EntityFrameworkCore;
+using Mersal.Amounts;
 
 namespace Mersal.Finance.Infrastructure;
 
@@ -52,10 +53,21 @@ public sealed class SettlementGenerator(FinanceDbContext db, IContractPriceProvi
             UpdatedAt = now,
         };
 
+        /*
+         * FROM HERE DOWN THE ARITHMETIC IS IN Money (ADR-0043).
+         *
+         * Not ceremony. `Money` rounds ONCE, at construction, half-to-even — so the unit price is rounded
+         * exactly where it is decided and every product and sum below inherits that single decision, rather
+         * than each site rounding its own way. It also makes the settlement's currency travel with its
+         * amounts, so the day a second currency exists this loop stops compiling instead of adding pounds to
+         * dollars.
+         */
+        var currency = settlement.Currency;
+
         foreach (var g in grouped)
         {
             var priced = book.TryPrice(g.ServiceCode, out var agreed);
-            var unit = priced ? agreed : decimal.Round(g.ObservedFloor, 2, MidpointRounding.ToEven);
+            var unit = new Money(priced ? agreed : g.ObservedFloor, currency);
             settlement.Lines.Add(new SettlementLine
             {
                 SettlementLineId = Guid.NewGuid(),
@@ -63,12 +75,19 @@ public sealed class SettlementGenerator(FinanceDbContext db, IContractPriceProvi
                 ServiceCode = g.ServiceCode,
                 ServiceLine = g.ServiceLine,
                 DeliveredQty = g.Delivered,
-                AgreedUnitPrice = unit,
-                LineTotal = unit * g.Delivered,
+                AgreedUnitPrice = unit.Amount,
+                LineTotal = (unit * g.Delivered).Amount,
                 PriceSource = priced ? SettlementPriceSource.Contract : SettlementPriceSource.ObservedFloor,
             });
         }
-        settlement.Total = settlement.Lines.Sum(l => l.LineTotal);
+        /*
+         * The total is a Money SUM of Money line totals, not a decimal sum of stored columns. The difference
+         * shows up in exactly the case that matters: a total that disagrees with the lines a provider is
+         * reading underneath it, by a rounding step nobody can point at.
+         */
+        settlement.Total = settlement.Lines
+            .Aggregate(Money.Zero(currency), (running, l) => running + l.TotalIn(currency))
+            .Amount;
         return settlement;
     }
 }

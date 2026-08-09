@@ -127,7 +127,7 @@ v1.MapPost("/check", async (
 
         var priced = await pricing.PriceAsync(
             new TierPricingRequest(planVersionId, req.BenefitCategory, query,
-                Mersal.Money.Money.Egp(req.EstimatedAmount ?? 0m)),
+                Mersal.Amounts.Money.Egp(req.EstimatedAmount ?? 0m)),
             bearer, ct);
 
         if (priced.Pricing is { } quote)

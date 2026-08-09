@@ -175,7 +175,13 @@ public sealed class BenefitRuleTier
         RequiresPreauthOverride ?? (rule ?? throw new ArgumentNullException(nameof(rule))).RequiresPreauth;
 
     /// <summary>The limit that applies at this tier, resolving the multiplier against the rule's own limit.
-    /// Null stays null — an unlimited benefit is not made finite by a tier multiplier.</summary>
+    /// Null stays null — an unlimited benefit is not made finite by a tier multiplier.
+    ///
+    /// <para><b>Returns <c>decimal</c> and not <c>Money</c>, deliberately (ADR-0043).</b> A limit is only
+    /// SOMETIMES an amount: <c>LimitType.Count</c> means it is a number of sessions, and "three
+    /// physiotherapy visits" typed as <c>Money.Egp(3)</c> would be three pounds of physiotherapy. The type
+    /// cannot be chosen per-row, so it is chosen for the honest case. The rounding is still the platform's
+    /// one mode, which is what the disagreement here actually was.</para></summary>
     public decimal? ResolvesLimit(BenefitRule rule)
     {
         ArgumentNullException.ThrowIfNull(rule);

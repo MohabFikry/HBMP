@@ -1,9 +1,9 @@
 using FluentAssertions;
 using Mersal.BenefitPricing;
-// The namespace Mersal.Money and the type Mersal.Money.Money collide inside this namespace; alias so the
+// The namespace Mersal.Amounts and the type Mersal.Amounts.Money collide inside this namespace; alias so the
 // assertions below read as amounts rather than as fully-qualified noise.
-using Cash = Mersal.Money.Money;
-using Mersal.Money;
+using Cash = Mersal.Amounts.Money;
+using Mersal.Amounts;
 
 namespace Mersal.BenefitPricing.Tests;
 

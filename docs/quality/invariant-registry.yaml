@@ -403,11 +403,29 @@ invariants:
     # across four services that have not migrated to the type: 1dp rounds are displayed percentages and are
     # left alone, and the one 2dp non-amount (a month count) acknowledges itself inline.
     tests:
-      - Mersal.Money.Tests.OneRoundingModeArchitectureTests.An_amount_is_rounded_half_to_even
-      - Mersal.Money.Tests.OneRoundingModeArchitectureTests.The_detector_reads_the_scale_and_the_mode
-      - Mersal.Money.Tests.OneRoundingModeArchitectureTests.Every_acknowledgement_still_sits_on_a_line_that_needs_one
+      - Mersal.Amounts.Tests.OneRoundingModeArchitectureTests.An_amount_is_rounded_half_to_even
+      - Mersal.Amounts.Tests.OneRoundingModeArchitectureTests.The_detector_reads_the_scale_and_the_mode
+      - Mersal.Amounts.Tests.OneRoundingModeArchitectureTests.Every_acknowledgement_still_sits_on_a_line_that_needs_one
       - Mersal.Claims.Tests.TheTwoClampsAgreeTests.The_decimal_clamp_and_the_Money_clamp_produce_the_same_amount
       - Mersal.Claims.Tests.TheTwoClampsAgreeTests.Neither_clamp_treats_a_missing_tariff_as_no_ceiling
+
+  - id: INV-AMOUNTS-CARRY-THEIR-CURRENCY
+    statement: >-
+      Money arithmetic is done in the Money type: each product rounds once at the settlement scale, a total
+      cannot disagree with the sum of the lines it is displayed above, and two currencies cannot be added.
+    source: libs/money/Money.cs (phase 18.F1); ADR-0043 (where it is adopted)
+    severity: Medium
+    # ADR-0043 settles the question the 2026-08-09 audit raised as "adopt Money in four services". Reading
+    # them found that only two do money ARITHMETIC: finance's settlement generator and pharmacy's high-cost
+    # routing estimate. Policy stores cost-share terms and hands them to CostShareCalculator, which has been
+    # typed since 18.F1; reporting's aggregates are SQL sum(numeric) computed by Postgres, and its one derived
+    # figure is a division, which Money deliberately does not have. The type is in the CALCULATIONS, not the
+    # schema — there is no migration, and the ADR is why a reader will not find one.
+    tests:
+      - Mersal.Finance.Tests.SettlementArithmeticIsMoneyTests.A_settlements_currency_is_typed_and_an_unknown_code_is_refused_at_the_boundary
+      - Mersal.Finance.Tests.SettlementArithmeticIsMoneyTests.The_total_equals_the_sum_of_the_lines_where_a_decimal_sum_would_not
+      - Mersal.Finance.Tests.SettlementArithmeticIsMoneyTests.A_line_cannot_be_added_to_one_in_another_currency
+      - Mersal.Finance.Tests.SettlementArithmeticIsMoneyTests.Rounding_is_bankers_at_the_settlement_scale
 
   - id: INV-DEDUPE-SURVIVES-RESTART
     statement: >-

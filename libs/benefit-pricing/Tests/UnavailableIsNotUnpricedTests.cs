@@ -1,5 +1,5 @@
 using FluentAssertions;
-using Cash = Mersal.Money.Money;
+using Cash = Mersal.Amounts.Money;
 
 namespace Mersal.BenefitPricing.Tests;
 

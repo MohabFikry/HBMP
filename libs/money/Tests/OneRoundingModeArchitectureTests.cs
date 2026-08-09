@@ -1,14 +1,14 @@
 using System.Text.RegularExpressions;
 using FluentAssertions;
 
-namespace Mersal.Money.Tests;
+namespace Mersal.Amounts.Tests;
 
 /// <summary>
 /// 2026-08-09 audit — an amount is rounded ONE way on this platform, and it is banker's.
 ///
 /// <para><b>The failure.</b> <see cref="Money"/> rounds half-to-even at construction, and says why: half away
 /// from zero biases every .005 upward, which across a settlement batch of thousands of lines is a systematic
-/// overpayment. But <c>Mersal.Money</c> is adopted by claims and eligibility only. Policy's tier limits and
+/// overpayment. But the type was adopted by claims and eligibility only. Policy's tier limits and
 /// reporting's per-member-per-month figures were bare decimals rounded <c>AwayFromZero</c> — so the same
 /// amount came out a piastre higher on a dashboard than in the settlement it was read beside, and neither
 /// screen could tell you which one was wrong.</para>
@@ -23,10 +23,10 @@ namespace Mersal.Money.Tests;
 /// per-site rather than per-file — the same acknowledgement shape the Cairo-date rule uses next door, and for
 /// the same reason. A file-level exemption covers the next amount somebody adds to that file.</para>
 ///
-/// <para>Note this rule deliberately does NOT require adopting the <c>Money</c> TYPE in policy, pharmacy,
-/// finance and reporting. That is a much larger migration — hundreds of signatures and the EF mapping layer —
-/// and it is a plan item, not a defect. What it forbids is the four services disagreeing about arithmetic
-/// while they remain decimals.</para>
+/// <para>This rule is about the MODE, and it holds whether or not a given amount is typed. ADR-0043 settles
+/// where the <c>Money</c> type itself is adopted — in the arithmetic, not in the schema — so the two work
+/// together: code that computes in <c>Money</c> rounds correctly by construction, and this catches the bare
+/// decimal that has not been converted yet.</para>
 /// </summary>
 public class OneRoundingModeArchitectureTests
 {

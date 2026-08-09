@@ -3,6 +3,8 @@
   <ItemGroup>
     <ProjectReference Include="../../../libs/prescribing/Mersal.Prescribing.csproj" />
     <ProjectReference Include="../../../libs/time/Mersal.Time.csproj" />
+    <!-- ADR-0043 — the high-cost routing estimate is money and is summed as money. -->
+    <ProjectReference Include="../../../libs/money/Mersal.Money.csproj" />
     <ProjectReference Include="..\..\..\libs\amendment\Mersal.Amendment.csproj" />
   </ItemGroup>
 </Project>

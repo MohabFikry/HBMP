@@ -213,10 +213,11 @@ case for the change was never the weight.
 **Two invariants added to the registry**, both scale/shape rules rather than type rules, which is what lets
 them hold across services mid-migration: `INV-DATE-IS-CAIRO` and `INV-ONE-ROUNDING-MODE`.
 
-**Deliberately NOT done, and it is the larger half of §3's money paragraph:** adopting the `Mersal.Money`
-TYPE in pharmacy, finance, policy and reporting. That is hundreds of signatures plus the EF mapping layer —
-a migration, not a defect fix. What has been closed is the thing that made the split *harmful*: those four
-services no longer disagree with claims and eligibility about how an amount rounds.
+**On the `Mersal.Money` type adoption** — carried out afterwards as its own piece of work; see the two rows
+above and ADR-0043. The estimate stated here first ("hundreds of signatures plus the EF mapping layer") was
+wrong, and wrong in the direction that would have justified not doing it: reading the four services for money
+*arithmetic* rather than for fields that merely hold amounts found two that needed it, one already typed
+through a shared library, and one correct without it.
 
 ### What closing the saga turned up (C1+C2, ADR-0041)
 

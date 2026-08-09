@@ -1,4 +1,4 @@
-namespace Mersal.Money;
+namespace Mersal.Amounts;
 
 /// <summary>
 /// The cost-share terms that apply at one network tier, as a plain value — no entity, no service, no I/O.
