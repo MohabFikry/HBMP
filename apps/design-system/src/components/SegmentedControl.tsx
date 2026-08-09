@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { cx } from "../lib/cx";
+import { useDirection } from "../lib/useDirection";
 
 export interface Segment<T extends string> {
   value: T;
@@ -26,11 +27,26 @@ export function SegmentedControl<T extends string>({
   ...aria
 }: SegmentedControlProps<T>) {
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
+  const dir = useDirection();
 
   function onKeyDown(e: React.KeyboardEvent, index: number) {
+    /*
+     * ARROW KEYS ARE SPATIAL, AND ARABIC RUNS THE OTHER WAY.
+     *
+     * The control mirrors itself through logical CSS, so in Arabic the FIRST segment is drawn on the right.
+     * `ArrowRight` therefore has to move BACKWARD through the list to move rightward on screen. It did not,
+     * and the effect was not subtle: on the design's signature filter control, arrowing toward the segment
+     * you are looking at moved focus away from it.
+     *
+     * Up/Down are unaffected. Vertical order does not mirror, and a reader who reaches for ArrowDown means
+     * "the next one" in both languages.
+     */
+    const forward = dir === "rtl" ? "ArrowLeft" : "ArrowRight";
+    const back = dir === "rtl" ? "ArrowRight" : "ArrowLeft";
+
     let next = index;
-    if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (index + 1) % segments.length;
-    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = (index - 1 + segments.length) % segments.length;
+    if (e.key === forward || e.key === "ArrowDown") next = (index + 1) % segments.length;
+    else if (e.key === back || e.key === "ArrowUp") next = (index - 1 + segments.length) % segments.length;
     else return;
     e.preventDefault();
     onChange(segments[next].value);

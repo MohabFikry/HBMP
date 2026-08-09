@@ -141,13 +141,13 @@ export function AdminUsers() {
     <>
       <PageHeader title={t(S.usersTitle)} />
       <Card as="section" style={{ padding: "var(--sp3)" }}>
-        <h3 style={{ marginTop: 0 }}>{t(S.accountsHeading)}</h3>
+        <h2 className="panel-h">{t(S.accountsHeading)}</h2>
         <AsyncSection<IdentityUser[]> state={users} isEmpty={(d) => d.length === 0} emptyLabel={S.usersEmpty}>
           {(rows) => <DataTable columns={userCols} rows={rows} rowKey={(r) => r.id} caption={t(S.accountsHeading)} />}
         </AsyncSection>
       </Card>
       <Card as="section" style={{ padding: "var(--sp3)", marginTop: "var(--sp3)" }}>
-        <h3 style={{ marginTop: 0 }}>{t(S.bindingsHeading)}</h3>
+        <h2 className="panel-h">{t(S.bindingsHeading)}</h2>
         <AsyncSection<RoleBinding[]> state={bindings} isEmpty={(d) => d.length === 0} emptyLabel={S.usersEmpty}>
           {(rows) => <DataTable columns={bindingCols} rows={rows} rowKey={(r) => r.id} caption={t(S.bindingsHeading)} />}
         </AsyncSection>
@@ -185,13 +185,13 @@ export function AdminPolicies() {
     <>
       <PageHeader title={t(S.policiesTitle)} />
       <Card as="section" style={{ padding: "var(--sp3)" }}>
-        <h3 style={{ marginTop: 0 }}>{t(S.sodHeading)}</h3>
+        <h2 className="panel-h">{t(S.sodHeading)}</h2>
         <AsyncSection<SodConflict[]> state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.policiesEmpty}>
           {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => `${r.roleA}:${r.roleB}`} caption={t(S.sodHeading)} />}
         </AsyncSection>
       </Card>
       <Card as="section" style={{ padding: "var(--sp3)", marginTop: "var(--sp3)" }}>
-        <h3 style={{ marginTop: 0 }}>{t(S.scopeHeading)}</h3>
+        <h2 className="panel-h">{t(S.scopeHeading)}</h2>
         <p className="muted" style={{ marginTop: 0 }}>{t(S.scopeNote)}</p>
         <AsyncSection<RoleScopeGrant[]> state={scopes} isEmpty={(d) => d.length === 0} emptyLabel={S.policiesEmpty}>
           {(rows) => <DataTable columns={scopeCols} rows={rows} rowKey={(r) => r.role} caption={t(S.scopeHeading)} />}

@@ -221,6 +221,17 @@ jobs:
         continue-on-error: true
         run: python3 tools/ci/check-dev-auth-flags.py
 
+      # 2026-08-09 audit — the docs' service inventory against the one on disk. Three independent copies of
+      # one fact (CLAUDE.md's layout, HANDOFF's count, doc 16's catalog) had drifted to 14, 21 and 17 against
+      # a real 22, and nothing connected any of them to the directory. A document cannot fail; this makes it.
+      - name: "gate: documented service inventory matches services/ (audit 2026-08-09 §3)"
+        id: gate_service_inventory
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 tools/ci/check-service-inventory.py --selftest
+          python3 tools/ci/check-service-inventory.py
+
       - name: "gate: integration DPIA / data-sharing (13.3)"
         id: gate_dpia
         if: always()
@@ -443,6 +454,7 @@ jobs:
             spa-scopes=${{ steps.gate_spa_scopes.outcome }}
             login-origin=${{ steps.gate_login_origin.outcome }}
             dev-auth-flags=${{ steps.gate_dev_auth_flags.outcome }}
+            service-inventory=${{ steps.gate_service_inventory.outcome }}
             integration-dpia=${{ steps.gate_dpia.outcome }}
             coverage-exclusions=${{ steps.gate_coverage_exclusions.outcome }}
             floor-monotonicity=${{ steps.gate_floor_monotonicity.outcome }}

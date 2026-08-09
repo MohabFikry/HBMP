@@ -67,6 +67,10 @@ REQUIRED_GATES = [
     # serves every page correctly, and the only way to know is to read the built JavaScript, which nobody
     # does by hand. This one lives in frontend-ci, so its heartbeat arrives in a second file — see load().
     "live-bundle",
+    # 2026-08-09 audit — the documented service inventory. Listed for the same reason as the rest: a document
+    # that has drifted looks exactly like one that has not, and the three copies of the service count sat at
+    # 14, 21 and 17 against a real 22 for as long as it took someone to audit them by hand.
+    "service-inventory",
 ]
 
 

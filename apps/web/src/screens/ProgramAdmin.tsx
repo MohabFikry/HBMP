@@ -179,7 +179,7 @@ function FeatureTable({
 
   return (
     <Card as="section" style={{ padding: "var(--sp3)", marginTop: "var(--sp3)" }}>
-      <h3 style={{ marginTop: 0 }}>{t(S.featuresHeading)}</h3>
+      <h2 className="panel-h">{t(S.featuresHeading)}</h2>
       <DataTable columns={cols} rows={features} rowKey={(r) => r.key} caption={t(S.featuresHeading)} />
 
       <Modal
@@ -290,7 +290,7 @@ function LimitTable({ tenant, limits, onChanged }: { tenant: string; limits: Pro
 
   return (
     <Card as="section" style={{ padding: "var(--sp3)", marginTop: "var(--sp3)" }}>
-      <h3 style={{ marginTop: 0 }}>{t(S.limitsHeading)}</h3>
+      <h2 className="panel-h">{t(S.limitsHeading)}</h2>
       <DataTable columns={cols} rows={limits} rowKey={(r) => r.key} caption={t(S.limitsHeading)} />
 
       <Modal

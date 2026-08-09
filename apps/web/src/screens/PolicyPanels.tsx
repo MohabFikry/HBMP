@@ -431,24 +431,44 @@ export function NotesPanel({ api, scope, scopeRef, canAdd = true }: NotesPanelPr
         })}
       </ul>
 
+      {/*
+        * THE DESIGN SYSTEM'S MODAL, not a div claiming to be one (2026-08-09 audit §3).
+        *
+        * This was `<div role="dialog" aria-modal="true">` with no scrim, no focus trap, no Escape and no
+        * focus restore. `aria-modal="true"` is an ASSERTION to assistive technology that everything outside
+        * this element is inert — and it was false: Tab walked straight out into the note list behind, where a
+        * screen reader then read content its own API had just been told was hidden. A dialog that lies about
+        * that is worse than a plain inline form, which at least does not.
+        *
+        * The composer twenty lines above already used `Modal`. Same file, same panel, two answers.
+        */}
       {cancelling && (
-        <div className="pol-dialog" role="dialog" aria-modal="true" aria-label={t(S.cancelNote)}>
-          <TextareaField
-            label={t(S.cancelReason)}
-            value={cancelReason}
-            onChange={(e) => setCancelReason(e.target.value)}
-            rows={2}
-          />
-          {cancelError && <InlineAlert tone="bad">{t(cancelError)}</InlineAlert>}
-          <div className="pol-dialog-actions">
-            <Button variant="primary" onClick={confirmCancel} disabled={busy}>
-              {t(S.confirmCancel)}
-            </Button>
-            <Button variant="ghost" onClick={() => setCancelling(null)}>
-              {t(S.keep)}
-            </Button>
+        <Modal
+          open
+          onOpenChange={(o) => !o && !busy && setCancelling(null)}
+          title={t(S.cancelNote)}
+          closeLabel={t(S.keep)}
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setCancelling(null)} disabled={busy}>
+                {t(S.keep)}
+              </Button>
+              <Button variant="primary" onClick={confirmCancel} loading={busy} disabled={busy}>
+                {t(S.confirmCancel)}
+              </Button>
+            </>
+          }
+        >
+          <div className="pol-dialog">
+            <TextareaField
+              label={t(S.cancelReason)}
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              rows={2}
+            />
+            {cancelError && <InlineAlert tone="bad">{t(cancelError)}</InlineAlert>}
           </div>
-        </div>
+        </Modal>
       )}
     </Card>
   );

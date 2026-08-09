@@ -396,7 +396,7 @@ function FilterBar({
 
   return (
     <Card className="pol-filterbar" aria-label={t(S.filters)}>
-      <h3>{t(S.filters)}</h3>
+      <h2 className="panel-h">{t(S.filters)}</h2>
       <div className="pol-filtergrid">
         {date("from", S.from)}
         {date("to", S.to)}
@@ -568,7 +568,7 @@ function SeriesCard({ series, onDrill }: { series: AnalyticsSeries; onDrill?: (b
 
   return (
     <Card className="pol-series" data-testid={`series-${series.key}`}>
-      <h3>{title}</h3>
+      <h2 className="panel-h">{title}</h2>
       {/* The text summary is read BEFORE the table, so a screen-reader user can decide whether to read the
           rows at all. It is composed server-side from the plotted data — a caption written here drifts. */}
       <p className="pol-series-summary">{summary}</p>
@@ -663,9 +663,9 @@ function DrillPanel({ drill, onClose }: { drill: { band: string; rows: OutlierRo
 
   return (
     <Card className="pol-drill" data-testid="drill-panel" aria-label={t(S.drillTitle)}>
-      <h3>
+      <h2 className="panel-h">
         {t(S.drillTitle)} — {drill.band}
-      </h3>
+      </h2>
       {/* Said plainly: the list is ids, and turning one into a person is a separate, recorded act. */}
       <InlineAlert tone="info">{t(S.drillHint)}</InlineAlert>
       <DataTable

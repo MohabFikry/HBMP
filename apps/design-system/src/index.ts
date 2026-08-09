@@ -10,5 +10,6 @@ export { compareSortValues, sortRows } from "./lib/sortRows";
 export type { SortValue, SortDirection } from "./lib/sortRows";
 export * from "./tokens/tokens";
 export { ThemeProvider, useTheme } from "./theme/ThemeProvider";
+export { useDirection } from "./lib/useDirection";
 export { initI18n, en, ar } from "./i18n";
 export type { Dictionary } from "./i18n";

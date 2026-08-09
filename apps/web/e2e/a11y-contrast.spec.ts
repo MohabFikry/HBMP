@@ -68,19 +68,41 @@ for (const lang of LANGS) {
       expect(rendered.length, `${path} (${lang}) rendered an EMPTY <main> — axe would have audited nothing`)
         .toBeGreaterThan(0);
 
-      const results = await new AxeBuilder({ page })
-        // ONLY contrast here. Structure is the jsdom suite's job and is already covered on every route;
-        // duplicating it would make this job slow and its failures ambiguous about which gate caught what.
-        .withRules(["color-contrast"])
-        .analyze();
+      const contrastViolations = async (state: string) => {
+        const results = await new AxeBuilder({ page })
+          // ONLY contrast here. Structure is the jsdom suite's job and is already covered on every route;
+          // duplicating it would make this job slow and its failures ambiguous about which gate caught what.
+          .withRules(["color-contrast"])
+          .analyze();
+        return results.violations
+          .filter((v) => v.impact === "serious" || v.impact === "critical")
+          .flatMap((v) => v.nodes.map((n) => `[${state}] ${v.id}: ${n.target.join(" ")} — ${n.failureSummary ?? ""}`));
+      };
 
-      const serious = results.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
-      expect(
-        serious,
-        serious
-          .flatMap((v) => v.nodes.map((n) => `${v.id}: ${n.target.join(" ")} — ${n.failureSummary ?? ""}`))
-          .join("\n"),
-      ).toEqual([]);
+      const failures = await contrastViolations("resting");
+
+      /*
+       * AND AGAIN UNDER THE POINTER (2026-08-09 audit §3).
+       *
+       * "This job never paints hover" was a literal statement about its coverage, and the defect it let
+       * through was not hypothetical: `--accent` is documented at 5.2:1 — against WHITE — and measures
+       * 4.44:1 on `--accent-tint`, which is the background every hover paints underneath it. The ACTIVE nav
+       * item was caught the first time this job ran and fixed; its hover twin, the ghost button and the icon
+       * button were not, because no screenshot pass ever put the pointer on them.
+       *
+       * Two elements per route, not a sweep: hovering every control would multiply this job's runtime by the
+       * number of buttons on the densest screen, and the three states that broke were all of this shape — a
+       * nav row and a button. `test/token-contrast.test.ts` sweeps the STYLESHEET for the same class in
+       * milliseconds; this is the composited check that arithmetic on hex pairs cannot do.
+       */
+      for (const selector of [".mrs-navi:not([aria-current])", "button:visible"]) {
+        const target = page.locator(selector).first();
+        if ((await target.count()) === 0) continue;
+        await target.hover();
+        failures.push(...(await contrastViolations(`hover ${selector}`)));
+      }
+
+      expect(failures, failures.join("\n")).toEqual([]);
     });
   }
 }

@@ -87,6 +87,10 @@ html[data-theme="dark"] .mrs-btn.mrs-primary {
 }
 .mrs-btn.mrs-ghost:hover:not(:disabled) {
   background: var(--accent-tint);
+  /* --accent-PRESS, for the reason spelled out at .mrs-navi[aria-current] below: --accent is 5.2:1 on WHITE
+     and 4.44:1 on this tint, so the moment hover paints the tint the label drops under AA. The active state
+     was fixed when the browser contrast job first ran; the HOVER states it never samples were not. */
+  color: var(--accent-press);
 }
 .mrs-btn.mrs-danger {
   color: var(--st-bad-fg);
@@ -154,7 +158,7 @@ html[data-theme="dark"] .mrs-btn.mrs-primary {
 }
 .mrs-iconbtn:hover {
   background: var(--accent-tint);
-  color: var(--accent);
+  color: var(--accent-press);   /* 6.72:1 on the tint; --accent is 4.44:1 there — see .mrs-btn.mrs-ghost:hover */
 }
 .mrs-iconbtn svg {
   width: 20px;
@@ -952,7 +956,9 @@ nav.mrs-rail {
 }
 .mrs-navi:hover {
   background: var(--accent-tint);
-  color: var(--accent);
+  /* The active row below had this fixed and its hover twin did not — so pointing at the row you are already
+     on was AA, and pointing at any OTHER row was 4.44:1. */
+  color: var(--accent-press);
 }
 .mrs-navi[aria-current="page"] {
   background: var(--accent-tint);

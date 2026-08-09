@@ -155,7 +155,7 @@ function ArtefactRow({
   return (
     <Card as="section" style={{ padding: "var(--sp4)" }}>
       <div className="result-head">
-        <h3 className="section-h" style={{ margin: 0 }}>{t(label)}</h3>
+        <h2 className="section-h" style={{ margin: 0 }}>{t(label)}</h2>
         {/*
           "Set" and "platform default" are different states and only one of them is a decision. A screen
           that showed 10 either way would let a director believe their tenant had chosen it.

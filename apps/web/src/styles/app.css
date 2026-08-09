@@ -249,6 +249,19 @@ nav.mrs-rail {
 /* ---- Flagship screen (9.3) layout utilities ---- */
 .tnum {
   font-variant-numeric: tabular-nums;
+  /*
+   * BIDI ISOLATION (2026-08-09 audit §4).
+   *
+   * These two classes carry IDENTIFIERS — MRS-M-10231, RX-2026-000410, an ICD code, a batch number — into
+   * Arabic sentences. Under the Unicode bidi algorithm a Latin-and-digits run inside RTL text does not simply
+   * sit there: neighbouring punctuation and digits get reordered around it, so `RX-2026-000410` renders with
+   * its parts rearranged and the code an operator reads aloud down a phone is not the code in the database.
+   *
+   * `isolate` makes the run a self-contained bidi paragraph: it keeps its own internal LTR order and takes no
+   * part in reordering the text around it. One line, roughly twenty render sites, and it cannot be got wrong
+   * per-site because it lives on the class every identifier already uses.
+   */
+  unicode-bidi: isolate;
 }
 .stack {
   display: grid;
@@ -275,6 +288,22 @@ nav.mrs-rail {
   display: grid;
   grid-template-columns: minmax(0, 1fr);   /* see `.stack` */
   gap: var(--sp3);
+}
+/*
+ * A SECTION heading that looks like a panel title.
+ *
+ * 2026-08-09 audit: eight admin screens went h1 → h3, because a card title WANTS to be h3-sized and the tag
+ * was picked for its size. Level and size are different questions — a screen-reader user navigating by
+ * heading is told a section was skipped, and on a screen made entirely of panels that is the whole page.
+ * This holds the h3 appearance (1.17em bold, the browser's own h3 metrics) on an `h2`, so the promotion is
+ * invisible on screen and audible where it matters.
+ *
+ * `test/heading-order.test.tsx` sweeps the route catalog for the skip; the axe gate next door cannot, because
+ * `heading-order` is a MODERATE rule and that gate filters to serious/critical.
+ */
+.panel-h {
+  font-size: 1.17em;
+  font-weight: 700;
 }
 .section-h {
   font-size: 11.5px;

@@ -33,6 +33,9 @@ html[lang="ar"] body {
   font-weight: 500;
   letter-spacing: 0;
   font-feature-settings: "tnum";
+  /* See `.tnum` in apps/web/src/styles/app.css for the reasoning — an identifier dropped into an Arabic
+     sentence is reordered by the bidi algorithm unless it is isolated from it. */
+  unicode-bidi: isolate;
 }
 
 /*

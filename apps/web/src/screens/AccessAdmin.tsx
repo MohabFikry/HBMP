@@ -237,9 +237,9 @@ export function MembershipDetailScreen({ membershipId, onBack }: { membershipId:
         {(m) => (
           <>
             <Card as="section" style={{ padding: "var(--sp3)", marginBottom: "var(--sp3)" }}>
-              <h3 style={{ marginTop: 0 }}>
+              <h2 className="panel-h">
                 {m.displayName} <span className="muted">· {m.username}</span>
-              </h3>
+              </h2>
               <p className="muted" style={{ margin: 0 }}>
                 {m.tenantId} · <StatusChip kind={m.status.kind} label={t(m.status.label)} /> ·{" "}
                 {levelLabel(m.level, t)}

@@ -142,7 +142,7 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
 
       {mayWrite && (
         <Card data-testid="tier-create">
-          <h3>{t(S.newTier)}</h3>
+          <h2 className="panel-h">{t(S.newTier)}</h2>
           <InlineAlert tone="info">{t(S.codeHint)}</InlineAlert>
           <InputField label={t(S.code)} value={tierCode} onChange={(e) => setTierCode(e.target.value)} />
           <InputField label={t(S.nameEn)} value={nameEn} onChange={(e) => setNameEn(e.target.value)} />
@@ -178,7 +178,7 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
 
       {selected && (
         <Card>
-          <h3>{t(S.assignments)}</h3>
+          <h2 className="panel-h">{t(S.assignments)}</h2>
           <DataTable
             caption={t(S.assignments)}
             rows={assignments}
@@ -234,7 +234,7 @@ function ResolveAtDate({ api }: { api: PolicyApi }) {
 
   return (
     <Card data-testid="tier-resolve">
-      <h3>{t(S.resolve)}</h3>
+      <h2 className="panel-h">{t(S.resolve)}</h2>
       <InputField label={t(S.providerId)} value={providerId} onChange={(e) => setProviderId(e.target.value)} />
       <InputField label={t(S.locationId)} value={locationId} onChange={(e) => setLocationId(e.target.value)} />
       <InputField type="date" label={t(S.serviceDate)} value={serviceDate} onChange={(e) => setServiceDate(e.target.value)} />
