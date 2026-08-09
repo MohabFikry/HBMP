@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
   security-events: write # upload SARIF to code scanning
+  # Required for the SARIF upload on a PRIVATE repository: codeql-action reads the workflow run it is
+  # reporting against, and without this it fails with "Resource not accessible by integration" — after a
+  # clean scan. Absent it, the SCA gate reported failure while Trivy had exited 0.
+  actions: read
 
 jobs:
   secret-scan:
@@ -98,8 +102,13 @@ jobs:
                      --severity CRITICAL,HIGH --ignore-unfixed \
                      --exit-code 1 --no-progress \
                      --format sarif --output /repo/trivy-fs.sarif
+      # continue-on-error, like the gitleaks upload above: publishing findings to code scanning is reporting,
+      # and reporting must not decide the gate. This job already failed once with Trivy exiting 0 and the
+      # upload erroring, which says "the SCA gate failed" about a clean scan — the same class of lie as a
+      # failed read reported as a finding.
       - name: Upload Trivy SARIF
         if: always()
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with: { sarif_file: trivy-fs.sarif }
 
