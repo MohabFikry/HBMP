@@ -1,4 +1,5 @@
 using Mersal.Claims.Domain;
+using Mersal.Events;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 
@@ -8,6 +9,9 @@ public enum AdjustmentOutcome
 {
     Recorded, PendingSecondApproval, Confirmed, Replayed, NotFound,
     SoDSameApprover, DualControlNotPending, Conflict, Validation,
+    /// <summary>The key was already used for a DIFFERENT adjustment. Answering it with the earlier one
+    /// would report a correction that was never applied (migration 0009).</summary>
+    IdempotencyKeyReuse,
 }
 
 public sealed record AdjustmentRequest(
@@ -33,10 +37,17 @@ public sealed class AdjustmentService(ClaimsDbContext db, BatchRollupService rol
         var line = claim?.Lines.FirstOrDefault(l => l.ClaimLineId == lineId);
         if (claim is null || line is null) return Fail(AdjustmentOutcome.NotFound);
 
+        // Bound to the BODY (migration 0009). The key alone was enough until the 2026-08-09 audit, so a key
+        // reused across two different amounts returned the first adjustment — the second correction never
+        // happened and the batch total stayed wrong by exactly the difference.
+        var requestHash = HashRequest(claimId, lineId, req);
         if (idempotencyKey is not null)
         {
             var prior = await db.ClaimAdjustments.AsNoTracking().FirstOrDefaultAsync(a => a.IdempotencyKey == idempotencyKey, ct);
-            if (prior is not null) return new AdjustmentResult(AdjustmentOutcome.Replayed, prior, claim, line);
+            if (prior is not null)
+                return IdempotencyKeyRules.Matches(prior.RequestHash, requestHash)
+                    ? new AdjustmentResult(AdjustmentOutcome.Replayed, prior, claim, line)
+                    : Fail(AdjustmentOutcome.IdempotencyKeyReuse);
         }
 
         if (req.ConfirmsAdjustmentId is { } confirmId)
@@ -180,8 +191,11 @@ public sealed class AdjustmentService(ClaimsDbContext db, BatchRollupService rol
         catch (DbUpdateException ex) when (IsUnique(ex, "ux_adjustment_idempotency"))
         {
             await RollbackAsync(tx, ambient, ct);
+            // Lost a race on the key. The winner's body still has to match — see the note above.
             var prior = await db.ClaimAdjustments.AsNoTracking().FirstAsync(a => a.IdempotencyKey == adjustment.IdempotencyKey, ct);
-            return new AdjustmentResult(AdjustmentOutcome.Replayed, prior, claim, line);
+            return IdempotencyKeyRules.Matches(prior.RequestHash, adjustment.RequestHash!)
+                ? new AdjustmentResult(AdjustmentOutcome.Replayed, prior, claim, line)
+                : Fail(AdjustmentOutcome.IdempotencyKeyReuse);
         }
         finally
         {
@@ -204,7 +218,18 @@ public sealed class AdjustmentService(ClaimsDbContext db, BatchRollupService rol
         RecoversClaimLineId = req.RecoversClaimLineId, BeforeAmount = before, AfterAmount = after, AdjustedBy = actor,
         AdjustedAt = clock.GetUtcNow(), CorrelationId = correlationId, PendingSecondApproval = pending,
         ConfirmsAdjustmentId = confirms, IdempotencyKey = idempotencyKey,
+        // From the SAME inputs the replay check hashes, in one function, so the two cannot drift.
+        RequestHash = HashRequest(claim.ClaimId, line.ClaimLineId, req),
     };
+
+    /// <summary>What makes this adjustment THIS adjustment: the line, the kind, the money, the coded reason
+    /// and the rationale. The recovery target and the confirmation target are in it too — confirming a
+    /// different pending adjustment under a reused key is a different act, not a retry.</summary>
+    private static string HashRequest(Guid claimId, Guid lineId, AdjustmentRequest req) =>
+        IdempotencyKeyRules.Hash(
+            claimId.ToString(), lineId.ToString(), req.Type.ToString(),
+            IdempotencyKeyRules.Amount(req.AmountDelta), req.ReasonCode ?? "", req.Rationale ?? "",
+            req.RecoversClaimLineId?.ToString() ?? "", req.ConfirmsAdjustmentId?.ToString() ?? "");
 
     private static AdjustmentResult Fail(AdjustmentOutcome o) => new(o, null, null, null);
 

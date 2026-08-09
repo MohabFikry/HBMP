@@ -168,6 +168,9 @@ Postgres and broker, not just compiled. `--with-db` throughout, so the DB-gated 
 | C3 | terminated members stayed Eligible | **Fixed** | `CoverageChanged` now published on terminate/reinstate; consumer honours explicit-null-clears; 483 policy + 66 eligibility tests green |
 | C4 | rejected messages were dropped (no DLX anywhere) | **Fixed** | `hbmp.dlx`/`hbmp.dead-letter` + policy applied by `rabbitmq-init`; **proven end-to-end** — a message rejected with `requeue:false` arrived in the DLQ; approvals hot-loop bounded; `DeadLetterQueueNotEmpty` alert added |
 | C6 | MFA-off/HTTPS-off could travel out of dev | **Fixed** | `check-dev-auth-flags.py` in backend-ci + `REQUIRED_GATES`; verified it catches both a `Production` pin and a missing environment |
+| H | patient registration demanded a key and ignored it | **Fixed** | `patient.processed_request` (0008) records key + body hash; a retry replays 200, a key reused for a different person is 422. 4 tests, including the no-card/no-identifier arrival every existing duplicate check is blind to |
+| H | claims reimbursement had no idempotency at all | **Fixed** | Header now required; key + hash on `reimbursement_request` (0009); the replay short-circuits **before** the malware scan and the OCR run. 3 tests |
+| H | replays were body-blind in approvals and claims | **Fixed** | `request_hash` on approvals' `processed_request` (0011) and on claims' decision / adjustment / submission rows (0009); a mismatched replay is 422 rather than the earlier answer. 5 tests, incl. a reject-under-an-approve's-key and a deny-under-an-approve's-key |
 | H | operational-document PHI downloads ungated | **Fixed** | Gated on `document:write` through the authorization engine so denials are audited; 3 new policy tests |
 | H | provider RLS failed **open** on a missing `provider_id` | **Fixed** | `(no-provider)` sentinel; role list unified onto `HbmpPrincipal` so both layers agree; 9 new tests |
 | H | break-glass step-up was client-asserted | **Fixed** | Reads `principal.MfaSatisfied`; field removed from the contract. *Known limit recorded:* proves session MFA, not per-action freshness — that needs `auth_time` in the frozen token contract |
@@ -202,7 +205,11 @@ unacknowledged contract-phase operations, and is `continue-on-error: true` in `b
 never blocked anything. This change added one drop-and-widen and acknowledged it inline (21 → 20), but the
 standing 20 are a gate that reports and is not read.
 
-**Not yet started:** Highs #9–#12 and Mediums #13–#14 in the plan below.
+**Not yet started:** Highs #10–#12 and Mediums #13–#14 in the plan below. Two idempotency items from §2.1
+remain deliberately open and are called out rather than quietly folded in: the approvals validity-extension
+ordering (it applies downstream BEFORE the decision commits) and the eligibility snapshot's unguarded
+delete-then-insert. Both are concurrency reorderings rather than missing ledgers, and each needs its own
+racer test to be worth claiming.
 
 ## 6. Proposed remediation plan
 

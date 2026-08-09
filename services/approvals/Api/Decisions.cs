@@ -118,10 +118,32 @@ public static class Decisions
         var denied = await deps.Gate.CheckAsync(action, id.ToString(), breakGlass ? "break-glass" : "decide", ct);
         if (denied is not null) return denied;
 
-        // Idempotent replay: a repeated key returns the prior recorded decision, no new row / state.
+        /*
+         * IDEMPOTENT REPLAY, BOUND TO THE BODY.
+         *
+         * A repeated key returns the prior recorded decision — but only when it is the SAME decision. This
+         * compared the key alone until the 2026-08-09 audit, so a reject retried under a key already used for
+         * an approve came back "approved", 200 OK: the reviewer is told the opposite of what they asked for,
+         * the authorization really is approved, and nothing anywhere records the disagreement. 18.A3 settled
+         * the rule for consume and dispense; the approvals ledger simply had no column to apply it with
+         * (migration 0011).
+         *
+         * The hash covers what the DECISION is — which authorization, which verdict, on what rationale and
+         * what scope. Not the reviewer: two reviewers cannot share a key, because the second one's decision
+         * would be refused by the state machine long before it reached here.
+         */
+        var requestHash = IdempotencyKeyRules.Hash(
+            id.ToString(), decision.ToString(), rationale ?? "", approvedScopeJson ?? "", justification ?? "");
+
         var prior = await deps.Db.ProcessedRequests.AsNoTracking().FirstOrDefaultAsync(r => r.IdempotencyKey == idem, ct);
         if (prior is not null)
         {
+            if (!IdempotencyKeyRules.Matches(prior.RequestHash, requestHash))
+                return Results.Problem(statusCode: 422, title: "idempotency-key-reuse",
+                    type: "urn:hbmp:idempotency-key-reuse",
+                    detail: "That key was already used for a different decision. Answering it with the "
+                          + "earlier one would report a verdict you did not give.");
+
             var a0 = await deps.Db.Authorizations.AsNoTracking().Include(a => a.Decisions)
                 .FirstOrDefaultAsync(a => a.AuthorizationId == prior.AuthorizationId, ct);
             if (a0 is null) return Results.NoContent();
@@ -193,6 +215,7 @@ public static class Decisions
         {
             IdempotencyKey = idem, Operation = $"decision:{decision}",
             AuthorizationId = auth.AuthorizationId, StatusCode = 200, CreatedAt = now,
+            RequestHash = requestHash,
         });
         // The new expiry is part of the DECISION record, not only of the item — "what did approving this
         // actually grant" has to be answerable from the ledger without calling another service.

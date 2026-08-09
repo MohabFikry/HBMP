@@ -99,6 +99,10 @@ public sealed class PatientApiFactory : WebApplicationFactory<Program>
             "DELETE FROM patient.contact WHERE beneficiary_id IN " +
             "  (SELECT beneficiary_id FROM patient.beneficiary WHERE tenant_id = {0}); " +
             "DELETE FROM patient.beneficiary WHERE tenant_id = {0}; " +
+            // 0008 — the registration idempotency ledger. Its rows outlive the beneficiary they point at
+            // (no foreign key, deliberately), so a leftover would let one run's key decide the next run's
+            // result — the exact failure a per-run tenant exists to prevent.
+            "DELETE FROM patient.processed_request WHERE tenant_id = {0}; " +
             "SET session_replication_role = origin;", Tenant);
     }
 

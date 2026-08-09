@@ -141,6 +141,10 @@ public sealed class RoutedAuthorizationIngestor(ApprovalsDbContext db, AuthNoIss
         {
             IdempotencyKey = idem, Operation = $"route:{eventType}",
             AuthorizationId = auth.AuthorizationId, StatusCode = 201, CreatedAt = now,
+            // No `RequestHash`, and deliberately. The column exists so a HUMAN caller cannot reuse one key
+            // for two different requests (migration 0011); here the key IS the event id, which the producer
+            // mints once per emission, so a differing body under the same key is not a thing the broker can
+            // deliver. Storing a hash would suggest a check nobody performs.
         });
         await db.SaveChangesAsync(ct);
 

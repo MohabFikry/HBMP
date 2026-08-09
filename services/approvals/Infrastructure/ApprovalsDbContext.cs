@@ -115,4 +115,15 @@ public sealed class ProcessedRequest
     public Guid AuthorizationId { get; set; }
     public int StatusCode { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>
+    /// SHA-256 of the canonical request this key produced (migration 0011).
+    /// </summary>
+    /// <remarks>
+    /// Without it a replay is answered from the key alone, and a reject retried under an approve's key
+    /// returned the approval as 200 OK — the reviewer is told the opposite of what they asked for and
+    /// nothing records the disagreement. NULL on rows written before the column: unverifiable, so
+    /// <see cref="Mersal.Events.IdempotencyKeyRules.Matches"/> treats it as a match.
+    /// </remarks>
+    public string? RequestHash { get; set; }
 }

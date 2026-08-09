@@ -36,9 +36,25 @@ public static class Worklist
                 return Results.Problem(statusCode: 422, title: "requesting-provider-required",
                     detail: "A non-manual authorization must name the requesting provider.", type: "urn:hbmp:validation");
 
+            // The replay is bound to the BODY, the same rule the decide path applies (migration 0011). A key
+            // reused for a different beneficiary or a different set of service codes would otherwise be
+            // answered with the first authorization — telling the caller their second request had been
+            // raised when nothing had been raised at all, and leaving the real one unmade.
+            var requestHash = IdempotencyKeyRules.Hash(
+                req.Source.ToString(), req.SourceRef ?? "", req.BeneficiaryId.ToString(),
+                req.RequestingProviderId?.ToString() ?? "",
+                string.Join(',', (req.ServiceCodes ?? []).OrderBy(c => c, StringComparer.Ordinal)),
+                req.RequestedScope ?? "", req.Priority.ToString());
+
             var prior = await db.ProcessedRequests.AsNoTracking().FirstOrDefaultAsync(r => r.IdempotencyKey == idem, ct);
             if (prior is not null)
             {
+                if (!IdempotencyKeyRules.Matches(prior.RequestHash, requestHash))
+                    return Results.Problem(statusCode: 422, title: "idempotency-key-reuse",
+                        type: "urn:hbmp:idempotency-key-reuse",
+                        detail: "That key was already used for a different authorization. Answering it with "
+                              + "the earlier one would report a request that was never raised.");
+
                 var existing = await db.Authorizations.AsNoTracking().FirstOrDefaultAsync(a => a.AuthorizationId == prior.AuthorizationId, ct);
                 return existing is null ? Results.NoContent() : Results.Ok(AuthorizationStateView.From(existing));
             }
@@ -79,6 +95,7 @@ public static class Worklist
             {
                 IdempotencyKey = idem, Operation = "create-authorization",
                 AuthorizationId = auth.AuthorizationId, StatusCode = 201, CreatedAt = now,
+                RequestHash = requestHash,
             });
             await db.SaveChangesAsync(ct);
             await outbox.EnqueueAsync("AuthSubmitted", "approvals.events",

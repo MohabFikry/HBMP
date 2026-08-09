@@ -25,6 +25,25 @@ public static class ReimbursementEndpoints
             var denied = await deps.Gate.CheckAsync(ClaimsPolicies.ReimburseSubmit, ct);
             if (denied is not null) return denied;
 
+            /*
+             * THE KEY THIS CHANNEL NEVER ASKED FOR.
+             *
+             * Every other write in this service required an `Idempotency-Key`; this one — the channel a
+             * BENEFICIARY submits through, from a phone, on a connection that drops — required nothing. A
+             * retry created a second request over the same receipts, both ran the OCR pipeline, and both
+             * could auto-match: the same receipt reimbursed twice, with nothing in either record hinting
+             * that the other existed.
+             *
+             * Required, not optional. A client that has never sent one starts getting a 400 with a problem
+             * type that says what to do, which is the same contract every sibling endpoint has always had —
+             * and far better than the silent double-payment it replaces.
+             */
+            var idem = http.Headers["Idempotency-Key"].ToString();
+            if (string.IsNullOrWhiteSpace(idem))
+                return Results.Problem(statusCode: 400, title: "idempotency-required",
+                    detail: "The Idempotency-Key header is required on a reimbursement request.",
+                    type: "urn:hbmp:idempotency-required");
+
             if (body.Documents is null || body.Documents.Count == 0)
                 return Results.Problem(statusCode: 422, title: "no-documents", detail: "Receipts + evidence are required.", type: "urn:hbmp:validation");
 
@@ -40,7 +59,7 @@ public static class ReimbursementEndpoints
             var actingFor = deps.ProviderId is null ? null : deps.Subject;
             var sub = new ReimbursementSubmission(body.BeneficiaryId, actingFor, body.ReceiptTotal,
                 string.IsNullOrWhiteSpace(body.CurrencyCode) ? "EGP" : body.CurrencyCode!,
-                body.LinkedOrderId, body.LinkedPrescriptionId, docs);
+                body.LinkedOrderId, body.LinkedPrescriptionId, docs, idem);
             var bearer = BearerOf(http);
             // 24.x — a reimbursement submission and BOTH events that route it (submitted, then matched
             // or sent for manual assessment) commit together. Lose the second and the request sits in a
@@ -53,6 +72,16 @@ public static class ReimbursementEndpoints
                 case ReimbursementOutcome.RejectedFiles:
                     await AuditReject(deps, body.BeneficiaryId, "REJECTED_FILES", r.Error);
                     return Results.Problem(statusCode: 422, title: r.Error, type: "urn:hbmp:validation", detail: "A document failed type/size validation.");
+                case ReimbursementOutcome.IdempotencyKeyReuse:
+                    return Results.Problem(statusCode: 422, title: "idempotency-key-reuse",
+                        type: "urn:hbmp:idempotency-key-reuse",
+                        detail: "That key was already used for a different submission. Answering it with the "
+                              + "earlier request would show you somebody else's receipts.");
+                case ReimbursementOutcome.Replayed:
+                    // 200, not 201: nothing was created this time, no OCR was re-run, and the status says so.
+                    await tx.CommitAsync(ct);
+                    return Results.Ok(ReimbursementView.From(
+                        r.Request!, await OcrOf(deps, r.Request!.RequestId, ct)));
                 case ReimbursementOutcome.RejectedScan:
                     await AuditReject(deps, body.BeneficiaryId, "MALWARE_SCAN_FAILED", r.Error);
                     return Results.Problem(statusCode: 422, title: "malware-scan-failed", type: "urn:hbmp:malware", detail: "A document failed the malware scan and was rejected.");

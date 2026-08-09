@@ -24,6 +24,21 @@ public sealed class ReimbursementRequest
     public Guid? LinkedOrderId { get; set; }
     public Guid? LinkedPrescriptionId { get; set; }
     public string TenantId { get; set; } = default!;
+
+    /// <summary>
+    /// The caller's <c>Idempotency-Key</c> and a hash of the request it produced (migration 0009).
+    /// </summary>
+    /// <remarks>
+    /// This channel had NO idempotency at all — the only write in the service without it, and the one a
+    /// beneficiary submits through from a phone on a connection that drops. A retry created a second request
+    /// over the same receipts; both run the OCR pipeline and both can auto-match, so the same receipt could
+    /// be reimbursed twice with nothing in either record hinting the other existed. NULL on rows submitted
+    /// before 0009, which is why the unique index is partial.
+    /// </remarks>
+    public string? IdempotencyKey { get; set; }
+
+    /// <inheritdoc cref="IdempotencyKey"/>
+    public string? RequestHash { get; set; }
 }
 
 /// <summary>An append-only OCR extraction (22 §10A.8). One row per extracted field per run — NEVER overwritten. A value

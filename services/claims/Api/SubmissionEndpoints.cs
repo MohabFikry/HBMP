@@ -63,6 +63,11 @@ public static class SubmissionEndpoints
 
             switch (r.Outcome)
             {
+                case SubmitOutcome.IdempotencyKeyReuse:
+                    return Results.Problem(statusCode: 422, title: "idempotency-key-reuse",
+                        type: "urn:hbmp:idempotency-key-reuse",
+                        detail: "That key was already used for a different submission. Answering it with the "
+                              + "earlier claim would report an invoice as received that was never received.");
                 case SubmitOutcome.Duplicate:
                     await AuditDenied(deps, body.ProviderId, "DUPLICATE_CLAIM");
                     return Results.Problem(statusCode: 409, title: "duplicate-claim", type: "urn:hbmp:duplicate-claim",

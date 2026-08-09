@@ -1,3 +1,4 @@
+using System.Globalization;
 using Mersal.Audit.Client;
 using Mersal.Auth;
 using Mersal.Auth.Authorization;
@@ -76,8 +77,45 @@ v1.MapPost("", async (
     BeneficiaryRegistrar registrar, PatientDbContext db, IAuditClient audit, IOutbox outbox,
     IHbmpPrincipalAccessor me, TimeProvider clock, IBusinessCalendar calendar, CancellationToken ct) =>
 {
-    if (string.IsNullOrWhiteSpace(http.Headers["Idempotency-Key"]))
+    var idem = http.Headers["Idempotency-Key"].ToString();
+    if (string.IsNullOrWhiteSpace(idem))
         return Results.Problem(statusCode: 400, title: "Idempotency-Key header is required", type: "urn:hbmp:idempotency-required");
+
+    /*
+     * THE LEDGER THE HEADER HAS ALWAYS DESERVED.
+     *
+     * This endpoint has refused a request without an `Idempotency-Key` since phase 3 and then discarded it —
+     * nothing stored it and nothing read it. So a retry after a dropped response, a double-submitted form or
+     * a client reconnect REGISTERED A SECOND PERSON, and the duplicate-identifier check does not save you:
+     * it fires only when a card or a national id was entered, and registration accepts a person with
+     * neither. Those are the arrivals most likely to be re-submitted on a poor connection.
+     *
+     * Two beneficiary rows for one human is the worst duplicate here — coverage, encounters, prescriptions
+     * and claims all hang off the id, so the two halves of a person's care diverge permanently.
+     *
+     * The hash binds the replay to the BODY (18.A3's rule, migration 0008). A key reused for a DIFFERENT
+     * person is refused rather than answered with the first person's record: a 201 naming somebody else is
+     * worse than the duplicate this prevents.
+     */
+    var requestHash = IdempotencyKeyRules.Hash(
+        body.CardNumber ?? "", body.GivenName ?? "", body.MiddleName ?? "", body.FamilyName ?? "",
+        body.BirthDate?.ToString("O", CultureInfo.InvariantCulture) ?? "", body.Sex ?? "",
+        body.NationalityCode ?? "", body.IdentifierType ?? "", body.IdentifierValue ?? "", body.Phone ?? "");
+
+    if (await db.ProcessedRequests.AsNoTracking().FirstOrDefaultAsync(r => r.IdempotencyKey == idem, ct) is { } seen)
+    {
+        if (!IdempotencyKeyRules.Matches(seen.RequestHash, requestHash))
+            return Results.Problem(statusCode: 422, title: "idempotency-key-reuse",
+                type: "urn:hbmp:idempotency-key-reuse",
+                detail: "That key was already used to register a different person. Answering it with the "
+                      + "earlier record would return somebody else's beneficiary.");
+
+        var already = await db.Beneficiaries.AsNoTracking()
+            .Include(x => x.Identifiers).Include(x => x.Contacts)
+            .FirstOrDefaultAsync(x => x.BeneficiaryId == seen.EntityId, ct);
+        // 200, not 201: nothing was created this time, and the status says so.
+        return already is null ? Results.NoContent() : Results.Ok(BeneficiaryDto.From(already));
+    }
 
     var req = body.ToDomain();
     var actor = me.Principal?.Subject;
@@ -155,6 +193,16 @@ v1.MapPost("", async (
                     CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow(),
                 });
             }
+            // The ledger row commits WITH the person, inside the same transaction. Written after it rather
+            // than before, so a registration that fails validation or a duplicate check leaves no row
+            // claiming the key — the operator corrects the form and retries with the same key, which is what
+            // a browser's retry button does.
+            db.ProcessedRequests.Add(new ProcessedRequest
+            {
+                IdempotencyKey = idem, TenantId = created.Beneficiary.TenantId,
+                Operation = "register-beneficiary", EntityId = created.Beneficiary.BeneficiaryId,
+                StatusCode = 201, RequestHash = requestHash, CreatedAt = clock.GetUtcNow(),
+            });
             await db.SaveChangesAsync(ct);
             await audit.EmitAsync(new AuditEventDraft
             {

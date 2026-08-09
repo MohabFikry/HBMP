@@ -18,6 +18,9 @@ public sealed class PatientDbContext(DbContextOptions<PatientDbContext> options)
     public DbSet<EnrolmentIntent> EnrolmentIntents => Set<EnrolmentIntent>();
     public DbSet<RegistrationNote> RegistrationNotes => Set<RegistrationNote>();
     public DbSet<RegistrationThreadEntry> RegistrationThread => Set<RegistrationThreadEntry>();
+    /// <summary>The registration idempotency ledger (migration 0008). The <c>Idempotency-Key</c> header has
+    /// been required on <c>POST /beneficiaries</c> since phase 3 and, until this table, discarded.</summary>
+    public DbSet<ProcessedRequest> ProcessedRequests => Set<ProcessedRequest>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -160,5 +163,32 @@ public sealed class PatientDbContext(DbContextOptions<PatientDbContext> options)
             e.Property(x => x.DependentBeneficiaryId).HasColumnName("dependent_beneficiary_id");
             e.Property(x => x.Relationship).HasConversion<string>().HasColumnName("relationship");
         });
+
+        b.Entity<ProcessedRequest>(e =>
+        {
+            e.ToTable("processed_request");
+            e.HasKey(x => x.IdempotencyKey);
+        });
     }
+}
+
+/// <summary>
+/// Idempotency ledger row — a replayed <c>Idempotency-Key</c> returns the prior result instead of
+/// registering the person a second time.
+/// </summary>
+/// <remarks>
+/// Tenant-scoped and RLS-forced, unlike the transport-level <c>processed_event</c> ledgers elsewhere: this
+/// row points at a beneficiary, so it is patient data. <see cref="RequestHash"/> is what makes the replay
+/// honest — a key reused for a DIFFERENT person is refused rather than answered with the first person's
+/// record, because a 201 naming somebody else is a worse failure than the duplicate it prevents.
+/// </remarks>
+public sealed class ProcessedRequest
+{
+    public string IdempotencyKey { get; set; } = default!;
+    public string TenantId { get; set; } = "";
+    public string Operation { get; set; } = default!;
+    public Guid EntityId { get; set; }
+    public int StatusCode { get; set; }
+    public string? RequestHash { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
 }

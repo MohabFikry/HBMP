@@ -68,6 +68,22 @@ data (tariffs, authorizations, eligibility, fulfillment) comes over the API/even
   atomically → `DUPLICATE_CLAIM` (409), no second payable line. Idempotent on the header `Idempotency-Key`;
   provider-isolated (ABAC PO + RLS); submission, document attach, and every match/no-match outcome audited. Emits
   `ClaimSubmitted`. Documents are stored by REFERENCE only (bytes stay scanned + encrypted in document-service).
+### Idempotency (migration 0009)
+
+Every write here takes an `Idempotency-Key`, and every replay is now bound to the **body**. Until the
+2026-08-09 audit the key was compared alone, so a key reused for a different request was answered with the
+earlier one, 200 OK: a **deny** retried under an approve's key returned the approval (the officer believes
+they refused a line that is now payable, with no error to investigate); an **adjustment** reused across two
+amounts returned the first (the second correction never happens and the batch total stays wrong by the
+difference); a **submission** reused across two invoices returned the first claim (the provider is told an
+invoice was received that never was). A mismatched replay is now **422 `idempotency-key-reuse`;** a genuine
+retry still replays.
+
+**Reimbursement had no idempotency at all** — the only write in this service without it, and the one a
+BENEFICIARY submits through, from a phone, on a connection that drops. A retry created a second request over
+the same receipts, both ran the OCR pipeline, and both could auto-match. The header is now required (400
+without it) and the replay short-circuits **before** the malware scan and the extraction.
+
 - **10b.6 — beneficiary reimbursement + OCR (assistive, human-gated).** `reimbursement_request` + `ocr_extraction`
   (append-only — a re-run is new rows; the ONLY permitted UPDATE is a human setting `accepted_by`/`accepted_at`, and
   the extracted value/confidence/region are trigger-immutable). Pipeline: file type/size validation → **malware scan**

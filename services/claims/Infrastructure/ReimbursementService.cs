@@ -1,15 +1,29 @@
 using Mersal.Claims.Domain;
+using Mersal.Events;
 using Microsoft.EntityFrameworkCore;
 
 namespace Mersal.Claims.Infrastructure;
 
-public enum ReimbursementOutcome { AutoMatched, ManualAssessment, RejectedFiles, RejectedScan }
+public enum ReimbursementOutcome
+{
+    AutoMatched, ManualAssessment, RejectedFiles, RejectedScan,
+    /// <summary>This key already produced a request and the body matches — the earlier one is returned and
+    /// nothing is created. Before migration 0009 this channel had no key at all.</summary>
+    Replayed,
+    /// <summary>The key was already used for a DIFFERENT submission. Answering it with the earlier request
+    /// would show the beneficiary somebody else's receipts.</summary>
+    IdempotencyKeyReuse,
+}
 
 public sealed record ReimbursementDoc(Guid DocumentId, ClaimDocType DocType, string? ContentType, long SizeBytes);
 
 public sealed record ReimbursementSubmission(
     Guid BeneficiaryId, string? ActingFor, decimal ReceiptTotal, string CurrencyCode,
-    Guid? LinkedOrderId, Guid? LinkedPrescriptionId, IReadOnlyList<ReimbursementDoc> Documents);
+    Guid? LinkedOrderId, Guid? LinkedPrescriptionId, IReadOnlyList<ReimbursementDoc> Documents,
+    /// <summary>The caller's <c>Idempotency-Key</c> (migration 0009). Optional on the record so the existing
+    /// tests and any internal caller compile unchanged; the ENDPOINT requires it, which is where a
+    /// beneficiary's retry actually arrives.</summary>
+    string? IdempotencyKey = null);
 
 public sealed record ReimbursementResult(
     ReimbursementOutcome Outcome, ReimbursementRequest? Request, string? Error = null);
@@ -33,6 +47,30 @@ public sealed class ReimbursementService(
     {
         ArgumentNullException.ThrowIfNull(sub);
 
+        /*
+         * (0) IDEMPOTENT REPLAY.
+         *
+         * This was the only write in claims-service with no idempotency at all — and it is the channel a
+         * BENEFICIARY submits through, from a phone, on a connection that drops. A retry created a SECOND
+         * request over the same receipts; both then run the OCR pipeline and both can auto-match, so the
+         * same receipt could be reimbursed twice with nothing in either record hinting the other existed.
+         *
+         * Checked before the scan and the OCR run, not after: those are the expensive, side-effecting steps,
+         * and re-running a malware scan and an extraction for a request that already exists is work nobody
+         * asked for on documents somebody has already paid to process.
+         */
+        var requestHash = HashRequest(sub);
+        if (sub.IdempotencyKey is { Length: > 0 } key)
+        {
+            var prior = await db.ReimbursementRequests.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.IdempotencyKey == key, ct);
+            if (prior is not null)
+                return IdempotencyKeyRules.Matches(prior.RequestHash, requestHash)
+                    ? new ReimbursementResult(ReimbursementOutcome.Replayed, prior)
+                    : new ReimbursementResult(ReimbursementOutcome.IdempotencyKeyReuse, null,
+                        "that key was already used for a different submission");
+        }
+
         // (1) File type/size gate — any bad file rejects the whole upload (audited by the caller).
         foreach (var d in sub.Documents)
             if (DocumentValidation.Validate(d.ContentType, d.SizeBytes) is { } fileErr)
@@ -52,6 +90,7 @@ public sealed class ReimbursementService(
             SubmittedAt = now, ReceiptTotal = sub.ReceiptTotal, CurrencyCode = sub.CurrencyCode,
             LinkedOrderId = sub.LinkedOrderId, LinkedPrescriptionId = sub.LinkedPrescriptionId,
             Status = ReimbursementStatus.OcrProcessing, TenantId = tenantId,
+            IdempotencyKey = sub.IdempotencyKey, RequestHash = requestHash,
         };
         db.ReimbursementRequests.Add(request);
         await db.SaveChangesAsync(ct);
@@ -164,6 +203,16 @@ public sealed class ReimbursementService(
     }
 
     /// <summary>Provider/date/amount/code disagreement between the submission and the single authorized candidate.</summary>
+    /// <summary>What makes this submission THIS submission: who it is for, the receipt total and currency,
+    /// what it is linked to, and the documents. Document ids are sorted, so the same upload described in a
+    /// different order is still recognised as a retry rather than a new claim on the same receipts.</summary>
+    private static string HashRequest(ReimbursementSubmission sub) =>
+        IdempotencyKeyRules.Hash([
+            sub.BeneficiaryId.ToString(), IdempotencyKeyRules.Amount(sub.ReceiptTotal), sub.CurrencyCode ?? "",
+            sub.LinkedOrderId?.ToString() ?? "", sub.LinkedPrescriptionId?.ToString() ?? "",
+            .. sub.Documents.Select(d => $"{d.DocumentId}|{d.DocType}").OrderBy(x => x, StringComparer.Ordinal),
+        ]);
+
     private static bool HasMismatch(AuthorizedService svc, ReimbursementSubmission sub)
     {
         // The receipt total may not EXCEED the authorized service's tariff by policy is checked at the cap; here a

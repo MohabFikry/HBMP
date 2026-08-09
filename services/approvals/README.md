@@ -111,7 +111,12 @@ integration seam wired alongside phase 8.)
 
 ## Decisions (US-060) — mandatory rationale + downstream (phase 7.2)
 
-All under scope `auth:decide` + `Idempotency-Key`. Each writes an **append-only** `authorization_decision` row,
+All under scope `auth:decide` + `Idempotency-Key`. **The replay is bound to the body (migration 0011):** this
+compared the key alone until the 2026-08-09 audit, so a REJECT retried under a key already used for an APPROVE
+came back "approved", 200 OK — the reviewer is told the opposite of what they asked for, the authorization
+really is approved, and nothing records the disagreement. A mismatched replay is now
+**422 `idempotency-key-reuse`;** a genuine retry still replays. Each writes an **append-only**
+`authorization_decision` row,
 drives the state machine, and emits the canonical event **in one transaction**, then audits (`Decision`); TAT is
 captured (`tat_seconds = decided − submitted`) and `sla_breached` flagged.
 

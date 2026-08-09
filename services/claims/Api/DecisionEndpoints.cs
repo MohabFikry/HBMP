@@ -108,6 +108,10 @@ public static class DecisionEndpoints
             switch (r.Outcome)
             {
                 case DecisionOutcome.NotFound: return Results.Problem(statusCode: 404, title: "Not Found", type: "https://mersal.foundation/problems/not-found");
+                case DecisionOutcome.IdempotencyKeyReuse:
+                    return Results.Problem(statusCode: 422, title: "idempotency-key-reuse",
+                        type: "urn:hbmp:idempotency-key-reuse",
+                        detail: "That key was already used for a different decision. Answering it with the earlier one would report a verdict you did not give.");
                 case DecisionOutcome.SoDOriginator: return await SoD(deps, claimId, "SOD_ORIGINATOR_CANNOT_ADJUDICATE", "You created this claim.");
                 case DecisionOutcome.SoDProviderAffiliated: return await SoD(deps, claimId, "SOD_PROVIDER_AFFILIATED", "You are affiliated with the claiming provider.");
                 case DecisionOutcome.SoDSameDecider: return await SoD(deps, claimId, "SOD_SAME_DECIDER", "A second, distinct approver is required.");
