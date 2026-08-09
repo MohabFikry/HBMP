@@ -32,6 +32,14 @@ ced86b4d997227c7700a112822f87dc9ffdb9026:infra/keycloak/provision-identity.sh:me
 ced86b4d997227c7700a112822f87dc9ffdb9026:docs/AUDIT-2026-07-26.md:mersal-prose-password:38
 2a299c64e64ac005ea698a52355c9767cf1961b9:docs/HANDOFF.md:mersal-prose-password:95
 
+# Self-inflicted, and left here rather than rewritten. The commit that documented the drug-catalogue false
+# positives QUOTED one of them in full, which reintroduced the same entropy hit in a new file — the audit
+# note describing the finding became the finding. The prose no longer contains the string, but the commit
+# that did is already pushed, and rewriting published history to delete a hair-mask ingredient list is a
+# worse trade than one honest line here. It is exactly the "write about a secret and you have written a
+# secret" trap the reference-data allowlist exists for, one directory over.
+48dfc71ec2946c4ae9fab8f6637a90521d7868ee:docs/AUDIT-2026-08-09-PLATFORM-WIDE.md:generic-api-key:247
+
 # A baked `${POSTGRES_PASSWORD:-<default>}` fallback in the DR rehearsal script. The current script has no
 # default at all: it uses `: "${POSTGRES_PASSWORD:?...}"` and fails fast when the variable is unset.
 4f6eda6f59b1fbeed499ee94104f995aceacc94b:infra/dr/restore-rehearsal.sh:mersal-uri-embedded-credential:14

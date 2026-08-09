@@ -21,16 +21,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+      # The gitleaks BINARY, not gitleaks-action.
+      #
+      # The action branches on event type and takes a different path for pull_request, which needs a
+      # GITHUB_TOKEN and `pull-requests` permission to call the API. It had neither, so on PRs it failed
+      # before scanning anything — and it failed in a way indistinguishable from finding a secret. The gate
+      # that is supposed to stop a credential BEFORE it lands was the one event type it never ran on.
+      #
+      # Running the binary removes the branch: same command, same coverage, on pushes and pull requests
+      # alike, with no token and no added permission. It also scans the full history rather than only the
+      # PR's own commits, which is strictly more than the action was doing on its good path. `fetch-depth: 0`
+      # above is what makes that possible. Pinned by version so a scanner upgrade is a visible diff.
       - name: gitleaks (secret hygiene — 100% secrets outside code, NFR-034)
         id: gate_secret_scan
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITLEAKS_CONFIG: .gitleaks.toml
-          # Required for pull_request events since the action's v2 breaking change — without it the action
-          # refuses before scanning anything and reports a failure that looks identical to a found secret.
-          # So on PRs, the branch where a secret is most likely to be caught, this gate has never once
-          # examined the code; it only ever passed on push-to-master.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo zricethezav/gitleaks:v8.24.3 \
+            detect --source=/repo --config=/repo/.gitleaks.toml --redact --no-banner \
+                   --report-format=sarif --report-path=/repo/gitleaks.sarif
+      - name: Upload gitleaks SARIF
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: gitleaks.sarif }
 
       # Heartbeat, so check-gate-freshness.py can tell "passing" from "never ran" — the same reason
       # backend-ci and frontend-ci write one. Own file: the watchdog merges every gate-heartbeats*.json in
@@ -68,17 +80,24 @@ jobs:
       # every push since it was added. GitHub resolves actions during job setup, which is why the failure
       # never named Trivy and read as infrastructure flake. A gate that has never once executed is not a
       # gate, which is the case check-gate-freshness.py was written for; this one predates its coverage.
+      # The Trivy IMAGE, not trivy-action, for the same reason gitleaks runs as a binary above.
+      #
+      # Fixing the non-existent `@0.24.0` tag got the job as far as running, where it failed again inside
+      # the action's own `setup-trivy` installer — it missed its cache and then could not fetch the binary.
+      # That is a second moving part between this repository and the scan, and neither of its two failures
+      # said anything about the code being scanned. The official image is the scanner, pinned, with nothing
+      # to install.
+      #
+      # `--scanners vuln,secret,misconfig`: the misconfig scanner is the one that matters here and is not on
+      # by default for `fs`. It is what caught the SPA container running as root.
       - name: Trivy filesystem (SCA + config/SAST)
         id: gate_sca_sast
-        uses: aquasecurity/trivy-action@v0.33.1
-        with:
-          scan-type: fs
-          scan-ref: .
-          severity: CRITICAL,HIGH
-          exit-code: "1" # block release (NFR-035/037)
-          ignore-unfixed: true
-          format: sarif
-          output: trivy-fs.sarif
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo aquasec/trivy:0.65.0 \
+            fs /repo --scanners vuln,secret,misconfig \
+                     --severity CRITICAL,HIGH --ignore-unfixed \
+                     --exit-code 1 --no-progress \
+                     --format sarif --output /repo/trivy-fs.sarif
       - name: Upload Trivy SARIF
         if: always()
         uses: github/codeql-action/upload-sarif@v3

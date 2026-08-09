@@ -244,8 +244,9 @@ HEAD, nine exist only in history. Triaged individually:
   rehearsal script. All were removed from the tree by the 18.B1 R2 purge; gitleaks scans all 482 commits, so
   they fail forever regardless. Pinned by fingerprint in `.gitleaksignore`, one line each with its reason.
 - *Seven false positives* — five pharmaceutical names in the ATC/CPT reference exports that score like
-  high-entropy keys (`CAPIXY HAIR MASK 250ML,CAPIXYL+GLYCERIN+ALOE VERA+SHEA BUTTER`), a portal nav key, and
-  a synthetic seed UUID. Allowlisted by data-file path and by stopword, not by blanket rule disablement.
+  high-entropy keys (a hair-mask row whose `+`-joined ingredient list runs to forty characters; an
+  anti-diabetic row ending in a `DPP-4` inhibitor class code), a portal nav key, and a synthetic seed UUID.
+  Allowlisted by data-file path and by stopword, not by blanket rule disablement.
 - *One live* — `amqp://hbmp:ci_hbmp_rmq_pw@localhost` in backend-ci. A throwaway credential for an ephemeral
   service container, already documented as such in the workflow, and flagged only because it happens to be
   URI-shaped while the identical `ci_hbmp_pw` beside it is not. The allowlist encodes the existing convention
