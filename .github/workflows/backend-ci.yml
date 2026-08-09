@@ -507,6 +507,11 @@ jobs:
           name: gate-heartbeats
           path: .ci-state
           retention-days: 30
+          # `.ci-state` is a HIDDEN directory, and upload-artifact v4 skips hidden files unless told not
+          # to. Without this line the artifact uploads EMPTY, which is how every heartbeat since the
+          # watchdog was written went missing: gate-health then reported all 18 gates as "never executed",
+          # and a real gate going quiet would have looked exactly the same.
+          include-hidden-files: true
 
       # ============================================================================================
       # The whole point of the restructure: one place that reads every gate's outcome, prints the

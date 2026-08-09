@@ -26,6 +26,11 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITLEAKS_CONFIG: .gitleaks.toml
+          # Required for pull_request events since the action's v2 breaking change — without it the action
+          # refuses before scanning anything and reports a failure that looks identical to a found secret.
+          # So on PRs, the branch where a secret is most likely to be caught, this gate has never once
+          # examined the code; it only ever passed on push-to-master.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Heartbeat, so check-gate-freshness.py can tell "passing" from "never ran" — the same reason
       # backend-ci and frontend-ci write one. Own file: the watchdog merges every gate-heartbeats*.json in
@@ -46,6 +51,11 @@ jobs:
           name: gate-heartbeats-secret-scan
           path: .ci-state
           retention-days: 30
+          # `.ci-state` is a HIDDEN directory, and upload-artifact v4 skips hidden files unless told not
+          # to. Without this line the artifact uploads EMPTY, which is how every heartbeat since the
+          # watchdog was written went missing: gate-health then reported all 18 gates as "never executed",
+          # and a real gate going quiet would have looked exactly the same.
+          include-hidden-files: true
 
   sca-sast-image:
     runs-on: ubuntu-latest
@@ -90,6 +100,11 @@ jobs:
           name: gate-heartbeats-sca
           path: .ci-state
           retention-days: 30
+          # `.ci-state` is a HIDDEN directory, and upload-artifact v4 skips hidden files unless told not
+          # to. Without this line the artifact uploads EMPTY, which is how every heartbeat since the
+          # watchdog was written went missing: gate-health then reported all 18 gates as "never executed",
+          # and a real gate going quiet would have looked exactly the same.
+          include-hidden-files: true
 
   codeql-dotnet:
     runs-on: ubuntu-latest

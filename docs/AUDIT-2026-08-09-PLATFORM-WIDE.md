@@ -262,6 +262,23 @@ Both gates are now in `REQUIRED_GATES` and write heartbeats, which is the durabl
 that has never run was exactly the failure `check-gate-freshness.py` exists to catch, and these two sat
 outside its coverage because it listed only the gates in `tools/ci/`.
 
+**And wiring that up exposed why the watchdog never caught it: it has never received a single heartbeat.**
+`.ci-state` is a hidden directory, and `actions/upload-artifact@v4` silently skips hidden files unless
+`include-hidden-files: true` is set. Every heartbeat artifact since the mechanism was written has therefore
+uploaded EMPTY — verified against the last five completed runs of both backend-ci and frontend-ci: zero
+`gate-heartbeats*` artifacts, on every one. That is why `gate-health` fails on `master` reporting all
+eighteen gates as "never executed", and why the same run locally says the same thing.
+
+The failure mode is worth stating plainly, because it is the one the watchdog was built to prevent. A gate
+that genuinely stopped running would have produced *exactly* the output the broken plumbing was producing —
+so the alarm was indistinguishable from the fault, and reading it as noise was the reasonable response.
+Fixed on all four upload steps.
+
+`secret-scan` also required `GITHUB_TOKEN` on `pull_request` events (a v2 breaking change in the action). It
+refuses before scanning and fails in a way that looks identical to a found secret, so on pull requests — the
+branch where a secret is most likely to be caught before it lands — this gate has never examined the code at
+all. It only ever ran on push-to-master.
+
 ### What closing the saga turned up (C1+C2, ADR-0041)
 
 Wiring it surfaced three things that only a real caller could have found, because each path had never had
