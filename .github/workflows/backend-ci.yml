@@ -72,6 +72,25 @@ jobs:
           --health-timeout 5s
           --health-retries 24
 
+      # Ephemeral RabbitMQ, for the same reason as the Postgres above: a gated proof that cannot reach its
+      # dependency SKIPS, and check-skipped-tests.py allows zero skips. libs/events'
+      # SagaMirrorAgainstBrokerTests assert that OrderPendingApproval really is readable out of
+      # approvals.routing-events and that a decision reaches BOTH owners' queues — the prior-authorization
+      # saga's two mirrors (ADR-0041). Neither is provable against a stub: the publish goes to the default
+      # exchange with the destination as the routing key, so an undeclared queue discards in silence.
+      rabbitmq:
+        image: rabbitmq:3.13
+        env:
+          RABBITMQ_DEFAULT_USER: hbmp
+          RABBITMQ_DEFAULT_PASS: ci_hbmp_rmq_pw
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 12
+
     env:
       DOTNET_NOLOGO: "1"
       DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
@@ -86,6 +105,8 @@ jobs:
       OWNER_PASSWORD: ci_hbmp_pw
       APP_PASSWORD: ci_hbmp_app_pw
       HBMP_APP_PASSWORD: ci_hbmp_app_pw
+      # The broker-gated mirror proofs. Same throwaway-credential rule as the DB values above.
+      HBMP_TEST_RABBIT_URI: "amqp://hbmp:ci_hbmp_rmq_pw@localhost:5672"
       # Coverage floors are NOT set here. They live in tools/ci/coverage-floors.json, the single
       # source of truth, guarded by check-floor-monotonicity.py (Gate 1.3 / Gate 7.3). A second copy
       # in this file is how a bar gets moved in a diff nobody reads as a bar being moved.

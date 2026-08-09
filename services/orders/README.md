@@ -23,6 +23,17 @@ sees an authorized **queue**, performs the **atomic idempotent consume** (the he
    `OrderPendingApproval`); otherwise **Requested → Active** (emits `OrderActivated`). Default: `Imaging` is gated.
 4. **Outbox** — `OrderCreated` then `OrderActivated | OrderPendingApproval` are enqueued in the same transaction
    as the state change (destination `orders.events`); consumers dedupe on event id.
+5. **The decision comes back** (ADR-0041). `ApprovalDecisionConsumer` binds **`orders.approval-decisions`**,
+   orders' own mirror of `approvals.events`, and applies the reviewer's answer: approve →
+   `PendingApproval → Approved → Active` in one transaction (emitting `OrderApproved` then `OrderActivated`);
+   reject → `Rejected`, which removes the order from every queue and is terminal; partially approve →
+   released, with the lines whose code the reviewer did not allow cancelled as `not-in-approved-scope`,
+   attributed to the reviewer.
+
+   Until 2026-08-09 **nothing consumed `approvals.events`**, so those transitions were declared in
+   `OrderWorkflow` and executed by no code anywhere: a gated order sat in `PendingApproval` for ever whatever
+   was decided, and a rejected one was indistinguishable from one still in the queue. `OrderPendingApproval`
+   likewise reached no reviewer until `ApprovalRoutingFeed` mirrored it to approvals.
 
 Every order event carries **`encounterId`** (ADR-0031). The column has been on `orders.order` since phase 4 and
 was never published, so the visit and the work it caused were two facts with nothing joining them: "what did

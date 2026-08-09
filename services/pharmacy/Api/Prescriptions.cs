@@ -513,6 +513,12 @@ public static class PrescriptionEndpoints
                     tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, rx.RxNo,
                     beneficiaryId = rx.BeneficiaryId, encounterId = rx.EncounterId,
                     requiresApproval = route.RequiresApproval, orderedByUserId = rx.CreatedBy,
+                    // WHAT IS BEING ASKED FOR, added when this event became the routing feed's input
+                    // (ApprovalRoutingFeed). Drug ids, because that is already this domain's vocabulary for an
+                    // approved scope — `AuthorizationScope.Assess` compares `line.DrugId.ToString()` against
+                    // the approved codes on every amendment, and a second vocabulary here would mean a partial
+                    // approval and an out-of-scope check disagreeing about what was approved.
+                    serviceCodes = rx.Lines.Select(l => l.DrugId.ToString()).Distinct(StringComparer.Ordinal).ToArray(),
                 }, ct);
             if (rx.Status == RxStatus.Approved)
                 await outbox.EnqueueAsync("RxApproved", "pharmacy.events", new { tenantId = rx.TenantId, prescriptionId = rx.PrescriptionId, rx.RxNo, auto = true }, ct);

@@ -17,6 +17,8 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
     public DbSet<ReportAccessGrant> ReportAccessGrants => Set<ReportAccessGrant>();          // 14.7
     public DbSet<LineAmendmentRecord> LineAmendments => Set<LineAmendmentRecord>();          // 30.1
     public DbSet<OrderNote> OrderNotes => Set<OrderNote>();                                  // 30.5b
+    /// <summary>The approval-decision consumer's dedupe ledger — event ids only, no tenant data (0017).</summary>
+    public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
 
     /// <summary>
     /// 29.2 — a line's <c>RequestedQuantity</c> defaults to what was ordered.
@@ -194,7 +196,22 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options) :
             // active-grant lookup: one row per (grantee, line) while not revoked (partial index in SQL).
             e.HasIndex(x => new { x.GranteeUserId, x.OrderLineId });
         });
+
+        b.Entity<ProcessedEvent>(e =>
+        {
+            e.ToTable("processed_event");
+            e.HasKey(x => x.EventId);
+        });
     }
+}
+
+/// <summary>Transport-level dedupe row — a redelivered broker message is a no-op. No tenant data, so no RLS:
+/// it holds event ids and a timestamp. Distinct from <see cref="ProcessedRequest"/>, which dedupes inbound
+/// HTTP requests by Idempotency-Key.</summary>
+public sealed class ProcessedEvent
+{
+    public Guid EventId { get; set; }
+    public DateTimeOffset ProcessedAt { get; set; }
 }
 
 /// <summary>Idempotency ledger row — a replayed Idempotency-Key returns the prior result (no second order).</summary>

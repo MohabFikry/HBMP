@@ -21,9 +21,8 @@ transitions are an RFC7807 **409**. The aggregate `Status` is the projection of 
 
 `POST /api/v1/authorizations` (scope `auth:ingest`, `Idempotency-Key` required) creates a **Submitted**
 authorization from a routed order-line / prescription (`source` = `OrderLine|Prescription|Manual`). This is the
-system-to-system seam that the phase-4 routing saga / the `OrderPendingApproval`|`RxSubmitted` event consumer
-targets; no clinical payload crosses it. Emits `AuthSubmitted` via the outbox. A non-manual request must name the
-requesting provider (**422** otherwise; DB `CHECK` backstop).
+system-to-system seam for an authorization raised from outside; no clinical payload crosses it. Emits
+`AuthSubmitted` via the outbox. A non-manual request must name the requesting provider (**422** otherwise).
 
 The seam carries two things the authorization cannot work out for itself. `orderedByUserId` is **who** is
 waiting, so a decision notice has a human to reach (§11.3). `encounterId` is **which visit** it came out of
@@ -34,9 +33,27 @@ raised by a reviewer with no encounter in hand, and a guessed one would put this
 another member's timeline. The decision events carry `encounterId` and `tenantId` outward for the same reason —
 emr's consumer binds its RLS session from that envelope and refuses a message it cannot attribute.
 
-**Note:** nothing populates `encounterId` automatically yet. The routing saga this endpoint is built for — a
-consumer of `OrderPendingApproval`/`RxSubmitted` — does not exist in the platform; until it does, the *order*
-records that it went for approval and the decision does not come back to the episode.
+### The routing consumer (ADR-0041)
+
+`RoutingConsumer` binds **`approvals.routing-events`**, approvals' own mirror of `OrderPendingApproval` and
+`RxSubmitted` (`ApprovalRoutingFeed`), and raises the authorization through `RoutedAuthorizationIngestor` —
+the same row this endpoint creates, in the same states, in the same `processed_request` ledger.
+
+This is the caller the seam was written for and did not have. Until 2026-08-09 `auth:ingest` was held by
+nobody: a gated order changed status, told the patient to wait, and reached no reviewer. Two differences from
+the endpoint, both deliberate:
+
+- **`RxSubmitted` is filtered on `requiresApproval`.** pharmacy emits it for every prescription; only the
+  gated ones become authorizations, or a queue whose value is that everything in it needs a decision fills
+  with a few hundred a day that do not.
+- **A routed request may name no provider.** A doctor's token is practitioner-scoped and carries no
+  `provider_id`, so a prescription has none to give. The DB `CHECK` (migration 0010) now requires a
+  requesting provider **or** a `created_by` — attribution, which is what the rule was always reaching for.
+  The endpoint's own 422 is unchanged, because there a missing provider means "this system cannot say who is
+  asking".
+
+Idempotency is keyed on the **event id**, never on `(source, sourceRef)`: an out-of-scope amendment
+re-publishes the same event for the same order (design 46 §5) and that second request is a real one.
 
 ## Worklist (US-060) — MIN-NECESSARY, no clinical payload
 

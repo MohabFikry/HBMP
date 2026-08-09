@@ -155,6 +155,12 @@ public static class AmendmentEndpoints
                             reasonCode = record.ReasonCode, reasonText = record.ReasonText,
                             orderedByUserId = record.AmendedBy.ToString(),
                             amendedAt = record.AmendedAt,
+                            // The routing feed's two required facts, same as the create path. `serviceCodes`
+                            // is the amended LINE's code and only it: this re-review is about the line that
+                            // left the approved scope, and offering the reviewer the whole order's codes
+                            // would invite a partial approval that silently re-scopes lines nobody amended.
+                            providerId = o.OrderingProviderId == Guid.Empty ? (Guid?)null : o.OrderingProviderId,
+                            serviceCodes = new[] { line.Code },
                         }, innerCt);
                     }
                 }, ct);

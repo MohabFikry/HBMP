@@ -161,6 +161,8 @@ Postgres and broker, not just compiled. `--with-db` throughout, so the DB-gated 
 
 | # | Finding | Status | Evidence |
 |---|---|---|---|
+| C1 | a routed order/prescription reached no reviewer (`auth:ingest` had zero callers) | **Fixed** | `ApprovalRoutingFeed` mirrors `OrderPendingApproval`/`RxSubmitted` to `approvals.routing-events`; `RoutingConsumer` + `RoutedAuthorizationIngestor` raise the same Submitted authorization the endpoint does; 12 tests (ADR-0041) |
+| C2 | nothing consumed `approvals.events`, so an approved order/Rx was never released | **Fixed** | `ApprovalDecisionFeed` mirrors every settling decision to `orders.approval-decisions` and `pharmacy.approval-decisions`; new consumers apply `PendingApproval→Approved→Active` and `Submitted→Approved`, cancel out-of-scope lines on a partial, and make rejection terminal; 16 tests |
 | C5 | document-service never relayed its outbox | **Fixed** | `AddHbmpOutboxRelay()` added; `OutboxRelayRegistrationTests` now asserts the outbox⇒relay pair across all 20 staging services |
 | C7 | audit spine self-audited into an in-memory buffer | **Fixed** | Publishes via `DirectAuditSink` onto `audit.events`, ingested through the same single write path; 22 audit tests green |
 | C3 | terminated members stayed Eligible | **Fixed** | `CoverageChanged` now published on terminate/reinstate; consumer honours explicit-null-clears; 483 policy + 66 eligibility tests green |
@@ -175,10 +177,32 @@ Gates re-run clean after the changes: OpenAPI drift (22 specs), migration-compat
 `libs/auth` token byte-compat (62). The two contract changes (removed `stepUpSatisfied` and
 `secondApproverSubject`) are reflected in `docs/api/` — the drift gate caught both, which is what it is for.
 
-**Not yet started:** C1+C2 (the approval saga — the largest remaining item), and Highs #9–#12 plus Mediums
-#13–#14 in the plan below. The saga is deliberately not half-built: it needs a routing queue, consumers in
-orders and pharmacy, and a rejection-compensation path, and a partially wired state machine on the
-gated-benefit path would be worse than the current honest gap.
+### What closing the saga turned up (C1+C2, ADR-0041)
+
+Wiring it surfaced three things that only a real caller could have found, because each path had never had
+one. All are recorded in the ADR rather than quietly worked around:
+
+1. **The `authorization_check` constraint did not hold for the sources it names.** Phase 7 required a
+   `requesting_provider_id` on every non-manual authorization, and the two sources it was written for — a
+   gated order and a gated prescription — never created a row, so the rule was never exercised against them.
+   A doctor's token is practitioner-scoped and carries no provider, so a prescription has none to give.
+   Migration `approvals/0010` restates it as **attributable**: a provider that raised it, or a person who
+   did. A widening; the endpoint's own 422 is unchanged.
+2. **`ProcedureSessions.ApplyApproval` cannot run.** Its summary says it is "applied when an approval
+   decision is recorded"; it narrows `QuantityOrdered`, which orders 0013's signed-content trigger freezes
+   against in-place update. It has only ever been called on detached objects in its own tests. The decision
+   contract carries **codes and no quantities**, so a partial approval is applied at the code level and the
+   refused lines are cancelled — which is what the contract can actually express.
+3. **`amendment_reason` had no code for "the reviewer did not authorise this".** Every entry was written for
+   a clinician amending their own work. `NotEligible` would have been a false sentence on a row read back in
+   a dispute, so orders 0017 / pharmacy 0019 add `not-in-approved-scope`.
+
+Also worth flagging, found while running the gates: **`check-migration-compat.py` is red on `main`** with 20
+unacknowledged contract-phase operations, and is `continue-on-error: true` in `backend-ci.yml`, so it has
+never blocked anything. This change added one drop-and-widen and acknowledged it inline (21 → 20), but the
+standing 20 are a gate that reports and is not read.
+
+**Not yet started:** Highs #9–#12 and Mediums #13–#14 in the plan below.
 
 ## 6. Proposed remediation plan
 

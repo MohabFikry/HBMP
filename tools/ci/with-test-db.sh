@@ -56,6 +56,28 @@ if ! timeout 10 bash -c "</dev/tcp/$PGHOST/$PGPORT" 2>/dev/null; then
   exit 1
 fi
 
+# ---------------------------------------------------------------------------------------------------------
+# THE BROKER, for the same reason as the database.
+#
+# The prior-authorization saga's mirrors are only provable against a real RabbitMQ: the publish goes to the
+# DEFAULT exchange with the destination as the routing key, so a queue that is never declared discards its
+# messages in silence, and no stub of IModel can tell you that. libs/events' SagaMirrorAgainstBrokerTests
+# gate on HBMP_TEST_RABBIT_URI exactly as the DB suites gate on their connection strings.
+#
+# Unlike Postgres this is a WARNING, not a failure. Postgres gates ~100 tests across every service, so a run
+# without it is meaningless; the broker gates four, and refusing to run the other 3,000 because a container
+# is down would be a worse trade. The warning names what will not run, because a skip is otherwise silent —
+# and CI sets this variable itself, where a skip fails check-skipped-tests.py.
+: "${RABBIT_HOST:=localhost}"
+: "${RABBIT_PORT:=5672}"
+if timeout 5 bash -c "</dev/tcp/$RABBIT_HOST/$RABBIT_PORT" 2>/dev/null; then
+  export HBMP_TEST_RABBIT_URI="amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@${RABBIT_HOST}:${RABBIT_PORT}"
+else
+  echo "with-test-db: nothing is listening on $RABBIT_HOST:$RABBIT_PORT — the broker mirror proofs" >&2
+  echo "              (SagaMirrorAgainstBrokerTests) will SKIP. Start it with:" >&2
+  echo "              docker compose -f infra/compose/compose.yaml up -d rabbitmq" >&2
+fi
+
 # The single source of truth for WHICH variables exist. Values hold passwords, so this is read line by line
 # into the environment and never echoed.
 while IFS='=' read -r key value; do

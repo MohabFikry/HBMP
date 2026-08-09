@@ -142,8 +142,13 @@ public static class RxAmendmentEndpoints
                             previousQuantity = line.QuantityPrescribed,
                             amendedQuantity = req.QuantityPrescribed,
                             // The care timeline maps RxSubmitted to a step ONLY when this flag is set, which
-                            // is exactly right here: the script really has gone back for approval.
+                            // is exactly right here: the script really has gone back for approval. The
+                            // routing feed reads the same flag to decide whether to raise an authorization.
                             requiresApproval = true,
+                            // The amended LINE's drug and only it — the re-review is about what left the
+                            // approved scope, and offering the whole script would invite a partial approval
+                            // that silently re-scopes drugs nobody amended.
+                            serviceCodes = new[] { line.DrugId.ToString() },
                             reason = "amended-beyond-approved-scope",
                             reasonCode = record.ReasonCode,
                             orderedByUserId = record.AmendedBy.ToString(),
@@ -216,6 +221,8 @@ public static class RxAmendmentEndpoints
                             previousDurationDays = line.DurationDays,
                             amendedDurationDays = req.DurationDays,
                             requiresApproval = true,
+                            // See the quantity twin above: the amended line's drug, and only it.
+                            serviceCodes = new[] { line.DrugId.ToString() },
                             reason = "amended-beyond-approved-scope",
                             reasonCode = record.ReasonCode,
                             orderedByUserId = record.AmendedBy.ToString(),

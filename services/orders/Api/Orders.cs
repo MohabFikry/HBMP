@@ -226,6 +226,14 @@ public static class OrdersEndpoints
                         tenantId = order.TenantId, orderId = order.OrderId, order.OrderNo, reason = route.Reason,
                         beneficiaryId = order.BeneficiaryId, encounterId = order.EncounterId,
                         orderedByUserId = order.CreatedBy,
+                        // WHO IS ASKING and WHAT FOR — the two facts an authorization cannot be created
+                        // without, added when this event became the routing feed's input
+                        // (ApprovalRoutingFeed). `serviceCodes` is not decoration: a partial approval must be
+                        // a strict subset of the requested codes, so an authorization ingested without them
+                        // can be approved or rejected outright and never narrowed, which is the decision the
+                        // approval team most often wants to make.
+                        providerId = order.OrderingProviderId == Guid.Empty ? (Guid?)null : order.OrderingProviderId,
+                        serviceCodes = order.Lines.Select(l => l.Code).Distinct(StringComparer.Ordinal).ToArray(),
                     }, ct);
             else
                 await outbox.EnqueueAsync("OrderActivated", "orders.events",

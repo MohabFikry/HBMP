@@ -20,6 +20,8 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
     public DbSet<PrescriptionDispenseWindow> DispenseWindows => Set<PrescriptionDispenseWindow>();   // 29.5
     public DbSet<LineAmendmentRecord> LineAmendments => Set<LineAmendmentRecord>();                  // 30.1
     public DbSet<RefillFrequency> RefillFrequencies => Set<RefillFrequency>();                       // 29.5
+    /// <summary>The approval-decision consumer's dedupe ledger — event ids only, no tenant data (0019).</summary>
+    public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
 
     /// <summary>
     /// 30.1 — a new line is version 1 of its own chain unless it was created BY an amendment, which sets the
@@ -197,7 +199,22 @@ public sealed class PharmacyDbContext(DbContextOptions<PharmacyDbContext> option
             e.ToTable("processed_request");
             e.HasKey(x => x.IdempotencyKey);
         });
+
+        b.Entity<ProcessedEvent>(e =>
+        {
+            e.ToTable("processed_event");
+            e.HasKey(x => x.EventId);
+        });
     }
+}
+
+/// <summary>Transport-level dedupe row — a redelivered broker message is a no-op. No tenant data, so no RLS:
+/// it holds event ids and a timestamp. Distinct from <see cref="ProcessedRequest"/>, which dedupes inbound
+/// HTTP requests by Idempotency-Key.</summary>
+public sealed class ProcessedEvent
+{
+    public Guid EventId { get; set; }
+    public DateTimeOffset ProcessedAt { get; set; }
 }
 
 /// <summary>Recorded advisory alert surfaced at prescribe time + whether the prescriber acknowledged an override.</summary>
