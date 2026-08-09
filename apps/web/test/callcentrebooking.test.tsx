@@ -41,11 +41,11 @@ function fakeApi(over: Partial<CcApi> = {}): CcApi {
       { providerId: "p2", locationId: "l2", branchId: "br-nasr", branchName: "Nasr City", label: "Mersal Nasr · Nasr Clinic", openSlots: 5 },
     ]),
     slots: vi.fn().mockResolvedValue([{ slotId: "slot-7", start: "2026-07-30T09:40:00Z" }]),
-    book: vi.fn().mockResolvedValue("ok"),
-    reschedule: vi.fn().mockResolvedValue("ok"),
-    cancel: vi.fn().mockResolvedValue("ok"),
+    book: vi.fn().mockResolvedValue({ kind: "ok" }),
+    reschedule: vi.fn().mockResolvedValue({ kind: "ok" }),
+    cancel: vi.fn().mockResolvedValue({ kind: "ok" }),
     // A RESULT, not void: the screen now clears only on a confirmed close.
-    close: vi.fn().mockResolvedValue("ok"),
+    close: vi.fn().mockResolvedValue({ kind: "ok" }),
     history: vi.fn().mockResolvedValue([]),
     ...over,
   };
@@ -206,7 +206,7 @@ describe("standalone Book appointment (call centre)", () => {
 
   it("keeps the agent on the screen when a slot is taken (409), and re-reads the times", async () => {
     const user = userEvent.setup();
-    const api = fakeApi({ book: vi.fn().mockResolvedValue("conflict") });
+    const api = fakeApi({ book: vi.fn().mockResolvedValue({ kind: "conflict" }) });
     renderNode(<CallCentreBooking api={api} />);
     await findAndOpenMember(user);
     await choose(user, /^branch$/i, /Dokki/);

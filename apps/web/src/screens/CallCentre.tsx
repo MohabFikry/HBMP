@@ -92,11 +92,11 @@ export interface CcApi {
     slotId: string,
     branchId?: string | null,
     extra?: { doctorId?: string | null; note?: string },
-  ): Promise<"ok" | "conflict" | "error">;
+  ): Promise<CcOutcome<CcBookResult>>;
   /** `rowVersion` rides along as If-Match: a reschedule computed against times the agent loaded before someone
    *  else moved the appointment must be refused (412 → "stale"), not applied. */
-  reschedule(interactionId: string, appointmentId: string, newSlotId: string, rowVersion?: number): Promise<CcWriteResult>;
-  cancel(interactionId: string, appointmentId: string, reasonCode: string, rowVersion?: number): Promise<CcWriteResult>;
+  reschedule(interactionId: string, appointmentId: string, newSlotId: string, rowVersion?: number): Promise<CcOutcome<CcWriteResult>>;
+  cancel(interactionId: string, appointmentId: string, reasonCode: string, rowVersion?: number): Promise<CcOutcome<CcWriteResult>>;
   /**
    * Wrap up the call. `summary` is REQUIRED by the server for every outcome but `Abandoned` (phase 20.3b) — it
    * is what other roles read later through the patient profile. The result is RETURNED rather than swallowed:
@@ -106,7 +106,7 @@ export interface CcApi {
    * There is no `notes` argument. It carried a second body of text kept apart from the summary; the call centre
    * now writes one account of the call, which is this one.
    */
-  close(interactionId: string, outcome: string, summary: string, reasonCode?: string): Promise<CcCloseResult>;
+  close(interactionId: string, outcome: string, summary: string, reasonCode?: string): Promise<CcOutcome<CcCloseResult>>;
   history(): Promise<CcCallRow[]>;
 }
 
@@ -118,6 +118,30 @@ export type CcWriteResult = "ok" | "conflict" | "stale" | "error";
 
 /** Wrap-up outcome. `summary-required` is the server's 422 and is a correctable mistake, not a failure. */
 export type CcCloseResult = "ok" | "summary-required" | "not-your-call" | "error";
+
+/** The verdict a booking POST can reach. */
+export type CcBookResult = "ok" | "conflict" | "error";
+
+/**
+ * A write's verdict, plus what the server said when the verdict is the generic `"error"`.
+ *
+ * ============================================================================================================
+ * WHY THE WORD ALONE WAS NOT ENOUGH
+ * ============================================================================================================
+ * Each method used to return a bare word from a union, so every failure the screen has no specific sentence
+ * for collapsed into "Couldn't book that time." The agent is on the phone with the person it concerns, and
+ * the server frequently knows the actual reason — the member's coverage lapsed, the clinic is closed that
+ * day, the referral required for this specialty has expired. All of it was read off the wire and dropped.
+ *
+ * `detail` is populated ONLY for `"error"`. The named verdicts — 409 slot-taken, 412 stale, 422
+ * summary-required, 403 not-your-call — already have sentences written for the conversation the agent is
+ * having, and replacing those with a service's own phrasing would be a downgrade, not an improvement.
+ */
+export interface CcOutcome<K extends string> {
+  kind: K;
+  /** The service's RFC-7807 `detail` (or `title`), when the failure carried one. `"error"` only. */
+  detail?: string;
+}
 
 /** The call reasons the service accepts (mirrors `CallReasonCode`). Exported: the booking journey offers the
  *  same list in its call-record step, and two copies would drift the moment one gained a value. */
@@ -152,11 +176,9 @@ const OUTCOMES = ["Resolved", "FollowUpRequired", "Transferred", "Abandoned", "N
  * that from a server refusal. That is precisely the RETRY / RELOAD / STOP distinction the phase-18 D1 rule
  * exists for, and it is the one class this helper could never express.
  *
- * NOT fixed here, and worth naming rather than half-doing: a 5xx carrying an RFC-7807 body still renders as a
- * generic "error". Every caller returns a fixed word from a union (`"ok" | "conflict" | "error"`), so there is
- * nowhere for the server's `detail` to go without widening all of them to carry a message. That is a real
- * improvement and a separate change; smuggling an unread `problem` field through this helper would only make
- * it look done.
+ * Fixed alongside it: a failure carrying an RFC-7807 body no longer renders as a bare "error". The verdicts
+ * are {@link CcOutcome} rather than bare words, so the server's `detail` reaches the agent — see that type
+ * for why only the GENERIC failure carries it.
  *
  * NOT changed: the absent `X-Active-Branch` header. The call centre is deliberately cross-branch and states
  * the branch in the body where it matters (see `zBookingRequest.branchId`); adding the header here would
@@ -186,6 +208,28 @@ async function req<T>(
   }
   const data = resp.status === 204 ? null : ((await resp.json().catch(() => null)) as T | null);
   return { status: resp.status, data };
+}
+
+/**
+ * The generic failure sentence with the service's own reason appended, when it gave one.
+ *
+ * Parenthesised and untranslated, exactly as `writeError.withDetail` does it: the service's `detail` is one
+ * string in one language, and the alternative to showing it in a sentence of the other is not showing it at
+ * all. An agent on the phone being told "the referral for this specialty expired on 12 July" in English
+ * inside an Arabic sentence is strictly better than being told "Couldn't book that time."
+ */
+export function withReason(base: string, o: { detail?: string }): string {
+  return o.detail ? `${base} (${o.detail})` : base;
+}
+
+/**
+ * Build a verdict. The server's own `detail` is attached only to the generic `"error"` — see {@link CcOutcome}.
+ */
+function verdict<K extends string>(kind: K, body?: unknown): CcOutcome<K> {
+  if (kind !== "error") return { kind };
+  const b = body && typeof body === "object" ? (body as Record<string, unknown>) : undefined;
+  const str = (v: unknown) => (typeof v === "string" && v.length > 0 ? v : undefined);
+  return { kind, detail: str(b?.detail) ?? str(b?.title) };
 }
 
 /**
@@ -258,22 +302,22 @@ export function createHttpCcApi(): CcApi {
         ...(extra?.doctorId ? { doctorId: extra.doctorId } : {}),
         ...(extra?.note ? { note: extra.note } : {}),
       }, bookingKey(interactionId, beneficiaryId, slotId));
-      if (r.status === 409) return "conflict";
-      return r.status >= 200 && r.status < 300 ? "ok" : "error";
+      if (r.status === 409) return verdict("conflict");
+      return verdict(r.status >= 200 && r.status < 300 ? "ok" : "error", r.data);
     },
     async reschedule(interactionId, appointmentId, newSlotId, rowVersion) {
       const r = await req("POST", `/call-centre/appointments/${appointmentId}/reschedule`, { interactionId, newSlotId },
         bookingKey(interactionId, appointmentId, newSlotId), rowVersion);
-      if (r.status === 409) return "conflict";
-      if (r.status === 412) return "stale";
-      return r.status >= 200 && r.status < 300 ? "ok" : "error";
+      if (r.status === 409) return verdict("conflict");
+      if (r.status === 412) return verdict("stale");
+      return verdict(r.status >= 200 && r.status < 300 ? "ok" : "error", r.data);
     },
     async cancel(interactionId, appointmentId, reasonCode, rowVersion) {
       const r = await req("POST", `/call-centre/appointments/${appointmentId}/cancel`, { interactionId, reasonCode },
         `cc-cancel:${interactionId}:${appointmentId}`, rowVersion);
-      if (r.status === 409) return "conflict";
-      if (r.status === 412) return "stale";
-      return r.status >= 200 && r.status < 300 ? "ok" : "error";
+      if (r.status === 409) return verdict("conflict");
+      if (r.status === 412) return verdict("stale");
+      return verdict(r.status >= 200 && r.status < 300 ? "ok" : "error", r.data);
     },
     async close(interactionId, outcome, summary, reasonCode) {
       const r = await req<{ title?: string }>("POST", `/call-interactions/${interactionId}/close`,
@@ -284,10 +328,10 @@ export function createHttpCcApi(): CcApi {
         // `reasonCode` rides along so a reason corrected mid-call lands on the record. The direction cannot:
         // it is fixed when the interaction opens, which is why its control locks rather than pretending.
         { outcome, summary, ...(reasonCode ? { reasonCode } : {}) });
-      if (r.status >= 200 && r.status < 300) return "ok";
-      if (r.status === 422 && r.data?.title === "summary-required") return "summary-required";
-      if (r.status === 403) return "not-your-call";
-      return "error";
+      if (r.status >= 200 && r.status < 300) return verdict("ok");
+      if (r.status === 422 && r.data?.title === "summary-required") return verdict("summary-required");
+      if (r.status === 403) return verdict("not-your-call");
+      return verdict("error", r.data);
     },
     async history() {
       const r = await req<{ items: CcCallRow[] }>("GET", "/call-interactions");
@@ -433,11 +477,15 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
       doctorId: sel.doctorId,
       note: sel.note || undefined,
     });
-    setAnnounce(outcome === "ok" ? t(L.ccBooked) : outcome === "conflict" ? t(L.ccSlotTaken) : t(L.ccBookFailed));
+    setAnnounce(
+      outcome.kind === "ok" ? t(L.ccBooked)
+      : outcome.kind === "conflict" ? t(L.ccSlotTaken)
+      : withReason(t(L.ccBookFailed), outcome),
+    );
     // A 409 invalidates the times exactly as a success does: one consumed the slot, the other proves someone
     // else did. Only a transport error leaves the loaded times still true. The agent's branch, specialty and
     // doctor survive either way — re-entering the caller's request mid-call is a cost they should not pay.
-    if (outcome !== "error") setReloadToken((k) => k + 1);
+    if (outcome.kind !== "error") setReloadToken((k) => k + 1);
   }, [api, interactionId, openedFor, sel, t]);
 
   /**
@@ -451,7 +499,7 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
   const closeCall = useCallback(async () => {
     if (!interactionId) return;
     const result = await api.close(interactionId, outcome, wrapSummary.trim(), reason);
-    if (result === "ok") {
+    if (result.kind === "ok") {
       setSummaryError(false);
       setInteractionId(null);
       setResults(null); setOpenedFor(null); setSummary(null);
@@ -461,11 +509,11 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
       return;
     }
     // Everything below leaves the call OPEN, which is the truth — so the call bar stays as it is.
-    setSummaryError(result === "summary-required");
+    setSummaryError(result.kind === "summary-required");
     setAnnounce(
-      result === "summary-required" ? t(L.ccSummaryRequired)
-      : result === "not-your-call" ? t(L.ccNotYourCall)
-      : t(L.ccCloseFailed),
+      result.kind === "summary-required" ? t(L.ccSummaryRequired)
+      : result.kind === "not-your-call" ? t(L.ccNotYourCall)
+      : withReason(t(L.ccCloseFailed), result),
     );
   }, [api, interactionId, outcome, wrapSummary, reason, setInteractionId, setOpenedFor, setQuery, setWrapSummary, t]);
 
@@ -491,14 +539,14 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
     setCancelError(false);
     const r = await api.cancel(interactionId, appointmentId, cancelReason, rowVersionOf(appointmentId));
     setAnnounce(
-      r === "ok" ? t(L.ccCancelled)
-      : r === "stale" ? t(L.ccApptStale)
-      : t(L.ccBookFailed),
+      r.kind === "ok" ? t(L.ccCancelled)
+      : r.kind === "stale" ? t(L.ccApptStale)
+      : withReason(t(L.ccBookFailed), r),
     );
     setCancelFor(null);
     // A stale refusal means the file on screen is out of date — re-read it rather than leaving the agent
     // acting on times that have already moved.
-    if (r === "stale") setReloadToken((k) => k + 1);
+    if (r.kind === "stale") setReloadToken((k) => k + 1);
   }, [api, interactionId, cancelReason, rowVersionOf, t]);
 
   const reschedule = useCallback(async (appointmentId: string) => {
@@ -507,12 +555,12 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
     if (!interactionId || !sel.slotId) { setShowReserve(true); setAnnounce(t(L.ccPickTime)); return; }
     const outcome = await api.reschedule(interactionId, appointmentId, sel.slotId, rowVersionOf(appointmentId));
     setAnnounce(
-      outcome === "ok" ? t(L.ccRescheduled)
-      : outcome === "conflict" ? t(L.ccSlotTaken)
-      : outcome === "stale" ? t(L.ccApptStale)
-      : t(L.ccBookFailed),
+      outcome.kind === "ok" ? t(L.ccRescheduled)
+      : outcome.kind === "conflict" ? t(L.ccSlotTaken)
+      : outcome.kind === "stale" ? t(L.ccApptStale)
+      : withReason(t(L.ccBookFailed), outcome),
     );
-    if (outcome !== "error") setReloadToken((k) => k + 1);
+    if (outcome.kind !== "error") setReloadToken((k) => k + 1);
   }, [api, interactionId, sel.slotId, rowVersionOf, t]);
 
   return (

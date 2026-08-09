@@ -1081,13 +1081,17 @@ function DiagnosisPicker({
       return;
     }
     setSearching(true);
+    const controller = new AbortController();
     const timer = setTimeout(() => {
-      api.searchIcd(q).then(
+      // The signal, not just the `live` flag. `live` stops a superseded answer from being RENDERED; the
+      // signal stops it from being FETCHED. On a 250ms debounce a considered search leaves several requests
+      // running against the catalogue that nobody will ever look at.
+      api.searchIcd(q, controller.signal).then(
         (rows) => { if (live) { setResults(rows); setSearching(false); } },
         () => { if (live) { setResults([]); setSearching(false); } },
       );
     }, 250);
-    return () => { live = false; clearTimeout(timer); };
+    return () => { live = false; clearTimeout(timer); controller.abort(); };
   }, [api, open, query]);
 
   const stagedPrimary = staged.some((r) => r.rank === "Primary");

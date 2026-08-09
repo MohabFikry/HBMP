@@ -549,8 +549,8 @@ export class HttpApiClient implements ApiClient {
   // `/reception/search`; there is deliberately no full-demographic "get by id" for reception (Reception≠EMR).
   // We adapt the card into the search-hit + result-card contract, caching the card so the check step needs no
   // second call (and never fabricates DOB/gender the card intentionally omits).
-  async searchEligibility(query: string) {
-    const r = (await getRaw(`/reception/search?q=${encodeURIComponent(query)}`)) as any;
+  async searchEligibility(query: string, signal?: AbortSignal) {
+    const r = (await getRaw(`/reception/search?q=${encodeURIComponent(query)}`, signal)) as any;
     const cards: any[] = r?.results ?? [];
     receptionCards.clear();
     for (const c of cards) receptionCards.set(String(c.identity?.beneficiaryId), c);
@@ -1124,12 +1124,12 @@ export class HttpApiClient implements ApiClient {
       `/encounters/${encodeURIComponent(encounterId)}/diagnoses/${encodeURIComponent(diagnosisId)}`,
     );
   }
-  async searchIcd(query: string) {
+  async searchIcd(query: string, signal?: AbortSignal) {
     const q = query.trim();
     // An empty query means "show me nothing yet", not "show me the ICD-10 catalogue". masterdata would
     // happily return the first page of tens of thousands of codes, which is a list nobody picks from.
     if (q.length < 2) return [];
-    const r = (await getRaw(`/search?domain=icd&q=${encodeURIComponent(q)}`)) as any[];
+    const r = (await getRaw(`/search?domain=icd&q=${encodeURIComponent(q)}`, signal)) as any[];
     return (Array.isArray(r) ? r : []).map((x: any) =>
       parseOr(zIcdRef, { code: String(x?.code ?? ""), title: String(x?.title ?? "") }),
     );
@@ -1216,7 +1216,7 @@ export class HttpApiClient implements ApiClient {
    * not the stored `category` — which is the CPT taxonomy and would put a chest x-ray and a blood count in
    * the same bucket.
    */
-  async searchCpt(query: string, sections: readonly CptSection[]) {
+  async searchCpt(query: string, sections: readonly CptSection[], signal?: AbortSignal) {
     const q = query.trim();
     if (q.length < 2) return [];
     // A comma-separated list, because the Labs tab is two sections. The ORDER of the 20 rows is decided
@@ -1224,6 +1224,7 @@ export class HttpApiClient implements ApiClient {
     // here would throw that away, since a page of 20 is already the top 20 of a much longer ranked list.
     const r = (await getRaw(
       `/cpt-codes?section=${encodeURIComponent(sections.join(","))}&q=${encodeURIComponent(q)}&pageSize=20`,
+      signal,
     )) as any;
     return ((r?.items ?? []) as any[]).map((c: any) =>
       parseOr(zCptRef, { code: String(c.code ?? ""), description: String(c.description ?? "") }),
@@ -1994,8 +1995,8 @@ export class HttpApiClient implements ApiClient {
   // Formulary substitutions (Phase 6.3, US-052) — master data is reference-only (auth, no scope). Search drugs
   // by name, then list a drug's policy-approved alternatives (same ATC-5 substance). Bilingual name from AR
   // where master data has it, else the EN name echoed (no machine translation).
-  async searchDrugs(query: string) {
-    const r = (await getRaw(`/drugs?q=${encodeURIComponent(query)}&pageSize=20`)) as any;
+  async searchDrugs(query: string, signal?: AbortSignal) {
+    const r = (await getRaw(`/drugs?q=${encodeURIComponent(query)}&pageSize=20`, signal)) as any;
     return ((r?.items ?? []) as any[]).map((d: any) =>
       parseOr(zDrugRef, {
         drugId: d.drugId,
@@ -2012,8 +2013,8 @@ export class HttpApiClient implements ApiClient {
   // One field over trade name AND active ingredient: a prescriber searches by whichever name they know.
   // The uuid is carried from here all the way to submission — `prescribe()` above sent `req.drug.code`,
   // the ATC STRING, where the API expects a Guid, so that path could never work against real data.
-  async searchPrescribableDrugs(query: string) {
-    const r = (await getRaw(`/drugs/search?q=${encodeURIComponent(query)}&pageSize=20`)) as any;
+  async searchPrescribableDrugs(query: string, signal?: AbortSignal) {
+    const r = (await getRaw(`/drugs/search?q=${encodeURIComponent(query)}&pageSize=20`, signal)) as any;
     return ((r?.items ?? []) as any[]).map((d: any) =>
       parseOr(zPrescribableDrug, {
         drugId: d.drugId,

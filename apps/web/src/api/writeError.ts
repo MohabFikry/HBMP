@@ -90,6 +90,13 @@ const M = {
     en: "Something went wrong. Reload the page to see the current state before trying again.",
     ar: "حدث خطأ ما. أعد تحميل الصفحة لعرض الحالة الحالية قبل المحاولة مجددًا.",
   },
+  cancelled: {
+    // Reaching this means a WRITE was cancelled, which nothing in the app currently does — `useWrite` passes
+    // no signal. It is written honestly rather than optimistically all the same: the request may well have
+    // arrived and been applied before we stopped listening, so "nothing was saved" would be a guess.
+    en: "That was cancelled before it finished. It may or may not have been saved — reload to check.",
+    ar: "تم إلغاء العملية قبل اكتمالها. قد يكون الحفظ قد تم أو لا — أعد التحميل للتحقق.",
+  },
 } satisfies Record<string, Localized>;
 
 /** Append the service's own `detail` — it is the only part that knows WHICH field or WHICH rule failed. */
@@ -119,6 +126,9 @@ function classify(e: unknown): WriteError {
   }
   if (e.kind === "schema") {
     return { message: M.schema, action: "stop", possiblyApplied: true };
+  }
+  if (e.kind === "aborted") {
+    return { message: M.cancelled, action: "reload", possiblyApplied: true };
   }
 
   const detail = e.problem?.detail ?? e.problem?.title;

@@ -133,7 +133,7 @@ export function CallCentreCancelButton({
       // flow would send a second cancel for an appointment that is already gone.
       if (!cancelled.current) {
         const outcome = await api.cancel(interaction.current, row.id, reason);
-        if (outcome !== "ok") { setError(S.failed); return; }
+        if (outcome.kind !== "ok") { setError(S.failed); return; }
         cancelled.current = true;
       }
 
@@ -141,7 +141,7 @@ export function CallCentreCancelButton({
       // `.catch(() => {})`, so every cancellation taken here left its interaction Open on the server — and an
       // open interaction is still bound to that member, still disclosing.
       const closed = await api.close(interaction.current, "Resolved", summaryFor(reason));
-      if (closed !== "ok") { setError(S.closeFailed); return; }
+      if (closed.kind !== "ok") { setError(S.closeFailed); return; }
 
       interaction.current = null;
       cancelled.current = false;

@@ -175,7 +175,7 @@ export interface ApiClient {
    */
   branchLabels(branchIds: readonly string[]): Promise<Map<string, string>>;
   // Reception — eligibility (Phase 2)
-  searchEligibility(query: string): Promise<EligibilityHit[]>;
+  searchEligibility(query: string, signal?: AbortSignal): Promise<EligibilityHit[]>;
   checkEligibility(beneficiaryId: string): Promise<EligibilityResult>;
 
   // Reception — day board (Phase 3). `filter` scopes the board: all / booked (arrivals to process) /
@@ -300,7 +300,7 @@ export interface ApiClient {
   /** Retract one — soft-deleted, and refused once the encounter's note is signed (409). */
   removeEncounterDiagnosis(encounterId: string, diagnosisId: string): Promise<void>;
   /** ICD-10 typeahead over master data. Empty query → no rows, never the whole catalogue. */
-  searchIcd(query: string): Promise<IcdRef[]>;
+  searchIcd(query: string, signal?: AbortSignal): Promise<IcdRef[]>;
   placeOrder(req: PlaceOrderRequest): Promise<PlaceOrderResult>;
   prescribe(req: PrescribeRequest): Promise<PrescribeResult>;
   /** The clinician's own orders (US-032). Pass status="Completed" for the results inbox. */
@@ -473,7 +473,7 @@ export interface ApiClient {
    */
   drugIngredients(drugIds: readonly string[]): Promise<Map<string, string>>;
   /** Formulary lookup for substitutions (US-052): search drugs, then list a drug's approved alternatives. */
-  searchDrugs(query: string): Promise<DrugRef[]>;
+  searchDrugs(query: string, signal?: AbortSignal): Promise<DrugRef[]>;
   drugAlternatives(drugId: string): Promise<DrugRef[]>;
 
   // Prescribing workspace (phase 26, design 43 §6)
@@ -484,7 +484,7 @@ export interface ApiClient {
    * same product. Returns real drug uuids — the modal this replaced sent the ATC code string where the API
    * expects a Guid.
    */
-  searchPrescribableDrugs(query: string): Promise<PrescribableDrug[]>;
+  searchPrescribableDrugs(query: string, signal?: AbortSignal): Promise<PrescribableDrug[]>;
   /**
    * Step 1 — advisory validation while composing (design 43 §5).
    *
@@ -563,7 +563,7 @@ export interface ApiClient {
    * blood count, so it cannot separate the Labs tab from the Imaging tab. The numeric range can.
    */
   /** Typeahead over the CPT catalogue, narrowed to the sections a tab orders from (Labs spans two). */
-  searchCpt(query: string, sections: readonly CptSection[]): Promise<CptRef[]>;
+  searchCpt(query: string, sections: readonly CptSection[], signal?: AbortSignal): Promise<CptRef[]>;
   /**
    * Ask the approval team to revalidate an expired prescription or order.
    *

@@ -8,7 +8,7 @@ import { BookingForm, NOTE_MAX, type BookingSelection } from "./booking/BookingF
 import { CallSummaryDraft } from "./CallNotes";
 import { MemberSearch } from "./CallCentreSearch";
 import { useRestorableState } from "./useRestorableState";
-import { CALL_REASONS, createHttpCcApi, type CcApi, type CcDirection, type CcMatch } from "./CallCentre";
+import { CALL_REASONS, createHttpCcApi, withReason, type CcApi, type CcDirection, type CcMatch } from "./CallCentre";
 import { useApi } from "../api/ApiProvider";
 import type { BranchSummary } from "@mersal/contracts";
 
@@ -162,11 +162,15 @@ export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
       doctorId: sel.doctorId,
       note: sel.note || undefined,
     });
-    setAnnounce(outcome === "ok" ? t(L.ccBooked) : outcome === "conflict" ? t(L.ccSlotTaken) : t(L.ccBookFailed));
+    setAnnounce(
+      outcome.kind === "ok" ? t(L.ccBooked)
+      : outcome.kind === "conflict" ? t(L.ccSlotTaken)
+      : withReason(t(L.ccBookFailed), outcome),
+    );
     // Both a success and a 409 invalidate the times: one consumed the slot, the other proves someone else
     // did. Re-read them WITHOUT resetting the agent's branch/specialty/doctor — they are still what the
     // caller asked for, and making the agent re-enter them mid-call is a cost paid for someone else's race.
-    if (outcome !== "error") setReloadToken((k) => k + 1);
+    if (outcome.kind !== "error") setReloadToken((k) => k + 1);
   }, [api, interactionId, openedFor, sel, t]);
 
   /**
@@ -178,12 +182,12 @@ export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
   const finish = useCallback(async () => {
     if (!interactionId) return;
     const result = await api.close(interactionId, "Resolved", wrapSummary.trim(), reason);
-    if (result !== "ok") {
-      setSummaryError(result === "summary-required");
+    if (result.kind !== "ok") {
+      setSummaryError(result.kind === "summary-required");
       setAnnounce(
-        result === "summary-required" ? t(L.ccSummaryRequired)
-        : result === "not-your-call" ? t(L.ccNotYourCall)
-        : t(L.ccCloseFailed),
+        result.kind === "summary-required" ? t(L.ccSummaryRequired)
+        : result.kind === "not-your-call" ? t(L.ccNotYourCall)
+        : withReason(t(L.ccCloseFailed), result),
       );
       return;   // the call is still open — leave the screen showing it
     }

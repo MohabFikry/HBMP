@@ -23,6 +23,7 @@ const STR = {
   errorNetwork: { en: "Couldn't reach the service. Check your connection and retry.", ar: "تعذّر الوصول إلى الخدمة. تحقّق من اتصالك ثم أعد المحاولة." },
   errorHttp: { en: "The service couldn't complete this request.", ar: "تعذّر على الخدمة إتمام هذا الطلب." },
   errorSchema: { en: "The service returned an unexpected response.", ar: "أعادت الخدمة استجابةً غير متوقعة." },
+  errorCancelled: { en: "That request was cancelled. Retry to load it again.", ar: "تم إلغاء هذا الطلب. أعد المحاولة لتحميله مرة أخرى." },
   retry: { en: "Retry", ar: "إعادة المحاولة" },
 
   // 18.D1's write path already distinguished these; the READ path collapsed every HTTP status into
@@ -190,6 +191,10 @@ type ReadRemedy = "retry" | "reauth" | "none";
 export function classifyReadError(err: ApiError | null | undefined): { headline: Localized; remedy: ReadRemedy } {
   if (err?.kind === "network") return { headline: STR.errorNetwork, remedy: "retry" };
   if (err?.kind === "schema") return { headline: STR.errorSchema, remedy: "none" };
+  // A read WE cancelled. `useAsync` never surfaces one, so this exists for the screen that calls a loader
+  // directly — and it offers Retry rather than an explanation, because there is nothing to explain: the
+  // request was superseded, and the only useful thing on screen is a way to ask again.
+  if (err?.kind === "aborted") return { headline: STR.errorCancelled, remedy: "retry" };
 
   switch (err?.status) {
     case 401:

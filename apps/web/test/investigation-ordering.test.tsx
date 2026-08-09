@@ -62,7 +62,9 @@ describe("the catalogue is real, and scoped to the section", () => {
 
     renderWorkspace("Imaging", api);
     await user.type(screen.getByRole("combobox", { name: "Study" }), "chest");
-    await waitFor(() => expect(searchCpt).toHaveBeenCalledWith("chest", ["Imaging"]));
+    // `expect.anything()` for the third argument: the combobox now passes an AbortSignal so a superseded
+    // keystroke's request is cancelled rather than merely ignored. What this test is about is the SECTIONS.
+    await waitFor(() => expect(searchCpt).toHaveBeenCalledWith("chest", ["Imaging"], expect.anything()));
 
     searchCpt.mockClear();
     renderWorkspace("Lab", api);
@@ -70,7 +72,8 @@ describe("the catalogue is real, and scoped to the section", () => {
     // TWO sections, not one. A sample run on an analyser and a specimen read by a pathologist are ordered
     // from the same tab and are not the same section — asking only for Laboratory would silently drop
     // every 88xxx code (surgical pathology, cytopathology) out of the doctor's reach.
-    await waitFor(() => expect(searchCpt).toHaveBeenCalledWith("chest", ["Laboratory", "Pathology"]));
+    await waitFor(() =>
+      expect(searchCpt).toHaveBeenCalledWith("chest", ["Laboratory", "Pathology"], expect.anything()));
   });
 
   it("reaches pathology from the Labs tab and refuses imaging there", async () => {
