@@ -73,6 +73,8 @@ function rules(css: string): Rule[] {
 
 const CAPSULE = /border-radius:\s*var\(--r-pill\)/;
 const STICKY = /position:\s*sticky/;
+/** A header rule counts if it pins itself or declares a layer — both are how one ends up over the bar. */
+const STICKY_OR_Z = /position:\s*sticky|z-index:/;
 /** A width query, not merely any query — `prefers-reduced-motion` tells you nothing about the row count. */
 const WIDTH_QUERY = /min-width:/;
 
@@ -105,6 +107,47 @@ describe("the profile pill tab bar wraps safely", () => {
       stickyEverywhere.map((r) => r.selector),
       "sticky must be confined to a min-width query — a wrapped bar obscures the focus it scrolls to",
     ).toEqual([]);
+  });
+
+  it("stacks above the sticky table headers inside its own panels, and below every popup", () => {
+    // The bug this pins: the bar shipped at `z-index: 1`, while the worklist tables INSIDE the profile's
+    // section cards pin their own `thead th` at 5 (and `.mrs-stickyend` at 6). Same stacking context, higher
+    // number — so scrolling a section with a table slid its header straight over the tab bar. A sticky bar
+    // that other components paint through is not isolated from them, whatever its offset.
+    //
+    // The ceiling matters just as much. Popup layers (select and combobox lists at 40, and the overlays
+    // above them) MUST stay over the bar: a dropdown opened in a section card and covered by the tab bar
+    // would be a worse bug than the one being fixed. So this asserts a slot, not a floor.
+    const zOf = (r: Rule): number | null => {
+      const m = /z-index:\s*(-?\d+)/.exec(r.body);
+      return m ? Number(m[1]) : null;
+    };
+
+    const bar = app
+      .filter((r) => r.selector.includes(".profile-tabs") && STICKY.test(r.body))
+      .map(zOf)
+      .filter((z): z is number => z !== null);
+    expect(bar.length, "the sticky tab bar should declare a z-index").toBeGreaterThan(0);
+
+    // Read the neighbours rather than hard-coding 6 and 40, so this keeps holding if either layer moves.
+    const stickyHeaders = components
+      .filter((r) => /\.mrs-wl\b/.test(r.selector) && /\bth\b/.test(r.selector) && STICKY_OR_Z.test(r.body))
+      .map(zOf)
+      .filter((z): z is number => z !== null);
+    const popups = components
+      .filter((r) => /\.mrs-(select|combo)-list/.test(r.selector))
+      .map(zOf)
+      .filter((z): z is number => z !== null);
+
+    expect(stickyHeaders.length, "in-card sticky headers should be findable").toBeGreaterThan(0);
+    expect(popups.length, "popup lists should be findable").toBeGreaterThan(0);
+
+    const floor = Math.max(...stickyHeaders);
+    const ceiling = Math.min(...popups);
+    for (const z of bar) {
+      expect(z, `tab bar z-index must clear the in-card sticky headers (${floor})`).toBeGreaterThan(floor);
+      expect(z, `tab bar z-index must stay under the popup layer (${ceiling})`).toBeLessThan(ceiling);
+    }
   });
 
   it("only restores the capsule radius at those same widths", () => {

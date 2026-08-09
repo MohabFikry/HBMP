@@ -148,7 +148,14 @@ nav.mrs-rail {
   /* Reserve the scrollbar's lane whether or not it is needed, so pages with and without a vertical
      scrollbar stop shifting ~16px horizontally against each other (QA P2-21). */
   scrollbar-gutter: stable;
-  padding: var(--sp6);
+  /* Exposed as a custom property because a sticky child has to CANCEL it. Sticky offsets are measured from
+     the scrollport's PADDING edge, so `top: 0` on a child pins 24px down from the top of this pane, leaving
+     a band that page content stays visible in as it scrolls past. A bar that wants to pin flush has to
+     offset by exactly this much — see `.profile-tabs` below. Naming it here keeps that one number in one
+     place; two hard-coded 24px values would drift apart the first time this padding changed, and the
+     symptom would be a gap that content scrolls through. */
+  --app-main-pad: var(--sp6);
+  padding: var(--app-main-pad);
 }
 /* Page header (v1.1 brand-tick eyebrow). */
 .pagehead {
@@ -1437,13 +1444,37 @@ nav.mrs-rail {
    so the wrap point is not a constant this file can pin down. Erring high costs a non-sticky bar on a
    narrow desktop window; erring low restores a defect that nothing in jsdom can see. */
 .profile-tabs .mrs-tabs--pill {
-  padding-block: var(--sp2);
+  /* Centred rather than left-aligned. `inline-flex` is inline-level, so `margin-inline: auto` alone does
+     nothing to it — it needs to be block-level AND still shrink-to-fit, which is `display: flex` plus
+     `inline-size: fit-content`. Stretching it to `100%` instead would pull the bordered, tinted track into a
+     full-row stadium with the pills bunched at one end, which is what the note above warns off. The pills
+     themselves are untouched and stay exactly as compact as they were.
+     `justify-content: center` matters only once the row wraps: without it the last row (one tab, at 360px)
+     hangs off the leading edge under two full ones. */
+  display: flex;
+  inline-size: fit-content;
+  margin-inline: auto;
+  justify-content: center;
+  padding-block: var(--sp3);
 }
 @media (min-width: 60rem) {
   .profile-tabs .mrs-tabs--pill {
     position: sticky;
-    top: var(--sp4);
-    z-index: 1;
+    /* Flush with the top of `.app-main`, which is the scrollport — NOT `var(--sp4)`, which left a 16px band
+       above the bar where page content stayed visible as it scrolled past. The bar's own `padding-block`
+       supplies the breathing room instead, INSIDE the opaque backdrop rather than outside it, so there is
+       no gap left for anything to show through. `.app-main` starts below the `.app-bar` (sticky, z-index
+       40, a grid sibling of this pane), so "flush with the top" means directly under the app bar, not over.
+       The negative offset cancels `.app-main`'s own padding, which sticky measures from — `top: 0` would
+       pin one padding's worth down and reopen the band. `0px`, not `0`, in the fallback: `calc()` needs a
+       unit to multiply. */
+    top: calc(-1 * var(--app-main-pad, 0px));
+    /* Above the sticky `thead th` (5) and `.mrs-stickyend` (6) of any worklist table inside a section card —
+       at z-index 1 those headers scrolled straight OVER this bar, which is what made it read as not
+       isolated from the rest of the page. Still below the popup layer (select/combo lists at 20-40) and
+       every overlay above it: a dropdown opened inside a section card must cover this bar, not be covered
+       by it. 10 is the slot between those two, and the guard test asserts the slot rather than the number. */
+    z-index: 10;
     /* The stadium track `.mrs-seg` wears, restored where the row count is known to be one. */
     border-radius: var(--r-pill);
     box-shadow: 0 0 0 100vmax var(--surface-0);
@@ -3207,10 +3238,10 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   min-inline-size: 0;
   /* WCAG 2.4.11 (Focus Not Obscured): without this, tabbing into a control just below the fold scrolls it
      under the sticky `.profile-tabs` bar. The bar is only sticky at >=60rem, and there it is measurably one
-     row: 44px pill + 2x var(--sp2) padding-block + 2x1px border = 62px, plus its own top: var(--sp4) offset
-     = 78px to clear. `calc(var(--sp4) + 80px)` = 96px, an 18px margin over the measured worst case rather
-     than the guess this used to be. The wrapped case is not covered here because it cannot arise: below
-     60rem nothing is sticky, so there is nothing to be obscured by. */
+     row: 44px pill + 2x var(--sp3) padding-block + 2x1px border = 70px, and it now pins at top: 0, so 70px
+     is the whole clearance. `calc(var(--sp4) + 80px)` = 96px, a 26px margin over the measured worst case
+     rather than the guess this used to be. The wrapped case is not covered here because it cannot arise:
+     below 60rem nothing is sticky, so there is nothing to be obscured by. */
   scroll-margin-block-start: calc(var(--sp4) + 80px);
 }
 .profile-section > * { min-inline-size: 0; }
