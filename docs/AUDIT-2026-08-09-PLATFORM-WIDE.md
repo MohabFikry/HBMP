@@ -280,6 +280,45 @@ refuses before scanning and fails in a way that looks identical to a found secre
 branch where a secret is most likely to be caught before it lands — this gate has never examined the code at
 all. It only ever ran on push-to-master.
 
+### The third red gate: expand/contract, and one migration that really was unsafe (2026-08-10)
+
+Also pre-existing, also red on `master` with the identical 20 findings, and blocking more than CI:
+`check-golive-gates.py` reads this gate, so `MIGRATION BLOCK` was one of the things standing between the
+platform and go-live.
+
+`check-migration-compat.py --all` flagged 20 contract-phase operations sitting in expand-phase migrations
+across masterdata, orders, pharmacy and provider. They are not one thing, and treating them as one — 20
+identical acknowledgements — would have been a rubber stamp. They sort into three groups:
+
+**Eleven are idempotency boilerplate.** `DROP CONSTRAINT IF EXISTS ck_x` immediately followed by
+`ADD CONSTRAINT ck_x` — for a constraint *that same migration* introduces. On a first run the constraint does
+not exist; the DROP is there so the file can be re-run. No previously deployed version can depend on a
+constraint that ships with this migration. Verified mechanically rather than by eye: every dropped name was
+checked for a matching `ADD CONSTRAINT` in the same file.
+
+**Eight are a widened CHECK.** The radiology vocabulary expansion drops each column's CHECK twice — once by
+the generated name from the original table definition, once by the explicit `ck_` name — and re-adds a strict
+*superset*. Every value the old CHECK accepted, the new one accepts, so a writer still emitting `'Imaging'`
+cannot break. The narrowing already lives in a deferred contract migration, exactly as it should.
+
+**One was a genuine defect.** `orders/0011_procedure_sessions.sql` added `requested_quantity` as nullable,
+backfilled it, and set `NOT NULL` in the same migration. During a rolling deploy an old orders-service replica
+still inserts order lines without that column, so the constraint turns an ordinary insert into a violation —
+a 500 to a doctor placing an order mid-encounter. The gate was right, and no acknowledgement would have been
+honest.
+
+The fix was already sitting in the repository. `deferred/0014_root_line_id_contract.sql` does precisely this
+for `root_line_id` on the same table, with the same reasoning, and `apply-migrations.sh` globs at maxdepth 1
+so a `deferred/` file physically cannot ship on the deploy that performs the switch. 0011 simply predates that
+lesson. The `SET NOT NULL` moved to `deferred/0018_requested_quantity_not_null_contract.sql`; there is no
+DEFAULT to paper over the gap instead, because `requested_quantity` is what the doctor *asked for* and
+inventing one would fabricate the single number the column exists to preserve.
+
+Proven rather than asserted: all 236 migrations apply to a scratch database with zero psql errors; after a
+normal deploy `requested_quantity` is nullable (matching `root_line_id`, which has the same deferred
+treatment); after `apply-deferred-migrations.sh` it is `NOT NULL`. And the gate is still sharp — a planted
+`DROP COLUMN` fails it, the same statement with an acknowledgement passes.
+
 ### What closing the saga turned up (C1+C2, ADR-0041)
 
 Wiring it surfaced three things that only a real caller could have found, because each path had never had

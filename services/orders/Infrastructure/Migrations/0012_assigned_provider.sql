@@ -1,5 +1,12 @@
 -- orders-service — 0012 route an order to the provider that will DELIVER it, at the row level.
 --
+-- ON THE `migrate-compat: contract-ok` ACKNOWLEDGEMENTS BELOW.
+-- Each marks a `DROP CONSTRAINT IF EXISTS ck_…` whose constraint this same migration adds immediately
+-- afterwards. The DROP is idempotency boilerplate so the file can be re-run; on a first run the constraint
+-- does not exist yet, and no previously deployed version can depend on one this migration introduces. That
+-- is a different thing from dropping a constraint the running system relies on, which is what the gate is
+-- for.
+--
 -- ============================================================================================================
 -- THE DEFECT THIS EXISTS TO NOT REPEAT
 -- ============================================================================================================
@@ -48,7 +55,7 @@ ALTER TABLE orders.investigation_order
     ADD COLUMN IF NOT EXISTS shared_context_at       timestamptz NULL;
 
 -- Context without an attributable author is not a disclosure, it is a leak with no one's name on it.
-ALTER TABLE orders.investigation_order DROP CONSTRAINT IF EXISTS ck_order_shared_context_attributed;
+ALTER TABLE orders.investigation_order DROP CONSTRAINT IF EXISTS ck_order_shared_context_attributed;  -- migrate-compat: contract-ok (re-created below; see header)
 ALTER TABLE orders.investigation_order
     ADD CONSTRAINT ck_order_shared_context_attributed CHECK (
         shared_clinical_context IS NULL
@@ -68,7 +75,7 @@ ALTER TABLE orders.investigation_order
     ADD COLUMN IF NOT EXISTS completion_reported_by text NULL,
     ADD COLUMN IF NOT EXISTS completion_reported_at timestamptz NULL;
 
-ALTER TABLE orders.investigation_order DROP CONSTRAINT IF EXISTS ck_order_completion_report_attributed;
+ALTER TABLE orders.investigation_order DROP CONSTRAINT IF EXISTS ck_order_completion_report_attributed;  -- migrate-compat: contract-ok (re-created below; see header)
 ALTER TABLE orders.investigation_order
     ADD CONSTRAINT ck_order_completion_report_attributed CHECK (
         completion_report IS NULL
@@ -76,7 +83,7 @@ ALTER TABLE orders.investigation_order
 
 -- An empty report is an open loop wearing a closed one's clothes. Refused in the API with a clear message and
 -- here as the backstop, because this column is what the doctor's "open loops" worklist counts as closed.
-ALTER TABLE orders.investigation_order DROP CONSTRAINT IF EXISTS ck_order_completion_report_not_blank;
+ALTER TABLE orders.investigation_order DROP CONSTRAINT IF EXISTS ck_order_completion_report_not_blank;  -- migrate-compat: contract-ok (re-created below; see header)
 ALTER TABLE orders.investigation_order
     ADD CONSTRAINT ck_order_completion_report_not_blank CHECK (
         completion_report IS NULL OR length(btrim(completion_report)) > 0);

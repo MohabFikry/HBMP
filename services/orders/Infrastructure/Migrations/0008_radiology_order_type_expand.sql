@@ -14,9 +14,15 @@
 --
 -- The order_type CHECK is an unnamed table constraint from 0001, so it is dropped by its generated name and
 -- re-added under an explicit one. Naming it now means the contract step does not have to guess.
+--
+-- ON THE `migrate-compat: contract-ok` ACKNOWLEDGEMENTS BELOW. Those two DROPs are what the paragraph above
+-- describes: the column is never left unconstrained, and the CHECK that replaces them is a strict SUPERSET —
+-- every value the old one accepted, the new one accepts. A dropped-and-widened CHECK cannot break a writer
+-- that is still emitting the old value, which is the compatibility the gate is protecting. The narrowing is
+-- the deferred contract migration named above, and it is not in this deploy.
 
-ALTER TABLE orders.investigation_order DROP CONSTRAINT IF EXISTS investigation_order_order_type_check;
-ALTER TABLE orders.investigation_order DROP CONSTRAINT IF EXISTS ck_investigation_order_order_type;
+ALTER TABLE orders.investigation_order DROP CONSTRAINT IF EXISTS investigation_order_order_type_check;  -- migrate-compat: contract-ok (widen-only; see header)
+ALTER TABLE orders.investigation_order DROP CONSTRAINT IF EXISTS ck_investigation_order_order_type;  -- migrate-compat: contract-ok (widen-only; see header)
 ALTER TABLE orders.investigation_order
     ADD CONSTRAINT ck_investigation_order_order_type
     CHECK (order_type IN ('Lab','Imaging','Radiology','Procedure'));

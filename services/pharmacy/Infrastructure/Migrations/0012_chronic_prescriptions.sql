@@ -1,5 +1,12 @@
 -- pharmacy-service — 0012 acute / chronic prescriptions and their refill windows.
 --
+-- ON THE `migrate-compat: contract-ok` ACKNOWLEDGEMENTS BELOW.
+-- Each marks a `DROP CONSTRAINT IF EXISTS ck_…` whose constraint this same migration adds immediately
+-- afterwards. The DROP is idempotency boilerplate so the file can be re-run; on a first run the constraint
+-- does not exist yet, and no previously deployed version can depend on one this migration introduces. That
+-- is a different thing from dropping a constraint the running system relies on, which is what the gate is
+-- for.
+--
 -- ============================================================================================================
 -- 29.5 / design 45 §5 · window model: docs/superpowers/specs/2026-08-07-chronic-refill-windows-design.md
 -- ============================================================================================================
@@ -34,26 +41,26 @@ ALTER TABLE pharmacy.prescription
     ADD COLUMN IF NOT EXISTS valid_from            date        NULL,
     ADD COLUMN IF NOT EXISTS valid_until           date        NULL;
 
-ALTER TABLE pharmacy.prescription DROP CONSTRAINT IF EXISTS ck_prescription_kind;
+ALTER TABLE pharmacy.prescription DROP CONSTRAINT IF EXISTS ck_prescription_kind;  -- migrate-compat: contract-ok (re-created below; see header)
 ALTER TABLE pharmacy.prescription
     ADD CONSTRAINT ck_prescription_kind CHECK (kind IN ('Acute','Chronic'));
 
 -- "Chronic requires a duration greater than one month. A 14-day course is not chronic; reject with a clear
 -- message rather than silently accepting." The API returns the clear message; this is the backstop, because
 -- a chronic script with no frequency has no windows and would be undispensable in a way nothing reports.
-ALTER TABLE pharmacy.prescription DROP CONSTRAINT IF EXISTS ck_prescription_chronic_requires_schedule;
+ALTER TABLE pharmacy.prescription DROP CONSTRAINT IF EXISTS ck_prescription_chronic_requires_schedule;  -- migrate-compat: contract-ok (re-created below; see header)
 ALTER TABLE pharmacy.prescription
     ADD CONSTRAINT ck_prescription_chronic_requires_schedule CHECK (
         kind <> 'Chronic'
         OR (refill_frequency_code IS NOT NULL AND duration_days IS NOT NULL AND duration_days > 30));
 
 -- An ACUTE script carries no refill schedule. Allowing one would make "is this chronic?" answerable two ways.
-ALTER TABLE pharmacy.prescription DROP CONSTRAINT IF EXISTS ck_prescription_acute_has_no_schedule;
+ALTER TABLE pharmacy.prescription DROP CONSTRAINT IF EXISTS ck_prescription_acute_has_no_schedule;  -- migrate-compat: contract-ok (re-created below; see header)
 ALTER TABLE pharmacy.prescription
     ADD CONSTRAINT ck_prescription_acute_has_no_schedule CHECK (
         kind <> 'Acute' OR refill_frequency_code IS NULL);
 
-ALTER TABLE pharmacy.prescription DROP CONSTRAINT IF EXISTS ck_prescription_validity_ordered;
+ALTER TABLE pharmacy.prescription DROP CONSTRAINT IF EXISTS ck_prescription_validity_ordered;  -- migrate-compat: contract-ok (re-created below; see header)
 ALTER TABLE pharmacy.prescription
     ADD CONSTRAINT ck_prescription_validity_ordered CHECK (
         valid_from IS NULL OR valid_until IS NULL OR valid_until >= valid_from);

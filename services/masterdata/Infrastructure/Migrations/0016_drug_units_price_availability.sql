@@ -1,5 +1,12 @@
 -- masterdata-service — 0016 prescribing unit, pack size, splittability (29.6) + lowest-price and
 -- availability (29.7). Design 45 §6, §7.
+--
+-- ON THE `migrate-compat: contract-ok` ACKNOWLEDGEMENTS BELOW.
+-- Each marks a `DROP CONSTRAINT IF EXISTS ck_…` whose constraint this same migration adds immediately
+-- afterwards. The DROP is idempotency boilerplate so the file can be re-run; on a first run the constraint
+-- does not exist yet, and no previously deployed version can depend on one this migration introduces. That
+-- is a different thing from dropping a constraint the running system relies on, which is what the gate is
+-- for.
 
 -- ============================================================================================================
 -- 29.6 — the three facts the drug master did not have
@@ -45,7 +52,7 @@ BEGIN
     END IF;
 END $$;
 
-ALTER TABLE masterdata.drug DROP CONSTRAINT IF EXISTS ck_drug_pack_size_positive;
+ALTER TABLE masterdata.drug DROP CONSTRAINT IF EXISTS ck_drug_pack_size_positive;  -- migrate-compat: contract-ok (re-created below; see header)
 ALTER TABLE masterdata.drug
     ADD CONSTRAINT ck_drug_pack_size_positive CHECK (pack_size IS NULL OR pack_size > 0);
 
@@ -66,7 +73,7 @@ COMMENT ON COLUMN masterdata.drug.unit_data_incomplete IS
 ALTER TABLE masterdata.drug
     ADD COLUMN IF NOT EXISTS availability varchar(16) NOT NULL DEFAULT 'Unknown';
 
-ALTER TABLE masterdata.drug DROP CONSTRAINT IF EXISTS ck_drug_availability;
+ALTER TABLE masterdata.drug DROP CONSTRAINT IF EXISTS ck_drug_availability;  -- migrate-compat: contract-ok (re-created below; see header)
 ALTER TABLE masterdata.drug
     ADD CONSTRAINT ck_drug_availability CHECK (availability IN ('Available','Unavailable','Unknown'));
 
