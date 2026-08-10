@@ -172,34 +172,64 @@ nav.mrs-rail {
 .scrolltop-anchor { display: none; }
 .scrolltop {
   position: fixed;
-  inset-block-end: var(--sp5);
-  inset-inline-end: var(--sp5);
+  inset-block-end: var(--sp6);
+  inset-inline-end: var(--sp6);
   z-index: 12;
-  /* 44px is the minimum target size (WCAG 2.5.8 / 0B), not a round number chosen for looks. */
-  inline-size: 44px;
-  block-size: 44px;
+  /* 48, not the 44px floor: this floats over content with nothing around it to give it scale, and at 44 it
+     read as a stray dot. 44 (WCAG 2.5.8) is the minimum, not the target. */
+  inline-size: 48px;
+  block-size: 48px;
   display: grid;
   place-items: center;
   padding: 0;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--r-pill);
-  background: var(--surface-1);
-  color: var(--text-1);
-  box-shadow: var(--elev-2);
+  /* FILLED, in the accent, with the same treatment `.mrs-btn.mrs-primary` uses — the top-light gradient and
+     the inset highlight, so it reads as the same family of control rather than a circle someone drew.
+     It was `--surface-1` with a `--border` hairline, which is #ffffff on the #eef5f5 page behind a #d7e3e3
+     line: about 1.1:1 for the edge. On a white section card it disappeared completely and on the page it
+     looked like a rendering artefact. A floating control has no container to borrow structure from, so it
+     has to carry its own contrast.
+     `--on-accent` rather than a literal: it is #ffffff on the light theme and #04282a on the dark one, where
+     white over the lightened teal fails AA. */
+  background: var(--accent);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0));
+  color: var(--on-accent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), var(--elev-2);
   cursor: pointer;
-  animation: scrolltop-in 120ms ease-out;
+  transition: background-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+  animation: scrolltop-in 140ms ease-out;
 }
-.scrolltop:hover { background: var(--surface-2); }
-/* The design system's one chevron points down; this is the same glyph turned, so the two can never drift. */
-.scrolltop svg { transform: rotate(180deg); }
+/* `Icon` carries no intrinsic size — unsized in this grid it had none of its own and rendered as whatever the
+   SVG default resolved to, which is the thin, adrift chevron. Sized here explicitly. */
+.scrolltop svg {
+  inline-size: 22px;
+  block-size: 22px;
+  /* The design system ships one chevron, pointing down; this is the same glyph turned, so the two can never
+     drift apart. */
+  transform: rotate(180deg);
+}
+.scrolltop:hover {
+  background-color: var(--accent-press);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), var(--elev-3);
+  transform: translateY(-1px);
+}
+.scrolltop:active {
+  transform: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), var(--elev-1);
+}
+/* base.css gives every :focus-visible a 6px radius, which draws a rounded RECTANGLE around a circular button
+   — the one place the global rule is wrong. The ring itself (3px, offset 2) is inherited unchanged. */
+.scrolltop:focus-visible { border-radius: var(--r-pill); }
 @keyframes scrolltop-in {
-  from { opacity: 0; transform: translateY(var(--sp2)); }
+  from { opacity: 0; transform: translateY(var(--sp2)) scale(0.9); }
   to   { opacity: 1; transform: none; }
 }
 /* The button's whole job is to move the viewport a long way; someone who has asked for less motion gets the
    appearance without the slide, and `ScrollToTop` reads the same preference to jump rather than smooth-scroll. */
 @media (prefers-reduced-motion: reduce) {
-  .scrolltop { animation: none; }
+  .scrolltop { animation: none; transition: none; }
+  .scrolltop:hover { transform: none; }
 }
 
 /* Page header (v1.1 brand-tick eyebrow). */

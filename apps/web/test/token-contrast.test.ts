@@ -126,6 +126,59 @@ describe.each([
  * Structural rather than a list, because a list of known-bad pairs is a list somebody has to remember to add
  * to. This reads the CSS.
  */
+describe("the floating back-to-top button carries its own contrast", () => {
+  /**
+   * A control with nothing around it has no container to borrow structure from, and this one shipped as
+   * `--surface-1` with a `--border` hairline: #ffffff behind a #d7e3e3 line, which is 1.19:1 against the page
+   * and 1.00:1 against a white section card — invisible, exactly as reported. WCAG 1.4.11 wants 3:1 for the
+   * boundary of a UI component against what is behind it, and a floating button is the case that rule is for.
+   *
+   * Pinned per theme, against every surface it can float over, so "make it subtle" cannot quietly return it
+   * to a white circle on a white card.
+   */
+  const UI_COMPONENT = 3; // WCAG 1.4.11 non-text contrast
+
+  describe.each([
+    ["light", 'html[data-theme="light"]'],
+    ["dark", 'html[data-theme="dark"]'],
+  ])("%s theme", (_name, selector) => {
+    const t = theme(selector);
+
+    it.each(["surface-0", "surface-1", "surface-2"])("the accent fill stands off --%s", (surface) => {
+      const ratio = contrast(t.accent, t[surface]);
+      expect(
+        ratio,
+        `the button (--accent ${t.accent}) on --${surface} (${t[surface]}) is ${ratio.toFixed(2)}:1, ` +
+          `below the ${UI_COMPONENT}:1 a UI component needs to be discernible`,
+      ).toBeGreaterThanOrEqual(UI_COMPONENT);
+    });
+
+    it("the chevron is legible on the fill", () => {
+      // --on-accent exists precisely because white fails on the dark theme's lightened teal (1.79:1).
+      const ratio = contrast(t["on-accent"], t.accent);
+      expect(
+        ratio,
+        `--on-accent (${t["on-accent"]}) on --accent (${t.accent}) is ${ratio.toFixed(2)}:1`,
+      ).toBeGreaterThanOrEqual(AA);
+    });
+
+    it("the hover fill stays discernible too", () => {
+      const ratio = contrast(t["accent-press"], t["surface-0"]);
+      expect(ratio, `--accent-press on the page is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(UI_COMPONENT);
+    });
+  });
+
+  it("is actually painted in the accent, not a surface", () => {
+    // The arithmetic above is about tokens; this is what ties it to the button. A rule that goes back to
+    // `background: var(--surface-1)` would sail past every ratio here while being the original bug.
+    const css = readFileSync(resolve(__dirname, "../src/styles/app.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const rule = /\.scrolltop\s*\{([^}]*)\}/.exec(css);
+    expect(rule, ".scrolltop rule should exist").not.toBeNull();
+    expect(rule![1], "the floating button is accent-filled").toMatch(/background:\s*var\(--accent\)/);
+    expect(rule![1], "and its glyph uses the theme-derived on-accent").toMatch(/color:\s*var\(--on-accent\)/);
+  });
+});
+
 describe("text painted on --accent-tint", () => {
   const CSS = resolve(__dirname, "../../design-system/src/styles/components.css");
 
