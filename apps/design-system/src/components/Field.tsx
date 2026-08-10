@@ -3,6 +3,8 @@ import type { InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "rea
 import { Icon } from "./Icon";
 import { Select } from "./Select";
 import type { SelectOption } from "./Select";
+import { Combobox } from "./Combobox";
+import type { ComboboxOption } from "./Combobox";
 import { cx } from "../lib/cx";
 
 interface FieldBase {
@@ -144,6 +146,84 @@ export function SelectField({
         placeholder={placeholder}
         disabled={disabled}
         aria-labelledby={`${base}-label`}
+      />
+    </Labelled>
+  );
+}
+
+export interface ComboboxFieldProps extends FieldBase {
+  options: ComboboxOption[];
+  /** The chosen value, or null for "nothing chosen" — which renders `placeholder`. */
+  value: string | null;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  id?: string;
+  required?: boolean;
+  /** An icon belonging to the control. See `ComboboxProps.leadingIcon`. */
+  leadingIcon?: ReactNode;
+  /** Pill silhouette for filter bars; default is the field radius. See `ComboboxProps.shape`. */
+  shape?: "pill" | "field";
+  /** Carry the selected option's hint into the closed control. See `ComboboxProps.hintWhenClosed`. */
+  hintWhenClosed?: boolean;
+}
+
+/**
+ * A labelled <see cref="Combobox"/> — the searchable picker, with the same field anatomy as InputField.
+ *
+ * ============================================================================================================
+ * WHY THIS EXISTS, AND WHY ITS ABSENCE WAS THE REAL FINDING
+ * ============================================================================================================
+ * The scrolls/dropdowns audit counted 56 pickers in the SPA and found 11 searchable. The interesting part was
+ * not the ratio but the distribution: `SelectField` — the NON-searchable control — was used 19 times, more
+ * than any other picker in the product, while `Combobox` was used 11.
+ *
+ * That is not 19 considered decisions. This file exported `InputField`, `SelectField` and `TextareaField`, so
+ * a developer who wanted a picker with a label attached had exactly one thing to reach for, and it was the
+ * one that cannot be typed into. The path of least resistance led away from the control the product should
+ * have been using, and every screen that took it was behaving reasonably.
+ *
+ * So this is the change that makes the standard stick, rather than the 30 call-site edits that follow it. A
+ * house rule that requires assembling `<label>` + `<Combobox>` by hand is a rule the next screen will forget;
+ * one that is the shortest thing to type is a rule nobody has to remember.
+ *
+ * ============================================================================================================
+ * WHAT IT DOES THAT `SelectField` DOES NOT
+ * ============================================================================================================
+ * `Combobox` is built on an `<input>`, which HTML lets a `<label for>` name directly — so unlike `SelectField`
+ * (whose trigger is a `<button>`, nameable only via `aria-labelledby`) this is an ordinary labelled field:
+ * clicking the label focuses the control and opens the list, which is the behaviour every other field here
+ * already has.
+ *
+ * It also wires `help` and `error` into `aria-describedby` and sets `aria-invalid`. `SelectField` does
+ * neither, because `Select` accepts neither — so on that control a helper line is on screen and absent from
+ * the accessible description, and an error is announced by the alert alone.
+ */
+export function ComboboxField({
+  label, help, error, className, id, options, value, onChange, placeholder, disabled, required, hideLabel,
+  leadingIcon, shape, hintWhenClosed,
+}: ComboboxFieldProps) {
+  const auto = useId();
+  const base = id ?? auto;
+  return (
+    <Labelled
+      label={label} help={help} error={error} base={base} className={className}
+      requiredMark={required} hideLabel={hideLabel}
+    >
+      <Combobox
+        id={base}
+        options={options}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        disabled={disabled}
+        invalid={Boolean(error)}
+        aria-describedby={describedBy(base, help, error)}
+        leadingIcon={leadingIcon}
+        shape={shape}
+        hintWhenClosed={hintWhenClosed}
+        // The label already names the input through `for`/`id`. A second name via `aria-labelledby` would
+        // override it with the same text, which is noise in the a11y tree rather than belt and braces.
       />
     </Labelled>
   );

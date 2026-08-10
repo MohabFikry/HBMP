@@ -4,6 +4,7 @@ import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderDS } from "./render";
 import { Combobox, type ComboboxOption } from "../src/components/Combobox";
+import { ComboboxField, SelectField } from "../src/components/Field";
 import { Icon } from "../src/components/Icon";
 
 /**
@@ -144,6 +145,63 @@ describe("the app-bar silhouette", () => {
     const { container } = renderDS(<Harness />);
     expect(container.querySelector(".mrs-combo--field")).not.toBeNull();
     expect(container.querySelector(".mrs-combo--pill")).toBeNull();
+  });
+});
+
+/**
+ * The audit's central finding was not that 45 pickers are unsearchable — it was WHY. `Field.tsx` exported a
+ * labelled non-searchable picker and no labelled searchable one, so the shortest thing to type was the wrong
+ * control, and 19 screens reasonably typed it. These tests hold the properties that make the new default
+ * genuinely the better default, so nobody has a reason to reach past it.
+ */
+describe("ComboboxField is a first-class field, not a Combobox with a label stuck on", () => {
+  function FieldHarness(props: Partial<React.ComponentProps<typeof ComboboxField>> = {}) {
+    const [value, setValue] = useState<string | null>(null);
+    return (
+      <ComboboxField label="Country" options={COUNTRIES} {...props} value={value} onChange={setValue} />
+    );
+  }
+
+  /** The behaviour every other field in the system has, and the one `SelectField` cannot have: `Combobox`
+   *  is built on an <input>, so `<label for>` names it directly instead of via `aria-labelledby`. */
+  it("focuses and opens the control when its label is clicked", async () => {
+    renderDS(<FieldHarness />);
+    await userEvent.click(screen.getByText("Country"));
+    expect(screen.getByRole("combobox", { name: "Country" })).toHaveFocus();
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+  });
+
+  it("ties help text and errors into the accessible description", () => {
+    renderDS(<FieldHarness help="Where the beneficiary was born" error="Pick a country" />);
+    const control = screen.getByRole("combobox", { name: "Country" });
+    const described = (control.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent);
+    expect(described).toContain("Where the beneficiary was born");
+    expect(described).toContain("Pick a country");
+    expect(control).toHaveAttribute("aria-invalid", "true");
+  });
+
+  /**
+   * Not a swipe at `SelectField` — a record of the gap that justified building this. `Select` accepts no
+   * `aria-describedby`, so a helper line under a SelectField is on screen and absent from the accessible
+   * description. If that is ever fixed, this test should be deleted along with the claim.
+   */
+  it("does what SelectField cannot: SelectField's help text reaches no description", () => {
+    renderDS(
+      <SelectField
+        label="Country" help="Where the beneficiary was born"
+        options={COUNTRIES} value={null} onChange={() => {}}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: "Country" })).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("searches — the whole reason for the conversion", async () => {
+    renderDS(<FieldHarness />);
+    await userEvent.type(screen.getByRole("combobox", { name: "Country" }), "south");
+    const options = within(screen.getByRole("listbox")).getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["South SudanSS"]);
   });
 });
 
