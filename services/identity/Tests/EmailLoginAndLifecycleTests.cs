@@ -105,9 +105,10 @@ public class EmailLoginAndLifecycleTests : IClassFixture<IdentityAppFactory>
         await using var admin = await Admin("create-noemail");
         var client = await AdminClient(admin);
 
+        var username = $"noemail-{Guid.NewGuid():N}";
         var res = await client.PostAsJsonAsync("/identity/admin/users", new
         {
-            username = $"noemail-{Guid.NewGuid():N}", displayName = "No Email",
+            username, displayName = "No Email",
             tenantId = TestFlow.TenantA, roles = new[] { "reception" },
         });
 
@@ -115,6 +116,9 @@ public class EmailLoginAndLifecycleTests : IClassFixture<IdentityAppFactory>
         // address can neither sign in by address nor be sent a reset link — it is unreachable from birth.
         res.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
         (await res.Content.ReadAsStringAsync()).Should().Contain("email-required");
+        // Nothing should exist to clean up — asserted by cleaning up anyway, which is free and catches a
+        // regression where the refusal happens AFTER the account is written.
+        await DropUserByName(username);
     }
 
     [SkippableFact]
@@ -125,23 +129,33 @@ public class EmailLoginAndLifecycleTests : IClassFixture<IdentityAppFactory>
         var client = await AdminClient(admin);
         var shared = $"shared-{Guid.NewGuid():N}@example.org";
 
-        var first = await client.PostAsJsonAsync("/identity/admin/users", new
+        var nameA = $"dupe-a-{Guid.NewGuid():N}";
+        var nameB = $"dupe-b-{Guid.NewGuid():N}";
+        try
         {
-            username = $"dupe-a-{Guid.NewGuid():N}", displayName = "A", email = shared,
-            tenantId = TestFlow.TenantA, roles = new[] { "reception" },
-        });
-        first.StatusCode.Should().Be(HttpStatusCode.Created);
+            var first = await client.PostAsJsonAsync("/identity/admin/users", new
+            {
+                username = nameA, displayName = "A", email = shared,
+                tenantId = TestFlow.TenantA, roles = new[] { "reception" },
+            });
+            first.StatusCode.Should().Be(HttpStatusCode.Created);
 
-        var second = await client.PostAsJsonAsync("/identity/admin/users", new
+            var second = await client.PostAsJsonAsync("/identity/admin/users", new
+            {
+                username = nameB, displayName = "B", email = shared,
+                tenantId = TestFlow.TenantA, roles = new[] { "reception" },
+            });
+
+            // 409, not a generic "create-failed" — an administrator has to be able to tell "that address is
+            // taken" from "that password was rejected", and Identity's own validation reports both the same way.
+            second.StatusCode.Should().Be(HttpStatusCode.Conflict);
+            (await second.Content.ReadAsStringAsync()).Should().Contain("email-taken");
+        }
+        finally
         {
-            username = $"dupe-b-{Guid.NewGuid():N}", displayName = "B", email = shared,
-            tenantId = TestFlow.TenantA, roles = new[] { "reception" },
-        });
-
-        // 409, not a generic "create-failed" — an administrator has to be able to tell "that address is
-        // taken" from "that password was rejected", and Identity's own validation reports both the same way.
-        second.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        (await second.Content.ReadAsStringAsync()).Should().Contain("email-taken");
+            await DropUserByName(nameA);
+            await DropUserByName(nameB);
+        }
     }
 
     [SkippableFact]
@@ -153,21 +167,26 @@ public class EmailLoginAndLifecycleTests : IClassFixture<IdentityAppFactory>
         CapturedEmail.Instance.Clear();
 
         var address = $"invited-{Guid.NewGuid():N}@example.org";
-        var res = await client.PostAsJsonAsync("/identity/admin/users", new
+        var username = $"invited-{Guid.NewGuid():N}";
+        try
         {
-            username = $"invited-{Guid.NewGuid():N}", displayName = "Invited", email = address,
-            tenantId = TestFlow.TenantA, roles = new[] { "reception" },
-        });
+            var res = await client.PostAsJsonAsync("/identity/admin/users", new
+            {
+                username, displayName = "Invited", email = address,
+                tenantId = TestFlow.TenantA, roles = new[] { "reception" },
+            });
 
-        res.StatusCode.Should().Be(HttpStatusCode.Created);
-        var body = await res.Content.ReadAsStringAsync();
-        body.Should().Contain("resetLinkSent");
-        // 28.7's rule, applied to creation: there must be no moment at which the administrator knows the
-        // credential. The response is where one would leak if the endpoint ever started returning one.
-        body.Should().NotContain("password");
+            res.StatusCode.Should().Be(HttpStatusCode.Created);
+            var body = await res.Content.ReadAsStringAsync();
+            body.Should().Contain("resetLinkSent");
+            // 28.7's rule, applied to creation: there must be no moment at which the administrator knows the
+            // credential. The response is where one would leak if the endpoint ever started returning one.
+            body.Should().NotContain("password");
 
-        CapturedEmail.Instance.Sent.Should().Contain(e => e.To == address,
-            "an account nobody was told about is an account nobody can use");
+            CapturedEmail.Instance.Sent.Should().Contain(e => e.To == address,
+                "an account nobody was told about is an account nobody can use");
+        }
+        finally { await DropUserByName(username); }
     }
 
     // ---- lifecycle -------------------------------------------------------------------------------------
@@ -332,6 +351,22 @@ public class EmailLoginAndLifecycleTests : IClassFixture<IdentityAppFactory>
                 foreach (var c in set) _jar.SetCookies(uri, c);
             return response;
         }
+    }
+
+    /// <summary>
+    /// Remove an account this suite created THROUGH THE API.
+    ///
+    /// <para>`TestFlow.DeleteUser` covers the accounts SEEDED here, because seeding hands back an id. The
+    /// creation tests do not seed — creating is the thing under test — so without this they leave a real
+    /// account in the shared development database on every run. Nineteen of them had accumulated before
+    /// anybody looked, and they show up in the admin console beside real staff.</para>
+    /// </summary>
+    private async Task DropUserByName(string username)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var user = await users.FindByNameAsync(username);
+        if (user is not null) await TestFlow.DeleteUser(_factory, user.Id);
     }
 
     private sealed class Seeded(IdentityAppFactory factory, Guid id, string name, string? totpKey) : IAsyncDisposable
