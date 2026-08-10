@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Button, Card, DataTable, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { Localized, ProcedureQueueItem } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -185,7 +185,7 @@ export default function ProcedureCentre({ mode = "queue" }: { mode?: "queue" | "
           <InputField label={t(S.fCard)} value={card} onChange={(e) => setCard(e.target.value)} />
           <InputField label={t(S.fMember)} value={member} onChange={(e) => setMember(e.target.value)} />
           <InputField label={t(S.fPassport)} value={passport} onChange={(e) => setPassport(e.target.value)} />
-          <Button variant="primary" onClick={() => void verify()}>{t(S.search)}</Button>
+          <Button leadingIcon={<Icon name="search" />} variant="primary" onClick={() => void verify()}>{t(S.search)}</Button>
           <Button variant="ghost" onClick={clear}>{t(S.clear)}</Button>
         </Card>
 

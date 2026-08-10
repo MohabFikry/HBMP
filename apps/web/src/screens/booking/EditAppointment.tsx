@@ -192,7 +192,7 @@ export function EditAppointmentButton({
         footer={
           <>
             <Button variant="secondary" onClick={() => setOpen(false)}>{t(S.keep)}</Button>
-            <Button variant="primary" loading={busy} onClick={() => void save()}>{t(S.save)}</Button>
+            <Button leadingIcon={<Icon name="check2" />} variant="primary" loading={busy} onClick={() => void save()}>{t(S.save)}</Button>
           </>
         }
       >

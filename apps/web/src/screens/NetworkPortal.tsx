@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useFormat } from "../i18n/useFormat";
-import { Button, Card, DataTable, InlineAlert, InputField, KpiCard, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, InputField, KpiCard, StatusChip, useTheme } from "@mersal/design-system";
 import { useWrite, writeErrorText } from "../api/useWrite";
 import type { Column } from "@mersal/design-system";
 import type { CreateProviderInput, Localized, ProviderContract, ProviderLocation, ProviderSummary } from "@mersal/contracts";
@@ -232,7 +232,7 @@ export function NetworkOnboarding() {
                 differently from a dropped connection, because they demand opposite actions. */}
             {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
             {status === "done" && <StatusChip kind="ok" label={t(S.created)} />}
-            <div><Button type="submit" variant="primary" loading={status === "saving"}>{t(S.create)}</Button></div>
+            <div><Button leadingIcon={<Icon name="plus" />} type="submit" variant="primary" loading={status === "saving"}>{t(S.create)}</Button></div>
           </div>
         </form>
       </Card>

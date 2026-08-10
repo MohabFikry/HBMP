@@ -1384,7 +1384,7 @@ function BeneficiaryPanel({
           <h3>{t(P.title)}</h3>
           <p className="pol-muted">{t(P.intro)}</p>
         </div>
-        <Button variant="secondary" onClick={() => setEditing(true)} aria-haspopup="dialog">{t(P.edit)}</Button>
+        <Button variant="secondary" leadingIcon={<Icon name="pen" />} onClick={() => setEditing(true)} aria-haspopup="dialog">{t(P.edit)}</Button>
       </div>
 
       <dl className="reg-kv">
@@ -1503,7 +1503,7 @@ function EditDetailsModal({
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>{t(P.cancel)}</Button>
-          <Button variant="primary" onClick={submit} loading={write.busy} disabled={write.busy}>{t(P.save)}</Button>
+          <Button variant="primary" leadingIcon={<Icon name="check2" />} onClick={submit} loading={write.busy} disabled={write.busy}>{t(P.save)}</Button>
         </>
       }
     >

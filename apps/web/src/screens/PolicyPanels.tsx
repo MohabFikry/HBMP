@@ -335,7 +335,7 @@ export function NotesPanel({ api, scope, scopeRef, canAdd = true }: NotesPanelPr
             <>
               <Button variant="ghost" onClick={() => setComposing(false)} disabled={busy}>{t(S.keep)}</Button>
               {/* No optimistic UI: the note is not in the list until the server says it is (phase 18 D1). */}
-              <Button variant="primary" onClick={submit} loading={busy} disabled={busy}>
+              <Button leadingIcon={<Icon name="check2" />} variant="primary" onClick={submit} loading={busy} disabled={busy}>
                 {busy ? t(S.saving) : t(S.save)}
               </Button>
             </>

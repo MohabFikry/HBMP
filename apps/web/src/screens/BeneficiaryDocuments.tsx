@@ -338,7 +338,7 @@ function DocumentUpload({
           <Button variant="ghost" onClick={onClose} disabled={busy}>{t(S.cancelUpload)}</Button>
           {/* `form` + `type="submit"` so the footer button drives the form's own validation path — the
               required-field messages below are the form's, not a second set written for the dialog. */}
-          <Button type="submit" form="doc-upload" variant="primary" loading={busy}>{t(S.upload)}</Button>
+          <Button leadingIcon={<Icon name="upload" />} type="submit" form="doc-upload" variant="primary" loading={busy}>{t(S.upload)}</Button>
         </>
       }
     >

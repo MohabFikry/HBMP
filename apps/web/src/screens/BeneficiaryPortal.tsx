@@ -783,7 +783,7 @@ function RegisterOneMember({ policyApi }: { policyApi: PolicyApi }) {
               <span className="muted tnum">{t(S.registeredId)}: {created.id.slice(0, 8)}</span>
               {/* The two next steps ARE the message (QA P2-20). Opening the profile is also where documents
                   are filed, which is why the documents section points here. */}
-              <Button variant="ghost" size="sm" onClick={() => openProfile(created.id)}>{t(S.openProfile)}</Button>
+              <Button leadingIcon={<Icon name="user" />} variant="ghost" size="sm" onClick={() => openProfile(created.id)}>{t(S.openProfile)}</Button>
               <Button variant="ghost" size="sm" onClick={() => navigate("/beneficiaries/eligibility")}>{t(S.toEligibility)}</Button>
             </div>
           )}

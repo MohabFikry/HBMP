@@ -3,6 +3,7 @@ import {
   Button,
   Card,
   DataTable,
+  Icon,
   InputField,
   InlineAlert,
   Modal,
@@ -388,7 +389,7 @@ function OverridesTab({ membership, onChanged }: { membership: MembershipDetail;
         footer={
           <>
             <Button variant="ghost" onClick={() => setOpen(false)}>{t(S.cancel)}</Button>
-            <Button variant="primary" onClick={submit} disabled={write.busy}>{t(S.save)}</Button>
+            <Button leadingIcon={<Icon name="check2" />} variant="primary" onClick={submit} disabled={write.busy}>{t(S.save)}</Button>
           </>
         }
       >

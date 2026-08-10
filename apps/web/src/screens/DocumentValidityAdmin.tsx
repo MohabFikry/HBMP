@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Card, InlineAlert, InputField, StatusChip, useToast } from "@mersal/design-system";
+import { Button, Card, Icon, InlineAlert, InputField, StatusChip, useToast } from "@mersal/design-system";
 import type { DocumentValidityItem, DocumentValidityView, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
@@ -237,7 +237,7 @@ function KindRow({
         onChange={(e) => setWarn(e.currentTarget.value)}
       />
 
-      <Button
+      <Button leadingIcon={<Icon name="check2" />}
         variant="primary"
         loading={busy}
         disabled={daysBad || warnEmpty || warnBad || !dirty}

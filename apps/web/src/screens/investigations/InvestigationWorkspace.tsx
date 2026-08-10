@@ -817,7 +817,7 @@ export function InvestigationWorkspace({
         <Button variant="secondary" loading={busy} disabled={!allLinesHaveTests} onClick={() => void validate()}>
           {t(S.validate)}
         </Button>
-        <Button variant="primary" disabled={!canSubmit} onClick={() => void submit()}>
+        <Button leadingIcon={<Icon name="check2" />} variant="primary" disabled={!canSubmit} onClick={() => void submit()}>
           {t(S.submit)}
         </Button>
       </div>

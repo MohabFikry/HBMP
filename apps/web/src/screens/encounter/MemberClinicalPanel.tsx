@@ -222,7 +222,7 @@ function BloodGroupControl({
       footer={
         <>
           <Button variant="ghost" onClick={() => setOpen(false)}>{t(S.cancel)}</Button>
-          <Button variant="primary" loading={busy} onClick={() => void save()}>{t(S.save)}</Button>
+          <Button leadingIcon={<Icon name="check2" />} variant="primary" loading={busy} onClick={() => void save()}>{t(S.save)}</Button>
         </>
       }
     >
@@ -326,7 +326,7 @@ function AddAllergyControl({ beneficiaryId, onSaved }: { beneficiaryId: string; 
       footer={
         <>
           <Button variant="ghost" onClick={() => setOpen(false)}>{t(S.cancel)}</Button>
-          <Button
+          <Button leadingIcon={<Icon name="check2" />}
             variant="primary"
             loading={busy}
             disabled={catalogue.status === "error"}

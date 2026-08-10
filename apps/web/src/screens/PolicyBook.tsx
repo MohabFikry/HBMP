@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Card, DataTable, InlineAlert, KpiList, Pagination, StatusChip, Tabs } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, KpiList, Pagination, StatusChip, Tabs } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   MemberGroupView,
@@ -520,7 +520,7 @@ export function UtilizationScreen({
             ))}
           </select>
         </div>
-        <Button variant="secondary" onClick={exportCsv} disabled={!scopeId}>
+        <Button leadingIcon={<Icon name="download" />} variant="secondary" onClick={exportCsv} disabled={!scopeId}>
           {t(S.export)}
         </Button>
       </Card>

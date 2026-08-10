@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, Card, DataTable, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type { NetworkTierView, PolicyApi, TierAssignmentView, TierResolutionView } from "../api/policyApi";
 import { createHttpPolicyApi } from "../api/policyApi";
@@ -168,7 +168,7 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
             <input type="checkbox" checked={isOon} onChange={(e) => setIsOon(e.target.checked)} />
             {t(S.oon)}
           </label>
-          <Button
+          <Button leadingIcon={<Icon name="plus" />}
             variant="primary"
             onClick={async () => {
               try {

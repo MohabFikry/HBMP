@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Card, DataTable, InlineAlert, InputField, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, InputField, StatusChip, useTheme } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import { branchApi } from "../api/branchApi";
 import type { BranchPractitioner, FlaggedAppointment, LicenceAlert } from "../api/branchApi";
@@ -182,7 +182,7 @@ function RenewLicence({
       {validation && <InlineAlert tone="warn">{validation}</InlineAlert>}
       {write.error && <InlineAlert tone="bad">{writeErrorText(write.error, lang)}</InlineAlert>}
       <div className="row-actions">
-        <Button onClick={submit} disabled={write.busy}>
+        <Button leadingIcon={<Icon name="check2" />} onClick={submit} disabled={write.busy}>
           {t(S.save)}
         </Button>
         <Button variant="ghost" onClick={onClose}>

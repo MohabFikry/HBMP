@@ -1444,7 +1444,7 @@ function RecordVitalsModal({ encounterId, onRecorded }: { encounterId: string; o
       footer={
         <>
           <Button variant="ghost" onClick={() => setOpen(false)}>{t(S.cancel)}</Button>
-          <Button variant="primary" loading={busy} onClick={() => void submit()}>{t(S.submit)}</Button>
+          <Button leadingIcon={<Icon name="check2" />} variant="primary" loading={busy} onClick={() => void submit()}>{t(S.submit)}</Button>
         </>
       }
     >

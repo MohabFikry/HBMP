@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Button, Card, DataTable, InlineAlert, InputField, SelectField, StatusChip, Tabs, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, InputField, SelectField, StatusChip, Tabs, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   AnalyticsDelta,
@@ -529,7 +529,7 @@ function ViewPanel({
 
       {result && (
         <div className="pol-view-actions">
-          <Button variant="secondary" onClick={exportView}>
+          <Button leadingIcon={<Icon name="download" />} variant="secondary" onClick={exportView}>
             {t(S.export)}
           </Button>
         </div>

@@ -4,6 +4,7 @@ import {
   Card,
   Combobox,
   DataTable,
+  Icon,
   InlineAlert,
   InputField,
   StatusChip,
@@ -443,7 +444,7 @@ export function PractitionerAdmin() {
 
             {write.done && !incomplete && <StatusChip kind="ok" label={t(S.created)} />}
             <div>
-              <Button type="submit" variant="primary" loading={write.busy}>
+              <Button leadingIcon={<Icon name="plus" />} type="submit" variant="primary" loading={write.busy}>
                 {t(S.create)}
               </Button>
             </div>
@@ -599,7 +600,7 @@ function PractitionerPanel({
               onChange={setAddSpecialty}
             />
           </div>
-          <Button
+          <Button leadingIcon={<Icon name="plus" />}
             variant="secondary"
             disabled={!addSpecialty}
             loading={busy === "adds"}
@@ -652,7 +653,7 @@ function PractitionerPanel({
               onChange={setAddClinic}
             />
           </div>
-          <Button
+          <Button leadingIcon={<Icon name="plus" />}
             variant="secondary"
             disabled={!addClinic}
             loading={busy === "addb"}

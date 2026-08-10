@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Card, DataTable, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { Localized, Prescription } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -203,7 +203,7 @@ export function PharmacyDispense() {
           <InputField label={t(S.fMember)} {...field("memberNo")} />
           <InputField label={t(S.fPassport)} {...field("passport")} />
           <div className="rx-search-actions">
-            <Button type="submit" variant="primary" loading={busy} disabled={!canSearch}>{t(S.search)}</Button>
+            <Button leadingIcon={<Icon name="search" />} type="submit" variant="primary" loading={busy} disabled={!canSearch}>{t(S.search)}</Button>
             <Button type="button" variant="ghost" onClick={clear}>{t(S.clear)}</Button>
           </div>
         </form>
