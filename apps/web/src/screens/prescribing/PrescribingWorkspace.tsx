@@ -873,7 +873,7 @@ export function PrescribingWorkspace({
         this is the last moment changing it is free.
       */}
       {preview && (
-        <div className="rx-schedule" data-testid="chronic-schedule">
+        <div className="rx-schedule mrs-scroll mrs-scroll-focusable" tabIndex={0} data-testid="chronic-schedule">
           <h4 className="section-h">{t(S.scheduleTitle)}</h4>
           <table className="mini-table">
             <caption className="mini-table-cap sr-only">{t(S.scheduleTitle)}</caption>

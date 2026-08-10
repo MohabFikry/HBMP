@@ -422,7 +422,7 @@ function FulfilBody({
             a box would be a promise the screen cannot keep. */}
         {order.expired && <InlineAlert tone="warn">{t(S.expiredBody)}</InlineAlert>}
 
-        <div className="rx-dispense-scroll">
+        <div className="rx-dispense-scroll mrs-scroll mrs-scroll-focusable" tabIndex={0}>
           <table className="rx-dispense-table">
             <thead>
               <tr>

@@ -4307,11 +4307,17 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   gap: var(--sp3);
 }
 /* The collection schedule, shown before submit. Scrolls on its own rather than widening the page: five
-   dated columns do not fit a narrow viewport, and a body that scrolls sideways loses the composer. */
+   dated columns do not fit a narrow viewport, and a body that scrolls sideways loses the composer.
+   Per-axis overscroll, matching `.mrs-wl-scroll` rather than plain `.mrs-scroll`: `block: auto` so the page
+   keeps scrolling under a cursor that happens to be over the schedule, `inline: contain` because horizontal
+   overscroll is what browsers map to back/forward navigation — a sideways flick here must not leave the
+   composer. `.mrs-scroll` on the element brings the house scrollbar. */
 .rx-schedule {
   display: grid;
   gap: var(--sp2);
   overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  overscroll-behavior-block: auto;
 }
 /* 29.2 — what a chosen code will CREATE, stated before the doctor commits (design 45 §2). Sits under the
    combobox and above the fields, because it changes which fields are there. */
@@ -4898,9 +4904,14 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
 }
 
 /* Wide content scrolls INSIDE its own container. The page body must never scroll sideways — a counter screen
-   that shifts horizontally while a quantity is being typed is how the wrong row gets filled in. */
+   that shifts horizontally while a quantity is being typed is how the wrong row gets filled in.
+   Per-axis overscroll for the reason spelled out on `.rx-schedule` above and on `.mrs-wl-scroll`: this is a
+   block IN the page and usually the tallest thing on it, so containing the block axis would stop the page
+   scrolling wherever the cursor sat over the table. */
 .rx-dispense-scroll {
   overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  overscroll-behavior-block: auto;
 }
 
 .rx-dispense-table {

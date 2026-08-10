@@ -585,7 +585,7 @@ function DispenseBody({
           <InlineAlert tone="info">{t(S.authNote)}</InlineAlert>
         )}
 
-        <div className="rx-dispense-scroll">
+        <div className="rx-dispense-scroll mrs-scroll mrs-scroll-focusable" tabIndex={0}>
           <table className="rx-dispense-table">
             <thead>
               <tr>
