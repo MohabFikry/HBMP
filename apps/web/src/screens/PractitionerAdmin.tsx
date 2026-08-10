@@ -3,14 +3,15 @@ import {
   Button,
   Card,
   Combobox,
-  DataTable,
+  DataTableView,
   Icon,
   InlineAlert,
   InputField,
   StatusChip,
+  useTableQuery,
   useTheme,
 } from "@mersal/design-system";
-import type { Column } from "@mersal/design-system";
+import type { Column, TableFilterSpec } from "@mersal/design-system";
 import type {
   BranchSummary,
   CreatePractitionerInput,
@@ -35,6 +36,12 @@ const S = {
 
   rosterHeading: { en: "Current clinicians", ar: "الإكلينيكيون الحاليون" },
   rosterEmpty: { en: "No clinicians have been created yet.", ar: "لم يتم إنشاء أي إكلينيكي بعد." },
+  search: { en: "Search", ar: "بحث" },
+  rosterSearchHint: { en: "Name, licence number or specialty", ar: "الاسم أو رقم الترخيص أو التخصص" },
+  noMatches: {
+    en: "No clinicians match. Change the search or clear the filters.",
+    ar: "لا يوجد إكلينيكيون مطابقون. عدّل البحث أو أزل عوامل التصفية.",
+  },
   name: { en: "Name", ar: "الاسم" },
   type: { en: "Type", ar: "النوع" },
   specialty: { en: "Specialty", ar: "التخصص" },
@@ -317,6 +324,44 @@ export function PractitionerAdmin() {
     },
   ];
 
+  /*
+    The roster grows with headcount and had no way to find anybody in it.
+
+    The BOOKABLE filter is the one this screen exists for. "Bookable" is not a server field — it is the
+    conjunction the booking picker's query implies — so being able to ask for exactly the records that fail
+    it turns a column an administrator has to scan into a question they can ask.
+
+    Read outside AsyncSection's render prop: a hook in there would be conditional on the load finishing.
+  */
+  const rosterRows = useMemo(() => roster.data ?? [], [roster.data]);
+  const rosterFilters: TableFilterSpec<Practitioner>[] = useMemo(() => [
+    {
+      key: "bookable",
+      label: t(S.bookable),
+      options: [
+        { value: "no", label: t(S.notBookable) },
+        { value: "yes", label: t(S.bookable) },
+      ],
+      match: (r, value) => {
+        const bookable = Boolean(r.primarySpecialty) && r.branches.length > 0;
+        return value === "yes" ? bookable : !bookable;
+      },
+    },
+  ], [t]);
+
+  const rosterQuery = useTableQuery<Practitioner>({
+    rows: rosterRows,
+    columns: cols,
+    // Both languages of the name, and the licence number — the three things an administrator arrives with.
+    searchText: (r) => [r.name.en, r.name.ar, r.licenseNo, r.primarySpecialty].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.rosterSearchHint),
+    filters: rosterFilters,
+    pageSize: 25,
+    initialSortKey: "name",
+    persistKey: "practitioner-roster",
+  });
+
   return (
     <>
       <PageHeader title={t(S.title)} />
@@ -326,15 +371,17 @@ export function PractitionerAdmin() {
         <Card as="section" style={{ padding: "var(--sp3)" }}>
           <h2 className="section-h">{t(S.rosterHeading)}</h2>
           <AsyncSection<Practitioner[]> state={roster} isEmpty={(d) => d.length === 0} emptyLabel={S.rosterEmpty}>
-            {(rows) => (
-              <DataTable
+            {() => (
+              <DataTableView
+                query={rosterQuery}
                 columns={cols}
-                rows={rows}
                 rowKey={(r) => r.id}
                 caption={t(S.rosterHeading)}
                 interactive
                 selectedKey={selectedId ?? undefined}
                 onSelect={(r) => setSelectedId(r.id)}
+                emptyLabel={t(S.rosterEmpty)}
+                noMatchesLabel={t(S.noMatches)}
               />
             )}
           </AsyncSection>
