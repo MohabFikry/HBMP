@@ -1,8 +1,6 @@
 import { useId } from "react";
 import type { CSSProperties, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "react";
 import { Icon } from "./Icon";
-import { Select } from "./Select";
-import type { SelectOption } from "./Select";
 import { Combobox } from "./Combobox";
 import type { ComboboxOption } from "./Combobox";
 import { cx } from "../lib/cx";
@@ -56,17 +54,14 @@ function Labelled({
   style,
   requiredMark,
   hideLabel,
-  /** False when the control is not a labellable element — a <button>-based combobox names itself with
-   *  `aria-labelledby` pointing at this label, and an inert `for` on a button is worse than none. */
-  labellable = true,
   children,
-}: FieldBase & { base: string; labellable?: boolean; children: ReactNode }) {
+}: FieldBase & { base: string; children: ReactNode }) {
   return (
     <div className={cx("mrs-field", className)} style={style}>
       <label
         className={cx("mrs-label", hideLabel && "sr-only")}
         id={`${base}-label`}
-        htmlFor={labellable ? base : undefined}
+        htmlFor={base}
       >
         {label}
         {requiredMark && (
@@ -112,56 +107,6 @@ export function InputField({ label, help, error, className, style, id, hideLabel
   );
 }
 
-export interface SelectFieldProps extends FieldBase {
-  options: SelectOption[];
-  /** The chosen value, or null for "nothing chosen" — which renders `placeholder`. */
-  value: string | null;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  disabled?: boolean;
-  id?: string;
-  required?: boolean;
-}
-
-/**
- * A labelled <see cref="Select"/> — the same field contract as InputField, over the design system's own
- * listbox rather than a native &lt;select&gt;.
- *
- * ============================================================================================================
- * WHY THIS EXISTS
- * ============================================================================================================
- * Screens were pairing a bare `<label>` with a bare `<select>`, and the result was a control that ignored
- * every field token in the system: the OS drew it, so it sat at a different height from the inputs beside it,
- * kept square corners against the app's radius, and opened a system-blue option list. Next to a Mersal text
- * field it does not read as unstyled — it reads as unfinished. `Select` already solved that; what was missing
- * was the labelled wrapper, so each screen wrote its own and half of them forgot the class.
- */
-export function SelectField({
-  label, help, error, className, style, id, options, value, onChange, placeholder, disabled, required,
-  hideLabel,
-}: SelectFieldProps) {
-  const auto = useId();
-  const base = id ?? auto;
-  return (
-    <Labelled
-      label={label} help={help} error={error} base={base} className={className} style={style}
-      requiredMark={required} labellable={false} hideLabel={hideLabel}
-    >
-      {/* The trigger is a <button>, which HTML does not let a <label for> name — so the label carries an id
-          and the combobox points at it. Same visible pairing, and a screen reader announces the field name. */}
-      <Select
-        id={base}
-        options={options}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-        disabled={disabled}
-        aria-labelledby={`${base}-label`}
-      />
-    </Labelled>
-  );
-}
-
 export interface ComboboxFieldProps extends FieldBase {
   options: ComboboxOption[];
   /** The chosen value, or null for "nothing chosen" — which renders `placeholder`. */
@@ -198,17 +143,13 @@ export interface ComboboxFieldProps extends FieldBase {
  * house rule that requires assembling `<label>` + `<Combobox>` by hand is a rule the next screen will forget;
  * one that is the shortest thing to type is a rule nobody has to remember.
  *
- * ============================================================================================================
- * WHAT IT DOES THAT `SelectField` DOES NOT
- * ============================================================================================================
- * `Combobox` is built on an `<input>`, which HTML lets a `<label for>` name directly — so unlike `SelectField`
- * (whose trigger is a `<button>`, nameable only via `aria-labelledby`) this is an ordinary labelled field:
- * clicking the label focuses the control and opens the list, which is the behaviour every other field here
- * already has.
- *
- * It also wires `help` and `error` into `aria-describedby` and sets `aria-invalid`. `SelectField` does
- * neither, because `Select` accepts neither — so on that control a helper line is on screen and absent from
- * the accessible description, and an error is announced by the alert alone.
+ * `SelectField` — the select-only version this replaced — has been deleted rather than left beside it. It had
+ * no call sites once the conversion finished, and the tables/buttons audit already wrote down what an unused
+ * control costs: the first screen to reach for it invents its meaning and the second invents a different one.
+ * Its two shortcomings are worth recording because they are why this is a better default and not merely a
+ * different one: its trigger was a `<button>`, which HTML does not let a `<label for>` name, so clicking the
+ * label did nothing; and `Select` accepted no `aria-describedby`, so a helper line under it was on screen and
+ * absent from the accessible description.
  */
 export function ComboboxField({
   label, help, error, className, style, id, options, value, onChange, placeholder, disabled, required,

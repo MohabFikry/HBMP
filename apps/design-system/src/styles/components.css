@@ -1349,94 +1349,19 @@ nav.mrs-rail {
   border-color: var(--st-warn-fg);
 }
 
-/* ── Select (listbox) ────────────────────────────────────────────────────────
-   A native <select> draws its option list in the OS, not the page: the popup arrived system-blue with square
-   corners and ignored every rule we wrote. Select renders the list itself, so it can carry the Mersal
-   surface, radius, elevation and accent — and so the active row is --accent-tint instead of Highlight blue. */
-.mrs-select {
-  position: relative;
-  display: inline-flex;
-}
-.mrs-select-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp2);
-  inline-size: 100%;
-  min-block-size: 40px;
-  padding-inline: var(--sp3);
-  border: 1px solid var(--border-input, var(--border));
-  border-radius: var(--r-md);
-  background: var(--surface-1);
-  color: var(--text-1);
-  font: inherit;
-  font-weight: 500;
-  text-align: start;
-  cursor: pointer;
-}
-.mrs-select--pill .mrs-select-trigger {
-  border-radius: var(--r-pill);
-  padding-inline: var(--sp4) var(--sp3);
-}
-.mrs-select-trigger:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-.mrs-select-trigger:focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: 2px;
-}
-.mrs-select-trigger:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-/* The leading icon lives INSIDE the control so the pair reads as one object. Sized against the 40px trigger
-   rather than left at the 18px an app-bar glyph happened to be. */
-.mrs-select-trigger > svg:first-child {
-  inline-size: 20px;
-  block-size: 20px;
-  flex: none;
-  color: var(--accent);
-}
-.mrs-select-value {
-  flex: 1 1 auto;
-  min-inline-size: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.mrs-select-value.is-placeholder {
-  color: var(--text-2);
-  font-weight: 400;
-}
-.mrs-select-hint {
-  color: var(--text-2);
-  font-weight: 400;
-}
-.mrs-select-chevron {
-  inline-size: 16px;
-  block-size: 16px;
-  flex: none;
-  color: var(--text-2);
-  transition: transform 120ms ease;
-}
-.mrs-select-trigger[aria-expanded="true"] .mrs-select-chevron {
-  transform: rotate(180deg);
-}
-@media (prefers-reduced-motion: reduce) {
-  .mrs-select-chevron {
-    transition: none;
-  }
-}
-
 /*
- * The surface shared by every anchored popup — the select's list and the combobox's.
+ * The surface shared by every anchored popup. One flavour today — the combobox's option list — and written
+ * as a shared rule because the positioning contract below is generic and the next popup should inherit it
+ * rather than restate it.
  *
  * <b>What is NOT here.</b> `position`, `top`/`bottom`, `left`/`right` and the inline size arrive as inline
  * styles from `useAnchoredPopup`, because they are measurements of where the control happens to be on screen
  * rather than design decisions. Everything a designer would want to change is in this rule.
  *
- * The two lists used to carry fourteen identical declarations each. They are one rule now for the ordinary
- * reason, and for one specific one: the popup is positioned by JS, and two copies of a positioning contract
- * is two places for the anchoring to drift apart.
+ * This began as fourteen declarations copied verbatim onto two lists. One of those lists has since gone with
+ * the select-only control it belonged to; the rule stays shared for the specific reason it was extracted —
+ * the popup is positioned by JS, and two copies of a positioning contract is two places for the anchoring to
+ * drift apart.
  *
  * `pointer-events: auto` is NOT here either, and that one is worth knowing about: Radix's modal dialog sets
  * `pointer-events: none` on `<body>` while it is open, and a popup portalled to the body inherits it and
@@ -1460,47 +1385,15 @@ nav.mrs-rail {
   border-radius: var(--r-md);
   box-shadow: var(--elev-2);
 }
-/* See `.mrs-combo-list` — surface and stacking come from `.mrs-popup`. */
-.mrs-select-list {
-  min-inline-size: 100%;
-}
-.mrs-select-option {
-  display: flex;
-  align-items: center;
-  gap: var(--sp2);
-  min-block-size: 40px;
-  padding-inline: var(--sp2);
-  border-radius: var(--r-sm);
-  color: var(--text-1);
-  cursor: pointer;
-  white-space: nowrap;
-}
-/* Keyboard-active and pointer-hover are the same visual state, and it is a tint of OUR accent. */
-.mrs-select-option.is-active {
-  background: var(--accent-tint);
-}
-.mrs-select-option[aria-selected="true"] {
-  font-weight: 600;
-}
-/* Selection is carried by a check, not by colour alone (WCAG 1.4.1 — the active tint is the same hue). */
-.mrs-select-check {
-  inline-size: 16px;
-  block-size: 16px;
-  flex: none;
-  color: var(--accent);
-  visibility: hidden;
-}
-.mrs-select-option[aria-selected="true"] .mrs-select-check {
-  visibility: visible;
-}
-.mrs-select-option-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* ── Combobox (editable, filters as you type) ──────────────────────────────────────────────────────────────
-   Deliberately identical in silhouette to `Select`: the two sit side by side in the same form, and a control
-   that is a text box only because its list is long should not also LOOK like a different kind of field. */
+   THE picker. A native <select> draws its option list in the OS, not the page: the popup arrives system-blue
+   with square corners, ignores every rule we write, and ignores `data-theme` and the app's RTL treatment too.
+   This renders the list itself, so it carries the Mersal surface, radius, elevation and accent — and so the
+   active row is --accent-tint rather than Highlight blue.
+
+   It is deliberately a text box that does not LOOK like a different kind of field from the inputs beside it:
+   it is editable because its list can be long, not because it holds free text — see the component's header
+   on why a half-typed query never survives blur. */
 .mrs-combo {
   position: relative;
   inline-size: 100%;
@@ -1525,9 +1418,9 @@ nav.mrs-rail {
   line-height: 1;
 }
 /* An icon in this slot is sized against the control, not left at whatever an app-bar glyph happened to be —
-   the same treatment and the same reasoning as `.mrs-select-trigger > svg:first-child`, so the branch
-   switcher looks identical either side of the conversion. Emoji `leading` (a flag) is unaffected: it is
-   text, and keeps the font-size above. */
+   the same treatment and reasoning the select-only control used, so the branch switcher looks identical
+   either side of the conversion. Emoji `leading` (a flag) is unaffected: it is text, and keeps the
+   font-size above. */
 .mrs-combo-leading > svg {
   display: block;
   inline-size: 20px;
@@ -1551,9 +1444,9 @@ nav.mrs-rail {
   pointer-events: none;
   transition: transform 120ms ease;
 }
-/* The app-bar silhouette. Mirrors `.mrs-select--pill`, including the asymmetric inline padding: the extra
-   room goes on the leading edge, where the pill's curve eats into the text, and the trailing edge already
-   reserves space for the chevron. */
+/* The app-bar silhouette, with the asymmetric inline padding it needs: the extra room goes on the leading
+   edge, where the pill's curve eats into the text, and the trailing edge already reserves space for the
+   chevron. */
 .mrs-combo--pill .mrs-combo-input {
   border-radius: var(--r-pill);
   padding-inline-start: var(--sp4);

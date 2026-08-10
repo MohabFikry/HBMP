@@ -1961,7 +1961,7 @@ nav.mrs-rail {
 /* ── Branch switcher (app bar) ───────────────────────────────────────────────
    The control WAS a bare browser <select> beside a bold "Active branch" label: unstyled against a glass bar,
    a visible label restating what the control already shows, and — the part CSS could not fix — an option list
-   drawn by the OS in system blue. It is now the design-system Select (see .mrs-select), which owns its own
+   drawn by the OS in system blue. It is now the design-system Combobox (see .mrs-combo), which owns its own
    list; this file only sizes it for the app bar. */
 .branch-switcher {
   display: flex;
@@ -2189,7 +2189,10 @@ nav.mrs-rail {
   align-content: start;
   min-inline-size: 0;
 }
-.book-field .mrs-select {
+/* The picker fills its cell. `Combobox` is already `inline-size: 100%`, but `.book-field` is also used as a
+   `ComboboxField`'s className — where the width belongs to the field wrapper rather than to the control. */
+.book-field.mrs-field,
+.book-field .mrs-combo {
   inline-size: 100%;
 }
 /* Times wrap into a grid of equal targets — a long single column makes 09:00 and 16:45 far apart in a list

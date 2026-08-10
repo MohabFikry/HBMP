@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderDS } from "./render";
 import { Combobox, type ComboboxOption } from "../src/components/Combobox";
-import { ComboboxField, SelectField } from "../src/components/Field";
+import { ComboboxField } from "../src/components/Field";
 import { Icon } from "../src/components/Icon";
 
 /**
@@ -182,21 +182,6 @@ describe("ComboboxField is a first-class field, not a Combobox with a label stuc
     expect(control).toHaveAttribute("aria-invalid", "true");
   });
 
-  /**
-   * Not a swipe at `SelectField` — a record of the gap that justified building this. `Select` accepts no
-   * `aria-describedby`, so a helper line under a SelectField is on screen and absent from the accessible
-   * description. If that is ever fixed, this test should be deleted along with the claim.
-   */
-  it("does what SelectField cannot: SelectField's help text reaches no description", () => {
-    renderDS(
-      <SelectField
-        label="Country" help="Where the beneficiary was born"
-        options={COUNTRIES} value={null} onChange={() => {}}
-      />,
-    );
-    expect(screen.getByRole("combobox", { name: "Country" })).not.toHaveAttribute("aria-describedby");
-  });
-
   it("searches — the whole reason for the conversion", async () => {
     renderDS(<FieldHarness />);
     await userEvent.type(screen.getByRole("combobox", { name: "Country" }), "south");
@@ -214,5 +199,63 @@ describe("what the combobox refuses to do", () => {
     await userEvent.type(input(), "Sud");
     await userEvent.keyboard("{Escape}");
     expect(input()).toHaveValue("Syria");
+  });
+});
+
+/**
+ * Inherited from `Select`'s suite, which was deleted with the component.
+ *
+ * These are not combobox-specific behaviours — they are the APG contract any listbox-owning control has to
+ * keep, and they were the design system's only coverage of it. Losing them because the control that happened
+ * to be tested went away would have been a silent reduction in what the library guarantees.
+ */
+describe("the listbox contract, kept from the control this replaced", () => {
+  it("contributes no listbox at all until opened", async () => {
+    renderDS(<Harness />);
+    expect(input()).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    await userEvent.click(input());
+    expect(input()).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+  });
+
+  it("marks the current value aria-selected", async () => {
+    renderDS(<Harness value="SY" />);
+    await userEvent.click(input());
+    const list = screen.getByRole("listbox");
+    expect(within(list).getByRole("option", { name: /Syria/ })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("keeps focus on the control and tracks the active option with aria-activedescendant", async () => {
+    renderDS(<Harness />);
+    const el = input();
+    el.focus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(el).toHaveFocus();
+    expect(document.getElementById(el.getAttribute("aria-activedescendant") ?? ""))
+      .toHaveTextContent("Sudan");
+    await userEvent.keyboard("{End}");
+    expect(document.getElementById(el.getAttribute("aria-activedescendant") ?? ""))
+      .toHaveTextContent("South Sudan");
+  });
+
+  it("Escape closes without committing; Enter commits the active option", async () => {
+    const onChange = vi.fn();
+    renderDS(<Harness value="SY" onChange={onChange} />);
+    const el = input();
+    el.focus();
+    await userEvent.keyboard("{ArrowDown}{Escape}");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(el).toHaveValue("Syria");
+
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+    expect(onChange).toHaveBeenCalledWith("SD");
+  });
+
+  it("renders the placeholder when nothing is selected", () => {
+    renderDS(<Harness placeholder="Any country" />);
+    expect(input()).toHaveAttribute("placeholder", "Any country");
+    expect(input()).toHaveValue("");
   });
 });

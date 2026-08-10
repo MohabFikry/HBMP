@@ -8,7 +8,6 @@ import {
   DataTable,
   InputField,
   SegmentedControl,
-  Select,
   StatusChip,
   Tabs,
   type Column,
@@ -139,94 +138,6 @@ describe("DataTable", () => {
     expect(selected).toHaveAttribute("aria-selected", "true");
     await userEvent.click(screen.getByText("CT"));
     expect(onSelect).toHaveBeenCalledWith(rows[1]);
-  });
-});
-
-describe("Select", () => {
-  const options = [
-    { value: "a", label: "Dokki", hint: "Home" },
-    { value: "b", label: "Maadi" },
-    { value: "c", label: "Nasr City" },
-  ];
-
-  function Harness({ onChange = vi.fn(), initial = "a" as string | null }) {
-    const [v, setV] = useState<string | null>(initial);
-    return (
-      <Select
-        aria-label="Active branch"
-        options={options}
-        value={v}
-        onChange={(next) => {
-          setV(next);
-          onChange(next);
-        }}
-      />
-    );
-  }
-
-  it("is a combobox that contributes no listbox until opened", async () => {
-    renderDS(<Harness />);
-    const combo = screen.getByRole("combobox", { name: "Active branch" });
-    expect(combo).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    await userEvent.click(combo);
-    expect(combo).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("listbox")).toBeInTheDocument();
-  });
-
-  it("marks the current value aria-selected and commits a click", async () => {
-    const onChange = vi.fn();
-    renderDS(<Harness onChange={onChange} />);
-    await userEvent.click(screen.getByRole("combobox"));
-    const list = screen.getByRole("listbox");
-    expect(within(list).getByRole("option", { name: /Dokki · Home/ })).toHaveAttribute("aria-selected", "true");
-    await userEvent.click(within(list).getByRole("option", { name: "Maadi" }));
-    expect(onChange).toHaveBeenCalledWith("b");
-    // Committing closes the list and the trigger reflects the new value.
-    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    expect(screen.getByRole("combobox")).toHaveTextContent("Maadi");
-  });
-
-  it("keeps focus on the trigger and tracks the active option with aria-activedescendant", async () => {
-    renderDS(<Harness />);
-    const combo = screen.getByRole("combobox");
-    combo.focus();
-    await userEvent.keyboard("{ArrowDown}");
-    expect(combo).toHaveFocus();
-    await userEvent.keyboard("{ArrowDown}");
-    expect(document.getElementById(combo.getAttribute("aria-activedescendant") ?? "")).toHaveTextContent("Maadi");
-    await userEvent.keyboard("{End}");
-    expect(document.getElementById(combo.getAttribute("aria-activedescendant") ?? "")).toHaveTextContent("Nasr City");
-  });
-
-  it("Escape closes without committing; Enter commits the active option", async () => {
-    const onChange = vi.fn();
-    renderDS(<Harness onChange={onChange} />);
-    const combo = screen.getByRole("combobox");
-    combo.focus();
-    await userEvent.keyboard("{ArrowDown}{ArrowDown}{Escape}");
-    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    expect(onChange).not.toHaveBeenCalled();
-    expect(combo).toHaveTextContent(/Dokki/);
-
-    await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
-    expect(onChange).toHaveBeenCalledWith("b");
-  });
-
-  it("jumps by typeahead, the way a native select does", async () => {
-    renderDS(<Harness />);
-    const combo = screen.getByRole("combobox");
-    combo.focus();
-    await userEvent.keyboard("{ArrowDown}");
-    await userEvent.keyboard("n");
-    expect(document.getElementById(combo.getAttribute("aria-activedescendant") ?? "")).toHaveTextContent("Nasr City");
-  });
-
-  it("renders the placeholder when nothing is selected", () => {
-    renderDS(
-      <Select aria-label="Branch" options={options} value={null} placeholder="All branches" onChange={vi.fn()} />,
-    );
-    expect(screen.getByRole("combobox", { name: "Branch" })).toHaveTextContent("All branches");
   });
 });
 

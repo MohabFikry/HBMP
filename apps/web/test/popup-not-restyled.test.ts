@@ -8,9 +8,9 @@ import { resolve } from "node:path";
  * ============================================================================================================
  * READ THIS FIRST — THE RUNTIME EXPOSURE IS GONE, AND THE RULE IS KEPT ANYWAY
  * ============================================================================================================
- * `Select` and `Combobox` now PORTAL their option lists to `<body>` (see `Popup.tsx`), so a popup is no
- * longer a DOM descendant of the row it was opened from and cannot inherit that row's layout. The bug
- * described below can no longer happen through those two components.
+ * `Combobox` now PORTALS its option list to `<body>` (see `Popup.tsx`), so a popup is no longer a DOM
+ * descendant of the row it was opened from and cannot inherit that row's layout. The bug described below can
+ * no longer happen through that component.
  *
  * This guard stays, for two reasons, and neither is sentiment:
  *
@@ -32,8 +32,8 @@ import { resolve } from "node:path";
  *
  *     .dx-staged-list li { display: grid; grid-template-columns: auto minmax(0, 1fr) 9rem auto; }
  *
- * `Select` renders its own listbox — `<ul class="mrs-select-list"><li class="mrs-select-option">` — and that
- * popup is a DESCENDANT of the staged row it belongs to. So every option inherited the row's four-column
+ * The picker rendered its own listbox — `<ul class="…-list"><li class="…-option">` — and that popup was a
+ * DESCENDANT of the staged row it belonged to. So every option inherited the row's four-column
  * grid, the check glyph took track one, the label landed in `minmax(0, 1fr)` — which resolved to 0px once the
  * fixed 9rem track was placed — and the option's text was laid out into a zero-width box. Measured in a real
  * browser: `li` 200px wide, label 0px wide, scrollWidth 54px. Nothing was missing from the data and nothing
@@ -49,8 +49,8 @@ import { resolve } from "node:path";
  * ============================================================================================================
  * A row rule is scoped with `>` so it styles the list's own children and stops there. This is generic over
  * app.css rather than a fix pinned to `.dx-staged-list`, because the trap is the default: a descendant
- * combinator is what you get by not thinking about it, and every screen that puts a Select or a Combobox in
- * a list row walks into the same hole.
+ * combinator is what you get by not thinking about it, and every screen that puts a picker in a list row
+ * walks into the same hole.
  */
 
 const APP_CSS = resolve(__dirname, "../src/styles/app.css");
@@ -76,9 +76,9 @@ function rules(css: string): { selector: string; body: string }[] {
 /**
  * The markup a design-system popup renders, planted inside `container`.
  *
- * Both listbox flavours, because they have the same shape and the same exposure: `Select` renders
- * `.mrs-select-list > .mrs-select-option`, `Combobox` renders `.mrs-combo-list > .mrs-combo-option`, and
- * either can be opened from inside a row of any list on any screen.
+ * `Combobox` renders `.mrs-combo-list > .mrs-combo-option`, and it can be opened from inside a row of any
+ * list on any screen. There were two flavours of this markup; the select-only one went with the control it
+ * belonged to, and the shape is identical either way.
  */
 function popupInside(container: string): { el: Element; li: Element[] } {
   const host = document.createElement("div");
@@ -86,12 +86,6 @@ function popupInside(container: string): { el: Element; li: Element[] } {
     <ul class="${container}">
       <li>
         <span>row content</span>
-        <div class="mrs-select">
-          <button type="button" role="combobox"></button>
-          <ul class="mrs-select-list mrs-scroll" role="listbox">
-            <li class="mrs-select-option" role="option"><span class="mrs-select-option-label">Primary</span></li>
-          </ul>
-        </div>
         <div class="mrs-combo">
           <input class="mrs-combo-input" />
           <ul class="mrs-combo-list mrs-scroll" role="listbox">
@@ -101,7 +95,7 @@ function popupInside(container: string): { el: Element; li: Element[] } {
       </li>
     </ul>`;
   document.body.append(host);
-  return { el: host, li: [...host.querySelectorAll(".mrs-select-option, .mrs-combo-option")] };
+  return { el: host, li: [...host.querySelectorAll(".mrs-combo-option")] };
 }
 
 /**
