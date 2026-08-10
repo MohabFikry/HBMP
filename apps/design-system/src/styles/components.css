@@ -121,10 +121,6 @@ html[data-theme="dark"] .mrs-btn.mrs-primary {
   border-color: transparent;
   box-shadow: none;
 }
-.mrs-btn.mrs-warn {
-  color: var(--st-warn-fg);
-  border-color: var(--st-warn-fg);
-}
 .mrs-btn:disabled,
 .mrs-btn[aria-disabled="true"] {
   opacity: 0.5;

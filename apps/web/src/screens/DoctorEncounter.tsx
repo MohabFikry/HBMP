@@ -1570,6 +1570,7 @@ function PrescriptionsTab({
     {
       key: "actions",
       header: t(S.colActions),
+      stickyEnd: true,
       cell: (r) => (
         <span className="row-actions">
           {/*
@@ -1825,6 +1826,7 @@ function InvestigationsTab({
     {
       key: "actions",
       header: t(S.colActions),
+      stickyEnd: true,
       cell: (r) => (
         <span className="row-actions">
           {/* 31.4 — copy into the composer above. Writes nothing; see the prescriptions tab. */}

@@ -147,3 +147,37 @@ describe("the button icon policy holds across the product", () => {
     expect(offenders, "`plus` labels a creation — pick a glyph that means this action, or none").toEqual([]);
   });
 });
+
+/**
+ * A variant the design system offers and nothing uses is a level nobody has defined.
+ *
+ * `warn` was exactly that — shipped, styled, and never once reached for in the life of the product. The
+ * first screen to use it would have been inventing its meaning, and the second would have invented a
+ * different one, which is the failure this whole file is about.
+ *
+ * This lives in the WEB suite rather than the design system's, deliberately: the design system cannot see
+ * whether anything uses it, and "is this level real?" is a question only the product can answer.
+ */
+describe("every button variant the design system offers is one the product uses", () => {
+  const BUTTON_TSX = resolve(__dirname, "../../design-system/src/components/Button.tsx");
+
+  it("reads the variant union — otherwise this asserts nothing", () => {
+    const union = /export type ButtonVariant =([^;]+);/.exec(readFileSync(BUTTON_TSX, "utf8"));
+    expect(union).not.toBeNull();
+    expect(union![1].match(/"[a-z]+"/g)!.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("has a call site for each of them", () => {
+    const union = /export type ButtonVariant =([^;]+);/.exec(readFileSync(BUTTON_TSX, "utf8"))![1];
+    const variants = union.match(/"([a-z]+)"/g)!.map((v) => v.replace(/"/g, ""));
+    const all = buttons();
+    const unused = variants.filter((v) =>
+      // `secondary` is the DEFAULT, so a button can wear it without naming it.
+      v !== "secondary" && !all.some((b) => b.variant.includes(v)));
+    expect(
+      unused,
+      "this variant is offered and never used. Either a screen needs it — in which case use it and say what " +
+        "the level means — or it should come out, because an unused one gets used inconsistently later.",
+    ).toEqual([]);
+  });
+});

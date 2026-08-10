@@ -110,6 +110,7 @@ export function BranchPractitioners() {
       { key: "expiry", header: t(S.expiry), cell: (p) => p.licenseExpiry ?? t(S.none), sortable: true, sortValue: (p) => p.licenseExpiry },
       {
         key: "actions",
+      stickyEnd: true,
         header: "",
         cell: (p) => (
           <Button size="sm" variant="ghost" onClick={() => setRenewing(p)}>
