@@ -19,6 +19,7 @@ import { permissionsForRole, hasPermission, type Permission, type Role } from ".
 import { useAsync } from "../api/useAsync";
 import { AsyncSection, PageHeader, useBackTarget, useLoc, useOpenProfile } from "./_shared";
 import { SectionView } from "./ProfileSectionViews";
+import { ScrollToTop } from "../shell/ScrollToTop";
 import { useFormat } from "../i18n/useFormat";
 
 /**
@@ -221,6 +222,10 @@ export function PatientProfile({ beneficiaryId }: { beneficiaryId?: string }) {
       <AsyncSection state={state} emptyLabel={STR.empty} isEmpty={(p) => !p || p.sections.length === 0}>
         {(profile) => <ProfileBody profile={profile!} onRetry={state.reload} />}
       </AsyncSection>
+      {/* What replaced the sticky tab bar. Mounted here rather than in `AppShell` because this is the screen
+          whose affordance it is standing in for — every other screen keeps the scrolling it already had. It
+          is written to be shell-level, so promoting it later is moving this one line. */}
+      <ScrollToTop />
     </>
   );
 }

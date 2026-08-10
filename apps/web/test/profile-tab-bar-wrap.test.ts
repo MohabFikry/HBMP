@@ -13,10 +13,15 @@ import { resolve as resolvePath } from "node:path";
  * 1. `--r-pill` is 999px. On a 62px one-row track that draws the intended stadium; on a 156px three-row
  *    track the radius clamps to half the height and the whole bar renders as a lozenge with the first and
  *    last rows cut into by the curve. It looks broken, not styled.
- * 2. The bar is `position: sticky`, and `.profile-section`'s `scroll-margin-block-start` was sized against
- *    the one-row height. Wrapped, the bar is taller than the margin that compensates for it, so tabbing to
- *    a control below the fold parks it underneath the bar — WCAG 2.4.11 (Focus Not Obscured), the exact
- *    thing that margin was added to satisfy. A three-row sticky bar also holds 24% of a 360x640 viewport.
+ * 2. The bar WAS `position: sticky`, and `.profile-section`'s `scroll-margin-block-start` was sized against
+ *    the one-row height. Wrapped, the bar was taller than the margin that compensated for it, so tabbing to
+ *    a control below the fold parked it underneath the bar — WCAG 2.4.11 (Focus Not Obscured), the exact
+ *    thing that margin was added to satisfy. A three-row sticky bar also held 24% of a 360x640 viewport.
+ *
+ *    That is now fixed by removal rather than by containment: the bar does not stick at any width, and the
+ *    floating back-to-top button replaces it — which is also why the assertion below is inverted from the
+ *    one that used to live here. The button inherits the bar's stacking constraint, so that check moved
+ *    across rather than being deleted with it.
  *
  * <b>Why a static check.</b> jsdom performs no layout, so the 1129-test suite passes over both defects
  * without a flicker — there is no row count and no rendered radius for an assertion to read. The invariant
@@ -98,36 +103,36 @@ describe("the profile pill tab bar wraps safely", () => {
     ).toEqual([]);
   });
 
-  it("only sticks the tab bar at widths where it is one row", () => {
+  it("does not stick the tab bar at any width", () => {
+    // REVERSED, deliberately. This assertion used to require stickiness inside a min-width query, because the
+    // bar pinned itself and a WRAPPED pinned bar obscures the focus it scrolls to. The bar no longer pins at
+    // all — `ScrollToTop` replaced it, and works at every width instead of only above 60rem — so the defect
+    // that rule guarded against cannot arise, and the rule now guards the reverse: sticky must not creep back
+    // in, because re-adding it would silently reintroduce both the wrapped-bar and the stacking problems
+    // whose machinery has been deleted (the z-index slot, the full-bleed backdrop, the padding cancellation).
     const sticky = app.filter((r) => r.selector.includes(".profile-tabs") && STICKY.test(r.body));
-    expect(sticky.length, "the tab bar should still be sticky somewhere").toBeGreaterThan(0);
-
-    const stickyEverywhere = sticky.filter((r) => r.media === null || !WIDTH_QUERY.test(r.media));
     expect(
-      stickyEverywhere.map((r) => r.selector),
-      "sticky must be confined to a min-width query — a wrapped bar obscures the focus it scrolls to",
+      sticky.map((r) => `${r.media ?? "all widths"} { ${r.selector} }`),
+      "the profile tab bar scrolls away with its content — use the back-to-top button, not position: sticky",
     ).toEqual([]);
   });
 
-  it("stacks above the sticky table headers inside its own panels, and below every popup", () => {
-    // The bug this pins: the bar shipped at `z-index: 1`, while the worklist tables INSIDE the profile's
-    // section cards pin their own `thead th` at 5 (and `.mrs-stickyend` at 6). Same stacking context, higher
-    // number — so scrolling a section with a table slid its header straight over the tab bar. A sticky bar
-    // that other components paint through is not isolated from them, whatever its offset.
-    //
-    // The ceiling matters just as much. Popup layers (select and combobox lists at 40, and the overlays
-    // above them) MUST stay over the bar: a dropdown opened in a section card and covered by the tab bar
-    // would be a worse bug than the one being fixed. So this asserts a slot, not a floor.
+  it("keeps the back-to-top button above in-card table headers and below every popup", () => {
+    // Inherited from the sticky bar this replaced, because the constraint is the same one: the button floats
+    // over the pane, the worklist tables INSIDE the profile's section cards pin their own `thead th` at 5
+    // (and `.mrs-stickyend` at 6), and popup layers (select and combo lists at 40, overlays above) must stay
+    // over anything floating. A table header sliding over the button, or the button covering an open
+    // dropdown, are the two failures — so this asserts a SLOT, not a floor.
     const zOf = (r: Rule): number | null => {
       const m = /z-index:\s*(-?\d+)/.exec(r.body);
       return m ? Number(m[1]) : null;
     };
 
-    const bar = app
-      .filter((r) => r.selector.includes(".profile-tabs") && STICKY.test(r.body))
+    const button = app
+      .filter((r) => r.selector.trim() === ".scrolltop")
       .map(zOf)
       .filter((z): z is number => z !== null);
-    expect(bar.length, "the sticky tab bar should declare a z-index").toBeGreaterThan(0);
+    expect(button.length, "the back-to-top button should declare a z-index").toBeGreaterThan(0);
 
     // Read the neighbours rather than hard-coding 6 and 40, so this keeps holding if either layer moves.
     const stickyHeaders = components
@@ -144,9 +149,9 @@ describe("the profile pill tab bar wraps safely", () => {
 
     const floor = Math.max(...stickyHeaders);
     const ceiling = Math.min(...popups);
-    for (const z of bar) {
-      expect(z, `tab bar z-index must clear the in-card sticky headers (${floor})`).toBeGreaterThan(floor);
-      expect(z, `tab bar z-index must stay under the popup layer (${ceiling})`).toBeLessThan(ceiling);
+    for (const z of button) {
+      expect(z, `back-to-top z-index must clear the in-card sticky headers (${floor})`).toBeGreaterThan(floor);
+      expect(z, `back-to-top z-index must stay under the popup layer (${ceiling})`).toBeLessThan(ceiling);
     }
   });
 
