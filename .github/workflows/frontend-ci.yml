@@ -95,6 +95,17 @@ jobs:
         id: gate_live_bundle
         run: python3 tools/ci/check-live-bundle-clean.py
 
+      # 2026-08-10 table & button audit — the six static guards that hold the design standards.
+      #
+      # They already run in the suite above, so a VIOLATION is loud. What is not loud is DELETION: remove one
+      # and the suite goes green with one fewer file, which looks exactly like a good day. This gate names
+      # them and fails if one is gone — the same shape of hole openapi-drift fell through.
+      - name: Guard selftest (a checker that cannot fail is not a check)
+        run: python3 tools/ci/check-design-guards.py --selftest
+      - name: Design standards are still guarded
+        id: gate_design_guards
+        run: python3 tools/ci/check-design-guards.py
+
       # The heartbeat the gate-health watchdog reads to tell "passing" from "never ran". Written to its OWN
       # file: backend-ci owns gate-heartbeats.json, and an artifact from this workflow that also contained
       # backend gates would carry a stale copy of them. check-gate-freshness.py merges every
@@ -105,9 +116,12 @@ jobs:
       - name: Record gate heartbeat
         if: always()
         run: |
-          [ "${{ steps.gate_live_bundle.outcome }}" = "skipped" ] && exit 0
-          python3 tools/ci/check-gate-freshness.py --record live-bundle \
-            --state-dir .ci-state --state-file gate-heartbeats.frontend.json >/dev/null || true
+          [ "${{ steps.gate_live_bundle.outcome }}" = "skipped" ] || \
+            python3 tools/ci/check-gate-freshness.py --record live-bundle \
+              --state-dir .ci-state --state-file gate-heartbeats.frontend.json >/dev/null || true
+          [ "${{ steps.gate_design_guards.outcome }}" = "skipped" ] || \
+            python3 tools/ci/check-gate-freshness.py --record design-guards \
+              --state-dir .ci-state --state-file gate-heartbeats.frontend.json >/dev/null || true
       - name: Upload gate heartbeats
         if: always()
         continue-on-error: true

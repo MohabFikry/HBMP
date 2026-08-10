@@ -353,13 +353,24 @@ Recording this so the fix effort does not "fix" it:
 
 ### Making it stick
 
-Steps 1-11 fix the instances. The reason there are 106 instances to fix is that nothing detects a new one. Three static guards, in the shape of the existing `apps/web/test/kpi-tile-padding.test.ts`, would close it:
+Steps 1-11 fix the instances. The reason there were 106 instances to fix is that nothing detected a new one.
 
-1. **A destructive-action guard** — any `<Button>` whose handler calls an `api.*` method matching the destructive verb list must be `variant="danger"`. This is the check that would have caught H2, and the extractor written for this audit already implements it.
-2. **A table-standard guard** — an allow-list of screens permitted to use bare `DataTable`, with a stated reason per entry, so a new unbounded queue has to argue its case rather than default in.
-3. **A `numeric` guard** — a column whose `cell` renders `fmt.money` / `fmt.number` and carries `.tnum` must set `numeric: true`. Money is currently clean; without a guard it will drift back, exactly as the quantity columns did.
+**Done.** Eight static guards now read the SPA's own source and fail on the shape of each defect rather than on its instances:
 
-Each new gate belongs in `tools/ci/` and in `REQUIRED_GATES` in `check-gate-freshness.py`, per `CLAUDE.md`, so its silence alarms as well as its failure.
+| Guard | Holds |
+|---|---|
+| `apps/web/test/queue-table-view.test.tsx` | an operational queue uses `DataTableView`; a bare table needs a stated reason (H3) |
+| `apps/web/test/table-truncation.test.tsx` | a page showing a SUBSET says so — pager, total, truncation notice (H1, H4) |
+| `apps/web/test/table-sortable.test.tsx` | a sortable header actually sorts; controlled and self-sorting stay distinct (M1) |
+| `apps/web/test/table-numeric-columns.test.ts` | a column of magnitudes is aligned by the COLUMN, not by a span (L5) |
+| `apps/web/test/destructive-actions.test.tsx` | a destructive write is `danger` and confirmed; no button ships unstyled (H2, L6) |
+| `apps/web/test/button-icon-policy.test.ts` | one glyph per action class; no variant offered that nothing uses (M4, L2) |
+| `apps/web/test/button-context-rules.test.ts` | row-action size, dismiss weight beside `danger`, no selection-by-hue (M6, M7, M8) |
+| `apps/design-system/test/icons.test.ts` | one glyph per meaning; no two names drawing the same path (M5) |
+
+Each was verified non-vacuous by reintroducing the defect it is about, and several found sites the manual pass had missed — `MemberAdmin`'s `P.edit`/`P.save`, a fourth selection-by-colour site, four columns the `numeric` detector's keyword filter had skipped, and a `PractitionerAdmin` header that had offered a sort since it was written and never performed one.
+
+**The gate is about deletion, not violation.** All eight run inside the ordinary suites, so breaking one is already loud. Removing one is not: the suite goes green with one fewer file, which looks exactly like a good day — the same hole `openapi-drift` fell through when it sat red for a day because nothing said it should be *running*. So `tools/ci/check-design-guards.py` names them with the standard each holds, fails if one is gone, then runs them; it is registered in `REQUIRED_GATES` so its own silence alarms too.
 
 ---
 
