@@ -280,7 +280,7 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
         </div>
         <div>
           <Button variant="primary"
-              leadingIcon={<Icon name="download" />} onClick={doUpload} loading={busy} disabled={!file || busy}>
+              leadingIcon={<Icon name="upload" />} onClick={doUpload} loading={busy} disabled={!file || busy}>
             {t(S.upload)}
           </Button>
         </div>

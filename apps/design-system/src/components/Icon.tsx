@@ -30,6 +30,19 @@ export const iconPaths = {
    *  trail draws: looking at a record and taking a copy of it are different disclosures. */
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
   download: '<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>',
+  /**
+   * Send a file TO the server — the mirror of `download`, arrow up out of the same baseline.
+   *
+   * It had to be added because the family had no upward arrow, and the consequence was predictable: the two
+   * bulk-intake screens, whose entire purpose is putting a CSV on the server, labelled their Upload button
+   * with `download`. The glyph pointed at the floor on the one control that means "away from this machine".
+   *
+   * The SURFACE stays at the bottom — `M5 21h14`, the same line `download` drops into. A true vertical mirror
+   * would put it at the top, which reads as another arrow coming down out of something rather than one leaving
+   * the machine. What flips is the stem and the barb, so the pair differs in exactly the direction of travel:
+   * the same 12px stem, the same 5px head, one falling to the line and one rising off it.
+   */
+  upload: '<path d="M12 17V5"/><path d="m7 10 5-5 5 5"/><path d="M5 21h14"/>',
   /** Edit — a pen over its underline. `doc` was standing in for this and reads as "open a document", which is
    *  what the note affordance beside it actually does; two different actions must not share a glyph. */
   pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
