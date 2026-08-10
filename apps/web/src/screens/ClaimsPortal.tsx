@@ -62,13 +62,13 @@ export function ClaimsWorklist() {
   const [status, setStatus] = useState<string>("");
   const state = useAsync<ClaimRow[]>(() => api.claimsWorklist(status || undefined), [status]);
   const cols: Column<ClaimRow>[] = [
-    { key: "claimNo", header: t(S.claimNo), cell: (r) => <span className="tnum">{r.claimNo}</span> },
-    { key: "origin", header: t(S.origin), cell: (r) => r.origin },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "claimed", header: t(S.claimed), cell: (r) => fmt.money(r.claimedAmount), numeric: true },
-    { key: "net", header: t(S.net), cell: (r) => fmt.money(r.netPayable), numeric: true },
-    { key: "serviceFrom", header: t(S.serviceFrom), cell: (r) => <span className="tnum">{fmt.date(r.serviceDateFrom)}</span> },
-    { key: "submitted", header: t(S.submitted), cell: (r) => <span className="tnum">{fmt.date(r.submittedAt)}</span> },
+    { key: "claimNo", header: t(S.claimNo), cell: (r) => <span className="tnum">{r.claimNo}</span>, sortable: true, sortValue: (r) => r.claimNo },
+    { key: "origin", header: t(S.origin), cell: (r) => r.origin, sortable: true, sortValue: (r) => r.origin },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
+    { key: "claimed", header: t(S.claimed), cell: (r) => fmt.money(r.claimedAmount), numeric: true, sortable: true, sortValue: (r) => r.claimedAmount },
+    { key: "net", header: t(S.net), cell: (r) => fmt.money(r.netPayable), numeric: true, sortable: true, sortValue: (r) => r.netPayable },
+    { key: "serviceFrom", header: t(S.serviceFrom), cell: (r) => <span className="tnum">{fmt.date(r.serviceDateFrom)}</span>, sortable: true, sortValue: (r) => r.serviceDateFrom },
+    { key: "submitted", header: t(S.submitted), cell: (r) => <span className="tnum">{fmt.date(r.submittedAt)}</span>, sortable: true, sortValue: (r) => r.submittedAt },
   ];
   return (
     <>
@@ -103,13 +103,13 @@ export function ClaimsReconciliation() {
   const [bucket, setBucket] = useState<string>("");
   const state = useAsync<ReconciliationRow[]>(() => api.claimsReconciliation(bucket || undefined), [bucket]);
   const cols: Column<ReconciliationRow>[] = [
-    { key: "claimNo", header: t(S.claimNo), cell: (r) => <span className="tnum">{r.claimNo}</span> },
-    { key: "origin", header: t(S.origin), cell: (r) => r.origin },
-    { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.code}</span> },
-    { key: "serviceDate", header: t(S.serviceDate), cell: (r) => <span className="tnum">{fmt.date(r.serviceDate)}</span> },
-    { key: "billed", header: t(S.billed), cell: (r) => fmt.money(r.billedAmount), numeric: true },
-    { key: "allowed", header: t(S.allowed), cell: (r) => fmt.money(r.allowedAmount), numeric: true },
-    { key: "bucket", header: t(S.bucket), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    { key: "claimNo", header: t(S.claimNo), cell: (r) => <span className="tnum">{r.claimNo}</span>, sortable: true, sortValue: (r) => r.claimNo },
+    { key: "origin", header: t(S.origin), cell: (r) => r.origin, sortable: true, sortValue: (r) => r.origin },
+    { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.code}</span>, sortable: true, sortValue: (r) => r.code },
+    { key: "serviceDate", header: t(S.serviceDate), cell: (r) => <span className="tnum">{fmt.date(r.serviceDate)}</span>, sortable: true, sortValue: (r) => r.serviceDate },
+    { key: "billed", header: t(S.billed), cell: (r) => fmt.money(r.billedAmount), numeric: true, sortable: true, sortValue: (r) => r.billedAmount },
+    { key: "allowed", header: t(S.allowed), cell: (r) => fmt.money(r.allowedAmount), numeric: true, sortable: true, sortValue: (r) => r.allowedAmount },
+    { key: "bucket", header: t(S.bucket), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
   ];
   return (
     <>
@@ -143,8 +143,8 @@ export function ClaimsInsights() {
   const t = useLoc();
   const state = useAsync<ClaimsKpis>(() => api.claimsKpis(), []);
   const reasonCols: Column<{ reason: string; count: number }>[] = [
-    { key: "reason", header: t(S.reason), cell: (r) => r.reason },
-    { key: "count", header: t(S.count), cell: (r) => r.count, numeric: true },
+    { key: "reason", header: t(S.reason), cell: (r) => r.reason, sortable: true, sortValue: (r) => r.reason },
+    { key: "count", header: t(S.count), cell: (r) => r.count, numeric: true, sortable: true, sortValue: (r) => r.count },
   ];
   return (
     <>

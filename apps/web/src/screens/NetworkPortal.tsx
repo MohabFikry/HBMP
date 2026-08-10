@@ -49,11 +49,11 @@ const VALID_TYPES = ["Hospital", "Clinic", "Lab", "Pharmacy", "Imaging"] as cons
 
 function directoryColumns(t: (l: Localized) => string): Column<ProviderSummary>[] {
   return [
-    { key: "provider", header: t(S.provider), cell: (r) => r.legalName },
-    { key: "code", header: t(S.codeH), cell: (r) => <span className="tnum">{r.code}</span> },
-    { key: "type", header: t(S.typeH), cell: (r) => r.providerType },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "onboarding", header: t(S.onboarding), cell: (r) => <StatusChip kind="neu" label={r.onboardingState} /> },
+    { key: "provider", header: t(S.provider), cell: (r) => r.legalName, sortable: true, sortValue: (r) => r.legalName },
+    { key: "code", header: t(S.codeH), cell: (r) => <span className="tnum">{r.code}</span>, sortable: true, sortValue: (r) => r.code },
+    { key: "type", header: t(S.typeH), cell: (r) => r.providerType, sortable: true, sortValue: (r) => r.providerType },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
+    { key: "onboarding", header: t(S.onboarding), cell: (r) => <StatusChip kind="neu" label={r.onboardingState} />, sortable: true, sortValue: (r) => r.onboardingState },
   ];
 }
 
@@ -152,11 +152,11 @@ function ContractsPanel({ providerId, t, api }: { providerId: string; t: (l: Loc
   const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const state = useAsync<ProviderContract[]>(() => api.providerContracts(providerId), [providerId]);
   const cols: Column<ProviderContract>[] = [
-    { key: "no", header: t(S.contractNo), cell: (r) => <span className="tnum">{r.contractNo}</span> },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "from", header: t(S.from), cell: (r) => <span className="tnum">{fmt.date(r.effectiveFrom)}</span> },
+    { key: "no", header: t(S.contractNo), cell: (r) => <span className="tnum">{r.contractNo}</span>, sortable: true, sortValue: (r) => r.contractNo },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
+    { key: "from", header: t(S.from), cell: (r) => <span className="tnum">{fmt.date(r.effectiveFrom)}</span>, sortable: true, sortValue: (r) => r.effectiveFrom },
     { key: "to", header: t(S.to), cell: (r) => <span className="tnum">{r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}</span> },
-    { key: "lines", header: t(S.lines), cell: (r) => r.serviceLines, numeric: true },
+    { key: "lines", header: t(S.lines), cell: (r) => r.serviceLines, numeric: true, sortable: true, sortValue: (r) => r.serviceLines },
   ];
   return (
     <Card as="section" style={{ padding: "var(--sp3)" }}>
@@ -175,9 +175,9 @@ export function NetworkLocations() {
 function LocationsPanel({ providerId, t, api }: { providerId: string; t: (l: Localized) => string; api: ReturnType<typeof useApi> }) {
   const state = useAsync<ProviderLocation[]>(() => api.providerLocations(providerId), [providerId]);
   const cols: Column<ProviderLocation>[] = [
-    { key: "name", header: t(S.name), cell: (r) => r.name },
-    { key: "gov", header: t(S.governorate), cell: (r) => r.governorate ?? "—" },
-    { key: "addr", header: t(S.address), cell: (r) => r.address ?? "—" },
+    { key: "name", header: t(S.name), cell: (r) => r.name, sortable: true, sortValue: (r) => r.name },
+    { key: "gov", header: t(S.governorate), cell: (r) => r.governorate ?? "—", sortable: true, sortValue: (r) => r.governorate },
+    { key: "addr", header: t(S.address), cell: (r) => r.address ?? "—", sortable: true, sortValue: (r) => r.address },
     { key: "primary", header: t(S.primary), cell: (r) => (r.isPrimary ? <StatusChip kind="ok" label={t(S.primary)} /> : "—") },
   ];
   return (

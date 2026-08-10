@@ -143,14 +143,13 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
           loading={tiers === null && !error}
           emptyLabel={t(S.noTiers)}
           columns={[
-            { key: "code", header: t(S.code), cell: (r) => r.tierCode },
-            { key: "name", header: t(S.name), cell: (r) => r.nameEn },
-            { key: "rank", header: t(S.rank), cell: (r) => r.rank },
+            { key: "code", header: t(S.code), cell: (r) => r.tierCode, sortable: true, sortValue: (r) => r.tierCode },
+            { key: "name", header: t(S.name), cell: (r) => r.nameEn, sortable: true, sortValue: (r) => r.nameEn },
+            { key: "rank", header: t(S.rank), cell: (r) => r.rank, sortable: true, sortValue: (r) => r.rank },
             {
               key: "oon",
               header: t(S.oon),
-              cell: (r) => <StatusChip kind={r.isOutOfNetwork ? "warn" : "ok"} label={r.isOutOfNetwork ? t(S.oon) : "—"} />,
-            },
+              cell: (r) => <StatusChip kind={r.isOutOfNetwork ? "warn" : "ok"} label={r.isOutOfNetwork ? t(S.oon) : "—"} />, sortable: true, sortValue: (r) => Number(r.isOutOfNetwork) },
             { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
           ]}
         />
@@ -201,7 +200,7 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
             rowKey={(r) => r.assignmentId}
             emptyLabel={t(S.noAssignments)}
             columns={[
-              { key: "scope", header: t(S.scope), cell: (r) => r.scope },
+              { key: "scope", header: t(S.scope), cell: (r) => r.scope, sortable: true, sortValue: (r) => r.scope },
               { key: "ref", header: t(S.scopeRef), cell: (r) => r.scopeRef.slice(0, 8) },
               {
                 key: "window",

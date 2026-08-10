@@ -283,7 +283,7 @@ export function PractitionerAdmin() {
   }
 
   const cols: Column<Practitioner>[] = [
-    { key: "name", header: t(S.name), cell: (r) => t(r.name), sortable: true },
+    { key: "name", header: t(S.name), cell: (r) => t(r.name), sortable: true, sortValue: (r) => t(r.name) },
     { key: "type", header: t(S.type), cell: (r) => t(r.practitionerType === "Nurse" ? S.nurse : S.doctor) },
     {
       key: "specialty",

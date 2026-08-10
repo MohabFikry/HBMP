@@ -150,7 +150,7 @@ function FeatureTable({
   };
 
   const cols: Column<ProgramFeature>[] = [
-    { key: "feature", header: t(S.feature), cell: (r) => <span className="mono">{r.key}</span> },
+    { key: "feature", header: t(S.feature), cell: (r) => <span className="mono">{r.key}</span>, sortable: true, sortValue: (r) => r.key },
     {
       key: "state",
       header: t(S.state),
@@ -246,7 +246,7 @@ function LimitTable({ tenant, limits, onChanged }: { tenant: string; limits: Pro
   };
 
   const cols: Column<ProgramLimit>[] = [
-    { key: "limit", header: t(S.limit), cell: (r) => <span className="mono">{r.key}</span> },
+    { key: "limit", header: t(S.limit), cell: (r) => <span className="mono">{r.key}</span>, sortable: true, sortValue: (r) => r.key },
     // Cap and usage are read ACROSS as a pair and DOWN as two columns of magnitudes, so both are `numeric`:
     // the figures stack at the same edge and "which limit is close to its ceiling" becomes a shape rather
     // than a string comparison. They were `.tnum` in start-aligned cells, which sets the figure width and

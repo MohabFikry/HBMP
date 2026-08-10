@@ -125,9 +125,9 @@ export function PolicyPayers({ api = httpPolicyApi }: { api?: PolicyApi }) {
           loading={rows === null && !error}
           emptyLabel={t(S.noPayers)}
           columns={[
-            { key: "code", header: t(S.payerCode), cell: (r) => r.payerCode },
+            { key: "code", header: t(S.payerCode), cell: (r) => r.payerCode, sortable: true, sortValue: (r) => r.payerCode },
             { key: "name", header: t(S.name), cell: (r) => <BiName en={r.nameEn} ar={r.nameAr} /> },
-            { key: "type", header: t(S.type), cell: (r) => r.payerType },
+            { key: "type", header: t(S.type), cell: (r) => r.payerType, sortable: true, sortValue: (r) => r.payerType },
             { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
           ]}
         />
@@ -213,9 +213,9 @@ export function PolicyPlans({ api = httpPolicyApi }: { api?: PolicyApi }) {
           loading={plans === null && !error}
           emptyLabel={t(S.noPlans)}
           columns={[
-            { key: "code", header: t(S.payerCode), cell: (r) => r.planCode },
+            { key: "code", header: t(S.payerCode), cell: (r) => r.planCode, sortable: true, sortValue: (r) => r.planCode },
             { key: "name", header: t(S.name), cell: (r) => <BiName en={r.nameEn} ar={r.nameAr} /> },
-            { key: "category", header: t(S.category), cell: (r) => r.category },
+            { key: "category", header: t(S.category), cell: (r) => r.category, sortable: true, sortValue: (r) => r.category },
             { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
           ]}
         />

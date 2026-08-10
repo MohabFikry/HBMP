@@ -156,10 +156,10 @@ export function MembershipRoster() {
         </span>
       ),
     },
-    { key: "tenant", header: t(S.tenant), cell: (r) => <span className="tnum">{r.tenantId}</span> },
+    { key: "tenant", header: t(S.tenant), cell: (r) => <span className="tnum">{r.tenantId}</span>, sortable: true, sortValue: (r) => r.tenantId },
     { key: "roles", header: t(S.roles), cell: (r) => (r.roles.length ? r.roles.map((x) => x.name).join(", ") : "—") },
     { key: "level", header: t(S.level), cell: (r) => <StatusChip kind="neu" label={levelLabel(r.level, t)} /> },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
     {
       // Exceptions get their own column because they are the reviewable surface: a role is policy, an
       // exception is somebody's decision about one person, and the lapsed count is called out separately
@@ -280,7 +280,7 @@ export function MembershipDetailScreen({ membershipId, onBack }: { membershipId:
 function RolesTab({ membership }: { membership: MembershipDetail }) {
   const t = useLoc();
   const cols: Column<{ name: string; level: number | null }>[] = [
-    { key: "role", header: t(S.role), cell: (r) => r.name },
+    { key: "role", header: t(S.role), cell: (r) => r.name, sortable: true, sortValue: (r) => r.name },
     {
       key: "level",
       header: t(S.level),
@@ -343,7 +343,7 @@ function OverridesTab({ membership, onChanged }: { membership: MembershipDetail;
   };
 
   const cols: Column<MembershipOverride>[] = [
-    { key: "scope", header: t(S.scope), cell: (r) => <span className="mono">{r.scope}</span> },
+    { key: "scope", header: t(S.scope), cell: (r) => <span className="mono">{r.scope}</span>, sortable: true, sortValue: (r) => r.scope },
     {
       key: "effect",
       header: t(S.effect),
@@ -351,7 +351,7 @@ function OverridesTab({ membership, onChanged }: { membership: MembershipDetail;
       // reading the word alone (four-cue status, 21-accessibility).
       cell: (r) => <StatusChip kind={r.effect === "Deny" ? "bad" : "ok"} label={t(r.effect === "Deny" ? S.deny : S.allow)} />,
     },
-    { key: "reason", header: t(S.reason), cell: (r) => r.reason },
+    { key: "reason", header: t(S.reason), cell: (r) => r.reason, sortable: true, sortValue: (r) => r.reason },
     { key: "grantedBy", header: t(S.grantedBy), cell: (r) => <span className="muted">{r.grantedBy ?? "—"}</span> },
     {
       key: "expires",
@@ -468,7 +468,7 @@ function GrantsTab({ membership }: { membership: MembershipDetail }) {
         </span>
       ),
     },
-    { key: "from", header: t(S.from), cell: (r) => <span className="tnum">{fmt.date(r.validFrom)}</span> },
+    { key: "from", header: t(S.from), cell: (r) => <span className="tnum">{fmt.date(r.validFrom)}</span>, sortable: true, sortValue: (r) => r.validFrom },
     {
       key: "until",
       header: t(S.until),
@@ -478,7 +478,7 @@ function GrantsTab({ membership }: { membership: MembershipDetail }) {
     { key: "grantedBy", header: t(S.grantedBy), cell: (r) => <span className="muted">{r.grantedBy ?? "—"}</span> },
     // The reason is a column, not a tooltip: "covering Alexandria for October" is what makes an expiring
     // grant reviewable, and a reviewer working down a list will not hover every row.
-    { key: "reason", header: t(S.reason), cell: (r) => r.grantedReason ?? "—" },
+    { key: "reason", header: t(S.reason), cell: (r) => r.grantedReason ?? "—", sortable: true, sortValue: (r) => r.grantedReason },
   ];
 
   return (
@@ -510,8 +510,8 @@ function SessionsTab({ membership }: { membership: MembershipDetail }) {
   };
 
   const cols: Column<AccessSession>[] = [
-    { key: "device", header: t(S.device), cell: (r) => r.device },
-    { key: "signedIn", header: t(S.signedIn), cell: (r) => <span className="tnum">{fmt.dateTime(r.createdAt)}</span> },
+    { key: "device", header: t(S.device), cell: (r) => r.device, sortable: true, sortValue: (r) => r.device },
+    { key: "signedIn", header: t(S.signedIn), cell: (r) => <span className="tnum">{fmt.dateTime(r.createdAt)}</span>, sortable: true, sortValue: (r) => r.createdAt },
     {
       key: "lastSeen",
       header: t(S.lastSeen),

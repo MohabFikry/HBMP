@@ -71,13 +71,13 @@ export function FinanceUtilization() {
   const t = useLoc();
   const state = useAsync<UtilizationView>(() => api.utilization(), []);
   const cols: Column<UtilizationRow>[] = [
-    { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.serviceCode}</span> },
-    { key: "line", header: t(S.line), cell: (r) => t(r.serviceLine) },
-    { key: "category", header: t(S.category), cell: (r) => t(r.coverageCategory) },
+    { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.serviceCode}</span>, sortable: true, sortValue: (r) => r.serviceCode },
+    { key: "line", header: t(S.line), cell: (r) => t(r.serviceLine), sortable: true, sortValue: (r) => t(r.serviceLine) },
+    { key: "category", header: t(S.category), cell: (r) => t(r.coverageCategory), sortable: true, sortValue: (r) => t(r.coverageCategory) },
     { key: "provider", header: t(S.provider), cell: (r) => <span className="tnum">{r.providerRef ?? "—"}</span> },
-    { key: "authorized", header: t(S.authorized), cell: (r) => r.authorizedQty, numeric: true },
-    { key: "delivered", header: t(S.delivered), cell: (r) => r.deliveredQty, numeric: true },
-    { key: "spend", header: t(S.spend), cell: (r) => fmt.money(r.spend), numeric: true },
+    { key: "authorized", header: t(S.authorized), cell: (r) => r.authorizedQty, numeric: true, sortable: true, sortValue: (r) => r.authorizedQty },
+    { key: "delivered", header: t(S.delivered), cell: (r) => r.deliveredQty, numeric: true, sortable: true, sortValue: (r) => r.deliveredQty },
+    { key: "spend", header: t(S.spend), cell: (r) => fmt.money(r.spend), numeric: true, sortable: true, sortValue: (r) => r.spend },
   ];
   return (
     <>
@@ -110,11 +110,11 @@ export function FinanceSettlements() {
   const [selected, setSelected] = useState<string | null>(null);
 
   const cols: Column<Settlement>[] = [
-    { key: "settlement", header: t(S.settlement), cell: (r) => <span className="tnum">{r.settlementNo}</span> },
-    { key: "provider", header: t(S.provider), cell: (r) => t(r.providerName) },
+    { key: "settlement", header: t(S.settlement), cell: (r) => <span className="tnum">{r.settlementNo}</span>, sortable: true, sortValue: (r) => r.settlementNo },
+    { key: "provider", header: t(S.provider), cell: (r) => t(r.providerName), sortable: true, sortValue: (r) => t(r.providerName) },
     { key: "period", header: t(S.period), cell: (r) => <span className="tnum">{r.periodStart} → {r.periodEnd}</span> },
-    { key: "total", header: t(S.total), cell: (r) => fmt.money(r.total), numeric: true },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    { key: "total", header: t(S.total), cell: (r) => fmt.money(r.total), numeric: true, sortable: true, sortValue: (r) => r.total },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
     {
       key: "view",
       header: t(S.view),
@@ -153,11 +153,11 @@ export function FinanceSettlements() {
 function SettlementLines({ lines, t }: { lines: SettlementLine[]; t: (l: Localized) => string }) {
   const fmt = useFormat();   // 18.D2 (U7) — Africa/Cairo + the app locale
   const cols: Column<SettlementLine>[] = [
-    { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.serviceCode}</span> },
-    { key: "line", header: t(S.line), cell: (r) => t(r.serviceLine) },
-    { key: "delivered", header: t(S.delivered), cell: (r) => r.deliveredQty, numeric: true },
-    { key: "agreed", header: t(S.agreedPrice), cell: (r) => fmt.money(r.agreedUnitPrice), numeric: true },
-    { key: "total", header: t(S.lineTotal), cell: (r) => fmt.money(r.lineTotal), numeric: true },
+    { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.serviceCode}</span>, sortable: true, sortValue: (r) => r.serviceCode },
+    { key: "line", header: t(S.line), cell: (r) => t(r.serviceLine), sortable: true, sortValue: (r) => t(r.serviceLine) },
+    { key: "delivered", header: t(S.delivered), cell: (r) => r.deliveredQty, numeric: true, sortable: true, sortValue: (r) => r.deliveredQty },
+    { key: "agreed", header: t(S.agreedPrice), cell: (r) => fmt.money(r.agreedUnitPrice), numeric: true, sortable: true, sortValue: (r) => r.agreedUnitPrice },
+    { key: "total", header: t(S.lineTotal), cell: (r) => fmt.money(r.lineTotal), numeric: true, sortable: true, sortValue: (r) => r.lineTotal },
   ];
   return (
     <Card as="section" style={{ padding: "var(--sp3)" }}>

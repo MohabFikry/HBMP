@@ -675,8 +675,8 @@ function DrillPanel({ drill, onClose }: { drill: { band: string; rows: OutlierRo
         emptyLabel={t(S.empty)}
         columns={[
           { key: "member", header: t(S.memberRef), cell: (r) => r.enrollmentId.slice(0, 8) },
-          { key: "limit", header: t(S.limit), cell: (r) => fmt.money(r.limit), numeric: true },
-          { key: "consumed", header: t(S.consumed), cell: (r) => fmt.money(r.consumed), numeric: true },
+          { key: "limit", header: t(S.limit), cell: (r) => fmt.money(r.limit), numeric: true, sortable: true, sortValue: (r) => r.limit },
+          { key: "consumed", header: t(S.consumed), cell: (r) => fmt.money(r.consumed), numeric: true, sortable: true, sortValue: (r) => r.consumed },
         ]}
       />
       <Button variant="ghost" onClick={onClose}>

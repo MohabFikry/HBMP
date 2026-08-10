@@ -80,7 +80,7 @@ export function ApprovalsRegister() {
   const list = useAsync<ApprovalItem[]>(() => api.approvalWorklist(filter), [filter]);
 
   const cols: Column<ApprovalItem>[] = [
-    { key: "authNo", header: t(S.authNo), cell: (r) => <span className="tnum">{r.id}</span> },
+    { key: "authNo", header: t(S.authNo), cell: (r) => <span className="tnum">{r.id}</span>, sortable: true, sortValue: (r) => r.id },
     {
       key: "kind",
       header: t(S.kind),
@@ -93,7 +93,7 @@ export function ApprovalsRegister() {
         />
       ),
     },
-    { key: "patient", header: t(S.patient), cell: (r) => <span className="tnum">{r.patient.token}</span> },
+    { key: "patient", header: t(S.patient), cell: (r) => <span className="tnum">{r.patient.token}</span>, sortable: true, sortValue: (r) => r.patient.token },
     {
       key: "against",
       header: t(S.against),
@@ -101,8 +101,8 @@ export function ApprovalsRegister() {
       // authorization with no reference to what it was issued against is a number with nothing behind it.
       cell: (r) => <span className="tnum">{r.itemReference ?? "—"}</span>,
     },
-    { key: "source", header: t(S.source), cell: (r) => <span>{r.source}</span> },
-    { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    { key: "source", header: t(S.source), cell: (r) => <span>{r.source}</span>, sortable: true, sortValue: (r) => r.source },
+    { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
   ];
 
   return (
@@ -176,7 +176,7 @@ function Items({ authorizationId }: { authorizationId: string }) {
         </span>
       ),
     },
-    { key: "quantity", header: t(S.quantity), cell: (r) => r.quantity, numeric: true },
+    { key: "quantity", header: t(S.quantity), cell: (r) => r.quantity, numeric: true, sortable: true, sortValue: (r) => r.quantity },
     {
       key: "reason",
       header: t(S.substituted),

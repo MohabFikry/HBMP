@@ -117,7 +117,7 @@ export function BranchRoster() {
             <StatusChip kind="ok" label={t(S.adds)} />
           ),
       },
-      { key: "reason", header: t(S.reason), cell: (e) => e.reason },
+      { key: "reason", header: t(S.reason), cell: (e) => e.reason, sortable: true, sortValue: (e) => e.reason },
     ],
     [t],
   );
@@ -248,12 +248,11 @@ function RecordException({ lang, onApplied }: { lang: "en" | "ar"; onApplied: ()
               <DataTable
                 caption={t(S.impactSome)}
                 columns={[
-                  { key: "patient", header: t(S.patient), cell: (a) => a.beneficiaryName ?? a.beneficiaryId.slice(0, 8) },
+                  { key: "patient", header: t(S.patient), cell: (a) => a.beneficiaryName ?? a.beneficiaryId.slice(0, 8), sortable: true, sortValue: (a) => a.beneficiaryName },
                   {
                     key: "when",
                     header: t(S.when),
-                    cell: (a) => fmt.dateTime(a.scheduledStart),
-                  },
+                    cell: (a) => fmt.dateTime(a.scheduledStart), sortable: true, sortValue: (a) => a.scheduledStart },
                 ]}
                 rows={impact.affected}
                 rowKey={(a) => a.appointmentId}

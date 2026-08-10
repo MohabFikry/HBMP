@@ -106,9 +106,9 @@ export function BranchInventory() {
   const stockColumns: Column<StockLine>[] = useMemo(() => {
     const base: Column<StockLine>[] = [
       { key: "item", header: t(S.item), cell: (l) => (lang === "ar" ? l.nameAr : l.nameEn) },
-      { key: "sku", header: t(S.sku), cell: (l) => l.sku },
+      { key: "sku", header: t(S.sku), cell: (l) => l.sku, sortable: true, sortValue: (l) => l.sku },
       { key: "onHand", header: t(S.onHand), cell: (l) => `${l.onHand} ${l.unitOfMeasure}` },
-      { key: "reorder", header: t(S.reorder), cell: (l) => String(l.reorderLevel) },
+      { key: "reorder", header: t(S.reorder), cell: (l) => String(l.reorderLevel), sortable: true, sortValue: (l) => l.reorderLevel },
       {
         key: "status",
         header: t(S.stockStatus),
@@ -128,8 +128,8 @@ export function BranchInventory() {
     return medical
       ? [
           base[0], base[1],
-          { key: "batch", header: t(S.batch), cell: (l) => l.batchNo ?? "—" },
-          { key: "expiry", header: t(S.expiry), cell: (l) => l.expiryDate ?? "—" },
+          { key: "batch", header: t(S.batch), cell: (l) => l.batchNo ?? "—", sortable: true, sortValue: (l) => l.batchNo },
+          { key: "expiry", header: t(S.expiry), cell: (l) => l.expiryDate ?? "—", sortable: true, sortValue: (l) => l.expiryDate },
           ...base.slice(2),
         ]
       : base;
@@ -137,12 +137,12 @@ export function BranchInventory() {
 
   const movementColumns: Column<Movement>[] = useMemo(
     () => [
-      { key: "when", header: t(S.when), cell: (m) => fmt.dateTime(m.occurredAt) },
-      { key: "kind", header: t(S.kind), cell: (m) => m.kind },
+      { key: "when", header: t(S.when), cell: (m) => fmt.dateTime(m.occurredAt), sortable: true, sortValue: (m) => m.occurredAt },
+      { key: "kind", header: t(S.kind), cell: (m) => m.kind, sortable: true, sortValue: (m) => m.kind },
       // The SIGN is shown, because it is what makes the running total explicable: +40, −15, −6.
       { key: "qty", header: t(S.quantity), cell: (m) => (m.quantity > 0 ? `+${m.quantity}` : String(m.quantity)) },
-      { key: "reason", header: t(S.reason), cell: (m) => m.reason ?? "—" },
-      { key: "actor", header: t(S.actor), cell: (m) => m.actor },
+      { key: "reason", header: t(S.reason), cell: (m) => m.reason ?? "—", sortable: true, sortValue: (m) => m.reason },
+      { key: "actor", header: t(S.actor), cell: (m) => m.actor, sortable: true, sortValue: (m) => m.actor },
     ],
     [t, lang, fmt],
   );

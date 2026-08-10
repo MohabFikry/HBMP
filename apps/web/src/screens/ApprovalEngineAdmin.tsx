@@ -354,7 +354,7 @@ function RuleTable({ rules }: { rules: ApprovalRule[] }) {
   const fmt = useFormat();
 
   const cols: Column<ApprovalRule>[] = [
-    { key: "order", header: t(S.order), cell: (r) => r.priority, numeric: true },
+    { key: "order", header: t(S.order), cell: (r) => r.priority, numeric: true, sortable: true, sortValue: (r) => r.priority },
     { key: "when", header: t(S.when), cell: (r) => <span className="mono">{describe(r.predicate, t)}</span> },
     { key: "then", header: t(S.then), cell: (r) => <strong>{describeAction(r.action)}</strong> },
     {
@@ -368,7 +368,7 @@ function RuleTable({ rules }: { rules: ApprovalRule[] }) {
             ? <StatusChip kind="ok" label={t(S.live)} />
             : <StatusChip kind="warn" label={t(S.disabled)} />,
     },
-    { key: "why", header: t(S.why), cell: (r) => r.rationale },
+    { key: "why", header: t(S.why), cell: (r) => r.rationale, sortable: true, sortValue: (r) => r.rationale },
   ];
 
   return (

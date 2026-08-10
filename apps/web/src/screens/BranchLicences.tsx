@@ -79,8 +79,8 @@ export function BranchPractitioners() {
   const columns: Column<BranchPractitioner>[] = useMemo(
     () => [
       { key: "name", header: t(S.name), cell: (p) => (lang === "ar" ? p.fullNameAr : p.fullNameEn) },
-      { key: "type", header: t(S.type), cell: (p) => p.practitionerType },
-      { key: "specialty", header: t(S.specialty), cell: (p) => p.primarySpecialty ?? t(S.none) },
+      { key: "type", header: t(S.type), cell: (p) => p.practitionerType, sortable: true, sortValue: (p) => p.practitionerType },
+      { key: "specialty", header: t(S.specialty), cell: (p) => p.primarySpecialty ?? t(S.none), sortable: true, sortValue: (p) => p.primarySpecialty },
       {
         key: "status",
         header: t(S.status),
@@ -98,9 +98,8 @@ export function BranchPractitioners() {
         header: t(S.licenceNo),
         // A masked licence renders as words, not as a blank cell: "not shown to you" is a different fact
         // from "none recorded", and a blank makes them look the same.
-        cell: (p) => p.licenseNo ?? <span className="muted">{t(S.masked)}</span>,
-      },
-      { key: "expiry", header: t(S.expiry), cell: (p) => p.licenseExpiry ?? t(S.none) },
+        cell: (p) => p.licenseNo ?? <span className="muted">{t(S.masked)}</span>, sortable: true, sortValue: (p) => p.licenseNo },
+      { key: "expiry", header: t(S.expiry), cell: (p) => p.licenseExpiry ?? t(S.none), sortable: true, sortValue: (p) => p.licenseExpiry },
       {
         key: "actions",
         header: "",
@@ -214,7 +213,7 @@ export function BranchLicenceAlerts() {
   const alertColumns: Column<LicenceAlert>[] = useMemo(
     () => [
       { key: "name", header: t(S.name), cell: (a) => (lang === "ar" ? a.fullNameAr : a.fullNameEn) },
-      { key: "type", header: t(S.type), cell: (a) => a.practitionerType },
+      { key: "type", header: t(S.type), cell: (a) => a.practitionerType, sortable: true, sortValue: (a) => a.practitionerType },
       {
         key: "status",
         header: t(S.status),
@@ -227,17 +226,17 @@ export function BranchLicenceAlerts() {
           />
         ),
       },
-      { key: "expiry", header: t(S.expiry), cell: (a) => a.licenseExpiry ?? t(S.none) },
-      { key: "clinics", header: t(S.clinics), cell: (a) => String(a.branches.length) },
+      { key: "expiry", header: t(S.expiry), cell: (a) => a.licenseExpiry ?? t(S.none), sortable: true, sortValue: (a) => a.licenseExpiry },
+      { key: "clinics", header: t(S.clinics), cell: (a) => String(a.branches.length), sortable: true, sortValue: (a) => a.branches.length },
     ],
     [t, lang],
   );
 
   const flaggedColumns: Column<FlaggedAppointment>[] = useMemo(
     () => [
-      { key: "patient", header: t(S.patient), cell: (a) => a.beneficiaryName ?? a.beneficiaryId.slice(0, 8) },
-      { key: "when", header: t(S.when), cell: (a) => fmt.dateTime(a.scheduledStart) },
-      { key: "flaggedSince", header: t(S.flaggedSince), cell: (a) => fmt.date(a.reassignmentNeededAt) },
+      { key: "patient", header: t(S.patient), cell: (a) => a.beneficiaryName ?? a.beneficiaryId.slice(0, 8), sortable: true, sortValue: (a) => a.beneficiaryName },
+      { key: "when", header: t(S.when), cell: (a) => fmt.dateTime(a.scheduledStart), sortable: true, sortValue: (a) => a.scheduledStart },
+      { key: "flaggedSince", header: t(S.flaggedSince), cell: (a) => fmt.date(a.reassignmentNeededAt), sortable: true, sortValue: (a) => a.reassignmentNeededAt },
       {
         key: "status",
         header: t(S.status),

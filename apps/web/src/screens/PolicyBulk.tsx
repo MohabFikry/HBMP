@@ -353,8 +353,8 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
                 rowKey={(r) => String(r.rowNumber)}
                 density="compact"
                 columns={[
-                  { key: "row", header: t(S.rowNo), cell: (r) => r.rowNumber },
-                  { key: "code", header: t(S.code), cell: (r) => <StatusChip kind="bad" label={r.code} /> },
+                  { key: "row", header: t(S.rowNo), cell: (r) => r.rowNumber, sortable: true, sortValue: (r) => r.rowNumber },
+                  { key: "code", header: t(S.code), cell: (r) => <StatusChip kind="bad" label={r.code} />, sortable: true, sortValue: (r) => r.code },
                   { key: "detail", header: t(S.detail), cell: (r) => (lang === "ar" ? r.detailAr : r.detailEn) },
                 ]}
               />
@@ -370,7 +370,7 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
                 rowKey={(r) => String(r.rowNumber)}
                 density="compact"
                 columns={[
-                  { key: "row", header: t(S.rowNo), cell: (r) => r.rowNumber },
+                  { key: "row", header: t(S.rowNo), cell: (r) => r.rowNumber, sortable: true, sortValue: (r) => r.rowNumber },
                   { key: "summary", header: t(S.detail), cell: (r) => (lang === "ar" ? r.summaryAr : r.summaryEn) },
                 ]}
               />

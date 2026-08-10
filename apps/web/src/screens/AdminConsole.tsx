@@ -111,14 +111,13 @@ export function AdminUsers() {
   const bindings = useAsync<RoleBinding[]>(() => api.accessMatrix(), []);
 
   const userCols: Column<IdentityUser>[] = [
-    { key: "username", header: t(S.username), cell: (r) => <span>{r.username}</span> },
-    { key: "displayName", header: t(S.displayName), cell: (r) => r.displayName },
+    { key: "username", header: t(S.username), cell: (r) => <span>{r.username}</span>, sortable: true, sortValue: (r) => r.username },
+    { key: "displayName", header: t(S.displayName), cell: (r) => r.displayName, sortable: true, sortValue: (r) => r.displayName },
     { key: "roles", header: t(S.role), cell: (r) => (r.roles.length ? r.roles.join(", ") : "—") },
     {
       key: "active",
       header: t(S.status),
-      cell: (r) => <StatusChip kind={r.isActive ? "ok" : "neu"} label={t(r.isActive ? S.active : S.deprovisioned)} />,
-    },
+      cell: (r) => <StatusChip kind={r.isActive ? "ok" : "neu"} label={t(r.isActive ? S.active : S.deprovisioned)} />, sortable: true, sortValue: (r) => Number(r.isActive) },
     {
       // Text label as well as chip kind: an administrator scans this column looking for the accounts that
       // CANNOT satisfy MFA, and colour alone would not carry that (21-accessibility).
@@ -129,12 +128,12 @@ export function AdminUsers() {
   ];
 
   const bindingCols: Column<RoleBinding>[] = [
-    { key: "subject", header: t(S.subject), cell: (r) => <span className="tnum">{r.subjectToken}</span> },
-    { key: "role", header: t(S.role), cell: (r) => r.role },
-    { key: "scope", header: t(S.scope), cell: (r) => r.scope },
-    { key: "tier", header: t(S.tier), cell: (r) => <StatusChip kind="neu" label={r.tier} /> },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "reviewDue", header: t(S.reviewDue), cell: (r) => <span className="tnum">{fmt.date(r.reviewDueAt)}</span> },
+    { key: "subject", header: t(S.subject), cell: (r) => <span className="tnum">{r.subjectToken}</span>, sortable: true, sortValue: (r) => r.subjectToken },
+    { key: "role", header: t(S.role), cell: (r) => r.role, sortable: true, sortValue: (r) => r.role },
+    { key: "scope", header: t(S.scope), cell: (r) => r.scope, sortable: true, sortValue: (r) => r.scope },
+    { key: "tier", header: t(S.tier), cell: (r) => <StatusChip kind="neu" label={r.tier} />, sortable: true, sortValue: (r) => r.tier },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
+    { key: "reviewDue", header: t(S.reviewDue), cell: (r) => <span className="tnum">{fmt.date(r.reviewDueAt)}</span>, sortable: true, sortValue: (r) => r.reviewDueAt },
   ];
 
   return (
@@ -172,14 +171,14 @@ export function AdminPolicies() {
   const state = useAsync<SodConflict[]>(() => api.sodMatrix(), []);
   const scopes = useAsync<RoleScopeGrant[]>(() => api.identityRoleScopes(), []);
   const scopeCols: Column<RoleScopeGrant>[] = [
-    { key: "role", header: t(S.role), cell: (r) => <StatusChip kind="neu" label={r.role} /> },
-    { key: "count", header: t(S.scopeCount), cell: (r) => r.scopes.length, numeric: true },
+    { key: "role", header: t(S.role), cell: (r) => <StatusChip kind="neu" label={r.role} />, sortable: true, sortValue: (r) => r.role },
+    { key: "count", header: t(S.scopeCount), cell: (r) => r.scopes.length, numeric: true, sortable: true, sortValue: (r) => r.scopes.length },
     { key: "scopes", header: t(S.scopes), cell: (r) => <span>{r.scopes.length ? r.scopes.join(" · ") : "—"}</span> },
   ];
   const cols: Column<SodConflict>[] = [
-    { key: "roleA", header: t(S.roleA), cell: (r) => <StatusChip kind="info" label={r.roleA} /> },
-    { key: "roleB", header: t(S.roleB), cell: (r) => <StatusChip kind="warn" label={r.roleB} /> },
-    { key: "reason", header: t(S.reason), cell: (r) => r.reason },
+    { key: "roleA", header: t(S.roleA), cell: (r) => <StatusChip kind="info" label={r.roleA} />, sortable: true, sortValue: (r) => r.roleA },
+    { key: "roleB", header: t(S.roleB), cell: (r) => <StatusChip kind="warn" label={r.roleB} />, sortable: true, sortValue: (r) => r.roleB },
+    { key: "reason", header: t(S.reason), cell: (r) => r.reason, sortable: true, sortValue: (r) => r.reason },
   ];
   return (
     <>
@@ -208,10 +207,10 @@ export function AdminTenants() {
   const t = useLoc();
   const state = useAsync<TenantSummary[]>(() => api.adminTenants(), []);
   const cols: Column<TenantSummary>[] = [
-    { key: "name", header: t(S.tenant), cell: (r) => r.name },
-    { key: "id", header: "ID", cell: (r) => <span className="tnum muted">{r.id}</span> },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "created", header: t(S.created), cell: (r) => <span className="tnum">{fmt.date(r.createdAt)}</span> },
+    { key: "name", header: t(S.tenant), cell: (r) => r.name, sortable: true, sortValue: (r) => r.name },
+    { key: "id", header: "ID", cell: (r) => <span className="tnum muted">{r.id}</span>, sortable: true, sortValue: (r) => r.id },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
+    { key: "created", header: t(S.created), cell: (r) => <span className="tnum">{fmt.date(r.createdAt)}</span>, sortable: true, sortValue: (r) => r.createdAt },
   ];
   return (
     <>
@@ -234,17 +233,17 @@ export function AdminGovernance() {
   const grants = useAsync<BreakGlassGrant[]>(() => api.breakGlassGrants(), []);
 
   const campCols: Column<AccessReviewCampaign>[] = [
-    { key: "name", header: t(S.campaign), cell: (r) => r.name },
+    { key: "name", header: t(S.campaign), cell: (r) => r.name, sortable: true, sortValue: (r) => r.name },
     { key: "minTier", header: t(S.minTier), cell: (r) => <StatusChip kind="neu" label={r.minTier ?? "—"} /> },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "due", header: t(S.due), cell: (r) => <span className="tnum">{fmt.date(r.dueAt)}</span> },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
+    { key: "due", header: t(S.due), cell: (r) => <span className="tnum">{fmt.date(r.dueAt)}</span>, sortable: true, sortValue: (r) => r.dueAt },
   ];
   const bgCols: Column<BreakGlassGrant>[] = [
-    { key: "requester", header: t(S.requester), cell: (r) => <span className="tnum">{r.requesterToken}</span> },
-    { key: "reasonCode", header: t(S.reasonCode), cell: (r) => r.reasonCode },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "requested", header: t(S.requested), cell: (r) => <span className="tnum">{fmt.date(r.requestedAt)}</span> },
-    { key: "expires", header: t(S.expires), cell: (r) => <span className="tnum">{fmt.date(r.expiresAt)}</span> },
+    { key: "requester", header: t(S.requester), cell: (r) => <span className="tnum">{r.requesterToken}</span>, sortable: true, sortValue: (r) => r.requesterToken },
+    { key: "reasonCode", header: t(S.reasonCode), cell: (r) => r.reasonCode, sortable: true, sortValue: (r) => r.reasonCode },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
+    { key: "requested", header: t(S.requested), cell: (r) => <span className="tnum">{fmt.date(r.requestedAt)}</span>, sortable: true, sortValue: (r) => r.requestedAt },
+    { key: "expires", header: t(S.expires), cell: (r) => <span className="tnum">{fmt.date(r.expiresAt)}</span>, sortable: true, sortValue: (r) => r.expiresAt },
   ];
   return (
     <>
@@ -274,11 +273,11 @@ export function AdminMasterData() {
   const t = useLoc();
   const state = useAsync<MasterDataVersion[]>(() => api.adminMasterData(), []);
   const cols: Column<MasterDataVersion>[] = [
-    { key: "system", header: t(S.system), cell: (r) => <span className="tnum">{r.system}</span> },
-    { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.code}</span> },
+    { key: "system", header: t(S.system), cell: (r) => <span className="tnum">{r.system}</span>, sortable: true, sortValue: (r) => r.system },
+    { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.code}</span>, sortable: true, sortValue: (r) => r.code },
     { key: "version", header: t(S.version), cell: (r) => <span className="tnum">v{r.versionNo}</span> },
-    { key: "retired", header: t(S.retired), cell: (r) => <StatusChip kind={r.retired ? "warn" : "ok"} label={r.retired ? t(S.retired) : "—"} /> },
-    { key: "effective", header: t(S.effective), cell: (r) => <span className="tnum">{fmt.date(r.effectiveFrom)}</span> },
+    { key: "retired", header: t(S.retired), cell: (r) => <StatusChip kind={r.retired ? "warn" : "ok"} label={r.retired ? t(S.retired) : "—"} />, sortable: true, sortValue: (r) => Number(r.retired) },
+    { key: "effective", header: t(S.effective), cell: (r) => <span className="tnum">{fmt.date(r.effectiveFrom)}</span>, sortable: true, sortValue: (r) => r.effectiveFrom },
   ];
   return (
     <>
@@ -299,9 +298,9 @@ export function AdminConfig() {
   const state = useAsync<SystemConfigEntry[]>(() => api.adminSystemConfig(), []);
   const cols: Column<SystemConfigEntry>[] = [
     { key: "scope", header: t(S.scope2), cell: (r) => (r.tenantId === "*" ? <StatusChip kind="info" label={t(S.platform)} /> : <span className="tnum muted">{r.tenantId.slice(0, 8)}</span>) },
-    { key: "key", header: t(S.key), cell: (r) => <span className="tnum">{r.key}</span> },
-    { key: "type", header: t(S.type), cell: (r) => <StatusChip kind="neu" label={r.type} /> },
-    { key: "value", header: t(S.value), cell: (r) => <span className="tnum">{r.value}</span> },
+    { key: "key", header: t(S.key), cell: (r) => <span className="tnum">{r.key}</span>, sortable: true, sortValue: (r) => r.key },
+    { key: "type", header: t(S.type), cell: (r) => <StatusChip kind="neu" label={r.type} />, sortable: true, sortValue: (r) => r.type },
+    { key: "value", header: t(S.value), cell: (r) => <span className="tnum">{r.value}</span>, sortable: true, sortValue: (r) => r.value },
     { key: "version", header: t(S.version), cell: (r) => <span className="tnum">v{r.versionNo}</span> },
   ];
   return (

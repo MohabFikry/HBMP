@@ -75,8 +75,8 @@ export function Notifications() {
       ),
     },
     { key: "ref", header: t(S.ref), cell: (r) => (r.entityRef ? <span className="tnum">{r.entityRef}</span> : <span className="muted">—</span>) },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "received", header: t(S.received), cell: (r) => <span className="tnum">{fmt.dateTime(r.createdAt)}</span> },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
+    { key: "received", header: t(S.received), cell: (r) => <span className="tnum">{fmt.dateTime(r.createdAt)}</span>, sortable: true, sortValue: (r) => r.createdAt },
     {
       key: "action",
       header: t(S.action),

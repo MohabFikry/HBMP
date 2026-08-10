@@ -152,12 +152,12 @@ export function LabQueue({ kind }: { kind: "lab" | "radiology" }) {
   const cols: Column<LabOrder>[] = [
     // The order's own reference. A technician reads it back to the patient and writes it on the sample; the
     // internal id is not a thing anyone downstream has seen.
-    { key: "orderNo", header: t(S.ref), cell: (r) => <span className="tnum">{r.orderNo}</span> },
+    { key: "orderNo", header: t(S.ref), cell: (r) => <span className="tnum">{r.orderNo}</span>, sortable: true, sortValue: (r) => r.orderNo },
     { key: "test", header: t(S.test), cell: (r) => <span><span className="tnum">{r.test.code}</span> · {t(r.test.label)}</span> },
-    { key: "patient", header: t(S.patient), cell: (r) => <span className="tnum">{r.patient.token}</span> },
-    { key: "priority", header: t(S.priority), cell: (r) => <StatusChip kind={PRIORITY_KIND[r.priority]} label={r.priority} /> },
+    { key: "patient", header: t(S.patient), cell: (r) => <span className="tnum">{r.patient.token}</span>, sortable: true, sortValue: (r) => r.patient.token },
+    { key: "priority", header: t(S.priority), cell: (r) => <StatusChip kind={PRIORITY_KIND[r.priority]} label={r.priority} />, sortable: true, sortValue: (r) => r.priority },
     { key: "progress", header: t(S.progress), cell: (r) => <span className="tnum">{r.panelsDone}/{r.panelsTotal}</span> },
-    { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
     {
       key: "action",
       header: t(S.action),

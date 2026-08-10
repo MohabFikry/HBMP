@@ -95,7 +95,7 @@ export function ApprovalsWorklist() {
   const selectedRow = (worklist.data ?? []).find((r) => r.id === selected) ?? null;
 
   const cols: Column<ApprovalItem>[] = [
-    { key: "patient", header: t(S.patient), cell: (r) => <span className="tnum">{r.patient.token}</span> },
+    { key: "patient", header: t(S.patient), cell: (r) => <span className="tnum">{r.patient.token}</span>, sortable: true, sortValue: (r) => r.patient.token },
     {
       key: "service",
       header: t(S.service),
@@ -112,7 +112,7 @@ export function ApprovalsWorklist() {
           <span><span className="tnum">{r.service.code}</span> · {t(r.service.label)}</span>
         ),
     },
-    { key: "priority", header: t(S.priority), cell: (r) => <StatusChip kind={PRIORITY_KIND[r.priority]} label={r.priority} /> },
+    { key: "priority", header: t(S.priority), cell: (r) => <StatusChip kind={PRIORITY_KIND[r.priority]} label={r.priority} />, sortable: true, sortValue: (r) => r.priority },
     {
       key: "sla",
       header: t(S.sla),
@@ -127,8 +127,8 @@ export function ApprovalsWorklist() {
           <span className="tnum">{t(S.dueIn)} {r.sla.minutesRemaining} {t(S.min)}</span>
         ),
     },
-    { key: "cost", header: t(S.cost), cell: (r) => r.estimatedCost, numeric: true },
-    { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    { key: "cost", header: t(S.cost), cell: (r) => r.estimatedCost, numeric: true, sortable: true, sortValue: (r) => r.estimatedCost },
+    { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
     {
       key: "review",
       header: t(S.action),

@@ -281,9 +281,9 @@ function PolicyPlansTab({ api, policyId }: { api: PolicyApi; policyId: string })
               </>
             ),
           },
-          { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}` },
-          { key: "members", header: t(S.members), cell: (r) => fmt.number(r.memberCount), numeric: true },
-          { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
+          { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`, sortable: true, sortValue: (r) => r.effectiveFrom },
+          { key: "members", header: t(S.members), cell: (r) => fmt.number(r.memberCount), numeric: true, sortable: true, sortValue: (r) => r.memberCount },
+          { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} />, sortable: true, sortValue: (r) => r.status },
         ]}
       />
     </Card>
@@ -313,11 +313,11 @@ function PolicyGroupsTab({ api, policyId }: { api: PolicyApi; policyId: string }
         loading={rows === null && !error}
         emptyLabel={t(S.noGroups)}
         columns={[
-          { key: "code", header: t(S.groupCode), cell: (r) => r.groupCode },
-          { key: "name", header: t(S.groupName), cell: (r) => r.nameEn },
-          { key: "type", header: t(S.groupType), cell: (r) => r.groupType },
-          { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}` },
-          { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
+          { key: "code", header: t(S.groupCode), cell: (r) => r.groupCode, sortable: true, sortValue: (r) => r.groupCode },
+          { key: "name", header: t(S.groupName), cell: (r) => r.nameEn, sortable: true, sortValue: (r) => r.nameEn },
+          { key: "type", header: t(S.groupType), cell: (r) => r.groupType, sortable: true, sortValue: (r) => r.groupType },
+          { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`, sortable: true, sortValue: (r) => r.effectiveFrom },
+          { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} />, sortable: true, sortValue: (r) => r.status },
         ]}
       />
     </Card>
@@ -414,10 +414,10 @@ export function ScopeUtilizationPanel({
                 rowKey={(r) => r.enrollmentId}
                 density="compact"
                 columns={[
-                  { key: "member", header: t(S.memberNo), cell: (r) => r.memberNo },
-                  { key: "consumed", header: t(S.totalConsumed), cell: (r) => fmt.money(r.totalConsumed), numeric: true },
+                  { key: "member", header: t(S.memberNo), cell: (r) => r.memberNo, sortable: true, sortValue: (r) => r.memberNo },
+                  { key: "consumed", header: t(S.totalConsumed), cell: (r) => fmt.money(r.totalConsumed), numeric: true, sortable: true, sortValue: (r) => r.totalConsumed },
                   { key: "limit", header: t(S.totalLimit), cell: (r) => (r.anyUnlimited ? "∞" : fmt.money(r.totalLimit)), numeric: true },
-                  { key: "pct", header: t(S.used), cell: (r) => (r.percentUsed != null ? `${Math.round(r.percentUsed)}%` : "—") },
+                  { key: "pct", header: t(S.used), cell: (r) => (r.percentUsed != null ? `${Math.round(r.percentUsed)}%` : "—"), sortable: true, sortValue: (r) => r.percentUsed },
                 ]}
               />
             </>
@@ -601,10 +601,10 @@ export function GroupsScreen({ api = httpPolicyApi }: { api?: PolicyApi }) {
           onSelect={(r) => setSelected(r.groupId)}
           emptyLabel={t(S.noGroups)}
           columns={[
-            { key: "code", header: t(S.groupCode), cell: (r) => r.groupCode },
-            { key: "name", header: t(S.groupName), cell: (r) => r.nameEn },
-            { key: "type", header: t(S.groupType), cell: (r) => r.groupType },
-            { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}` },
+            { key: "code", header: t(S.groupCode), cell: (r) => r.groupCode, sortable: true, sortValue: (r) => r.groupCode },
+            { key: "name", header: t(S.groupName), cell: (r) => r.nameEn, sortable: true, sortValue: (r) => r.nameEn },
+            { key: "type", header: t(S.groupType), cell: (r) => r.groupType, sortable: true, sortValue: (r) => r.groupType },
+            { key: "window", header: t(S.window), cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`, sortable: true, sortValue: (r) => r.effectiveFrom },
           ]}
         />
       </Card>

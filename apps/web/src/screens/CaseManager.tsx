@@ -64,11 +64,11 @@ export function MyCases() {
   const [selected, setSelected] = useState<string | null>(null);
 
   const cols: Column<CaseListItem>[] = [
-    { key: "caseNo", header: t(S.caseNo), cell: (r) => <span className="tnum">{r.caseNo}</span> },
-    { key: "beneficiary", header: t(S.beneficiary), cell: (r) => <span className="tnum">{r.beneficiary.token}</span> },
-    { key: "category", header: t(S.category), cell: (r) => <span>{r.category}</span> },
-    { key: "priority", header: t(S.priority), cell: (r) => <StatusChip kind={PRIORITY_KIND[r.priority]} label={r.priority} /> },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    { key: "caseNo", header: t(S.caseNo), cell: (r) => <span className="tnum">{r.caseNo}</span>, sortable: true, sortValue: (r) => r.caseNo },
+    { key: "beneficiary", header: t(S.beneficiary), cell: (r) => <span className="tnum">{r.beneficiary.token}</span>, sortable: true, sortValue: (r) => r.beneficiary.token },
+    { key: "category", header: t(S.category), cell: (r) => <span>{r.category}</span>, sortable: true, sortValue: (r) => r.category },
+    { key: "priority", header: t(S.priority), cell: (r) => <StatusChip kind={PRIORITY_KIND[r.priority]} label={r.priority} />, sortable: true, sortValue: (r) => r.priority },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
     {
       key: "action",
       header: t(S.action),
@@ -199,8 +199,8 @@ function CaseTasks({ caseId, t }: { caseId: string; t: (l: Localized) => string 
   const api = useApi();
   const tasks = useAsync<CoordinationTask[]>(() => api.caseTasks(caseId), [caseId]);
   const cols: Column<CoordinationTask>[] = [
-    { key: "title", header: t(S.tasksTitle), cell: (r) => t(r.title) },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    { key: "title", header: t(S.tasksTitle), cell: (r) => t(r.title), sortable: true, sortValue: (r) => t(r.title) },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
   ];
   return (
     <Card as="section" style={{ padding: "var(--sp3)" }}>
@@ -219,11 +219,11 @@ export function Escalations() {
   const t = useLoc();
   const state = useAsync<Escalation[]>(() => api.escalations(), []);
   const cols: Column<Escalation>[] = [
-    { key: "caseNo", header: t(S.caseNo), cell: (r) => <span className="tnum">{r.caseNo}</span> },
-    { key: "raisedTo", header: t(S.raisedTo), cell: (r) => t(r.raisedToRole) },
-    { key: "reason", header: t(S.reason), cell: (r) => r.reason },
-    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
-    { key: "raisedAt", header: t(S.raisedAt), cell: (r) => <span className="tnum">{fmt.dateTime(r.raisedAt)}</span> },
+    { key: "caseNo", header: t(S.caseNo), cell: (r) => <span className="tnum">{r.caseNo}</span>, sortable: true, sortValue: (r) => r.caseNo },
+    { key: "raisedTo", header: t(S.raisedTo), cell: (r) => t(r.raisedToRole), sortable: true, sortValue: (r) => t(r.raisedToRole) },
+    { key: "reason", header: t(S.reason), cell: (r) => r.reason, sortable: true, sortValue: (r) => r.reason },
+    { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
+    { key: "raisedAt", header: t(S.raisedAt), cell: (r) => <span className="tnum">{fmt.dateTime(r.raisedAt)}</span>, sortable: true, sortValue: (r) => r.raisedAt },
   ];
   return (
     <>

@@ -154,10 +154,10 @@ export function PharmacyDispense() {
   }
 
   const cols: Column<Prescription>[] = [
-    { key: "rxNo", header: t(S.rxNo), cell: (r) => <span className="tnum">{r.rxNo}</span> },
-    { key: "prescriber", header: t(S.prescriber), cell: (r) => t(r.prescriber.label) },
-    { key: "lines", header: t(S.lines), cell: (r) => r.lines.length, numeric: true },
-    { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
+    { key: "rxNo", header: t(S.rxNo), cell: (r) => <span className="tnum">{r.rxNo}</span>, sortable: true, sortValue: (r) => r.rxNo },
+    { key: "prescriber", header: t(S.prescriber), cell: (r) => t(r.prescriber.label), sortable: true, sortValue: (r) => t(r.prescriber.label) },
+    { key: "lines", header: t(S.lines), cell: (r) => r.lines.length, numeric: true, sortable: true, sortValue: (r) => r.lines.length },
+    { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
     {
       key: "open",
       header: t(S.action),

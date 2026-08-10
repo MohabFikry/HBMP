@@ -135,16 +135,15 @@ export default function ProcedureCentre({ mode = "queue" }: { mode?: "queue" | "
   }
 
   const columns: Column<ProcedureQueueItem>[] = [
-    { key: "orderNo", header: t(S.cOrder), cell: (r: ProcedureQueueItem) => r.orderNo },
+    { key: "orderNo", header: t(S.cOrder), cell: (r: ProcedureQueueItem) => r.orderNo, sortable: true, sortValue: (r) => r.orderNo },
     { key: "code", header: t(S.cService), cell: (r: ProcedureQueueItem) => `${r.code} — ${r.description ?? ""}` },
-    { key: "type", header: t(S.cType), cell: (r: ProcedureQueueItem) => r.procedureTypeCode ?? "—" },
+    { key: "type", header: t(S.cType), cell: (r: ProcedureQueueItem) => r.procedureTypeCode ?? "—", sortable: true, sortValue: (r) => r.procedureTypeCode },
     {
       key: "progress",
       header: t(S.cProgress),
       // The SAME sentence the ordering doctor's worklist shows. A course that reads differently at each end is
       // a course somebody delivers twice.
-      cell: (r: ProcedureQueueItem) => r.progressLabel,
-    },
+      cell: (r: ProcedureQueueItem) => r.progressLabel, sortable: true, sortValue: (r) => r.progressLabel },
     {
       key: "context",
       header: t(S.cContext),
@@ -154,8 +153,7 @@ export default function ProcedureCentre({ mode = "queue" }: { mode?: "queue" | "
           // share — and a physiotherapist who reads it the other way treats someone as uncomplicated who
           // is not.
           <span title={t(S.notDisclosedHint)} className="muted">{t(S.notDisclosed)}</span>
-        ),
-    },
+        ), sortable: true, sortValue: (r) => r.sharedClinicalContext },
     {
       key: "action",
       header: t(S.cAction),

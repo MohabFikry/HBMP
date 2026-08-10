@@ -56,16 +56,16 @@ export function Substitutions() {
   }
 
   const hitCols: Column<DrugRef>[] = [
-    { key: "drug", header: t(S.drug), cell: (d) => t(d.name) },
-    { key: "form", header: t(S.form), cell: (d) => d.form ?? "—" },
-    { key: "strength", header: t(S.strength), cell: (d) => d.strength ?? "—" },
+    { key: "drug", header: t(S.drug), cell: (d) => t(d.name), sortable: true, sortValue: (d) => t(d.name) },
+    { key: "form", header: t(S.form), cell: (d) => d.form ?? "—", sortable: true, sortValue: (d) => d.form },
+    { key: "strength", header: t(S.strength), cell: (d) => d.strength ?? "—", sortable: true, sortValue: (d) => d.strength },
     { key: "atc", header: t(S.atc), cell: (d) => <span className="tnum">{d.atcCode ?? "—"}</span> },
     { key: "act", header: "", cell: (d) => <Button variant="secondary" size="sm" onClick={() => void pick(d)}>{t(S.viewAlts)}</Button> },
   ];
   const altCols: Column<DrugRef>[] = [
-    { key: "drug", header: t(S.drug), cell: (d) => t(d.name) },
-    { key: "form", header: t(S.form), cell: (d) => d.form ?? "—" },
-    { key: "strength", header: t(S.strength), cell: (d) => d.strength ?? "—" },
+    { key: "drug", header: t(S.drug), cell: (d) => t(d.name), sortable: true, sortValue: (d) => t(d.name) },
+    { key: "form", header: t(S.form), cell: (d) => d.form ?? "—", sortable: true, sortValue: (d) => d.form },
+    { key: "strength", header: t(S.strength), cell: (d) => d.strength ?? "—", sortable: true, sortValue: (d) => d.strength },
     { key: "atc", header: t(S.atc), cell: (d) => <span className="tnum">{d.atcCode ?? "—"}</span> },
   ];
 
