@@ -21,9 +21,15 @@ export function DevLoginForm() {
   const navigate = useNavigate();
 
   const [role, setRole] = useState<Role>("reception");
+  // Extra portals BESIDE the primary, so the picker and the switcher can be reached with no issuer running.
+  // Held apart from `role` rather than as one multi-select: the first role is the primary and decides the
+  // display name and the fallback landing portal, and a set with no order cannot express that.
+  const [extras, setExtras] = useState<Role[]>([]);
   const [mfa, setMfa] = useState("");
   const [fieldError, setFieldError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
+
+  const held: Role[] = [role, ...extras.filter((r) => r !== role)];
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -34,8 +40,10 @@ export function DevLoginForm() {
     }
     setBusy(true);
     try {
-      await login(role, mfa);
-      navigate(`/${portalForRole(role).base}`);
+      await login(held, mfa);
+      // More than one portal lands on the picker, exactly as a live sign-in does — otherwise the dev build
+      // would take a different route through the app than the one being shipped.
+      navigate(held.length > 1 ? "/portals" : `/${portalForRole(role).base}`);
     } catch {
       setFieldError(L.mfaError[lang]);
     } finally {
@@ -64,6 +72,26 @@ export function DevLoginForm() {
             onChange={(v) => setRole(v as Role)}
             options={PORTALS.map((p) => ({ value: p.role, label: p.eyebrow[lang], keywords: p.role }))}
           />
+          <fieldset className="dev-extra-portals">
+            <legend>{L.extraPortals[lang]}</legend>
+            <p className="muted dev-extra-portals-help">{L.extraPortalsHelp[lang]}</p>
+            <div className="dev-extra-portals-list mrs-scroll">
+              {PORTALS.filter((p) => p.role !== role).map((p) => (
+                <label key={p.role} className="dev-extra-portal">
+                  <input
+                    type="checkbox"
+                    checked={extras.includes(p.role)}
+                    onChange={(e) =>
+                      setExtras((prev) =>
+                        e.currentTarget.checked ? [...prev, p.role] : prev.filter((r) => r !== p.role),
+                      )
+                    }
+                  />
+                  <span>{p.eyebrow[lang]}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
           <InputField
             label={L.mfaLabel[lang]}
             help={L.mfaHelp[lang]}

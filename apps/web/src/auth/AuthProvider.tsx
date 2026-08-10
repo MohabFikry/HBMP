@@ -39,7 +39,7 @@ interface AuthContextValue {
   ready: boolean;
   /** True in the warning window before expiry (drives the re-auth prompt). */
   timeoutWarning: boolean;
-  login: (role: Role, mfaCode: string) => Promise<void>;
+  login: (roles: readonly Role[], mfaCode: string) => Promise<void>;
   logout: (reason?: "user" | "timeout") => Promise<void>;
   /** Refresh the idle timer (called on user activity + on "stay signed in"). */
   keepAlive: () => void;
@@ -137,8 +137,8 @@ export function AuthProvider({ children, client: injected }: { children: ReactNo
   }, []);
 
   const login = useCallback(
-    async (role: Role, mfaCode: string) => {
-      const s = await client.login(role, mfaCode);
+    async (roles: readonly Role[], mfaCode: string) => {
+      const s = await client.login(roles, mfaCode);
       setSession(s);
       setTimeoutWarning(false);
       scheduleTimers(s);

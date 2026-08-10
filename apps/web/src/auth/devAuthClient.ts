@@ -1,4 +1,4 @@
-import { permissionsForRole, type Role } from "../authz/permissions";
+import { unionPermissions, type Role } from "../authz/permissions";
 import { SESSION_TTL, type AuthClient, type Session } from "./authClient";
 
 /**
@@ -49,13 +49,23 @@ const DISPLAY_NAMES: Record<Role, string> = {
  * would carry. Swap for the OIDC client without touching AuthProvider or the router.
  */
 export class DevAuthClient implements AuthClient {
-  async login(role: Role, mfaCode: string): Promise<Session> {
+  /**
+   * Takes a LIST because the portal picker has to be exercisable with no backend — the whole frontend suite
+   * runs against this client, so a dev session that could only ever hold one portal would leave the picker,
+   * the switcher and every multi-portal routing rule untestable outside a live issuer.
+   *
+   * The identity is named after the FIRST role, matching the live client's notion of a primary.
+   */
+  async login(roles: readonly Role[], mfaCode: string): Promise<Session> {
     if (!/^\d{6}$/.test(mfaCode)) throw new Error("mfa-required");
+    if (roles.length === 0) throw new Error("role-required");
+    const primary = roles[0];
     const session: Session = {
-      userId: `dev-${role}`,
-      displayName: DISPLAY_NAMES[role],
-      role,
-      permissions: permissionsForRole(role),
+      userId: `dev-${primary}`,
+      displayName: DISPLAY_NAMES[primary],
+      role: primary,
+      roles: [...roles],
+      permissions: unionPermissions(roles),
       mfaSatisfied: true,
       expiresAt: Date.now() + SESSION_TTL,
     };
@@ -75,16 +85,22 @@ export class DevAuthClient implements AuthClient {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return null;
-      const parsed = JSON.parse(raw) as { userId: string; displayName: string; role: Role; expiresAt: number };
+      const parsed = JSON.parse(raw) as {
+        userId: string; displayName: string; role: Role; roles?: Role[]; expiresAt: number;
+      };
       if (parsed.expiresAt <= Date.now()) {
         localStorage.removeItem(STORAGE_KEY);
         return null;
       }
+      // `roles` is optional on the way in: a session persisted by the previous build has only `role`, and a
+      // developer reloading across the change should keep working rather than be silently signed out.
+      const roles = parsed.roles?.length ? parsed.roles : [parsed.role];
       return {
         userId: parsed.userId,
         displayName: parsed.displayName,
         role: parsed.role,
-        permissions: permissionsForRole(parsed.role),
+        roles,
+        permissions: unionPermissions(roles),
         mfaSatisfied: true,
         expiresAt: parsed.expiresAt,
       };
@@ -102,6 +118,7 @@ function persist(session: Session) {
         userId: session.userId,
         displayName: session.displayName,
         role: session.role,
+        roles: session.roles,
         expiresAt: session.expiresAt,
       }),
     );

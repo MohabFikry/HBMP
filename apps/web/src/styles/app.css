@@ -5752,3 +5752,262 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   .login-hero-compact-hide { display: none; }
   .login-headline { font-size: clamp(24px, 6vw, 30px); }
 }
+
+/* =============================================================================================
+ * PORTAL PICKER  (/portals)
+ * =============================================================================================
+ *
+ * The screen a sign-in lands on when the caller holds more than one portal. It sits OUTSIDE the app shell —
+ * there is no rail, no branch and no portal to name in an app bar until one is chosen — so it brings its own
+ * page frame rather than borrowing `.app-grid`'s.
+ *
+ * Everything here is drawn from tokens that already existed. No new colour, font or spacing step enters the
+ * system for this screen: the zone dots are `--accent`, `--st-info-fg` and `--st-part-fg`, the surfaces and
+ * hairlines are the same ones every card in the product uses, and the type sizes are the existing scale.
+ */
+.picker-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--page-wash);
+  padding: var(--sp6) clamp(var(--sp4), 5vw, var(--sp12)) var(--sp12);
+  /* The grid is capped rather than the viewport: on a wide monitor `auto-fill` would otherwise run six or
+     seven 268px cards across a single row and the zone groupings would stop reading as groups. */
+  max-width: 1240px;
+  margin-inline: auto;
+}
+.picker-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp4);
+  margin-bottom: var(--sp10);
+}
+/* `margin-inline-start: auto` and not `justify-content: flex-end` — the logical property is what moves the
+   controls to the LEFT under RTL without a second rule. */
+.picker-bar-actions {
+  margin-inline-start: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+}
+.picker-signout {
+  min-height: 44px;
+  padding: 0 var(--sp4);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.picker-signout:hover { border-color: var(--border-strong); }
+.picker-signout:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.picker-greeting {
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 0;
+  color: var(--text-1);
+}
+.picker-lede {
+  margin: var(--sp2) 0 0;
+  color: var(--text-2);
+  font-size: var(--fs-body-lg);
+  max-width: 62ch;
+}
+
+.picker-zone { margin-top: var(--sp10); }
+/* The label and the rule are flex siblings, so the hairline takes whatever width the label leaves and the
+   pair reverses end-for-end under RTL with nothing further to write. */
+.picker-zone-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp3);
+  margin-bottom: var(--sp4);
+}
+.picker-zone-label {
+  margin: 0;
+  font-size: var(--tbl-head-size);
+  font-weight: var(--tbl-head-weight);
+  letter-spacing: var(--tbl-head-tracking);
+  text-transform: uppercase;
+  color: var(--tbl-head-color);
+  white-space: nowrap;
+}
+.picker-zone-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: var(--sp4);
+}
+
+.picker-card {
+  display: grid;
+  /* Explicit rows so the meta line pins to the BOTTOM of the tallest card in the row: descriptions run one
+     or two lines, and a footer that floats up under the shorter ones makes a tidy grid look ragged. */
+  grid-template-rows: auto auto 1fr auto;
+  gap: var(--sp2);
+  padding: var(--sp5);
+  text-align: start;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--elev-1);
+  cursor: pointer;
+  font: inherit;
+  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.picker-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: var(--elev-hover);
+}
+.picker-card:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+/* The lift is the one piece of motion on this page, and it is the one thing somebody with a vestibular
+   disorder would ask for less of. The border and shadow still answer hover, so the affordance survives. */
+@media (prefers-reduced-motion: reduce) {
+  .picker-card { transition: none; }
+  .picker-card:hover { transform: none; }
+}
+.picker-card-tile {
+  inline-size: 44px;
+  block-size: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-md);
+  background: var(--accent-tint);
+  color: var(--accent-press);
+  margin-bottom: var(--sp1);
+}
+.picker-card-tile svg { width: 22px; height: 22px; }
+.picker-card-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.picker-card-desc {
+  font-size: var(--fs-subhead);
+  line-height: 1.45;
+  color: var(--text-2);
+}
+.picker-card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+  padding-top: var(--sp3);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-caption);
+  color: var(--text-3);
+}
+/* Decorative: the zone heading directly above the grid carries the meaning, so this dot adds a second,
+   redundant cue rather than being the only one. Nothing is identified by colour alone. */
+.picker-card-dot {
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: var(--r-pill);
+  flex: none;
+}
+
+/* =============================================================================================
+ * PORTAL SWITCHER  (top of the nav rail, every portal)
+ * ============================================================================================= */
+.portal-switch {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--sp3);
+  min-height: 44px;
+  padding: 10px var(--sp3);
+  margin-bottom: var(--sp3);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-1);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.portal-switch:hover { border-color: var(--accent); }
+.portal-switch:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.portal-switch-tile {
+  inline-size: 28px;
+  block-size: 28px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-sm);
+  background: var(--accent-tint);
+  color: var(--accent-press);
+}
+.portal-switch-tile svg { width: 16px; height: 16px; }
+/* `min-width: 0` so a long portal name can ellipsize instead of pushing the switch glyph out of the rail. */
+.portal-switch-text {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+.portal-switch-name {
+  font-size: var(--fs-subhead);
+  font-weight: 600;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.portal-switch-sub {
+  font-size: var(--fs-caption);
+  color: var(--text-3);
+}
+/* No mirroring rule: the glyph shows both arrows, so it means "exchange" in either direction. */
+.portal-switch-glyph {
+  flex: none;
+  display: inline-flex;
+  color: var(--text-3);
+}
+
+/* =============================================================================================
+ * DEV LOGIN — additional portals
+ * =============================================================================================
+ * Fixture builds only (`src/dev/DevLoginForm.tsx`). It is the only way to produce a multi-portal session
+ * with no issuer running, which is how the whole frontend suite exercises the picker and the switcher.
+ */
+.dev-extra-portals {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp3);
+  margin: 0;
+}
+.dev-extra-portals legend {
+  padding: 0 var(--sp2);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--text-2);
+}
+.dev-extra-portals-help {
+  margin: 0 0 var(--sp2);
+  font-size: var(--fs-caption);
+}
+.dev-extra-portals-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--sp1) var(--sp3);
+  max-height: var(--scroll-picker);
+  overflow: auto;
+}
+.dev-extra-portal {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+  min-height: 32px;
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+  cursor: pointer;
+}

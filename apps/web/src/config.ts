@@ -229,3 +229,44 @@ export function roleFromClaimRoles(roles: readonly string[]): Role | null {
   }
   return null;
 }
+
+/**
+ * EVERY portal role the token names, in priority order, deduped.
+ *
+ * {@link roleFromClaimRoles} answers "which portal is this person's primary" and discards the rest — which
+ * was correct while a session could hold one portal and is a silent capability loss now that it can hold
+ * several. A clinics manager who is also an org admin was issued a token naming both and shown one, with
+ * nothing anywhere to suggest the other existed.
+ *
+ * The two functions are kept separate rather than one derived from the other's first element, because the
+ * PRIMARY is a different question from the SET: the primary decides the fallback landing portal and the
+ * audit event's `actorRole`, and it must keep answering exactly as it does today for a single-role token.
+ */
+export function rolesFromClaimRoles(roles: readonly string[]): Role[] {
+  const out: Role[] = [];
+  for (const [kc, role] of ROLE_MAP) {
+    if (roles.includes(kc) && !out.includes(role)) out.push(role);
+  }
+  return out;
+}
+
+/**
+ * The ISSUER's name for a portal role — the inverse of {@link ROLE_MAP}.
+ *
+ * Load-bearing for user administration. The issuer's catalog (`IdentityContract.Roles`) names clinical
+ * titles: `lab_tech`, `pharmacist`, `radiology_tech`, `network_team`. The portal catalog names portals:
+ * `lab`, `pharmacy`, `radiology`, `provider_admin`. An admin screen that let somebody tick "Laboratory" and
+ * POSTed `lab` would get a 422 back for every clinical role in the system — and the tick would look as
+ * though it had worked right up until the save.
+ *
+ * Returns the FIRST issuer name that maps to this portal, which is the canonical one: `radiology_tech`
+ * precedes the `imaging_tech` alias kept alive for the rename's dual-accept window, so a grant made through
+ * this function is always written under the new name (docs/runbooks/radiology-rename.md).
+ */
+export function issuerRoleFor(role: Role): string {
+  const hit = ROLE_MAP.find(([, portalRole]) => portalRole === role);
+  // Every portal role has a row — `ROLE_MAP` and the catalog are asserted equal by the portal-model suite —
+  // so the fallback is unreachable. It is the role's own name because that is right for the fourteen roles
+  // whose issuer name and portal key are already identical.
+  return hit ? hit[0] : role;
+}

@@ -337,6 +337,25 @@ export function permissionsForRole(role: Role): ReadonlySet<Permission> {
   return perms;
 }
 
+/**
+ * The permissions of somebody holding SEVERAL portal roles.
+ *
+ * A plain union, and deliberately so: `permissionsForRole` already adds the cross-cutting grants
+ * (`notification.read`, `profile.read`, `profile.export`) per role, and unioning the finished sets keeps
+ * exactly one place where those rules live. Computing them again over the merged role list would be a
+ * second implementation of the same policy, free to disagree with the first.
+ *
+ * This does NOT widen anybody. Each portal's nav and routes are gated by its own catalog sections, so a
+ * doctor who is also an org admin sees the clinician rail in `/clinician` and the administration rail in
+ * `/admin` — never one inside the other. And the server re-authorizes every call from the token, which is
+ * where the real answer has always been.
+ */
+export function unionPermissions(roles: readonly Role[]): ReadonlySet<Permission> {
+  const out = new Set<Permission>();
+  for (const role of roles) for (const p of permissionsForRole(role)) out.add(p);
+  return out;
+}
+
 export function hasPermission(perms: ReadonlySet<Permission>, required: Permission): boolean {
   return perms.has(required);
 }

@@ -8,10 +8,33 @@ export interface Session {
   userId: string;
   displayName: string;
   /**
-   * Portal role. `null` means the caller authenticated at the IdP but carries no realm role that maps to a
-   * portal — a valid, fail-closed state that renders the "no portal assigned" page (never a default portal).
+   * PRIMARY portal role — the first of {@link roles} in `ROLE_MAP` priority order. `null` means the caller
+   * authenticated at the IdP but carries no realm role that maps to a portal — a valid, fail-closed state
+   * that renders the "no portal assigned" page (never a default portal).
+   *
+   * It decides the landing portal for a single-portal caller and the `actorRole` on audit events. It does
+   * NOT decide what the caller may reach: that is {@link roles}.
    */
   role: Role | null;
+  /**
+   * EVERY portal role the caller holds, priority-ordered.
+   *
+   * The session used to carry one role because a person was assumed to do one job. Real staff do not: a
+   * clinics manager is often also an org admin, a supervisor keeps the officer role they were promoted from,
+   * and an approving doctor holds both a clinic and the approvals queue. Their tokens always said so — the
+   * session threw it away, so the portal picker had nothing to pick from.
+   *
+   * Empty exactly when {@link role} is null; the two are derived from the same claim in one pass.
+   */
+  roles: readonly Role[];
+  /**
+   * Union across {@link roles}, NOT the primary's set alone.
+   *
+   * Narrowing to the active portal was the rejected alternative: each portal's nav and routes are already
+   * permission-gated by its OWN catalog sections, so the union cannot widen a portal beyond what it
+   * contains — while scoping to the active role would 403 a deep link into a portal the caller genuinely
+   * holds, and put the client's opinion of their authority at odds with the token's.
+   */
   permissions: ReadonlySet<Permission>;
   mfaSatisfied: boolean;
   /** Epoch ms when the access token expires (drives the idle/absolute session guard). */
@@ -25,8 +48,8 @@ export interface Session {
  * of backend availability.
  */
 export interface AuthClient {
-  /** Begin login. Dev: resolves after the caller supplies role + MFA. Prod: redirects to the issuer. */
-  login(role: Role, mfaCode: string): Promise<Session>;
+  /** Begin login. Dev: resolves after the caller supplies roles + MFA. Prod: redirects to the issuer. */
+  login(roles: readonly Role[], mfaCode: string): Promise<Session>;
   logout(): Promise<void>;
   /** Restore a persisted session on reload (returns null if none/expired). */
   restore(): Promise<Session | null>;

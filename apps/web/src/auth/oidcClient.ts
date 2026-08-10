@@ -1,5 +1,5 @@
-import { permissionsForRole, type Role } from "../authz/permissions";
-import { OIDC, roleFromClaimRoles } from "../config";
+import { unionPermissions, type Role } from "../authz/permissions";
+import { OIDC, roleFromClaimRoles, rolesFromClaimRoles } from "../config";
 import {
   clearTokens, getRefreshToken, getScopeRequest, getToken, setRefreshToken, setScopeRequest, setToken,
 } from "./tokenStore";
@@ -229,14 +229,21 @@ function sessionFrom(token: string): Session {
   // FAIL CLOSED (H6): an unmapped role yields role=null (→ "no portal assigned" page). Never default to a
   // portal — that would silently grant an authenticated stranger reception access. Roles are the issuer's
   // flat `roles` claim (17.5), no longer Keycloak's nested realm_access.
-  const role: Role | null = roleFromClaimRoles(asArray(c.roles));
+  const claimed = asArray(c.roles);
+  const role: Role | null = roleFromClaimRoles(claimed);
+  // Every portal the token names, not just the primary — this is what the picker picks from. `role` stays
+  // the first of them, so a single-role token produces a byte-identical session to before.
+  const roles: Role[] = rolesFromClaimRoles(claimed);
   const mfa = (c.acr && ["mfa", "aal2", "aal3", "loa2", "loa3", "2fa"].includes(c.acr)) ||
     asArray(c.amr).some((m) => ["mfa", "otp", "hwk", "totp", "webauthn", "sms"].includes(m));
   return {
     userId: c.sub,
     displayName: c.name ?? c.preferred_username ?? c.sub,
     role,
-    permissions: role ? permissionsForRole(role) : new Set(),
+    roles,
+    // The UNION over every held role. Still derived from the token's own roles claim, so this cannot grant
+    // anything the issuer did not — and the server re-authorizes every call regardless.
+    permissions: unionPermissions(roles),
     mfaSatisfied: Boolean(mfa),
     expiresAt: c.exp * 1000,
   };

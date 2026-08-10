@@ -7,16 +7,32 @@ import { ForgotPasswordPage } from "../pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "../pages/ResetPasswordPage";
 import { SectionPage } from "../pages/SectionPage";
 import { Forbidden, NotFound, NoPortal } from "./Forbidden";
-import { ALL_ROUTES, portalForRole } from "../portals/catalog";
+import { ALL_ROUTES, portalsForRoles, type PortalDef } from "../portals/catalog";
+import { PortalPicker } from "../portals/PortalPicker";
 import { screenFor } from "../screens/registry";
 
-/** Home = the first section of the signed-in user's portal that they can access. */
+/** The first section of a portal the caller can actually open, or the bare base when they can open none. */
+export function homePathFor(portal: PortalDef, can: (p: Parameters<ReturnType<typeof useAuth>["can"]>[0]) => boolean): string {
+  const first = portal.sections.find((s) => can(s.permission));
+  return first ? `/${portal.base}/${first.path}` : `/${portal.base}`;
+}
+
+/**
+ * Where a sign-in lands.
+ *
+ * With more than one portal that is the PICKER, not a portal: choosing for somebody who holds four would
+ * mean choosing wrong three times out of four, and there would be nothing on the landing screen to tell
+ * them the other three exist. With exactly one it is that portal's first usable section, unchanged — a
+ * picker with a single card is a click that asks a question with one answer.
+ */
 function useHomePath(): string {
   const { session, can } = useAuth();
   if (!session?.role) return "/login";
-  const portal = portalForRole(session.role);
-  const first = portal.sections.find((s) => can(s.permission));
-  return first ? `/${portal.base}/${first.path}` : `/${portal.base}`;
+  const mine = portalsForRoles(session.roles);
+  if (mine.length > 1) return "/portals";
+  const portal = mine[0];
+  if (!portal) return "/login";
+  return homePathFor(portal, can);
 }
 
 /**
@@ -31,15 +47,26 @@ function useHomePath(): string {
 function ResolveRoute() {
   const { session, can } = useAuth();
   const location = useLocation();
-  const home = useHomePath();
   const path = location.pathname.replace(/\/+$/, "") || "/";
 
   if (!session) return <Navigate to="/login" replace />;
   if (!session.role) return <NoPortal />;
-  const portal = portalForRole(session.role);
 
-  // Bare portal base → home.
-  if (path === `/${portal.base}`) return <Navigate to={home} replace />;
+  // Resolve against the portal that OWNS this path, not the caller's primary.
+  //
+  // This used to be `portalForRole(session.role)`, which was correct while a session held one portal and is
+  // the bug once it holds several: an org admin whose primary is `clinics_manager` typing `/admin/users`
+  // was answered against the CLINIC portal, found no matching section, and got a 404 for a screen they were
+  // granted. The permission check below is unchanged and still decides the answer — this only stops the
+  // router asking the wrong portal the question.
+  const mine = portalsForRoles(session.roles);
+  const base = path.split("/")[1] ?? "";
+  const portal = mine.find((p) => p.base === base) ?? mine[0];
+  if (!portal) return <NoPortal />;
+
+  // Bare portal base → that portal's own home, which for a base the caller holds is NOT the global home
+  // (that would be the picker, sending `/admin` straight back to the screen they just left).
+  if (path === `/${portal.base}`) return <Navigate to={homePathFor(portal, can)} replace />;
 
   const entry = ALL_ROUTES.find((r) => r.fullPath === path);
 
@@ -82,15 +109,39 @@ function ScreenBoundary({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * The picker, or a redirect past it.
+ *
+ * OUTSIDE `AppShell` — it is the screen you are on when no portal is chosen, so there is no rail to render,
+ * no branch to switch and no portal to name in the app bar. A caller holding exactly one portal never sees
+ * it, however they arrived: a bookmark, a back button and the rail's own switcher all resolve the same way.
+ */
+function PortalPickerRoute() {
+  const { session, can } = useAuth();
+  const mine = portalsForRoles(session?.roles ?? []);
+  if (mine.length === 1) return <Navigate to={homePathFor(mine[0], can)} replace />;
+  if (mine.length === 0) return <NoPortal />;
+  return <PortalPicker />;
+}
+
 function AuthedApp() {
   const home = useHomePath();
   return (
-    <AppShell>
-      <Routes>
-        <Route index element={<Navigate to={home} replace />} />
-        <Route path="*" element={<ResolveRoute />} />
-      </Routes>
-    </AppShell>
+    <Routes>
+      {/* Before the shell-wrapped catch-all, and deliberately not inside it. */}
+      <Route path="/portals" element={<PortalPickerRoute />} />
+      <Route
+        path="*"
+        element={
+          <AppShell>
+            <Routes>
+              <Route index element={<Navigate to={home} replace />} />
+              <Route path="*" element={<ResolveRoute />} />
+            </Routes>
+          </AppShell>
+        }
+      />
+    </Routes>
   );
 }
 

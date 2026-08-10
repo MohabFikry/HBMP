@@ -12,12 +12,13 @@ import {
 } from "@mersal/design-system";
 import { useAuth } from "../auth/AuthProvider";
 import { useApi } from "../api/ApiProvider";
-import { portalForRole, type Localized, type Section } from "../portals/catalog";
+import { portalsForRoles, type Localized, type Section } from "../portals/catalog";
 import { L } from "../i18n/strings";
 import { CommandPalette } from "./CommandPalette";
 import { NotificationPane } from "./NotificationPane";
 import { UserPane } from "./UserPane";
 import { BranchSwitcher } from "./BranchSwitcher";
+import { PortalSwitcher } from "./PortalSwitcher";
 import { useBranchContext } from "./useBranchContext";
 
 /** Two-letter initials for the app-bar avatar placeholder. */
@@ -96,7 +97,18 @@ export function AppShell({ children }: { children: ReactNode }) {
   const tr = useLocalized();
   const searchRef = useRef<HTMLInputElement | null>(null);
 
-  const portal = session?.role ? portalForRole(session.role) : null;
+  /**
+   * The portals this caller holds, and which of them the current URL is in.
+   *
+   * The active portal is READ OFF THE ADDRESS BAR rather than held in state. A stored "current portal" is a
+   * second answer to a question the URL already answers, and the two disagree the moment somebody follows a
+   * link, uses the back button, or opens a second tab — which is exactly what a person with several portals
+   * does all day. Falling back to the first held portal covers the paths that belong to no portal at all
+   * (a cross-portal patient deep link, `/patients/{id}`).
+   */
+  const myPortals = useMemo(() => portalsForRoles(session?.roles ?? []), [session?.roles]);
+  const activeBase = location.pathname.split("/")[1] ?? "";
+  const portal = myPortals.find((p) => p.base === activeBase) ?? myPortals[0] ?? null;
   const accessible: Section[] = useMemo(
     () => (portal ? portal.sections.filter((s) => can(s.permission)) : []),
     [portal, can],
@@ -282,6 +294,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         items={navItems}
         current={activePath}
         onNavigate={(key) => navigate(`/${portal.base}/${key}`)}
+        // One shared switcher, in one slot, for every portal — and only for callers who have somewhere to
+        // switch to. See PortalSwitcher for why it is hidden rather than disabled below two portals.
+        header={myPortals.length > 1 ? <PortalSwitcher portal={portal} /> : undefined}
       />
 
       <main id="main" className="app-main" tabIndex={-1}>
