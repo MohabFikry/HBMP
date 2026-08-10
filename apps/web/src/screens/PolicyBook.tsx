@@ -285,7 +285,16 @@ export function ScopeUtilizationPanel({
   );
 
   return (
-    <Card data-testid="scope-utilization">
+    // `Card` is a SURFACE — background, border, radius, shadow, and no padding; every screen that uses one
+    // supplies its own (the filter card above this does). This one supplied none, so the KPI tiles sat flush
+    // against the card's own border with their labels reading as clipped, and the member meters ran edge to
+    // edge and collided with the tiles above them. The gap matters as much as the padding: four stacked
+    // children (alerts, KPIs, meters, outlier table) with nothing between them is what made it look crammed
+    // rather than merely tight.
+    <Card
+      data-testid="scope-utilization"
+      style={{ display: "grid", gap: "var(--sp5)", alignContent: "start" }}
+    >
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
       {view && (
         <>

@@ -1688,7 +1688,13 @@ function MemberUtilizationTab({ api, beneficiaryId }: { api: PolicyApi; benefici
   );
 
   return (
-    <Card data-testid="member-utilization">
+    // Same as `scope-utilization` in PolicyBook: `Card` is a surface and carries no padding of its own, so
+    // without this the meters and KPIs sat flush against its border. Found while fixing that one — it is the
+    // same panel, over one member instead of a cohort.
+    <Card
+      data-testid="member-utilization"
+      style={{ display: "grid", gap: "var(--sp5)", alignContent: "start" }}
+    >
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
       {view && (
         <>

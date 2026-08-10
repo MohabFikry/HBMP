@@ -152,7 +152,10 @@ export function ClaimsInsights() {
       <AsyncSection state={state} isEmpty={() => false} emptyLabel={S.insEmpty}>
         {(k) => (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "var(--sp3)", marginBottom: "var(--sp4)" }}>
+            {/* `mrs-kpigrid`, not a hand-written grid: this was `minmax(160px, 1fr)` with a --sp3 gap, which
+                is narrower than the design system's own KPI row and too narrow for the money values two of
+                these seven tiles carry — they clipped. One class now sizes both KPI layouts. */}
+            <div className="mrs-kpigrid" style={{ marginBottom: "var(--sp4)" }}>
               <KpiCard label={t(S.tat)} value={k.averageTatHours.toFixed(1)} />
               <KpiCard label={t(S.approval)} value={pct(k.approvalRate)} />
               <KpiCard label={t(S.denial)} value={pct(k.denialRate)} />

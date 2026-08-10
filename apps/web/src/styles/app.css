@@ -1233,13 +1233,22 @@ nav.mrs-rail {
   padding: var(--sp4);
 }
 /*
-  A card INSIDE a card would otherwise be padded twice. There is no such nesting on these screens today —
-  checked across every analytics tab and the member detail's five — so this is a guard against the next one
-  rather than a fix for a current fault: the inner surface keeps whatever its parent gives it, which is what
-  the nesting was for.
+  A card INSIDE a card would otherwise be padded twice. The inner surface keeps whatever its parent gives it,
+  which is what the nesting was for.
+
+  `:not(.mrs-kpi)` — THE NESTING ARRIVED, AND THIS RULE FLATTENED IT. The note here used to say "there is no
+  such nesting on these screens today", and that stopped being true the moment the utilization panel started
+  rendering a `KpiList`: a KPI tile IS a `.mrs-card`, nested inside the panel card, so this selector (0,3,0)
+  beat `.mrs-kpi`'s own `padding: var(--sp5)` (0,1,0) and stripped every tile to zero. The label then sat on
+  the tile's top border under the 3px accent hairline — reading as clipped — and the 34px figure ran to the
+  bottom edge. Reported as "the padding is broken on this page", and it was, three selectors away.
+
+  A KPI tile is not the case this guard is about. That case is a panel nested in a panel, where the inner one
+  would be inset twice; a tile is a component with its own fixed internal spacing, and it is nested by
+  design. Excluding it by class keeps the guard doing its job for everything else.
 */
-.pol-screen .mrs-card .mrs-card,
-.pol-detail .mrs-card .mrs-card {
+.pol-screen .mrs-card .mrs-card:not(.mrs-kpi),
+.pol-detail .mrs-card .mrs-card:not(.mrs-kpi) {
   padding: 0;
 }
 .pol-detail { display: grid; gap: var(--sp4); margin-block-start: var(--sp4); }
@@ -3204,8 +3213,12 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
 .branch-screen .mrs-tabpane .mrs-card {
   padding: var(--sp4);
 }
-/* A card inside a card keeps whatever its parent gives it, rather than being inset twice. */
-.branch-screen .mrs-card .mrs-card {
+/* A card inside a card keeps whatever its parent gives it, rather than being inset twice. `:not(.mrs-kpi)`
+   for the reason spelled out on the identical guard in the policy screens above: a KPI tile is a card by
+   construction and carries its own spacing, so flattening it strips the padding off the tile rather than
+   preventing a double inset. This screen has no KPI row today — it is excluded here so it cannot acquire the
+   same defect the moment it gains one. */
+.branch-screen .mrs-card .mrs-card:not(.mrs-kpi) {
   padding: 0;
 }
 /* The intro paragraph sits directly under the page header, so it carries the header's own bottom rhythm

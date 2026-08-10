@@ -991,9 +991,18 @@ nav.mrs-rail {
 /* ---------- KPI card ---------- */
 /* A row of KPI cards that is also a definition list. `dd` carries a browser default margin-inline-start of
    40px, which would indent every value away from its own label. */
+/* ONE grid for both KPI layouts. `.mrs-kpilist` is the definition-list flavour; `.mrs-kpigrid` is the same
+   track sizing for screens that lay `KpiCard`s out directly. They were two: this rule at minmax(180px) and a
+   hand-written `style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}` in ClaimsPortal, and
+   the inline one was narrow enough that seven tiles of money clipped their own values.
+
+   200px, not 180: the value is set at up to 34px, and a tile has 2x --sp5 of padding, so 180px leaves ~140px
+   of text room — under what "EGP 0.00" needs at that size, let alone a real figure. At 200 the row wraps one
+   tile sooner on a mid-width screen, which is the correct trade against a clipped number. */
+.mrs-kpigrid,
 .mrs-kpilist {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: var(--sp4);
   margin: 0;
 }
@@ -1005,6 +1014,15 @@ nav.mrs-rail {
   padding: var(--sp5);
   position: relative;
   overflow: hidden;
+  /* Label / value / optional delta. The value row takes the slack so it can be pinned to the BOTTOM of it:
+     grid stretches every tile in a row to the tallest, and without this the value sits directly under its own
+     label, so a tile whose label wraps to two lines ("OCR AUTO-MATCH", "RECOVERY OUTSTANDING") drops its
+     number a line below its neighbours' and the row of figures stops being a row. Bottom-aligning costs
+     nothing when every label is one line — the tiles are the same height either way. */
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  /* Makes the tile itself the reference for the `cqi` sizing on the value below. */
+  container-type: inline-size;
 }
 .mrs-kpi::before {
   content: "";
@@ -1024,7 +1042,9 @@ nav.mrs-rail {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   display: flex;
-  align-items: center;
+  /* `start`, not `center`: a two-line label centred against a one-line icon pushes both off the tile's top
+     edge and reads as mis-set. The icon's own `flex: none` keeps it square. */
+  align-items: start;
   gap: 6px;
 }
 /*
@@ -1084,11 +1104,26 @@ nav.mrs-rail {
 }
 
 .mrs-kpi .mrs-kpi-val {
-  font-size: 34px;
+  /* 34px is the 0B §10b headline size and stays the size on any tile wide enough to hold it. It was a FIXED
+     34px, which is fine for "23" and not for "EGP 483,000.00": at seven tiles across a claims dashboard the
+     number was wider than the tile and `overflow: hidden` above quietly cut it in half — a truncated figure
+     that still looks like a figure, which is the worst way for a number to be wrong.
+     9cqi is 9% of the TILE's width, so the type shrinks with the TILE rather than with the viewport. The
+     factor is set from the worst realistic string rather than picked: a formatted amount like
+     "EGP 483,000.00" is ~14 characters, and tabular digits run about 0.6em, so it needs ~8.4em — which fits
+     a tile's inner width at 11cqi and does not at 16. `cqi` resolves against the container's CONTENT box,
+     so the tile's 2x --sp5 padding is already discounted: a 234px tile lands on the 22px floor and a 351px
+     one is back at the full 34px design size.
+     Wrapping is deliberately left ENABLED as the backstop: if a figure ever does exceed its tile, breaking to
+     a second line is a legible answer, where `nowrap` would hand it back to `overflow: hidden` above and
+     truncate it into a different, plausible-looking number. */
+  font-size: clamp(22px, 11cqi, 34px);
   font-weight: 600;
   letter-spacing: -0.02em;
   margin-top: 8px;
   font-variant-numeric: tabular-nums;
+  /* Sits at the bottom of the slack row — see the grid note on `.mrs-kpi`. */
+  align-self: end;
 }
 .mrs-kpi .mrs-kpi-delta {
   font-size: 12.5px;
