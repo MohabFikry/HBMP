@@ -120,7 +120,9 @@ import type {
   Settlement,
   UtilizationView,
   IdentityUser,
+  RoleCatalogEntry,
   RoleScopeGrant,
+  ScopeCatalogEntry,
   ReportAccessRequestRow,
   PatientProfile,
   CptRef,
@@ -648,6 +650,60 @@ export interface ApiClient {
   // Admin / platform governance (Phase 8b) — WHO can access, not content. Admin-role gated on the server.
   /** 18.C2 (W5) — users from the IDENTITY STORE (active + 2FA state), not the admin-service projection. */
   identityUsers(query?: string): Promise<IdentityUser[]>;
+
+  // ---- 28.8/28.9: administering people, not just looking at them ------------------------------------------
+  //
+  // Every one of these existed on identity-service since 17.4 and had NO caller. The console could display a
+  // user and could not create, correct, re-enable or help one — so the only way to bring somebody onto the
+  // platform was a database seed. These are the wires.
+
+  /**
+   * Create an account and INVITE it.
+   *
+   * No password crosses this boundary in either direction. The server generates a throwaway, discards it,
+   * and emails a reset link — so there is no moment at which the administrator knows the credential (28.7,
+   * applied to creation). `resetLinkSent: false` means the account is real but nobody has been told about
+   * it yet, which the UI must say rather than smooth over.
+   */
+  createIdentityUser(input: {
+    username: string;
+    displayName: string;
+    email: string;
+    tenantId: string;
+    roles: string[];
+    lang?: "en" | "ar";
+  }): Promise<{ id: string; resetLinkSent: boolean }>;
+  /** Correct a name or an address. Roles are deliberately NOT settable here — see setIdentityUserRoles. */
+  updateIdentityUser(id: string, input: { displayName?: string; email?: string }): Promise<void>;
+  /**
+   * Set the roles — and therefore the PORTALS — this account holds.
+   *
+   * Takes the ISSUER's role names (`lab_tech`, `pharmacist`), not the SPA's portal keys. `issuerRoleFor`
+   * in config.ts is the translation; sending portal keys is a 422 for every clinical role in the system.
+   */
+  setIdentityUserRoles(id: string, roles: string[]): Promise<void>;
+  /** Soft deprovision: the account, its membership and every live session. Never a delete. */
+  deactivateIdentityUser(id: string): Promise<void>;
+  /** The way back. Sessions are NOT restored — the person signs in again, and gets a fresh token. */
+  reactivateIdentityUser(id: string): Promise<void>;
+  /** Start a reset for somebody who cannot start their own. Issues a link; never reveals a password. */
+  sendPasswordResetLink(id: string, lang?: "en" | "ar"): Promise<void>;
+  /** Change MY password. Requires the current one — a live token proves the device, not the owner. */
+  changeMyPassword(currentPassword: string, newPassword: string): Promise<void>;
+
+  /** 28.9 — every permission in the system, with its flags and who already holds it. */
+  scopeCatalog(): Promise<ScopeCatalogEntry[]>;
+  /** 28.9 — every role this tenant may assign, built-in and its own, with what each actually grants. */
+  roleCatalog(): Promise<RoleCatalogEntry[]>;
+  /** 28.9 — design a role from the catalogue. Refused 409 if the set holds both halves of a split duty. */
+  createRole(input: {
+    name: string;
+    scopes: string[];
+    description?: string;
+    sensitivityTier?: string;
+  }): Promise<void>;
+  /** Replace a role's permission set, in this tenant only. Built-in and custom roles both. */
+  setRoleScopes(role: string, scopes: string[]): Promise<void>;
   /** 18.C2 (W5) — the live role→scope matrix the token issuer actually reads. */
   identityRoleScopes(): Promise<RoleScopeGrant[]>;
   accessMatrix(): Promise<RoleBinding[]>;

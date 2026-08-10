@@ -60,6 +60,8 @@ public sealed class IdentityStoreDbContext(DbContextOptions<IdentityStoreDbConte
         {
             e.ToTable("role");
             e.Property(r => r.SensitivityTier).HasMaxLength(2).HasDefaultValue("T1");
+            // 28.9 — null for the built-in catalog, which is every role that predates custom roles (0036).
+            e.Property(r => r.OwnerTenantId).HasMaxLength(64);
         });
         builder.Entity<IdentityUserRole<Guid>>().ToTable("user_role");
         builder.Entity<IdentityUserClaim<Guid>>().ToTable("user_claim");

@@ -81,11 +81,12 @@ export function DevLoginForm() {
                   <input
                     type="checkbox"
                     checked={extras.includes(p.role)}
-                    onChange={(e) =>
-                      setExtras((prev) =>
-                        e.currentTarget.checked ? [...prev, p.role] : prev.filter((r) => r !== p.role),
-                      )
-                    }
+                    /* Read before the updater — see the same note in AccessCatalogue: `currentTarget` is
+                       null by the time a state updater runs. */
+                    onChange={(e) => {
+                      const on = e.currentTarget.checked;
+                      setExtras((prev) => (on ? [...prev, p.role] : prev.filter((r) => r !== p.role)));
+                    }}
                   />
                   <span>{p.eyebrow[lang]}</span>
                 </label>

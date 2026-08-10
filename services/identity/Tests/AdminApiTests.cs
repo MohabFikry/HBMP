@@ -30,6 +30,7 @@ public class AdminApiTests(IdentityHostFixture host) : IClassFixture<IdentityHos
             var resp = await client.PostAsJsonAsync("/identity/admin/users", new
             {
                 username = newUser, displayName = "New Nurse", password = "Passw0rd!Mersal",
+                email = $"{newUser}@example.org",
                 tenantId = TestFlow.TenantA, roles = new[] { "nurse" },
             });
             resp.StatusCode.Should().Be(HttpStatusCode.Created, await resp.Content.ReadAsStringAsync());
@@ -65,7 +66,8 @@ public class AdminApiTests(IdentityHostFixture host) : IClassFixture<IdentityHos
 
             var resp = await client.PostAsJsonAsync("/identity/admin/users", new
             {
-                username = "x", displayName = "x", password = "Passw0rd!Mersal", tenantId = TestFlow.TenantA, roles = new[] { "nurse" },
+                username = "x", displayName = "x", password = "Passw0rd!Mersal", email = "x@example.org",
+                tenantId = TestFlow.TenantA, roles = new[] { "nurse" },
             });
             resp.StatusCode.Should().Be(HttpStatusCode.Forbidden, "admin actions require an MFA (step-up) session");
         }

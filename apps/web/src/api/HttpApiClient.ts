@@ -96,6 +96,8 @@ import {
   type Soap,
   type DiagnosisRank,
   zIdentityUser,
+  zRoleCatalogEntry,
+  zScopeCatalogEntry,
   zRoleScopeGrant,
   zReportAccessRequestRow,
   zBeneficiaryDocument,
@@ -2835,12 +2837,94 @@ export class HttpApiClient implements ApiClient {
         id: String(u.id),
         username: String(u.username ?? ""),
         displayName: String(u.displayName ?? u.username ?? ""),
+        // NOT masked, unlike the tenant beside it. The address is the sign-in credential and the destination
+        // of every reset link, so an administrator who cannot read it cannot tell whether the button they
+        // are about to press will reach the person — which is the whole question that button asks.
+        email: u.email ?? null,
         tenantId: u.tenantId ? `•••${String(u.tenantId).replace(/-/g, "").slice(-4)}` : undefined,
         isActive: u.isActive !== false,
         twoFactorEnabled: u.twoFactorEnabled === true,
         roles: Array.isArray(u.roles) ? u.roles.map(String) : [],
       }),
     );
+  }
+
+  // ---- 28.8/28.9 — administering people ------------------------------------------------------------------
+  //
+  // Thin by design. Each of these is one call to an endpoint that has enforced its own rules since 17.4 —
+  // the SoD engine, the MFA gate, the audit write, the membership mirror. Anything clever here would be a
+  // second opinion about a decision the server has already made correctly.
+
+  async createIdentityUser(input: {
+    username: string; displayName: string; email: string; tenantId: string; roles: string[]; lang?: "en" | "ar";
+  }) {
+    const r = (await postAbsolute(`${GATEWAY_BASE}/identity/admin/users`, input)) as any;
+    return { id: String(r?.id ?? ""), resetLinkSent: r?.resetLinkSent === true };
+  }
+
+  async updateIdentityUser(id: string, input: { displayName?: string; email?: string }) {
+    await postAbsolute(`${GATEWAY_BASE}/identity/admin/users/${encodeURIComponent(id)}`, input);
+  }
+
+  async setIdentityUserRoles(id: string, roles: string[]) {
+    await postAbsolute(`${GATEWAY_BASE}/identity/admin/users/${encodeURIComponent(id)}/roles`, { roles });
+  }
+
+  async deactivateIdentityUser(id: string) {
+    await postAbsolute(`${GATEWAY_BASE}/identity/admin/users/${encodeURIComponent(id)}/deactivate`, {});
+  }
+
+  async reactivateIdentityUser(id: string) {
+    await postAbsolute(`${GATEWAY_BASE}/identity/admin/users/${encodeURIComponent(id)}/reactivate`, {});
+  }
+
+  async sendPasswordResetLink(id: string, lang?: "en" | "ar") {
+    await postAbsolute(`${GATEWAY_BASE}/identity/admin/users/${encodeURIComponent(id)}/reset-password`, { lang });
+  }
+
+  async changeMyPassword(currentPassword: string, newPassword: string) {
+    // `/identity/me`, not `/identity/admin`: changing your own password needs no administrative scope, and
+    // putting it behind one would mean the people most likely to need it could not.
+    await postAbsolute(`${GATEWAY_BASE}/identity/me/password`, { currentPassword, newPassword });
+  }
+
+  async scopeCatalog() {
+    const r = (await getAbsolute(`${GATEWAY_BASE}/identity/admin/scopes`)) as any[];
+    return (Array.isArray(r) ? r : []).map((s: any) =>
+      parseOr(zScopeCatalogEntry, {
+        name: String(s.name ?? ""),
+        domain: String(s.domain ?? ""),
+        description: s.description ?? null,
+        serviceOnly: s.serviceOnly === true,
+        deprecated: s.deprecated === true,
+        replacedBy: s.replacedBy ?? null,
+        isPlatformAdminKey: s.isPlatformAdminKey === true,
+        heldBy: Array.isArray(s.heldBy) ? s.heldBy.map(String) : [],
+      }),
+    );
+  }
+
+  async roleCatalog() {
+    const r = (await getAbsolute(`${GATEWAY_BASE}/identity/admin/roles`)) as any[];
+    return (Array.isArray(r) ? r : []).map((x: any) =>
+      parseOr(zRoleCatalogEntry, {
+        name: String(x.name ?? ""),
+        description: x.description ?? null,
+        sensitivityTier: String(x.sensitivityTier ?? "T1"),
+        level: typeof x.level === "number" ? x.level : null,
+        custom: x.custom === true,
+        builtIn: x.builtIn === true,
+        scopes: Array.isArray(x.scopes) ? x.scopes.map(String) : [],
+      }),
+    );
+  }
+
+  async createRole(input: { name: string; scopes: string[]; description?: string; sensitivityTier?: string }) {
+    await postAbsolute(`${GATEWAY_BASE}/identity/admin/roles`, input);
+  }
+
+  async setRoleScopes(role: string, scopes: string[]) {
+    await postAbsolute(`${GATEWAY_BASE}/identity/admin/roles/${encodeURIComponent(role)}/scopes`, { scopes });
   }
 
   /** 18.C2 (W5) — the live role→scope matrix, read from the issuer's own catalog rather than inferred. */

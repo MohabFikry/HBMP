@@ -54,7 +54,15 @@ public class RoleScopeMatrixTests
         Skip.If(IdentityTestDb.Conn is null, "IDENTITY_TEST_DB not set — DB integration test skipped.");
         await using var db = IdentityTestDb.NewContext();
 
-        var names = await db.Roles.AsNoTracking().Select(r => r.Name!).ToListAsync();
+        // 28.9 — the BUILT-IN catalogue, which is what "frozen" was ever about. A tenant may now author its
+        // own roles (`owner_tenant_id`), and those are data rather than contract: they carry no scopes the
+        // catalogue does not already define and no service parses them by name. Asserting over every row
+        // would make this test fail the moment an administrator does the thing the feature exists for —
+        // while still catching the case it is here for, a role quietly added to the platform's own list.
+        var names = await db.Roles.AsNoTracking()
+            .Where(r => r.OwnerTenantId == null)
+            .Select(r => r.Name!)
+            .ToListAsync();
         names.Should().BeEquivalentTo(IdentityContract.Roles);
     }
 

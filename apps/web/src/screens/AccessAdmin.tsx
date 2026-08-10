@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import {
   Button,
   Card,
+  ComboboxField,
   DataTable,
   Icon,
   InputField,
@@ -15,19 +16,31 @@ import {
 import type { Column } from "@mersal/design-system";
 import type {
   AccessSession,
+  IdentityUser,
   BranchScopeGrant,
   EffectiveAccess,
   Localized,
   MembershipDetail,
   MembershipOverride,
   MembershipRow,
+  ScopeCatalogEntry,
 } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
 import { useWrite } from "../api/useWrite";
 import { useFormat } from "../i18n/useFormat";
+import { issuerRoleFor } from "../config";
+import { PORTALS } from "../portals/catalog";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
 import { EffectiveAccessPreview } from "./EffectiveAccessPreview";
+import {
+  AccountStatusChip,
+  CreateUserDialog,
+  EditPortalsDialog,
+  UserActionDialog,
+  UserRowActions,
+  USER_ADMIN_STRINGS,
+} from "./UserAdmin";
 
 /**
  * Phase 21.6 — the user & access administration screens (design 40 §1–§3, §6).
@@ -44,6 +57,18 @@ import { EffectiveAccessPreview } from "./EffectiveAccessPreview";
 
 const S = {
   rosterTitle: { en: "Users & Access", ar: "المستخدمون والصلاحيات" },
+  rosterTabsLabel: { en: "Users and access sections", ar: "أقسام المستخدمين والصلاحيات" },
+  // 28.8 — the identity half and the authority half. See the comment at the tab strip for why they are two.
+  tabAccounts: { en: "Accounts", ar: "الحسابات" },
+  tabMemberships: { en: "Authority", ar: "الصلاحيات" },
+  searchAccounts: { en: "Search by name, username or email", ar: "ابحث بالاسم أو اسم المستخدم أو البريد" },
+  accountsEmpty: { en: "No accounts yet. Add one to get started.", ar: "لا توجد حسابات بعد. أضف حسابًا للبدء." },
+  email: { en: "Email", ar: "البريد الإلكتروني" },
+  noEmail: { en: "No address", ar: "بلا بريد" },
+  portalsCol: { en: "Portals", ar: "البوابات" },
+  twoFactor: { en: "Second factor", ar: "التحقق بخطوتين" },
+  mfaOn: { en: "Enrolled", ar: "مُفعّل" },
+  mfaOff: { en: "Not enrolled", ar: "غير مُفعّل" },
   rosterEmpty: { en: "No memberships in this tenant.", ar: "لا توجد عضويات في هذا المستأجر." },
   search: { en: "Search by name or username", ar: "ابحث بالاسم أو اسم المستخدم" },
   person: { en: "Person", ar: "الشخص" },
@@ -140,6 +165,7 @@ export function MembershipRoster() {
   const api = useApi();
   const t = useLoc();
   const [query, setQuery] = useState("");
+  const [topTab, setTopTab] = useState("accounts");
   const [selected, setSelected] = useState<string | null>(null);
   const rows = useAsync<MembershipRow[]>(() => api.memberships(undefined, undefined, query || undefined), [query]);
 
@@ -195,21 +221,177 @@ export function MembershipRoster() {
   return (
     <>
       <PageHeader title={t(S.rosterTitle)} />
-      <Card as="section" style={{ padding: "var(--sp3)" }}>
-        <SearchField
-          aria-label={t(S.search)}
-          placeholder={t(S.search)}
-          value={query}
-          onChange={(e) => setQuery(e.currentTarget.value)}
-          style={{ marginBottom: "var(--sp3)" }}
-        />
-        <AsyncSection<MembershipRow[]> state={rows} isEmpty={(d) => d.length === 0} emptyLabel={S.rosterEmpty}>
-          {(list) => (
-            <DataTable columns={cols} rows={list} rowKey={(r) => r.membershipId} caption={t(S.rosterTitle)} />
-          )}
-        </AsyncSection>
-      </Card>
+      {/*
+        28.8 — TWO VIEWS OF THE SAME PEOPLE, and the split is the design 40 §1 invariant made visible.
+
+        ACCOUNTS is the identity: who exists, how they sign in, which portals they hold, and the lifecycle
+        (invite, reset, deprovision, restore). MEMBERSHIPS is the principal: what a person may DO inside one
+        organisation — their tier, their exceptions, their reach, their effective access. The same human
+        appears in both and they are not the same subject, which is exactly why authority is keyed on the
+        membership and never on the identity.
+
+        Accounts is first because it is the one that answers "make this person exist", which is the question
+        this screen previously could not answer at all.
+      */}
+      <Tabs
+        aria-label={t(S.rosterTabsLabel)}
+        value={topTab}
+        onValueChange={setTopTab}
+        items={[
+          { value: "accounts", label: t(S.tabAccounts), content: <AccountsTab /> },
+          {
+            value: "memberships",
+            label: t(S.tabMemberships),
+            content: (
+              <Card as="section" style={{ padding: "var(--sp3)" }}>
+                <SearchField
+                  aria-label={t(S.search)}
+                  placeholder={t(S.search)}
+                  value={query}
+                  onChange={(e) => setQuery(e.currentTarget.value)}
+                  style={{ marginBottom: "var(--sp3)" }}
+                />
+                <AsyncSection<MembershipRow[]> state={rows} isEmpty={(d) => d.length === 0} emptyLabel={S.rosterEmpty}>
+                  {(list) => (
+                    <DataTable columns={cols} rows={list} rowKey={(r) => r.membershipId} caption={t(S.rosterTitle)} />
+                  )}
+                </AsyncSection>
+              </Card>
+            ),
+          },
+        ]}
+      />
     </>
+  );
+}
+
+/**
+ * The accounts half — the identity store, with the lifecycle this app has never had.
+ *
+ * The columns are chosen to answer, without opening a row, the four questions an administrator opens this
+ * page holding: who is this, how do they sign in, what can they reach, and is the account in a state that
+ * works. `twoFactorEnabled` earns its place because MFA gates every admin scope and every break-glass
+ * request on the platform, and until 18.C2 no screen anywhere showed whether an account had one.
+ */
+function AccountsTab() {
+  const api = useApi();
+  const t = useLoc();
+  const [query, setQuery] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<IdentityUser | null>(null);
+  const [action, setAction] = useState<{ kind: "reset" | "deactivate" | "reactivate"; user: IdentityUser } | null>(null);
+  // Announced rather than merely rendered: creating an account and sending a link both succeed by changing
+  // almost nothing on screen, and an outcome nobody is told about reads as a button that did not work.
+  const [announcement, setAnnouncement] = useState<Localized | null>(null);
+  const users = useAsync<IdentityUser[]>(() => api.identityUsers(query || undefined), [query, reloadKey]);
+  const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  const cols: Column<IdentityUser>[] = [
+    {
+      key: "person",
+      header: t(S.person),
+      cell: (u) => (
+        <span>
+          {u.displayName}
+          <span className="muted"> · {u.username}</span>
+        </span>
+      ),
+      sortable: true,
+      sortValue: (u) => u.displayName,
+    },
+    {
+      key: "email",
+      header: t(S.email),
+      // An account with no address is the one this column exists to surface: it cannot sign in by address
+      // and cannot be sent a reset link, and nothing else on the page would say so.
+      cell: (u) => (u.email ? u.email : <StatusChip kind="warn" label={t(S.noEmail)} />),
+    },
+    {
+      key: "portals",
+      header: t(S.portalsCol),
+      cell: (u) => {
+        const held = PORTALS.filter((p) => u.roles.includes(issuerRoleFor(p.role)));
+        return held.length ? held.map((p) => t(p.title)).join(", ") : <span className="muted">{t(S.none)}</span>;
+      },
+    },
+    {
+      key: "twoFactor",
+      header: t(S.twoFactor),
+      cell: (u) =>
+        u.twoFactorEnabled ? (
+          <StatusChip kind="ok" label={t(S.mfaOn)} />
+        ) : (
+          <StatusChip kind="warn" label={t(S.mfaOff)} />
+        ),
+    },
+    { key: "status", header: t(S.status), cell: (u) => <AccountStatusChip user={u} /> },
+    {
+      key: "actions",
+      header: "",
+      cell: (u) => (
+        <UserRowActions
+          user={u}
+          onAct={(kind, user) => setAction({ kind, user })}
+          onEditPortals={(user) => setEditing(user)}
+        />
+      ),
+    },
+  ];
+
+  return (
+    <Card as="section" style={{ padding: "var(--sp3)" }}>
+      <div className="pagehead-actions" style={{ marginBottom: "var(--sp3)" }}>
+        <Button variant="primary" onClick={() => setCreating(true)}>
+          {t(USER_ADMIN_STRINGS.addUser)}
+        </Button>
+      </div>
+
+      <div aria-live="polite">
+        {announcement && <InlineAlert tone="ok">{t(announcement)}</InlineAlert>}
+      </div>
+
+      <SearchField
+        aria-label={t(S.searchAccounts)}
+        placeholder={t(S.searchAccounts)}
+        value={query}
+        onChange={(e) => setQuery(e.currentTarget.value)}
+        style={{ margin: "var(--sp3) 0" }}
+      />
+
+      <AsyncSection<IdentityUser[]> state={users} isEmpty={(d) => d.length === 0} emptyLabel={S.accountsEmpty}>
+        {(list) => <DataTable columns={cols} rows={list} rowKey={(u) => u.id} caption={t(S.tabAccounts)} />}
+      </AsyncSection>
+
+      <CreateUserDialog
+        open={creating}
+        onClose={() => setCreating(false)}
+        onCreated={({ resetLinkSent }) => {
+          // The un-invited case is NOT smoothed over. The account exists and nobody can sign in to it; an
+          // administrator told only "created" would walk away from that.
+          setAnnouncement(resetLinkSent ? USER_ADMIN_STRINGS.createdInvited : USER_ADMIN_STRINGS.createdNotInvited);
+          reload();
+        }}
+      />
+      <EditPortalsDialog
+        open={editing !== null}
+        user={editing}
+        onClose={() => setEditing(null)}
+        onSaved={() => {
+          setEditing(null);
+          reload();
+        }}
+      />
+      <UserActionDialog
+        kind={action?.kind ?? null}
+        user={action?.user ?? null}
+        onClose={() => setAction(null)}
+        onDone={(message) => {
+          setAnnouncement(message);
+          reload();
+        }}
+      />
+    </Card>
   );
 }
 
@@ -311,6 +493,8 @@ function OverridesTab({ membership, onChanged }: { membership: MembershipDetail;
   const t = useLoc();
   const fmt = useFormat();
   const write = useWrite();
+  // 28.9 — the same catalogue the Access Catalogue screen reads, so the two can never offer different keys.
+  const catalogue = useAsync<ScopeCatalogEntry[]>(() => api.scopeCatalog(), []);
   const [open, setOpen] = useState(false);
   const [scope, setScope] = useState("");
   const [effect, setEffect] = useState<"Allow" | "Deny">("Allow");
@@ -408,11 +592,34 @@ function OverridesTab({ membership, onChanged }: { membership: MembershipDetail;
           </InlineAlert>
         ) : null}
 
-        <InputField
+        {/*
+          28.9 — CHOSEN FROM THE CATALOGUE, not typed from memory.
+          ------------------------------------------------------------------------------------------------
+          This was a bare text field. Granting an exception therefore required knowing the exact spelling of
+          a key with no screen anywhere that listed them — so the realistic options were "give them a bigger
+          role" or "guess", and a typo produced a 422 rather than a grant. A combobox over the same catalogue
+          the Access Catalogue screen renders makes the narrow, reviewable path the easy one, which is the
+          only way an exception mechanism competes with over-granting.
+
+          Service-only keys are excluded: the server refuses them for a human principal, and offering one
+          would be offering a control that fails.
+        */}
+        <ComboboxField
+          id="override-scope"
           label={t(S.scope)}
           value={scope}
           error={scopeError}
-          onChange={(e) => setScope(e.currentTarget.value)}
+          onChange={(v) => setScope(v)}
+          options={(catalogue.data ?? [])
+            .filter((s) => !s.serviceOnly)
+            .map((s) => ({
+              value: s.name,
+              label: s.name,
+              // Searchable by what it DOES as well as by its key: an administrator looking for "let them
+              // upload a result" does not know it is spelled `lab:result:write`.
+              keywords: `${s.domain} ${s.description ?? ""}`,
+              hint: s.description ?? undefined,
+            }))}
         />
         <fieldset className="mrs-choice" style={{ margin: "var(--sp3) 0" }}>
           <legend className="mrs-label">{t(S.effect)}</legend>

@@ -147,6 +147,55 @@ SoD table move to a **Governance** tab on the same screen.
 - **Self-service** — "Change password" in `UserPane`: current + new + confirm, revoking the user's other
   sessions on success.
 
+## Phase G — the access catalogue, custom roles, and exception grants
+
+Added after the first four phases, and it is the piece that makes the rest honest.
+
+**The problem.** Every permission on the platform has been data since 17.1 — rows in `identity.scope` — and
+no screen ever listed them. An administrator could assign a role, and could grant an exception naming a key,
+but had no way to discover what keys exist or what any of them means. The exception dialog's permission field
+was free text. So the only workable strategy in front of a real person with an unusual job was *grant the
+nearest bigger role* — which is how least privilege actually erodes: not by anyone arguing against it, but by
+the alternative being unavailable at the moment of the decision.
+
+**`/admin/policies` becomes the Access Catalogue**, in four tabs:
+
+- **Permissions** — every scope, searchable, with its area, what it allows, which roles already hold it in
+  this tenant, and its flags (service-only, superseded, platform-administration).
+- **Roles** — built-in and the tenant's own, with what each actually grants, and **Design a role**: a name,
+  a purpose, a sensitivity tier, and a permission picker grouped by domain.
+- **Assignments** — the role bindings and recertification dates carried over from the screen 28.8 merged
+  away. It is the only part of that screen not superseded, and dropping it would have silently removed
+  recertification dates from the product.
+- **Separated duties** — the SoD matrix, which is what refuses the combinations the designer offers.
+
+**Custom roles** get an `owner_tenant_id` on `identity.role` (migration 0036). Names stay globally unique —
+Identity's `RoleStore` requires it and the token's `roles` claim has nowhere to put a qualifier — so the
+column records *ownership*, which is what lets one tenant's role be refused to another. A custom role grants
+**permissions, never a portal**: the SPA derives a workspace from the built-in role→portal map, so a custom
+role adds keys to whatever portal its holder already has. Somebody holding only custom roles has no portal
+and lands on the fail-closed page, which is correct — a workspace is a designed thing with screens in it.
+
+**Guard rails on the designer**, each enforced server-side and surfaced in the form:
+
+| Rule | Why |
+|---|---|
+| Name matches `^[a-z][a-z0-9_]{2,48}$` | It lands in the `roles` claim, which other code splits on |
+| Built-in names are reserved | Redefining `doctor` changes what the audit trail means |
+| Service-only keys are refused | A machine credential on a person is invisible to any review |
+| SoD is evaluated over the **set** | A role holding both halves of a split duty breaches it for *everyone* ever assigned it — and the existing per-key check passes each key against an empty held-set, so it finds nothing |
+
+`SegregationOfDuties.EvaluateScopeSet` is the new pure function behind that last row.
+
+**Exception grants** already existed (`POST /memberships/{id}/overrides`, SoD-guarded, reason mandatory). The
+change is that its permission field is now a combobox over the same catalogue, searchable by what a key
+*does* rather than by its spelling — an administrator looking for "let them upload a result" does not know it
+is `lab:result:write`.
+
+New endpoints: `GET /identity/admin/scopes`, `GET /identity/admin/roles`, `POST /identity/admin/roles`. The
+existing `POST /roles/{role}/scopes` is relaxed to accept a custom role owned by the caller's tenant, and
+refuses another tenant's with 403.
+
 ## Phase E — identity-service
 
 | Change | Why |

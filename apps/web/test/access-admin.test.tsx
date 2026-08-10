@@ -31,13 +31,25 @@ function renderRoster(client: ApiClient = new DevApiClient({ latencyMs: 0 })) {
 }
 
 /**
+ * Reach the membership roster.
+ *
+ * 28.8 put it behind an "Authority" tab, beside the "Accounts" tab that administers the identities. The two
+ * are deliberately separate subjects — the account is who somebody IS, the membership is what they may DO in
+ * one organisation — so every test below that is about AUTHORITY starts by saying so.
+ */
+async function showAuthority(client?: ApiClient) {
+  renderRoster(client);
+  await userEvent.click(await screen.findByRole("tab", { name: /authority/i }));
+}
+
+/**
  * Open the first membership's detail and switch to `tab`, returning the ACTIVE panel.
  *
  * Every panel is force-mounted (the design-system Tabs keeps content in the DOM and hides the inactive
  * ones), so assertions must be scoped to the active panel — an unscoped query sweeps in all five tabs.
  */
 async function openDetail(tab?: string, client?: ApiClient): Promise<HTMLElement> {
-  renderRoster(client);
+  await showAuthority(client);
   const open = await screen.findAllByRole("button", { name: /^open$/i });
   await userEvent.click(open[0]);
   await screen.findByRole("tab", { name: /roles/i });
@@ -55,7 +67,7 @@ describe("Membership roster (21.6)", () => {
   it("lists memberships, not identities — one person appears once per organisation", async () => {
     // Invariant 1: authorization evaluates against the membership. The same person holding authority in two
     // organisations must render as two rows; collapsing them to one identity is the thing the design forbids.
-    renderRoster();
+    await showAuthority();
     await screen.findAllByText(/Sara Ibrahim/);
 
     const rows = screen.getAllByRole("row").slice(1);
@@ -68,14 +80,14 @@ describe("Membership roster (21.6)", () => {
   it("calls out lapsed exceptions separately from live ones", async () => {
     // An override expiring changes someone's authority with nobody being told. The count on its own would
     // hide that: "3 exceptions" reads as three things in force.
-    renderRoster();
+    await showAuthority();
     const row = (await screen.findAllByRole("row")).find((r) => within(r).queryByText(/Sara Ibrahim/))!;
     expect(within(row).getByText(/lapsed/i)).toBeInTheDocument();
   });
 
   it("shows a suspended membership as its own state, not as inactive", async () => {
     // Invited / Suspended / Ended are three different remedies (accept, ask an administrator, start over).
-    renderRoster();
+    await showAuthority();
     await waitFor(() => expect(screen.getByText(/Mohamed Farouk/)).toBeInTheDocument());
     const row = screen.getAllByRole("row").find((r) => within(r).queryByText(/Mohamed Farouk/))!;
     expect(within(row).getByText(/suspended/i)).toBeInTheDocument();
@@ -109,7 +121,11 @@ describe("Exceptions tab (21.6)", () => {
     const panel = await openDetail("exceptions", client);
 
     await userEvent.click(within(panel).getByRole("button", { name: /add an exception/i }));
-    await userEvent.type(await screen.findByLabelText(/permission/i), "approvals:decide");
+    // 28.9 — the permission is CHOSEN from the access catalogue, not typed from memory. Typing filters the
+    // list; the value is only set by picking an option, which is the point: a key that does not exist can no
+    // longer be submitted, and an administrator no longer has to know its exact spelling.
+    await userEvent.type(await screen.findByLabelText(/permission/i), "emr:write");
+    await userEvent.click(await screen.findByRole("option", { name: /emr:write/ }));
     await userEvent.type(screen.getByLabelText(/reason/i), "covering the reviewer");
     await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
 

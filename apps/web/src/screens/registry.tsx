@@ -82,8 +82,7 @@ const ClaimsInsights = lazy(() => import("./ClaimsPortal").then((m) => ({ defaul
 const Notifications = lazy(() => import("./Notifications").then((m) => ({ default: m.Notifications })));
 // Admin / platform governance (Phase 8b) — one chunk, mounted under both the org-admin (/admin) and
 // super-admin (/platform) portal bases which share section paths.
-const AdminUsers = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminUsers })));
-const AdminPolicies = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminPolicies })));
+const AccessCatalogue = lazy(() => import("./AccessCatalogue").then((m) => ({ default: m.AccessCatalogue })));
 const AdminTenants = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminTenants })));
 const AdminGovernance = lazy(() => import("./AdminConsole").then((m) => ({ default: m.AdminGovernance })));
 const ApprovalEngineAdmin = lazy(() => import("./ApprovalEngineAdmin").then((m) => ({ default: m.ApprovalEngineAdmin })));
@@ -262,8 +261,13 @@ export const SCREENS: Record<string, () => ReactNode> = {
 // Admin sections are shared by the org-admin (/admin/*) and super-admin (/platform/*) portals; map by the
 // trailing section rather than enumerating both bases.
 const ADMIN_SECTIONS: Record<string, () => ReactNode> = {
-  users: () => <AdminUsers />,
-  policies: () => <AdminPolicies />,
+  // 28.8 — `users` is gone from the catalog (merged into `access`), but the ROUTE stays mapped: a bookmark
+  // to /admin/users predates the merge, and answering it with a 404 would teach an administrator that the
+  // people surface disappeared. It resolves to the merged screen, which is where they were going.
+  users: () => <MembershipRoster />,
+  // 28.9 — the SoD table this used to be is now one tab of the catalogue, beside the permissions it refuses
+  // combinations of and the roles built out of them.
+  policies: () => <AccessCatalogue />,
   tenants: () => <AdminTenants />,
   audit: () => <AdminGovernance />,
   "master-data": () => <AdminMasterData />,

@@ -558,8 +558,14 @@ export const PORTALS: PortalDef[] = [
       ar: "أفراد مؤسستك وصلاحياتهم، إضافة إلى البيانات المرجعية والمستأجرين والإعدادات وسجل التدقيق.",
     },
     sections: [
-      { key: "users", path: "users", label: { en: "Users & Roles", ar: "المستخدمون والأدوار" }, group: G.admin, icon: "user", permission: "admin.users" },
-      { key: "policies", path: "policies", label: { en: "Permissions / Policies", ar: "الصلاحيات / السياسات" }, group: G.admin, icon: "check2", permission: "admin.policies" },
+      // 28.8 — "Users & Roles" is GONE, folded into "Users & Access" below.
+      //
+      // Two sections about the same people is how they drift apart: one listed accounts and their 2FA state
+      // and could change nothing; the other listed memberships and exceptions and knew nothing about the
+      // account behind them. An administrator asking "why can this person not sign in" had to guess which of
+      // the two to open, and neither would have answered. There is now ONE place, with the identity and the
+      // authority as two tabs of it — and the role->scope matrix that lived here is the Access Catalogue.
+      { key: "policies", path: "policies", label: { en: "Access Catalogue", ar: "دليل الصلاحيات" }, group: G.admin, icon: "check2", permission: "admin.policies" },
       { key: "masterdata", path: "master-data", label: { en: "Master Data", ar: "البيانات المرجعية" }, group: G.admin, icon: "doc", permission: "admin.masterdata" },
       { key: "tenants", path: "tenants", label: { en: "Tenants / Providers", ar: "المستأجرون / مقدمو الخدمة" }, group: G.admin, icon: "refer", permission: "admin.tenants" },
       { key: "audit", path: "audit", label: { en: "Audit & Access Reviews", ar: "التدقيق والمراجعات" }, group: G.oversight, icon: "clock", permission: "admin.audit" },
@@ -580,8 +586,8 @@ export const PORTALS: PortalDef[] = [
       ar: "المنصة نفسها: أفراد كل مستأجر وصلاحياتهم، وتفعيل البرامج الذي تحدده مرسال وحدها.",
     },
     sections: [
-      { key: "users", path: "users", label: { en: "Users & Roles", ar: "المستخدمون والأدوار" }, group: G.admin, icon: "user", permission: "admin.users" },
-      { key: "policies", path: "policies", label: { en: "Permissions / Policies", ar: "الصلاحيات / السياسات" }, group: G.admin, icon: "check2", permission: "admin.policies" },
+      // Same merge as the org-admin portal above — one people surface, not two.
+      { key: "policies", path: "policies", label: { en: "Access Catalogue", ar: "دليل الصلاحيات" }, group: G.admin, icon: "check2", permission: "admin.policies" },
       { key: "masterdata", path: "master-data", label: { en: "Master Data", ar: "البيانات المرجعية" }, group: G.admin, icon: "doc", permission: "admin.masterdata" },
       { key: "tenants", path: "tenants", label: { en: "Tenants / Providers", ar: "المستأجرون / مقدمو الخدمة" }, group: G.admin, icon: "refer", permission: "admin.tenants" },
       { key: "audit", path: "audit", label: { en: "Audit & Access Reviews", ar: "التدقيق والمراجعات" }, group: G.oversight, icon: "clock", permission: "admin.audit" },

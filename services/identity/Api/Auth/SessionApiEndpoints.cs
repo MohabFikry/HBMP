@@ -90,7 +90,7 @@ public static class SessionApiEndpoints
             var ip = ClientIp(http);
             var username = req.Username ?? "";
 
-            var user = await users.FindByNameAsync(username);
+            var user = await ResolveLoginAsync(users, username);
             if (user is null || !user.IsActive)
             {
                 // Both record the SAME coarse reason as the form path does, so the distinction between "no
@@ -274,6 +274,45 @@ public static class SessionApiEndpoints
         return new SessionStatusResponse(
             SessionStatus.Authenticated,
             TwoFactorEnrolled: await users.GetTwoFactorEnabledAsync(user));
+    }
+
+    /// <summary>
+    /// Resolve what somebody typed into the sign-in field: an EMAIL ADDRESS, or a username.
+    ///
+    /// <para>
+    /// ========================================================================================================
+    /// WHY EMAIL FIRST AND USERNAME AS THE FALLBACK
+    /// ========================================================================================================
+    /// This was <c>FindByNameAsync</c> alone, so an account created with an email address could not sign in
+    /// with it — which is the one credential its owner is certain to remember. Email is tried first because
+    /// it is what the form now asks for and what every new account is created with; the username fallback is
+    /// what keeps the seeded accounts and the service accounts working, and those have no mailbox at all.
+    /// </para>
+    ///
+    /// <para>
+    /// ========================================================================================================
+    /// WHAT THIS MUST NOT BECOME
+    /// ========================================================================================================
+    /// An enumeration oracle. It returns a user or it does not, and the CALLER records the same coarse
+    /// <c>bad-credentials</c> reason and returns the same <c>invalid_credentials</c> status either way —
+    /// unknown address, unknown username, wrong password and deactivated account are one answer, as they
+    /// were before. Nothing here may branch the response on WHICH lookup succeeded, or the two lookups
+    /// become a way to ask "does this address have an account".
+    /// </para>
+    ///
+    /// <para>An address is only tried as one when it contains '@'. Without that guard a username containing
+    /// no '@' still costs a wasted index probe on every sign-in, and — more importantly — a username that
+    /// happens to match some other account's email would resolve to the wrong person.</para>
+    /// </summary>
+    private static async Task<ApplicationUser?> ResolveLoginAsync(UserManager<ApplicationUser> users, string login)
+    {
+        if (string.IsNullOrWhiteSpace(login)) return null;
+        if (login.Contains('@', StringComparison.Ordinal))
+        {
+            var byEmail = await users.FindByEmailAsync(login);
+            if (byEmail is not null) return byEmail;
+        }
+        return await users.FindByNameAsync(login);
     }
 
     /// <summary>Validate the antiforgery pair, or refuse. Returns null when the request is genuine.</summary>

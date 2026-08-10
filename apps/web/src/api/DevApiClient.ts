@@ -115,6 +115,8 @@ import {
   type PlaceOrderRequest,
   type PrescribeRequest,
   type IdentityUser,
+  type RoleCatalogEntry,
+  type ScopeCatalogEntry,
   type RoleScopeGrant,
   type ReportAccessRequestRow,
   zAmendReasonOption,
@@ -1072,12 +1074,160 @@ export class DevApiClient implements ApiClient {
 
   /** 18.C2 (W5) — fixture identity users. One account WITHOUT a second factor, because that is the row the
    * screen exists to make visible. */
-  async identityUsers(): Promise<IdentityUser[]> {
+  /**
+   * The fixture identity store. MUTABLE, unlike most of this file.
+   *
+   * Everything else here answers from a literal, because a screen that only reads cannot tell the difference.
+   * User administration is the first surface in the app whose whole point is that the list CHANGES: "create
+   * a user and see them in the table" is the behaviour under test, and a client that returned the same three
+   * rows forever would pass a test that proved nothing.
+   */
+  private identityStore: IdentityUser[] = [
+    { id: "u-1", username: "org.admin", displayName: "Org Admin", email: "org.admin@mersal.org", tenantId: "•••1111", isActive: true, twoFactorEnabled: true, roles: ["org_admin"] },
+    { id: "u-2", username: "dr.hala", displayName: "Dr. Hala", email: "hala@mersal.org", tenantId: "•••1111", isActive: true, twoFactorEnabled: false, roles: ["doctor"] },
+    { id: "u-3", username: "left.staff", displayName: "Former Staff", email: "former@mersal.org", tenantId: "•••1111", isActive: false, twoFactorEnabled: true, roles: ["reception"] },
+    // Predates 28.8, which required an address on creation: it can neither sign in by address nor be sent a
+    // reset link, and the console must say so rather than offer a button that fails.
+    { id: "u-4", username: "svc.reporting", displayName: "Reporting Service", email: null, tenantId: "•••1111", isActive: true, twoFactorEnabled: false, roles: ["finance"] },
+  ];
+
+  async identityUsers(query?: string): Promise<IdentityUser[]> {
+    if (!query) return [...this.identityStore];
+    const q = query.toLowerCase();
+    return this.identityStore.filter(
+      (u) =>
+        u.username.toLowerCase().includes(q) ||
+        u.displayName.toLowerCase().includes(q) ||
+        (u.email ?? "").toLowerCase().includes(q),
+    );
+  }
+
+  async createIdentityUser(input: {
+    username: string; displayName: string; email: string; tenantId: string; roles: string[];
+  }) {
+    // The duplicate check is here as well as on the server, because the fixture build is where the screen's
+    // conflict path gets exercised — a 409 that only a live issuer can produce is a branch nothing tests.
+    if (this.identityStore.some((u) => (u.email ?? "").toLowerCase() === input.email.toLowerCase())) {
+      // A TYPED refusal, matching what the HTTP client raises. The screens branch on `status === 409` to
+      // decide which field to blame, so a bare Error here would leave the conflict path untested — and it
+      // is the branch most likely to be wrong.
+      throw new ApiError("http", "email-taken", 409, { title: "email-taken" });
+    }
+    const id = `u-${this.identityStore.length + 1}-${input.username}`;
+    this.identityStore.push({
+      id,
+      username: input.username,
+      displayName: input.displayName,
+      email: input.email,
+      tenantId: "•••1111",
+      isActive: true,
+      // A new account has no second factor until its owner enrols one — showing it as enrolled would hide
+      // the single most important gap an administrator reviews this table for.
+      twoFactorEnabled: false,
+      roles: [...input.roles],
+    });
+    return { id, resetLinkSent: true };
+  }
+
+  async updateIdentityUser(id: string, input: { displayName?: string; email?: string }) {
+    const u = this.identityStore.find((x) => x.id === id);
+    if (!u) throw new Error("not-found");
+    if (input.displayName) u.displayName = input.displayName;
+    if (input.email) u.email = input.email;
+  }
+
+  async setIdentityUserRoles(id: string, roles: string[]) {
+    const u = this.identityStore.find((x) => x.id === id);
+    if (!u) throw new Error("not-found");
+    u.roles = [...roles];
+  }
+
+  async deactivateIdentityUser(id: string) {
+    const u = this.identityStore.find((x) => x.id === id);
+    if (!u) throw new Error("not-found");
+    u.isActive = false;
+  }
+
+  async reactivateIdentityUser(id: string) {
+    const u = this.identityStore.find((x) => x.id === id);
+    if (!u) throw new Error("not-found");
+    u.isActive = true;
+  }
+
+  async sendPasswordResetLink(id: string) {
+    if (!this.identityStore.some((x) => x.id === id)) throw new Error("not-found");
+  }
+
+  async changeMyPassword(currentPassword: string, newPassword: string) {
+    // Modelled, not stubbed: the screen's job is to surface the refusal, and a fixture that always succeeds
+    // leaves the only interesting branch untested.
+    if (!currentPassword || !newPassword) throw new Error("missing-field");
+    if (newPassword.length < 12) throw new Error("change-refused");
+  }
+
+  /**
+   * A slice of the real catalogue — enough domains, and one of each flag, so the screen's own rules are
+   * exercised: a service-only key must be unselectable, a deprecated one must be marked, and a
+   * platform-administration key must say what it is.
+   */
+  async scopeCatalog(): Promise<ScopeCatalogEntry[]> {
     return [
-      { id: "u-1", username: "org.admin", displayName: "Org Admin", tenantId: "•••1111", isActive: true, twoFactorEnabled: true, roles: ["org_admin"] },
-      { id: "u-2", username: "dr.hala", displayName: "Dr. Hala", tenantId: "•••1111", isActive: true, twoFactorEnabled: false, roles: ["doctor"] },
-      { id: "u-3", username: "left.staff", displayName: "Former Staff", tenantId: "•••1111", isActive: false, twoFactorEnabled: true, roles: ["reception"] },
+      { name: "eligibility:check", domain: "eligibility", description: "Check whether a beneficiary is covered.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["reception", "call_center"] },
+      { name: "patient:read", domain: "patient", description: "Read the beneficiary directory (identity, not clinical).", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["reception", "doctor", "nurse", "pharmacist"] },
+      { name: "emr:read", domain: "emr", description: "Read the clinical record of a treated patient.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["doctor", "nurse"] },
+      { name: "emr:write", domain: "emr", description: "Author an encounter.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["doctor"] },
+      { name: "orders:write", domain: "orders", description: "Place an investigation order.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["doctor"] },
+      { name: "orders:consume", domain: "orders", description: "Consume an order at a bench. Once only.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["lab_tech", "radiology_tech"] },
+      { name: "rx:dispense", domain: "pharmacy", description: "Dispense against a prescription.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["pharmacist"] },
+      { name: "finance:write", domain: "finance", description: "Raise a payment.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["finance"] },
+      { name: "finance:approve", domain: "finance", description: "Release a payment.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["finance"] },
+      { name: "claims:submit", domain: "claims", description: "Raise a claim.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: [] },
+      { name: "claims:adjudicate", domain: "claims", description: "Decide a claim.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["claims_officer"] },
+      { name: "admin:read", domain: "admin", description: "Read the administration surfaces.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: true, heldBy: ["org_admin", "super_admin"] },
+      { name: "admin:write", domain: "admin", description: "Change users, roles and configuration.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: true, heldBy: ["org_admin", "super_admin"] },
+      { name: "auth:ingest", domain: "auth", description: "Service-to-service audit ingest.", serviceOnly: true, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: [] },
+      { name: "orders:read:all", domain: "orders", description: "Superseded by the narrower bench keys.", serviceOnly: false, deprecated: true, replacedBy: "orders:read", isPlatformAdminKey: false, heldBy: [] },
+      { name: "notification:read", domain: "notification", description: "Read your own notification inbox.", serviceOnly: false, deprecated: false, replacedBy: null, isPlatformAdminKey: false, heldBy: ["reception", "doctor", "nurse", "org_admin"] },
     ];
+  }
+
+  private customRoles: RoleCatalogEntry[] = [];
+
+  async roleCatalog(): Promise<RoleCatalogEntry[]> {
+    return [
+      { name: "reception", description: "The front desk.", sensitivityTier: "T2", level: 2, custom: false, builtIn: true, scopes: ["eligibility:check", "patient:read", "notification:read"] },
+      { name: "doctor", description: "Treating clinician.", sensitivityTier: "T3", level: 1, custom: false, builtIn: true, scopes: ["emr:read", "emr:write", "orders:write", "patient:read", "notification:read"] },
+      { name: "finance", description: "Money, never a diagnosis.", sensitivityTier: "T2", level: 2, custom: false, builtIn: true, scopes: ["finance:write", "finance:approve"] },
+      { name: "org_admin", description: "Organisation administration.", sensitivityTier: "T4", level: 0, custom: false, builtIn: true, scopes: ["admin:read", "admin:write"] },
+      ...this.customRoles,
+    ];
+  }
+
+  async createRole(input: { name: string; scopes: string[]; description?: string; sensitivityTier?: string }) {
+    if (this.customRoles.some((r) => r.name === input.name)) {
+      throw new ApiError("http", "role-name-taken", 409, { title: "role-name-taken" });
+    }
+    // The SoD rule the server enforces over the SET, mirrored here for the same reason the duplicate check
+    // is: it is the branch the screen exists to render, and only a live issuer would otherwise produce it.
+    const sod = (a: string, b: string) => input.scopes.includes(a) && input.scopes.includes(b);
+    if (sod("finance:write", "finance:approve") || sod("claims:submit", "claims:adjudicate")) {
+      throw new ApiError("http", "sod-conflict", 409, { title: "sod-conflict" });
+    }
+    const tier = input.sensitivityTier ?? "T2";
+    this.customRoles.push({
+      name: input.name,
+      description: input.description ?? null,
+      sensitivityTier: tier,
+      level: 4 - Number(tier.slice(1)),
+      custom: true,
+      builtIn: false,
+      scopes: [...input.scopes],
+    });
+  }
+
+  async setRoleScopes(role: string, scopes: string[]) {
+    const r = this.customRoles.find((x) => x.name === role);
+    if (r) r.scopes = [...scopes];
   }
 
   async identityRoleScopes(): Promise<RoleScopeGrant[]> {

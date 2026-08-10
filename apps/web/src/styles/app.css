@@ -6011,3 +6011,179 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   color: var(--text-2);
   cursor: pointer;
 }
+
+/* =============================================================================================
+ * USER ADMINISTRATION + ACCESS CATALOGUE  (28.8 / 28.9)
+ * ============================================================================================= */
+
+/* A permission key is an identifier, not prose: monospace so `finance:write` and `finance:approve` differ
+   at a glance, which on this screen is the difference between two halves of a separated duty. */
+.scope-key {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--text-1);
+}
+
+/* A row of chips or small buttons that must not run edge-to-edge — JSX drops newline-only whitespace
+   between elements, so adjacent chips render touching without an explicit gap. */
+.chip-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp2);
+}
+
+/* ---- The portal checklist, grouped by the picker's own three zones -------------------------- */
+.portal-checklist-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp3);
+  margin: 0;
+}
+.portal-checklist-wrap > legend {
+  padding: 0 var(--sp2);
+  font-size: var(--fs-subhead);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.portal-checklist-help {
+  margin: 0 0 var(--sp3);
+  font-size: var(--fs-caption);
+}
+.portal-checklist {
+  display: grid;
+  gap: var(--sp3);
+  max-height: var(--scroll-panel);
+  overflow: auto;
+}
+.portal-checklist-zone {
+  border: 0;
+  border-top: 1px solid var(--border);
+  padding: var(--sp3) 0 0;
+  margin: 0;
+}
+.portal-checklist-zone:first-child { border-top: 0; padding-top: 0; }
+.portal-checklist-zone > legend {
+  font-size: var(--tbl-head-size);
+  font-weight: var(--tbl-head-weight);
+  letter-spacing: var(--tbl-head-tracking);
+  text-transform: uppercase;
+  color: var(--tbl-head-color);
+  padding: 0;
+}
+.portal-checklist-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: var(--sp2);
+  min-height: 36px;
+  cursor: pointer;
+}
+.portal-checklist-name {
+  font-size: var(--fs-subhead);
+  color: var(--text-1);
+}
+/* The role's own eyebrow, on the second row under the portal name: two roles share the Clinic Management
+   portal, and without it the list shows the same title twice with nothing to tell them apart. */
+.portal-checklist-eyebrow {
+  grid-column: 2;
+  font-size: var(--fs-caption);
+  color: var(--text-3);
+}
+
+/* ---- The role designer's permission picker --------------------------------------------------- */
+.scope-picker {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp3);
+  margin: 0;
+}
+.scope-picker > legend {
+  padding: 0 var(--sp2);
+  font-size: var(--fs-subhead);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.scope-picker-list {
+  display: grid;
+  gap: var(--sp4);
+  max-height: var(--scroll-panel);
+  overflow: auto;
+  margin-top: var(--sp2);
+}
+.scope-picker-group { display: grid; gap: var(--sp1); }
+.scope-picker-domain {
+  margin: 0 0 var(--sp1);
+  font-size: var(--tbl-head-size);
+  font-weight: var(--tbl-head-weight);
+  letter-spacing: var(--tbl-head-tracking);
+  text-transform: uppercase;
+  color: var(--tbl-head-color);
+}
+.scope-picker-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--sp2);
+  align-items: start;
+  padding: var(--sp1) 0;
+  min-height: 36px;
+  cursor: pointer;
+}
+/* A key the server refuses for a human principal. Dimmed AND the cursor says so — a disabled control that
+   looks merely quiet reads as a bug rather than as a rule. */
+.scope-picker-item:has(input:disabled) {
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+.scope-picker-name {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp2);
+}
+.scope-picker-desc {
+  grid-column: 2;
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+}
+
+/* ---- Sensitivity tier, as a radio row --------------------------------------------------------- */
+.tier-choice {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp2) var(--sp3);
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp4);
+}
+.tier-choice > legend {
+  padding: 0 var(--sp2);
+  font-size: var(--fs-subhead);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.tier-option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp2);
+  min-height: 36px;
+  cursor: pointer;
+}
+
+/* ---- Change-my-password, inside the account drawer -------------------------------------------- */
+.upane-pwform {
+  display: grid;
+  gap: var(--sp3);
+  padding: var(--sp3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.upane-pwform-help { margin: 0; font-size: var(--fs-caption); }
+.upane-pwform-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp2);
+}

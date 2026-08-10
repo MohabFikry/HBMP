@@ -223,6 +223,26 @@ export const L = {
   changePortal: { en: "Change portal", ar: "تغيير البوابة" },
   openPortal: { en: "Open", ar: "فتح" },
 
+  // ---- 28.8: changing your own password, from the account pane ----------------------------------------
+  security: { en: "Security", ar: "الأمان" },
+  password: { en: "Password", ar: "كلمة المرور" },
+  changePassword: { en: "Change password", ar: "تغيير كلمة المرور" },
+  // Said BEFORE the change rather than after: signing every other device out is the reason somebody would
+  // choose this over doing nothing when they suspect their password is known.
+  changePasswordHelp: {
+    en: "You'll stay signed in here. Every other device is signed out.",
+    ar: "ستبقى مسجّلاً هنا. وسيتم إخراج كل الأجهزة الأخرى.",
+  },
+  currentPassword: { en: "Current password", ar: "كلمة المرور الحالية" },
+  newPassword: { en: "New password", ar: "كلمة المرور الجديدة" },
+  confirmPassword: { en: "Confirm new password", ar: "تأكيد كلمة المرور الجديدة" },
+  passwordPolicy: {
+    en: "At least 12 characters, with upper and lower case, a digit and a symbol.",
+    ar: "12 حرفًا على الأقل، مع أحرف كبيرة وصغيرة ورقم ورمز.",
+  },
+  passwordMismatch: { en: "These two do not match.", ar: "الحقلان غير متطابقين." },
+  passwordChanged: { en: "Password changed. Other devices have been signed out.", ar: "تم تغيير كلمة المرور. تم إخراج الأجهزة الأخرى." },
+
   // ---- 28.4: the sign-in happens HERE now (ADR-0036). Every string authored in both locales. ----
   usernameLabel: { en: "Username", ar: "اسم المستخدم" },
   passwordLabel: { en: "Password", ar: "كلمة المرور" },

@@ -11,14 +11,21 @@ import type { Role } from "../src/authz/permissions";
 
 const DISPLAY: Record<string, string> = {};
 
-/** Seed a persisted session so restore() logs the user in as `role` before render. */
-export function seedSession(role: Role, ttlMs = 30 * 60 * 1000) {
+/**
+ * Seed a persisted session so restore() logs the user in before render.
+ *
+ * `extraRoles` produces a MULTI-PORTAL session — the state the portal picker and the in-app switcher exist
+ * for, and one no test could previously express because a session held exactly one role. `role` stays the
+ * primary, matching what a real token's priority order would resolve to.
+ */
+export function seedSession(role: Role, extraRoles: Role[] = [], ttlMs = 30 * 60 * 1000) {
   localStorage.setItem(
     "mersal-session",
     JSON.stringify({
       userId: `dev-${role}`,
       displayName: DISPLAY[role] ?? role,
       role,
+      roles: [role, ...extraRoles.filter((r) => r !== role)],
       expiresAt: Date.now() + ttlMs,
     }),
   );

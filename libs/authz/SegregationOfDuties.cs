@@ -207,6 +207,39 @@ public static class SegregationOfDuties
     /// <summary>Every violation that granting the catalog key <paramref name="scopeKey"/> would introduce for
     /// a principal already holding <paramref name="heldRoles"/>. Empty when the key carries no separated
     /// duty — the common case, and a genuine "no conflict" rather than an unchecked one.</summary>
+    /// <summary>
+    /// Every violation INTERNAL to a proposed set of catalog keys — the check a custom role definition needs.
+    ///
+    /// <para>
+    /// <see cref="EvaluateScopeGrant"/> answers "does adding this key to what somebody already holds break a
+    /// duty". A role being designed holds nothing yet, and the danger is different in shape: the set can
+    /// contain BOTH HALVES of a separated duty on its own, and then every person ever assigned that role
+    /// breaches SoD at once. Running the keys through the grant check one at a time would find nothing —
+    /// each key is clean against an empty held-set — so a role combining <c>finance:write</c> with
+    /// <c>finance:approve</c> would be created without complaint, and the conflict would surface later as a
+    /// mystery about individual users.
+    /// </para>
+    ///
+    /// <para>Empty ⇒ the set is SoD-clean, which is the honest answer for most sets: the great majority of
+    /// keys carry no separated duty at all.</para>
+    /// </summary>
+    public static IReadOnlyList<Violation> EvaluateScopeSet(IEnumerable<string> scopeKeys)
+    {
+        ArgumentNullException.ThrowIfNull(scopeKeys);
+        var tokens = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var key in scopeKeys)
+            foreach (var token in TokensForScope(key))
+                tokens.Add(token);
+
+        if (tokens.Count < 2) return [];
+
+        var violations = new List<Violation>();
+        foreach (var rule in Rules)
+            if (tokens.Contains(rule.TokenA) && tokens.Contains(rule.TokenB))
+                violations.Add(new Violation(rule.TokenA, rule.TokenB, rule.Reason));
+        return violations;
+    }
+
     public static IReadOnlyList<Violation> EvaluateScopeGrant(IEnumerable<string> heldRoles, string scopeKey)
     {
         var held = Expand(heldRoles);

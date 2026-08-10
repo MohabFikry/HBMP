@@ -141,6 +141,11 @@ const BARE_TABLE_OK: Record<string, string> = {
   "screens/BranchInventory.tsx": "the ledger is server-paged; the stock table above it IS a DataTableView",
   "screens/AdminConsole.tsx": "accounts and bindings migrated; the rest are bounded config tables",
   "screens/AccessAdmin.tsx": "roles, exceptions and sessions belong to ONE membership",
+  // 28.9 — the permission catalogue is bounded by the scope table (a few hundred rows, filtered by the
+  // search above it); the role list is the tenant's own roles; assignments and separated duties are
+  // governance tables, not queues. None of them is server-paged, so a pager would be a control that
+  // scrolls nothing.
+  "screens/AccessCatalogue.tsx": "the scope and role catalogues are bounded reference data, filtered in place",
   "screens/ApprovalsRegister.tsx": "the register migrated; the items table lists ONE authorization's deliveries",
   "screens/CaseManager.tsx": "cases and escalations migrated; the task list belongs to ONE case",
   "screens/FinancePortal.tsx": "utilization and settlements migrated; the line table belongs to ONE settlement",

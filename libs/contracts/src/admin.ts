@@ -142,6 +142,14 @@ export const zIdentityUser = z.object({
   id: zId,
   username: z.string(),
   displayName: z.string(),
+  /**
+   * 28.8 — the sign-in credential, so the console has to show it.
+   *
+   * Nullable because accounts predating 28.8 may have none (service accounts, seeded fixtures), and an
+   * address-less account is exactly what an administrator needs to SEE: "send a reset link" cannot reach it,
+   * and it cannot sign in by address. Creation now requires one, so the set can only shrink.
+   */
+  email: z.string().nullable().optional(),
   /** Masked in the UI — the console administers ACCESS, not identities. */
   tenantId: z.string().optional(),
   isActive: z.boolean(),
@@ -149,6 +157,44 @@ export const zIdentityUser = z.object({
   roles: z.array(z.string()),
 });
 export type IdentityUser = z.infer<typeof zIdentityUser>;
+
+/**
+ * 28.9 — one permission in the access catalogue.
+ *
+ * Every permission on the platform has always been data (`identity.scope`) and no screen listed it. Without
+ * the catalogue an administrator deciding what a person needs has one usable strategy — grant the nearest
+ * bigger role — which is how least-privilege erodes: not by being rejected, but by being unavailable at the
+ * moment of the decision.
+ *
+ * The flags are not decoration. Each one changes whether a key belongs in a role at all: a service-only key
+ * must never reach a human, a deprecated one must not seed a new role, and a platform-administration key is
+ * the only kind the A1 short-circuit can reach (and still never grants clinical data).
+ */
+export const zScopeCatalogEntry = z.object({
+  name: z.string(),
+  domain: z.string(),
+  description: z.string().nullable().optional(),
+  serviceOnly: z.boolean(),
+  deprecated: z.boolean(),
+  replacedBy: z.string().nullable().optional(),
+  isPlatformAdminKey: z.boolean(),
+  /** Which roles already hold this key IN THIS TENANT — the question an administrator has in front of a
+   *  permission is "who has this already", and without it the safe guess is always to include it. */
+  heldBy: z.array(z.string()),
+});
+export type ScopeCatalogEntry = z.infer<typeof zScopeCatalogEntry>;
+
+/** 28.9 — a role and what it actually grants in this tenant. `custom` roles are the tenant's own to edit. */
+export const zRoleCatalogEntry = z.object({
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  sensitivityTier: z.string(),
+  level: z.number().nullable().optional(),
+  custom: z.boolean(),
+  builtIn: z.boolean(),
+  scopes: z.array(z.string()),
+});
+export type RoleCatalogEntry = z.infer<typeof zRoleCatalogEntry>;
 
 /** 18.C2 (W5) — one role→scope grant from the identity store, the live source the token issuer reads. */
 export const zRoleScopeGrant = z.object({

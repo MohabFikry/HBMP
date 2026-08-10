@@ -1,7 +1,108 @@
-import { useEffect, useRef } from "react";
-import { Button, Icon, useTheme } from "@mersal/design-system";
+import { useEffect, useRef, useState } from "react";
+import { Button, Icon, InlineAlert, InputField, useTheme } from "@mersal/design-system";
 import type { Localized } from "../portals/catalog";
+import { useApi } from "../api/ApiProvider";
+import { useWrite } from "../api/useWrite";
 import { L } from "../i18n/strings";
+
+/**
+ * Change your own password.
+ *
+ * <b>The current password is required</b>, and that requirement is the whole security of this form. Being
+ * signed in proves somebody has the DEVICE; it does not prove they are the owner. Without it, an unattended
+ * unlocked workstation is a permanent account takeover — the attacker sets a password the owner does not
+ * know, and the owner's own recovery path is the only thing that would ever tell them.
+ *
+ * Collapsed until asked for: it is the rarest thing in this drawer, and an always-open password form is
+ * three fields of noise on every visit to change the theme.
+ */
+function ChangePasswordForm() {
+  const { lang } = useTheme();
+  const api = useApi();
+  const write = useWrite();
+  const [open, setOpen] = useState(false);
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [touched, setTouched] = useState(false);
+  const [done, setDone] = useState(false);
+
+  // Checked HERE as well as on the server, because it is the one rule the server cannot check: it receives
+  // one new password and has no idea what the person meant to type twice.
+  const mismatch = touched && next !== confirm;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setTouched(true);
+    setDone(false);
+    if (!current || !next || next !== confirm) return;
+    const ok = await write.run(() => api.changeMyPassword(current, next));
+    if (ok) {
+      setDone(true);
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+      setTouched(false);
+      setOpen(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <>
+        {/* The confirmation outlives the form that produced it — collapsing on success would otherwise
+            leave the drawer looking exactly as it did before, which reads as a button that did nothing. */}
+        <div aria-live="polite">{done && <InlineAlert tone="ok">{L.passwordChanged[lang]}</InlineAlert>}</div>
+        <div className="upane-row">
+          <span>{L.password[lang]}</span>
+          <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>
+            {L.changePassword[lang]}
+          </Button>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <form onSubmit={submit} className="upane-pwform">
+      {/* Every other session ends on success — said BEFORE the change, not after, because it is the reason
+          somebody would choose this over doing nothing when they suspect their password is known. */}
+      <p className="muted upane-pwform-help">{L.changePasswordHelp[lang]}</p>
+      {write.error && <InlineAlert tone="bad">{write.error.message[lang]}</InlineAlert>}
+      <InputField
+        label={L.currentPassword[lang]}
+        type="password"
+        autoComplete="current-password"
+        value={current}
+        onChange={(e) => setCurrent(e.target.value)}
+      />
+      <InputField
+        label={L.newPassword[lang]}
+        type="password"
+        autoComplete="new-password"
+        help={L.passwordPolicy[lang]}
+        value={next}
+        onChange={(e) => setNext(e.target.value)}
+      />
+      <InputField
+        label={L.confirmPassword[lang]}
+        type="password"
+        autoComplete="new-password"
+        error={mismatch ? L.passwordMismatch[lang] : undefined}
+        value={confirm}
+        onChange={(e) => setConfirm(e.target.value)}
+      />
+      <div className="upane-pwform-actions">
+        <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
+          {L.cancel[lang]}
+        </Button>
+        <Button type="submit" variant="primary" size="sm" loading={write.busy}>
+          {L.changePassword[lang]}
+        </Button>
+      </div>
+    </form>
+  );
+}
 
 /** Two-letter initials from a display name, for the avatar placeholder (e.g. "Reception Desk" → "RD"). */
 function initialsOf(name: string): string {
@@ -90,6 +191,22 @@ export function UserPane({
               <span className="upane-name">{displayName}</span>
               <span className="upane-role">{roleLabel[lang]}</span>
             </span>
+          </div>
+
+          {/*
+            28.8 — CHANGING YOUR OWN PASSWORD, which this app has never offered.
+            ------------------------------------------------------------------------------------------------
+            28.6 gave a locked-out person a way back in and 28.7 removed the administrator's power to choose
+            a credential for them. Between them they left the ordinary case unbuilt: somebody who simply
+            wants to change a password they already know had to sign out and use "forgot password" — which
+            teaches staff that a routine, healthy act is indistinguishable from losing your credentials.
+
+            It lives in the account pane rather than on a settings page because this is where a person
+            already goes to act on their own account, and it is the only such place.
+          */}
+          <div className="upane-section">
+            <h3 className="section-h">{L.security[lang]}</h3>
+            <ChangePasswordForm />
           </div>
 
           <div className="upane-section">
