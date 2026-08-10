@@ -482,6 +482,22 @@ function PlanVersionEditor({
       {tiers.length === 0 && <InlineAlert tone="warn">{t(S.noTiers)}</InlineAlert>}
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
 
+      {/*
+        WRAPPED, and the wrapper is not decoration.
+        `.pol-grid` is `display: block; overflow-x: auto` — a table that is its own scrollport. That buys the
+        horizontal scroll and costs the table its layout: the browser wraps the rows in an anonymous
+        shrink-to-fit table, so `width: 100%` applies to the block box while the columns size to their own
+        content. `.pol-tablewrap > .pol-grid` resets it to a real table and takes the scroll onto the wrapper,
+        which is what the other 11 call sites of these two classes already do — these two were the only ones
+        that never got one.
+        The wrapper is also what makes the pane reachable: a region a pointer can scroll and a keyboard
+        cannot is WCAG 2.1.1, and `tabIndex` + `.mrs-scroll-focusable` is the treatment every other scrolling
+        pane in the product carries. `.mrs-scroll` brings the house scrollbar with it.
+        It is a prerequisite for the pickers inside this table becoming design-system comboboxes: an ancestor
+        with `overflow-x: auto` is a clipping context on BOTH axes (CSS Overflow §3 — `visible` computes to
+        `auto` when the other axis is not `visible`), so an option list opened in here would have been cut off.
+      */}
+      <div className="pol-tablewrap mrs-scroll mrs-scroll-focusable" tabIndex={0}>
       <table className="pol-grid">
         <caption className="sr-only">{t(S.plans)}</caption>
         <thead>
@@ -597,6 +613,8 @@ function PlanVersionEditor({
                         {t(S.costShare)} — {r.benefitCategoryCode}
                       </legend>
                       {unpriced && <InlineAlert tone="warn">{t(S.unpricedHint)}</InlineAlert>}
+                      {/* Same treatment, same reasons — one column per tier, so this is the wider of the two. */}
+                      <div className="pol-tablewrap mrs-scroll mrs-scroll-focusable" tabIndex={0}>
                       <table className="pol-costshare">
                         <thead>
                           <tr>
@@ -663,6 +681,7 @@ function PlanVersionEditor({
                           </tr>
                         </tbody>
                       </table>
+                      </div>
                     </fieldset>
                   </td>
                 </tr>
@@ -671,6 +690,7 @@ function PlanVersionEditor({
           })}
         </tbody>
       </table>
+      </div>
 
       <div className="pol-editor-actions">
         {editable && (
