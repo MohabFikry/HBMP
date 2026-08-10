@@ -6,6 +6,7 @@ import {
   Icon,
   InlineAlert,
   InputField,
+  KpiList,
   Modal,
   Pagination,
   SelectField,
@@ -1700,17 +1701,27 @@ function MemberUtilizationTab({ api, beneficiaryId }: { api: PolicyApi; benefici
         <>
           {!view.reconciliation.reconciled && <InlineAlert tone="bad">{t(S.reconcileBad)}</InlineAlert>}
           <LimitMeters caption={t(S.utilizationCaption)} rows={meters} />
-          <dl className="pol-kpis">
-            <div>
-              <dt>{t(S.encounters)}</dt>
-              {/* null means "could not ask", never "zero" — an em dash says so. */}
-              <dd>{fmt.number(view.external.encounters ?? undefined)}</dd>
-            </div>
-            <div>
-              <dt>{t(S.authorizations)}</dt>
-              <dd>{fmt.number(view.external.authorizationsRaised ?? undefined)}</dd>
-            </div>
-          </dl>
+          {/*
+           * `KpiList`, not the `pol-kpis` definition list this used to be — the same migration the cohort
+           * panel in PolicyBook made, for the same reason. That treatment is a dt at 0.82rem over a dd at
+           * 1.25rem: plain text with a size difference, which on a member's utilization tab put "how many
+           * encounters has this person had" in something smaller than the body copy beside it. `KpiList`
+           * keeps the definition-list semantics — two terms describing one subject, announced as pairs —
+           * and takes the hairline, the uppercase micro-label and the tabular numerals from the same classes
+           * `KpiCard` uses, so this panel and the cohort one cannot drift into two different-looking KPIs.
+           *
+           * Order is deliberately unchanged: for ONE member the meters are the headline and these two counts
+           * are context, which is the reverse of the cohort panel, where the totals lead.
+           *
+           * `fmt.number(null)` renders an em dash, so "could not ask" still reads as a dash and never as a
+           * zero — the distinction survives the change of treatment because it lives in the formatter.
+           */}
+          <KpiList
+            items={[
+              { label: t(S.encounters), value: fmt.number(view.external.encounters ?? undefined) },
+              { label: t(S.authorizations), value: fmt.number(view.external.authorizationsRaised ?? undefined) },
+            ]}
+          />
           {view.external.unavailable.length > 0 && (
             <InlineAlert tone="warn">
               {t(S.unavailable)} {view.external.unavailable.join(", ")}

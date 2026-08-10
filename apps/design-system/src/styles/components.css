@@ -1023,6 +1023,14 @@ nav.mrs-rail {
   grid-template-rows: auto 1fr auto;
   /* Makes the tile itself the reference for the `cqi` sizing on the value below. */
   container-type: inline-size;
+  /* A ceiling on the TILE, not on the grid track. `auto-fit` splits the row between however many tiles there
+     are, which is right for four and absurd for two — a member's utilization panel has exactly two counts and
+     they stretched to 718px each to hold "3" and "12".
+     Capping the TRACK instead was tried and is worse: it quantises the row, and at 22rem four tiles no longer
+     fit on one line (4x352 + 3x16 > 1452) so the cohort panel broke to 3 + 1. Capping the tile leaves every
+     track exactly where it was — four still fill their row, seven still fall 6 + 1 — and only stops a short
+     row from inflating. */
+  max-inline-size: 22rem;
 }
 .mrs-kpi::before {
   content: "";
