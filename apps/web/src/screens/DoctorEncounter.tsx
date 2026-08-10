@@ -646,7 +646,7 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
             <Button
               variant="ghost"
               size="sm"
-              leadingIcon={<Icon name="user" width={16} height={16} aria-hidden="true" />}
+              leadingIcon={<Icon name="user" aria-hidden="true" />}
               onClick={() => openProfile(encounter.patientId)}
             >
               {t(S.patientFile)}
@@ -782,7 +782,7 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
                   variant="primary"
                   loading={busy === "final"}
                   disabled={!hasContent || !hasPrimary || unsent.length > 0}
-                  leadingIcon={<Icon name="lock" width={16} height={16} aria-hidden="true" />}
+                  leadingIcon={<Icon name="lock" aria-hidden="true" />}
                   onClick={() => setConfirming(true)}
                 >
                   {t(S.finalize)}
@@ -799,7 +799,7 @@ function Workspace({ encounter, onSaved }: { encounter: Encounter; onSaved: () =
                   variant="secondary"
                   loading={busy === "draft"}
                   disabled={!hasContent}
-                  leadingIcon={<Icon name="doc" width={16} height={16} aria-hidden="true" />}
+                  leadingIcon={<Icon name="doc" aria-hidden="true" />}
                   onClick={() => void saveDraft()}
                 >
                   {t(S.saveDraft)}
@@ -1159,7 +1159,7 @@ function DiagnosisPicker({
         <Button
           variant="ghost"
           size="sm"
-          leadingIcon={<Icon name="plus" width={16} height={16} aria-hidden="true" />}
+          leadingIcon={<Icon name="plus" aria-hidden="true" />}
         >
           {t(S.addCode)}
         </Button>
@@ -1438,7 +1438,7 @@ function RecordVitalsModal({ encounterId, onRecorded }: { encounterId: string; o
           // Icon-only in a tight rail header, so the name has to come from aria-label.
           aria-label={t(S.recordVitals)}
           title={t(S.recordVitals)}
-          leadingIcon={<Icon name="plus" width={16} height={16} aria-hidden="true" />}
+          leadingIcon={<Icon name="plus" aria-hidden="true" />}
         />
       }
       footer={

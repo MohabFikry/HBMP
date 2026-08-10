@@ -247,26 +247,35 @@ function LimitTable({ tenant, limits, onChanged }: { tenant: string; limits: Pro
 
   const cols: Column<ProgramLimit>[] = [
     { key: "limit", header: t(S.limit), cell: (r) => <span className="mono">{r.key}</span> },
+    // Cap and usage are read ACROSS as a pair and DOWN as two columns of magnitudes, so both are `numeric`:
+    // the figures stack at the same edge and "which limit is close to its ceiling" becomes a shape rather
+    // than a string comparison. They were `.tnum` in start-aligned cells, which sets the figure width and
+    // leaves the column ragged — equal-width digits that never line up.
     {
       key: "cap",
       header: t(S.cap),
-      cell: (r) => (r.maxValue === null ? <span className="muted">{t(S.unlimited)}</span> : <span className="tnum">{r.maxValue}</span>),
+      numeric: true,
+      cell: (r) => (r.maxValue === null ? <span className="muted">{t(S.unlimited)}</span> : r.maxValue),
     },
     {
       key: "usage",
       header: t(S.usage),
+      numeric: true,
       cell: (r) =>
         r.currentUsage === null ? (
           // NOT rendered as 0. Null means the answering service does not own this count, and a zero here
           // would tell an administrator the organisation was idle when nobody actually measured.
           <span className="muted" title={t(S.notCountedHelp)}>{t(S.notCounted)}</span>
         ) : (
-          <span className="tnum">
-            {r.currentUsage}
+          <>
+            {/* The chip goes BEFORE the figure. In an end-aligned cell the last thing in the cell is what
+                touches the edge, so a trailing chip pushes the number inboard by its own width — and the one
+                row that most needs to be comparable with the rest is the one that has broken out of it. */}
             {r.maxValue !== null && r.currentUsage > r.maxValue ? (
-              <> <StatusChip kind="bad" label={t(S.overCap)} /></>
+              <><StatusChip kind="bad" label={t(S.overCap)} /> </>
             ) : null}
-          </span>
+            {r.currentUsage}
+          </>
         ),
     },
     { key: "changedBy", header: t(S.changedBy), cell: (r) => <span className="muted">{r.changedBy ?? "—"}</span> },

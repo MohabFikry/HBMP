@@ -176,7 +176,7 @@ function Items({ authorizationId }: { authorizationId: string }) {
         </span>
       ),
     },
-    { key: "quantity", header: t(S.quantity), cell: (r) => <span className="tnum">{r.quantity}</span> },
+    { key: "quantity", header: t(S.quantity), cell: (r) => r.quantity, numeric: true },
     {
       key: "reason",
       header: t(S.substituted),

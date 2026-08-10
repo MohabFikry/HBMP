@@ -75,8 +75,8 @@ export function FinanceUtilization() {
     { key: "line", header: t(S.line), cell: (r) => t(r.serviceLine) },
     { key: "category", header: t(S.category), cell: (r) => t(r.coverageCategory) },
     { key: "provider", header: t(S.provider), cell: (r) => <span className="tnum">{r.providerRef ?? "—"}</span> },
-    { key: "authorized", header: t(S.authorized), cell: (r) => <span className="tnum">{r.authorizedQty}</span> },
-    { key: "delivered", header: t(S.delivered), cell: (r) => <span className="tnum">{r.deliveredQty}</span> },
+    { key: "authorized", header: t(S.authorized), cell: (r) => r.authorizedQty, numeric: true },
+    { key: "delivered", header: t(S.delivered), cell: (r) => r.deliveredQty, numeric: true },
     { key: "spend", header: t(S.spend), cell: (r) => fmt.money(r.spend), numeric: true },
   ];
   return (
@@ -155,7 +155,7 @@ function SettlementLines({ lines, t }: { lines: SettlementLine[]; t: (l: Localiz
   const cols: Column<SettlementLine>[] = [
     { key: "code", header: t(S.code), cell: (r) => <span className="tnum">{r.serviceCode}</span> },
     { key: "line", header: t(S.line), cell: (r) => t(r.serviceLine) },
-    { key: "delivered", header: t(S.delivered), cell: (r) => <span className="tnum">{r.deliveredQty}</span> },
+    { key: "delivered", header: t(S.delivered), cell: (r) => r.deliveredQty, numeric: true },
     { key: "agreed", header: t(S.agreedPrice), cell: (r) => fmt.money(r.agreedUnitPrice), numeric: true },
     { key: "total", header: t(S.lineTotal), cell: (r) => fmt.money(r.lineTotal), numeric: true },
   ];

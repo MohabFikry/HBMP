@@ -87,6 +87,33 @@ describe("no destructive write fires from a non-destructive button", () => {
   });
 });
 
+/**
+ * A raw `<button>` is allowed — a combobox option, a picker row, a time slot and the shell chrome are all
+ * real controls that `Button` is the wrong shape for. What is not allowed is one with NO class, which renders
+ * as platform chrome. Exactly one existed: the retry control inside CallCentre's failed-load alert, which is
+ * to say the single button on that screen an operator definitely has to press.
+ */
+describe("no button ships unstyled", () => {
+  it("gives every raw <button> a class of its own", () => {
+    const offenders: string[] = [];
+    for (const file of tsxFiles(SRC)) {
+      const src = readFileSync(file, "utf8");
+      // Comments are blanked rather than deleted, so line numbers still point at the real thing. Two doc
+      // comments in this codebase discuss `<button>` in prose — they are not markup and must not be reported.
+      const code = src.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (c) => c.replace(/[^\n]/g, " "));
+      for (const m of code.matchAll(/<button\b([\s\S]{0,300}?)>/g)) {
+        if (/className=/.test(m[1])) continue;
+        offenders.push(`${file.slice(SRC.length + 1)}:${code.slice(0, m.index).split("\n").length}`);
+      }
+    }
+    expect(
+      offenders,
+      "a raw <button> with no className renders as browser chrome — use `Button`, or give it a class if it " +
+        "is a genuine custom control",
+    ).toEqual([]);
+  });
+});
+
 // ── PractitionerAdmin ────────────────────────────────────────────────────────────────────────────────────
 
 /** Spies on the two revokes, over the ordinary fixture so the roster and panel render as they really do. */

@@ -318,7 +318,7 @@ function AddAllergyControl({ beneficiaryId, onSaved }: { beneficiaryId: string; 
           variant="ghost"
           size="sm"
           className="mc-add"
-          leadingIcon={<Icon name="plus" width={16} height={16} aria-hidden="true" />}
+          leadingIcon={<Icon name="plus" aria-hidden="true" />}
         >
           {t(S.addAllergy)}
         </Button>

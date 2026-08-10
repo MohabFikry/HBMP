@@ -144,7 +144,7 @@ export function ClaimsInsights() {
   const state = useAsync<ClaimsKpis>(() => api.claimsKpis(), []);
   const reasonCols: Column<{ reason: string; count: number }>[] = [
     { key: "reason", header: t(S.reason), cell: (r) => r.reason },
-    { key: "count", header: t(S.count), cell: (r) => <span className="tnum">{r.count}</span> },
+    { key: "count", header: t(S.count), cell: (r) => r.count, numeric: true },
   ];
   return (
     <>

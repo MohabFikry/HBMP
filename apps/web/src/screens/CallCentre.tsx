@@ -846,9 +846,16 @@ export function CallHistory({ api = defaultCcApi }: { api?: CcApi }) {
       {failed && (
         <p role="alert" className="cc-error">
           {t(L.ccHistoryError)}{" "}
-          <button type="button" onClick={() => { setFailed(false); setRows(null); void api.history().then((r) => setRows(r)).catch(() => setFailed(true)); }}>
+          {/* The only button in the product that was raw markup with no class at all: `.cc-error` styles the
+              paragraph and nothing inside it, so this rendered as browser chrome — on the one control the
+              operator has to press to get out of the error. */}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => { setFailed(false); setRows(null); void api.history().then((r) => setRows(r)).catch(() => setFailed(true)); }}
+          >
             {t(L.retry)}
-          </button>
+          </Button>
         </p>
       )}
       {!failed && rows && rows.length === 0 && <p role="status">{t(L.ccHistoryEmpty)}</p>}

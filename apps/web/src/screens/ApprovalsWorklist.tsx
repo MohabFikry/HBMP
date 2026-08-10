@@ -127,7 +127,7 @@ export function ApprovalsWorklist() {
           <span className="tnum">{t(S.dueIn)} {r.sla.minutesRemaining} {t(S.min)}</span>
         ),
     },
-    { key: "cost", header: t(S.cost), cell: (r) => <span className="tnum">{r.estimatedCost}</span> },
+    { key: "cost", header: t(S.cost), cell: (r) => r.estimatedCost, numeric: true },
     { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} /> },
     {
       key: "review",

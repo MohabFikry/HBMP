@@ -1124,7 +1124,7 @@ export function PrescribingWorkspace({
         className="rx-add-line"
         disabled={busy}
         onClick={() => setLines((prev) => [...prev, newLine()])}
-        leadingIcon={<Icon name="plus" width={16} height={16} aria-hidden="true" />}
+        leadingIcon={<Icon name="plus" aria-hidden="true" />}
       >
         {t(S.addLine)}
       </Button>

@@ -241,6 +241,14 @@ Eight sites write `leadingIcon={<Icon name="…" width={16} height={16} />}`; tw
 
 *Fix:* drop the inline `width`/`height` from the eight; the CSS is the single source.
 
+### L2a — `ConfirmAction` had zero call sites *(found during the H2 fix)*
+
+`screens/ConfirmAction.tsx` is a 109-line shared confirmation dialog with an unusually careful rationale — why not `window.confirm` (untranslatable, single-line, blocks the thread), and why typed confirmation for the most dangerous actions ("a yes/no dialog in front of a repetitive task becomes muscle memory within a shift"). **Nothing imported it.** `grep ConfirmAction` matched only its own definition.
+
+Its doc comment names five actions it was built for. Checked: none is unguarded — dispensing, consuming, rejecting and break-glass are all reached through multi-field forms or dedicated workspaces, which is a legitimate guard and arguably a better one than a dialog. So this is dead code, not five open holes. But the `requireText` typed-confirmation path — the one thing in the app designed for the genuinely irreversible — has never run.
+
+Fixed as part of H2, which made it the component's first caller.
+
 ### L2 — `variant="warn"` has zero call sites
 
 `Button` ships it and `components.css:124` styles it (`--st-warn-fg` text and border). Nothing uses it. Either there is a real reversible-but-consequential class of action that should be wearing it — plausibly the three actions in **H2**, if they are judged reversible — or it should be removed so the palette does not offer a level nobody has defined.
@@ -269,7 +277,7 @@ Several of these are legitimate non-tables — `.mini-table` in `ExecutiveDashbo
 
 `Column.stickyEnd` pins the trailing column so the buttons stay reachable while wide columns scroll under them. It is used at `RegistrationApprovals.tsx:414`, `ProfileSectionViews.tsx:785` and `MasterListAdmin.tsx:180`. Four other `key: "actions"` columns, and the ~20 other action columns under different keys, do not have it — so on a wide worklist the operator scrolls sideways to reach the control they came for, once per row. That is the exact scenario `DataTable.tsx:26-29` describes.
 
-### L5 — Seven quantity columns align figures by hand instead of with `numeric`
+### L5 — Eleven quantity columns align figures by hand instead of with `numeric`
 
 `Column.numeric` right-aligns the cell **and its header** and sets tabular figures. `DataTable.tsx:39-42` records that this was already fixed once for money — and indeed **0 money/percent columns** are now missing it. The residue is counts and quantities:
 
@@ -278,11 +286,18 @@ Several of these are legitimate non-tables — `.mini-table` in `ExecutiveDashbo
 | `FinancePortal.tsx:78` / `:79` | `authorizedQty` / `deliveredQty` — side by side, meant to be compared |
 | `FinancePortal.tsx:158` | `deliveredQty` |
 | `AdminConsole.tsx:176` | scope count |
-| `ApprovalsExtra.tsx:50` | count |
+| `ApprovalsExtra.tsx:50` / `:53` | count / breaches |
 | `ClaimsPortal.tsx:147` | count |
-| `ProgramAdmin.tsx:255` | current usage |
+| `ApprovalsRegister.tsx:179` | quantity |
+| `PharmacyDispense.tsx:159` | line count |
+| `ApprovalsWorklist.tsx:130` | estimated cost |
+| `ProgramAdmin.tsx:250` / `:255` | cap / current usage — a comparison pair |
 
 Each wraps the value in `<span className="tnum">` inside a start-aligned cell — equal-width digits in a ragged column, which is the precise failure mode the doc comment describes. Authorized-vs-delivered quantity is a column you read by scanning down.
+
+`ApprovalsExtra` is the tell: four adjacent metric columns in one list, where `avg` and `p95` are `numeric` and the `count` and `breaches` either side of them are `.tnum` spans — so two of four sit at a different edge from their neighbours.
+
+> *Correction:* the first draft of this section said **seven**. The detector behind it filtered on a keyword list (`money`, `number`, `Qty`, `Count`…) that `maxValue`, `breaches`, `quantity`, `lines.length` and `estimatedCost` do not match, so it under-reported. Re-scanning every `.tnum` column without the filter and judging them by hand found eleven. `LabQueue.tsx:159` (`3/5` panel progress) was examined and deliberately left: it is a ratio label, and end-aligning it would line up the totals rather than the figures.
 
 ### L6 — One button in the app is unstyled
 

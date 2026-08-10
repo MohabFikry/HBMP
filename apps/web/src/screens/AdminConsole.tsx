@@ -173,7 +173,7 @@ export function AdminPolicies() {
   const scopes = useAsync<RoleScopeGrant[]>(() => api.identityRoleScopes(), []);
   const scopeCols: Column<RoleScopeGrant>[] = [
     { key: "role", header: t(S.role), cell: (r) => <StatusChip kind="neu" label={r.role} /> },
-    { key: "count", header: t(S.scopeCount), cell: (r) => <span className="tnum">{r.scopes.length}</span> },
+    { key: "count", header: t(S.scopeCount), cell: (r) => r.scopes.length, numeric: true },
     { key: "scopes", header: t(S.scopes), cell: (r) => <span>{r.scopes.length ? r.scopes.join(" · ") : "—"}</span> },
   ];
   const cols: Column<SodConflict>[] = [
