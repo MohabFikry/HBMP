@@ -37,3 +37,12 @@
 **/.env
 **/.env.*
 !**/.env.example
+# The stanza above said "never let a local secrets file reach a build context" and then listed only .env
+# files, so the issuer's PEM keys were still being sent. They are mounted read-only at runtime from
+# infra/compose/secrets (compose.yaml, `/run/secrets`) and no Dockerfile copies one, so nothing needs them
+# here — and `docker build` from the repo root FAILED outright on them, because they are 0400 and owned by
+# the container's uid, so the daemon could not read them while packing the context. A build that dies on a
+# file it should never have been offered is the same bug wearing a different hat.
+**/*.pem
+**/*.key
+infra/compose/secrets/
