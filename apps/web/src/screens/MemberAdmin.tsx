@@ -9,7 +9,7 @@ import {
   KpiList,
   Modal,
   Pagination,
-  SelectField,
+  ComboboxField,
   StatusChip,
   Tabs,
   TextareaField,
@@ -670,12 +670,16 @@ const BANDS = ["Low", "Medium", "High", "Exhausted"] as const;
  * ============================================================================================================
  * This used to wrap a NATIVE `<select>` in the field markup by hand, with a note saying the design system's
  * `Select` was "wrong here" because ten filters need visible labels bound to their control. The objection was
- * fair and is now answered: `SelectField` is that control with that label. A native select cannot style its
+ * fair and is now answered: `ComboboxField` is that control with that label. A native select cannot style its
  * own option list — the popup is drawn by the OS — so every one of these opened a system-blue list with square
  * corners, and sat at a slightly different height from the `InputField`s beside it.
  *
+ * It became `ComboboxField` — the SEARCHABLE one — in the scrolls/dropdowns pass. Ten filters over member
+ * data is exactly the case the audit was about: a plan or a group list is as long as the deployment makes it,
+ * and first-letter typeahead over it is a walk rather than a search.
+ *
  * Kept as a named wrapper rather than replaced at ~15 call sites: the filter grid's contract is
- * `value: string` where `""` means "Any", and `SelectField`'s is `string | null` where null means "nothing
+ * `value: string` where `""` means "Any", and `ComboboxField`'s is `string | null` where null means "nothing
  * chosen". Those are different ideas and the translation belongs in one place.
  */
 function FilterSelect({
@@ -690,7 +694,7 @@ function FilterSelect({
   options: ReadonlyArray<{ value: string; label: string }>;
 }) {
   return (
-    <SelectField
+    <ComboboxField
       label={label}
       value={value}
       onChange={onChange}
@@ -1911,7 +1915,7 @@ function MembershipDialog({
         * as plain — it reads as a control somebody forgot to finish.
         */}
       {kind === "changeGroup" && (
-        <SelectField
+        <ComboboxField
           id="dlg-group"
           label={t(S.group)}
           value={groupId === "" ? null : groupId}
@@ -1920,14 +1924,20 @@ function MembershipDialog({
           placeholder={t(S.none)}
           options={[
             { value: "", label: t(S.none) },
-            ...groups.map((g) => ({ value: g.groupId, label: `${g.groupCode} — ${g.nameEn}` })),
+            // Localized, and the code goes in `keywords` so it stays findable by typing it. This read
+            // `nameEn` regardless of language while `nameAr` sat on the schema unused.
+            ...groups.map((g) => ({
+              value: g.groupId,
+              label: `${g.groupCode} — ${t({ en: g.nameEn, ar: g.nameAr })}`,
+              keywords: g.groupCode,
+            })),
           ]}
         />
       )}
 
       {kind === "changePlan" && (
         <>
-          <SelectField
+          <ComboboxField
             id="dlg-plan"
             label={t(S.targetPlan)}
             value={policyPlanId === "" ? null : policyPlanId}

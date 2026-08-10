@@ -501,16 +501,27 @@ function RegisterOneMember({ policyApi }: { policyApi: PolicyApi }) {
   const isDuplicateId = write.error?.problemType === "urn:hbmp:duplicate-identifier";
   const isDuplicateCard = write.error?.problemType === "urn:hbmp:duplicate-card-number";
 
+  // LOCALIZED, for the reason spelled out at the same three lists in BatchIntake: `nameAr` is on all three
+  // schemas, these read `nameEn` unconditionally, and a combobox filters on `label` — so an English-only
+  // label is a row an Arabic operator can neither read nor find.
   const planOptions: ComboboxOption[] = useMemo(
-    () => reference.plans.map((p) => ({ value: p.planId, label: p.nameEn, hint: p.planCode, keywords: p.planCode })),
-    [reference.plans],
+    () => reference.plans.map((p) => ({
+      value: p.planId, label: t({ en: p.nameEn, ar: p.nameAr }), hint: p.planCode, keywords: p.planCode,
+    })),
+    [reference.plans, t],
   );
   const tierOptions: ComboboxOption[] = useMemo(
-    () => reference.tiers.map((x) => ({ value: x.networkTierId, label: x.nameEn, hint: x.tierCode, keywords: x.tierCode })),
-    [reference.tiers],
+    () => reference.tiers.map((x) => ({
+      value: x.networkTierId, label: t({ en: x.nameEn, ar: x.nameAr }), hint: x.tierCode, keywords: x.tierCode,
+    })),
+    [reference.tiers, t],
   );
   const branchOptions: ComboboxOption[] = useMemo(
-    () => [{ value: "", label: t(S.noBranch) }, ...reference.branches.map((b) => ({ value: b.branchId, label: b.nameEn }))],
+    () => [
+      { value: "", label: t(S.noBranch) },
+      // `nameAr` is optional on a branch reference, so English is the stated fallback, not a blank name.
+      ...reference.branches.map((b) => ({ value: b.branchId, label: t({ en: b.nameEn, ar: b.nameAr ?? b.nameEn }) })),
+    ],
     [reference.branches, t],
   );
   // The flag is the fastest way to confirm the right country in a list of a hundred — but it is decoration

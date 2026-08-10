@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Card, Icon, InlineAlert, InputField, Modal, SelectField, StatusChip } from "@mersal/design-system";
+import { Button, Card, Icon, InlineAlert, InputField, Modal, ComboboxField, StatusChip } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type { PolicyApi, PolicyDocumentView } from "../api/policyApi";
 import { createHttpPolicyApi } from "../api/policyApi";
@@ -343,7 +343,7 @@ function DocumentUpload({
       }
     >
       <form id="doc-upload" onSubmit={submit} noValidate className="ben-doc-upload" aria-label={t(S.add)}>
-        <SelectField
+        <ComboboxField
           id="doc-type"
           label={t(S.type)}
           required

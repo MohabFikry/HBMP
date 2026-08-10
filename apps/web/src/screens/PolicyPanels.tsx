@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Button, Card, Icon, InlineAlert, Modal, SelectField, StatusChip, TextareaField,
+  Button, Card, Icon, InlineAlert, Modal, ComboboxField, StatusChip, TextareaField,
 } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import { newIdempotencyKey } from "../api/http";
@@ -342,7 +342,7 @@ export function NotesPanel({ api, scope, scopeRef, canAdd = true }: NotesPanelPr
           }
         >
           <div className="pol-note-form">
-            <SelectField
+            <ComboboxField
               id="note-type"
               label={t(S.noteType)}
               value={noteType}
@@ -355,7 +355,7 @@ export function NotesPanel({ api, scope, scopeRef, canAdd = true }: NotesPanelPr
               * saying what the choice does, because "Financial" and "Clinical" look like categories and
               * behave like access control.
               */}
-            <SelectField
+            <ComboboxField
               id="note-visibility"
               label={t(S.visibility)}
               help={t(S.visibilityHint)}

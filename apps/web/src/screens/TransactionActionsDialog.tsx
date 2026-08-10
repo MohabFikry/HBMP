@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Icon, InlineAlert, Modal, SelectField, StatusChip, TextareaField } from "@mersal/design-system";
+import { Button, Icon, InlineAlert, Modal, ComboboxField, StatusChip, TextareaField } from "@mersal/design-system";
 import type { Localized, WithdrawResult } from "@mersal/contracts";
 import type { AmendReasonOption } from "./AmendLineDialog";
 import { useLoc } from "./_shared";
@@ -371,10 +371,12 @@ export function TransactionActionsDialog({
 
         {action === "amend" && !anyAmendable && <InlineAlert tone="info">{t(S.nothingAmendable)}</InlineAlert>}
 
-        {/* SelectField, not a bare <label> beside a bare Select: the pair had no field wrapper, so the word
-            "Reason" sat on the control's baseline hard against the dialog's inner edge while every other
-            control on the same form stacked its label above itself with the system's own gap. */}
-        <SelectField
+        {/* ComboboxField, not a bare <label> beside a bare picker: the pair had no field wrapper, so the
+            word "Reason" sat on the control's baseline hard against the dialog's inner edge while every
+            other control on the same form stacked its label above itself with the system's own gap. It was
+            `SelectField` until the scrolls/dropdowns audit; the reason list is a server catalogue, and this
+            dialog is one of the 12 places a picker sat inside a modal whose `overflow: auto` clipped it. */}
+        <ComboboxField
           id="txn-reason"
           label={t(S.reason)}
           placeholder={t(S.reasonPlaceholder)}

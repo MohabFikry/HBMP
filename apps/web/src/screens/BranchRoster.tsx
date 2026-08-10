@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Card, DataTable, InlineAlert, InputField, SelectField, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, InlineAlert, InputField, ComboboxField, StatusChip, useTheme } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import { rosterApi } from "../api/branchApi";
 import type { CreateRosterExceptionBody, RosterException, RosterImpact, RosterKind } from "../api/branchApi";
@@ -214,7 +214,7 @@ function RecordException({ lang, onApplied }: { lang: "en" | "ar"; onApplied: ()
     <Card>
       <h2>{t(S.addHeading)}</h2>
 
-      <SelectField
+      <ComboboxField
         label={t(S.kind)}
         options={(Object.keys(KIND_LABEL) as RosterKind[]).map((k) => ({ value: k, label: t(KIND_LABEL[k]) }))}
         value={kind}

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Card, DataTable, DataTableView, InlineAlert, InputField, Pagination, SegmentedControl, SelectField, StatusChip, useTableQuery, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, DataTableView, InlineAlert, InputField, Pagination, SegmentedControl, ComboboxField, StatusChip, useTableQuery, useTheme } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import { inventoryApi } from "../api/branchApi";
 import type { ItemCategory, Movement, MovementKind, StockLine } from "../api/branchApi";
@@ -316,7 +316,7 @@ function RecordMovement({
     <Card>
       <h2>{t(S.record)}</h2>
 
-      <SelectField
+      <ComboboxField
         label={t(S.item)}
         // The empty option is gone: `placeholder` is how Select says "nothing chosen", and an em-dash in the
         // list read as a selectable item called "—".
@@ -329,7 +329,7 @@ function RecordMovement({
         onChange={setLine}
       />
 
-      <SelectField
+      <ComboboxField
         label={t(S.kind)}
         options={WRITABLE_KINDS.map((k) => ({ value: k.kind, label: t(k.label) }))}
         value={kind}

@@ -7,7 +7,7 @@ import {
   InlineAlert,
   InputField,
   Modal,
-  SelectField,
+  ComboboxField,
   StatusChip,
   Tabs,
   useTableQuery,
@@ -1233,7 +1233,7 @@ function DiagnosisPicker({
                 <li key={r.code}>
                   <span className="dx-code tnum">{r.code}</span>
                   <span className="dx-staged-title">{r.title}</span>
-                  <SelectField
+                  <ComboboxField
                     label={t(S.rank)}
                     hideLabel
                     value={r.rank}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Button, Card, DataTable, Icon, InlineAlert, InputField, SelectField, StatusChip, Tabs, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, InputField, ComboboxField, StatusChip, Tabs, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   AnalyticsDelta,
@@ -375,7 +375,7 @@ function FilterBar({
     options: ReadonlyArray<{ value: string; label: string }>,
     opts: { disabled?: boolean; help?: string } = {},
   ) => (
-    <SelectField
+    <ComboboxField
       label={t(label)}
       value={filters[key] ?? ""}
       onChange={(v) => onChange(key, v)}

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import {
-  Button, Card, DataTable, Icon, InlineAlert, InputField, SegmentedControl, SelectField, StatusChip,
+  Button, Card, DataTable, Icon, InlineAlert, InputField, SegmentedControl, ComboboxField, StatusChip,
   TextareaField, useToast,
 } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
@@ -468,7 +468,7 @@ function RuleEditor({
           onChange={(e) => setPriority(e.currentTarget.value)}
         />
 
-        <SelectField
+        <ComboboxField
           label={t(S.matchPriority)}
           value={matchPriority}
           onChange={setMatchPriority}
@@ -480,7 +480,7 @@ function RuleEditor({
           ]}
         />
 
-        <SelectField
+        <ComboboxField
           label={t(S.matchSource)}
           value={matchSource}
           onChange={setMatchSource}
@@ -494,7 +494,7 @@ function RuleEditor({
 
         {family === "AutoApprove" && (
           <>
-            <SelectField
+            <ComboboxField
               label={t(S.category)}
               value={category}
               onChange={setCategory}
@@ -528,7 +528,7 @@ function RuleEditor({
 
         {family === "Preauth" && (
           <>
-            <SelectField
+            <ComboboxField
               label={t(S.category)}
               value={category}
               onChange={setCategory}
@@ -560,7 +560,7 @@ function RuleEditor({
         )}
 
         {family === "Routing" ? (
-          <SelectField
+          <ComboboxField
             label={t(S.queue)}
             value={queue}
             onChange={setQueue}
