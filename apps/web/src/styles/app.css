@@ -567,6 +567,17 @@ nav.mrs-rail {
   text-align: end;
   color: var(--text-1);
 }
+/*
+ * A chart's ACCESSIBLE EQUIVALENT, and small key/value summaries — not a data table.
+ *
+ * Every chart in the product ships the same numbers as a table so the figures are reachable without seeing
+ * the picture (`ExecutiveDashboard`, `PolicyPanels`, `FinancePortal`). Those are a rendering of one series,
+ * frequently `sr-only`, and want none of `DataTable`'s worklist behaviour — a sticky header and a sort
+ * control on a four-row chart equivalent is chrome around nothing.
+ *
+ * If the rows are records an operator works through rather than the numbers behind a picture, it is a
+ * `DataTable`.
+ */
 .mini-table {
   width: 100%;
   border-collapse: collapse;
@@ -1342,8 +1353,27 @@ nav.mrs-rail {
 */
 .mem-actions-end { margin-inline-start: 0; }
 
-/* The two-level grid. Wide by nature (one column per tier once expanded), so it scrolls INSIDE its own
-   container — the page body must never scroll sideways. */
+/*
+ * ============================================================================================================
+ * `.pol-grid` / `.pol-costshare` ARE NOT FOR DATA TABLES
+ * ============================================================================================================
+ * A read-only list of rows belongs to `DataTable`, which brings the sticky header, `aria-sort`, the
+ * loading/empty/error states, numeric alignment and one cell padding shared with every other table in the
+ * product. These two exist for the things it is NOT:
+ *
+ *  - `.pol-grid` — a MASTER/DETAIL grid whose rows expand into a `.pol-grid-sub` panel (member coverage, plan
+ *    benefit categories). `DataTable` has no row-expansion concept, and giving it one to serve two screens
+ *    would be a large component for a small need.
+ *  - `.pol-costshare` — an EDIT grid: every cell is a checkbox, a select or a number field, and the table is
+ *    a form laid out in columns rather than a list of values.
+ *
+ * The household roster used to live here and has moved to `DataTable`; it was a plain list of rows all
+ * along, and the only thing distinguishing it was that it sat at this file's 8/12px cell padding while every
+ * other table in the app sits at 14/16px. If what you are adding is a list of rows, that is the lesson.
+ *
+ * Wide by nature (one column per tier once expanded), so it scrolls INSIDE its own container — the page body
+ * must never scroll sideways.
+ */
 .pol-grid, .pol-costshare { width: 100%; border-collapse: collapse; display: block; overflow-x: auto; }
 /*
  * `display: block` buys the horizontal scroll, but it also takes the table OUT of table layout: the browser

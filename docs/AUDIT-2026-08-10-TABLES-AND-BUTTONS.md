@@ -269,9 +269,13 @@ Header **typography** has already been unified across all four via the `--tbl-he
 
 ¹ except `.bulk-columns > .pol-costshare`, whose wrapper owns the scroll and the sticky header.
 
-Several of these are legitimate non-tables — `.mini-table` in `ExecutiveDashboard.tsx:83` and `PolicyPanels.tsx:178` is a chart's accessible data equivalent, and `.pol-costshare` is largely a spec sheet of editable inputs. But three are unambiguously data tables built by hand: the family roster (`MemberAdmin.tsx:1226`, complete with its own `<caption class="sr-only">`, `<th scope="col">` and focusable scroll wrapper — the DS pattern, reimplemented), member coverage (`MemberAdmin.tsx:1562`) and plan benefit categories (`PolicyProductAdmin.tsx:485`).
+Several of these are legitimate non-tables — `.mini-table` in `ExecutiveDashboard.tsx:83` and `PolicyPanels.tsx:178` is a chart's accessible data equivalent, and `.pol-costshare` is largely a spec sheet of editable inputs.
 
-*Fix:* move those three to `DataTable`. Leave the chart alternatives and the input grids where they are; document in `app.css` that `.mini-table` is for chart equivalents and `.pol-costshare` for input grids, so neither accretes more data tables.
+**One** is unambiguously a data table built by hand: the family roster (`MemberAdmin.tsx:1226`), complete with its own `<caption class="sr-only">`, `<th scope="col">` row and focusable scroll wrapper — the DS pattern, reimplemented — and differing from a real one only in sitting at `.pol-grid`'s 8/12px cell padding while every other table in the product sits at 14/16px.
+
+> *Correction:* the first draft named **three**, adding member coverage (`MemberAdmin.tsx:1562`) and plan benefit categories (`PolicyProductAdmin.tsx:485`). Reading them properly, neither is a data table. Both expand a row into a `.pol-grid-sub` detail panel, which `DataTable` has no concept of; and every cell of the plan-categories grid is a checkbox, a select or a number field, which makes it a form laid out in columns rather than a list of values. Migrating either would have meant building row expansion into the design system to serve two screens. They stay, and `app.css` now says why.
+
+*Fix:* move the roster to `DataTable`. Leave the chart alternatives, the input grids and the two master/detail grids where they are; document in `app.css` what each skin is for, so none of them accretes a data table.
 
 ### L4 — `stickyEnd` used on 3 of 7 actions columns
 

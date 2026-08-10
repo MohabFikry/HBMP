@@ -15,6 +15,7 @@ import {
   TextareaField,
   useTheme,
 } from "@mersal/design-system";
+import type { Column } from "@mersal/design-system";
 import type { BeneficiaryEdit, BeneficiaryRow, Localized } from "@mersal/contracts";
 import type {
   CategoryCoverageDetail,
@@ -1221,27 +1222,22 @@ function FamilyModal({
 
       {view !== null && alone && <InlineAlert tone="info">{t(S.familyAlone)}</InlineAlert>}
 
+      {/*
+        A DataTable, not hand-written markup. It was the latter — complete with its own `<caption
+        class="sr-only">`, its own `<th scope>` row and its own focusable scroll wrapper, which is the
+        component's pattern reimplemented — and the only visible difference was that it sat at `.pol-grid`'s
+        8/12px padding while every other table in the product sits at 14/16px.
+
+        The NAME column keeps `scope="row"`: a household table is read across, and "plan, Standard" without a
+        name attached is the wrong six words to hear.
+      */}
       {view !== null && !alone && (
-        <div className="pol-tablewrap mrs-scroll mrs-scroll-focusable" tabIndex={0}>
-          <table className="pol-grid" data-testid="family-table">
-            <caption className="sr-only">{t(S.familyTitle)}</caption>
-            <thead>
-              <tr>
-                <th scope="col">{t(S.name)}</th>
-                <th scope="col">{t(S.memberNo)}</th>
-                <th scope="col">{t(S.relationship)}</th>
-                <th scope="col">{t(S.plan)}</th>
-                <th scope="col">{t(S.from)}</th>
-                <th scope="col">{t(S.status)}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {view.members.map((member) => (
-                <FamilyRow key={member.enrollmentId} member={member} fmt={fmt} t={t} enumLabel={enumLabel} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          caption={t(S.familyTitle)}
+          rows={view.members}
+          rowKey={(m) => m.enrollmentId}
+          columns={familyColumns(t, fmt, enumLabel)}
+        />
       )}
 
       {/* Both of these are said out loud rather than left to be inferred from a short list. */}
@@ -1255,38 +1251,49 @@ function FamilyModal({
   );
 }
 
-function FamilyRow({
-  member,
-  fmt,
-  t,
-  enumLabel,
-}: {
-  member: CoveredFamilyMember;
-  fmt: ReturnType<typeof useFormat>;
-  t: (value: Localized) => string;
-  enumLabel: (value: string) => string;
-}) {
-  const name = [member.givenName, member.familyName].filter(Boolean).join(" ");
-  return (
-    <tr data-testid="family-row" data-subject={member.isSubject || undefined}>
-      <th scope="row">
-        {name || <span className="muted">{t(S.nameUnavailable)}</span>}
-        {/* Two different facts, and a row can carry both: who the cover belongs to, and which row you came
-            from. Words, not styling — a bold row says nothing to a screen reader. */}
-        {member.isPrincipal && <StatusChip kind="info" label={t(S.principal)} />}
-        {member.isSubject && <StatusChip kind="neu" label={t(S.thisMember)} />}
-      </th>
-      <td className="tnum">{member.memberNo}</td>
-      <td>{enumLabel(member.relationship)}</td>
-      <td>{member.planLabel ?? "—"}</td>
-      <td className="tnum">
-        {member.effectiveFrom ? fmt.date(member.effectiveFrom) : "—"}
-        {" → "}
-        {member.effectiveTo ? fmt.date(member.effectiveTo) : "—"}
-      </td>
-      <td><StatusChip kind={statusKind(member.status)} label={enumLabel(member.status)} /></td>
-    </tr>
-  );
+function familyColumns(
+  t: (value: Localized) => string,
+  fmt: ReturnType<typeof useFormat>,
+  enumLabel: (value: string) => string,
+): Column<CoveredFamilyMember>[] {
+  return [
+    {
+      key: "name",
+      header: t(S.name),
+      rowHeader: true,
+      cell: (m) => {
+        const name = [m.givenName, m.familyName].filter(Boolean).join(" ");
+        return (
+          <>
+            {name || <span className="muted">{t(S.nameUnavailable)}</span>}
+            {/* Two different facts, and a row can carry both: who the cover belongs to, and which row you
+                came from. Words, not styling — a bold row says nothing to a screen reader. */}
+            {m.isPrincipal && <StatusChip kind="info" label={t(S.principal)} />}
+            {m.isSubject && <StatusChip kind="neu" label={t(S.thisMember)} />}
+          </>
+        );
+      },
+    },
+    { key: "memberNo", header: t(S.memberNo), cell: (m) => <span className="tnum">{m.memberNo}</span> },
+    { key: "relationship", header: t(S.relationship), cell: (m) => enumLabel(m.relationship) },
+    { key: "plan", header: t(S.plan), cell: (m) => m.planLabel ?? "—" },
+    {
+      key: "from",
+      header: t(S.from),
+      cell: (m) => (
+        <span className="tnum">
+          {m.effectiveFrom ? fmt.date(m.effectiveFrom) : "—"}
+          {" → "}
+          {m.effectiveTo ? fmt.date(m.effectiveTo) : "—"}
+        </span>
+      ),
+    },
+    {
+      key: "status",
+      header: t(S.status),
+      cell: (m) => <StatusChip kind={statusKind(m.status)} label={enumLabel(m.status)} />,
+    },
+  ];
 }
 
 // ── The identity record ─────────────────────────────────────────────────────────────────────────────────

@@ -650,7 +650,7 @@ html[dir="rtl"] .mrs-search input {
   border-collapse: separate;
   border-spacing: 0;
 }
-.mrs-wl th {
+.mrs-wl thead th {
   position: sticky;
   top: 0;
   background: var(--surface-2);
@@ -688,7 +688,7 @@ html[dir="rtl"] .mrs-search input {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.mrs-wl th button.mrs-sort {
+.mrs-wl thead th button.mrs-sort {
   all: unset;
   cursor: pointer;
   display: inline-flex;
@@ -697,15 +697,15 @@ html[dir="rtl"] .mrs-search input {
 }
 /* `all: unset` above strips the focus ring too, so a keyboard user tabbing across the header had no idea
    where they were. Put it back explicitly. */
-.mrs-wl th button.mrs-sort:focus-visible {
+.mrs-wl thead th button.mrs-sort:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
   border-radius: var(--r-sm);
 }
 /* The chevron points the way the column is actually sorted, so direction is legible without reading
    aria-sort — and turns rather than vanishing, so the control never looks disabled. */
-.mrs-wl th[aria-sort="none"] button.mrs-sort svg { opacity: 0.35; }
-.mrs-wl th[aria-sort="descending"] button.mrs-sort svg { transform: rotate(180deg); }
+.mrs-wl thead th[aria-sort="none"] button.mrs-sort svg { opacity: 0.35; }
+.mrs-wl thead th[aria-sort="descending"] button.mrs-sort svg { transform: rotate(180deg); }
 
 /* ---------- Table toolbar (search + filter chips) ---------- */
 .mrs-toolbar {
@@ -870,14 +870,28 @@ html[dir="rtl"] .mrs-search input {
 .mrs-toolbar-extra .mrs-field .mrs-control {
   margin-top: 6px;
 }
-.mrs-wl td {
+/*
+ * A ROW HEADER is a cell to look at and only a different thing to LISTEN to.
+ *
+ * `Column.rowHeader` renders `<th scope="row">` so a screen reader announces whose row is being read with
+ * every cell across it. That `th` is styled here, WITH the `td`s, rather than being un-styled afterwards:
+ * the header rule above is scoped to `thead`, so nothing has to be undone and the two kinds of cell cannot
+ * drift apart. Scoping it that way is what the rule always meant — a sticky, uppercase, 11.5px micro-label
+ * on --surface-2 describes a column heading and was never a claim about `th` in general.
+ */
+.mrs-wl td,
+.mrs-wl tbody th {
   padding: var(--tbl-cell-pad-y) var(--tbl-cell-pad-x);
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
+  font-weight: inherit;
+  text-align: start;
 }
-.mrs-wl tbody tr:last-child td {
+.mrs-wl tbody tr:last-child td,
+.mrs-wl tbody tr:last-child th {
   border-bottom: 0;
 }
+.mrs-wl.mrs-compact tbody th,
 .mrs-wl.mrs-compact td {
   padding: var(--tbl-cell-pad-y-tight) var(--tbl-cell-pad-x);
 }

@@ -4,7 +4,9 @@ import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
 import { renderDS } from "./render";
-import { DataTableView, Pagination, useTableQuery, type Column, type TableFilterSpec } from "../src";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { DataTable, DataTableView, Pagination, useTableQuery, type Column, type TableFilterSpec } from "../src";
 
 /**
  * The portal table pattern: search + filters + sortable columns + pagination, assembled once so that every
@@ -302,5 +304,41 @@ describe("DataTableView.serverFilters", () => {
     // never given); the client group keeps its faceting.
     expect(screen.getByRole("button", { name: /^Red\b/ })).toHaveTextContent("6");
     expect(screen.getByRole("button", { name: "Today" })).not.toHaveTextContent(/\d/);
+  });
+});
+
+describe("Column.rowHeader", () => {
+  const COLS_WITH_HEADER: Column<Row>[] = [
+    { key: "name", header: "Name", cell: (r) => r.name, rowHeader: true },
+    { key: "team", header: "Team", cell: (r) => r.team },
+  ];
+
+  it("renders that column as a row header and the rest as cells", () => {
+    renderDS(
+      <DataTable columns={COLS_WITH_HEADER} rows={ROWS.slice(0, 2)} rowKey={(r) => r.id} caption="People" />);
+    const first = screen.getAllByRole("row")[1]!;
+    // `rowheader` is the ARIA role a <th scope="row"> maps to; a screen reader announces it with every cell
+    // read across the row, which is the whole point.
+    expect(within(first).getByRole("rowheader")).toHaveTextContent("Amal");
+    expect(within(first).getAllByRole("cell")).toHaveLength(1);
+  });
+
+  it("leaves every column a plain cell when nothing opts in", () => {
+    renderDS(<DataTable columns={COLS} rows={ROWS.slice(0, 2)} rowKey={(r) => r.id} caption="People" />);
+    const first = screen.getAllByRole("row")[1]!;
+    expect(within(first).queryByRole("rowheader")).not.toBeInTheDocument();
+    expect(within(first).getAllByRole("cell")).toHaveLength(COLS.length);
+  });
+
+  it("cannot pick up the COLUMN-header styling, because that rule is scoped to the head", () => {
+    // The header rule is sticky, uppercase, 11.5px micro-label on --surface-2 — a description of a column
+    // HEADING, never a claim about `th` in general. Scoped to `thead`, a body `th` is simply not matched,
+    // so nothing has to be undone and the two cannot drift apart. Written as an unscoped `.mrs-wl th` the
+    // person's name would come out grey, tiny, upper-cased and pinned to the top of the scrollport.
+    const css = readFileSync(resolve(__dirname, "../src/styles/components.css"), "utf8");
+    expect(css).toMatch(/\.mrs-wl thead th \{/);
+    expect(css, "an unscoped .mrs-wl th would style the body too").not.toMatch(/\n\.mrs-wl th \{/);
+    // And the body th is styled WITH the tds, so their padding cannot diverge.
+    expect(css).toMatch(/\.mrs-wl td,\n\.mrs-wl tbody th \{/);
   });
 });
