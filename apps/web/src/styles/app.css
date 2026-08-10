@@ -1263,10 +1263,18 @@ nav.mrs-rail {
 .pol-searchbar { align-items: end; }
 .pol-searchbar .mrs-btn { margin-bottom: 1px; }
 
-.pol-kpis { display: flex; flex-wrap: wrap; gap: var(--sp5); margin: 0; }
-.pol-kpis > div { display: grid; gap: var(--sp1); }
-.pol-kpis dt { color: var(--text-2); font-size: 0.82rem; }
-.pol-kpis dd { margin: 0; font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+/* `.pol-facts` — a short list of label/value FACTS. Renamed from `.pol-kpis`, which is what it was called
+   while four screens used it for figures; those four now render `KpiList`, which is the 0B §10b treatment
+   figures are supposed to get (hairline, uppercase micro-label, 34px tabular numerals) rather than a 0.82rem
+   label over a 1.25rem value, which is plain text with a size difference.
+   The one remaining caller is the tier resolver's result, and it is NOT figures: a status chip and the word
+   "DefaultOutOfNetwork". Putting those in KPI tiles would set a chip and a vocabulary term at headline size
+   and claim they are measurements. So the treatment stays for this case and the NAME stops overselling it —
+   a class called `kpis` is how the wrong content ends up in it again. */
+.pol-facts { display: flex; flex-wrap: wrap; gap: var(--sp5); margin: 0; }
+.pol-facts > div { display: grid; gap: var(--sp1); }
+.pol-facts dt { color: var(--text-2); font-size: 0.82rem; }
+.pol-facts dd { margin: 0; font-size: 1.25rem; font-variant-numeric: tabular-nums; }
 
 .pol-identity { display: grid; gap: var(--sp2); }
 .pol-identity dl { display: flex; flex-wrap: wrap; gap: var(--sp5); margin: 0; }

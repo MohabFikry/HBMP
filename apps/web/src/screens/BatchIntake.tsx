@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Card, DataTable, Icon, InlineAlert, Select, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, Icon, InlineAlert, KpiList, Select, StatusChip, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   BulkCommitView,
@@ -320,14 +320,21 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
             </InlineAlert>
           )}
 
-          <dl className="pol-kpis">
-            <div><dt>{t(S.submitted)}</dt><dd>{fmt.number(job.totalRows)}</dd></div>
-            <div><dt>{t(S.valid)}</dt><dd>{fmt.number(job.validRows)}</dd></div>
-            <div><dt>{t(S.invalid)}</dt><dd>{fmt.number(job.invalidRows)}</dd></div>
-            <div><dt>{t(S.applied)}</dt><dd>{fmt.number(job.appliedRows)}</dd></div>
-            <div><dt>{t(S.failed)}</dt><dd>{fmt.number(job.failedRows)}</dd></div>
-            <div><dt>{t(S.skipped)}</dt><dd>{fmt.number(job.skippedRows)}</dd></div>
-          </dl>
+          {/* `KpiList`, not the `pol-kpis` definition list this used to be — the same migration the two
+              utilization panels made. Six row counts are exactly what the KPI treatment is for, and on the
+              screen an operator watches to decide whether to commit a file, "how many rows failed" should not
+              be set smaller than the body copy beside it. Same definition-list semantics, same classes as
+              `KpiCard`. */}
+          <KpiList
+            items={[
+              { label: t(S.submitted), value: fmt.number(job.totalRows) },
+              { label: t(S.valid), value: fmt.number(job.validRows) },
+              { label: t(S.invalid), value: fmt.number(job.invalidRows) },
+              { label: t(S.applied), value: fmt.number(job.appliedRows) },
+              { label: t(S.failed), value: fmt.number(job.failedRows) },
+              { label: t(S.skipped), value: fmt.number(job.skippedRows) },
+            ]}
+          />
 
           <div className="pol-editor-actions">
             <Button variant="secondary" onClick={doValidate} disabled={busy || job.status === "Failed"}>

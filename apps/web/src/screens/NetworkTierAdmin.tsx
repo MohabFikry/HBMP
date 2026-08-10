@@ -254,7 +254,12 @@ function ResolveAtDate({ api }: { api: PolicyApi }) {
       </Button>
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
       {result && (
-        <dl className="pol-kpis" aria-live="polite">
+        // Not `KpiList`, and deliberately: a status chip and a vocabulary term ("DefaultOutOfNetwork") are
+        // not figures, and the KPI treatment sets its value at 34px tabular numerals because a KPI is a
+        // number. `.pol-facts` is the same rule this always used, renamed to say what it holds.
+        // `aria-live` stays on the list: the resolver replaces this block in place when Run is pressed, and
+        // without it the only feedback is text quietly changing somewhere down the page.
+        <dl className="pol-facts" aria-live="polite">
           <div>
             <dt>{t(S.resolvedTo)}</dt>
             <dd>
