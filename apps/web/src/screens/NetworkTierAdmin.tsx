@@ -12,6 +12,7 @@ import { writeErrorMessage } from "../api/writeError";
 import { useAuth } from "../auth/AuthProvider";
 import { mayAdministerTiers } from "../authz/permissions";
 import { PageHeader, useLoc, readErrorMessage } from "./_shared";
+import { ConfirmAction } from "./ConfirmAction";
 import { useIdempotencyKey } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
 
@@ -66,6 +67,19 @@ const S = {
   selectTier: { en: "Select a tier to see its assignments.", ar: "اختر شريحة لعرض إسناداتها." },
   created: { en: "Tier created.", ar: "تم إنشاء الشريحة." },
   revoked: { en: "Assignment revoked.", ar: "تم سحب الإسناد." },
+  // ── Confirming a revoke ───────────────────────────────────────────────────────────────────────────────
+  // This fired straight from the click, on a `ghost` button — the transparent variant every Cancel in the app
+  // wears. Which tier a provider sits in decides the rate their claims are priced at, so the row it removes is
+  // not a display preference.
+  revokeTitle: { en: "Revoke this assignment?", ar: "سحب هذا الإسناد؟" },
+  revokeBody: {
+    en: "{0} will stop being assigned to this tier. Services on or after today price against whatever tier resolves instead.",
+    ar: "سيتوقف إسناد {0} إلى هذه الشريحة. تُسعَّر الخدمات من اليوم فصاعدًا وفق الشريحة البديلة.",
+  },
+  revokeReversible: {
+    en: "The assignment can be re-created, but claims already priced are not repriced.",
+    ar: "يمكن إعادة إنشاء الإسناد، لكن المطالبات المُسعَّرة سابقًا لا يُعاد تسعيرها.",
+  },
 } satisfies Record<string, Localized>;
 
 export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
@@ -77,6 +91,8 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
   const [tiers, setTiers] = useState<NetworkTierView[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [assignments, setAssignments] = useState<TierAssignmentView[]>([]);
+  /** The assignment awaiting confirmation — see `revokeTitle`. */
+  const [revoking, setRevoking] = useState<TierAssignmentView | null>(null);
   const [error, setError] = useState<Localized | null>(null);
   const [announce, setAnnounce] = useState("");
   const [createKey, rotateCreateKey] = useIdempotencyKey();
@@ -199,16 +215,9 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
                 cell: (r) =>
                   mayWrite && r.status === "Active" ? (
                     <Button
-                      variant="ghost"
-                      onClick={async () => {
-                        try {
-                          await api.revokeAssignment(r.assignmentId);
-                          setAnnounce(t(S.revoked));
-                          setAssignments(await api.tierAssignments(selected));
-                        } catch (e) {
-                          setError(readErrorMessage(e));
-                        }
-                      }}
+                      variant="danger"
+                      size="sm"
+                      onClick={() => setRevoking(r)}
                     >
                       {t(S.revoke)}
                     </Button>
@@ -218,6 +227,33 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
           />
         </Card>
       )}
+
+      <ConfirmAction
+        open={revoking !== null}
+        onOpenChange={(o) => !o && setRevoking(null)}
+        destructive
+        title={S.revokeTitle}
+        description={S.revokeReversible}
+        // The reference the row shows, so the dialog names the same thing the operator clicked beside.
+        body={{
+          en: S.revokeBody.en.replace("{0}", revoking?.scopeRef.slice(0, 8) ?? ""),
+          ar: S.revokeBody.ar.replace("{0}", revoking?.scopeRef.slice(0, 8) ?? ""),
+        }}
+        confirmLabel={S.revoke}
+        onConfirm={async () => {
+          if (!revoking || !selected) return;
+          try {
+            await api.revokeAssignment(revoking.assignmentId);
+            setAnnounce(t(S.revoked));
+            setAssignments(await api.tierAssignments(selected));
+          } catch (e) {
+            setError(readErrorMessage(e));
+          } finally {
+            setRevoking(null);
+          }
+        }}
+      />
+
 
       <ResolveAtDate api={api} />
     </div>

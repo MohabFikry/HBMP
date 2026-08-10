@@ -31,6 +31,10 @@ import type { BulkJobView, PolicyApi, PolicyQueryRow } from "../src/api/policyAp
 
 const reject = () => Promise.reject(new ApiError("network", "not stubbed in this test"));
 
+/** The most recent call's first argument. `.at()` is ES2022 and this package targets lower. */
+const lastArg = (fn: { mock: { calls: unknown[][] } }) =>
+  fn.mock.calls[fn.mock.calls.length - 1]?.[0];
+
 /** Only the members of `PolicyApi` these screens touch; the rest reject loudly if a screen reaches for them. */
 function fakeApi(overrides: Partial<PolicyApi>): PolicyApi {
   return new Proxy({ ...overrides } as PolicyApi, {
@@ -43,18 +47,18 @@ function policyRow(n: number): PolicyQueryRow {
     policyId: `pol-${n}`,
     policyNo: `POL-${String(n).padStart(4, "0")}`,
     payerId: null,
-    payerName: null,
     status: "Active",
     effectiveFrom: "2026-01-01",
     effectiveTo: null,
     memberCount: n,
+    memberCountBand: "Small",
+    maxMembers: null,
     planCount: 1,
     totalLimit: null,
     totalConsumed: null,
-    totalRemaining: null,
     percentUsed: null,
     utilizationBand: "Low",
-  } as PolicyQueryRow;
+  };
 }
 
 function policyPage(overrides: Partial<Record<string, unknown>> = {}) {
@@ -100,7 +104,7 @@ describe("the policy book renders the whole result, not the first page of it", (
     // A refetch, with page 2 asked of the SERVER. Slicing the 25 rows in hand would be the bug the
     // `useTableQuery` docs describe, arriving through a different door.
     await waitFor(() => expect(policyQuery.mock.calls.length).toBeGreaterThan(calls));
-    expect(policyQuery.mock.calls.at(-1)?.[0]).toMatchObject({ page: 2 });
+    expect(lastArg(policyQuery)).toMatchObject({ page: 2 });
   });
 
   it("sorts on the SERVER, in the server's own vocabulary", async () => {
@@ -111,12 +115,12 @@ describe("the policy book renders the whole result, not the first page of it", (
     // "Members" — `membercount` in PolicySortFields.Allowed.
     await userEvent.click(screen.getByRole("button", { name: /members/i }));
     await waitFor(() =>
-      expect(policyQuery.mock.calls.at(-1)?.[0]).toMatchObject({ sort: "membercount" }));
+      expect(lastArg(policyQuery)).toMatchObject({ sort: "membercount" }));
 
     // Same header again flips direction, and the server's "-" prefix carries it.
     await userEvent.click(screen.getByRole("button", { name: /members/i }));
     await waitFor(() =>
-      expect(policyQuery.mock.calls.at(-1)?.[0]).toMatchObject({ sort: "-membercount" }));
+      expect(lastArg(policyQuery)).toMatchObject({ sort: "-membercount" }));
   });
 
   it("only offers the orders the server accepts", async () => {

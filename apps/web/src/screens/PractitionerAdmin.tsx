@@ -23,6 +23,7 @@ import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
 import { useWrite, writeErrorText } from "../api/useWrite";
 import { AsyncSection, PageHeader, useLoc } from "./_shared";
+import { ConfirmAction } from "./ConfirmAction";
 
 const S = {
   title: { en: "Doctors & Clinicians", ar: "الأطباء والإكلينيكيون" },
@@ -105,6 +106,18 @@ const S = {
     en: "Removing a clinic stops NEW bookings there. Appointments already booked are not cancelled — check them before removing.",
     ar: "إزالة العيادة توقف الحجوزات الجديدة بها. المواعيد المحجوزة مسبقًا لا تُلغى — راجعها قبل الإزالة.",
   },
+  // ── Confirming a removal ──────────────────────────────────────────────────────────────────────────────
+  // Both removals used to fire on the click. They are reversible, so the dialog says so rather than borrowing
+  // "this cannot be undone" from the irreversible ones — a warning that overstates on the small cases is one
+  // nobody reads on the large ones.
+  reversible: { en: "You can add it back afterwards.", ar: "يمكنك إعادته لاحقًا." },
+  removeSpecialtyTitle: { en: "Remove this specialty?", ar: "إزالة هذا التخصص؟" },
+  removeSpecialtyBody: {
+    en: "{0} will be removed from this clinician. They can no longer be booked for it.",
+    ar: "سيُزال {0} من هذا الإكلينيكي، ولن يعود قابلًا للحجز به.",
+  },
+  removeClinicTitle: { en: "Remove this clinic?", ar: "إزالة هذه العيادة؟" },
+  removeClinicBody: { en: "{0} will be removed from this clinician.", ar: "ستُزال {0} من هذا الإكلينيكي." },
   statusReason: { en: "Reason", ar: "السبب" },
   statusReasonHelp: { en: "Recorded in the audit trail.", ar: "يُسجل في سجل التدقيق." },
   apply: { en: "Apply", ar: "تطبيق" },
@@ -479,6 +492,20 @@ function PractitionerPanel({
   const [status, setStatus] = useState<string>(STATUSES[0]);
   const [reason, setReason] = useState("");
   const [reasonMissing, setReasonMissing] = useState(false);
+  /*
+    The removal awaiting confirmation.
+
+    Both Remove buttons used to be `variant="ghost"` — the app's TRANSPARENT variant, the one every Cancel
+    wears — and both called the API straight from `onClick`. Revoking a specialty makes a clinician unbookable
+    for it; revoking a clinic drops them off that site's booking list, and the panel already said as much in a
+    caption the operator could only read AFTER clicking. Neither is undoable by pressing the same button
+    again, and neither asked.
+
+    One piece of state for both, so there is one dialog rather than two: the pair differ in their wording, not
+    in their shape.
+  */
+  const [confirming, setConfirming] = useState<
+    { kind: "specialty" | "clinic"; id: string; label: string } | null>(null);
 
   async function run(key: string, action: () => Promise<unknown>) {
     setBusy(key);
@@ -549,8 +576,8 @@ function PractitionerPanel({
                         that cannot succeed teaches an operator the screen is unreliable. Promote another
                         first — which is exactly what the button beside it does. */}
                     {!isPrimary && (
-                      <Button variant="ghost" size="sm" loading={busy === `rms:${code}`}
-                              onClick={() => void run(`rms:${code}`, () => api.revokeSpecialty(p.id, code))}>
+                      <Button variant="danger" size="sm" loading={busy === `rms:${code}`}
+                              onClick={() => setConfirming({ kind: "specialty", id: code, label: specialtyName(code) })}>
                         {t(S.remove)}
                       </Button>
                     )}
@@ -604,8 +631,8 @@ function PractitionerPanel({
                 <span>{branchName(id)}</span>
                 <span className="row-actions">
                   {onlyClinic && <span className="muted">{t(S.lastClinicWarning)}</span>}
-                  <Button variant="ghost" size="sm" loading={busy === `rmb:${id}`}
-                          onClick={() => void run(`rmb:${id}`, () => api.revokePractitionerBranch(p.id, id))}>
+                  <Button variant="danger" size="sm" loading={busy === `rmb:${id}`}
+                          onClick={() => setConfirming({ kind: "clinic", id, label: branchName(id) })}>
                     {t(S.remove)}
                   </Button>
                 </span>
@@ -668,6 +695,52 @@ function PractitionerPanel({
           </Button>
         </div>
       </section>
+
+      {/*
+        ONE dialog for both removals, driven by `confirming`.
+
+        The clinic body carries `revokeBranchNote` — "removing a clinic stops NEW bookings there; appointments
+        already booked are not cancelled" — because that is the fact the decision turns on, and until now it
+        was a caption above the list that an operator had already scrolled past. `lastClinicWarning` joins it
+        when this is the only one, for the same reason: it used to sit BESIDE the button, which is to say it
+        was read after the click, not before it.
+      */}
+      <ConfirmAction
+        open={confirming !== null}
+        onOpenChange={(o) => !o && setConfirming(null)}
+        destructive
+        description={S.reversible}
+        title={confirming?.kind === "clinic" ? S.removeClinicTitle : S.removeSpecialtyTitle}
+        body={bodyFor(confirming, onlyClinic)}
+        confirmLabel={S.remove}
+        onConfirm={async () => {
+          if (!confirming) return;
+          const { kind, id } = confirming;
+          await run(
+            `${kind === "clinic" ? "rmb" : "rms"}:${id}`,
+            () => (kind === "clinic" ? api.revokePractitionerBranch(p.id, id) : api.revokeSpecialty(p.id, id)));
+          setConfirming(null);
+        }}
+      />
     </Card>
   );
+}
+
+/** The confirmation body, with the name of the thing in it — "Remove this?" alone is not a question. */
+function bodyFor(
+  confirming: { kind: "specialty" | "clinic"; id: string; label: string } | null,
+  onlyClinic: boolean,
+): Localized {
+  if (!confirming) return { en: "", ar: "" };
+  const fill = (l: Localized): Localized => ({
+    en: l.en.replace("{0}", confirming.label),
+    ar: l.ar.replace("{0}", confirming.label),
+  });
+  if (confirming.kind === "specialty") return fill(S.removeSpecialtyBody);
+  const base = fill(S.removeClinicBody);
+  const extra = onlyClinic ? [S.revokeBranchNote, S.lastClinicWarning] : [S.revokeBranchNote];
+  return {
+    en: [base.en, ...extra.map((e) => e.en)].join(" "),
+    ar: [base.ar, ...extra.map((e) => e.ar)].join(" "),
+  };
 }
