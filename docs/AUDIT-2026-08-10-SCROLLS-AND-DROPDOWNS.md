@@ -275,6 +275,26 @@ Ordered by dependency, not by severity — H1 and M2 are prerequisites for the c
 
 ---
 
+## 6. Outcome — what was actually done
+
+All ten steps completed on 2026-08-10, one commit each, on `fix/audit-2026-08-10-scrolls-dropdowns`. Gates after every step: web 1293/1293, design-system 85/85, `tsc` clean in both packages, eslint 0 errors.
+
+**Four things turned out differently from the plan, and all four are worth knowing:**
+
+1. **A sixteenth native `<select>` existed** — `Pagination`'s page-size picker. The audit scanned `apps/web` for pickers, so a native select living in the design system was outside the scan; on a product where nearly every screen is a paginated table, that made it quite possibly the one an operator met most often. It was found by chasing a stale comment in `MemberAdmin`, not by this report. **Appendix B's total of 56 pickers should read 57.**
+
+2. **Step 9 became a deletion, not a doc rewrite.** After steps 4–6, `Select` and `SelectField` had no call sites and the gallery never documented them. The tables/buttons pass already shipped a guard refusing an unused Button variant on the grounds that "an unused one gets used inconsistently later"; that argument does not weaken for a whole component. ~550 lines removed. The six tests in `Select`'s suite were **ported, not deleted** — five of them were the APG listbox contract rather than anything select-specific, and this was the design system's only coverage of it.
+
+3. **`hintWhenClosed` had to be opt-in.** Shipping the closed-state hint unconditionally changed the displayed value at 11 existing call sites (caught by two tests). `hint` is doing two different jobs: on a nationality picker "SY" is a search aid and reads as noise in the box; on the branch switcher "Home" qualifies the value and an operator who cannot see it has lost which of six clinics is theirs. Default off, so converting a screen is the moment someone decides which kind theirs is.
+
+4. **L2 was deliberately NOT done.** Folding `.rx-field-input` into `.mrs-control` was listed for step 6, but the class still dresses ~10 text inputs and textareas across the clinical composers, and changing their radius and padding is a visual change to screens this audit was not about. The two *selects* that wore it are converted. **This is the only item in this report left open.**
+
+**Three guards added** (`no-native-select.test.ts`, `scroll-regions.test.ts`, `combobox-control.test.tsx`), registered in `tools/ci/check-design-guards.py` — 11 guards now — so a deleted guard alarms as loudly as a failing one. Each was verified non-vacuous by reintroducing the defect it names: a returning native `<select>`, a scrolling class losing `.mrs-scroll`, a tab stop losing its focus ring, an un-portalled popup, and a scroll listener dropping capture phase each fail exactly the test that describes them.
+
+**H1 was verified in a real browser, not just in jsdom** (which performs no layout): headless Chrome against the compiled stylesheet, at three viewport heights and in both directions. The list is fully visible, the modal no longer grows a scrollbar, the flip branch fires below 380px, and RTL anchors to the control's inline-start edge.
+
+---
+
 ## Appendix A — Scroll region inventory (29 call sites, 19 CSS regions)
 
 `✓` = carries `.mrs-scroll`. `KB` = keyboard-reachable, and by what means.

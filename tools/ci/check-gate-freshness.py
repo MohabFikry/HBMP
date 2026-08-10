@@ -52,10 +52,11 @@ REQUIRED_GATES = [
     # the browser, so the sign-in reports success and the next authorize reports login_required — the user is
     # told their password is wrong. If this gate stopped running, nothing else would notice.
     "login-origin",
-    # 2026-08-10 table & button audit. Listed for the reason the three above are: what it guards fails
-    # SILENTLY. The six design guards run inside the ordinary web suite, so a violation is loud — but
-    # DELETING one leaves the suite green with one fewer file, which is indistinguishable from a good day.
-    # This gate names them; if it stopped running, nothing would notice that nothing was being checked.
+    # 2026-08-10 table & button audit, extended by the scrolls & dropdowns audit the same day. Listed for the
+    # reason the three above are: what it guards fails SILENTLY. The eleven design guards run inside the
+    # ordinary web and design-system suites, so a violation is loud — but DELETING one leaves the suite green
+    # with one fewer file, which is indistinguishable from a good day. This gate names them; if it stopped
+    # running, nothing would notice that nothing was being checked.
     "design-guards",
     # 2026-08-09 audit — dev-only auth relaxations. Listed for the same reason as the two above: what it
     # guards fails SILENTLY and in the safe-looking direction. A stack running with MFA disabled serves

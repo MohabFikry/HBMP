@@ -50,6 +50,19 @@ GUARDS: dict[Path, str] = {
         "row-action size, dismiss weight beside danger, no selection-by-hue (audit M6, M7, M8)",
     DS / "test" / "icons.test.ts":
         "one glyph per meaning, and no two names drawing the same path (audit M5)",
+
+    # 2026-08-10 scrolls & dropdowns audit. Same shape as the eight above: the standard already existed in the
+    # design system, adoption was the gap, and nothing said so while it drifted.
+    WEB / "test" / "no-native-select.test.ts":
+        "no native <select> ships — an OS-drawn list ignores data-theme, ignores RTL, and cannot be searched "
+        "(scrolls/dropdowns audit H2)",
+    WEB / "test" / "scroll-regions.test.ts":
+        "a scrolling region wears the house scrollbar or is excluded BY NAME; a tab-stopped pane shows focus; "
+        "the popup stays portalled so a scrollport cannot clip it (scrolls/dropdowns audit H1, M3, M4)",
+    DS / "test" / "combobox-control.test.tsx":
+        "the picker's contract: portalled list, pointer events re-enabled under a modal, control-icon vs "
+        "value-icon, opt-in closed hint, and the APG listbox behaviours inherited from the deleted Select "
+        "(scrolls/dropdowns audit M2, step 9)",
 }
 
 
