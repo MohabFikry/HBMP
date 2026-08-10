@@ -16,6 +16,7 @@ import { useIdempotencyKey } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
 import { useRegistrationReference } from "./useRegistrationReference";
 import { BulkTemplateActions } from "./BulkTemplateActions";
+import { BulkErrorReportButton } from "./BulkErrorReport";
 
 /** ONE client for the module — see the note in BeneficiaryPortal. */
 const httpPolicyApi = createHttpPolicyApi();
@@ -386,6 +387,7 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
                   {report?.job.errorDocumentId ? ` ${t(S.errorFile)}` : ""}
                 </InlineAlert>
               )}
+              <BulkErrorReportButton documentId={report?.job.errorDocumentId} jobId={report?.job.jobId ?? ""} />
               <DataTable
                 caption={t(S.detail)}
                 rows={errors}
@@ -442,7 +444,12 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
                   </tbody>
                 </table>
               </div>
-              {recon.errorDocumentId && <InlineAlert tone="info">{t(S.errorFile)}</InlineAlert>}
+              {recon.errorDocumentId && (
+                <>
+                  <InlineAlert tone="info">{t(S.errorFile)}</InlineAlert>
+                  <BulkErrorReportButton documentId={recon.errorDocumentId} jobId={recon.jobId} />
+                </>
+              )}
             </div>
           )}
         </Card>

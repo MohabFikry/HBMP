@@ -20,6 +20,7 @@ import { PageHeader, useLoc, readErrorMessage } from "./_shared";
 import { useIdempotencyKey } from "./PolicyPanels";
 import { useFormat } from "../i18n/useFormat";
 import { BulkTemplateActions } from "./BulkTemplateActions";
+import { BulkErrorReportButton } from "./BulkErrorReport";
 
 /**
  * Phase 19.6 — the operator's side of the 19.5b bulk engine.
@@ -351,6 +352,7 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
                   {report?.job.errorDocumentId ? ` ${t(S.errorFile)}` : ""}
                 </InlineAlert>
               )}
+              <BulkErrorReportButton documentId={report?.job.errorDocumentId} jobId={report?.job.jobId ?? ""} />
               <DataTable
                 caption={t(S.detail)}
                 rows={errors}
@@ -407,7 +409,12 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
                   </tbody>
                 </table>
               </div>
-              {recon.errorDocumentId && <InlineAlert tone="info">{t(S.errorFile)}</InlineAlert>}
+              {recon.errorDocumentId && (
+                <>
+                  <InlineAlert tone="info">{t(S.errorFile)}</InlineAlert>
+                  <BulkErrorReportButton documentId={recon.errorDocumentId} jobId={recon.jobId} />
+                </>
+              )}
             </div>
           )}
         </Card>
