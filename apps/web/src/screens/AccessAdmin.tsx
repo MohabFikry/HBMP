@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Button,
   Card,
@@ -18,6 +18,7 @@ import type {
   AccessSession,
   IdentityUser,
   BranchScopeGrant,
+  BranchSummary,
   EffectiveAccess,
   Localized,
   MembershipDetail,
@@ -31,12 +32,12 @@ import { useWrite } from "../api/useWrite";
 import { useFormat } from "../i18n/useFormat";
 import { issuerRoleFor } from "../config";
 import { PORTALS } from "../portals/catalog";
-import { AsyncSection, PageHeader, useLoc } from "./_shared";
+import { AsyncSection, PageHeader, tenantLabel, useActorNames, useLoc, useTenantNames } from "./_shared";
 import { EffectiveAccessPreview } from "./EffectiveAccessPreview";
 import {
   AccountStatusChip,
   CreateUserDialog,
-  EditPortalsDialog,
+  EditUserDialog,
   UserActionDialog,
   UserRowActions,
   USER_ADMIN_STRINGS,
@@ -73,6 +74,9 @@ const S = {
   search: { en: "Search by name or username", ar: "ابحث بالاسم أو اسم المستخدم" },
   person: { en: "Person", ar: "الشخص" },
   tenant: { en: "Organisation", ar: "المؤسسة" },
+  // Shown when the roster spans tenants but the registry could not be read to name one of them. "Another
+  // organisation" is the true statement; a uuid would only look like one.
+  otherOrg: { en: "Another organisation", ar: "مؤسسة أخرى" },
   roles: { en: "Roles", ar: "الأدوار" },
   level: { en: "Tier", ar: "الفئة" },
   status: { en: "Status", ar: "الحالة" },
@@ -85,6 +89,7 @@ const S = {
     ar: "صلاحية إدارية فقط — لا تمنح الوصول إلى بيانات المرضى.",
   },
   open: { en: "Open", ar: "فتح" },
+  actions: { en: "Actions", ar: "إجراءات" },
   back: { en: "Back to the list", ar: "العودة إلى القائمة" },
 
   detailTitle: { en: "Membership", ar: "العضوية" },
@@ -124,6 +129,9 @@ const S = {
   sodBlocked: { en: "Segregation of duties blocks this exception", ar: "الفصل بين المهام يمنع هذا الاستثناء" },
 
   branch: { en: "Branch", ar: "الفرع" },
+  // A grant naming a branch the directory no longer carries. Said plainly, because it is a review finding —
+  // reach into a clinic that has been decommissioned — and not a loading state.
+  branchUnknown: { en: "Branch no longer listed", ar: "فرع لم يعد مُدرجًا" },
   home: { en: "Home", ar: "الرئيسي" },
   from: { en: "From", ar: "من" },
   until: { en: "Until", ar: "حتى" },
@@ -164,12 +172,27 @@ function levelLabel(level: number, t: (l: Localized) => string) {
 export function MembershipRoster() {
   const api = useApi();
   const t = useLoc();
+  const tenantNames = useTenantNames();
   const [query, setQuery] = useState("");
   const [topTab, setTopTab] = useState("accounts");
   const [selected, setSelected] = useState<string | null>(null);
   const rows = useAsync<MembershipRow[]>(() => api.memberships(undefined, undefined, query || undefined), [query]);
 
   if (selected) return <MembershipDetailScreen membershipId={selected} onBack={() => setSelected(null)} />;
+
+  /*
+    28.10 — THE ORGANISATION COLUMN, WHEN THERE IS MORE THAN ONE ORGANISATION.
+
+    It rendered `r.tenantId` — a raw uuid — in every row. Two things were wrong with that. The uuid is a join
+    key that the person reading a staff roster has no use for and cannot act on; and the roster is
+    tenant-pinned by the server (`ResolveTenantReachAsync`), so for an org admin every row carried the SAME
+    uuid. A column with one distinct value in it is not information, it is furniture.
+
+    It survives only for the caller it means something to — a platform admin, whose reach spans tenants — and
+    it renders the NAME, which is also the only form they could act on.
+  */
+  const list = rows.data ?? [];
+  const multiTenant = new Set(list.map((r) => r.tenantId)).size > 1;
 
   const cols: Column<MembershipRow>[] = [
     {
@@ -182,7 +205,15 @@ export function MembershipRoster() {
         </span>
       ),
     },
-    { key: "tenant", header: t(S.tenant), cell: (r) => <span className="tnum">{r.tenantId}</span>, sortable: true, sortValue: (r) => r.tenantId },
+    ...(multiTenant
+      ? [{
+          key: "tenant",
+          header: t(S.tenant),
+          cell: (r: MembershipRow) => tenantLabel(r.tenantId, tenantNames, t(S.otherOrg)),
+          sortable: true,
+          sortValue: (r: MembershipRow) => tenantLabel(r.tenantId, tenantNames, t(S.otherOrg)),
+        } satisfies Column<MembershipRow>]
+      : []),
     { key: "roles", header: t(S.roles), cell: (r) => (r.roles.length ? r.roles.map((x) => x.name).join(", ") : "—") },
     { key: "level", header: t(S.level), cell: (r) => <StatusChip kind="neu" label={levelLabel(r.level, t)} /> },
     { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
@@ -209,7 +240,9 @@ export function MembershipRoster() {
     },
     {
       key: "open",
-      header: "",
+      // Named, not blank. An empty `<th>` is announced as a column with no name, so a screen-reader user
+      // working across a row reaches a button with nothing to say what column it belongs to.
+      header: t(S.actions),
       cell: (r) => (
         <Button variant="ghost" size="sm" onClick={() => setSelected(r.membershipId)}>
           {t(S.open)}
@@ -244,13 +277,14 @@ export function MembershipRoster() {
             label: t(S.tabMemberships),
             content: (
               <Card as="section" style={{ padding: "var(--sp3)" }}>
-                <SearchField
-                  aria-label={t(S.search)}
-                  placeholder={t(S.search)}
-                  value={query}
-                  onChange={(e) => setQuery(e.currentTarget.value)}
-                  style={{ marginBottom: "var(--sp3)" }}
-                />
+                <div className="admin-toolbar">
+                  <SearchField
+                    aria-label={t(S.search)}
+                    placeholder={t(S.search)}
+                    value={query}
+                    onChange={(e) => setQuery(e.currentTarget.value)}
+                  />
+                </div>
                 <AsyncSection<MembershipRow[]> state={rows} isEmpty={(d) => d.length === 0} emptyLabel={S.rosterEmpty}>
                   {(list) => (
                     <DataTable columns={cols} rows={list} rowKey={(r) => r.membershipId} caption={t(S.rosterTitle)} />
@@ -328,12 +362,12 @@ function AccountsTab() {
     { key: "status", header: t(S.status), cell: (u) => <AccountStatusChip user={u} /> },
     {
       key: "actions",
-      header: "",
+      header: t(S.actions),
       cell: (u) => (
         <UserRowActions
           user={u}
-          onAct={(kind, user) => setAction({ kind, user })}
-          onEditPortals={(user) => setEditing(user)}
+          onAct={(kind, user) => { setAnnouncement(null); setAction({ kind, user }); }}
+          onEdit={(user) => { setAnnouncement(null); setEditing(user); }}
         />
       ),
     },
@@ -341,23 +375,36 @@ function AccountsTab() {
 
   return (
     <Card as="section" style={{ padding: "var(--sp3)" }}>
-      <div className="pagehead-actions" style={{ marginBottom: "var(--sp3)" }}>
-        <Button variant="primary" onClick={() => setCreating(true)}>
+      {/*
+        28.10 — ONE toolbar row, not three stacked ones.
+
+        This was a `.pagehead-actions` div (a PAGE-header utility, used inside a card, so the button floated
+        alone on its own line), then the announcement slot, then the search field on a third line. Three bands
+        of chrome above the table, and the search — the control anyone actually reaches for — was the one
+        pushed furthest down. Search and the primary action belong on the same line, which is the pattern
+        `DataTableView`'s own toolbar uses everywhere else in the app.
+      */}
+      <div className="admin-toolbar">
+        <SearchField
+          aria-label={t(S.searchAccounts)}
+          placeholder={t(S.searchAccounts)}
+          value={query}
+          onChange={(e) => setQuery(e.currentTarget.value)}
+        />
+        <Button
+          variant="primary"
+          leadingIcon={<Icon name="plus" />}
+          onClick={() => { setAnnouncement(null); setCreating(true); }}
+        >
           {t(USER_ADMIN_STRINGS.addUser)}
         </Button>
       </div>
 
+      {/* Cleared whenever another action starts — see the row handlers. A success banner left standing above
+          a table the administrator has since re-searched describes something that is no longer on screen. */}
       <div aria-live="polite">
         {announcement && <InlineAlert tone="ok">{t(announcement)}</InlineAlert>}
       </div>
-
-      <SearchField
-        aria-label={t(S.searchAccounts)}
-        placeholder={t(S.searchAccounts)}
-        value={query}
-        onChange={(e) => setQuery(e.currentTarget.value)}
-        style={{ margin: "var(--sp3) 0" }}
-      />
 
       <AsyncSection<IdentityUser[]> state={users} isEmpty={(d) => d.length === 0} emptyLabel={S.accountsEmpty}>
         {(list) => <DataTable columns={cols} rows={list} rowKey={(u) => u.id} caption={t(S.tabAccounts)} />}
@@ -373,12 +420,13 @@ function AccountsTab() {
           reload();
         }}
       />
-      <EditPortalsDialog
+      <EditUserDialog
         open={editing !== null}
         user={editing}
         onClose={() => setEditing(null)}
-        onSaved={() => {
+        onSaved={(message) => {
           setEditing(null);
+          setAnnouncement(message);
           reload();
         }}
       />
@@ -399,10 +447,14 @@ function AccountsTab() {
 export function MembershipDetailScreen({ membershipId, onBack }: { membershipId: string; onBack?: () => void }) {
   const api = useApi();
   const t = useLoc();
+  const tenantNames = useTenantNames();
   const [tab, setTab] = useState("roles");
   const [reloadKey, setReloadKey] = useState(0);
   const detail = useAsync<MembershipDetail>(() => api.membership(membershipId), [membershipId, reloadKey]);
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+  // Empty fallback, deliberately: a uuid resolves to "" and the segment is omitted. Naming the reader's own
+  // organisation "Another organisation" on their own membership page would be worse than saying nothing.
+  const tenantName = detail.data ? tenantLabel(detail.data.tenantId, tenantNames, "") : "";
 
   return (
     <>
@@ -423,9 +475,12 @@ export function MembershipDetailScreen({ membershipId, onBack }: { membershipId:
               <h2 className="panel-h">
                 {m.displayName} <span className="muted">· {m.username}</span>
               </h2>
+              {/* The tenant uuid used to lead this line. It named the organisation the reader is already in,
+                  in a form they cannot use — so it is a name when one can be resolved, and absent otherwise
+                  rather than replaced by a placeholder that says nothing. */}
               <p className="muted" style={{ margin: 0 }}>
-                {m.tenantId} · <StatusChip kind={m.status.kind} label={t(m.status.label)} /> ·{" "}
-                {levelLabel(m.level, t)}
+                {tenantName ? <>{tenantName} · </> : null}
+                <StatusChip kind={m.status.kind} label={t(m.status.label)} /> · {levelLabel(m.level, t)}
               </p>
               {m.isPlatformAdmin ? (
                 // Stated wherever the flag appears. A1 is the invariant most easily misread as "can see
@@ -493,6 +548,7 @@ function OverridesTab({ membership, onChanged }: { membership: MembershipDetail;
   const t = useLoc();
   const fmt = useFormat();
   const write = useWrite();
+  const actorName = useActorNames();
   // 28.9 — the same catalogue the Access Catalogue screen reads, so the two can never offer different keys.
   const catalogue = useAsync<ScopeCatalogEntry[]>(() => api.scopeCatalog(), []);
   const [open, setOpen] = useState(false);
@@ -536,7 +592,8 @@ function OverridesTab({ membership, onChanged }: { membership: MembershipDetail;
       cell: (r) => <StatusChip kind={r.effect === "Deny" ? "bad" : "ok"} label={t(r.effect === "Deny" ? S.deny : S.allow)} />,
     },
     { key: "reason", header: t(S.reason), cell: (r) => r.reason, sortable: true, sortValue: (r) => r.reason },
-    { key: "grantedBy", header: t(S.grantedBy), cell: (r) => <span className="muted">{r.grantedBy ?? "—"}</span> },
+    // The PERSON who authorised it, not their subject claim. See `useActorNames`.
+    { key: "grantedBy", header: t(S.grantedBy), cell: (r) => <span className="muted">{actorName(r.grantedBy)}</span> },
     {
       key: "expires",
       header: t(S.expires),
@@ -659,10 +716,30 @@ function GrantsTab({ membership }: { membership: MembershipDetail }) {
   const api = useApi();
   const t = useLoc();
   const fmt = useFormat();
+  const actorName = useActorNames();
   const grants = useAsync<BranchScopeGrant[]>(
     () => api.branchScopeGrants(membership.userId, membership.tenantId),
     [membership.userId, membership.tenantId],
   );
+  /*
+    28.10 — THE BRANCH, BY NAME.
+
+    This column rendered `r.branchId.slice(0, 8)`: the first eight characters of a uuid. That is worse than
+    printing the whole thing. It cannot be copied into anything that would accept it, eight hex characters
+    are not guaranteed distinct between two clinics, and it reads as a rendering bug rather than as a value.
+
+    The question this tab answers is "which clinics can this person see" — and "Maadi" is the answer to it.
+    `/branches` is org reference data readable by any authenticated caller, so the lookup costs nothing that
+    the caller was not already entitled to. When a grant names a branch the directory does not carry (a
+    decommissioned clinic still inside an open-ended grant, which is exactly the row a reviewer should catch),
+    the code is shown as itself rather than silently blanked.
+  */
+  const branches = useAsync<BranchSummary[]>(() => api.branches(), []);
+  const branchName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const b of branches.data ?? []) map.set(b.id, t(b.name));
+    return map;
+  }, [branches.data, t]);
 
   const cols: Column<BranchScopeGrant>[] = [
     {
@@ -670,10 +747,12 @@ function GrantsTab({ membership }: { membership: MembershipDetail }) {
       header: t(S.branch),
       cell: (r) => (
         <span>
-          <span className="tnum">{r.branchId.slice(0, 8)}</span>
+          {branchName.get(r.branchId) ?? <span className="muted">{t(S.branchUnknown)}</span>}
           {r.isHome ? <> <StatusChip kind="info" label={t(S.home)} /></> : null}
         </span>
       ),
+      sortable: true,
+      sortValue: (r) => branchName.get(r.branchId) ?? "",
     },
     { key: "from", header: t(S.from), cell: (r) => <span className="tnum">{fmt.date(r.validFrom)}</span>, sortable: true, sortValue: (r) => r.validFrom },
     {
@@ -682,7 +761,7 @@ function GrantsTab({ membership }: { membership: MembershipDetail }) {
       cell: (r) =>
         r.validUntil ? <span className="tnum">{fmt.date(r.validUntil)}</span> : <span className="muted">{t(S.openEnded)}</span>,
     },
-    { key: "grantedBy", header: t(S.grantedBy), cell: (r) => <span className="muted">{r.grantedBy ?? "—"}</span> },
+    { key: "grantedBy", header: t(S.grantedBy), cell: (r) => <span className="muted">{actorName(r.grantedBy)}</span> },
     // The reason is a column, not a tooltip: "covering Alexandria for October" is what makes an expiring
     // grant reviewable, and a reviewer working down a list will not hover every row.
     { key: "reason", header: t(S.reason), cell: (r) => r.grantedReason ?? "—", sortable: true, sortValue: (r) => r.grantedReason },
@@ -726,7 +805,7 @@ function SessionsTab({ membership }: { membership: MembershipDetail }) {
     },
     {
       key: "revoke",
-      header: "",
+      header: t(S.actions),
       cell: (r) => (
         <Button variant="danger" size="sm" onClick={() => setTarget(r)}>
           {t(S.revoke)}

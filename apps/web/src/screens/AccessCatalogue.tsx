@@ -3,16 +3,17 @@ import {
   Button,
   Card,
   DataTable,
+  DataTableView,
   Icon,
   InlineAlert,
   InputField,
   Modal,
-  SearchField,
   StatusChip,
   Tabs,
   TextareaField,
+  useTableQuery,
 } from "@mersal/design-system";
-import type { Column } from "@mersal/design-system";
+import type { Column, TableFilterSpec } from "@mersal/design-system";
 import type { Localized, RoleBinding, RoleCatalogEntry, ScopeCatalogEntry, SodConflict } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
@@ -85,6 +86,7 @@ const S = {
   custom: { en: "Yours", ar: "خاص بمؤسستك" },
   rolesEmpty: { en: "No roles.", ar: "لا توجد أدوار." },
   edit: { en: "Edit permissions", ar: "تعديل الصلاحيات" },
+  actions: { en: "Actions", ar: "إجراءات" },
 
   design: { en: "Design a role", ar: "تصميم دور" },
   designHelp: {
@@ -131,6 +133,11 @@ const S = {
   },
   bindingsEmpty: { en: "No role bindings in this tenant.", ar: "لا توجد أدوار مُسندة في هذا المستأجر." },
   subject: { en: "Subject", ar: "المستخدم" },
+  searchBindings: { en: "Search by token, role or scope", ar: "ابحث بالرمز أو الدور أو النطاق" },
+  noMatches: {
+    en: "No rows match. Change the search or clear the filters.",
+    ar: "لا توجد صفوف مطابقة. عدّل البحث أو أزل عوامل التصفية.",
+  },
   bindingScope: { en: "Scope", ar: "النطاق" },
   bindingStatus: { en: "Status", ar: "الحالة" },
   reviewDue: { en: "Review due", ar: "موعد المراجعة" },
@@ -168,7 +175,6 @@ export function AccessCatalogue() {
 function ScopesTab() {
   const api = useApi();
   const t = useLoc();
-  const [query, setQuery] = useState("");
   const scopes = useAsync<ScopeCatalogEntry[]>(() => api.scopeCatalog(), []);
 
   const cols: Column<ScopeCatalogEntry>[] = [
@@ -204,28 +210,64 @@ function ScopesTab() {
     },
   ];
 
+  /*
+    28.10 — the standard toolbar, replacing a hand-rolled `SearchField` + `.filter()` over an unpaged table.
+
+    The two filters are the questions this table gets opened with. AREA is how anyone navigates a few hundred
+    keys — nobody scrolls a permission list, they go to the one domain they are reasoning about. And "held by
+    NO role" is a governance finding rather than a convenience: a permission the platform defines and nothing
+    grants is either dead vocabulary or a gap somebody worked around, and there was previously no way to ask
+    for it short of reading every row.
+  */
+  const filters: TableFilterSpec<ScopeCatalogEntry>[] = useMemo(() => [
+    {
+      key: "domain",
+      label: t(S.domain),
+      options: [...new Set((scopes.data ?? []).map((s) => s.domain))].sort().map((d) => ({ value: d, label: d })),
+      match: (s, value) => s.domain === value,
+    },
+    {
+      key: "flags",
+      label: t(S.flags),
+      options: [
+        { value: "unheld", label: t(S.heldByNone) },
+        { value: "service", label: t(S.serviceOnly) },
+        { value: "deprecated", label: t(S.deprecated) },
+        { value: "platform", label: t(S.platformKey) },
+      ],
+      match: (s, value) =>
+        value === "unheld" ? s.heldBy.length === 0
+        : value === "service" ? s.serviceOnly
+        : value === "deprecated" ? s.deprecated
+        : s.isPlatformAdminKey,
+    },
+  ], [t, scopes.data]);
+
+  const query = useTableQuery<ScopeCatalogEntry>({
+    rows: scopes.data ?? [],
+    columns: cols,
+    searchText: (s) => [s.name, s.domain, s.description ?? "", ...s.heldBy].join(" "),
+    searchLabel: t(S.searchScopes),
+    searchPlaceholder: t(S.searchScopes),
+    filters,
+    pageSize: 25,
+    initialSortKey: "name",
+    persistKey: "access-scopes",
+  });
+
   return (
     <Card as="section" style={{ padding: "var(--sp3)" }}>
-      <SearchField
-        aria-label={t(S.searchScopes)}
-        placeholder={t(S.searchScopes)}
-        value={query}
-        onChange={(e) => setQuery(e.currentTarget.value)}
-        style={{ marginBottom: "var(--sp3)" }}
-      />
       <AsyncSection<ScopeCatalogEntry[]> state={scopes} isEmpty={(d) => d.length === 0} emptyLabel={S.scopesEmpty}>
-        {(all) => {
-          const q = query.trim().toLowerCase();
-          const rows = q
-            ? all.filter(
-                (s) =>
-                  s.name.toLowerCase().includes(q) ||
-                  s.domain.toLowerCase().includes(q) ||
-                  (s.description ?? "").toLowerCase().includes(q),
-              )
-            : all;
-          return <DataTable columns={cols} rows={rows} rowKey={(s) => s.name} caption={t(S.tabScopes)} />;
-        }}
+        {() => (
+          <DataTableView
+            query={query}
+            columns={cols}
+            rowKey={(s) => s.name}
+            caption={t(S.tabScopes)}
+            emptyLabel={t(S.scopesEmpty)}
+            noMatchesLabel={t(S.noMatches)}
+          />
+        )}
       </AsyncSection>
     </Card>
   );
@@ -255,7 +297,8 @@ function RolesTab({ reloadKey, onChanged }: { reloadKey: number; onChanged: () =
     },
     {
       key: "edit",
-      header: "",
+      // Named, not blank — an empty `<th>` is announced as a column with no name.
+      header: t(S.actions),
       cell: (r) => (
         <Button variant="ghost" size="sm" leadingIcon={<Icon name="pen" />} onClick={() => setEditing(r)}>
           {t(S.edit)}
@@ -483,7 +526,7 @@ function BindingsTab() {
   const api = useApi();
   const t = useLoc();
   const fmt = useFormat();
-  const rows = useAsync<RoleBinding[]>(() => api.accessMatrix(), []);
+  const state = useAsync<RoleBinding[]>(() => api.accessMatrix(), []);
 
   const cols: Column<RoleBinding>[] = [
     // The subject is a TOKEN, not a name: this is admin-service's projection of who holds what, and it
@@ -503,12 +546,46 @@ function BindingsTab() {
     },
   ];
 
+  /*
+    This register grows with every grant the tenant has ever made and it rendered as one unbroken list. The
+    ROLE filter is what makes it answer its own question — "who holds `medical_approval`, and is any of it
+    overdue" — which is the direction the roster cannot answer.
+  */
+  const filters: TableFilterSpec<RoleBinding>[] = useMemo(() => [
+    {
+      key: "role",
+      label: t(S.role),
+      options: [...new Set((state.data ?? []).map((r) => r.role))].sort().map((r) => ({ value: r, label: r })),
+      match: (r, value) => r.role === value,
+    },
+  ], [t, state.data]);
+
+  const query = useTableQuery<RoleBinding>({
+    rows: state.data ?? [],
+    columns: cols,
+    searchText: (r) => [r.subjectToken, r.role, r.scope, r.tier].filter(Boolean).join(" "),
+    searchLabel: t(S.searchBindings),
+    searchPlaceholder: t(S.searchBindings),
+    filters,
+    pageSize: 25,
+    // Soonest review first — a reviewer opens this to find what is falling due, not to browse it.
+    initialSortKey: "review",
+    persistKey: "access-bindings",
+  });
+
   return (
     <Card as="section" style={{ padding: "var(--sp3)" }}>
       <p className="lede">{t(S.bindingsLede)}</p>
-      <AsyncSection<RoleBinding[]> state={rows} isEmpty={(d) => d.length === 0} emptyLabel={S.bindingsEmpty}>
-        {(list) => (
-          <DataTable columns={cols} rows={list} rowKey={(r) => r.id} caption={t(S.tabBindings)} />
+      <AsyncSection<RoleBinding[]> state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.bindingsEmpty}>
+        {() => (
+          <DataTableView
+            query={query}
+            columns={cols}
+            rowKey={(r) => r.id}
+            caption={t(S.tabBindings)}
+            emptyLabel={t(S.bindingsEmpty)}
+            noMatchesLabel={t(S.noMatches)}
+          />
         )}
       </AsyncSection>
     </Card>

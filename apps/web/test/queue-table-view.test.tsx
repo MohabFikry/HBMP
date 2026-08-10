@@ -139,13 +139,17 @@ const BARE_TABLE_OK: Record<string, string> = {
   "screens/MemberAdmin.tsx": "server-side search, sort and paging — the book is too big for the browser",
   "screens/PolicyBook.tsx": "server-side sort and paging on the policy list; the rest are bounded config",
   "screens/BranchInventory.tsx": "the ledger is server-paged; the stock table above it IS a DataTableView",
-  "screens/AdminConsole.tsx": "accounts and bindings migrated; the rest are bounded config tables",
+  // 28.10 — AdminConsole.tsx is GONE from this list. Its four remaining screens all render `DataTableView`
+  // now. Master data was the case that made the old entry indefensible: the server returns up to five
+  // hundred in-force versions and the screen drew every one of them as an unbroken, unsearchable list, which
+  // is the same as not having the screen. "Bounded config table" was true of the tenant list and was being
+  // used to cover a table two orders of magnitude larger.
   "screens/AccessAdmin.tsx": "roles, exceptions and sessions belong to ONE membership",
-  // 28.9 — the permission catalogue is bounded by the scope table (a few hundred rows, filtered by the
-  // search above it); the role list is the tenant's own roles; assignments and separated duties are
-  // governance tables, not queues. None of them is server-paged, so a pager would be a control that
-  // scrolls nothing.
-  "screens/AccessCatalogue.tsx": "the scope and role catalogues are bounded reference data, filtered in place",
+  // 28.10 — the permission catalogue and the assignment register moved to `DataTableView`: the first is a
+  // few hundred rows an administrator searches by domain, the second grows with every grant the tenant has
+  // ever made. What is left here is the role list (the tenant's own roles) and the separated-duty matrix,
+  // both genuinely bounded governance tables.
+  "screens/AccessCatalogue.tsx": "the role list and the separated-duty matrix are bounded governance tables",
   "screens/ApprovalsRegister.tsx": "the register migrated; the items table lists ONE authorization's deliveries",
   "screens/CaseManager.tsx": "cases and escalations migrated; the task list belongs to ONE case",
   "screens/FinancePortal.tsx": "utilization and settlements migrated; the line table belongs to ONE settlement",

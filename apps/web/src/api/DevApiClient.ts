@@ -121,8 +121,9 @@ import {
   type ReportAccessRequestRow,
   zAmendReasonOption,
   zQuantityPreview,
+  canonicaliseConfigValue,
 } from "@mersal/contracts";
-import type { BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, DiagnosisRank, MasterDataEdit, SetDocumentValidity, SaveApprovalRule, ApprovalRule, SetAutoDecision} from "@mersal/contracts";
+import type { BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, DiagnosisRank, MasterDataEdit, SystemConfigEdit, SetDocumentValidity, SaveApprovalRule, ApprovalRule, SetAutoDecision} from "@mersal/contracts";
 import type { CptSection, InvestigationDraftLine, InvestigationOrderType, OrderAcknowledgement, OrderFinding, ValidityExtensionRequest } from "@mersal/contracts";
 import type { PrescriptionDraftLine, LineAcknowledgement, Finding, PrescriptionKind } from "@mersal/contracts";
 import type { WithdrawResult } from "@mersal/contracts";
@@ -3853,14 +3854,48 @@ export class DevApiClient implements ApiClient {
     });
   }
 
+  /**
+   * MUTABLE, like `mdVersions` above and for the same reason: the config editor's whole point is that a
+   * value CHANGES and the change survives a reload of the table. A fixture that answered the same two rows
+   * after every write would let an editor that silently did nothing look correct here.
+   *
+   * <p>`session.timeout_minutes` is deliberately `Whole` and not `Duration`. The fixture used to say
+   * Duration with a value of "15", which the server would read as a .NET `TimeSpan` — fifteen DAYS. A
+   * fixture that would be rejected (or worse, accepted with the wrong meaning) by the real endpoint teaches
+   * the wrong shape to every screen written against it.</p>
+   */
+  private configs: { id: string; tenantId: string; key: string; type: string; value: string; versionNo: number }[] = [
+    { id: "CFG-1", tenantId: "*", key: "session.timeout_minutes", type: "Whole", value: "15", versionNo: 1 },
+    { id: "CFG-2", tenantId: "11111111-1111-1111-1111-111111111111", key: "approvals.sla_hours", type: "Whole", value: "24", versionNo: 3 },
+    { id: "CFG-3", tenantId: "11111111-1111-1111-1111-111111111111", key: "notifications.sms_enabled", type: "Boolean", value: "true", versionNo: 1 },
+    { id: "CFG-4", tenantId: "*", key: "documents.retention", type: "Duration", value: "3650.00:00:00", versionNo: 2 },
+  ];
+
   adminSystemConfig() {
-    return this.gate(
-      () => ok(z.array(zSystemConfigEntry), [
-        { id: "CFG-1", tenantId: "*", key: "session.timeout_minutes", type: "Duration", value: "15", versionNo: 1 },
-        { id: "CFG-2", tenantId: "11111111-1111-1111-1111-111111111111", key: "approvals.sla_hours", type: "Whole", value: "24", versionNo: 3 },
-      ]),
-      [],
-    );
+    return this.gate(() => ok(z.array(zSystemConfigEntry), this.configs), []);
+  }
+
+  adminSystemConfigSet(edit: SystemConfigEdit) {
+    return this.gate(() => {
+      // The SERVER's validation, not a looser copy of it. A dev client that accepted "abc" as a Whole would
+      // let the editor ship without the error path anyone will actually hit.
+      const canonical = canonicaliseConfigValue(edit.type, edit.value);
+      if (canonical === null) {
+        throw new ApiError("http", `not-a-${edit.type.toLowerCase()}`, 422, { title: `not-a-${edit.type.toLowerCase()}` });
+      }
+      const tenantId = edit.tenantId ?? "11111111-1111-1111-1111-111111111111";
+      const prior = this.configs.find((c) => c.tenantId === tenantId && c.key === edit.key);
+      const row = {
+        id: prior?.id ?? `CFG-${this.configs.length + 1}`,
+        tenantId,
+        key: edit.key,
+        type: edit.type,
+        value: canonical,
+        versionNo: (prior?.versionNo ?? 0) + 1,
+      };
+      this.configs = [...this.configs.filter((c) => !(c.tenantId === tenantId && c.key === edit.key)), row];
+      return ok(zSystemConfigEntry, row);
+    });
   }
 
   // ---- User & access model (Phase 21.6, design 40) -------------------------------------------------------
@@ -3923,12 +3958,21 @@ export class DevApiClient implements ApiClient {
     return this.gate(
       () =>
         ok(z.array(zBranchScopeGrant), [
+          /*
+            28.10 — the branch ids MATCH `branches()` above.
+
+            They used to be `b1000000-0000-…-01/02`, which appear in no other fixture. That was invisible
+            while the column rendered `branchId.slice(0, 8)` — eight hex characters look the same whether or
+            not they identify anything. Now that the column resolves a NAME, an id matching nothing renders
+            as "Branch no longer listed", so the fixture would have shown every dev run a review finding that
+            does not exist. `BR-ALX` for the second one because its own reason already says Alexandria.
+          */
           {
-            grantId: "G-1", branchId: "b1000000-0000-0000-0000-000000000001", isHome: true,
+            grantId: "G-1", branchId: "BR-MAA", isHome: true,
             validFrom: "2026-01-01", validUntil: null, grantedBy: "admin@mersal", grantedReason: "Home branch",
           },
           {
-            grantId: "G-2", branchId: "b1000000-0000-0000-0000-000000000002", isHome: false,
+            grantId: "G-2", branchId: "BR-ALX", isHome: false,
             validFrom: "2026-10-01", validUntil: "2026-10-31", grantedBy: "admin@mersal",
             grantedReason: "Covering Alexandria for October",
           },

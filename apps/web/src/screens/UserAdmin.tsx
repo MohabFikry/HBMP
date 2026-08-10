@@ -67,11 +67,30 @@ const S = {
   },
   emailTaken: { en: "Another account already uses this email address.", ar: "هناك حساب آخر يستخدم هذا البريد الإلكتروني." },
 
-  editPortals: { en: "Change portals", ar: "تغيير البوابات" },
-  editPortalsHelp: {
-    en: "Removing a portal takes effect on their next sign-in, or within five minutes on this one.",
-    ar: "إزالة بوابة تسري عند تسجيل الدخول التالي، أو خلال خمس دقائق على الجلسة الحالية.",
+  /*
+    28.10 — ONE "Edit", not two.
+
+    There were two row buttons and neither could correct a name or an address: "Change portals" existed, and
+    `api.updateIdentityUser` — the endpoint that fixes a mistyped email — had no caller anywhere in the app.
+    So the recorded remedy for a typo in the address somebody signs in with was to abandon the account and
+    make another one.
+
+    Merging them is not just about adding the missing half. An administrator opening a person's record is
+    fixing THAT PERSON, and "their details" and "what they can reach" are two parts of one answer; splitting
+    them across two buttons made the reader choose a route before knowing which one held the field they
+    wanted.
+  */
+  edit: { en: "Edit", ar: "تعديل" },
+  editTitle: { en: "Edit this account", ar: "تعديل هذا الحساب" },
+  editHelp: {
+    en: "Changes to portals take effect on their next sign-in, or within five minutes on this one. Changing the email address changes what they sign in with.",
+    ar: "تسري تغييرات البوابات عند تسجيل الدخول التالي، أو خلال خمس دقائق على الجلسة الحالية. تغيير البريد الإلكتروني يغيّر ما يسجّلون الدخول به.",
   },
+  emailChanged: {
+    en: "Saved. They now sign in with the new address.",
+    ar: "تم الحفظ. سيسجّلون الدخول الآن بالبريد الجديد.",
+  },
+  detailsSaved: { en: "Saved.", ar: "تم الحفظ." },
   save: { en: "Save", ar: "حفظ" },
 
   sendReset: { en: "Send reset link", ar: "إرسال رابط إعادة التعيين" },
@@ -87,6 +106,23 @@ const S = {
   resetSent: { en: "Reset link sent.", ar: "تم إرسال رابط إعادة التعيين." },
 
   deactivate: { en: "Deactivate", ar: "تعطيل" },
+  /*
+    28.10 — the OUTCOME sentences.
+
+    `UserActionDialog` used to announce `S.deactivate` and `S.reactivate` on success — the BUTTON LABELS. So
+    the polite live region, which exists to tell a screen-reader user what just happened, said "Deactivate".
+    Not a sentence, not in the past tense, and indistinguishable from the control that had just been pressed:
+    the one reading it could not tell whether the account had been deactivated or whether they were being
+    offered the chance to.
+  */
+  deactivated: {
+    en: "Account deactivated. They are signed out of every device.",
+    ar: "تم تعطيل الحساب. تم إخراجهم من كل الأجهزة.",
+  },
+  reactivated: {
+    en: "Account reactivated. They can sign in again.",
+    ar: "تمت إعادة تفعيل الحساب. يمكنهم تسجيل الدخول مجددًا.",
+  },
   deactivateTitle: { en: "Deactivate this account?", ar: "تعطيل هذا الحساب؟" },
   deactivateBody: {
     en: "They are signed out of every device immediately and cannot sign in again. Nothing is deleted — the record and its history remain, and the account can be brought back.",
@@ -273,8 +309,19 @@ export function CreateUserDialog({
   );
 }
 
-/** Change which portals an existing account holds. */
-export function EditPortalsDialog({
+/**
+ * Edit an existing account: who they are, what they sign in with, and what they can reach.
+ *
+ * <p>Two writes behind one Save, and the ORDER matters. Details go first: if the roles write then fails, the
+ * administrator is looking at a corrected name beside an unchanged portal list and a stated error, which is
+ * a legible half-done state. The other order leaves a person's access changed while their record still shows
+ * the typo that prompted the edit — and nothing on screen would say which half landed.</p>
+ *
+ * <p>Neither write is sent when nothing in its half changed. That is not an optimisation: every one of these
+ * endpoints writes an audit event, and an "email changed" entry recording no change is noise in the record
+ * an access review reads.</p>
+ */
+export function EditUserDialog({
   open,
   user,
   onClose,
@@ -283,12 +330,15 @@ export function EditPortalsDialog({
   open: boolean;
   user: IdentityUser | null;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (message: Localized) => void;
 }) {
   const api = useApi();
   const t = useLoc();
   const write = useWrite();
+  const [displayName, setDisplayName] = useState("");
+  const [email, setEmail] = useState("");
   const [portals, setPortals] = useState<string[]>([]);
+  const [touched, setTouched] = useState(false);
   const [seeded, setSeeded] = useState<string | null>(null);
 
   // Seeded once per opening rather than from an effect, which would overwrite the administrator's ticks on
@@ -296,24 +346,50 @@ export function EditPortalsDialog({
   const seedKey = open && user ? user.id : null;
   if (seedKey !== seeded) {
     setSeeded(seedKey);
+    setDisplayName(user?.displayName ?? "");
+    setEmail(user?.email ?? "");
     // The account holds ISSUER role names; the checklist speaks portal keys. Mapped back through the same
     // table `issuerRoleFor` uses, so a round trip cannot silently drop `lab_tech`.
     setPortals(PORTALS.filter((p) => (user?.roles ?? []).includes(issuerRoleFor(p.role))).map((p) => p.role));
+    setTouched(false);
     write.reset();
   }
 
+  const nameOk = displayName.trim().length > 0;
+  // An account may legitimately have NO address (service accounts, fixtures predating 28.8), so blank is
+  // allowed here where it is required at creation. What is not allowed is a malformed one.
+  const emailOk = email.trim().length === 0 || looksLikeEmail(email);
+  const portalsOk = portals.length > 0;
+
+  const nameChanged = user ? displayName.trim() !== user.displayName : false;
+  const emailChanged = user ? email.trim() !== (user.email ?? "") : false;
+  const rolesChanged = user
+    ? [...portals].sort().join() !== PORTALS.filter((p) => user.roles.includes(issuerRoleFor(p.role))).map((p) => p.role).sort().join()
+    : false;
+
   async function submit() {
-    if (!user) return;
-    const ok = await write.run(() => api.setIdentityUserRoles(user.id, portals.map((r) => issuerRoleFor(r as never))));
-    if (ok) onSaved();
+    setTouched(true);
+    if (!user || !nameOk || !emailOk || !portalsOk) return;
+    const ok = await write.run(async () => {
+      if (nameChanged || emailChanged) {
+        await api.updateIdentityUser(user.id, {
+          displayName: nameChanged ? displayName.trim() : undefined,
+          email: emailChanged ? email.trim() : undefined,
+        });
+      }
+      if (rolesChanged) await api.setIdentityUserRoles(user.id, portals.map((r) => issuerRoleFor(r as never)));
+    });
+    // The address is called out on its own because it is the one change that alters how the person GETS IN.
+    // Being told only "Saved" after changing it leaves them to discover the consequence at the login screen.
+    if (ok) onSaved(emailChanged ? S.emailChanged : S.detailsSaved);
   }
 
   return (
     <Modal
       open={open}
       onOpenChange={(o) => !o && onClose()}
-      title={`${t(S.editPortals)}${user ? ` — ${user.displayName}` : ""}`}
-      description={t(S.editPortalsHelp)}
+      title={`${t(S.editTitle)}${user ? ` — ${user.displayName}` : ""}`}
+      description={t(S.editHelp)}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -326,11 +402,37 @@ export function EditPortalsDialog({
       }
     >
       <div className="stack-3">
-        {write.error && <InlineAlert tone="bad">{t(write.error.message)}</InlineAlert>}
-        <PortalChecklist
-          chosen={portals}
-          onToggle={(role, on) => setPortals((prev) => (on ? [...prev, role] : prev.filter((r) => r !== role)))}
+        {write.error && (
+          <InlineAlert tone="bad">
+            {/* A 409 on this endpoint has exactly one cause — the address already belongs to somebody else.
+                "Conflict" would leave the administrator guessing which of three fields to change. */}
+            {write.error.status === 409 ? t(S.emailTaken) : t(write.error.message)}
+          </InlineAlert>
+        )}
+        <InputField
+          label={t(S.fullName)}
+          value={displayName}
+          error={touched && !nameOk ? t(S.nameRequired) : undefined}
+          onChange={(e) => setDisplayName(e.target.value)}
         />
+        <InputField
+          label={t(S.email)}
+          help={t(S.emailHelp)}
+          type="email"
+          autoComplete="off"
+          value={email}
+          error={touched && !emailOk ? t(S.emailRequired) : undefined}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <fieldset className="portal-checklist-wrap">
+          <legend>{t(S.portals)}</legend>
+          <p className="muted portal-checklist-help">{t(S.portalsHelp)}</p>
+          {touched && !portalsOk && <InlineAlert tone="bad">{t(S.portalsRequired)}</InlineAlert>}
+          <PortalChecklist
+            chosen={portals}
+            onToggle={(role, on) => setPortals((prev) => (on ? [...prev, role] : prev.filter((r) => r !== role)))}
+          />
+        </fieldset>
       </div>
     </Modal>
   );
@@ -381,7 +483,7 @@ export function UserActionDialog({
       else await api.reactivateIdentityUser(user.id);
     });
     if (ok) {
-      onDone(kind === "reset" ? S.resetSent : kind === "deactivate" ? S.deactivate : S.reactivate);
+      onDone(kind === "reset" ? S.resetSent : kind === "deactivate" ? S.deactivated : S.reactivated);
       onClose();
     }
   }
@@ -418,27 +520,38 @@ export function UserActionDialog({
   );
 }
 
-/** The row's action buttons — the same three, in the same order, on every row. */
+/**
+ * The row's action buttons — the same three, in the same order, on every row.
+ *
+ * <p>Three, not four: 28.10 merged "Change portals" into "Edit". And the destructive one is `danger` rather
+ * than a fourth identical ghost. Four buttons of identical weight give the eye nothing to sort them by, so
+ * the one that signs a colleague out of every device sat with exactly the visual authority of the one that
+ * opens a form. Colour is not the only cue — the confirmation states the consequence, and the label says the
+ * verb — but it is the one available before the click.</p>
+ *
+ * <p>Reactivate stays `ghost`: restoring somebody's access is the safe direction, and painting it red to
+ * match its opposite would teach the colour to mean "account lifecycle" instead of "this is destructive".</p>
+ */
 export function UserRowActions({
   user,
   onAct,
-  onEditPortals,
+  onEdit,
 }: {
   user: IdentityUser;
   onAct: (kind: ConfirmKind, user: IdentityUser) => void;
-  onEditPortals: (user: IdentityUser) => void;
+  onEdit: (user: IdentityUser) => void;
 }) {
   const t = useLoc();
   return (
     <span className="chip-row">
-      <Button variant="ghost" size="sm" onClick={() => onEditPortals(user)}>
-        {t(S.editPortals)}
+      <Button variant="ghost" size="sm" leadingIcon={<Icon name="pen" />} onClick={() => onEdit(user)}>
+        {t(S.edit)}
       </Button>
       <Button variant="ghost" size="sm" onClick={() => onAct("reset", user)}>
         {t(S.sendReset)}
       </Button>
       {user.isActive ? (
-        <Button variant="ghost" size="sm" onClick={() => onAct("deactivate", user)}>
+        <Button variant="danger" size="sm" onClick={() => onAct("deactivate", user)}>
           {t(S.deactivate)}
         </Button>
       ) : (

@@ -128,6 +128,75 @@ export const zSystemConfigEntry = z.object({
 export type SystemConfigEntry = z.infer<typeof zSystemConfigEntry>;
 
 /**
+ * The value types `ConfigValidation.Validate` accepts, in the server's spelling.
+ *
+ * <p>Named here rather than typed as a bare string because the type decides how the value is PARSED, and a
+ * type the server does not know is a 422 the administrator cannot act on — they picked from a list, so the
+ * list has to be the real one. `Duration` is a .NET `TimeSpan`, which means a lone number is DAYS: "15" is
+ * fifteen days, not fifteen minutes, and the editor says so rather than letting a session timeout be set to
+ * a fortnight by somebody who meant a quarter of an hour.</p>
+ */
+export const CONFIG_VALUE_TYPES = ["Text", "Whole", "Number", "Boolean", "Duration"] as const;
+export type ConfigValueType = (typeof CONFIG_VALUE_TYPES)[number];
+
+/**
+ * A proposed change to one system-config entry.
+ *
+ * <p>There is no "delete": the server closes the current version's window and appends a new one, so the
+ * history stays resolvable and an auditor can answer "what was this set to in March". `tenantId` is omitted
+ * to mean the caller's own tenant — the server pins it, and asking for another is refused rather than
+ * silently narrowed.</p>
+ */
+export const zSystemConfigEdit = z.object({
+  key: z.string().min(1),
+  type: z.enum(CONFIG_VALUE_TYPES),
+  value: z.string().min(1),
+  tenantId: z.string().optional(),
+});
+export type SystemConfigEdit = z.infer<typeof zSystemConfigEdit>;
+
+/**
+ * Canonicalise a config value the way `ConfigValidation.Validate` does, or `null` when it does not parse.
+ *
+ * <p>A deliberate second implementation of a server rule, which is normally the wrong thing to build. It
+ * earns its place because the alternative is a round trip to learn that "abc" is not a number: the
+ * administrator presses Save, waits, and gets `not-an-integer` as a banner over a form they have already
+ * mentally left. Checking here turns that into a field error while they are still typing.</p>
+ *
+ * <p>It returns the CANONICAL form rather than a boolean so the editor can show what will actually be
+ * stored — `TRUE` becomes `true`, `1.50` becomes `1.5` — instead of letting the value change under the
+ * administrator on the next read. The server remains the authority; this never decides, it only warns.</p>
+ */
+export function canonicaliseConfigValue(type: string, raw: string): string | null {
+  const value = (raw ?? "").trim();
+  if (value.length === 0) return null;
+  switch (type) {
+    case "Text":
+      return value;
+    case "Whole":
+      return /^[+-]?\d+$/.test(value) ? String(BigInt(value)) : null;
+    case "Number": {
+      if (!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(value)) return null;
+      const n = Number(value);
+      return Number.isFinite(n) ? String(n) : null;
+    }
+    case "Boolean": {
+      const lower = value.toLowerCase();
+      // `bool.TryParse` accepts "True"/"TRUE"/"true" and nothing else — not "1", not "yes".
+      return lower === "true" || lower === "false" ? lower : null;
+    }
+    case "Duration":
+      // .NET `TimeSpan`: [d.]hh:mm[:ss[.fffffff]], or a bare number meaning DAYS. The bare-number case is the
+      // one worth being strict about — it is how "15" becomes a fortnight.
+      return /^-?(\d+|\d+\.\d{1,2}:\d{2}(:\d{2}(\.\d{1,7})?)?|\d{1,2}:\d{2}(:\d{2}(\.\d{1,7})?)?)$/.test(value)
+        ? value
+        : null;
+    default:
+      return null;
+  }
+}
+
+/**
  * 18.C2 (audit R2 W5) — a user as the IDENTITY STORE knows them.
  *
  * The admin console read the access matrix from admin-service, which is a PROJECTION of role bindings: it

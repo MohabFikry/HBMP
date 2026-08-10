@@ -301,7 +301,10 @@ export const rolePermissions: Record<Role, Permission[]> = {
     "policy.analytics",
     "network.tiers",
   ],
-  org_admin: ["admin.users", "admin.policies", "admin.masterdata", "admin.tenants", "admin.audit", "admin.config", "admin.access"],
+  // 28.10 — `admin.tenants` is NOT here. The tenant registry's read and write are both
+  // `AdminPolicies.ManageTenant`, which names `super_admin` alone, so an org admin holding this permission
+  // could only ever reach a screen that answered 403. Removing it takes nothing away that worked.
+  org_admin: ["admin.users", "admin.policies", "admin.masterdata", "admin.audit", "admin.config", "admin.access"],
   // Super admin can administer globally; sensitive PHI reads remain break-glass on the server, not routine UI.
   // `admin.programs` is super-admin only: enablement is set by Mersal programme administration, and a tenant
   // that can switch on its own programmes is not gated at all (design 40 §4, A4).

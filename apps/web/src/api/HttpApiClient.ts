@@ -123,6 +123,7 @@ import {
 import type {
   BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, CreatePractitionerInput, PractitionerAttachFailure,
   MasterDataEdit,
+  SystemConfigEdit,
   SetDocumentValidity,
   SaveApprovalRule,
   SetAutoDecision,
@@ -3630,6 +3631,32 @@ export class HttpApiClient implements ApiClient {
         versionNo: Number(c.versionNo ?? 0),
       }),
     );
+  }
+
+  /**
+   * Set one configuration value. The server validates the value AGAINST the declared type and answers 422
+   * with the reason (`not-an-integer`, `not-a-duration`) when it does not parse, which the editor renders
+   * beside the field rather than as a toast.
+   */
+  async adminSystemConfigSet(edit: SystemConfigEdit) {
+    const r = (await putRaw(`/admin/system-config`, {
+      key: edit.key,
+      valueType: edit.type,
+      value: edit.value,
+      tenant: edit.tenantId ?? null,
+    })) as any;
+    return parseOr(zSystemConfigEntry, {
+      id: r?.configId ?? r?.id,
+      // The response carries no tenant — the server pinned it from the token, so the value we sent (or the
+      // caller's own tenant when we sent none) is the only honest thing to report back.
+      tenantId: edit.tenantId ?? "",
+      key: String(r?.key ?? edit.key),
+      type: String(r?.valueType ?? r?.type ?? edit.type),
+      // The CANONICAL value, not the one typed: the server normalises `TRUE` to `true` and `1.50` to `1.5`,
+      // and echoing the input back would show the administrator a value the platform is not using.
+      value: String(r?.value ?? edit.value),
+      versionNo: Number(r?.versionNo ?? 0),
+    });
   }
 
   // ---- User & access model (Phase 21.6, design 40) -------------------------------------------------------

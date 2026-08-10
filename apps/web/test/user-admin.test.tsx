@@ -252,6 +252,85 @@ describe("granting one permission as an exception", () => {
   });
 });
 
+/**
+ * 28.10 — correcting an account, and the identifiers the screens used to show instead of names.
+ */
+describe("correcting an existing account", () => {
+  it("can change the name and the address, which nothing in the app could do before", async () => {
+    const user = userEvent.setup();
+    renderAccounts();
+
+    // `api.updateIdentityUser` existed and had NO caller anywhere in the SPA, so the recorded remedy for a
+    // typo in the address somebody signs in with was to abandon the account and create another.
+    const row = (await screen.findByText("Dr. Hala")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: /^edit$/i }));
+
+    const email = await screen.findByLabelText(/email address/i);
+    await user.clear(email);
+    await user.type(email, "hala.mansour@mersal.org");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    expect(await screen.findByText("hala.mansour@mersal.org")).toBeInTheDocument();
+  });
+
+  it("says the address is what they now sign in with, rather than only 'Saved'", async () => {
+    const user = userEvent.setup();
+    renderAccounts();
+
+    const row = (await screen.findByText("Dr. Hala")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: /^edit$/i }));
+    const email = await screen.findByLabelText(/email address/i);
+    await user.clear(email);
+    await user.type(email, "h.new@mersal.org");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    // Changing the address is the one edit that alters how the person GETS IN. Being told only "Saved"
+    // leaves them to discover the consequence at the sign-in screen.
+    expect(await screen.findByText(/sign in with the new address/i)).toBeInTheDocument();
+  });
+
+  it("reaches the portal checklist from the same button — one record, not two routes", async () => {
+    const user = userEvent.setup();
+    renderAccounts();
+
+    const row = (await screen.findByText("Dr. Hala")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: /^edit$/i }));
+
+    expect(await screen.findByLabelText(/full name/i)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /Consultation/i })).toBeInTheDocument();
+  });
+
+  it("announces an OUTCOME after deactivating, not the label of the button just pressed", async () => {
+    const user = userEvent.setup();
+    renderAccounts();
+
+    const row = (await screen.findByText("Dr. Hala")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: /^deactivate$/i }));
+    await user.click(await screen.findByRole("button", { name: /^confirm$/i }));
+
+    // The live region used to be handed `S.deactivate` — the BUTTON LABEL. A screen-reader user could not
+    // tell whether the account had been deactivated or whether they were being offered the chance to.
+    expect(await screen.findByText(/signed out of every device/i)).toBeInTheDocument();
+  });
+});
+
+describe("identifiers a person cannot act on", () => {
+  it("names the branches a membership reaches instead of eight characters of a uuid", async () => {
+    const user = userEvent.setup();
+    seedSession("org_admin");
+    renderNode(<MembershipRoster />, new DevApiClient({ latencyMs: 0 }));
+
+    await user.click(await screen.findByRole("tab", { name: /Authority/i }));
+    await user.click((await screen.findAllByRole("button", { name: /^Open$/i }))[0]);
+    await user.click(await screen.findByRole("tab", { name: /Branch reach/i }));
+
+    // "Which clinics can this person see" is the question the tab exists for, and "Maadi" is an answer to
+    // it. `b1000000` is not — it cannot be copied anywhere that would accept it and reads as a bug.
+    expect(await screen.findByText("Maadi")).toBeInTheDocument();
+    expect(screen.getByText("Alexandria")).toBeInTheDocument();
+  });
+});
+
 describe("the email check", () => {
   it("catches a typo without pretending to be RFC 5322", () => {
     expect(looksLikeEmail("nadia@mersal.org")).toBe(true);

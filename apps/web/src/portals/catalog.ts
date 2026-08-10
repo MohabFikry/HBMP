@@ -567,7 +567,15 @@ export const PORTALS: PortalDef[] = [
       // authority as two tabs of it — and the role->scope matrix that lived here is the Access Catalogue.
       { key: "policies", path: "policies", label: { en: "Access Catalogue", ar: "دليل الصلاحيات" }, group: G.admin, icon: "check2", permission: "admin.policies" },
       { key: "masterdata", path: "master-data", label: { en: "Master Data", ar: "البيانات المرجعية" }, group: G.admin, icon: "doc", permission: "admin.masterdata" },
-      { key: "tenants", path: "tenants", label: { en: "Tenants / Providers", ar: "المستأجرون / مقدمو الخدمة" }, group: G.admin, icon: "refer", permission: "admin.tenants" },
+      // 28.10 — "Tenants / Providers" is GONE from this portal, and it never worked.
+      //
+      // Both the read and the write behind that screen are `AdminPolicies.ManageTenant`, whose rule names
+      // `super_admin` and nobody else (`libs/authz/AdminPolicies.cs`). So an org admin clicking it got a 403
+      // — not sometimes, not for some tenants: always, by construction. A nav item that cannot succeed is
+      // worse than a missing one, because the person who clicks it concludes the platform is broken rather
+      // than that the power is not theirs. It stays on the platform portal below, where it is held.
+      //
+      // The label was also wrong. The screen lists TENANTS; providers are the Provider Network portal.
       { key: "audit", path: "audit", label: { en: "Audit & Access Reviews", ar: "التدقيق والمراجعات" }, group: G.oversight, icon: "clock", permission: "admin.audit" },
       { key: "config", path: "config", label: { en: "System Config", ar: "إعدادات النظام" }, group: G.admin, icon: "info", permission: "admin.config" },
       // 21.6 — memberships, exceptions, branch reach and the effective-access preview (design 40).
@@ -589,7 +597,7 @@ export const PORTALS: PortalDef[] = [
       // Same merge as the org-admin portal above — one people surface, not two.
       { key: "policies", path: "policies", label: { en: "Access Catalogue", ar: "دليل الصلاحيات" }, group: G.admin, icon: "check2", permission: "admin.policies" },
       { key: "masterdata", path: "master-data", label: { en: "Master Data", ar: "البيانات المرجعية" }, group: G.admin, icon: "doc", permission: "admin.masterdata" },
-      { key: "tenants", path: "tenants", label: { en: "Tenants / Providers", ar: "المستأجرون / مقدمو الخدمة" }, group: G.admin, icon: "refer", permission: "admin.tenants" },
+      { key: "tenants", path: "tenants", label: { en: "Tenants", ar: "المستأجرون" }, group: G.admin, icon: "refer", permission: "admin.tenants" },
       { key: "audit", path: "audit", label: { en: "Audit & Access Reviews", ar: "التدقيق والمراجعات" }, group: G.oversight, icon: "clock", permission: "admin.audit" },
       { key: "config", path: "config", label: { en: "System Config", ar: "إعدادات النظام" }, group: G.admin, icon: "info", permission: "admin.config" },
       { key: "access", path: "access", label: { en: "Users & Access", ar: "المستخدمون والصلاحيات" }, group: G.admin, icon: "user", permission: "admin.access" },

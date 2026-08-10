@@ -70,6 +70,7 @@ import type {
   CreatePractitionerInput,
   PractitionerCreated,
   ReportView,
+  SystemConfigEdit,
   SystemConfigEntry,
   TatSummary,
   CaseListItem,
@@ -735,6 +736,18 @@ export interface ApiClient {
   adminMasterDataAsOf(system: string, code: string, at: string): Promise<MasterDataAsOf>;
   adminMasterData(): Promise<MasterDataVersion[]>;
   adminSystemConfig(): Promise<SystemConfigEntry[]>;
+  /**
+   * Set one system-config value — 28.10.
+   *
+   * <p>The endpoint has existed since 8b.2 (typed, validated, effective-dated, audited) and nothing in the
+   * SPA has ever called it, so every one of these settings was read-only in the product and changeable only
+   * by a hand-written SQL statement against `admin.system_config`. That is the shape of a "hardcoded value":
+   * not a literal in the source, but a row nobody was given a way to reach.</p>
+   *
+   * <p>Returns the NEW version. The prior one is not overwritten — its window closes — so the version number
+   * coming back is the evidence the append happened rather than a no-op.</p>
+   */
+  adminSystemConfigSet(edit: SystemConfigEdit): Promise<SystemConfigEntry>;
 
   // User & access model (Phase 21.6, design 40) — the MEMBERSHIP is the principal, never the identity.
   /** The tenant's membership roster. Server-side tenant-pinned: asking for another tenant is 403 + audited. */

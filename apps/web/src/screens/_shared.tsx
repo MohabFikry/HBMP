@@ -2,7 +2,9 @@ import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button, Card, Icon, InlineAlert, InputField, useTheme } from "@mersal/design-system";
 import type { TableFilterSpec } from "@mersal/design-system";
-import type { Localized } from "@mersal/contracts";
+import type { IdentityUser, Localized, TenantSummary } from "@mersal/contracts";
+import { useApi } from "../api/ApiProvider";
+import { useAsync } from "../api/useAsync";
 import { useAuth } from "../auth/AuthProvider";
 import { portalForRole } from "../portals/catalog";
 import { kindFromProblemType, type AccessDeniedKind } from "../routing/AccessDenied";
@@ -103,6 +105,76 @@ export function PageHeader({ title, actions, back }: { title: string; actions?: 
       )}
     </div>
   );
+}
+
+/**
+ * Tenant id → the organisation's NAME, for the admin screens that would otherwise render a uuid.
+ *
+ * ============================================================================================================
+ * 28.10 — WHY THE ERROR IS SWALLOWED
+ * ============================================================================================================
+ * `GET /admin/tenants` is gated on `AdminPolicies.ManageTenant`, whose rule names `super_admin` and nobody
+ * else, so an org admin's call is a 403. That is not a failure worth reporting: every caller here needs a
+ * name IF one can be had and has a correct fallback if not — "This organisation" reads better than a uuid in
+ * either case. Surfacing the 403 would put an error banner on a page that is working exactly as intended.
+ *
+ * The map is therefore empty for an org admin and populated for a platform admin, which matches who the
+ * column is actually useful to: a roster spanning one tenant does not need it named on every row.
+ */
+export function useTenantNames(): Map<string, string> {
+  const api = useApi();
+  const tenants = useAsync<TenantSummary[]>(() => api.adminTenants(), []);
+  return useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of tenants.data ?? []) map.set(t.id, t.name);
+    return map;
+  }, [tenants.data]);
+}
+
+/** A uuid in any of the shapes this platform mints them (v4/v7, with or without dashes). */
+const UUID_LIKE = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
+
+/**
+ * The best available label for a tenant: its name, its own readable id, or an honest description.
+ *
+ * ============================================================================================================
+ * WHY THE RAW ID IS NOT ALWAYS WRONG
+ * ============================================================================================================
+ * The rule being enforced is "no uuid in front of a person", not "no identifier". A tenant id of `partner-ngo`
+ * is a readable name that happens to be the key; suppressing it would be replacing information with none.
+ *
+ * The distinction matters because the fallback has to keep two organisations APART. Collapsing every
+ * unresolved tenant to one phrase makes a roster spanning two of them look like a duplicate-row bug, which is
+ * the opposite of what a column headed "Organisation" is for.
+ *
+ * A uuid gets the phrase, because there is genuinely nothing in it for the reader. In practice this is close
+ * to unreachable: the column only appears when the caller's reach spans tenants, which means they are a
+ * platform admin, which means the registry read that would have named it succeeded.
+ */
+export function tenantLabel(id: string, names: Map<string, string>, fallback: string): string {
+  return names.get(id) ?? (UUID_LIKE.test(id) ? fallback : id);
+}
+
+/**
+ * Account id → the person's display NAME, for the "granted by" columns.
+ *
+ * <p>`grantedBy` on an override and on a branch grant is the actor's `sub` claim — a uuid. It is written that
+ * way for the right reason (the audit trail must not depend on a name that can be edited), but rendering it
+ * that way defeats the column's whole purpose: an access reviewer asking who authorised an exception is
+ * asking for a person, and `a2f9c1e0-…` is not an answer they can act on.</p>
+ *
+ * <p>Falls back to the raw id when the account is not in the directory — a grant made by someone since
+ * de-provisioned still has to say something, and an empty cell would read as "granted by nobody".</p>
+ */
+export function useActorNames(): (id: string | null | undefined) => string {
+  const api = useApi();
+  const users = useAsync<IdentityUser[]>(() => api.identityUsers(), []);
+  const map = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const u of users.data ?? []) m.set(u.id, u.displayName);
+    return m;
+  }, [users.data]);
+  return useCallback((id) => (id ? (map.get(id) ?? id) : "—"), [map]);
 }
 
 /**
