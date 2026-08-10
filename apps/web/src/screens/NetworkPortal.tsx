@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useFormat } from "../i18n/useFormat";
-import { Button, Card, DataTable, Icon, InlineAlert, InputField, KpiCard, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, DataTableView, Icon, InlineAlert, InputField, KpiCard, StatusChip, useTableQuery, useTheme } from "@mersal/design-system";
 import { useWrite, writeErrorText } from "../api/useWrite";
-import type { Column } from "@mersal/design-system";
+import type { Column, TableFilterSpec } from "@mersal/design-system";
 import type { CreateProviderInput, Localized, ProviderContract, ProviderLocation, ProviderSummary } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
@@ -38,6 +38,12 @@ const S = {
   noContracts: { en: "No contracts recorded.", ar: "لا توجد عقود مسجلة." },
   legalName: { en: "Legal name", ar: "الاسم القانوني" },
   code: { en: "Provider code", ar: "رمز مقدم الخدمة" },
+  search: { en: "Search", ar: "بحث" },
+  dirSearchHint: { en: "Provider name or code", ar: "اسم مقدم الخدمة أو رمزه" },
+  noMatches: {
+    en: "No providers match. Change the search or clear the filters.",
+    ar: "لا يوجد مقدمو خدمة مطابقون. عدّل البحث أو أزل عوامل التصفية.",
+  },
   type: { en: "Type (Hospital/Clinic/Lab/Pharmacy/Imaging)", ar: "النوع" },
   create: { en: "Onboard provider", ar: "إضافة مقدم خدمة" },
   created: { en: "Provider created (Draft) — proceed to credentialing.", ar: "تم إنشاء مقدم الخدمة (مسودة)." },
@@ -63,12 +69,68 @@ export function NetworkDirectory() {
   const t = useLoc();
   const state = useAsync<ProviderSummary[]>(() => api.providerList(), []);
   const cols = directoryColumns(t);
+
+  /*
+    This is the WHOLE network in one response, and it was rendered as one unbroken list: no search, no
+    filter, no pager. Finding a provider meant scrolling past every other one.
+
+    Both filter groups are derived from the rows rather than declared, for the reason the clinician panel
+    gives about branches: the vocabulary is the network's, not the client's. A hardcoded type list would show
+    a chip for Imaging in a network with no imaging centre, and miss whatever is added next.
+  */
+  const rows = useMemo(() => state.data ?? [], [state.data]);
+  const filters: TableFilterSpec<ProviderSummary>[] = useMemo(() => {
+    const groups: TableFilterSpec<ProviderSummary>[] = [];
+    const types = [...new Set(rows.map((r) => r.providerType))].sort((a, b) => a.localeCompare(b));
+    if (types.length > 1) {
+      groups.push({
+        key: "type",
+        label: t(S.typeH),
+        options: types.map((x) => ({ value: x, label: x })),
+        match: (r, value) => r.providerType === value,
+      });
+    }
+    const states = [...new Set(rows.map((r) => r.onboardingState))].sort((a, b) => a.localeCompare(b));
+    if (states.length > 1) {
+      groups.push({
+        key: "onboarding",
+        label: t(S.onboarding),
+        options: states.map((x) => ({ value: x, label: x })),
+        match: (r, value) => r.onboardingState === value,
+      });
+    }
+    return groups;
+  }, [rows, t]);
+
+  const query = useTableQuery<ProviderSummary>({
+    rows,
+    columns: cols,
+    // The provider code is what a claim or a contract cites, so it has to be searchable even though the
+    // name is what an operator would think of first.
+    searchText: (r) => [r.legalName, r.code, r.providerType].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.dirSearchHint),
+    filters,
+    pageSize: 25,
+    initialSortKey: "provider",
+    persistKey: "network-directory",
+  });
+
   return (
     <>
       <PageHeader title={t(S.dirTitle)} />
       <Card as="section" style={{ padding: "var(--sp3)" }}>
         <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.dirEmpty}>
-          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.dirTitle)} />}
+          {() => (
+            <DataTableView
+              query={query}
+              columns={cols}
+              rowKey={(r) => r.id}
+              caption={t(S.dirTitle)}
+              emptyLabel={t(S.dirEmpty)}
+              noMatchesLabel={t(S.noMatches)}
+            />
+          )}
         </AsyncSection>
       </Card>
     </>

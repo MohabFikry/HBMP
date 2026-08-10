@@ -1,6 +1,7 @@
-import { Card, DataTable, StatusChip } from "@mersal/design-system";
+import { useMemo } from "react";
+import { Card, DataTable, DataTableView, StatusChip, useTableQuery } from "@mersal/design-system";
 import { useFormat } from "../i18n/useFormat";
-import type { Column } from "@mersal/design-system";
+import type { Column, TableFilterSpec } from "@mersal/design-system";
 import type {
   AccessReviewCampaign,
   IdentityUser,
@@ -68,6 +69,13 @@ const S = {
   platform: { en: "Platform", ar: "المنصة" },
   // 18.C2 (W5) — identity-store columns.
   username: { en: "Username", ar: "اسم المستخدم" },
+  search: { en: "Search", ar: "بحث" },
+  usersSearchHint: { en: "Username, name or role", ar: "اسم المستخدم أو الاسم أو الدور" },
+  bindingsSearchHint: { en: "Subject token, role or scope", ar: "رمز الشخص أو الدور أو النطاق" },
+  noMatches: {
+    en: "No rows match. Change the search or clear the filters.",
+    ar: "لا توجد صفوف مطابقة. عدّل البحث أو أزل عوامل التصفية.",
+  },
   displayName: { en: "Name", ar: "الاسم" },
   twoFactor: { en: "Second factor", ar: "التحقق بخطوتين" },
   mfaOn: { en: "Enrolled", ar: "مُفعّل" },
@@ -136,19 +144,87 @@ export function AdminUsers() {
     { key: "reviewDue", header: t(S.reviewDue), cell: (r) => <span className="tnum">{fmt.date(r.reviewDueAt)}</span>, sortable: true, sortValue: (r) => r.reviewDueAt },
   ];
 
+  /*
+    The identity store and the binding register both grow with every staff account the organisation has ever
+    had, and both rendered as one unbroken list. The two questions an administrator opens this screen with —
+    "who is this person" and "which accounts cannot satisfy MFA" — needed a scroll and an eye respectively.
+
+    The MFA group is the one worth having by name: it is the reason this screen is looked at during an access
+    review, and counting it off a chip is faster than reading a column of chips.
+  */
+  const userRows = useMemo(() => users.data ?? [], [users.data]);
+  const userFilters: TableFilterSpec<IdentityUser>[] = useMemo(() => [
+    {
+      key: "mfa",
+      label: t(S.twoFactor),
+      options: [{ value: "off", label: t(S.mfaOff) }, { value: "on", label: t(S.mfaOn) }],
+      match: (r, value) => (value === "on" ? r.twoFactorEnabled : !r.twoFactorEnabled),
+    },
+    {
+      key: "active",
+      label: t(S.status),
+      options: [{ value: "active", label: t(S.active) }, { value: "off", label: t(S.deprovisioned) }],
+      match: (r, value) => (value === "active" ? r.isActive : !r.isActive),
+    },
+  ], [t]);
+
+  const userQuery = useTableQuery<IdentityUser>({
+    rows: userRows,
+    columns: userCols,
+    searchText: (r) => [r.username, r.displayName, ...r.roles].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.usersSearchHint),
+    filters: userFilters,
+    pageSize: 25,
+    initialSortKey: "username",
+    persistKey: "admin-accounts",
+  });
+
+  const bindingQuery = useTableQuery<RoleBinding>({
+    rows: bindings.data ?? [],
+    columns: bindingCols,
+    // The subject TOKEN rather than a name: this register is deliberately pseudonymous, and the token is
+    // what an access-review spreadsheet cites back at the administrator.
+    searchText: (r) => [r.subjectToken, r.role, r.scope, r.tier].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.bindingsSearchHint),
+    pageSize: 25,
+    // Soonest review first — the register is opened to find what is falling due, not to browse it.
+    initialSortKey: "reviewDue",
+    persistKey: "admin-bindings",
+  });
+
   return (
     <>
       <PageHeader title={t(S.usersTitle)} />
       <Card as="section" style={{ padding: "var(--sp3)" }}>
         <h2 className="panel-h">{t(S.accountsHeading)}</h2>
         <AsyncSection<IdentityUser[]> state={users} isEmpty={(d) => d.length === 0} emptyLabel={S.usersEmpty}>
-          {(rows) => <DataTable columns={userCols} rows={rows} rowKey={(r) => r.id} caption={t(S.accountsHeading)} />}
+          {() => (
+            <DataTableView
+              query={userQuery}
+              columns={userCols}
+              rowKey={(r) => r.id}
+              caption={t(S.accountsHeading)}
+              emptyLabel={t(S.usersEmpty)}
+              noMatchesLabel={t(S.noMatches)}
+            />
+          )}
         </AsyncSection>
       </Card>
       <Card as="section" style={{ padding: "var(--sp3)", marginTop: "var(--sp3)" }}>
         <h2 className="panel-h">{t(S.bindingsHeading)}</h2>
         <AsyncSection<RoleBinding[]> state={bindings} isEmpty={(d) => d.length === 0} emptyLabel={S.usersEmpty}>
-          {(rows) => <DataTable columns={bindingCols} rows={rows} rowKey={(r) => r.id} caption={t(S.bindingsHeading)} />}
+          {() => (
+            <DataTableView
+              query={bindingQuery}
+              columns={bindingCols}
+              rowKey={(r) => r.id}
+              caption={t(S.bindingsHeading)}
+              emptyLabel={t(S.usersEmpty)}
+              noMatchesLabel={t(S.noMatches)}
+            />
+          )}
         </AsyncSection>
       </Card>
     </>

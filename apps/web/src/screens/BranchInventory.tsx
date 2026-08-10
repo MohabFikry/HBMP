@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Card, DataTable, InlineAlert, InputField, SegmentedControl, SelectField, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, DataTableView, InlineAlert, InputField, Pagination, SegmentedControl, SelectField, StatusChip, useTableQuery, useTheme } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import { inventoryApi } from "../api/branchApi";
 import type { ItemCategory, Movement, MovementKind, StockLine } from "../api/branchApi";
@@ -19,6 +19,12 @@ const S = {
   medical: { en: "Medical", ar: "طبي" },
   nonMedical: { en: "Non-medical", ar: "غير طبي" },
   ledger: { en: "Movement ledger", ar: "سجل الحركات" },
+  search: { en: "Search", ar: "بحث" },
+  stockSearchHint: { en: "Item name, SKU or batch", ar: "اسم الصنف أو الرمز أو التشغيلة" },
+  noMatches: {
+    en: "No stock lines match. Change the search or clear the filters.",
+    ar: "لا توجد أصناف مطابقة. عدّل البحث أو أزل عوامل التصفية.",
+  },
 
   item: { en: "Item", ar: "الصنف" },
   sku: { en: "SKU", ar: "الرمز" },
@@ -99,7 +105,21 @@ export function BranchInventory() {
   const [tab, setTab] = useState<ItemCategory>("Medical");
 
   const stock = useAsync(() => inventoryApi.stock({ category: tab }), [tab]);
-  const movements = useAsync(() => inventoryApi.movements({ pageSize: 50 }), []);
+  /*
+    THE LEDGER IS SERVER-PAGED, and it was truncated.
+
+    An append-only stock ledger has no natural size. This asked for fifty rows, rendered them, and threw
+    `total` away — so movement 51 was unreachable and nothing on screen said the list had an end. That is the
+    same defect the policy book had, arriving here through a different door.
+
+    Paged on the SERVER rather than through `useTableQuery`, because the endpoint already pages and a ledger
+    is exactly the thing that outgrows a browser. The stock table below is the opposite case — one branch's
+    lines, a bounded list — and is filtered in the browser.
+  */
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const [ledgerSize, setLedgerSize] = useState(25);
+  const movements = useAsync(
+    () => inventoryApi.movements({ page: ledgerPage, pageSize: ledgerSize }), [ledgerPage, ledgerSize]);
 
   const medical = tab === "Medical";
 
@@ -147,6 +167,28 @@ export function BranchInventory() {
     [t, lang, fmt],
   );
 
+  /** One branch's stock lines — a bounded list, so search and filter happen in the browser. */
+  const stockQuery = useTableQuery<StockLine>({
+    rows: stock.data?.stock ?? [],
+    columns: stockColumns,
+    searchText: (l) => [l.nameEn, l.nameAr, l.sku, l.batchNo].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.stockSearchHint),
+    // The two states a storekeeper looks for. Quarantined stock cannot be issued at all; low stock is what
+    // the next order is built from.
+    filters: [{
+      key: "state",
+      label: t(S.stockStatus),
+      options: [
+        { value: "quarantined", label: t(S.quarantined) },
+        { value: "low", label: t(S.low) },
+      ],
+      match: (l, value) => (value === "quarantined" ? l.isQuarantined : l.isLow && !l.isQuarantined),
+    }],
+    pageSize: 25,
+    persistKey: `branch-stock-${tab}`,
+  });
+
   return (
     <div className="branch-screen">
       <PageHeader title={t(S.title)} />
@@ -171,13 +213,15 @@ export function BranchInventory() {
       {medical && <InlineAlert tone="info">{t(S.quarantineHelp)}</InlineAlert>}
 
       <AsyncSection state={stock} isEmpty={(d) => d.stock.length === 0} emptyLabel={S.noStock}>
-        {(data) => (
+        {() => (
           <Card>
-            <DataTable
-              caption={t(medical ? S.medical : S.nonMedical)}
+            <DataTableView
+              query={stockQuery}
               columns={stockColumns}
-              rows={data.stock}
               rowKey={(l) => `${l.branchId}:${l.itemId}:${l.batchId ?? "-"}`}
+              caption={t(medical ? S.medical : S.nonMedical)}
+              emptyLabel={t(S.noStock)}
+              noMatchesLabel={t(S.noMatches)}
             />
           </Card>
         )}
@@ -201,6 +245,16 @@ export function BranchInventory() {
               columns={movementColumns}
               rows={data.movements}
               rowKey={(m) => m.movementId}
+            />
+            {/* Shown always, like the membership book's: "1–25 of 4,812" is the answer to "how much has
+                moved through this branch", which is a question a ledger is opened with. */}
+            <Pagination
+              page={ledgerPage}
+              pageSize={ledgerSize}
+              total={data.total}
+              onPageChange={setLedgerPage}
+              onPageSizeChange={(n) => { setLedgerSize(n); setLedgerPage(1); }}
+              pageSizeOptions={[10, 25, 50, 100]}
             />
           </Card>
         )}

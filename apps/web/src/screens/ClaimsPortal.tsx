@@ -1,4 +1,4 @@
-import { Card, DataTable, KpiCard, SegmentedControl, StatusChip } from "@mersal/design-system";
+import { Card, DataTable, DataTableView, KpiCard, SegmentedControl, StatusChip, useTableQuery } from "@mersal/design-system";
 import { useFormat } from "../i18n/useFormat";
 import type { Column } from "@mersal/design-system";
 import type { ClaimRow, ClaimsKpis, Localized, ReconciliationRow } from "@mersal/contracts";
@@ -13,6 +13,13 @@ const S = {
   wlTitle: { en: "Claims Worklist", ar: "قائمة المطالبات" },
   wlEmpty: { en: "No claims match this filter.", ar: "لا توجد مطالبات مطابقة." },
   claimNo: { en: "Claim", ar: "المطالبة" },
+  search: { en: "Search", ar: "بحث" },
+  wlSearchHint: { en: "Claim number or origin", ar: "رقم المطالبة أو المصدر" },
+  recSearchHint: { en: "Claim number or service code", ar: "رقم المطالبة أو رمز الخدمة" },
+  noMatches: {
+    en: "No rows match. Change the search or clear the filter above.",
+    ar: "لا توجد صفوف مطابقة. عدّل البحث أو أزل التصفية أعلاه.",
+  },
   origin: { en: "Origin", ar: "المصدر" },
   status: { en: "Status", ar: "الحالة" },
   claimed: { en: "Claimed", ar: "المطالَب" },
@@ -70,6 +77,25 @@ export function ClaimsWorklist() {
     { key: "serviceFrom", header: t(S.serviceFrom), cell: (r) => <span className="tnum">{fmt.date(r.serviceDateFrom)}</span>, sortable: true, sortValue: (r) => r.serviceDateFrom },
     { key: "submitted", header: t(S.submitted), cell: (r) => <span className="tnum">{fmt.date(r.submittedAt)}</span>, sortable: true, sortValue: (r) => r.submittedAt },
   ];
+
+  /*
+    Search and a pager, but NO filter group: the status segmented control above already narrows this, and it
+    does it on the SERVER — `claimsWorklist(status)` refetches. Mirroring it into `useTableQuery` would give
+    the screen two controls for one question that could disagree with each other.
+
+    Read outside AsyncSection's render prop: a hook called in there would be conditional on the load.
+  */
+  const query = useTableQuery<ClaimRow>({
+    rows: state.data ?? [],
+    columns: cols,
+    // What a finance clerk arrives holding: the claim number off a provider's statement, or the code.
+    searchText: (r) => [r.claimNo, r.origin, t(r.status.label)].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.wlSearchHint),
+    pageSize: 25,
+    persistKey: "claims-worklist",
+  });
+
   return (
     <>
       <PageHeader title={t(S.wlTitle)} />
@@ -88,7 +114,16 @@ export function ClaimsWorklist() {
       </div>
       <Card as="section" style={{ padding: "var(--sp3)" }}>
         <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.wlEmpty}>
-          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.wlTitle)} />}
+          {() => (
+            <DataTableView
+              query={query}
+              columns={cols}
+              rowKey={(r) => r.id}
+              caption={t(S.wlTitle)}
+              emptyLabel={t(S.wlEmpty)}
+              noMatchesLabel={t(S.noMatches)}
+            />
+          )}
         </AsyncSection>
       </Card>
     </>
@@ -111,6 +146,19 @@ export function ClaimsReconciliation() {
     { key: "allowed", header: t(S.allowed), cell: (r) => fmt.money(r.allowedAmount), numeric: true, sortable: true, sortValue: (r) => r.allowedAmount },
     { key: "bucket", header: t(S.bucket), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
   ];
+
+  /** Same shape as the worklist above: the bucket control is the server's filter, so this adds only the
+   *  search and the pager. A reconciliation row is found by claim number or by the service code on it. */
+  const query = useTableQuery<ReconciliationRow>({
+    rows: state.data ?? [],
+    columns: cols,
+    searchText: (r) => [r.claimNo, r.code, r.origin, t(r.status.label)].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.recSearchHint),
+    pageSize: 25,
+    persistKey: "claims-reconciliation",
+  });
+
   return (
     <>
       <PageHeader title={t(S.recTitle)} />
@@ -129,7 +177,16 @@ export function ClaimsReconciliation() {
       </div>
       <Card as="section" style={{ padding: "var(--sp3)" }}>
         <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.recEmpty}>
-          {(rows) => <DataTable columns={cols} rows={rows} rowKey={(r) => `${r.claimId}-${r.code}`} caption={t(S.recTitle)} />}
+          {() => (
+            <DataTableView
+              query={query}
+              columns={cols}
+              rowKey={(r) => `${r.claimId}-${r.code}`}
+              caption={t(S.recTitle)}
+              emptyLabel={t(S.recEmpty)}
+              noMatchesLabel={t(S.noMatches)}
+            />
+          )}
         </AsyncSection>
       </Card>
     </>
