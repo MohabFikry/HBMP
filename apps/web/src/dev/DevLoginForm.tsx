@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Card, InputField, Logo, useTheme } from "@mersal/design-system";
+import { Button, Card, ComboboxField, InputField, Logo, useTheme } from "@mersal/design-system";
 import { useAuth } from "../auth/AuthProvider";
 import { PORTALS, portalForRole } from "../portals/catalog";
 import type { Role } from "../authz/permissions";
@@ -54,23 +54,16 @@ export function DevLoginForm() {
           {L.loginSub[lang]}
         </p>
         <form onSubmit={onSubmit} style={{ display: "grid", gap: "var(--sp4)", marginTop: "var(--sp5)" }}>
-          <div className="mrs-field">
-            <label className="mrs-label" htmlFor="role">
-              {L.chooseRole[lang]}
-            </label>
-            <select
-              id="role"
-              className="mrs-control"
-              value={role}
-              onChange={(e) => setRole(e.target.value as Role)}
-            >
-              {PORTALS.map((p) => (
-                <option key={p.role} value={p.role}>
-                  {p.eyebrow[lang]}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Dev-only, and converted with the rest so "no native <select> ships" needs no exception list —
+              an exception nobody can see the reason for is one the next screen copies. Twenty-three portals
+              is also past the point where scrolling to a role beats typing it. */}
+          <ComboboxField
+            id="role"
+            label={L.chooseRole[lang]}
+            value={role}
+            onChange={(v) => setRole(v as Role)}
+            options={PORTALS.map((p) => ({ value: p.role, label: p.eyebrow[lang], keywords: p.role }))}
+          />
           <InputField
             label={L.mfaLabel[lang]}
             help={L.mfaHelp[lang]}

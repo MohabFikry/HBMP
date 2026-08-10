@@ -46,9 +46,9 @@ async function openReservePanel(user: ReturnType<typeof userEvent.setup>) {
 }
 
 /**
- * Branch and clinic are the design-system Select, not a native <select>: a native one draws its option list in
- * the OS, so it cannot wear the Mersal surface at all. That makes it a combobox + listbox rather than something
- * `selectOptions` can drive, and these helpers are what the agent actually does.
+ * Every picker on this screen is a design-system Combobox, not a native <select>: a native one draws its
+ * option list in the OS, so it cannot wear the Mersal surface at all. That makes it a combobox + listbox
+ * rather than something `selectOptions` can drive, and these helpers are what the agent actually does.
  */
 async function choose(user: ReturnType<typeof userEvent.setup>, name: RegExp, option: RegExp) {
   await user.click(await screen.findByRole("combobox", { name }));
@@ -505,7 +505,7 @@ describe("search hits and stale writes", () => {
     await startAndOpenMember(user);
 
     await user.click(screen.getByRole("button", { name: /^cancel appointment — /i }));
-    await user.selectOptions(screen.getByRole("combobox", { name: /cancellation reason/i }), "PatientRequest");
+    await choose(user, /cancellation reason/i, /^patient request$/i);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^cancel appointment$/i }));
 
     await waitFor(() => expect(api.cancel).toHaveBeenCalled());

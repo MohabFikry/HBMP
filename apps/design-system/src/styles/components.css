@@ -1669,10 +1669,19 @@ nav.mrs-rail {
   font-weight: 600;
   white-space: nowrap;
 }
+/* The picker sizes to its content in this row, not to the pager. `.mrs-combo` is `inline-size: 100%` — right
+   for a field in a form grid, wrong for a control sitting in a flex row beside the step buttons. The floor
+   is wider than the 72px the native select needed: the same three digits now share the box with a chevron. */
+.mrs-pager-size .mrs-combo {
+  inline-size: auto;
+}
+/* An explicit width, not `auto`. `auto` on an <input> is not shrink-to-fit — it is the intrinsic width of the
+   `size` attribute, which defaults to 20 characters and rendered a 193px box to hold "100". The native select
+   this replaced DID shrink to fit, which is why `auto` was right before and is a trap now. 88px holds three
+   digits with room for the chevron. */
 .mrs-pager-size .mrs-control {
   margin-top: 0;
-  inline-size: auto;
-  min-inline-size: 72px;
+  inline-size: 88px;
 }
 
 .mrs-pager-step {

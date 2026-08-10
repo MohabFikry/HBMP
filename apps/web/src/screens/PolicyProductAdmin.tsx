@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Card, DataTable, Icon, InlineAlert, StatusChip } from "@mersal/design-system";
+import { Button, Card, Combobox, DataTable, Icon, InlineAlert, StatusChip } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   ActivationProblem,
@@ -533,18 +533,18 @@ function PlanVersionEditor({
                   />
                 </td>
                 <td>
-                  <select
+                  {/* These two carried NO class at all — the browser's untouched default control, in a table
+                      of Mersal-styled inputs. Safe to convert only after step 7 wrapped the table: an
+                      ancestor with `overflow-x: auto` clips on both axes, and a native popup was escaping it
+                      only because the OS draws it outside the page. */}
+                  <Combobox
                     aria-label={`${t(S.limitType)} — ${r.benefitCategoryCode}`}
-                    value={r.limitType}
+                    value={r.limitType || null}
                     disabled={!editable}
-                    onChange={(e) => patch(r.benefitCategoryCode, { limitType: e.target.value })}
-                  >
-                    {LIMIT_TYPES.map((x) => (
-                      <option key={x || "none"} value={x}>
-                        {x || "—"}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder="—"
+                    onChange={(v) => patch(r.benefitCategoryCode, { limitType: v })}
+                    options={LIMIT_TYPES.filter(Boolean).map((x) => ({ value: x, label: x }))}
+                  />
                 </td>
                 <td>
                   <input
@@ -556,18 +556,13 @@ function PlanVersionEditor({
                   />
                 </td>
                 <td>
-                  <select
+                  <Combobox
                     aria-label={`${t(S.reset)} — ${r.benefitCategoryCode}`}
                     value={r.resetPeriod}
                     disabled={!editable}
-                    onChange={(e) => patch(r.benefitCategoryCode, { resetPeriod: e.target.value })}
-                  >
-                    {RESET_PERIODS.map((x) => (
-                      <option key={x} value={x}>
-                        {x}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(v) => patch(r.benefitCategoryCode, { resetPeriod: v })}
+                    options={RESET_PERIODS.map((x) => ({ value: x, label: x }))}
+                  />
                 </td>
                 <td>
                   <input

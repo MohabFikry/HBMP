@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, Card, Icon, InlineAlert, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, Combobox, Icon, InlineAlert, StatusChip, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import { L } from "../i18n/strings";
 import { PageHeader, useOpenProfile } from "./_shared";
@@ -302,29 +302,27 @@ export function CallCentreBooking({ api = defaultCcApi }: { api?: CcApi }) {
         <div className="cc-callmeta">
           <label className="cc-field">
             <span>{t(L.ccReason)}</span>
-            <select
-              className="mrs-control"
+            <Combobox
               value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            >
-              {CALL_REASONS.map((r) => <option key={r} value={r}>{t(callReasonLabel(r))}</option>)}
-            </select>
+              onChange={setReason}
+              options={CALL_REASONS.map((r) => ({ value: r, label: t(callReasonLabel(r)) }))}
+            />
           </label>
 
           <label className="cc-field">
             <span>{t(L.ccDirection)}</span>
-            <select
-              className="mrs-control"
+            <Combobox
               value={direction}
-              onChange={(e) => setDirection(e.target.value as CcDirection)}
+              onChange={(v) => setDirection(v as CcDirection)}
               // Locked once the call exists. Direction is written when the interaction OPENS and there is no
               // endpoint that changes it, so an editable control here would accept a correction and silently
               // drop it — worse than not offering one.
               disabled={interactionId !== null}
-            >
-              <option value="Inbound">{t(L.ccInbound)}</option>
-              <option value="Outbound">{t(L.ccOutbound)}</option>
-            </select>
+              options={[
+                { value: "Inbound", label: t(L.ccInbound) },
+                { value: "Outbound", label: t(L.ccOutbound) },
+              ]}
+            />
             {interactionId !== null && <span className="cc-hint">{t(L.ccDirectionLocked)}</span>}
           </label>
         </div>

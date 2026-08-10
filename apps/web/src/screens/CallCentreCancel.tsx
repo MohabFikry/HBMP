@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { Button, Icon, InlineAlert, Modal } from "@mersal/design-system";
+import { Button, Combobox, Icon, InlineAlert, Modal } from "@mersal/design-system";
 import type { AppointmentRow, Localized } from "@mersal/contracts";
 import type { CcApi } from "./CallCentre";
 
@@ -189,15 +189,13 @@ export function CallCentreCancelButton({
 
           <div className="cc-field">
             <span id="cc-cancel-reason-code">{t(S.reasonStep)}</span>
-            <select
+            <Combobox
               aria-labelledby="cc-cancel-reason-code"
-              className="mrs-control"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            >
-              <option value="">—</option>
-              {CANCEL_REASONS.map((code) => <option key={code} value={code}>{code}</option>)}
-            </select>
+              value={reason || null}
+              onChange={setReason}
+              placeholder="—"
+              options={CANCEL_REASONS.map((code) => ({ value: code, label: code }))}
+            />
           </div>
 
           {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}

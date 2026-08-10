@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type SetStateAction } from "react";
 import { z } from "zod";
-import { Button, Icon, InlineAlert, Modal, useToast } from "@mersal/design-system";
+import { Button, Combobox, Icon, InlineAlert, Modal, useToast } from "@mersal/design-system";
 import type {
   CheckState, CptSection, InvestigationDraftLine, InvestigationOrderType, Localized,
   OrderAcknowledgement, OrderCheckKind, OrderFinding, OrderValidationResult, ProcedureType,
@@ -565,15 +565,14 @@ export function InvestigationWorkspace({
           <div className="rx-course-fields">
             <label className="rx-field">
               <span className="rx-field-label">{t(S.procedureType)}</span>
-              <select
-                className="rx-field-input"
-                value={procedureTypeCode ?? ""}
+              <Combobox
+                value={procedureTypeCode}
                 disabled={busy || typesFailed}
-                onChange={(e) => {
-                  // Read the value BEFORE the updater — `setDraft`'s callback runs after React has released
-                  // the synthetic event, and reaching for `currentTarget` there throws inside a state
-                  // updater and takes the whole composer down with it.
-                  const code = e.currentTarget.value || null;
+                placeholder={t(S.chooseType)}
+                onChange={(next) => {
+                  // The event-timing note that used to live here is gone with the native select: `onChange`
+                  // hands over the VALUE, so there is no synthetic event to read after React has released it.
+                  const code = next || null;
                   const picked = code ? typeByCode.get(code) : undefined;
                   setDraft((d) => ({
                     ...d,
@@ -585,12 +584,8 @@ export function InvestigationWorkspace({
                     sessions: picked?.isSessionBased ? (picked.defaultSessions ?? 1) : null,
                   }));
                 }}
-              >
-                <option value="">{t(S.chooseType)}</option>
-                {procedureTypes.map((p) => (
-                  <option key={p.code} value={p.code}>{t(p.name)}</option>
-                ))}
-              </select>
+                options={procedureTypes.map((p) => ({ value: p.code, label: t(p.name), keywords: p.code }))}
+              />
             </label>
 
             {/* Revealed by the TYPE's `isSessionBased` flag and never by its NAME — dialysis and

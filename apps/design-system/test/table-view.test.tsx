@@ -204,7 +204,10 @@ describe("Pagination on its own", () => {
     renderDS(
       <Pagination page={3} pageSize={10} total={120} onPageChange={onPageChange} onPageSizeChange={onPageSizeChange} />,
     );
-    await userEvent.selectOptions(screen.getByLabelText(/per page/i), "50");
+    // A Combobox, not a native <select> — the page-size picker was the one native select left in the design
+    // system, and on a paginated product the one an operator met most often.
+    await userEvent.click(screen.getByLabelText(/per page/i));
+    await userEvent.click(await screen.findByRole("option", { name: "50" }));
     expect(onPageSizeChange).toHaveBeenCalledWith(50);
     // Keeping the page number across a size change moves the operator to a different part of the list than
     // the one they were reading.

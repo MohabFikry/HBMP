@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Card, DataTable, Icon, InlineAlert, KpiList, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, ComboboxField, DataTable, Icon, InlineAlert, KpiList, StatusChip, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   BulkCommitView,
@@ -253,16 +253,20 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
       <Card style={{ padding: "var(--sp5)", display: "grid", gap: "var(--sp4)" }}>
         {/* QA P1-10: this card was raw browser controls crammed into one unspaced row while every other
             screen wears the design system — the controls now use the shared field classes and breathe. */}
-        <div className="mrs-field" style={{ maxWidth: 360 }}>
-          <label className="mrs-label" htmlFor="bulk-type">{t(S.jobType)}</label>
-          <select className="mrs-control" id="bulk-type" value={jobType} onChange={(e) => { setJobType(e.target.value); reset(); }}>
-            {JOB_TYPES.map((x) => (
-              <option key={x} value={x}>
-                {JOB_TYPE_LABELS[x] ? t(JOB_TYPE_LABELS[x]) : x}
-              </option>
-            ))}
-          </select>
-        </div>
+        <ComboboxField
+          id="bulk-type"
+          label={t(S.jobType)}
+          style={{ maxWidth: 360 }}
+          value={jobType}
+          onChange={(v) => { setJobType(v); reset(); }}
+          options={JOB_TYPES.map((x) => ({
+            value: x,
+            label: JOB_TYPE_LABELS[x] ? t(JOB_TYPE_LABELS[x]) : x,
+            // The engine's job type is the value and is sent verbatim; it is also what an operator who knows
+            // the API will type, so it is searchable without being shown as the answer.
+            keywords: x,
+          }))}
+        />
 
         {/* Hint stays inline; the column TABLE lives in the modal behind the paired trigger (0B §11). */}
         <InlineAlert tone="info">{t(S.templateHint)}</InlineAlert>

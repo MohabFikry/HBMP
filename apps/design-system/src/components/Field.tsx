@@ -1,5 +1,5 @@
 import { useId } from "react";
-import type { InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "react";
+import type { CSSProperties, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "react";
 import { Icon } from "./Icon";
 import { Select } from "./Select";
 import type { SelectOption } from "./Select";
@@ -13,6 +13,15 @@ interface FieldBase {
   /** Error message — rendered with icon+text+red border (never color alone). */
   error?: string;
   className?: string;
+  /**
+   * Inline style for the field wrapper — in practice a width constraint.
+   *
+   * <p>Here because screens were hand-building `<div className="mrs-field" style={{ maxWidth: 320 }}>` around
+   * a bare control to get one, and a wrapper written by hand is a wrapper half of them get wrong: the QA
+   * notes on the policy screens record a label running into a zero-width control for exactly this reason.
+   * The field owns its own box now, so the width goes on the field.</p>
+   */
+  style?: CSSProperties;
   /** Marks the label with a required indicator. The native `required` attribute (which also sets
    *  aria-required) still passes through to the control — this is only the VISIBLE half, so sighted users
    *  learn a field is mandatory before failing it, not after (QA P2-12). */
@@ -44,6 +53,7 @@ function Labelled({
   error,
   base,
   className,
+  style,
   requiredMark,
   hideLabel,
   /** False when the control is not a labellable element — a <button>-based combobox names itself with
@@ -52,7 +62,7 @@ function Labelled({
   children,
 }: FieldBase & { base: string; labellable?: boolean; children: ReactNode }) {
   return (
-    <div className={cx("mrs-field", className)}>
+    <div className={cx("mrs-field", className)} style={style}>
       <label
         className={cx("mrs-label", hideLabel && "sr-only")}
         id={`${base}-label`}
@@ -80,7 +90,7 @@ function Labelled({
 }
 
 /** Text input with always-visible label, helper/error tied via aria-describedby, aria-invalid on error. */
-export function InputField({ label, help, error, className, id, hideLabel, ...rest }: InputFieldProps) {
+export function InputField({ label, help, error, className, style, id, hideLabel, ...rest }: InputFieldProps) {
   const auto = useId();
   const base = id ?? auto;
   return (
@@ -88,7 +98,7 @@ export function InputField({ label, help, error, className, id, hideLabel, ...re
     // an InputField it fell into `...rest` and landed on the DOM node as an unknown attribute. A prop the
     // shared base documents has to work on every field that inherits it, or the contract is a suggestion.
     <Labelled
-      label={label} help={help} error={error} base={base} className={className}
+      label={label} help={help} error={error} base={base} className={className} style={style}
       requiredMark={rest.required} hideLabel={hideLabel}
     >
       <input
@@ -127,13 +137,14 @@ export interface SelectFieldProps extends FieldBase {
  * was the labelled wrapper, so each screen wrote its own and half of them forgot the class.
  */
 export function SelectField({
-  label, help, error, className, id, options, value, onChange, placeholder, disabled, required, hideLabel,
+  label, help, error, className, style, id, options, value, onChange, placeholder, disabled, required,
+  hideLabel,
 }: SelectFieldProps) {
   const auto = useId();
   const base = id ?? auto;
   return (
     <Labelled
-      label={label} help={help} error={error} base={base} className={className}
+      label={label} help={help} error={error} base={base} className={className} style={style}
       requiredMark={required} labellable={false} hideLabel={hideLabel}
     >
       {/* The trigger is a <button>, which HTML does not let a <label for> name — so the label carries an id
@@ -200,14 +211,14 @@ export interface ComboboxFieldProps extends FieldBase {
  * the accessible description, and an error is announced by the alert alone.
  */
 export function ComboboxField({
-  label, help, error, className, id, options, value, onChange, placeholder, disabled, required, hideLabel,
-  leadingIcon, shape, hintWhenClosed,
+  label, help, error, className, style, id, options, value, onChange, placeholder, disabled, required,
+  hideLabel, leadingIcon, shape, hintWhenClosed,
 }: ComboboxFieldProps) {
   const auto = useId();
   const base = id ?? auto;
   return (
     <Labelled
-      label={label} help={help} error={error} base={base} className={className}
+      label={label} help={help} error={error} base={base} className={className} style={style}
       requiredMark={required} hideLabel={hideLabel}
     >
       <Combobox
@@ -230,12 +241,12 @@ export function ComboboxField({
 }
 
 /** Multiline field — same a11y contract as InputField. */
-export function TextareaField({ label, help, error, className, id, hideLabel, ...rest }: TextareaFieldProps) {
+export function TextareaField({ label, help, error, className, style, id, hideLabel, ...rest }: TextareaFieldProps) {
   const auto = useId();
   const base = id ?? auto;
   return (
     <Labelled
-      label={label} help={help} error={error} base={base} className={className}
+      label={label} help={help} error={error} base={base} className={className} style={style}
       requiredMark={rest.required} hideLabel={hideLabel}
     >
       <textarea

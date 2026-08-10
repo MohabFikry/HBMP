@@ -1,7 +1,7 @@
 import { memberStatus, callOutcomeLabel, callReasonLabel, identifierTypeLabel, appointmentTypeLabel } from "./statusLabels";
 import { useFormat } from "../i18n/useFormat";
 import { useCallback, useEffect, useState } from "react";
-import { Button, Card, Icon, InputField, Modal, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, Combobox, Icon, InputField, Modal, StatusChip, useTheme } from "@mersal/design-system";
 import { L } from "../i18n/strings";
 import { API_BASE } from "../config";
 import { getToken } from "../auth/tokenStore";
@@ -576,20 +576,24 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
           {!interactionId ? (
             <>
               <label htmlFor="cc-reason">{t(L.ccReason)}</label>
-              <select id="cc-reason" value={reason} onChange={(e) => setReason(e.target.value)}>
-                {CALL_REASONS.map((r) => <option key={r} value={r}>{t(callReasonLabel(r))}</option>)}
-              </select>
+              <Combobox
+                id="cc-reason"
+                value={reason}
+                onChange={setReason}
+                options={CALL_REASONS.map((r) => ({ value: r, label: t(callReasonLabel(r)) }))}
+              />
               {/* Offered BEFORE the call opens, because that is the only moment it can be recorded — the
                   interaction stores it at creation and nothing changes it afterwards. */}
               <label htmlFor="cc-direction">{t(L.ccDirection)}</label>
-              <select
+              <Combobox
                 id="cc-direction"
                 value={direction}
-                onChange={(e) => setDirection(e.target.value as CcDirection)}
-              >
-                <option value="Inbound">{t(L.ccInbound)}</option>
-                <option value="Outbound">{t(L.ccOutbound)}</option>
-              </select>
+                onChange={(v) => setDirection(v as CcDirection)}
+                options={[
+                  { value: "Inbound", label: t(L.ccInbound) },
+                  { value: "Outbound", label: t(L.ccOutbound) },
+                ]}
+              />
               <Button variant="primary" onClick={startCall}>{t(L.ccStartCall)}</Button>
             </>
           ) : (
@@ -705,15 +709,13 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
                   >
                     <div className="cc-field">
                       <span id="cc-cancel-reason">{t(L.ccCancelReason)}</span>
-                      <select
+                      <Combobox
                         aria-labelledby="cc-cancel-reason"
-                        className="mrs-control"
-                        value={cancelReason}
-                        onChange={(e) => setCancelReason(e.target.value)}
-                      >
-                        <option value="">—</option>
-                        {CANCEL_REASONS.map((code) => <option key={code} value={code}>{t(CANCEL_REASON_LABELS[code])}</option>)}
-                      </select>
+                        value={cancelReason || null}
+                        onChange={setCancelReason}
+                        placeholder="—"
+                        options={CANCEL_REASONS.map((code) => ({ value: code, label: t(CANCEL_REASON_LABELS[code]) }))}
+                      />
                       {cancelError && <span role="alert" className="cc-error">{t(L.ccCancelReasonRequired)}</span>}
                     </div>
                   </Modal>
@@ -777,15 +779,14 @@ export function CallCentreWorkspace({ api = defaultCcApi }: { api?: CcApi }) {
                     Arabic-portal agent picked their wrap-up from "FollowUpRequired" and "NoAction" — the exact
                     bug already fixed for the identifier types a few cards up. `callOutcomeLabel` existed and
                     was in use in the call-history list below; only this control skipped it. */}
-                <select
+                <Combobox
                   value={outcome}
                   // Changing the outcome can make the summary optional (Abandoned), so a "summary is
                   // required" error left over from a Resolved attempt would be sitting on a form that is
                   // now valid — telling the agent to fix something the server no longer asks for.
-                  onChange={(e) => { setOutcome(e.target.value); setSummaryError(false); }}
-                >
-                  {OUTCOMES.map((o) => <option key={o} value={o}>{t(callOutcomeLabel(o))}</option>)}
-                </select>
+                  onChange={(v) => { setOutcome(v); setSummaryError(false); }}
+                  options={OUTCOMES.map((o) => ({ value: o, label: t(callOutcomeLabel(o)) }))}
+                />
               </label>
 
               {/* The summary OTHER ROLES read. Required by the server for every outcome but Abandoned, so it is

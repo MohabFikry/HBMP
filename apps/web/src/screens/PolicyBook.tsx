@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Card, DataTable, Icon, InlineAlert, KpiList, Pagination, StatusChip, Tabs } from "@mersal/design-system";
+import { Button, Card, ComboboxField, DataTable, Icon, InlineAlert, KpiList, Pagination, StatusChip, Tabs } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   MemberGroupView,
@@ -499,27 +499,24 @@ export function UtilizationScreen({
       <div aria-live="polite" role="status" className="sr-only">{announce}</div>
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
       <Card style={{ padding: "var(--sp4)", display: "flex", gap: "var(--sp4)", alignItems: "end", flexWrap: "wrap" }}>
-        {/* QA P1-11: the label ran into a zero-width bare select. Real field markup, a minimum width, and
-            an explicit empty option — an empty select must LOOK empty, not collapsed. */}
-        <div className="mrs-field" style={{ minWidth: 280 }}>
-          <label className="mrs-label" htmlFor="util-policy">{t(S.policyNo)}</label>
-          <select
-            className="mrs-control"
-            id="util-policy"
-            value={scopeId}
-            onChange={(e) => {
-              setScope("policies");
-              setScopeId(e.target.value);
-            }}
-          >
-            {policies.length === 0 ? <option value="">—</option> : null}
-            {policies.map((p) => (
-              <option key={p.policyId} value={p.policyId}>
-                {p.policyNo}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* QA P1-11 fixed the label running into a zero-width bare select by hand-building the field markup
+            around it. `ComboboxField` IS that markup, so the wrapper goes and the width stays.
+            Searchable, and this is the case the audit was loudest about: the list is every policy on the
+            book, and first-letter typeahead over policy numbers means arrowing to find one. The empty
+            `<option>` that had to exist so an empty control looked empty is now a placeholder — "nothing
+            chosen" stops being a selectable row reading "—". */}
+        <ComboboxField
+          id="util-policy"
+          label={t(S.policyNo)}
+          style={{ minWidth: 280 }}
+          placeholder="—"
+          value={scopeId || null}
+          onChange={(v) => {
+            setScope("policies");
+            setScopeId(v);
+          }}
+          options={policies.map((p) => ({ value: p.policyId, label: p.policyNo }))}
+        />
         <Button leadingIcon={<Icon name="download" />} variant="secondary" onClick={exportCsv} disabled={!scopeId}>
           {t(S.export)}
         </Button>
@@ -579,17 +576,15 @@ export function GroupsScreen({ api = httpPolicyApi }: { api?: PolicyApi }) {
       <PageHeader title={t(S.groupsTitle)} />
       {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
       <Card style={{ padding: "var(--sp4)" }}>
-        <div className="mrs-field" style={{ maxWidth: 320 }}>
-          <label className="mrs-label" htmlFor="grp-policy">{t(S.policyNo)}</label>
-          <select className="mrs-control" id="grp-policy" value={policyId ?? ""} onChange={(e) => setPolicyId(e.target.value)}>
-            {policies.length === 0 ? <option value="">—</option> : null}
-            {policies.map((p) => (
-              <option key={p.policyId} value={p.policyId}>
-                {p.policyNo}
-              </option>
-            ))}
-          </select>
-        </div>
+        <ComboboxField
+          id="grp-policy"
+          label={t(S.policyNo)}
+          style={{ maxWidth: 320 }}
+          placeholder="—"
+          value={policyId}
+          onChange={setPolicyId}
+          options={policies.map((p) => ({ value: p.policyId, label: p.policyNo }))}
+        />
       </Card>
       <Card>
         <DataTable

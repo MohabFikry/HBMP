@@ -1113,9 +1113,24 @@ nav.mrs-rail {
 .cc-workspace > .mrs-card { padding: var(--sp5); }
 .cc-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .cc-callbar { display: flex; align-items: center; gap: var(--sp4); flex-wrap: wrap; min-block-size: 44px; }
-.cc-callbar select, .cc-wrapup select, .cc-cancel select, .cc-callmeta select {
-  min-block-size: 44px; padding: 0 var(--sp3); border: 1px solid var(--border);
-  border-radius: var(--r-sm); background: var(--surface-1); color: var(--text-1);
+/*
+ * The call centre's pickers size to their content, not to the bar.
+ *
+ * This rule used to restate `.mrs-control` — border, background, radius, height — for four bars' worth of
+ * native `<select>` elements, at `--r-sm` rather than the field radius and with no focus style of its own.
+ * There are no native selects here any more: they are design-system comboboxes, which bring all of that with
+ * them. What is left is the one thing the bars actually need, and it is a LAYOUT concern rather than a skin.
+ *
+ * `.mrs-combo` is `inline-size: 100%`, which is right for a field in a form grid and wrong for a control in a
+ * horizontal bar — as a flex item it would resolve against the bar and take every pixel the buttons beside it
+ * were not using. Same correction, same reason, as `.branch-select` in the app bar.
+ */
+.cc-callbar .mrs-combo,
+.cc-wrapup .mrs-combo,
+.cc-cancel .mrs-combo,
+.cc-callmeta .mrs-combo {
+  inline-size: auto;
+  min-inline-size: 220px;
 }
 .cc-muted { color: var(--text-2); }
 .cc-locked { display: flex; flex-direction: column; gap: var(--sp3); }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type SetStateAction } from "react";
 import { z } from "zod";
-import { Button, Icon, InlineAlert, Modal, useToast } from "@mersal/design-system";
+import { Button, Combobox, Icon, InlineAlert, Modal, useToast } from "@mersal/design-system";
 import type {
   CheckKind, CheckState, ClinicalSeverity, Finding, LineAcknowledgement, Localized,
   PrescriptionDraftLine, ValidationResult,
@@ -821,23 +821,17 @@ export function PrescribingWorkspace({
         <div className="rx-chronic-fields">
           <label className="rx-field">
             <span className="rx-field-label">{t(S.refillFrequency)}</span>
-            <select
-              className="rx-field-input"
-              value={refillFrequencyCode ?? ""}
+            <Combobox
+              value={refillFrequencyCode}
               disabled={busy}
-              onChange={(e) => {
-                // Read the value BEFORE the updater. `setDraft`'s callback runs after React has released
-                // the synthetic event, so `e.currentTarget` is null by then — which throws inside a state
-                // updater and takes the whole composer down with it.
-                const code = e.currentTarget.value || null;
-                setDraft((d) => ({ ...d, refillFrequencyCode: code }));
+              placeholder={t(S.chooseFrequency)}
+              onChange={(next) => {
+                // The event-timing note that used to live here is gone with the native select: `onChange`
+                // hands over the VALUE, so there is no synthetic event to read after React has released it.
+                setDraft((d) => ({ ...d, refillFrequencyCode: next || null }));
               }}
-            >
-              <option value="">{t(S.chooseFrequency)}</option>
-              {frequencies.map((f) => (
-                <option key={f.code} value={f.code}>{t(f.name)}</option>
-              ))}
-            </select>
+              options={frequencies.map((f) => ({ value: f.code, label: t(f.name), keywords: f.code }))}
+            />
           </label>
           {/*
             31.1 — the treatment length is READ from the lines, not asked for again. One fact, one field:
