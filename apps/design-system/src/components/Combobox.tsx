@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { cx } from "../lib/cx";
 import { Icon } from "./Icon";
+import { PopupPortal, useAnchoredPopup } from "./Popup";
 
 export interface ComboboxOption {
   value: string;
@@ -110,7 +111,10 @@ export function Combobox({
     // pointerdown, not click: a drag that starts inside and ends outside must not close, and pointerdown
     // fires before the browser moves focus.
     function onPointerDown(e: PointerEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) close();
+      const t = e.target as Node;
+      // BOTH refs. The list is portalled to <body>, so it is no longer inside `rootRef` — checking only that
+      // one would treat every click on an option as an outside click and close the popup before it commits.
+      if (!rootRef.current?.contains(t) && !listRef.current?.contains(t)) close();
     }
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
@@ -162,6 +166,8 @@ export function Combobox({
     }
   }
 
+  const popup = useAnchoredPopup(rootRef, listRef, open);
+
   return (
     <div ref={rootRef} className={cx("mrs-combo", className)}>
       <div className="mrs-combo-control">
@@ -199,9 +205,16 @@ export function Combobox({
         <Icon name="chevron" className="mrs-combo-chevron" aria-hidden />
       </div>
 
-      {/* Rendered only while open, so the closed control contributes nothing to the a11y tree or hit-testing. */}
+      {/*
+        Rendered only while open, so the closed control contributes nothing to the a11y tree or hit-testing,
+        and PORTALLED out of this control so no scrolling ancestor can clip it — see `Popup.tsx`. The input
+        keeps focus throughout, so moving the list out of the control changes nothing about the keyboard
+        contract: `aria-activedescendant` and `aria-controls` reach across the portal.
+      */}
       {open && (
-        <ul ref={listRef} id={listId} role="listbox" className="mrs-combo-list mrs-scroll"
+        <PopupPortal>
+        <ul ref={listRef} id={listId} role="listbox" className="mrs-combo-list mrs-popup mrs-scroll"
+            data-flipped={popup.flipped || undefined} style={popup.style}
             aria-label={aria["aria-label"]} aria-labelledby={aria["aria-labelledby"]}>
           {matches.length === 0 && (
             // A silent empty popup reads as a broken control. Not an option, so it is never selectable.
@@ -227,6 +240,7 @@ export function Combobox({
             </li>
           ))}
         </ul>
+        </PopupPortal>
       )}
     </div>
   );

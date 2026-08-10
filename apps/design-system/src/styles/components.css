@@ -1427,13 +1427,30 @@ nav.mrs-rail {
   }
 }
 
-.mrs-select-list {
-  position: absolute;
-  z-index: 40;
-  inset-block-start: calc(100% + var(--sp1));
-  inset-inline-start: 0;
-  min-inline-size: 100%;
-  max-block-size: var(--scroll-picker);
+/*
+ * The surface shared by every anchored popup — the select's list and the combobox's.
+ *
+ * <b>What is NOT here.</b> `position`, `top`/`bottom`, `left`/`right` and the inline size arrive as inline
+ * styles from `useAnchoredPopup`, because they are measurements of where the control happens to be on screen
+ * rather than design decisions. Everything a designer would want to change is in this rule.
+ *
+ * The two lists used to carry fourteen identical declarations each. They are one rule now for the ordinary
+ * reason, and for one specific one: the popup is positioned by JS, and two copies of a positioning contract
+ * is two places for the anchoring to drift apart.
+ *
+ * `pointer-events: auto` is NOT here either, and that one is worth knowing about: Radix's modal dialog sets
+ * `pointer-events: none` on `<body>` while it is open, and a popup portalled to the body inherits it and
+ * swallows every click on an option. It is declared inline by `useAnchoredPopup` so the guarantee cannot be
+ * separated from the portalling that needs it.
+ *
+ * `--popup-avail` is the room actually left between the control and the edge of the viewport, published by
+ * the measurement. `min()` means the design token still decides the popup's normal height and the
+ * measurement can only ever make it shorter — the alternative, writing `max-block-size` from JS, would have
+ * put a layout constant in a component file where nobody would look for it.
+ */
+.mrs-popup {
+  z-index: 85;                /* above `.mrs-overlay` (80), below `.mrs-toastwrap` (90) */
+  max-block-size: min(var(--scroll-picker), var(--popup-avail, 100dvh));
   overflow-y: auto;
   margin: 0;
   padding: var(--sp1);
@@ -1442,6 +1459,10 @@ nav.mrs-rail {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   box-shadow: var(--elev-2);
+}
+/* See `.mrs-combo-list` — surface and stacking come from `.mrs-popup`. */
+.mrs-select-list {
+  min-inline-size: 100%;
 }
 .mrs-select-option {
   display: flex;
@@ -1523,21 +1544,10 @@ nav.mrs-rail {
 .mrs-combo-input[aria-expanded="true"] ~ .mrs-combo-chevron { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { .mrs-combo-chevron { transition: none; } }
 
+/* Surface, height and stacking come from `.mrs-popup`, which this element also carries. Kept as a hook so
+   the option rules below have something to hang off and so a screen can target one flavour of popup. */
 .mrs-combo-list {
-  position: absolute;
-  z-index: 40;
-  inset-block-start: calc(100% + var(--sp1));
-  inset-inline-start: 0;
   min-inline-size: 100%;
-  max-block-size: var(--scroll-picker);
-  overflow-y: auto;
-  margin: 0;
-  padding: var(--sp1);
-  list-style: none;
-  background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  box-shadow: var(--elev-2);
 }
 .mrs-combo-option {
   display: flex;

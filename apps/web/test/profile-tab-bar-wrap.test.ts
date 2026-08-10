@@ -120,9 +120,14 @@ describe("the profile pill tab bar wraps safely", () => {
   it("keeps the back-to-top button above in-card table headers and below every popup", () => {
     // Inherited from the sticky bar this replaced, because the constraint is the same one: the button floats
     // over the pane, the worklist tables INSIDE the profile's section cards pin their own `thead th` at 5
-    // (and `.mrs-stickyend` at 6), and popup layers (select and combo lists at 40, overlays above) must stay
-    // over anything floating. A table header sliding over the button, or the button covering an open
-    // dropdown, are the two failures — so this asserts a SLOT, not a floor.
+    // (and `.mrs-stickyend` at 6), and the popup layer must stay over anything floating. A table header
+    // sliding over the button, or the button covering an open dropdown, are the two failures — so this
+    // asserts a SLOT, not a floor.
+    //
+    // The popup layer is `.mrs-popup`, the shared surface the select's and the combobox's lists both carry.
+    // It used to be a z-index declared twice, once on each list; the lists are portalled to <body> now and
+    // their stacking moved to the one rule. Read out of the sheet rather than hard-coded, so this keeps
+    // holding if the layer moves again.
     const zOf = (r: Rule): number | null => {
       const m = /z-index:\s*(-?\d+)/.exec(r.body);
       return m ? Number(m[1]) : null;
@@ -140,7 +145,7 @@ describe("the profile pill tab bar wraps safely", () => {
       .map(zOf)
       .filter((z): z is number => z !== null);
     const popups = components
-      .filter((r) => /\.mrs-(select|combo)-list/.test(r.selector))
+      .filter((r) => /\.mrs-popup\b/.test(r.selector))
       .map(zOf)
       .filter((z): z is number => z !== null);
 

@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { cx } from "../lib/cx";
 import { Icon } from "./Icon";
+import { PopupPortal, useAnchoredPopup } from "./Popup";
 
 export interface SelectOption {
   value: string;
@@ -80,7 +81,10 @@ export function Select({
     // pointerdown, not click: a click that starts inside and ends outside should not close, and pointerdown
     // fires before the browser moves focus.
     function onPointerDown(e: PointerEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      // BOTH refs. The list is portalled to <body>, so it is no longer inside `rootRef` — checking only that
+      // one would treat every click on an option as an outside click and close the popup before it commits.
+      if (!rootRef.current?.contains(t) && !listRef.current?.contains(t)) setOpen(false);
     }
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
@@ -149,6 +153,7 @@ export function Select({
   }
 
   const selected = selectedIndex < 0 ? null : options[selectedIndex];
+  const popup = useAnchoredPopup(rootRef, listRef, open);
 
   return (
     <div ref={rootRef} className={cx("mrs-select", `mrs-select--${shape}`, className)}>
@@ -175,13 +180,21 @@ export function Select({
         <Icon name="chevron" className="mrs-select-chevron" aria-hidden />
       </button>
 
-      {/* Rendered only while open so the closed control contributes nothing to the a11y tree or hit-testing. */}
+      {/*
+        Rendered only while open so the closed control contributes nothing to the a11y tree or hit-testing,
+        and PORTALLED out of this control so no scrolling ancestor can clip it — see `Popup.tsx` for why a
+        modal's `overflow: auto` cut seven of eight options off the bottom of this list. `aria-controls` on
+        the trigger is what keeps the two halves associated across the portal.
+      */}
       {open && (
+        <PopupPortal>
         <ul
           ref={listRef}
           id={listId}
           role="listbox"
-          className="mrs-select-list mrs-scroll"
+          className="mrs-select-list mrs-popup mrs-scroll"
+          data-flipped={popup.flipped || undefined}
+          style={popup.style}
           aria-label={aria["aria-label"]}
           aria-labelledby={aria["aria-labelledby"]}
         >
@@ -206,6 +219,7 @@ export function Select({
             </li>
           ))}
         </ul>
+        </PopupPortal>
       )}
     </div>
   );

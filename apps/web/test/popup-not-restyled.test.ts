@@ -6,7 +6,26 @@ import { resolve } from "node:path";
  * A list's own row rules must not reach inside a popup that opens within one of its rows.
  *
  * ============================================================================================================
- * WHY THIS EXISTS
+ * READ THIS FIRST — THE RUNTIME EXPOSURE IS GONE, AND THE RULE IS KEPT ANYWAY
+ * ============================================================================================================
+ * `Select` and `Combobox` now PORTAL their option lists to `<body>` (see `Popup.tsx`), so a popup is no
+ * longer a DOM descendant of the row it was opened from and cannot inherit that row's layout. The bug
+ * described below can no longer happen through those two components.
+ *
+ * This guard stays, for two reasons, and neither is sentiment:
+ *
+ * <ul>
+ *   <li>The portalling was done to escape CLIPPING by scrolling ancestors, not to fix inheritance — that was
+ *       a side effect. A future change that anchors a popup differently, or a third control that renders a
+ *       listbox inline, brings the exposure straight back, and it would come back silently.</li>
+ *   <li>What it actually asserts is narrower and still true: a rule written for one list's rows should be
+ *       scoped to them. That is worth holding whether or not a popup is the thing it currently leaks onto.</li>
+ * </ul>
+ *
+ * So treat a failure here as "an unscoped row rule was written", not as "a dropdown is broken".
+ *
+ * ============================================================================================================
+ * WHY IT WAS WRITTEN
  * ============================================================================================================
  * The rank picker on the "Add a diagnosis" modal opened a list of two options and BOTH RENDERED BLANK. The
  * cause was one space:
