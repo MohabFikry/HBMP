@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Icon, InlineAlert, InputField, Modal, Select, useToast } from "@mersal/design-system";
+import { Button, Combobox, Icon, InlineAlert, InputField, Modal, useToast } from "@mersal/design-system";
 import type {
   AllergenOption, AllergyRecord, AllergySeverity, BloodGroup, Localized,
 } from "@mersal/contracts";
@@ -228,7 +228,7 @@ function BloodGroupControl({
     >
       <div className="stack-3">
         {error && <InlineAlert tone="bad">{t(error)}</InlineAlert>}
-        <Select
+        <Combobox
           aria-label={t(S.bloodGroup)}
           value={choice}
           onChange={setChoice}
@@ -345,7 +345,7 @@ function AddAllergyControl({ beneficiaryId, onSaved }: { beneficiaryId: string; 
 
         <label className="mc-field">
           <span className="mc-field-label">{t(S.allergen)}</span>
-          <Select
+          <Combobox
             aria-label={t(S.allergen)}
             value={allergenId}
             onChange={setAllergenId}
@@ -357,7 +357,7 @@ function AddAllergyControl({ beneficiaryId, onSaved }: { beneficiaryId: string; 
 
         <label className="mc-field">
           <span className="mc-field-label">{t(S.severity)}</span>
-          <Select
+          <Combobox
             aria-label={t(S.severity)}
             value={severity}
             onChange={(v) => setSeverity(v as AllergySeverity)}

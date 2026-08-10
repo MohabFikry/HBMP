@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, InlineAlert, Modal, Select, StatusChip, TextareaField } from "@mersal/design-system";
+import { Button, ComboboxField, InlineAlert, Modal, StatusChip, TextareaField } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import { useLoc } from "./_shared";
 import { useFormat } from "../i18n/useFormat";
@@ -212,10 +212,12 @@ export function AmendLineDialog(props: AmendLineDialogProps) {
           </section>
         )}
 
-        <label htmlFor="amend-reason">{t(S.reason)}</label>
-        <Select
+        {/* The reason list is a server catalogue, so it is searchable. The bare <label> is gone with it:
+            `ComboboxField` renders the label, binds it to the input, and drops the duplicate `aria-label`
+            that was naming the control a second time with the same words. */}
+        <ComboboxField
           id="amend-reason"
-          aria-label={t(S.reason)}
+          label={t(S.reason)}
           placeholder={t(S.reasonPlaceholder)}
           options={options}
           value={reasonCode === "" ? null : reasonCode}

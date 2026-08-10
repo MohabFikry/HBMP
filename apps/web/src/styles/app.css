@@ -1963,7 +1963,17 @@ nav.mrs-rail {
   flex: none;
   color: var(--accent);
 }
+/*
+ * The switcher sizes to its content with a floor, not to its container.
+ *
+ * `Select` was `display: inline-flex`, so it shrank to fit and this rule only had to set a floor. `Combobox`
+ * is a form field — `inline-size: 100%` is right for one sitting in a grid — and as a flex item in the app
+ * bar that resolves against the bar, so the branch picker would have taken every pixel the title and the
+ * account controls were not using. `inline-size: auto` puts it back on flex-basis content sizing; the floor
+ * below is unchanged and is what keeps a one-word branch name from collapsing to a stub.
+ */
 .branch-select {
+  inline-size: auto;
   min-inline-size: 208px;
 }
 .branch-switcher--member > span:not(.sr-only) {

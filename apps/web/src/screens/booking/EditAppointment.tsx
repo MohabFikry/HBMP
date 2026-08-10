@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Icon, InlineAlert, Modal, Select, TextareaField } from "@mersal/design-system";
+import { Button, ComboboxField, Icon, InlineAlert, Modal, TextareaField } from "@mersal/design-system";
 import type {
   AppointmentDay, AppointmentRow, BookableSlot, DoctorAvailability, Localized, Practitioner,
 } from "@mersal/contracts";
@@ -222,19 +222,18 @@ export function EditAppointmentButton({
                 the desk cannot produce an appointment whose named doctor and whose session disagree, which
                 is exactly the row the server used to be able to write.
               */}
-              <div className="book-field">
-                <span className="mrs-label" id={`ea-doc-${row.id}`}>{t(S.doctor)}</span>
-                <Select
-                  aria-labelledby={`ea-doc-${row.id}`}
-                  value={doctorId}
-                  onChange={(next) => { setDoctorId(next); setSlotId(null); }}
-                  options={[
-                    { value: "", label: t(S.doctorAny) },
-                    ...doctors.map((d) => ({ value: d.id, label: t(d.name) })),
-                  ]}
-                />
-                <span className="mrs-help">{t(S.doctorHelp)}</span>
-              </div>
+              <ComboboxField
+                className="book-field"
+                id={`ea-doc-${row.id}`}
+                label={t(S.doctor)}
+                help={t(S.doctorHelp)}
+                value={doctorId}
+                onChange={(next) => { setDoctorId(next); setSlotId(null); }}
+                options={[
+                  { value: "", label: t(S.doctorAny) },
+                  ...doctors.map((d) => ({ value: d.id, label: t(d.name) })),
+                ]}
+              />
               {doctorId && slots.length === 0 && (
                 <InlineAlert tone="info">{t(S.doctorNoSlots)}</InlineAlert>
               )}

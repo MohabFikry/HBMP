@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Card, Icon, InlineAlert, Select, Tabs, useTheme } from "@mersal/design-system";
+import { Button, Card, Combobox, Icon, InlineAlert, Tabs, useTheme } from "@mersal/design-system";
 import type { IconName, TabItem } from "@mersal/design-system";
 import type {
   CallHistoryRow,
@@ -908,13 +908,16 @@ function CallHistoryView({ data, beneficiaryId }: { data: CallHistorySection; be
     <div className="call-history">
       <div className="call-history-toolbar">
         {/*
-          The design-system Select, not a native <select>. A native one cannot style its own option list —
+          The design-system Combobox, not a native <select>. A native one cannot style its own option list —
           the popup is drawn by the OS — so it arrived system-blue and square-cornered inside a rounded
           Mersal card, with a default border no other control on the profile has. Same reason the branch
-          switcher in the app bar was converted; the keyboard contract (arrows, Home/End, typeahead, Escape)
-          is unchanged.
+          switcher in the app bar was converted.
+
+          A bare Combobox rather than a ComboboxField: this is a toolbar filter sitting beside a Copy-all
+          button, not a field in a form, so it carries its name in `aria-label` and no visible label — the
+          same treatment the toolbar search has.
         */}
-        <Select
+        <Combobox
           aria-label={t(STR.filterByDirection)}
           value={direction}
           onChange={(v) => setDirection(v as typeof direction)}

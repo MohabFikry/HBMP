@@ -131,7 +131,7 @@ describe("the hint reaches the closed control only when asked", () => {
   it("shows the hint in the list either way — that is what makes the code searchable", async () => {
     renderDS(<Harness />);
     await userEvent.click(input());
-    expect(within(screen.getByRole("listbox")).getByText("SY")).toBeInTheDocument();
+    expect(within(screen.getByRole("listbox")).getByText("· SY")).toBeInTheDocument();
   });
 });
 
@@ -201,7 +201,7 @@ describe("ComboboxField is a first-class field, not a Combobox with a label stuc
     renderDS(<FieldHarness />);
     await userEvent.type(screen.getByRole("combobox", { name: "Country" }), "south");
     const options = within(screen.getByRole("listbox")).getAllByRole("option");
-    expect(options.map((o) => o.textContent)).toEqual(["South SudanSS"]);
+    expect(options.map((o) => o.textContent)).toEqual(["South Sudan· SS"]);
   });
 });
 

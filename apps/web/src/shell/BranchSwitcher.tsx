@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Icon, Select, useTheme } from "@mersal/design-system";
-import type { SelectOption } from "@mersal/design-system";
+import { Combobox, Icon, useTheme } from "@mersal/design-system";
+import type { ComboboxOption } from "@mersal/design-system";
 import { L } from "../i18n/strings";
 
 /** A permitted branch for the switcher. `isHome` marks the user's home branch (design 37 §2.3). */
@@ -28,9 +28,14 @@ export interface BranchSwitcherProps {
  * permitted branches (Home marked); selecting one changes the active branch and announces it via aria-live.
  * MemberScoped roles see an "All branches" indicator plus an OPTIONAL filter — never a restriction.
  *
- * Built on the design-system Select rather than a native <select>: the OS draws a native option list itself,
- * so it came up system-blue and square-cornered against a teal app bar and no CSS could reach it. Select keeps
- * the same keyboard contract (arrows, Home/End, typeahead, Escape) with the list under our own tokens.
+ * Built on the design-system Combobox rather than a native <select>: the OS draws a native option list
+ * itself, so it came up system-blue and square-cornered against a teal app bar and no CSS could reach it.
+ *
+ * It was a `Select` — the select-only pattern, first-letter typeahead — until the scrolls/dropdowns audit.
+ * A clinic network is not a closed vocabulary of five: a deployment with thirty branches gave an operator
+ * pressing "M" a walk through every M in the list, and this control sits in the app bar of every portal, so
+ * it is the one every user meets. `hintWhenClosed` keeps "Maadi · Home" in the closed control, which is what
+ * `Select` rendered and what tells someone which of the branches is theirs.
  */
 export function BranchSwitcher({ memberScoped, branches, activeBranchId, onSwitch, onFilter }: BranchSwitcherProps) {
   const { lang } = useTheme();
@@ -39,7 +44,7 @@ export function BranchSwitcher({ memberScoped, branches, activeBranchId, onSwitc
 
   // "Home" is a qualifier on the name, not part of it — it goes in `hint` so it renders muted instead of
   // competing with the branch name at the same weight.
-  const toOption = (b: BranchOption): SelectOption => ({
+  const toOption = (b: BranchOption): ComboboxOption => ({
     value: b.id,
     label: b.name,
     hint: b.isHome ? t(L.homeBranch) : undefined,
@@ -49,9 +54,10 @@ export function BranchSwitcher({ memberScoped, branches, activeBranchId, onSwitc
     return (
       <div className="branch-switcher branch-switcher--member">
         {onFilter && branches.length > 0 ? (
-          <Select
+          <Combobox
             className="branch-select"
             shape="pill"
+            hintWhenClosed
             aria-label={t(L.branch)}
             leadingIcon={<Icon name="branch" aria-hidden />}
             placeholder={t(L.allBranches)}
@@ -73,9 +79,10 @@ export function BranchSwitcher({ memberScoped, branches, activeBranchId, onSwitc
     <div className="branch-switcher">
       {/* The icon sits inside the control and carries the meaning; the accessible name is on the combobox, so
           "Active branch" no longer spends a third of the app bar restating what the control already shows. */}
-      <Select
+      <Combobox
         className="branch-select"
         shape="pill"
+        hintWhenClosed
         aria-label={t(L.activeBranch)}
         leadingIcon={<Icon name="branch" aria-hidden />}
         value={activeBranchId}

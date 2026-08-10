@@ -126,7 +126,13 @@ describe("30.6 — amend/cancel dialog", () => {
       </AppProviders>,
     );
 
-    expect(screen.getByText(/choose a reason/i)).toBeInTheDocument();
+    // The reason picker is a searchable Combobox now, so "nothing chosen" is an EMPTY control showing its
+    // placeholder attribute — where a Select rendered the placeholder as text inside its trigger. Asserting
+    // the empty value is the stronger form anyway: the old check would have passed on a control that
+    // displayed the prompt while still holding the previous line's code underneath.
+    const reason = screen.getByRole("combobox", { name: /reason/i });
+    expect(reason).toHaveValue("");
+    expect(reason).toHaveAttribute("placeholder", expect.stringMatching(/choose a reason/i));
   });
 
   it("is axe-clean in English and in Arabic RTL", async () => {

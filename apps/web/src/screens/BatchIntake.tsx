@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Card, DataTable, Icon, InlineAlert, KpiList, Select, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, ComboboxField, DataTable, Icon, InlineAlert, KpiList, StatusChip, useTheme } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type {
   BulkCommitView,
@@ -242,17 +242,30 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
   const errors = report?.errors ?? [];
   const totalErrors = report?.totalErrors ?? 0;
 
+  // LOCALIZED labels, and `keywords` so the code is searchable without being read out as the answer.
+  //
+  // These three read `nameEn` unconditionally until the scrolls/dropdowns audit — an Arabic operator got an
+  // English plan list on the batch-enrolment screen, with `nameAr` sitting unused on all three schemas. It
+  // had to be fixed WITH the conversion rather than after it: the combobox filters on `label`, so a
+  // searchable list of English-only labels is a list an Arabic operator cannot search either.
   const planOptions = useMemo(
-    () => reference.plans.map((p) => ({ value: p.planId, label: p.nameEn, hint: p.planCode })),
-    [reference.plans],
+    () => reference.plans.map((p) => ({
+      value: p.planId, label: t({ en: p.nameEn, ar: p.nameAr }), hint: p.planCode, keywords: p.planCode,
+    })),
+    [reference.plans, t],
   );
   const tierOptions = useMemo(
-    () => reference.tiers.map((x) => ({ value: x.networkTierId, label: x.nameEn, hint: x.tierCode })),
-    [reference.tiers],
+    () => reference.tiers.map((x) => ({
+      value: x.networkTierId, label: t({ en: x.nameEn, ar: x.nameAr }), hint: x.tierCode, keywords: x.tierCode,
+    })),
+    [reference.tiers, t],
   );
   const branchOptions = useMemo(
-    () => reference.branches.map((b) => ({ value: b.branchId, label: b.nameEn })),
-    [reference.branches],
+    // `nameAr` is optional on a branch reference, so English is the stated fallback rather than a blank name.
+    () => reference.branches.map((b) => ({
+      value: b.branchId, label: t({ en: b.nameEn, ar: b.nameAr ?? b.nameEn }),
+    })),
+    [reference.branches, t],
   );
 
   return (
@@ -282,27 +295,18 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
           <legend>{t(S.defaults)}</legend>
           <p className="ben-section-hint">{t(S.defaultsHint)}</p>
           <div className="ben-batch-defaults">
-            <div className="mrs-field">
-              <label className="mrs-label" id="batch-plan-label" htmlFor="batch-plan">{t(S.plan)}</label>
-              <Select
-                id="batch-plan" aria-labelledby="batch-plan-label" options={planOptions}
-                value={planId} onChange={setPlanId} placeholder={t(S.choose)} disabled={reference.loading}
-              />
-            </div>
-            <div className="mrs-field">
-              <label className="mrs-label" id="batch-tier-label" htmlFor="batch-tier">{t(S.networkTier)}</label>
-              <Select
-                id="batch-tier" aria-labelledby="batch-tier-label" options={tierOptions}
-                value={tierId} onChange={setTierId} placeholder={t(S.choose)} disabled={reference.loading}
-              />
-            </div>
-            <div className="mrs-field">
-              <label className="mrs-label" id="batch-branch-label" htmlFor="batch-branch">{t(S.defaultBranch)}</label>
-              <Select
-                id="batch-branch" aria-labelledby="batch-branch-label" options={branchOptions}
-                value={branchId} onChange={setBranchId} placeholder={t(S.choose)}
-              />
-            </div>
+            <ComboboxField
+              id="batch-plan" label={t(S.plan)} options={planOptions} hintWhenClosed
+              value={planId} onChange={setPlanId} placeholder={t(S.choose)} disabled={reference.loading}
+            />
+            <ComboboxField
+              id="batch-tier" label={t(S.networkTier)} options={tierOptions} hintWhenClosed
+              value={tierId} onChange={setTierId} placeholder={t(S.choose)} disabled={reference.loading}
+            />
+            <ComboboxField
+              id="batch-branch" label={t(S.defaultBranch)} options={branchOptions}
+              value={branchId} onChange={setBranchId} placeholder={t(S.choose)}
+            />
           </div>
         </fieldset>
 

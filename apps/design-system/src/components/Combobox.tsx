@@ -283,7 +283,14 @@ export function Combobox({
               <Icon name="ok" className="mrs-combo-check" aria-hidden />
               {o.leading && <span className="mrs-combo-leading">{o.leading}</span>}
               <span className="mrs-combo-label">{o.label}</span>
-              {o.hint && <span className="mrs-combo-hint">{o.hint}</span>}
+              {/* The separator is DOM text, not a `::before`, for two reasons: it is what `Select` renders,
+                  so a converted screen's list reads the same as the one it replaced; and it is part of the
+                  option's accessible name, which CSS-generated content is not reliably part of. It also has
+                  to agree with the closed control, which joins label and hint with the same " · " because an
+                  <input> cannot hold two styled spans. The hint stays a SIBLING of the label rather than
+                  moving inside it (which is how `Select` does it) so a long label ellipsises without taking
+                  the qualifier with it. */}
+              {o.hint && <span className="mrs-combo-hint">· {o.hint}</span>}
             </li>
           ))}
         </ul>
