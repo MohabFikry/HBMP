@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Card, DataTable, InlineAlert, SegmentedControl, StatusChip } from "@mersal/design-system";
+import { Card, DataTable, DataTableView, InlineAlert, SegmentedControl, StatusChip, useTableQuery } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { ApprovalItem, AuthorizationItem, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -23,6 +23,9 @@ const S = {
   empty: { en: "No authorizations to show.", ar: "لا توجد تفويضات لعرضها." },
 
   authNo: { en: "Authorization", ar: "التفويض" },
+  search: { en: "Search", ar: "بحث" },
+  searchHint: { en: "Authorization, member token or reference", ar: "التفويض أو رمز العضو أو المرجع" },
+  noMatches: { en: "No authorizations match your search.", ar: "لا توجد تفويضات مطابقة لبحثك." },
   patient: { en: "Patient", ar: "المريض" },
   against: { en: "Issued against", ar: "صادر بناءً على" },
   source: { en: "Origin", ar: "المصدر" },
@@ -105,6 +108,25 @@ export function ApprovalsRegister() {
     { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
   ];
 
+  /*
+    A register of every authorization ever raised, and it had no way to find one. NO filter group here: the
+    segmented control above already asks the only categorical question this register has — fulfilment or
+    review — and it asks it of the SERVER (`approvalWorklist(filter)` refetches).
+
+    Read outside AsyncSection's render prop: a hook in there would be conditional on the load finishing.
+  */
+  const query = useTableQuery<ApprovalItem>({
+    rows: list.data ?? [],
+    columns: cols,
+    // The authorization id, the member token, and the reference of the order or prescription it was raised
+    // against — a register is searched by whichever of the three the caller happens to be holding.
+    searchText: (r) => [r.id, r.patient.token, r.service.code, r.itemReference].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.searchHint),
+    pageSize: 25,
+    persistKey: "approvals-register",
+  });
+
   return (
     <>
       <PageHeader title={t(S.title)} />
@@ -123,15 +145,17 @@ export function ApprovalsRegister() {
 
       <Card as="section" style={{ padding: "var(--sp3)", marginBlockStart: "var(--sp4)" }}>
         <AsyncSection state={list} isEmpty={(d) => d.length === 0} emptyLabel={S.empty}>
-          {(rows) => (
-            <DataTable
+          {() => (
+            <DataTableView
+              query={query}
               columns={cols}
-              rows={rows}
               rowKey={(r) => r.id}
               caption={t(S.title)}
               interactive
               selectedKey={selected?.id}
               onSelect={(r) => setSelected(r)}
+              emptyLabel={t(S.empty)}
+              noMatchesLabel={t(S.noMatches)}
             />
           )}
         </AsyncSection>

@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useFormat } from "../i18n/useFormat";
-import { Button, Card, DataTable, SegmentedControl, StatusChip, useToast } from "@mersal/design-system";
-import type { Column } from "@mersal/design-system";
+import { Button, Card, DataTable, DataTableView, SegmentedControl, StatusChip, useTableQuery, useToast } from "@mersal/design-system";
+import type { Column, TableFilterSpec } from "@mersal/design-system";
 import type {
   ExportRequest,
   ExportResult,
@@ -22,6 +22,13 @@ const S = {
   utilTitle: { en: "Utilization", ar: "الاستخدام" },
   utilEmpty: { en: "No utilization for this period.", ar: "لا يوجد استخدام لهذه الفترة." },
   code: { en: "Service code", ar: "رمز الخدمة" },
+  search: { en: "Search", ar: "بحث" },
+  utilSearchHint: { en: "Service code, line or provider", ar: "رمز الخدمة أو البند أو مقدم الخدمة" },
+  setSearchHint: { en: "Settlement number or provider", ar: "رقم التسوية أو مقدم الخدمة" },
+  noMatches: {
+    en: "No rows match. Change the search or clear the filters.",
+    ar: "لا توجد صفوف مطابقة. عدّل البحث أو أزل عوامل التصفية.",
+  },
   line: { en: "Service line", ar: "بند الخدمة" },
   category: { en: "Category", ar: "الفئة" },
   provider: { en: "Provider", ar: "مقدّم الخدمة" },
@@ -79,6 +86,42 @@ export function FinanceUtilization() {
     { key: "delivered", header: t(S.delivered), cell: (r) => r.deliveredQty, numeric: true, sortable: true, sortValue: (r) => r.deliveredQty },
     { key: "spend", header: t(S.spend), cell: (r) => fmt.money(r.spend), numeric: true, sortable: true, sortValue: (r) => r.spend },
   ];
+  /*
+    A period's utilization by billing code. It grows with the period and had no search, so answering "what
+    did we spend on this code" meant scanning. The service LINE is the filter rather than the code: a
+    finance analyst groups by line and reads codes within it, and the vocabulary is derived from the rows
+    because the lines present depend on what was actually delivered.
+
+    Read outside AsyncSection's render prop: a hook in there would be conditional on the load finishing.
+  */
+  const rows = useMemo(() => state.data?.rows ?? [], [state.data]);
+  const filters: TableFilterSpec<UtilizationRow>[] = useMemo(() => {
+    const lines = [...new Map(rows.map((r) => [t(r.serviceLine), r.serviceLine])).entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]));
+    if (lines.length < 2) return [];
+    return [{
+      key: "line",
+      label: t(S.line),
+      options: lines.map(([label]) => ({ value: label, label })),
+      match: (r, value) => t(r.serviceLine) === value,
+    }];
+  }, [rows, t]);
+
+  const query = useTableQuery<UtilizationRow>({
+    rows,
+    columns: cols,
+    searchText: (r) => [r.serviceCode, t(r.serviceLine), t(r.coverageCategory), r.providerRef]
+      .filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.utilSearchHint),
+    filters,
+    pageSize: 25,
+    // Biggest spend first — this table is opened to find where the money went.
+    initialSortKey: "spend",
+    initialSortDir: "descending",
+    persistKey: "finance-utilization",
+  });
+
   return (
     <>
       <PageHeader title={t(S.utilTitle)} actions={state.data ? <span className="muted tnum">{state.data.from} → {state.data.to}</span> : undefined} />
@@ -86,7 +129,14 @@ export function FinanceUtilization() {
         <AsyncSection state={state} isEmpty={(d) => d.rows.length === 0} emptyLabel={S.utilEmpty}>
           {(d) => (
             <div className="stack" style={{ gap: "var(--sp3)" }}>
-              <DataTable columns={cols} rows={d.rows} rowKey={(r) => r.serviceCode + r.providerRef} caption={t(S.utilTitle)} />
+              <DataTableView
+                query={query}
+                columns={cols}
+                rowKey={(r) => r.serviceCode + r.providerRef}
+                caption={t(S.utilTitle)}
+                emptyLabel={t(S.utilEmpty)}
+                noMatchesLabel={t(S.noMatches)}
+              />
               <div className="result-head" style={{ paddingInline: "var(--sp2)" }}>
                 <strong>{t(S.totals)}</strong>
                 <span className="tnum">
@@ -126,15 +176,38 @@ export function FinanceSettlements() {
     },
   ];
 
+  /** Provider settlements accumulate every period. Searched by settlement number or provider — the two
+   *  things a finance clerk has in front of them when a provider queries a payment. */
+  const query = useTableQuery<Settlement>({
+    rows: state.data ?? [],
+    columns: cols,
+    searchText: (r) => [r.settlementNo, t(r.providerName), t(r.status.label)].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.setSearchHint),
+    pageSize: 25,
+    initialSortKey: "period",
+    initialSortDir: "descending",
+    persistKey: "finance-settlements",
+  });
+
   return (
     <>
       <PageHeader title={t(S.setTitle)} />
       <div className="split split-wide">
         <Card as="section" style={{ padding: "var(--sp3)" }}>
           <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.setEmpty}>
-            {(rows) => (
-              <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} caption={t(S.setTitle)} interactive
-                onSelect={(r) => setSelected(r.id)} selectedKey={selected} />
+            {() => (
+              <DataTableView
+                query={query}
+                columns={cols}
+                rowKey={(r) => r.id}
+                caption={t(S.setTitle)}
+                interactive
+                onSelect={(r) => setSelected(r.id)}
+                selectedKey={selected}
+                emptyLabel={t(S.setEmpty)}
+                noMatchesLabel={t(S.noMatches)}
+              />
             )}
           </AsyncSection>
         </Card>
