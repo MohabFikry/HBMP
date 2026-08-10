@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import { Button, Card, DataTable, Icon, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Button, Card, DataTable, DataTableView, Icon, InlineAlert, InputField, StatusChip, useTableQuery } from "@mersal/design-system";
+import type { Column } from "@mersal/design-system";
 import type { Localized } from "@mersal/contracts";
 import type { NetworkTierView, PolicyApi, TierAssignmentView, TierResolutionView } from "../api/policyApi";
 import { createHttpPolicyApi } from "../api/policyApi";
@@ -57,6 +58,9 @@ const S = {
   window: { en: "In force", ar: "سارٍ" },
   noAssignments: { en: "No assignments on this tier.", ar: "لا توجد إسنادات على هذه الشريحة." },
   revoke: { en: "Revoke", ar: "سحب" },
+  search: { en: "Search", ar: "بحث" },
+  assignmentSearchHint: { en: "Scope or reference", ar: "النطاق أو المرجع" },
+  noMatches: { en: "No assignments match your search.", ar: "لا توجد إسنادات مطابقة لبحثك." },
   resolve: { en: "Resolve tier at a date", ar: "تحديد الشريحة في تاريخ" },
   providerId: { en: "Provider", ar: "مقدم الخدمة" },
   locationId: { en: "Location (optional)", ar: "الموقع (اختياري)" },
@@ -124,6 +128,46 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
       .catch((e) => live && setError(writeErrorMessage(e).message));
     return () => { live = false; };
   }, [api, selected]);
+
+  /*
+    Hoisted out of the JSX because `useTableQuery` sorts by `column.sortValue` and therefore needs the same
+    array the table renders — one definition, not two that can drift apart.
+  */
+  const assignmentCols: Column<TierAssignmentView>[] = useMemo(() => [
+            { key: "scope", header: t(S.scope), cell: (r) => r.scope, sortable: true, sortValue: (r) => r.scope },
+            { key: "ref", header: t(S.scopeRef), cell: (r) => r.scopeRef.slice(0, 8) },
+            {
+              key: "window",
+              header: t(S.window),
+              cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`,
+            },
+            { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
+            {
+              key: "act",
+              header: "",
+              cell: (r) =>
+                mayWrite && r.status === "Active" ? (
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => setRevoking(r)}
+                  >
+                    {t(S.revoke)}
+                  </Button>
+                ) : null,
+            },
+  ], [t, fmt, mayWrite]);
+
+  /** A tier accumulates assignments as the network grows; searched by the reference a contract cites. */
+  const assignmentQuery = useTableQuery<TierAssignmentView>({
+    rows: assignments,
+    columns: assignmentCols,
+    searchText: (r) => [r.scope, r.scopeRef, r.status].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.assignmentSearchHint),
+    pageSize: 25,
+    persistKey: "tier-assignments",
+  });
 
   return (
     <div className="pol-screen">
@@ -194,35 +238,13 @@ export function NetworkTiers({ api = httpPolicyApi }: { api?: PolicyApi }) {
       {selected && (
         <Card>
           <h2 className="panel-h">{t(S.assignments)}</h2>
-          <DataTable
-            caption={t(S.assignments)}
-            rows={assignments}
+          <DataTableView
+            query={assignmentQuery}
             rowKey={(r) => r.assignmentId}
+            caption={t(S.assignments)}
             emptyLabel={t(S.noAssignments)}
-            columns={[
-              { key: "scope", header: t(S.scope), cell: (r) => r.scope, sortable: true, sortValue: (r) => r.scope },
-              { key: "ref", header: t(S.scopeRef), cell: (r) => r.scopeRef.slice(0, 8) },
-              {
-                key: "window",
-                header: t(S.window),
-                cell: (r) => `${fmt.date(r.effectiveFrom)} → ${r.effectiveTo ? fmt.date(r.effectiveTo) : "—"}`,
-              },
-              { key: "status", header: t(S.status), cell: (r) => <StatusChip kind={r.status === "Active" ? "ok" : "neu"} label={r.status} /> },
-              {
-                key: "act",
-                header: "",
-                cell: (r) =>
-                  mayWrite && r.status === "Active" ? (
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      onClick={() => setRevoking(r)}
-                    >
-                      {t(S.revoke)}
-                    </Button>
-                  ) : null,
-              },
-            ]}
+            noMatchesLabel={t(S.noMatches)}
+            columns={assignmentCols}
           />
         </Card>
       )}

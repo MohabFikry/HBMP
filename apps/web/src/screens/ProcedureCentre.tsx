@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Button, Card, DataTable, Icon, InlineAlert, InputField, StatusChip } from "@mersal/design-system";
+import { Button, Card, DataTable, DataTableView, Icon, InlineAlert, InputField, StatusChip, useTableQuery } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { Localized, ProcedureQueueItem } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -18,6 +18,9 @@ import { ApiError } from "../api/http";
  * centres' rows render correctly, which is how audit R3's network-wide pharmacy queue survived unnoticed.</p>
  */
 const S = {
+  queueSearch: { en: "Search", ar: "بحث" },
+  queueSearchHint: { en: "Order number or service code", ar: "رقم الطلب أو رمز الخدمة" },
+  noMatches: { en: "No orders match your search.", ar: "لا توجد طلبات مطابقة لبحثك." },
   queueTitle: { en: "Our queue", ar: "قائمة أعمالنا" },
   counterTitle: { en: "Verify & deliver", ar: "التحقق والتنفيذ" },
   queueEmpty: { en: "No work is currently routed to your centre.", ar: "لا توجد أعمال موجّهة إلى مركزكم حالياً." },
@@ -174,6 +177,17 @@ export default function ProcedureCentre({ mode = "queue" }: { mode?: "queue" | "
     },
   ];
 
+  /** The centre's own delivery queue — it grows through the day and had no way to find one order in it. */
+  const query = useTableQuery({
+    rows: queue.data ?? [],
+    columns,
+    searchText: (r) => [r.orderNo, r.code, r.description, r.procedureTypeCode].filter(Boolean).join(" "),
+    searchLabel: t(S.queueSearch),
+    searchPlaceholder: t(S.queueSearchHint),
+    pageSize: 25,
+    persistKey: "procedure-queue",
+  });
+
   if (mode === "counter") {
     return (
       <>
@@ -203,13 +217,23 @@ export default function ProcedureCentre({ mode = "queue" }: { mode?: "queue" | "
     );
   }
 
+
   return (
     <>
       <PageHeader title={t(S.queueTitle)} />
       {actionError && <InlineAlert tone="warn">{t(actionError)}</InlineAlert>}
       <Card>
         <AsyncSection state={queue} isEmpty={(rows) => rows.length === 0} emptyLabel={S.queueEmpty}>
-          {(rows) => <DataTable columns={columns} rows={rows} rowKey={(r) => r.orderId} caption={t(S.queueTitle)} />}
+          {() => (
+            <DataTableView
+              query={query}
+              columns={columns}
+              rowKey={(r) => r.orderId}
+              caption={t(S.queueTitle)}
+              emptyLabel={t(S.queueEmpty)}
+              noMatchesLabel={t(S.noMatches)}
+            />
+          )}
         </AsyncSection>
       </Card>
     </>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Card, DataTable, Icon, InlineAlert, KpiCard } from "@mersal/design-system";
+import { Button, Card, DataTableView, Icon, InlineAlert, KpiCard, useTableQuery } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import type { AppointmentCounts, AppointmentRow, Localized, Practitioner, Specialty } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
@@ -30,6 +30,9 @@ const S = {
   retry: { en: "Retry", ar: "إعادة المحاولة" },
 
   visitsHeading: { en: "Visits", ar: "الزيارات" },
+  search: { en: "Search", ar: "بحث" },
+  visitsSearchHint: { en: "Patient or doctor", ar: "المريض أو الطبيب" },
+  noMatches: { en: "No visits match your search.", ar: "لا توجد زيارات مطابقة لبحثك." },
   visitsEmpty: { en: "No one has checked in on this day.", ar: "لم يسجّل أحد وصوله في هذا اليوم." },
   patient: { en: "Patient", ar: "المريض" },
   doctor: { en: "Doctor", ar: "الطبيب" },
@@ -193,6 +196,19 @@ export function ReceptionDashboard() {
     },
   ];
 
+  /** Today's checked-in visits. A busy desk's board grows all morning; the search is the patient's name. */
+  const visitsQuery = useTableQuery({
+    rows: visits,
+    columns: visitCols,
+    // The doctor's NAME, resolved through the same lookup the column uses — searching the raw id would
+    // match nothing anyone at the desk can see or type.
+    searchText: (r) => [r.beneficiaryName, doctorName(r.doctorId)].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.visitsSearchHint),
+    pageSize: 25,
+    persistKey: "reception-visits",
+  });
+
   return (
     <>
       <PageHeader title={t(S.title)} />
@@ -295,7 +311,14 @@ export function ReceptionDashboard() {
         <h2 className="section-h">{t(S.visitsHeading)}</h2>
         <AsyncSection<AppointmentRow[]> state={board} isEmpty={() => visits.length === 0} emptyLabel={S.visitsEmpty}>
           {() => (
-            <DataTable columns={visitCols} rows={visits} rowKey={(r) => r.id} caption={t(S.visitsHeading)} />
+            <DataTableView
+              query={visitsQuery}
+              columns={visitCols}
+              rowKey={(r) => r.id}
+              caption={t(S.visitsHeading)}
+              emptyLabel={t(S.visitsEmpty)}
+              noMatchesLabel={t(S.noMatches)}
+            />
           )}
         </AsyncSection>
       </Card>

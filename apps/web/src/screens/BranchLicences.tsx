@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Card, DataTable, Icon, InlineAlert, InputField, StatusChip, useTheme } from "@mersal/design-system";
+import { Button, Card, DataTable, DataTableView, Icon, InlineAlert, InputField, StatusChip, useTableQuery, useTheme } from "@mersal/design-system";
 import type { Column } from "@mersal/design-system";
 import { branchApi } from "../api/branchApi";
 import type { BranchPractitioner, FlaggedAppointment, LicenceAlert } from "../api/branchApi";
@@ -28,6 +28,14 @@ const S = {
   licence: { en: "Licence", ar: "الترخيص" },
   licenceNo: { en: "Licence number", ar: "رقم الترخيص" },
   expiry: { en: "Expiry", ar: "تاريخ الانتهاء" },
+  search: { en: "Search", ar: "بحث" },
+  rosterSearchHint: { en: "Name, licence number or specialty", ar: "الاسم أو رقم الترخيص أو التخصص" },
+  expiredFilter: { en: "Needs renewal", ar: "يحتاج تجديدًا" },
+  validFilter: { en: "Valid", ar: "ساري" },
+  noMatches: {
+    en: "No clinicians match. Change the search or clear the filters.",
+    ar: "لا يوجد إكلينيكيون مطابقون. عدّل البحث أو أزل عوامل التصفية.",
+  },
   status: { en: "Licence status", ar: "حالة الترخيص" },
   clinics: { en: "Clinics", ar: "العيادات" },
   none: { en: "—", ar: "—" },
@@ -113,18 +121,48 @@ export function BranchPractitioners() {
     [t, lang],
   );
 
+  /*
+    A branch's clinicians, filtered by the thing this screen is FOR: whether their licence has expired. The
+    roster grows with headcount, and the expiry column was something to scan rather than something to ask
+    for — on the one screen whose purpose is finding the records that need renewing.
+  */
+  const query = useTableQuery({
+    rows: state.data ?? [],
+    columns,
+    searchText: (p) => [p.fullNameEn, p.fullNameAr, p.licenseNo, p.primarySpecialty].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.rosterSearchHint),
+    filters: [{
+      key: "licence",
+      label: t(S.status),
+      options: [
+        { value: "invalid", label: t(S.expiredFilter) },
+        { value: "valid", label: t(S.validFilter) },
+      ],
+      // `licenceValid` is nullable — an unlicensed record is neither valid nor expired, and coercing
+      // null to "needs renewal" would put clinicians who never had a licence into the renewal queue.
+      match: (p, value) => (value === "valid" ? p.licenceValid === true : p.licenceValid === false),
+    }],
+    pageSize: 25,
+    // Soonest expiry first — the list is worked from the end that is running out.
+    initialSortKey: "expiry",
+    persistKey: "branch-licences-roster",
+  });
+
   return (
     <div className="branch-screen">
       <PageHeader title={t(S.practitionersTitle)} />
       <p className="muted lede">{t(S.practitionersIntro)}</p>
       <AsyncSection state={state} isEmpty={(rows) => rows.length === 0} emptyLabel={S.noPractitioners}>
-        {(rows) => (
+        {() => (
             <Card>
-              <DataTable
-                caption={t(S.practitionersTitle)}
+              <DataTableView
+                query={query}
                 columns={columns}
-                rows={rows}
                 rowKey={(p) => p.practitionerId}
+                caption={t(S.practitionersTitle)}
+                emptyLabel={t(S.noPractitioners)}
+                noMatchesLabel={t(S.noMatches)}
               />
             </Card>
         )}
