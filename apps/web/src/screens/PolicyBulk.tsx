@@ -81,6 +81,10 @@ const S = {
     en: "The error report contains member data and is downloaded through an authorized, audited request.",
     ar: "يحتوي تقرير الأخطاء على بيانات أعضاء ويُنزَّل عبر طلب مصرّح به ومُدقَّق.",
   },
+  changesTruncated: {
+    en: "Showing the first {shown} of {total} changes.",
+    ar: "يتم عرض أول {shown} من أصل {total} تغيير.",
+  },
   errorsTruncated: {
     en: "Showing the first {shown} of {total} errors. Fixing only these will not make the file pass.",
     ar: "يتم عرض أول {shown} من أصل {total} خطأ. إصلاح هذه وحدها لن يجعل الملف يمرّ.",
@@ -364,6 +368,13 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
           {validation && validation.wouldChange.length > 0 && !commit && (
             <>
               <h4>{t(S.wouldChange)}</h4>
+              {validation.totalWouldChange > validation.wouldChange.length && (
+                <InlineAlert tone="info">
+                  {t(S.changesTruncated)
+                    .replace("{shown}", fmt.number(validation.wouldChange.length))
+                    .replace("{total}", fmt.number(validation.totalWouldChange))}
+                </InlineAlert>
+              )}
               <DataTable
                 caption={t(S.wouldChange)}
                 rows={validation.wouldChange}

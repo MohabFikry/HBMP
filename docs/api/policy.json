@@ -3567,6 +3567,10 @@
             },
             "nullable": true
           },
+          "totalWouldChange": {
+            "type": "integer",
+            "format": "int32"
+          },
           "committable": {
             "type": "boolean"
           }

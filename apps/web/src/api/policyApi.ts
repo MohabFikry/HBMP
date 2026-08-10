@@ -829,6 +829,8 @@ export const zBulkValidationView = z.object({
   totalErrors: z.number(),
   errors: z.array(zBulkRowError),
   wouldChange: z.array(zBulkRowPreview),
+  /** How many rows the file would change in total. `wouldChange` is capped the same way `errors` is. */
+  totalWouldChange: z.number(),
   committable: z.boolean(),
 }).passthrough();
 export type BulkValidationView = z.infer<typeof zBulkValidationView>;

@@ -175,6 +175,10 @@ public sealed class BulkJobEngine(
 
         var errors = new List<BulkRowError>();
         var previews = new List<BulkRowPreview>();
+        // How many rows WOULD change, as against how many of them fit in the inline list. Counted separately
+        // from `valid` because a row can be valid and produce no preview — one already applied by an earlier
+        // commit is left alone, and an applier that offers no diff for a row still counts it valid.
+        var previewable = 0;
         var valid = 0;
 
         foreach (var row in rows)
@@ -192,6 +196,7 @@ public sealed class BulkJobEngine(
                     row.Normalized = BulkSnapshots.Write(v.Normalized);
                     row.ErrorCode = null; row.ErrorDetail = null; row.ErrorDetailAr = null;
                     valid++;
+                    previewable++;
                     if (previews.Count < InlineErrorLimit)
                         previews.Add(new BulkRowPreview(row.RowNumber, v.Preview.SummaryEn, v.Preview.SummaryAr, v.Preview.Changes));
                     break;
@@ -226,7 +231,8 @@ public sealed class BulkJobEngine(
         await AuditJob(job, AuditAction.Decision,
             $"validated;valid={job.ValidRows};invalid={job.InvalidRows}", AuditSeverity.Info, ct);
 
-        return new BulkValidationReport(job, [.. errors.Take(InlineErrorLimit)], previews, errors.Count, null);
+        return new BulkValidationReport(
+            job, [.. errors.Take(InlineErrorLimit)], previews, errors.Count, previewable, null);
     }
 
     // ---- 3. Commit ---------------------------------------------------------------------------------------
@@ -555,11 +561,18 @@ public sealed record BulkRowError(int RowNumber, string Code, string DetailEn, s
 public sealed record BulkRowPreview(
     int RowNumber, string SummaryEn, string SummaryAr, IReadOnlyDictionary<string, object?> Changes);
 
+/// <summary>
+/// The dry run's answer.
+/// <para><c>Errors</c> and <c>Preview</c> are both capped at <see cref="BulkJobEngine.InlineErrorLimit"/> —
+/// the full lists name people and belong in the stored report — so each travels with its REAL size beside
+/// it. A caller that renders the capped list without the count shows fifty rows of a three-thousand-row
+/// answer and says nothing, which reads as "this is all of them".</para>
+/// </summary>
 public sealed record BulkValidationReport(
     BulkJob Job, IReadOnlyList<BulkRowError> Errors, IReadOnlyList<BulkRowPreview> Preview,
-    int TotalErrors, string? Refusal)
+    int TotalErrors, int TotalPreview, string? Refusal)
 {
-    public static BulkValidationReport Refused(BulkJob job, string reason) => new(job, [], [], 0, reason);
+    public static BulkValidationReport Refused(BulkJob job, string reason) => new(job, [], [], 0, 0, reason);
 }
 
 public sealed record BulkCommitReport(BulkJob Job, IReadOnlyList<BulkRowError> Errors, int TotalErrors, string? Refusal)

@@ -286,13 +286,13 @@ public sealed record BulkRowView(
 /// is about to move everybody onto the wrong plan.</summary>
 public sealed record BulkValidationView(
     BulkJobView Job, int TotalErrors, IReadOnlyList<BulkRowError> Errors,
-    IReadOnlyList<BulkRowPreview> WouldChange, bool Committable)
+    IReadOnlyList<BulkRowPreview> WouldChange, int TotalWouldChange, bool Committable)
 {
     public static BulkValidationView From(BulkValidationReport r)
     {
         ArgumentNullException.ThrowIfNull(r);
         return new BulkValidationView(BulkJobView.From(r.Job), r.TotalErrors, r.Errors, r.Preview,
-            BulkJobTransitions.MayCommit(r.Job.Status) && r.Job.ValidRows > 0);
+            r.TotalPreview, BulkJobTransitions.MayCommit(r.Job.Status) && r.Job.ValidRows > 0);
     }
 }
 

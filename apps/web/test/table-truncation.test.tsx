@@ -169,13 +169,18 @@ const JOB: BulkJobView = {
   submittedAt: "2026-08-10T09:00:00Z",
 } as BulkJobView;
 
-/** Upload a file and press Validate — the shortest real path to the error table. */
-async function uploadAndValidate(errors: unknown[], totalErrors: number, job: BulkJobView = JOB) {
+/** Upload a file and press Validate — the shortest real path to the error and preview tables. */
+async function uploadAndValidate(
+  errors: unknown[],
+  totalErrors: number,
+  job: BulkJobView = JOB,
+  preview: { wouldChange: unknown[]; totalWouldChange: number } = { wouldChange: [], totalWouldChange: 0 },
+) {
   const api = fakeApi({
     bulkTemplates: () => Promise.resolve([]),
     uploadBulk: () => Promise.resolve(job),
     validateBulk: () =>
-      Promise.resolve({ job, totalErrors, errors, wouldChange: [], committable: false } as never),
+      Promise.resolve({ job, totalErrors, errors, ...preview, committable: false } as never),
   });
   renderNode(<BulkJobs api={api} />);
 
@@ -206,6 +211,30 @@ describe("the bulk error list reports its own size", () => {
     await uploadAndValidate([rowError(1), rowError(2)], 2);
 
     expect(await screen.findAllByText(/does not exist/)).toHaveLength(2);
+    expect(screen.queryByText(/Showing the first/)).not.toBeInTheDocument();
+  });
+
+  it("reports the size of the CHANGE preview too, which is capped the same way", async () => {
+    // The preview is capped at the same 50 and, until the server was given a total for it, the SPA had no
+    // way to know: "What this file would change" showed fifty rows of a thousand-row change with nothing
+    // saying so — on the step whose entire purpose is seeing what the file is about to do.
+    await uploadAndValidate([], 0, JOB, {
+      wouldChange: Array.from({ length: 50 }, (_, i) => ({
+        rowNumber: i + 1, summaryEn: `Row ${i + 1} moves to Plan B`, summaryAr: "", changes: {},
+      })),
+      totalWouldChange: 1000,
+    });
+
+    expect(await screen.findByText(/Showing the first 50 of 1,000 changes/)).toBeInTheDocument();
+  });
+
+  it("stays quiet when the preview is complete", async () => {
+    await uploadAndValidate([], 0, JOB, {
+      wouldChange: [{ rowNumber: 1, summaryEn: "Row 1 moves to Plan B", summaryAr: "", changes: {} }],
+      totalWouldChange: 1,
+    });
+
+    expect(await screen.findByText(/moves to Plan B/)).toBeInTheDocument();
     expect(screen.queryByText(/Showing the first/)).not.toBeInTheDocument();
   });
 

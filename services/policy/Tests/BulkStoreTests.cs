@@ -239,6 +239,30 @@ public class BulkStoreTests
         finally { await Cleanup(f); }
     }
 
+    [SkippableFact]
+    public async Task The_dry_run_caps_its_preview_and_says_how_many_rows_it_left_out()
+    {
+        Skip.If(Db is null, "POLICY_TEST_DB not set — DB integration test skipped.");
+        var f = await Seed();
+        try
+        {
+            await using var db = Ctx();
+            var harness = new Harness(db, f);
+            // Ten past the inline cap. The list is deliberately short — the full one names people and goes to
+            // the stored report — but a caller that renders it without the total shows fifty rows of a
+            // sixty-row change and says nothing, which reads as "this is everything the file does".
+            var many = Enumerable.Range(0, BulkJobEngine.InlineErrorLimit + 10).Select(_ => Guid.NewGuid()).ToList();
+            var job = await harness.UploadAsync(BulkJobType.MemberEnrolment, EnrolmentCsv(f, many));
+
+            var validation = await harness.Engine.ValidateAsync(job.JobId, harness.Scope, null);
+
+            validation.Preview.Should().HaveCount(BulkJobEngine.InlineErrorLimit, "the inline list is capped");
+            validation.TotalPreview.Should().Be(many.Count, "and the cap has to be visible from outside");
+            validation.Job.ValidRows.Should().Be(many.Count);
+        }
+        finally { await Cleanup(f); }
+    }
+
     // ---- Scope --------------------------------------------------------------------------------------------
 
     [SkippableFact]
