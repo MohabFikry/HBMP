@@ -81,6 +81,10 @@ const S = {
     en: "The error report contains member data and is downloaded through an authorized, audited request.",
     ar: "يحتوي تقرير الأخطاء على بيانات أعضاء ويُنزَّل عبر طلب مصرّح به ومُدقَّق.",
   },
+  errorsTruncated: {
+    en: "Showing the first {shown} of {total} errors. Fixing only these will not make the file pass.",
+    ar: "يتم عرض أول {shown} من أصل {total} خطأ. إصلاح هذه وحدها لن يجعل الملف يمرّ.",
+  },
   infected: {
     en: "This file failed the malware scan and was never parsed.",
     ar: "فشل هذا الملف في فحص البرمجيات الخبيثة ولم تتم قراءته.",
@@ -222,7 +226,18 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
     }
   }
 
-  const errors = commit?.errors ?? validation?.errors ?? [];
+  /*
+    The report the errors below came from, held whole rather than reaching for `.errors` twice.
+
+    The server caps the INLINE error list at 50 (BulkJobEngine.InlineErrorLimit) and returns the real count
+    beside it, because the full list names people and belongs in the stored, access-controlled report instead.
+    That cap is right. Rendering the 50 and dropping `totalErrors` was not: a 3,000-error file showed fifty rows
+    with nothing after them, which reads as "these are the errors" — and fixing those fifty and re-uploading
+    fails again for the other 2,950.
+  */
+  const report = commit ?? validation ?? null;
+  const errors = report?.errors ?? [];
+  const totalErrors = report?.totalErrors ?? 0;
 
   return (
     <div className="pol-screen">
@@ -319,17 +334,31 @@ export function BulkJobs({ api = httpPolicyApi }: { api?: PolicyApi }) {
           {commit && commit.job.failedRows > 0 && <InlineAlert tone="warn">{t(S.partial)}</InlineAlert>}
 
           {errors.length > 0 && (
-            <DataTable
-              caption={t(S.detail)}
-              rows={errors}
-              rowKey={(r) => String(r.rowNumber)}
-              density="compact"
-              columns={[
-                { key: "row", header: t(S.rowNo), cell: (r) => r.rowNumber },
-                { key: "code", header: t(S.code), cell: (r) => <StatusChip kind="bad" label={r.code} /> },
-                { key: "detail", header: t(S.detail), cell: (r) => (lang === "ar" ? r.detailAr : r.detailEn) },
-              ]}
-            />
+            <>
+              {/* Above the table, not below it: the count changes what the operator does with the rows they can
+                  see, so it has to be read before them. The error-report note comes along when a report was
+                  actually written — the reconciliation panel says the same thing, but only after a commit, and
+                  this is the moment the whole list is wanted. */}
+              {totalErrors > errors.length && (
+                <InlineAlert tone="warn">
+                  {t(S.errorsTruncated)
+                    .replace("{shown}", fmt.number(errors.length))
+                    .replace("{total}", fmt.number(totalErrors))}
+                  {report?.job.errorDocumentId ? ` ${t(S.errorFile)}` : ""}
+                </InlineAlert>
+              )}
+              <DataTable
+                caption={t(S.detail)}
+                rows={errors}
+                rowKey={(r) => String(r.rowNumber)}
+                density="compact"
+                columns={[
+                  { key: "row", header: t(S.rowNo), cell: (r) => r.rowNumber },
+                  { key: "code", header: t(S.code), cell: (r) => <StatusChip kind="bad" label={r.code} /> },
+                  { key: "detail", header: t(S.detail), cell: (r) => (lang === "ar" ? r.detailAr : r.detailEn) },
+                ]}
+              />
+            </>
           )}
 
           {validation && validation.wouldChange.length > 0 && !commit && (

@@ -110,6 +110,10 @@ const S = {
     en: "The error report contains member data and is downloaded through an authorized, audited request.",
     ar: "يحتوي تقرير الأخطاء على بيانات أعضاء ويُنزَّل عبر طلب مصرّح به ومُدقَّق.",
   },
+  errorsTruncated: {
+    en: "Showing the first {shown} of {total} errors. Fixing only these will not make the file pass.",
+    ar: "يتم عرض أول {shown} من أصل {total} خطأ. إصلاح هذه وحدها لن يجعل الملف يمرّ.",
+  },
 } satisfies Record<string, Localized>;
 
 /** Registering and enrolling members is one job type — the file describes a person AND their coverage. */
@@ -224,7 +228,14 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
     }
   }
 
-  const errors = commit?.errors ?? validation?.errors ?? [];
+  /*
+    Held whole, so the inline list can be reported against its real size. The server caps the inline errors at
+    50 (BulkJobEngine.InlineErrorLimit) — the full list names people and lives in the stored report — and
+    returns `totalErrors` beside them. Rendering the 50 without that count reads as "these are the errors".
+  */
+  const report = commit ?? validation ?? null;
+  const errors = report?.errors ?? [];
+  const totalErrors = report?.totalErrors ?? 0;
 
   const planOptions = useMemo(
     () => reference.plans.map((p) => ({ value: p.planId, label: p.nameEn, hint: p.planCode })),
@@ -361,6 +372,16 @@ export function BatchIntake({ api = httpPolicyApi }: { api?: PolicyApi } = {}) {
               {/* Said here, next to the errors, because this is the moment the operator decides whether to
                   re-upload the whole file or hand-edit it down to the failing rows. */}
               <InlineAlert tone="info">{t(S.reupload)}</InlineAlert>
+              {/* And this decides which of those two it is: hand-editing the rows on screen is only an option
+                  when the rows on screen are all of them. */}
+              {totalErrors > errors.length && (
+                <InlineAlert tone="warn">
+                  {t(S.errorsTruncated)
+                    .replace("{shown}", fmt.number(errors.length))
+                    .replace("{total}", fmt.number(totalErrors))}
+                  {report?.job.errorDocumentId ? ` ${t(S.errorFile)}` : ""}
+                </InlineAlert>
+              )}
               <DataTable
                 caption={t(S.detail)}
                 rows={errors}
