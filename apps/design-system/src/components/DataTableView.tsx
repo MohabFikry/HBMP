@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { DataTable, type Column, type RowSelection } from "./DataTable";
 import { Pagination } from "./Pagination";
-import { TableToolbar } from "./TableToolbar";
+import { TableToolbar, type FilterGroup } from "./TableToolbar";
 import { cx } from "../lib/cx";
 import { useTheme } from "../theme/ThemeProvider";
 import type { TableQuery } from "../lib/useTableQuery";
@@ -15,6 +15,24 @@ export interface DataTableViewProps<Row> {
   caption: string;
   /** Extra toolbar controls — an export button, a bulk-action bar. Rendered at the end of the bar. */
   toolbarExtra?: ReactNode;
+  /**
+   * Filter groups the CALLER owns because they narrow on the server, rendered before the query's own.
+   *
+   * <p>`useTableQuery` is a client-side engine: its `match` runs over rows already in hand, and its faceted
+   * counts mean "if you picked this instead, you would get N". A filter that changes what the SERVER returns
+   * satisfies neither — its `match` would have to return true for every row, and every option would then
+   * report the whole set as its count. Putting one in there does not narrow anything; it just lies about the
+   * numbers.</p>
+   *
+   * <p>The appointments boards are the case: their date range is a query parameter, so choosing "Custom"
+   * refetches. Their status chips and their search are ordinary client-side narrowing and belong to the
+   * query. The two kinds sit in one bar because an operator does not care which side of the wire a control
+   * acts on — but they are wired differently, and pretending otherwise is what makes the counts wrong.</p>
+   *
+   * <p>These carry no counts for the same reason: the component cannot compute a count for rows it has not
+   * been given. Omit `count` on their options.</p>
+   */
+  serverFilters?: FilterGroup[];
   /** Shown when the table is empty and NOTHING is filtering it. */
   emptyLabel?: string;
   /** Shown when search or a filter has excluded everything. Falls back to a localized default. */
@@ -57,6 +75,7 @@ export function DataTableView<Row>({
   rowKey,
   caption,
   toolbarExtra,
+  serverFilters,
   emptyLabel,
   noMatchesLabel,
   selection,
@@ -74,12 +93,13 @@ export function DataTableView<Row>({
     ? "لا توجد صفوف مطابقة. عدّل البحث أو أزل عوامل التصفية."
     : "No rows match. Change the search or clear the filters.");
 
-  const hasToolbar = Boolean(query.toolbarProps.search) || query.toolbarProps.filters.length > 0 || Boolean(toolbarExtra);
+  const groups = serverFilters ? [...serverFilters, ...query.toolbarProps.filters] : query.toolbarProps.filters;
+  const hasToolbar = Boolean(query.toolbarProps.search) || groups.length > 0 || Boolean(toolbarExtra);
 
   return (
     <div className={cx("mrs-tableview", className)}>
       {hasToolbar && (
-        <TableToolbar search={query.toolbarProps.search} filters={query.toolbarProps.filters}>
+        <TableToolbar search={query.toolbarProps.search} filters={groups}>
           {toolbarExtra}
         </TableToolbar>
       )}

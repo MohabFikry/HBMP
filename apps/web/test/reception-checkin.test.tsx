@@ -280,7 +280,9 @@ describe("Reception board — search, filters and sort (14.5)", () => {
     renderBoard(fakeApi({ appointments }));
     await screen.findByRole("table");
 
-    await user.click(screen.getByRole("button", { name: /^checked in$/i }));
+    // `\b` rather than `$`: the chip now carries its faceted count ("Checked in 1"), which is what
+    // `useTableQuery` adds and what the hand-rolled toolbar did not have.
+    await user.click(screen.getByRole("button", { name: /^checked in\b/i }));
 
     expect(tokens()).toEqual(["•••2222"]);
     // One load, not two: a client-side narrowing must not cost a round trip.
@@ -308,7 +310,7 @@ describe("Reception board — search, filters and sort (14.5)", () => {
     // passes — so an unscoped query matches two buttons with the same name, and the one it would have picked
     // is a coin toss between filtering the board and marking a patient absent.
     await user.click(within(screen.getByRole("group", { name: /status/i }))
-      .getByRole("button", { name: /^no-show$/i }));
+      .getByRole("button", { name: /^no-show\b/i }));
 
     // "No appointments booked for today" would tell the desk their bookings had vanished.
     expect(await screen.findByText(/no appointments match these filters/i)).toBeInTheDocument();

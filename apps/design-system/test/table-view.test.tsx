@@ -215,3 +215,92 @@ describe("Pagination on its own", () => {
     expect(screen.getByRole("button", { name: /next/i })).toBeEnabled();
   });
 });
+
+/**
+ * A filter the CALLER owns because it narrows on the server.
+ *
+ * `useTableQuery` cannot hold one: its `match` runs over rows already in hand, and its per-option counts mean
+ * "if you picked this instead, you would get N". A group whose real effect is to change the REQUEST satisfies
+ * neither — its `match` would have to return true for every row, and every option would then report the whole
+ * set. The appointments boards are the case: choosing a custom date range refetches, while their status chips
+ * and their search are ordinary client-side narrowing.
+ *
+ * So they arrive by a different door, and these pin that the two kinds coexist in one bar without the
+ * client-side one losing its counts.
+ */
+function ServerFilterHarness({ onWhen }: { onWhen?: (v: string | null) => void }) {
+  const [when, setWhen] = useState<string | null>("today");
+  const query = useTableQuery<Row>({
+    rows: ROWS,
+    columns: COLS,
+    searchText: (r) => `${r.name} ${r.team}`,
+    searchLabel: "Search",
+    filters: FILTERS,
+    pageSize: 50,
+  });
+  return (
+    <DataTableView
+      query={query}
+      columns={COLS}
+      rowKey={(r) => r.id}
+      caption="People"
+      serverFilters={[{
+        key: "when",
+        label: "When",
+        value: when,
+        onChange: (v) => { setWhen(v); onWhen?.(v); },
+        options: [{ value: "today", label: "Today" }, { value: "custom", label: "Custom" }],
+        extra: when === "custom" ? <span data-testid="range-fields">from/to</span> : undefined,
+      }]}
+    />
+  );
+}
+
+describe("DataTableView.serverFilters", () => {
+  it("renders the caller's group in the same bar as the query's", () => {
+    renderDS(<ServerFilterHarness />);
+    expect(screen.getByRole("group", { name: "When" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Team" })).toBeInTheDocument();
+  });
+
+  it("puts the caller's group FIRST — it is the coarser narrowing", () => {
+    renderDS(<ServerFilterHarness />);
+    // A fieldset takes its accessible name from its <legend>, not from an attribute — so compare the
+    // elements' DOM order rather than reading a label off them.
+    const when = screen.getByRole("group", { name: "When" });
+    const team = screen.getByRole("group", { name: "Team" });
+    // Node.DOCUMENT_POSITION_FOLLOWING === 4: `team` comes after `when`.
+    expect(when.compareDocumentPosition(team) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("hands the selection back to the caller instead of filtering rows itself", async () => {
+    const user = userEvent.setup();
+    const onWhen = vi.fn();
+    renderDS(<ServerFilterHarness onWhen={onWhen} />);
+
+    await user.click(screen.getByRole("button", { name: "Custom" }));
+
+    expect(onWhen).toHaveBeenCalledWith("custom");
+    // Every row is still on screen. The component must NOT try to narrow by a group it cannot evaluate —
+    // narrowing is the refetch the caller does in response.
+    expect(names()).toHaveLength(ROWS.length);
+  });
+
+  it("reveals the group's own follow-up controls", async () => {
+    const user = userEvent.setup();
+    renderDS(<ServerFilterHarness />);
+    expect(screen.queryByTestId("range-fields")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Custom" }));
+    // Beside the chip that reveals them — the reason `extra` exists at all.
+    expect(screen.getByTestId("range-fields")).toBeInTheDocument();
+  });
+
+  it("leaves the query's own chips carrying their counts", () => {
+    renderDS(<ServerFilterHarness />);
+    // Six red, six blue. The server group has no counts (the component cannot compute one for rows it was
+    // never given); the client group keeps its faceting.
+    expect(screen.getByRole("button", { name: /^Red\b/ })).toHaveTextContent("6");
+    expect(screen.getByRole("button", { name: "Today" })).not.toHaveTextContent(/\d/);
+  });
+});

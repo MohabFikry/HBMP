@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { Card, Combobox, DataTable, InlineAlert, InputField, TableToolbar } from "@mersal/design-system";
-import type { Column } from "@mersal/design-system";
+import { Card, Combobox, DataTableView, InlineAlert, InputField, useTableQuery } from "@mersal/design-system";
+import type { Column, TableFilterSpec } from "@mersal/design-system";
 import type {
   AppointmentRow, BranchSummary, Localized, Practitioner, Specialty,
 } from "@mersal/contracts";
@@ -69,6 +69,7 @@ const S = {
 /** Stable empties: `?? []` mints a new array each render and defeats the memo keyed on it. */
 const NO_PRACTITIONERS: Practitioner[] = [];
 const NO_SPECIALTIES: Specialty[] = [];
+const NO_ROWS: AppointmentRow[] = [];
 const NO_BRANCHES: BranchSummary[] = [];
 
 /**
@@ -91,8 +92,6 @@ export function CallCentreAppointments({ ccApi = defaultCcApi }: { ccApi?: CcApi
   const fmt = useFormat();   // 18.D2 (U7) — Cairo times, app locale
 
   const [branchId, setBranchId] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
   const [when, setWhen] = useState<string | null>("today");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -151,18 +150,42 @@ export function CallCentreAppointments({ ccApi = defaultCcApi }: { ccApi?: CcApi
     },
   ];
 
-  const visible = (rows: AppointmentRow[]) => {
-    const q = query.trim().toLowerCase();
-    return rows.filter((r) => {
-      if (status === "booked" && !r.checkInEligible) return false;
-      if (status === "checked-in" && !r.checkedIn) return false;
-      if (status === "no-show" && r.status.label.en !== "No-show") return false;
-      if (!q) return true;
-      const doctor = r.doctorId ? doctorById.get(r.doctorId)?.name.en ?? "" : "";
-      return `${r.beneficiaryName ?? ""} ${r.beneficiary.token} ${r.appointmentType} ${doctor}`
-        .toLowerCase().includes(q);
-    });
-  };
+  /*
+    BRANCH and DATE are the server's — they change which rows exist, which is why typing in the search box
+    must not refetch. They stay the caller's and reach the bar as `serverFilters` / `toolbarExtra`.
+
+    STATUS and the SEARCH narrow what came back, so they belong to `useTableQuery` — which also brings the
+    pager and the empty-vs-no-matches distinction this screen drew by hand. See `DataTableView.serverFilters`
+    for why the two cannot be wired the same way.
+  */
+  const statusFilters: TableFilterSpec<AppointmentRow>[] = useMemo(() => [{
+    key: "status",
+    label: t(S.status),
+    options: [
+      { value: "booked", label: t(S.fBooked) },
+      { value: "checked-in", label: t(S.fCheckedIn) },
+      { value: "no-show", label: t(S.fNoShow) },
+    ],
+    match: (r, value) => {
+      if (value === "booked") return r.checkInEligible;
+      if (value === "checked-in") return r.checkedIn;
+      return r.status.label.en === "No-show";
+    },
+  }], [t]);
+
+  const board = useTableQuery<AppointmentRow>({
+    rows: state.data ?? NO_ROWS,
+    columns: cols,
+    searchText: (r) => [
+      r.beneficiaryName, r.beneficiary.token, r.appointmentType,
+      r.doctorId ? doctorById.get(r.doctorId)?.name.en : null,
+    ].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.searchHint),
+    filters: statusFilters,
+    pageSize: 25,
+    persistKey: "callcentre-appointments",
+  });
 
   return (
     <>
@@ -172,61 +195,53 @@ export function CallCentreAppointments({ ccApi = defaultCcApi }: { ccApi?: CcApi
         <p className="muted">{t(S.actionsNote)}</p>
         <p className="muted">{t(S.arrivals)}</p>
 
-        <TableToolbar
-          search={{ label: t(S.search), value: query, onChange: setQuery, placeholder: t(S.searchHint) }}
-          filters={[
-            {
-              key: "when", label: t(S.when), value: when, onChange: setWhen,
-              options: [{ value: "today", label: t(S.today) }, { value: "custom", label: t(S.customRange) }],
-              // Beside the chip that reveals them, not at the far end of the bar.
-              extra: when === "custom" ? (
-                <>
-                  <InputField label={t(S.from)} type="date" value={from} onChange={(e) => setFrom(e.currentTarget.value)} />
-                  <InputField label={t(S.to)} type="date" value={to} onChange={(e) => setTo(e.currentTarget.value)} />
-                </>
-              ) : undefined,
-            },
-            {
-              key: "status", label: t(S.status), value: status, onChange: setStatus,
-              options: [
-                { value: "booked", label: t(S.fBooked) },
-                { value: "checked-in", label: t(S.fCheckedIn) },
-                { value: "no-show", label: t(S.fNoShow) },
-              ],
-            },
-          ]}
-        >
-          <div className="book-field" style={{ inlineSize: 220 }}>
-            <span className="mrs-label" id="cc-branch-filter">{t(S.branch)}</span>
-            {/* A combobox rather than chips: there are six clinics today and more later, and a chip per
-                branch would take the whole bar. Clearing it returns every branch — the call centre is
-                branch-unrestricted, so this narrows the view and never the entitlement. */}
-            <Combobox
-              aria-labelledby="cc-branch-filter"
-              options={(branches.data ?? NO_BRANCHES).map((b) => ({ value: b.id, label: t(b.name), hint: b.city }))}
-              value={branchId}
-              placeholder={t(S.allBranches)}
-              onChange={(v) => setBranchId(v || null)}
-            />
-          </div>
-        </TableToolbar>
-
         {/* Chosen "Custom" but not finished filling it in — say what is actually on screen rather than
             leaving the board looking filtered when it is not. */}
         {when === "custom" && !customActive && <InlineAlert tone="info">{t(S.rangeIncomplete)}</InlineAlert>}
 
         <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.empty}>
-          {(rows) => {
-            const shown = visible(rows);
-            return shown.length === 0 ? (
-              // Distinct from the empty board above: rows EXIST, the filters hid them. Saying "no
-              // appointments today" when the agent has simply filtered to a status with none is how someone
-              // concludes the system lost a booking mid-call.
-              <InlineAlert tone="info">{t(S.noneMatch)}</InlineAlert>
-            ) : (
-              <DataTable columns={cols} rows={shown} rowKey={(r) => r.id} caption={t(S.title)} />
-            );
-          }}
+          {() => (
+            <DataTableView
+              query={board}
+              columns={cols}
+              rowKey={(r) => r.id}
+              caption={t(S.title)}
+              emptyLabel={t(S.empty)}
+              // Distinct from the empty board: rows EXIST and the filters hid them. Saying "no appointments
+              // today" when the agent has filtered to a status with none is how someone concludes the system
+              // lost a booking mid-call.
+              noMatchesLabel={t(S.noneMatch)}
+              serverFilters={[{
+                key: "when",
+                label: t(S.when),
+                value: when,
+                onChange: setWhen,
+                options: [{ value: "today", label: t(S.today) }, { value: "custom", label: t(S.customRange) }],
+                // Beside the chip that reveals them, not at the far end of the bar.
+                extra: when === "custom" ? (
+                  <>
+                    <InputField label={t(S.from)} type="date" value={from} onChange={(e) => setFrom(e.currentTarget.value)} />
+                    <InputField label={t(S.to)} type="date" value={to} onChange={(e) => setTo(e.currentTarget.value)} />
+                  </>
+                ) : undefined,
+              }]}
+              toolbarExtra={
+                <div className="book-field" style={{ inlineSize: 220 }}>
+                  <span className="mrs-label" id="cc-branch-filter">{t(S.branch)}</span>
+                  {/* A combobox rather than chips: there are six clinics today and more later, and a chip per
+                      branch would take the whole bar. Clearing it returns every branch — the call centre is
+                      branch-unrestricted, so this narrows the view and never the entitlement. */}
+                  <Combobox
+                    aria-labelledby="cc-branch-filter"
+                    options={(branches.data ?? NO_BRANCHES).map((b) => ({ value: b.id, label: t(b.name), hint: b.city }))}
+                    value={branchId}
+                    placeholder={t(S.allBranches)}
+                    onChange={(v) => setBranchId(v || null)}
+                  />
+                </div>
+              }
+            />
+          )}
         </AsyncSection>
       </Card>
     </>

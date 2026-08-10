@@ -162,8 +162,6 @@ const BARE_TABLE_OK: Record<string, string> = {
   "screens/PolicyProductAdmin.tsx": "payers and plan versions — bounded configuration",
   "screens/ProfileSectionViews.tsx": "one patient's record, sectioned",
   "screens/ProgramAdmin.tsx": "programmes and capacity — bounded configuration",
-  "screens/ReceptionDesk.tsx": "hand-rolled toolbar, pending consolidation (audit M3)",
-  "screens/CallCentreAppointments.tsx": "hand-rolled toolbar, pending consolidation (audit M3)",
   "screens/ReportView.tsx": "a rendered report's own tables",
   "screens/ServiceHistoryModal.tsx": "previous occurrences of one service for one member",
   "screens/Substitutions.tsx": "a drug search and its alternatives",

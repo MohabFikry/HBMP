@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useFormat } from "../i18n/useFormat";
-import { Button, Card, DataTable, Icon, InlineAlert, InputField, StatusChip, TableToolbar } from "@mersal/design-system";
-import type { Column } from "@mersal/design-system";
+import { Button, Card, DataTableView, Icon, InlineAlert, InputField, StatusChip, useTableQuery } from "@mersal/design-system";
+import type { Column, TableFilterSpec } from "@mersal/design-system";
 import type { AppointmentRow, Localized, Practitioner, Specialty } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
@@ -79,6 +79,7 @@ const S = {
 } satisfies Record<string, Localized>;
 
 /** Stable empties: `?? []` mints a new array each render and defeats the memo keyed on it. */
+const NO_ROWS: AppointmentRow[] = [];
 const NO_PRACTITIONERS: Practitioner[] = [];
 const NO_SPECIALTIES: Specialty[] = [];
 
@@ -149,8 +150,6 @@ export function ReceptionAppointments() {
   const [when, setWhen] = useRestorableState<string | null>("reception-appts.when", "today");
   const [from, setFrom] = useRestorableState("reception-appts.from", "");
   const [to, setTo] = useRestorableState("reception-appts.to", "");
-  const [status, setStatus] = useRestorableState<string | null>("reception-appts.status", null);
-  const [query, setQuery] = useRestorableState("reception-appts.query", "");
 
   const customActive = when === "custom" && from !== "" && to !== "";
   const range = customActive ? { from, to } : undefined;
@@ -171,20 +170,6 @@ export function ReceptionAppointments() {
     [practitioners.data],
   );
 
-  const visible = (rows: AppointmentRow[]) => {
-    const q = query.trim().toLowerCase();
-    return rows.filter((r) => {
-      if (status === "booked" && !r.checkInEligible) return false;
-      if (status === "checked-in" && !r.checkedIn) return false;
-      if (status === "no-show" && r.status.label.en !== "No-show") return false;
-      if (!q) return true;
-      // The NAME is what the desk reads and what a patient gives at the counter, so it is what the search
-      // has to match. The token stays in the haystack for rows booked before names were captured.
-      const doctor = r.doctorId ? doctorById.get(r.doctorId)?.name.en ?? "" : "";
-      return `${r.beneficiaryName ?? ""} ${r.beneficiary.token} ${r.appointmentType} ${doctor}`
-        .toLowerCase().includes(q);
-    });
-  };
 
   const deps = { t, fmt, doctorById, specialties: specialties.data ?? NO_SPECIALTIES };
   const cols: Column<AppointmentRow>[] = [
@@ -286,6 +271,53 @@ export function ReceptionAppointments() {
     patientFileColumn(t, openProfile),
   ];
 
+  /*
+    ============================================================================================================
+    THE TWO KINDS OF FILTER ON THIS BOARD ARE WIRED DIFFERENTLY
+    ============================================================================================================
+    WHEN is the SERVER'S: choosing a custom range changes the request, which is why typing in the search box
+    must not refetch. It therefore stays the caller's — passed to `DataTableView` as a `serverFilter` — and
+    `useTableQuery` never sees it. A client-side engine cannot narrow rows it has not been given, and its
+    per-option counts would report the whole set for every choice.
+
+    STATUS and the SEARCH are ordinary client-side narrowing and belong to the query, which also brings the
+    pager and the empty-vs-no-matches distinction this screen used to draw by hand. Both sit in one bar,
+    because an operator does not care which side of the wire a control acts on.
+  */
+  const statusFilters: TableFilterSpec<AppointmentRow>[] = useMemo(() => [{
+    key: "status",
+    label: t(S.status),
+    options: [
+      { value: "booked", label: t(S.fBooked) },
+      { value: "checked-in", label: t(S.fCheckedIn) },
+      { value: "no-show", label: t(S.fNoShow) },
+    ],
+    match: (r, value) => {
+      if (value === "booked") return r.checkInEligible;
+      if (value === "checked-in") return r.checkedIn;
+      return r.status.label.en === "No-show";
+    },
+  }], [t]);
+
+  const board = useTableQuery<AppointmentRow>({
+    rows: state.data ?? NO_ROWS,
+    columns: cols,
+    // The NAME is what the desk reads and what a patient gives at the counter, so it is what the search has
+    // to match. The token stays in the haystack for rows booked before names were captured.
+    searchText: (r) => [
+      r.beneficiaryName, r.beneficiary.token, r.appointmentType,
+      r.doctorId ? doctorById.get(r.doctorId)?.name.en : null,
+    ].filter(Boolean).join(" "),
+    searchLabel: t(S.search),
+    searchPlaceholder: t(S.searchHint),
+    filters: statusFilters,
+    pageSize: 25,
+    // The board's own key, so the desk returns to the same view after opening a patient file. It replaces
+    // the two `useRestorableState` calls this screen kept for exactly that reason. The date range keeps its
+    // own, because it is the server's input rather than part of the query.
+    persistKey: "reception-appointments",
+  });
+
   return (
     <>
       <PageHeader title={t(S.apptTitle)} />
@@ -293,33 +325,6 @@ export function ReceptionAppointments() {
           card's edge, so the card read as a border drawn around the content rather than as a surface holding
           it — and every other worklist card in the app is set at sp5, so this one was the odd one out. */}
       <Card as="section" style={{ padding: "var(--sp5)" }}>
-        <TableToolbar
-          search={{ label: t(S.search), value: query, onChange: setQuery, placeholder: t(S.searchHint) }}
-          filters={[
-            {
-              key: "when", label: t(S.when), value: when, onChange: setWhen,
-              options: [{ value: "today", label: t(S.today) }, { value: "custom", label: t(S.customRange) }],
-              // Beside the chip that reveals them, not at the far end of the bar. They appear only once
-              // "Custom" is chosen: two empty date boxes sitting permanently next to a "Today" chip invite
-              // the desk to wonder which of the two is actually in force.
-              extra: when === "custom" ? (
-                <>
-                  <InputField label={t(S.from)} type="date" value={from} onChange={(e) => setFrom(e.currentTarget.value)} />
-                  <InputField label={t(S.to)} type="date" value={to} onChange={(e) => setTo(e.currentTarget.value)} />
-                </>
-              ) : undefined,
-            },
-            {
-              key: "status", label: t(S.status), value: status, onChange: setStatus,
-              options: [
-                { value: "booked", label: t(S.fBooked) },
-                { value: "checked-in", label: t(S.fCheckedIn) },
-                { value: "no-show", label: t(S.fNoShow) },
-              ],
-            },
-          ]}
-        />
-
         {/* Chosen "Custom" but not yet finished filling it in — say what is still showing rather than
             leaving the board looking filtered when it is not. */}
         {when === "custom" && !customActive && (
@@ -329,22 +334,38 @@ export function ReceptionAppointments() {
         )}
 
         <AsyncSection state={state} isEmpty={(d) => d.length === 0} emptyLabel={S.apptEmpty}>
-          {(rows) => {
-            const shown = visible(rows);
-            return (
-              <div aria-live="polite">
-                {desk.stale && <StatusChip kind="warn" label={t(S.stale)} />}
-                {shown.length === 0 ? (
-                  // Distinct from the empty board above: rows EXIST, the filters hid them. Telling the desk
-                  // "no appointments today" when they have simply filtered to a status with none is how
-                  // someone concludes the system lost their bookings.
-                  <InlineAlert tone="info">{t(S.noneMatch)}</InlineAlert>
-                ) : (
-                  <DataTable columns={cols} rows={shown} rowKey={(r) => r.id} caption={t(S.apptTitle)} />
-                )}
-              </div>
-            );
-          }}
+          {() => (
+            <div aria-live="polite">
+              {desk.stale && <StatusChip kind="warn" label={t(S.stale)} />}
+              <DataTableView
+                query={board}
+                columns={cols}
+                rowKey={(r) => r.id}
+                caption={t(S.apptTitle)}
+                emptyLabel={t(S.apptEmpty)}
+                // Distinct from the empty board above: rows EXIST and the filters hid them. Telling the desk
+                // "no appointments today" when they have filtered to a status with none is how someone
+                // concludes the system lost their bookings.
+                noMatchesLabel={t(S.noneMatch)}
+                serverFilters={[{
+                  key: "when",
+                  label: t(S.when),
+                  value: when,
+                  onChange: setWhen,
+                  options: [{ value: "today", label: t(S.today) }, { value: "custom", label: t(S.customRange) }],
+                  // Beside the chip that reveals them, not at the far end of the bar. They appear only once
+                  // "Custom" is chosen: two empty date boxes sitting permanently next to a "Today" chip
+                  // invite the desk to wonder which of the two is actually in force.
+                  extra: when === "custom" ? (
+                    <>
+                      <InputField label={t(S.from)} type="date" value={from} onChange={(e) => setFrom(e.currentTarget.value)} />
+                      <InputField label={t(S.to)} type="date" value={to} onChange={(e) => setTo(e.currentTarget.value)} />
+                    </>
+                  ) : undefined,
+                }]}
+              />
+            </div>
+          )}
         </AsyncSection>
       </Card>
     </>
