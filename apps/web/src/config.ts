@@ -168,7 +168,7 @@ export function loginOriginsAgree(authority: string, redirectUri: string, appOri
  * issuer uses clinical titles (`lab_tech`, `pharmacist`, …); the portal catalog uses portal keys (`lab`,
  * `pharmacy`, …). The first match (in portal-priority order) wins when a user carries several roles.
  */
-const ROLE_MAP: Array<[string, Role]> = [
+export const ROLE_MAP: Array<[string, Role]> = [
   ["super_admin", "super_admin"],
   ["org_admin", "org_admin"],
   ["medical_director", "medical_director"],

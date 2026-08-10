@@ -847,4 +847,14 @@ export interface ApiClient {
 export interface ApiScenario {
   latencyMs?: number;
   fault?: "none" | "error" | "empty";
+  /**
+   * The ISSUER roles the fixture should answer as, for the endpoints the server role-projects (currently the
+   * patient profile). A function rather than a value because the signed-in role changes without the client
+   * being rebuilt — the dev login picks one after `ApiProvider` has already constructed this.
+   *
+   * Returning an empty array means "no role known", and the fixture then answers with everything rather than
+   * nothing. That is a FIXTURE convenience, not a policy: it keeps a client constructed with no session
+   * usable, and the enforcement that matters is server-side and tested there.
+   */
+  roles?: () => readonly string[];
 }

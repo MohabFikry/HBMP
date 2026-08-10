@@ -127,6 +127,7 @@ import type { WithdrawResult } from "@mersal/contracts";
 import type { AddAllergyRequest, AllergenOption, BloodGroup, MemberClinicalRecord } from "@mersal/contracts";
 import type { InvestigationOrder, OrderPricing, SubstitutionRequest } from "@mersal/contracts";
 import type { ApiClient, ApiScenario } from "./client";
+import { sectionStateFor } from "../dev/profileSectionMatrix";
 import { ApiError } from "./http";
 
 const loc = (en: string, ar: string): Localized => ({ en, ar });
@@ -3349,12 +3350,42 @@ export class DevApiClient implements ApiClient {
     };
 
     const wanted = sections?.length ? new Set<string>(sections) : null;
+
+    /**
+     * The ROLE PROJECTION, mirrored from the server (`libs/authz/ProfilePolicies.cs`, drift-checked by
+     * `test/profile-fixture-matrix.test.ts`).
+     *
+     * Without this the fixture answered every caller with all fifteen sections, so the dev build showed a
+     * receptionist the prescriptions and investigation results production withholds from them — and, worse,
+     * the screen's behaviour under a real projection was never exercised anywhere a test could see it.
+     *
+     * A section with NO CELL for the caller's roles is omitted entirely rather than sent withheld, because
+     * that is what the server does: `DecideAll` drops it, and the profile screen's tab grouping is written
+     * against that (a tab whose sections are all absent does not render at all). A `res` cell is sent as
+     * Restricted, so the "you may ask for access" state stays reachable in dev.
+     *
+     * No roles known — a client constructed without a session, which is most unit tests — means no
+     * projection, not an empty profile. See `ApiScenario.roles`.
+     */
+    const roles = this.scenario.roles?.() ?? [];
+    const project = (s: ProfileSection): ProfileSection | null => {
+      if (roles.length === 0) return s;
+      const state = sectionStateFor(roles, s.key);
+      if (state === null) return null;
+      if (state === "Restricted" && s.state !== "Restricted") {
+        return { key: s.key, state: "Restricted", reasonCode: "role-not-permitted" };
+      }
+      return s;
+    };
+
     return this.gate(() =>
       ok(zPatientProfile, {
         beneficiaryId,
         servedAt: new Date().toISOString(),
         sections: all
           .map((s) => withheld[s.key] ?? s)
+          .map(project)
+          .filter((s): s is ProfileSection => s !== null)
           .filter((s) => !wanted || wanted.has(s.key)),
       }),
     );

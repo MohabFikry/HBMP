@@ -16,7 +16,8 @@ import { SESSION_TTL, type AuthClient, type Session } from "./authClient";
  * it worked.
  */
 
-const STORAGE_KEY = "mersal-session";
+export const DEV_SESSION_KEY = "mersal-session";
+const STORAGE_KEY = DEV_SESSION_KEY;
 
 const DISPLAY_NAMES: Record<Role, string> = {
   reception: "Reham (Reception)",

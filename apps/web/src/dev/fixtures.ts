@@ -1,8 +1,10 @@
 import type { ComponentType } from "react";
 import type { ApiClient } from "../api/client";
 import { DevApiClient } from "../api/DevApiClient";
-import { DevAuthClient } from "../auth/devAuthClient";
+import { DevAuthClient, DEV_SESSION_KEY } from "../auth/devAuthClient";
 import type { AuthClient } from "../auth/authClient";
+import { ROLE_MAP } from "../config";
+import type { Role } from "../authz/permissions";
 import { DevLoginForm } from "./DevLoginForm";
 
 /**
@@ -43,7 +45,47 @@ export const FIXTURES: Fixtures = {
   available: true,
   // 250ms so the loading states the screens are built around actually appear in the demo. A fixture that
   // resolves instantly is one where nobody ever sees the skeleton they wrote.
-  createApi: () => new DevApiClient({ latencyMs: 250 }),
+  createApi: () => new DevApiClient({ latencyMs: 250, roles: signedInIssuerRoles }),
   createAuth: () => new DevAuthClient(),
   LoginForm: DevLoginForm,
 };
+
+/**
+ * The ISSUER roles the signed-in dev user would be carrying, so the fixture can project the patient profile
+ * the way the server does (see `profileSectionMatrix.ts`).
+ *
+ * Read from storage rather than from React state because `ApiProvider` builds the client once, before anyone
+ * has signed in — a value captured at construction would be `null` for the whole session. This is a function
+ * so it is evaluated per request, which is also what makes switching roles in the dev login take effect
+ * without a reload.
+ *
+ * Derived by INVERTING `ROLE_MAP` rather than by writing a second table: that map already states which issuer
+ * titles land on which portal, and two hand-maintained copies of the same correspondence is precisely the
+ * drift this whole change is about. One portal role can come from several issuer titles (`radiology_tech` and
+ * `imaging_tech` both mean the radiology portal), and returning all of them matches the server, which decides
+ * on the WIDEST cell across every role the caller holds.
+ */
+function signedInIssuerRoles(): readonly string[] {
+  const role = signedInPortalRole();
+  return role === null ? [] : ISSUER_ROLES_FOR_PORTAL_ROLE[role] ?? [];
+}
+
+function signedInPortalRole(): Role | null {
+  try {
+    const raw = localStorage.getItem(DEV_SESSION_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    const role = (parsed as { role?: unknown } | null)?.role;
+    return typeof role === "string" ? (role as Role) : null;
+  } catch {
+    // A corrupt or unreadable session is "no role known", which the fixture treats as "do not project".
+    return null;
+  }
+}
+
+const ISSUER_ROLES_FOR_PORTAL_ROLE: Partial<Record<Role, string[]>> = ROLE_MAP.reduce<
+  Partial<Record<Role, string[]>>
+>((acc, [issuer, portal]) => {
+  (acc[portal] ??= []).push(issuer);
+  return acc;
+}, {});
