@@ -1034,7 +1034,7 @@ export function MemberDetail({
           title={t(S.profileTitle)}
           closeLabel={t(S.close)}
           wide
-          footer={<Button variant="ghost" onClick={() => setProfileOpen(false)}>{t(S.close)}</Button>}
+          footer={<Button variant="secondary" onClick={() => setProfileOpen(false)}>{t(S.close)}</Button>}
         >
           <Suspense fallback={<div className="async-loading" role="status" aria-live="polite"><span className="mrs-spin" aria-hidden="true" /></div>}>
             <PatientProfile beneficiaryId={row.beneficiaryId} />

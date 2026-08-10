@@ -87,7 +87,15 @@ export function ConfirmAction({
       description={t(description ?? S.irreversible)}
       footer={
         <>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>{t(S.cancel)}</Button>
+          {/*
+            The dismiss takes its weight from what it sits beside. Against an ordinary commit it is `ghost`,
+            so the commit dominates. Against a DESTRUCTIVE one it is `secondary`: backing out is the
+            recommended action there, and it must not be the lighter of the two — which is the same reasoning
+            that made three cancellation dialogs in this product relabel their dismiss to "Keep it".
+          */}
+          <Button variant={destructive ? "secondary" : "ghost"} onClick={() => onOpenChange(false)}>
+            {t(S.cancel)}
+          </Button>
           <Button
             variant={destructive ? "danger" : "primary"}
             onClick={() => void confirm()}

@@ -542,7 +542,7 @@ function SessionsTab({ membership }: { membership: MembershipDetail }) {
         description={t(S.revokeBody)}
         footer={
           <>
-            <Button variant="ghost" onClick={() => setTarget(null)}>{t(S.cancel)}</Button>
+            <Button variant="secondary" onClick={() => setTarget(null)}>{t(S.cancel)}</Button>
             <Button variant="danger" onClick={confirm} disabled={write.busy}>{t(S.revoke)}</Button>
           </>
         }

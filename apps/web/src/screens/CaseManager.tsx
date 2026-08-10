@@ -73,7 +73,7 @@ export function MyCases() {
       key: "action",
       header: t(S.action),
       cell: (r) => (
-        <Button size="sm" variant={selected === r.id ? "primary" : "secondary"} onClick={() => setSelected(r.id)}>
+        <Button size="sm" variant="secondary" onClick={() => setSelected(r.id)}>
           {t(S.open)}
         </Button>
       ),

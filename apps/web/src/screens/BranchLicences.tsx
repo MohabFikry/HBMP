@@ -105,7 +105,7 @@ export function BranchPractitioners() {
         key: "actions",
         header: "",
         cell: (p) => (
-          <Button variant="ghost" onClick={() => setRenewing(p)}>
+          <Button size="sm" variant="ghost" onClick={() => setRenewing(p)}>
             {t(S.renew)}
           </Button>
         ),

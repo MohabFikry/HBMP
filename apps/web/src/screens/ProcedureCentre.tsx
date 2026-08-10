@@ -165,7 +165,7 @@ export default function ProcedureCentre({ mode = "queue" }: { mode?: "queue" | "
         ) : r.sessionsRemaining <= 0 ? (
           <StatusChip kind="neu" label={t(S.allDelivered)} />
         ) : (
-          <Button
+          <Button size="sm"
             variant="primary"
             disabled={busy === r.orderId}
             onClick={() => void recordSession(r)}

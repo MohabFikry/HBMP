@@ -145,7 +145,7 @@ export function StatusChangeModal({
           <Button variant="ghost" onClick={onClose}>{t(S.close)}</Button>
         ) : (
           <>
-            <Button variant="ghost" onClick={onClose}>{t(S.cancel)}</Button>
+            <Button variant={selected?.danger ? "secondary" : "ghost"} onClick={onClose}>{t(S.cancel)}</Button>
             <Button
               variant={selected?.danger ? "danger" : "primary"}
               onClick={confirm}

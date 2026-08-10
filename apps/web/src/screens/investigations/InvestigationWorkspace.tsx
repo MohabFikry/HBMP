@@ -844,7 +844,7 @@ export function InvestigationWorkspace({
         title={t(S.confirmDiscard)}
         footer={
           <>
-            <Button variant="ghost" onClick={() => setDiscarding(false)}>{t(S.cancel)}</Button>
+            <Button variant="secondary" onClick={() => setDiscarding(false)}>{t(S.cancel)}</Button>
             <Button
               variant="danger"
               onClick={() => { setDraft(emptyDraft()); setOpenChecks(null); setDiscarding(false); }}

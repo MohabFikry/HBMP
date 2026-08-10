@@ -688,7 +688,7 @@ function DecisionModal({
       closeLabel={t(A.close)}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>{t(A.cancel)}</Button>
+          <Button variant={decision === "Reject" ? "secondary" : "ghost"} onClick={onClose}>{t(A.cancel)}</Button>
           <Button
             variant={decision === "Reject" ? "danger" : "primary"}
             leadingIcon={<Icon name={decision === "Reject" ? "cross" : "check2"} />}

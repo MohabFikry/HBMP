@@ -405,7 +405,7 @@ function MasterListEditor({
       )}
 
       <div className="pol-editor-actions">
-        <Button variant="secondary" onClick={onCancel}>{t(S.cancel)}</Button>
+        <Button variant="ghost" onClick={onCancel}>{t(S.cancel)}</Button>
         <Button
           variant="primary"
           loading={busy}

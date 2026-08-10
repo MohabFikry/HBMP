@@ -1795,7 +1795,7 @@ function InvestigationsTab({
       key: "open",
       header: t(S.colOpen),
       cell: (r) => (
-        <Button
+        <Button size="sm"
           variant="ghost"
           aria-label={`${t(S.openOrder)} — ${r.orderNo}`}
           onClick={() => setViewingOrder(r)}
@@ -1811,7 +1811,7 @@ function InvestigationsTab({
       key: "history",
       header: t(S.colHistory),
       cell: (r) => (
-        <Button
+        <Button size="sm"
           variant="ghost"
           aria-label={`${t(S.viewHistory)} — ${r.primaryCode}`}
           onClick={() => setHistoryFor({ code: r.primaryCode, label: r.primaryCode })}

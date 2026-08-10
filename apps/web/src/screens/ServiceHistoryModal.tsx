@@ -121,7 +121,7 @@ export function ServiceHistoryModal({
           <span>
             <StatusChip kind="warn" label={t(S.restricted)} />
             {onRequestAccess && (
-              <Button variant="ghost" onClick={() => onRequestAccess(r)}>{t(S.requestAccess)}</Button>
+              <Button size="sm" variant="ghost" onClick={() => onRequestAccess(r)}>{t(S.requestAccess)}</Button>
             )}
           </span>
         ) : (

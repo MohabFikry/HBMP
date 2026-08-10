@@ -191,7 +191,7 @@ export function EditAppointmentButton({
         description={t(S.body)}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setOpen(false)}>{t(S.keep)}</Button>
+            <Button variant="ghost" onClick={() => setOpen(false)}>{t(S.keep)}</Button>
             <Button leadingIcon={<Icon name="check2" />} variant="primary" loading={busy} onClick={() => void save()}>{t(S.save)}</Button>
           </>
         }

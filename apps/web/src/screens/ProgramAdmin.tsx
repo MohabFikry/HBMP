@@ -188,7 +188,7 @@ function FeatureTable({
         title={t(destructive ? S.disableTitle : S.enableTitle)}
         footer={
           <>
-            <Button variant="ghost" onClick={close}>{t(S.cancel)}</Button>
+            <Button variant={destructive ? "secondary" : "ghost"} onClick={close}>{t(S.cancel)}</Button>
             <Button variant={destructive ? "danger" : "primary"} onClick={confirm} disabled={write.busy}>
               {t(S.confirm)}
             </Button>
