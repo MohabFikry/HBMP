@@ -2860,7 +2860,7 @@ export class HttpApiClient implements ApiClient {
   // second opinion about a decision the server has already made correctly.
 
   async createIdentityUser(input: {
-    username: string; displayName: string; email: string; tenantId: string; roles: string[]; lang?: "en" | "ar";
+    username: string; displayName: string; email: string; tenantId?: string; roles: string[]; lang?: "en" | "ar";
     position?: string;
   }) {
     const r = (await postAbsolute(`${GATEWAY_BASE}/identity/admin/users`, input)) as any;
@@ -3716,6 +3716,14 @@ export class HttpApiClient implements ApiClient {
     await postAbsolute(
       `${GATEWAY_BASE}/identity/admin/memberships/${encodeURIComponent(membershipId)}/overrides`,
       input,
+    );
+  }
+
+  async removeMembershipOverride(membershipId: string, scopeKey: string) {
+    // The key is a path SEGMENT and it contains colons (`orders:read`), so the encode is load-bearing rather
+    // than defensive — an unencoded key is a different URL from the one the route matches.
+    await deleteAbsolute(
+      `${GATEWAY_BASE}/identity/admin/memberships/${encodeURIComponent(membershipId)}/overrides/${encodeURIComponent(scopeKey)}`,
     );
   }
 

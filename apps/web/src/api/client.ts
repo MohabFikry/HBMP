@@ -670,7 +670,16 @@ export interface ApiClient {
     username: string;
     displayName: string;
     email: string;
-    tenantId: string;
+    /**
+     * 28.16 — OMITTED by the portal, and that is the correct call rather than a shortcut.
+     *
+     * <p>The browser has no tenant to send: the caller's own is a claim in their token, and the SPA was
+     * passing "" because the field demanded a string. The server wrote that verbatim, so every account
+     * created through the product landed in tenant "" — an account nobody's organisation could see. It now
+     * resolves the tenant from the caller through the same reach check the roster reads with, and this field
+     * exists only for a platform admin deliberately creating INTO another tenant.</p>
+     */
+    tenantId?: string;
     roles: string[];
     lang?: "en" | "ar";
     /** The person's job title. Display only — see `zIdentityUser.position`. */
@@ -775,6 +784,19 @@ export interface ApiClient {
     membershipId: string,
     input: { scopeKey: string; effect: "Allow" | "Deny"; reason: string; validUntil: string | null },
   ): Promise<void>;
+  /**
+   * Withdraw one exception — 28.16.
+   *
+   * <p>`DELETE .../overrides/{scopeKey}` has existed since 21.2 and nothing in the SPA has ever called it, so
+   * an exception could be granted from the UI and never taken back from it. That is the worse half to leave
+   * missing: an administrator who cannot withdraw a narrow, reason-carrying exception has one remaining way
+   * to correct it — change the person's ROLE — which is the over-granting the exception path exists to
+   * avoid.</p>
+   *
+   * <p>Soft-deleted on the server: an override is evidence of a decision, and revoking it must not erase the
+   * record that it was once made.</p>
+   */
+  removeMembershipOverride(membershipId: string, scopeKey: string): Promise<void>;
   /**
    * Mode-2 effective access — "what can this person actually do, and why".
    *

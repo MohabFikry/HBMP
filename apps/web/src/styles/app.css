@@ -1145,6 +1145,42 @@ nav.mrs-rail {
   font-weight: 700;
   overflow: hidden;
 }
+/*
+  28.16 — the PERSON cell of the Users & Access table: face, name, and the address they sign in with.
+
+  Three columns across two tables became one cell, so the three facts have to read as one thing rather than
+  as a paragraph. The avatar is fixed at its own size (`flex: 0 0 auto` on `.staff-avatar` above) and the text
+  column takes the rest, with `min-inline-size: 0` so a long address ELLIPSES instead of forcing the table
+  wider than its container — the grid-blowout guard exists because that failure is invisible until somebody
+  opens the screen at 1280px with a real directory in it.
+*/
+.person-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--sp2);
+}
+.person-cell-text {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+}
+.person-cell-name {
+  font-weight: 600;
+}
+.person-cell-sub {
+  font-size: var(--fs-caption);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The record header: the face beside who this is, at the reading size the account pane uses. */
+.person-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp3);
+  margin-bottom: var(--sp3);
+}
+
 .photo-picker {
   display: flex;
   align-items: center;

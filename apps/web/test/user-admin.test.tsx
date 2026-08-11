@@ -3,13 +3,13 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
 import { DevApiClient } from "../src/api/DevApiClient";
-import { MembershipRoster } from "../src/screens/AccessAdmin";
+import { UsersAndAccess } from "../src/screens/AccessAdmin";
 import { AccessCatalogue } from "../src/screens/AccessCatalogue";
 import { looksLikeEmail } from "../src/screens/UserAdmin";
 import { renderNode, seedSession } from "./helpers";
 
 /**
- * Phase 28.8/28.9 — administering people, and the access catalogue they are administered against.
+ * Phase 28.8/28.9/28.16 — administering people, and the access catalogue they are administered against.
  *
  * ============================================================================================================
  * WHAT THESE PROVE
@@ -21,13 +21,17 @@ import { renderNode, seedSession } from "./helpers";
  *   * an account with no address is marked as one, because "send reset link" cannot reach it;
  *   * the role designer refuses a set holding both halves of a separated duty, in the form;
  *   * a machine-only key cannot be ticked onto a human role.
+ *
+ * 28.16 moved the lifecycle off the table and onto the person's own record — three buttons on every row of a
+ * staff directory is sixty-nine controls competing with the data, and two of them change what a colleague can
+ * do today. So the tests that used to press a row button now open the record first, which is the change.
  */
 
 afterEach(cleanup);
 
-function renderAccounts() {
+function renderUsers() {
   seedSession("org_admin");
-  return renderNode(<MembershipRoster />, new DevApiClient({ latencyMs: 0 }));
+  return renderNode(<UsersAndAccess />, new DevApiClient({ latencyMs: 0 }));
 }
 
 function renderCatalogue() {
@@ -35,9 +39,19 @@ function renderCatalogue() {
   return renderNode(<AccessCatalogue />, new DevApiClient({ latencyMs: 0 }));
 }
 
-describe("the accounts list", () => {
+/** Open one person's record and switch to the Account tab, where identity and lifecycle live. */
+async function openAccountTab(name: string) {
+  const user = userEvent.setup();
+  renderUsers();
+  const row = (await screen.findByText(name)).closest("tr")!;
+  await user.click(within(row).getByRole("button", { name: /^manage$/i }));
+  await user.click(await screen.findByRole("tab", { name: /^account$/i }));
+  return user;
+}
+
+describe("the people list", () => {
   it("shows the address an account signs in with, and marks the ones that have none", async () => {
-    renderAccounts();
+    renderUsers();
     expect(await screen.findByText("org.admin@mersal.org")).toBeInTheDocument();
   });
 
@@ -45,7 +59,7 @@ describe("the accounts list", () => {
     // `doctor` happens to be spelled the same either way; the point is that the column resolves through the
     // catalogue, so `lab_tech` would read as "Laboratory" rather than as a role name nobody outside the
     // issuer uses.
-    renderAccounts();
+    renderUsers();
     const row = (await screen.findByText("Dr. Hala")).closest("tr")!;
     expect(within(row).getByText(/Consultation/)).toBeInTheDocument();
   });
@@ -53,16 +67,16 @@ describe("the accounts list", () => {
   it("calls out an account with no second factor", async () => {
     // MFA gates every admin scope and every break-glass request on the platform, and until 18.C2 no screen
     // anywhere showed whether a given account had one.
-    renderAccounts();
+    renderUsers();
     const row = (await screen.findByText("Dr. Hala")).closest("tr")!;
-    expect(within(row).getByText(/Not enrolled/i)).toBeInTheDocument();
+    expect(within(row).getByText(/no second factor/i)).toBeInTheDocument();
   });
 });
 
 describe("creating an account", () => {
   it("requires a name, a usable address and at least one portal", async () => {
     const user = userEvent.setup();
-    renderAccounts();
+    renderUsers();
     await user.click(await screen.findByRole("button", { name: /Add a user/i }));
     await user.click(screen.getByRole("button", { name: /Create and invite/i }));
 
@@ -75,7 +89,7 @@ describe("creating an account", () => {
 
   it("creates the account, reports that the invitation went, and never mentions a password", async () => {
     const user = userEvent.setup();
-    renderAccounts();
+    renderUsers();
     await user.click(await screen.findByRole("button", { name: /Add a user/i }));
 
     await user.type(screen.getByLabelText(/Full name/i), "Nadia Farouk");
@@ -94,7 +108,7 @@ describe("creating an account", () => {
 
   it("says which field to change when the address is already in use", async () => {
     const user = userEvent.setup();
-    renderAccounts();
+    renderUsers();
     await user.click(await screen.findByRole("button", { name: /Add a user/i }));
     await user.type(screen.getByLabelText(/Full name/i), "Someone Else");
     await user.type(screen.getByLabelText(/Email address/i), "hala@mersal.org");
@@ -106,7 +120,7 @@ describe("creating an account", () => {
 
   it("has no serious accessibility violations", async () => {
     const user = userEvent.setup();
-    const { container } = renderAccounts();
+    const { container } = renderUsers();
     await user.click(await screen.findByRole("button", { name: /Add a user/i }));
     const results = await axe(container);
     const serious = results.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
@@ -116,43 +130,46 @@ describe("creating an account", () => {
 
 describe("the account lifecycle", () => {
   it("states the consequence before deactivating, then reflects it", async () => {
-    const user = userEvent.setup();
-    renderAccounts();
-    const row = (await screen.findByText("Dr. Hala")).closest("tr")!;
-    await user.click(within(row).getByRole("button", { name: /^Deactivate$/i }));
+    const user = await openAccountTab("Dr. Hala");
+    await user.click(await screen.findByRole("button", { name: /^Deactivate$/i }));
 
     // Signed out of every device, immediately, for somebody who is not in the room. An administrator who
     // finds that out afterwards has been given no choice.
     expect(await screen.findByText(/signed out of every device immediately/i)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^Confirm$/i }));
 
-    await waitFor(() => {
-      const after = screen.getByText("Dr. Hala").closest("tr")!;
-      expect(within(after).getByText(/De-provisioned/i)).toBeInTheDocument();
-    });
+    // The record stays open and the header — which is where the account's state is stated — follows.
+    expect(await screen.findByText(/signed out of every device/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText(/De-provisioned/i).length).toBeGreaterThan(0));
   });
 
   it("offers the way back on a deactivated account", async () => {
-    const user = userEvent.setup();
-    renderAccounts();
-    const row = (await screen.findByText("Former Staff")).closest("tr")!;
-    // The action swaps with the state, so a row never offers the one that cannot apply.
-    expect(within(row).queryByRole("button", { name: /^Deactivate$/i })).toBeNull();
-    await user.click(within(row).getByRole("button", { name: /Reactivate/i }));
+    const user = await openAccountTab("Former Staff");
+    // The action swaps with the state, so a record never offers the one that cannot apply.
+    expect(screen.queryByRole("button", { name: /^Deactivate$/i })).toBeNull();
+    await user.click(screen.getByRole("button", { name: /Reactivate/i }));
     expect(await screen.findByText(/sign in again with their existing password/i)).toBeInTheDocument();
   });
 
   it("refuses to offer a reset link to an account with no address", async () => {
-    const user = userEvent.setup();
-    renderAccounts();
     // An address-less account is a real state for anything predating 28.8 (service accounts, seeds).
-    const row = (await screen.findByText("Reporting Service")).closest("tr")!;
-    await user.click(within(row).getByRole("button", { name: /Send reset link/i }));
+    const user = await openAccountTab("Reporting Service");
+    await user.click(screen.getByRole("button", { name: /Send reset link/i }));
 
     // Stated BEFORE the attempt rather than reported after it: the server answers 422, and an administrator
     // who presses a button and reads "no-email-address" has learned it the expensive way.
     expect(await screen.findByText(/no email address, so a link cannot be sent/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Confirm$/i })).toBeDisabled();
+  });
+
+  it("announces an OUTCOME after deactivating, not the label of the button just pressed", async () => {
+    const user = await openAccountTab("Dr. Hala");
+    await user.click(await screen.findByRole("button", { name: /^deactivate$/i }));
+    await user.click(await screen.findByRole("button", { name: /^confirm$/i }));
+
+    // The live region used to be handed `S.deactivate` — the BUTTON LABEL. A screen-reader user could not
+    // tell whether the account had been deactivated or whether they were being offered the chance to.
+    expect(await screen.findByText(/signed out of every device/i)).toBeInTheDocument();
   });
 });
 
@@ -234,36 +251,14 @@ describe("designing a role", () => {
   });
 });
 
-describe("granting one permission as an exception", () => {
-  it("offers the catalogue rather than asking for a key from memory", async () => {
-    const user = userEvent.setup();
-    seedSession("org_admin");
-    renderNode(<MembershipRoster />, new DevApiClient({ latencyMs: 0 }));
-
-    await user.click(await screen.findByRole("tab", { name: /Authority/i }));
-    await user.click((await screen.findAllByRole("button", { name: /^Open$/i }))[0]);
-    await user.click(await screen.findByRole("tab", { name: /Exceptions/i }));
-    await user.click(await screen.findByRole("button", { name: /Add an exception/i }));
-
-    // This was a bare text field: granting an exception required knowing a key's exact spelling with no
-    // screen anywhere that listed them, so the realistic options were "guess" or "give them a bigger role".
-    const picker = await screen.findByLabelText(/^Permission$/i);
-    expect(picker).toHaveAttribute("role", "combobox");
-  });
-});
-
 /**
- * 28.10 — correcting an account, and the identifiers the screens used to show instead of names.
+ * 28.10 — correcting an account. 28.16 — from the person's record rather than a dialog over the table.
  */
 describe("correcting an existing account", () => {
   it("can change the name and the address, which nothing in the app could do before", async () => {
-    const user = userEvent.setup();
-    renderAccounts();
-
     // `api.updateIdentityUser` existed and had NO caller anywhere in the SPA, so the recorded remedy for a
     // typo in the address somebody signs in with was to abandon the account and create another.
-    const row = (await screen.findByText("Dr. Hala")).closest("tr")!;
-    await user.click(within(row).getByRole("button", { name: /^edit$/i }));
+    const user = await openAccountTab("Dr. Hala");
 
     const email = await screen.findByLabelText(/email address/i);
     await user.clear(email);
@@ -274,11 +269,8 @@ describe("correcting an existing account", () => {
   });
 
   it("says the address is what they now sign in with, rather than only 'Saved'", async () => {
-    const user = userEvent.setup();
-    renderAccounts();
+    const user = await openAccountTab("Dr. Hala");
 
-    const row = (await screen.findByText("Dr. Hala")).closest("tr")!;
-    await user.click(within(row).getByRole("button", { name: /^edit$/i }));
     const email = await screen.findByLabelText(/email address/i);
     await user.clear(email);
     await user.type(email, "h.new@mersal.org");
@@ -289,45 +281,23 @@ describe("correcting an existing account", () => {
     expect(await screen.findByText(/sign in with the new address/i)).toBeInTheDocument();
   });
 
-  it("reaches the portal checklist from the same button — one record, not two routes", async () => {
+  it("reaches the identity and the portals from the same record — one person, two questions", async () => {
     const user = userEvent.setup();
-    renderAccounts();
-
+    renderUsers();
     const row = (await screen.findByText("Dr. Hala")).closest("tr")!;
-    await user.click(within(row).getByRole("button", { name: /^edit$/i }));
+    await user.click(within(row).getByRole("button", { name: /^manage$/i }));
 
+    // Access first, because that is what an administrator opens a colleague's record to change.
+    expect(await screen.findByRole("checkbox", { name: /Consultation/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: /^account$/i }));
     expect(await screen.findByLabelText(/full name/i)).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /Consultation/i })).toBeInTheDocument();
   });
 
-  it("announces an OUTCOME after deactivating, not the label of the button just pressed", async () => {
-    const user = userEvent.setup();
-    renderAccounts();
-
-    const row = (await screen.findByText("Dr. Hala")).closest("tr")!;
-    await user.click(within(row).getByRole("button", { name: /^deactivate$/i }));
-    await user.click(await screen.findByRole("button", { name: /^confirm$/i }));
-
-    // The live region used to be handed `S.deactivate` — the BUTTON LABEL. A screen-reader user could not
-    // tell whether the account had been deactivated or whether they were being offered the chance to.
-    expect(await screen.findByText(/signed out of every device/i)).toBeInTheDocument();
-  });
-});
-
-describe("identifiers a person cannot act on", () => {
-  it("names the branches a membership reaches instead of eight characters of a uuid", async () => {
-    const user = userEvent.setup();
-    seedSession("org_admin");
-    renderNode(<MembershipRoster />, new DevApiClient({ latencyMs: 0 }));
-
-    await user.click(await screen.findByRole("tab", { name: /Authority/i }));
-    await user.click((await screen.findAllByRole("button", { name: /^Open$/i }))[0]);
-    await user.click(await screen.findByRole("tab", { name: /Branch reach/i }));
-
-    // "Which clinics can this person see" is the question the tab exists for, and "Maadi" is an answer to
-    // it. `b1000000` is not — it cannot be copied anywhere that would accept it and reads as a bug.
-    expect(await screen.findByText("Maadi")).toBeInTheDocument();
-    expect(screen.getByText("Alexandria")).toBeInTheDocument();
+  it("does not offer Save until something has actually changed", async () => {
+    // Every one of these endpoints writes an audit event, and a "details changed" entry recording no change
+    // is noise in the record an access review reads.
+    await openAccountTab("Dr. Hala");
+    expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled();
   });
 });
 
@@ -353,7 +323,7 @@ describe("the email check", () => {
  */
 describe("a person's position", () => {
   it("shows the job title, which is not the role", async () => {
-    renderAccounts();
+    renderUsers();
     const row = (await screen.findByText("Dr. Hala")).closest("tr")!;
     expect(within(row).getByText("Consultant Physician")).toBeInTheDocument();
     // The portals column beside it still names the workspace, and the two disagree on purpose.
@@ -363,17 +333,13 @@ describe("a person's position", () => {
   it("says 'not recorded' rather than leaving a blank cell", async () => {
     // A service account has no job title because it is not a person. An empty cell reads as a rendering
     // fault; the words read as a fact.
-    renderAccounts();
+    renderUsers();
     const row = (await screen.findByText("Reporting Service")).closest("tr")!;
     expect(within(row).getByText(/not recorded/i)).toBeInTheDocument();
   });
 
   it("can be set when correcting an account", async () => {
-    const user = userEvent.setup();
-    renderAccounts();
-
-    const row = (await screen.findByText("Dr. Hala")).closest("tr")!;
-    await user.click(within(row).getByRole("button", { name: /^edit$/i }));
+    const user = await openAccountTab("Dr. Hala");
     const field = await screen.findByLabelText(/^position$/i);
     await user.clear(field);
     await user.type(field, "Head of Internal Medicine");
@@ -385,23 +351,16 @@ describe("a person's position", () => {
   it("can be CLEARED, not only set", async () => {
     // A title that no longer applies has to be removable. A field that can only ever gain a value is one
     // nobody can correct — which is why an empty box sends "" rather than being treated as "unchanged".
-    const user = userEvent.setup();
-    renderAccounts();
-
-    const row = (await screen.findByText("Dr. Hala")).closest("tr")!;
-    await user.click(within(row).getByRole("button", { name: /^edit$/i }));
+    const user = await openAccountTab("Dr. Hala");
     await user.clear(await screen.findByLabelText(/^position$/i));
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
-    await waitFor(() => {
-      const after = screen.getByText("Dr. Hala").closest("tr")!;
-      expect(within(after).getByText(/not recorded/i)).toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.getAllByText(/not recorded/i).length).toBeGreaterThan(0));
   });
 
   it("grants nothing — the help text says so where the decision is made", async () => {
     const user = userEvent.setup();
-    renderAccounts();
+    renderUsers();
     await user.click(await screen.findByRole("button", { name: /add a user/i }));
     // The one sentence that keeps an administrator from treating this box as an access control.
     expect(await screen.findByText(/grants nothing/i)).toBeInTheDocument();

@@ -3,7 +3,8 @@ import { Button, Icon, InlineAlert, InputField, Modal, StatusChip } from "@mersa
 import type { IdentityUser, Localized } from "@mersal/contracts";
 import { useApi } from "../api/ApiProvider";
 import { useWrite } from "../api/useWrite";
-import { issuerRoleFor } from "../config";
+import { issuerRoleFor, rolesFromClaimRoles } from "../config";
+import type { PortalDef } from "../portals/catalog";
 import { PORTALS, ZONES } from "../portals/catalog";
 import { PhotoPicker, PHOTO_PICKER_STRINGS } from "../shell/PhotoPicker";
 import { useLoc } from "./_shared";
@@ -74,24 +75,11 @@ const S = {
   emailTaken: { en: "Another account already uses this email address.", ar: "هناك حساب آخر يستخدم هذا البريد الإلكتروني." },
 
   /*
-    28.10 — ONE "Edit", not two.
-
-    There were two row buttons and neither could correct a name or an address: "Change portals" existed, and
-    `api.updateIdentityUser` — the endpoint that fixes a mistyped email — had no caller anywhere in the app.
-    So the recorded remedy for a typo in the address somebody signs in with was to abandon the account and
-    make another one.
-
-    Merging them is not just about adding the missing half. An administrator opening a person's record is
-    fixing THAT PERSON, and "their details" and "what they can reach" are two parts of one answer; splitting
-    them across two buttons made the reader choose a route before knowing which one held the field they
-    wanted.
+    28.10 merged "Change portals" into an "Edit" dialog; 28.16 dissolved the dialog itself. An administrator
+    opening a person's record is fixing THAT PERSON, and "their details" and "what they can reach" are two
+    parts of one answer — but they are two WRITES to two services, and forcing them behind one Save meant a
+    half-failure with nothing on screen to say which half had landed. They are two panels of one record now.
   */
-  edit: { en: "Edit", ar: "تعديل" },
-  editTitle: { en: "Edit this account", ar: "تعديل هذا الحساب" },
-  editHelp: {
-    en: "Changes to portals take effect on their next sign-in, or within five minutes on this one. Changing the email address changes what they sign in with.",
-    ar: "تسري تغييرات البوابات عند تسجيل الدخول التالي، أو خلال خمس دقائق على الجلسة الحالية. تغيير البريد الإلكتروني يغيّر ما يسجّلون الدخول به.",
-  },
   emailChanged: {
     en: "Saved. They now sign in with the new address.",
     ar: "تم الحفظ. سيسجّلون الدخول الآن بالبريد الجديد.",
@@ -160,13 +148,32 @@ export function looksLikeEmail(value: string): boolean {
 }
 
 /**
+ * The portals an account holds — 28.16, and it is not the obvious one-liner.
+ *
+ * <p>Every screen here resolved portals with `PORTALS.filter(p => roles.includes(issuerRoleFor(p.role)))`,
+ * which compares against the CANONICAL issuer name only. Two portals answer to more than one name:
+ * `provider_admin` is also granted as `network_team`, and `radiology_tech` is also `imaging_tech` for the
+ * duration of the rename's dual-accept window (docs/runbooks/radiology-rename.md). An account holding an
+ * alias therefore rendered as holding NO portal — and since the edit form requires at least one, that
+ * account could not be saved at all. The seeded platform has exactly such an account.</p>
+ *
+ * <p>{@link rolesFromClaimRoles} is the table that already knows about both spellings; it is what the app
+ * bar and the portal picker resolve the signed-in user's own portals with. Using it here means one table
+ * decides, rather than two that agree until an alias is added.</p>
+ */
+export function portalsHeldBy(user: Pick<IdentityUser, "roles">): PortalDef[] {
+  const held = new Set<string>(rolesFromClaimRoles(user.roles));
+  return PORTALS.filter((p) => held.has(p.role));
+}
+
+/**
  * The portal picker, grouped by the same three zones the sign-in picker uses.
  *
  * Shared shape on purpose: an administrator granting "Clinical & approvals" portals and a clinician
  * choosing between them should be looking at the same grouping, or the grant does not obviously correspond
  * to the thing the person will see.
  */
-function PortalChecklist({
+export function PortalChecklist({
   chosen,
   onToggle,
 }: {
@@ -238,7 +245,8 @@ export function CreateUserDialog({
         // Optional, and left absent rather than sent as "" when unfilled — the server treats blank as "none
         // recorded", and so does everything that renders it.
         position: position.trim() || undefined,
-        tenantId: "",
+        // No tenantId: the server takes the caller's own, which is the only one an org admin may create
+        // into. Sending "" here is what put every account created from this screen into tenant "" (28.16).
         // The ISSUER's names, not the portal keys. `lab` would be a 422; `lab_tech` is the grant.
         roles: portals.map((r) => issuerRoleFor(r as never)),
       });
@@ -328,49 +336,45 @@ export function CreateUserDialog({
 }
 
 /**
- * Edit an existing account: who they are, what they sign in with, and what they can reach.
+ * Who somebody IS: their name, the address they sign in with, their job title and their photograph.
  *
- * <p>Two writes behind one Save, and the ORDER matters. Details go first: if the roles write then fails, the
- * administrator is looking at a corrected name beside an unchanged portal list and a stated error, which is
- * a legible half-done state. The other order leaves a person's access changed while their record still shows
- * the typo that prompted the edit — and nothing on screen would say which half landed.</p>
+ * ==========================================================================================================
+ * 28.16 — WHY THIS IS A PANEL AND NOT A DIALOG ANY MORE
+ * ==========================================================================================================
+ * It was `EditUserDialog`, and it carried the portal checklist too — identity and authority behind one Save,
+ * two endpoints, ordered so a half-failure was at least legible. That ordering problem exists because the two
+ * halves were forced into one transaction they never belonged in.
  *
- * <p>Neither write is sent when nothing in its half changed. That is not an optimisation: every one of these
- * endpoints writes an audit event, and an "email changed" entry recording no change is noise in the record
- * an access review reads.</p>
+ * They are now two panels of one record: this one writes to the identity, and the Access tab writes to the
+ * grant. Neither can leave the other half-applied, and each says what it did. The pair of writes that used to
+ * hide behind one button is gone rather than sequenced more carefully.
+ *
+ * The photo still writes IMMEDIATELY rather than on Save: it is a separate resource with its own endpoint,
+ * and folding it in would mean a failed upload rolling back a corrected email, or the reverse.
  */
-export function EditUserDialog({
-  open,
+export function AccountDetailsForm({
   user,
-  onClose,
   onSaved,
 }: {
-  open: boolean;
-  user: IdentityUser | null;
-  onClose: () => void;
+  user: IdentityUser;
   onSaved: (message: Localized) => void;
 }) {
   const api = useApi();
   const t = useLoc();
   const write = useWrite();
-  const [displayName, setDisplayName] = useState("");
-  const [email, setEmail] = useState("");
-  const [position, setPosition] = useState("");
-  const [portals, setPortals] = useState<string[]>([]);
+  const [displayName, setDisplayName] = useState(user.displayName);
+  const [email, setEmail] = useState(user.email ?? "");
+  const [position, setPosition] = useState(user.position ?? "");
   const [touched, setTouched] = useState(false);
-  const [seeded, setSeeded] = useState<string | null>(null);
+  const [seeded, setSeeded] = useState(user.id);
 
-  // Seeded once per opening rather than from an effect, which would overwrite the administrator's ticks on
-  // every re-render of the parent list.
-  const seedKey = open && user ? user.id : null;
-  if (seedKey !== seeded) {
-    setSeeded(seedKey);
-    setDisplayName(user?.displayName ?? "");
-    setEmail(user?.email ?? "");
-    setPosition(user?.position ?? "");
-    // The account holds ISSUER role names; the checklist speaks portal keys. Mapped back through the same
-    // table `issuerRoleFor` uses, so a round trip cannot silently drop `lab_tech`.
-    setPortals(PORTALS.filter((p) => (user?.roles ?? []).includes(issuerRoleFor(p.role))).map((p) => p.role));
+  // Re-seeded when the panel is pointed at a DIFFERENT person, not on every render: an effect on `user`
+  // would overwrite what the administrator is typing each time the parent list refreshes.
+  if (seeded !== user.id) {
+    setSeeded(user.id);
+    setDisplayName(user.displayName);
+    setEmail(user.email ?? "");
+    setPosition(user.position ?? "");
     setTouched(false);
     write.reset();
   }
@@ -379,110 +383,80 @@ export function EditUserDialog({
   // An account may legitimately have NO address (service accounts, fixtures predating 28.8), so blank is
   // allowed here where it is required at creation. What is not allowed is a malformed one.
   const emailOk = email.trim().length === 0 || looksLikeEmail(email);
-  const portalsOk = portals.length > 0;
 
-  const nameChanged = user ? displayName.trim() !== user.displayName : false;
-  const emailChanged = user ? email.trim() !== (user.email ?? "") : false;
-  const positionChanged = user ? position.trim() !== (user.position ?? "") : false;
-  const rolesChanged = user
-    ? [...portals].sort().join() !== PORTALS.filter((p) => user.roles.includes(issuerRoleFor(p.role))).map((p) => p.role).sort().join()
-    : false;
+  const nameChanged = displayName.trim() !== user.displayName;
+  const emailChanged = email.trim() !== (user.email ?? "");
+  const positionChanged = position.trim() !== (user.position ?? "");
+  const dirty = nameChanged || emailChanged || positionChanged;
 
   async function submit() {
     setTouched(true);
-    if (!user || !nameOk || !emailOk || !portalsOk) return;
-    const ok = await write.run(async () => {
-      if (nameChanged || emailChanged || positionChanged) {
-        await api.updateIdentityUser(user.id, {
-          displayName: nameChanged ? displayName.trim() : undefined,
-          email: emailChanged ? email.trim() : undefined,
-          // Sent as "" when the administrator has emptied the box, which is how the field is CLEARED.
-          // `undefined` would leave a title that no longer applies in place with no way to remove it.
-          position: positionChanged ? position.trim() : undefined,
-        });
-      }
-      if (rolesChanged) await api.setIdentityUserRoles(user.id, portals.map((r) => issuerRoleFor(r as never)));
-    });
+    if (!nameOk || !emailOk || !dirty) return;
+    // Nothing is sent when nothing changed. Not an optimisation: this endpoint writes an audit event, and a
+    // "details changed" entry recording no change is noise in the record an access review reads.
+    const ok = await write.run(() =>
+      api.updateIdentityUser(user.id, {
+        displayName: nameChanged ? displayName.trim() : undefined,
+        email: emailChanged ? email.trim() : undefined,
+        // Sent as "" when the administrator has emptied the box, which is how the field is CLEARED.
+        // `undefined` would leave a title that no longer applies in place with no way to remove it.
+        position: positionChanged ? position.trim() : undefined,
+      }),
+    );
     // The address is called out on its own because it is the one change that alters how the person GETS IN.
     // Being told only "Saved" after changing it leaves them to discover the consequence at the login screen.
     if (ok) onSaved(emailChanged ? S.emailChanged : S.detailsSaved);
   }
 
   return (
-    <Modal
-      open={open}
-      onOpenChange={(o) => !o && onClose()}
-      title={`${t(S.editTitle)}${user ? ` — ${user.displayName}` : ""}`}
-      description={t(S.editHelp)}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            {t(S.cancel)}
-          </Button>
-          <Button variant="primary" leadingIcon={<Icon name="check2" />} loading={write.busy} onClick={() => void submit()}>
-            {t(S.save)}
-          </Button>
-        </>
-      }
-    >
-      <div className="stack-3">
-        {write.error && (
-          <InlineAlert tone="bad">
-            {/* A 409 on this endpoint has exactly one cause — the address already belongs to somebody else.
-                "Conflict" would leave the administrator guessing which of three fields to change. */}
-            {write.error.status === 409 ? t(S.emailTaken) : t(write.error.message)}
-          </InlineAlert>
-        )}
-        <InputField
-          label={t(S.fullName)}
-          value={displayName}
-          error={touched && !nameOk ? t(S.nameRequired) : undefined}
-          onChange={(e) => setDisplayName(e.target.value)}
-        />
-        <InputField
-          label={t(S.email)}
-          help={t(S.emailHelp)}
-          type="email"
-          autoComplete="off"
-          value={email}
-          error={touched && !emailOk ? t(S.emailRequired) : undefined}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-        <InputField
-          label={t(S.position)}
-          help={t(S.positionHelp)}
-          autoComplete="off"
-          value={position}
-          onChange={(e) => setPosition(e.target.value)}
-        />
-        {/*
-          28.15 — an administrator sets somebody's photograph. Ordinary: a headshot arrives at HR from a
-          person who does not administer their own account.
-
-          It writes IMMEDIATELY, not on Save, and that is deliberate. The photo is a separate resource with
-          its own endpoint; folding it into this dialog's Save would mean a failed photo upload rolling back
-          a name change that succeeded, or the reverse. The picker reports its own outcome, and the avatar
-          beside it is the confirmation.
-        */}
-        <fieldset className="portal-checklist-wrap">
-          <legend>{t(PHOTO_PICKER_STRINGS.photo)}</legend>
-          {/* `buttons`, not the pane's hover overlay: every other row in this dialog is a labelled control,
-              and a picture that only reveals its verb on hover would be the one thing here that hides it. */}
-          {user && (
-            <PhotoPicker userId={user.id} name={user.displayName} adminForUserId={user.id} variant="buttons" t={t} />
-          )}
-        </fieldset>
-        <fieldset className="portal-checklist-wrap">
-          <legend>{t(S.portals)}</legend>
-          <p className="muted portal-checklist-help">{t(S.portalsHelp)}</p>
-          {touched && !portalsOk && <InlineAlert tone="bad">{t(S.portalsRequired)}</InlineAlert>}
-          <PortalChecklist
-            chosen={portals}
-            onToggle={(role, on) => setPortals((prev) => (on ? [...prev, role] : prev.filter((r) => r !== role)))}
-          />
-        </fieldset>
+    <div className="stack-3">
+      {write.error && (
+        <InlineAlert tone="bad">
+          {/* A 409 on this endpoint has exactly one cause — the address already belongs to somebody else.
+              "Conflict" would leave the administrator guessing which of three fields to change. */}
+          {write.error.status === 409 ? t(S.emailTaken) : t(write.error.message)}
+        </InlineAlert>
+      )}
+      <InputField
+        label={t(S.fullName)}
+        value={displayName}
+        error={touched && !nameOk ? t(S.nameRequired) : undefined}
+        onChange={(e) => setDisplayName(e.target.value)}
+      />
+      <InputField
+        label={t(S.email)}
+        help={t(S.emailHelp)}
+        type="email"
+        autoComplete="off"
+        value={email}
+        error={touched && !emailOk ? t(S.emailRequired) : undefined}
+        onChange={(e) => setEmail(e.target.value)}
+      />
+      <InputField
+        label={t(S.position)}
+        help={t(S.positionHelp)}
+        autoComplete="off"
+        value={position}
+        onChange={(e) => setPosition(e.target.value)}
+      />
+      <fieldset className="portal-checklist-wrap">
+        <legend>{t(PHOTO_PICKER_STRINGS.photo)}</legend>
+        {/* `buttons`, not the account pane's hover overlay: every other row here is a labelled control, and a
+            picture that only reveals its verb on hover would be the one thing on the panel hiding it. */}
+        <PhotoPicker userId={user.id} name={user.displayName} adminForUserId={user.id} variant="buttons" t={t} />
+      </fieldset>
+      <div className="chip-row">
+        <Button
+          variant="primary"
+          leadingIcon={<Icon name="check2" />}
+          loading={write.busy}
+          disabled={!dirty}
+          onClick={() => void submit()}
+        >
+          {t(S.save)}
+        </Button>
       </div>
-    </Modal>
+    </div>
   );
 }
 
@@ -569,33 +543,29 @@ export function UserActionDialog({
 }
 
 /**
- * The row's action buttons — the same three, in the same order, on every row.
+ * The three account-lifecycle actions, in one row.
  *
- * <p>Three, not four: 28.10 merged "Change portals" into "Edit". And the destructive one is `danger` rather
- * than a fourth identical ghost. Four buttons of identical weight give the eye nothing to sort them by, so
- * the one that signs a colleague out of every device sat with exactly the visual authority of the one that
- * opens a form. Colour is not the only cue — the confirmation states the consequence, and the label says the
- * verb — but it is the one available before the click.</p>
+ * <p>28.16 moved them OFF the table and onto the person's own record. Three buttons on every row of a
+ * twenty-three row table is sixty-nine controls competing with the data, and two of them change what a
+ * colleague can do today — so they belong where an administrator has already said which person they mean,
+ * beside the state each one acts on.</p>
  *
- * <p>Reactivate stays `ghost`: restoring somebody's access is the safe direction, and painting it red to
+ * <p>The destructive one is `danger` rather than a third identical ghost. Colour is not the only cue — the
+ * confirmation states the consequence and the label says the verb — but it is the one available before the
+ * click. Reactivate stays `ghost`: restoring somebody's access is the safe direction, and painting it red to
  * match its opposite would teach the colour to mean "account lifecycle" instead of "this is destructive".</p>
  */
-export function UserRowActions({
+export function AccountLifecycleActions({
   user,
   onAct,
-  onEdit,
 }: {
   user: IdentityUser;
   onAct: (kind: ConfirmKind, user: IdentityUser) => void;
-  onEdit: (user: IdentityUser) => void;
 }) {
   const t = useLoc();
   return (
     <span className="chip-row">
-      <Button variant="ghost" size="sm" leadingIcon={<Icon name="pen" />} onClick={() => onEdit(user)}>
-        {t(S.edit)}
-      </Button>
-      <Button variant="ghost" size="sm" onClick={() => onAct("reset", user)}>
+      <Button variant="secondary" size="sm" onClick={() => onAct("reset", user)}>
         {t(S.sendReset)}
       </Button>
       {user.isActive ? (

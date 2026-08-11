@@ -1096,6 +1096,28 @@ export class DevApiClient implements ApiClient {
     // No position, and that is a state the table has to render honestly rather than blank: a service account
     // has no job title because it is not a person.
     { id: "u-4", username: "svc.reporting", displayName: "Reporting Service", email: null, position: null, tenantId: "•••1111", isActive: true, twoFactorEnabled: false, roles: ["finance"] },
+    /*
+      28.16 — the two people the AUTHORITY fixtures are about, now that accounts and memberships are one
+      table. They had no account rows at all while the two halves were separate tabs reading separate
+      endpoints, which was invisible then and is the whole subject now: the merged row is an account JOINED to
+      its memberships, and a membership whose account is missing would have quietly proved nothing.
+
+      Sara holds TWO memberships in two organisations — invariant 1, and the reason the row does not blend
+      them: the table lists her once because she is one person, and the detail makes you choose which
+      membership you are configuring because authority is never the union.
+    */
+    { id: "u-5", username: "s.ibrahim", displayName: "Sara Ibrahim", email: "s.ibrahim@mersal.org", position: "Attending Physician", tenantId: "•••1111", isActive: true, twoFactorEnabled: true, roles: ["doctor", "provider_admin"] },
+    { id: "u-6", username: "m.farouk", displayName: "Mohamed Farouk", email: "m.farouk@mersal.org", position: "Dispensing Pharmacist", tenantId: "•••1111", isActive: true, twoFactorEnabled: true, roles: ["pharmacist"] },
+    /*
+      Holds `network_team`, which is an ISSUER ALIAS for the provider-admin portal rather than its canonical
+      name — and the seeded platform really does have an account exactly like this one.
+
+      It is here as a regression fixture. The portals column used to resolve with
+      `roles.includes(issuerRoleFor(portal))`, which only ever matches the CANONICAL spelling, so this
+      account rendered as holding no portal at all — and the edit form, which requires at least one, could
+      not be saved. Same defect for `imaging_tech` through the radiology rename's dual-accept window.
+    */
+    { id: "u-7", username: "n.habib", displayName: "Nour Habib", email: "n.habib@mersal.org", position: "Provider Network Analyst", tenantId: "•••1111", isActive: true, twoFactorEnabled: false, roles: ["network_team"] },
   ];
 
   async identityUsers(query?: string): Promise<IdentityUser[]> {
@@ -1111,7 +1133,7 @@ export class DevApiClient implements ApiClient {
   }
 
   async createIdentityUser(input: {
-    username: string; displayName: string; email: string; tenantId: string; roles: string[]; position?: string;
+    username: string; displayName: string; email: string; tenantId?: string; roles: string[]; position?: string;
   }) {
     // The duplicate check is here as well as on the server, because the fixture build is where the screen's
     // conflict path gets exercised — a 409 that only a live issuer can produce is a branch nothing tests.
@@ -3924,8 +3946,25 @@ export class DevApiClient implements ApiClient {
   // make legible: a suspended membership, a lapsed override, an open-ended branch grant, a cap already
   // exceeded, and a feature nobody has configured either way.
 
+  /** The exception rows, per membership. See {@link devOverrides}. */
+  private overrideStore = devOverrides();
+
   memberships() {
-    return this.gate(() => ok(z.array(zMembershipRow), DEV_MEMBERSHIPS), []);
+    return this.gate(
+      () =>
+        ok(
+          z.array(zMembershipRow),
+          // Counted from the live store rather than carried as literals: the roster's "3 exceptions, 1
+          // lapsed" and the detail's three rows have to be one fact, or granting one from the detail leaves
+          // the list behind it saying something else.
+          DEV_MEMBERSHIPS.map((m) => ({
+            ...m,
+            overrideCount: (this.overrideStore.get(m.membershipId) ?? []).length,
+            expiredOverrideCount: (this.overrideStore.get(m.membershipId) ?? []).filter((o) => o.expired).length,
+          })),
+        ),
+      [],
+    );
   }
 
   membership(membershipId: string) {
@@ -3933,45 +3972,89 @@ export class DevApiClient implements ApiClient {
     return this.gate(() =>
       ok(zMembershipDetail, {
         ...row,
+        // Read back from the mutable map, so the counts on the roster and the rows in the detail are the same
+        // fact rather than two literals that agree until somebody grants an exception.
+        overrideCount: (this.overrideStore.get(row.membershipId) ?? []).length,
+        expiredOverrideCount: (this.overrideStore.get(row.membershipId) ?? []).filter((o) => o.expired).length,
         providerId: null,
         homeBranchId: "b1000000-0000-0000-0000-000000000001",
-        overrides: [
-          {
-            id: "OV-1", scope: "orders:read", effect: "Deny", reason: "Under investigation — access narrowed pending review",
-            grantedBy: "admin@mersal", validUntil: null, expired: false,
-          },
-          {
-            id: "OV-2", scope: "reports:export", effect: "Allow", reason: "Covering the monthly extract while N. is on leave",
-            grantedBy: "admin@mersal", validUntil: "2026-08-31T00:00:00Z", expired: false,
-          },
-          // Lapsed on purpose: the screen must show it as expired rather than hide it, so an administrator
-          // can explain why this person lost the key overnight.
-          {
-            id: "OV-3", scope: "claims:submit", effect: "Allow", reason: "Ramadan surge cover",
-            grantedBy: "admin@mersal", validUntil: "2026-04-30T00:00:00Z", expired: true,
-          },
-        ],
+        overrides: [...(this.overrideStore.get(row.membershipId) ?? [])],
       }),
     );
   }
 
-  setMembershipOverride() {
-    return this.gate(() => undefined);
+  setMembershipOverride(
+    membershipId: string,
+    input: { scopeKey: string; effect: "Allow" | "Deny"; reason: string; validUntil: string | null },
+  ) {
+    return this.gate(() => {
+      const list = this.overrideStore.get(membershipId) ?? [];
+      // SET, not add: the endpoint is idempotent per (membership, scope), and a fixture that appended would
+      // let a screen with a duplicate-key bug look correct.
+      const rest = list.filter((o) => o.scope !== input.scopeKey);
+      this.overrideStore.set(membershipId, [...rest, {
+        id: `OV-${membershipId.slice(0, 4)}-${input.scopeKey}`,
+        scope: input.scopeKey,
+        effect: input.effect,
+        reason: input.reason,
+        grantedBy: "u-1",
+        validUntil: input.validUntil,
+        expired: false,
+      }]);
+      return undefined;
+    });
   }
 
+  removeMembershipOverride(membershipId: string, scopeKey: string) {
+    return this.gate(() => {
+      const list = this.overrideStore.get(membershipId) ?? [];
+      this.overrideStore.set(membershipId, list.filter((o) => o.scope !== scopeKey));
+      return undefined;
+    });
+  }
+
+  /**
+   * Mode 2, DERIVED from the membership's roles and its live overrides.
+   *
+   * <p>It used to be five literals returned for every membership id, which meant granting an exception in the
+   * dev build changed nothing on the preview that exists to show what an exception does. The algebra here is
+   * the fixture's own — the real one runs on the server and this client never talks to it — but it has to
+   * MOVE, or the screen's most important panel is a picture.</p>
+   */
   effectiveAccess(membershipId: string) {
-    return this.gate(() =>
-      ok(zEffectiveAccess, {
-        membershipId,
-        keys: [
-          { key: "encounters:read", source: "role", via: "doctor" },
-          { key: "prescriptions:write", source: "role", via: "doctor" },
-          { key: "reports:export", source: "override", via: "admin@mersal", reason: "Covering the monthly extract while N. is on leave" },
-          { key: "labs:read", source: "role", via: "doctor", deprecated: true, replacedBy: "investigations:read" },
-          { key: "orders:read", source: "denied", via: "admin@mersal", reason: "Under investigation — access narrowed pending review" },
-        ],
-      }),
-    );
+    return this.gate(() => {
+      const row = DEV_MEMBERSHIPS.find((m) => m.membershipId === membershipId) ?? DEV_MEMBERSHIPS[0];
+      const byRole: Record<string, string[]> = {
+        doctor: ["encounters:read", "prescriptions:write", "labs:read", "orders:read"],
+        provider_admin: ["provider:read", "provider:write"],
+        network_team: ["provider:read"],
+        pharmacist: ["pharmacy:read", "pharmacy:dispense"],
+        org_admin: ["admin:read", "admin:write"],
+        reception: ["reception:search", "appointment:write"],
+      };
+      const deprecated: Record<string, string | null> = { "labs:read": "investigations:read" };
+      const overrides = (this.overrideStore.get(row.membershipId) ?? []).filter((o) => !o.expired);
+      const denied = new Map(overrides.filter((o) => o.effect === "Deny").map((o) => [o.scope, o]));
+      const allowed = overrides.filter((o) => o.effect === "Allow");
+
+      const fromRoles = row.roles.flatMap((r) => (byRole[r.name] ?? []).map((key) => ({ key, via: r.name })));
+      const keys = [
+        ...fromRoles.map((k) => {
+          const deny = denied.get(k.key);
+          return deny
+            // Listed as DENIED rather than dropped: an absence that looks like a broken role definition is
+            // what sends an administrator re-granting the role.
+            ? { key: k.key, source: "denied" as const, via: deny.grantedBy ?? undefined, reason: deny.reason }
+            : {
+                key: k.key, source: "role" as const, via: k.via,
+                deprecated: k.key in deprecated ? true : undefined,
+                replacedBy: deprecated[k.key] ?? undefined,
+              };
+        }),
+        ...allowed.map((o) => ({ key: o.scope, source: "override" as const, via: o.grantedBy ?? undefined, reason: o.reason })),
+      ];
+      return ok(zEffectiveAccess, { membershipId, keys });
+    });
   }
 
   branchScopeGrants() {
@@ -4048,37 +4131,111 @@ export class DevApiClient implements ApiClient {
   }
 }
 
-/** One identity holding two memberships with different authority — invariant 1, made visible. */
+/**
+ * The membership roster — keyed to the fixture ACCOUNTS above by `userId`.
+ *
+ * <p>One identity holding two memberships with different authority (Sara) is invariant 1 made visible, and
+ * `svc.reporting` deliberately has NO membership: an account that exists and holds authority nowhere is a
+ * real state, and the merged table has to render it as a fact rather than as a blank.</p>
+ */
 const DEV_MEMBERSHIPS = [
   {
     membershipId: "11111111-1111-1111-1111-111111111111",
-    userId: "aaaaaaaa-1111-1111-1111-111111111111",
+    userId: "u-5",
     username: "s.ibrahim", displayName: "Sara Ibrahim",
     tenantId: "mersal", status: { kind: "ok" as const, label: loc("Active", "نشِطة") },
     roles: [{ name: "doctor", level: 3 }], level: 3, isPlatformAdmin: false,
-    overrideCount: 3, expiredOverrideCount: 1,
     activatedAt: "2026-01-15T08:00:00Z", endedAt: null,
   },
   {
     // Same person, different organisation, genuinely different authority — never a blended principal.
     membershipId: "22222222-2222-2222-2222-222222222222",
-    userId: "aaaaaaaa-1111-1111-1111-111111111111",
+    userId: "u-5",
     username: "s.ibrahim", displayName: "Sara Ibrahim",
     tenantId: "partner-ngo", status: { kind: "ok" as const, label: loc("Active", "نشِطة") },
     roles: [{ name: "provider_admin", level: 2 }], level: 2, isPlatformAdmin: false,
-    overrideCount: 0, expiredOverrideCount: 0,
     activatedAt: "2026-03-02T08:00:00Z", endedAt: null,
   },
   {
     membershipId: "33333333-3333-3333-3333-333333333333",
-    userId: "bbbbbbbb-2222-2222-2222-222222222222",
+    userId: "u-6",
     username: "m.farouk", displayName: "Mohamed Farouk",
     tenantId: "mersal", status: { kind: "warn" as const, label: loc("Suspended", "موقوفة") },
     roles: [{ name: "pharmacist", level: 4 }], level: 4, isPlatformAdmin: false,
-    overrideCount: 0, expiredOverrideCount: 0,
     activatedAt: "2026-02-01T08:00:00Z", endedAt: null,
   },
+  {
+    membershipId: "44444444-4444-4444-4444-444444444444",
+    userId: "u-1",
+    username: "org.admin", displayName: "Org Admin",
+    tenantId: "mersal", status: { kind: "ok" as const, label: loc("Active", "نشِطة") },
+    roles: [{ name: "org_admin", level: 1 }], level: 1, isPlatformAdmin: false,
+    activatedAt: "2025-11-01T08:00:00Z", endedAt: null,
+  },
+  {
+    membershipId: "55555555-5555-5555-5555-555555555555",
+    userId: "u-2",
+    username: "dr.hala", displayName: "Dr. Hala",
+    tenantId: "mersal", status: { kind: "ok" as const, label: loc("Active", "نشِطة") },
+    roles: [{ name: "doctor", level: 3 }], level: 3, isPlatformAdmin: false,
+    activatedAt: "2026-01-04T08:00:00Z", endedAt: null,
+  },
+  {
+    // Ended, not merely inactive: the account is de-provisioned AND the membership is over, and the two are
+    // separate facts that happen to agree here.
+    membershipId: "66666666-6666-6666-6666-666666666666",
+    userId: "u-3",
+    username: "left.staff", displayName: "Former Staff",
+    tenantId: "mersal", status: { kind: "neu" as const, label: loc("Ended", "منتهية") },
+    roles: [{ name: "reception", level: 4 }], level: 4, isPlatformAdmin: false,
+    activatedAt: "2025-06-01T08:00:00Z", endedAt: "2026-05-30T08:00:00Z",
+  },
+  {
+    membershipId: "77777777-7777-7777-7777-777777777777",
+    userId: "u-7",
+    username: "n.habib", displayName: "Nour Habib",
+    tenantId: "mersal", status: { kind: "ok" as const, label: loc("Active", "نشِطة") },
+    roles: [{ name: "network_team", level: 2 }], level: 2, isPlatformAdmin: false,
+    activatedAt: "2026-04-12T08:00:00Z", endedAt: null,
+  },
 ];
+
+/**
+ * The overrides, MUTABLE and per membership — 28.16.
+ *
+ * <p>`setMembershipOverride` was a no-op returning `undefined` and `membership()` answered the same three
+ * literals for every id, so the exception path could be driven in the dev build and in tests without any of
+ * it being observable. That is the shape of stub this session has already been caught by twice: a fixture
+ * that cannot disagree with a broken screen cannot test one. Granting an exception now adds a row, and
+ * withdrawing one removes it.</p>
+ */
+interface DevOverride {
+  id: string; scope: string; effect: "Allow" | "Deny"; reason: string;
+  grantedBy: string | null; validUntil: string | null; expired: boolean;
+}
+
+/** A FRESH map per client, like the identity store: a module-level one would carry one test's grant into
+ *  the next test's assertions. */
+function devOverrides(): Map<string, DevOverride[]> {
+  return new Map<string, DevOverride[]>([
+  ["11111111-1111-1111-1111-111111111111", [
+    {
+      id: "OV-1", scope: "orders:read", effect: "Deny", reason: "Under investigation — access narrowed pending review",
+      grantedBy: "u-1", validUntil: null, expired: false,
+    },
+    {
+      id: "OV-2", scope: "reports:export", effect: "Allow", reason: "Covering the monthly extract while N. is on leave",
+      grantedBy: "u-1", validUntil: "2026-08-31T00:00:00Z", expired: false,
+    },
+    // Lapsed on purpose: the screen must show it as expired rather than hide it, so an administrator
+    // can explain why this person lost the key overnight.
+    {
+      id: "OV-3", scope: "claims:submit", effect: "Allow", reason: "Ramadan surge cover",
+      grantedBy: "u-1", validUntil: "2026-04-30T00:00:00Z", expired: true,
+    },
+  ]],
+  ]);
+}
 
 /**
  * A fixture validation engine that mirrors the SERVER's five-state semantics (phase 26).

@@ -65,7 +65,8 @@ public static class AdminEndpoints
         });
 
         g.MapPost("/users", async (HttpContext http, CreateUserRequest req,
-            UserManager<ApplicationUser> users, IAuditClient audit, TimeProvider clock, MembershipService memberships,
+            UserManager<ApplicationUser> users, IdentityStoreDbContext db, IAuditClient audit, TimeProvider clock,
+            MembershipService memberships,
             IEmailSender email, IConfiguration config, ILoggerFactory logs) =>
         {
             var (me, err) = await Guard(http, "admin:write");
@@ -92,11 +93,36 @@ public static class AdminEndpoints
                 return Results.Problem(statusCode: 409, title: "username-taken",
                     detail: "another account already uses this username");
 
+            // ------------------------------------------------------------------------------------------------
+            // 28.16 — THE NEW ACCOUNT BELONGS TO A TENANT, AND THE CALLER DOES NOT GET TO INVENT ONE.
+            // ------------------------------------------------------------------------------------------------
+            // This wrote `req.TenantId` verbatim. The SPA sends "" — it has no tenant to send, since the
+            // caller's own is in their token — so every account created through the product landed with an
+            // EMPTY tenant id, and `EnsureMirroredAsync` below then minted its membership in tenant "".
+            //
+            // Nothing said so. The account appeared in the directory (that listing is not tenant-scoped), it
+            // could sign in, and it was simply absent from its own organisation's membership roster forever:
+            // no authority to review, no exception that could be granted to it, and a token carrying a tenant
+            // claim that matches no tenant. Merging the two lists is what made it visible — the new row says
+            // "No membership" the moment it is created.
+            //
+            // Resolved through the SAME reach check the roster reads with, so a cross-tenant create is
+            // refused and audited rather than quietly accepted, and asking for nothing means "mine".
+            var (askedTenant, tenantDenied) = await ResolveTenantReachAsync(
+                db, me!, string.IsNullOrWhiteSpace(req.TenantId) ? null : req.TenantId, audit, http.RequestAborted);
+            if (tenantDenied is not null) return tenantDenied;
+            // Null here means "every tenant", which is a legitimate answer for a READ and meaningless for a
+            // create — a platform admin who named no tenant gets their own.
+            var tenantId = askedTenant ?? me!.GetClaim(HbmpClaimTypes.TenantId);
+            if (string.IsNullOrWhiteSpace(tenantId))
+                return Results.Problem(statusCode: 422, title: "tenant-required",
+                    detail: "the new account's tenant could not be resolved — name one, or sign in with a tenant of your own");
+
             var user = new ApplicationUser
             {
                 Id = Guid.NewGuid(), UserName = req.Username, NormalizedUserName = req.Username.ToUpperInvariant(),
                 Email = req.Email, DisplayName = req.DisplayName, Position = Trimmed(req.Position),
-                TenantId = req.TenantId, ProviderId = req.ProviderId,
+                TenantId = tenantId, ProviderId = req.ProviderId,
                 CreatedAt = clock.GetUtcNow(), IsActive = true,
             };
             // ------------------------------------------------------------------------------------------------
