@@ -129,6 +129,10 @@ public sealed class EmrApiFactory : WebApplicationFactory<Program>
             "DELETE FROM emr.appointment WHERE tenant_id = {0}; " +
             "DELETE FROM emr.appointment_slot WHERE tenant_id = {0}; " +
             "DELETE FROM emr.provider_availability WHERE tenant_id = {0}; " +
+            // The 0025 history trigger fires on every rule the suite writes, so its rows outlive the rule
+            // unless they are swept too. Deleted AFTER the rule, because the delete itself does not fire the
+            // trigger (it is AFTER INSERT OR UPDATE) but the ordering keeps the intent readable.
+            "DELETE FROM emr.provider_availability_history WHERE tenant_id = {0}; " +
             "DELETE FROM emr.encounter WHERE tenant_id = {0};", Tenant);
     }
 

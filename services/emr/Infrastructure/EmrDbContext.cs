@@ -77,6 +77,11 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             e.Property(x => x.StartTime).HasColumnName("start_time");
             e.Property(x => x.EndTime).HasColumnName("end_time");
             e.Property(x => x.BranchId).HasColumnName("branch_id");   // phase 14
+            e.Property(x => x.MaxPerDay).HasColumnName("max_per_day");            // 0025
+            e.Property(x => x.UpdatedByName).HasColumnName("updated_by_name");    // 0025
+            // Retired rules stay in the table — they are what produced the slots people are already booked
+            // into — and out of every query, so nothing has to remember to exclude them.
+            e.HasQueryFilter(x => !x.IsDeleted);
         });
 
         b.Entity<RosterException>(e =>

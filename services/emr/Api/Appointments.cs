@@ -118,16 +118,46 @@ public static class AppointmentsModule
             var rosterExceptions = await RosterExceptionEndpoints.OverlappingAsync(
                 db, slotBranch, req.DoctorId, req.FromDate, req.ToDate, ct);
 
-            var availability = new ProviderAvailability
+            // 0025 — UPSERT the rule; do not mint one.
+            //
+            // This used to be `new ProviderAvailability { AvailabilityId = Guid.NewGuid(), … }` unconditionally,
+            // so every call left another live rule behind. Materializing a clinic's Tuesdays three times left
+            // three identical rules, and each of them was a source slot generation would honour. Nothing
+            // surfaced it because the SLOTS were deduplicated a few lines below — the calendar looked right
+            // while the thing generating it multiplied. `ux_availability_rule` now forbids the duplicate, so
+            // this reads the rule back and updates it in place.
+            var tenant = me.Principal?.TenantId;
+            if (string.IsNullOrEmpty(tenant)) return Results.Problem(statusCode: 403, title: "no tenant scope on principal");
+
+            var now = clock.GetUtcNow();
+            var availability = await db.ProviderAvailabilities.FirstOrDefaultAsync(
+                a => a.TenantId == tenant && a.ProviderId == req.ProviderId && a.LocationId == req.LocationId
+                     && a.DoctorId == req.DoctorId && a.BranchId == slotBranch && a.DayOfWeek == req.DayOfWeek, ct);
+
+            if (availability is null)
             {
-                AvailabilityId = Guid.NewGuid(), ProviderId = req.ProviderId, LocationId = req.LocationId,
-                // Was validated and then dropped, so the rule — and every slot generated from it — ended up
-                // branchless. SlotGeneration copies this onto each slot.
-                BranchId = slotBranch,
-                DoctorId = req.DoctorId, DayOfWeek = req.DayOfWeek,
-                StartTime = req.StartTime, EndTime = req.EndTime, SlotMinutes = req.SlotMinutes,
-            };
-            db.ProviderAvailabilities.Add(availability);
+                availability = new ProviderAvailability
+                {
+                    AvailabilityId = Guid.NewGuid(), TenantId = tenant,
+                    ProviderId = req.ProviderId, LocationId = req.LocationId,
+                    // Was validated and then dropped, so the rule — and every slot generated from it — ended
+                    // up branchless. SlotGeneration copies this onto each slot.
+                    BranchId = slotBranch,
+                    DoctorId = req.DoctorId, DayOfWeek = req.DayOfWeek,
+                    CreatedAt = now, CreatedBy = me.Principal?.Subject,
+                };
+                db.ProviderAvailabilities.Add(availability);
+            }
+
+            availability.StartTime = req.StartTime;
+            availability.EndTime = req.EndTime;
+            availability.SlotMinutes = req.SlotMinutes;
+            // Null LEAVES an existing cap alone — see CreateSlotsRequest.MaxPerDay for why regenerating a
+            // calendar must not be a way to uncap a clinic by omission.
+            if (req.MaxPerDay is { } cap) availability.MaxPerDay = cap;
+            availability.UpdatedAt = now;
+            availability.UpdatedBy = me.Principal?.Subject;
+            availability.UpdatedByName = me.Principal?.DisplayName;
 
             // 25.3 — the licence is a bound on the generation WINDOW, not a filter applied afterwards.
             // Availability is computed in exactly one place (design 42 §7 rule 5), and that place has to know
