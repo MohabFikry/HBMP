@@ -351,10 +351,31 @@ the gate, and de-duplicates three copies of the same cell.
 | `apps/web` — vitest | 114 files, **1456 passed, 0 failed** (17 new) |
 | `Mersal.Approvals.Tests` (`--with-db`) | **146/146** (7 new) |
 | `Mersal.Authz.Tests` | 235/235 |
-| Full solution (`--with-db`) | see the PR |
+| Full solution (`--with-db`) | 36 assemblies; two failures, both traced to other branches — see below |
 | OpenAPI drift gate | regenerated `docs/api/approvals.json` |
 
-Four pre-existing web suites needed updating, and each records why:
+### The two solution-run failures
+
+Neither is from this work, and each was isolated rather than assumed.
+
+**`Mersal.Admin.Tests.BranchScopeGrantParityTests`** fails with `23505 ux_bsg_home_per_subject` — the exact
+bug PR #7 fixes in `admin/0007_branch_scope_grant.sql`. That fix is on a sibling branch, so this one does not
+carry it. Proved by substituting PR #7's version of that single file: **115/115**, and restoring it brings the
+failure straight back. The parity test's copy has no tenant filter, so it picks up any real row the shared dev
+database is left holding.
+
+**`Mersal.Orders.Tests`** — one failure inside the solution run, **221/221 when the assembly runs on its own**.
+Cross-assembly contention on the shared database, not a defect: assemblies run in parallel against one
+Postgres, and orders is one of the suites the `fix/migration-rerunnability` work already showed to be
+sensitive to residual rows.
+
+The same contention accounted for ten web failures observed while a solution run was in flight — the first was
+a 20-second axe timeout, cascading into "Axe is already running". `patient-profile-sections.test.tsx` passes
+**27/27** on its own, and the full suite is green when nothing else is competing for the machine.
+
+### Pre-existing web suites updated
+
+Four, each recording why:
 
 - `branch.test.tsx` — the heading is "Claims", not "Claims Worklist"; the line queue is its own screen now.
 - `table-sortable.test.tsx` — the claims worklist is row-selectable, so the design system renders it as a
