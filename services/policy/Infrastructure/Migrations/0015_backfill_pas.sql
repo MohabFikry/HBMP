@@ -119,10 +119,27 @@ BEGIN
             v_version := gen_random_uuid();
             -- Effective from the EARLIEST coverage in the tenant: a version that started later than the
             -- coverage it describes would make every historical claim fall outside its own plan.
+            --
+            -- CREATED AS A DRAFT, ACTIVATED BELOW — and it used to be inserted Active here.
+            --
+            -- 0005 freezes a version's benefit configuration the moment the version leaves Draft:
+            -- `trg_benefit_rule_immutable` fires BEFORE INSERT OR UPDATE OR DELETE and refuses any rule whose
+            -- parent is not a Draft ("Rules are writable only while their parent version is a Draft"). So
+            -- creating the version Active and then inserting its rules — which is what this block did — was
+            -- refused by the platform's own rule, and the whole DO block rolled back. Every tenant with
+            -- coverage and no reconstructed plan hit it, on the FIRST pass, not merely on a replay.
+            --
+            -- `apply-migrations.sh` runs under `set -e`, so the abort stopped every service after `policy/`
+            -- alphabetically: profile, provider, reporting.
+            --
+            -- Draft → write the rules → activate is not a workaround; it is the authoring workflow 0005
+            -- describes, and it is what a person amending a plan through the API does. `activated_at` stays
+            -- NULL until the flip because `ck_plan_version_activation` pairs the two — a draft must not claim
+            -- an activation signature, and a version that has left Draft must carry one.
             INSERT INTO policy.plan_version (plan_version_id, tenant_id, plan_id, version_no, effective_from,
                                              status, activated_at, row_version, created_at, updated_at)
             SELECT v_version, v_tenant, v_plan, 1,
-                   COALESCE(MIN(c.effective_from), CURRENT_DATE), 'Active', v_now, 1, v_now, v_now
+                   COALESCE(MIN(c.effective_from), CURRENT_DATE), 'Draft', NULL, 1, v_now, v_now
             FROM policy.coverage c WHERE c.tenant_id = v_tenant AND NOT c.is_deleted;
 
             INSERT INTO policy.backfill_provenance (entity_type, entity_id, batch_id, tenant_id)
@@ -152,6 +169,14 @@ BEGIN
             SELECT 'benefit_rule', r.rule_id, v_batch, v_tenant
             FROM policy.benefit_rule r WHERE r.plan_version_id = v_version
             ON CONFLICT DO NOTHING;
+
+            -- The rules are written; the version can now be sealed. `trg_plan_version_immutable` returns
+            -- early for a Draft, so this is the one transition it permits — and after it, the rules above are
+            -- frozen exactly as an authored version's are. The exclusion constraint on overlapping date
+            -- ranges also starts applying here, which is correct: a draft is not yet resolvable.
+            UPDATE policy.plan_version
+               SET status = 'Active', activated_at = v_now, updated_at = v_now
+             WHERE plan_version_id = v_version;
         ELSE
             SELECT plan_version_id INTO v_version FROM policy.plan_version
             WHERE plan_id = v_plan ORDER BY version_no LIMIT 1;
