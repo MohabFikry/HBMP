@@ -342,3 +342,68 @@ describe("the email check", () => {
     expect(looksLikeEmail("@mersal.org")).toBe(false);
   });
 });
+
+/**
+ * 28.13 — the POSITION: what the organisation calls the job, beside what the platform lets the account do.
+ *
+ * <p>The whole risk in this column is that it gets read as a second name for the role. The fixtures are built
+ * to catch that — `Dr. Hala` is a "Consultant Physician" holding `doctor`, `Former Staff` is an "Office
+ * Administrator" holding `reception` — so a screen that rendered the ROLE here would look plausible and fail
+ * these.</p>
+ */
+describe("a person's position", () => {
+  it("shows the job title, which is not the role", async () => {
+    renderAccounts();
+    const row = (await screen.findByText("Dr. Hala")).closest("tr")!;
+    expect(within(row).getByText("Consultant Physician")).toBeInTheDocument();
+    // The portals column beside it still names the workspace, and the two disagree on purpose.
+    expect(within(row).getByText(/Consultation/)).toBeInTheDocument();
+  });
+
+  it("says 'not recorded' rather than leaving a blank cell", async () => {
+    // A service account has no job title because it is not a person. An empty cell reads as a rendering
+    // fault; the words read as a fact.
+    renderAccounts();
+    const row = (await screen.findByText("Reporting Service")).closest("tr")!;
+    expect(within(row).getByText(/not recorded/i)).toBeInTheDocument();
+  });
+
+  it("can be set when correcting an account", async () => {
+    const user = userEvent.setup();
+    renderAccounts();
+
+    const row = (await screen.findByText("Dr. Hala")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: /^edit$/i }));
+    const field = await screen.findByLabelText(/^position$/i);
+    await user.clear(field);
+    await user.type(field, "Head of Internal Medicine");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    expect(await screen.findByText("Head of Internal Medicine")).toBeInTheDocument();
+  });
+
+  it("can be CLEARED, not only set", async () => {
+    // A title that no longer applies has to be removable. A field that can only ever gain a value is one
+    // nobody can correct — which is why an empty box sends "" rather than being treated as "unchanged".
+    const user = userEvent.setup();
+    renderAccounts();
+
+    const row = (await screen.findByText("Dr. Hala")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: /^edit$/i }));
+    await user.clear(await screen.findByLabelText(/^position$/i));
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => {
+      const after = screen.getByText("Dr. Hala").closest("tr")!;
+      expect(within(after).getByText(/not recorded/i)).toBeInTheDocument();
+    });
+  });
+
+  it("grants nothing — the help text says so where the decision is made", async () => {
+    const user = userEvent.setup();
+    renderAccounts();
+    await user.click(await screen.findByRole("button", { name: /add a user/i }));
+    // The one sentence that keeps an administrator from treating this box as an access control.
+    expect(await screen.findByText(/grants nothing/i)).toBeInTheDocument();
+  });
+});

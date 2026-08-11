@@ -19,15 +19,9 @@ import { NotificationPane } from "./NotificationPane";
 import { UserPane } from "./UserPane";
 import { BranchSwitcher } from "./BranchSwitcher";
 import { PortalSwitcher } from "./PortalSwitcher";
+import { AppUserButton } from "./AppUserButton";
+import { useMyProfile } from "./useMyProfile";
 import { useBranchContext } from "./useBranchContext";
-
-/** Two-letter initials for the app-bar avatar placeholder. */
-function initials(name: string): string {
-  const p = name.trim().split(/\s+/).filter(Boolean);
-  if (p.length === 0) return "?";
-  if (p.length === 1) return p[0].slice(0, 2).toUpperCase();
-  return (p[0][0] + p[p.length - 1][0]).toUpperCase();
-}
 
 function useLocalized() {
   const { lang } = useTheme();
@@ -116,6 +110,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const canNotify = !!portal && can("notification.read");
   // 14.8 — branch context for the app-bar switcher (fail-soft: renders only when the caller has branches).
   const branchCtx = useBranchContext(session?.role ?? undefined);
+  // 28.13 — the job title under the name in the app bar. Fails soft to null; see the hook.
+  const profile = useMyProfile();
   const [paneOpen, setPaneOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);   // 18.F2 — ⌘K / Ctrl+K
   const [searchText, setSearchText] = useState("");
@@ -260,23 +256,25 @@ export function AppShell({ children }: { children: ReactNode }) {
               )}
             </button>
           )}
-          <button
+          {/*
+            28.13 — the line under the name is the person's POSITION, not the portal's eyebrow.
+
+            It used to read "Org Admin" — the label of the portal being looked at — so it CHANGED as somebody
+            moved between their portals. That made a caption about the PAGE wear the shape of a caption about
+            the PERSON. A job title does not change when you switch workspace, and that constancy is the
+            whole point of the line.
+
+            Falls back to the portal label when no title is recorded, which is most accounts today: an empty
+            second line leaves the button looking broken rather than looking sparse.
+          */}
+          <AppUserButton
             ref={avatarRef}
-            type="button"
-            className="app-userbtn"
-            aria-haspopup="dialog"
-            aria-expanded={userPaneOpen}
+            displayName={session.displayName}
+            secondary={profile?.position ?? tr(portal.eyebrow)}
+            expanded={userPaneOpen}
+            label={L.accountOpen[lang]}
             onClick={() => setUserPaneOpen((v) => !v)}
-            aria-label={`${L.accountOpen[lang]} — ${session.displayName}`}
-          >
-            <span className="app-avatar" aria-hidden="true">
-              {initials(session.displayName)}
-            </span>
-            <span className="app-userbtn-text">
-              <span className="app-userbtn-name">{session.displayName}</span>
-              <span className="app-userbtn-role">{tr(portal.eyebrow)}</span>
-            </span>
-          </button>
+          />
         </div>
       </header>
 
@@ -296,7 +294,20 @@ export function AppShell({ children }: { children: ReactNode }) {
         onNavigate={(key) => navigate(`/${portal.base}/${key}`)}
         // One shared switcher, in one slot, for every portal — and only for callers who have somewhere to
         // switch to. See PortalSwitcher for why it is hidden rather than disabled below two portals.
-        header={myPortals.length > 1 ? <PortalSwitcher portal={portal} /> : undefined}
+        /*
+          28.13 — ALWAYS rendered, including for somebody who holds exactly one portal.
+
+          It used to appear only above two, on the reasoning that a control offering one choice is not a
+          choice. That reasoning was about the PICKER, and it does not carry here: this block is also the
+          only thing on screen that names which workspace you are in, so hiding it left the single-portal
+          user — most of the platform — with a nav rail whose heading was the product's name and nothing
+          about their own context.
+
+          For a one-portal holder the sub-label still reads "Change portal" and still works: it opens the
+          picker, which shows their one card. That is a dead end by construction rather than by accident, and
+          the alternative — a control that is present but inert — is worse.
+        */
+        header={<PortalSwitcher portal={portal} />}
       />
 
       <main id="main" className="app-main" tabIndex={-1}>

@@ -5854,19 +5854,9 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
   color: var(--text-2);
   text-align: center;
 }
-.picker-signout {
-  min-height: 44px;
-  padding: 0 var(--sp4);
-  border-radius: var(--r-md);
-  border: 1px solid var(--border);
-  background: var(--surface-1);
-  color: var(--text-1);
-  font: inherit;
-  font-weight: 500;
-  cursor: pointer;
-}
-.picker-signout:hover { border-color: var(--border-strong); }
-.picker-signout:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+/* `.picker-signout` lived here. 28.13 moved sign-out, language and theme into `UserPane` — the same pane
+   every other screen opens from the same button — so the rule had nothing left to style. Deleted rather than
+   left behind: `css-classes-exist` catches markup pointing at absent CSS, and nothing catches the reverse. */
 
 .picker-greeting {
   font-size: 30px;

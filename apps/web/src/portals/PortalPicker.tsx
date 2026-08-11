@@ -3,7 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { Icon, Logo, SearchField, useTheme } from "@mersal/design-system";
 import { useAuth } from "../auth/AuthProvider";
 import { L } from "../i18n/strings";
-import { LangGlyph, MoonIcon, SunIcon } from "../shell/controlGlyphs";
+import { AppUserButton } from "../shell/AppUserButton";
+import { UserPane } from "../shell/UserPane";
+import { useMyProfile } from "../shell/useMyProfile";
 import { ZONES, portalsForRoles, type PortalDef, type ZoneDef } from "./catalog";
 
 /**
@@ -29,10 +31,15 @@ import { ZONES, portalsForRoles, type PortalDef, type ZoneDef } from "./catalog"
  */
 export function PortalPicker() {
   const { session, can, logout } = useAuth();
-  const { lang, theme, setLang, setTheme } = useTheme();
+  // Language and theme moved INTO `UserPane` with the rest of the account controls, so this screen only
+  // needs to know which language to render in.
+  const { lang } = useTheme();
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
+  const [userPaneOpen, setUserPaneOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const avatarRef = useRef<HTMLButtonElement>(null);
+  const profile = useMyProfile();
 
   const portals = useMemo(() => portalsForRoles(session?.roles ?? []), [session?.roles]);
 
@@ -106,8 +113,8 @@ export function PortalPicker() {
         reads as a rendering fault rather than as a different screen.
 
         The CONTENTS differ, and that part is deliberate. No branch switcher and no notification bell: both
-        belong to a portal, and the whole premise here is that one has not been chosen yet. What replaces them
-        is the pair the picker has always needed — language and theme — plus sign-out.
+        belong to a portal, and the whole premise here is that one has not been chosen yet. What is left is
+        the logo, the search, and the person.
       */}
       <header className="mrs-glass app-bar picker-appbar" role="banner">
         <Logo variant="lockup" height={48} />
@@ -129,28 +136,38 @@ export function PortalPicker() {
             }}
           />
         </div>
+        {/*
+          28.13 — the SAME user control the portal shell renders, showing the same two lines.
+
+          This was a logo followed by three loose buttons — language, theme, sign out — which made the first
+          screen anybody sees the one screen that did not look like the product. All three of those controls
+          already live inside `UserPane`, so the bar now carries the person (initials, name, position) and the
+          pane carries what you can do about them. One component, one arrangement, both screens.
+
+          The position line is the point: it is the person's job title, and it reads the same here as it does
+          inside every portal, because it is a fact about them rather than about where they are standing.
+        */}
         <div className="app-actions">
-          <button
-            type="button"
-            className="login-icon-btn"
-            aria-label={L.toggleLanguage[lang]}
-            onClick={() => setLang(lang === "ar" ? "en" : "ar")}
-          >
-            <LangGlyph code={lang === "ar" ? "EN" : "ع"} />
-          </button>
-          <button
-            type="button"
-            className="login-icon-btn"
-            aria-label={L.toggleTheme[lang]}
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          >
-            {theme === "dark" ? <SunIcon /> : <MoonIcon />}
-          </button>
-          <button type="button" className="picker-signout" onClick={() => void logout("user")}>
-            {L.signOut[lang]}
-          </button>
+          <AppUserButton
+            ref={avatarRef}
+            displayName={session?.displayName ?? ""}
+            secondary={profile?.position ?? L.portalPickerTitle[lang]}
+            expanded={userPaneOpen}
+            label={L.accountOpen[lang]}
+            onClick={() => setUserPaneOpen((v) => !v)}
+          />
         </div>
       </header>
+
+      <UserPane
+        open={userPaneOpen}
+        onClose={() => setUserPaneOpen(false)}
+        displayName={session?.displayName ?? ""}
+        // No portal has been chosen, so there is no portal label to caption them with — the page's own
+        // heading is the honest answer to "where am I".
+        roleLabel={{ en: "Choose a portal", ar: "اختر بوابة" }}
+        onSignOut={() => void logout("user")}
+      />
 
       <main id="main" className="picker-page">
       <h1 className="picker-greeting">{L.welcomeBack[lang].replace("{name}", firstNameOf(session?.displayName))}</h1>

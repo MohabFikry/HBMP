@@ -39,6 +39,11 @@ const S = {
     en: "They sign in with this, and the invitation goes to it. It must not already belong to another account.",
     ar: "يسجّل الدخول به، وإليه تُرسل الدعوة. يجب ألّا يكون مستخدمًا في حساب آخر.",
   },
+  position: { en: "Position", ar: "المسمى الوظيفي" },
+  positionHelp: {
+    en: "Their job title, e.g. Senior Pharmacist. It appears beside their name across the platform and grants nothing — access comes from the portals below.",
+    ar: "المسمى الوظيفي، مثل صيدلي أول. يظهر بجوار الاسم في كل أنحاء المنصة ولا يمنح أي صلاحية — الوصول يأتي من البوابات أدناه.",
+  },
   username: { en: "Username", ar: "اسم المستخدم" },
   usernameHelp: {
     en: "Defaults to the email address. Change it only for an account with no mailbox of its own.",
@@ -209,6 +214,7 @@ export function CreateUserDialog({
   const write = useWrite();
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
+  const [position, setPosition] = useState("");
   const [username, setUsername] = useState("");
   const [portals, setPortals] = useState<string[]>([]);
   const [touched, setTouched] = useState(false);
@@ -228,6 +234,9 @@ export function CreateUserDialog({
         username: username.trim() || email.trim(),
         displayName: displayName.trim(),
         email: email.trim(),
+        // Optional, and left absent rather than sent as "" when unfilled — the server treats blank as "none
+        // recorded", and so does everything that renders it.
+        position: position.trim() || undefined,
         tenantId: "",
         // The ISSUER's names, not the portal keys. `lab` would be a 422; `lab_tech` is the grant.
         roles: portals.map((r) => issuerRoleFor(r as never)),
@@ -237,6 +246,7 @@ export function CreateUserDialog({
     if (ok) {
       setDisplayName("");
       setEmail("");
+      setPosition("");
       setUsername("");
       setPortals([]);
       setTouched(false);
@@ -284,6 +294,13 @@ export function CreateUserDialog({
           value={email}
           error={touched && !emailOk ? t(S.emailRequired) : undefined}
           onChange={(e) => setEmail(e.target.value)}
+        />
+        <InputField
+          label={t(S.position)}
+          help={t(S.positionHelp)}
+          autoComplete="off"
+          value={position}
+          onChange={(e) => setPosition(e.target.value)}
         />
         <InputField
           label={t(S.username)}
@@ -337,6 +354,7 @@ export function EditUserDialog({
   const write = useWrite();
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
+  const [position, setPosition] = useState("");
   const [portals, setPortals] = useState<string[]>([]);
   const [touched, setTouched] = useState(false);
   const [seeded, setSeeded] = useState<string | null>(null);
@@ -348,6 +366,7 @@ export function EditUserDialog({
     setSeeded(seedKey);
     setDisplayName(user?.displayName ?? "");
     setEmail(user?.email ?? "");
+    setPosition(user?.position ?? "");
     // The account holds ISSUER role names; the checklist speaks portal keys. Mapped back through the same
     // table `issuerRoleFor` uses, so a round trip cannot silently drop `lab_tech`.
     setPortals(PORTALS.filter((p) => (user?.roles ?? []).includes(issuerRoleFor(p.role))).map((p) => p.role));
@@ -363,6 +382,7 @@ export function EditUserDialog({
 
   const nameChanged = user ? displayName.trim() !== user.displayName : false;
   const emailChanged = user ? email.trim() !== (user.email ?? "") : false;
+  const positionChanged = user ? position.trim() !== (user.position ?? "") : false;
   const rolesChanged = user
     ? [...portals].sort().join() !== PORTALS.filter((p) => user.roles.includes(issuerRoleFor(p.role))).map((p) => p.role).sort().join()
     : false;
@@ -371,10 +391,13 @@ export function EditUserDialog({
     setTouched(true);
     if (!user || !nameOk || !emailOk || !portalsOk) return;
     const ok = await write.run(async () => {
-      if (nameChanged || emailChanged) {
+      if (nameChanged || emailChanged || positionChanged) {
         await api.updateIdentityUser(user.id, {
           displayName: nameChanged ? displayName.trim() : undefined,
           email: emailChanged ? email.trim() : undefined,
+          // Sent as "" when the administrator has emptied the box, which is how the field is CLEARED.
+          // `undefined` would leave a title that no longer applies in place with no way to remove it.
+          position: positionChanged ? position.trim() : undefined,
         });
       }
       if (rolesChanged) await api.setIdentityUserRoles(user.id, portals.map((r) => issuerRoleFor(r as never)));
@@ -423,6 +446,13 @@ export function EditUserDialog({
           value={email}
           error={touched && !emailOk ? t(S.emailRequired) : undefined}
           onChange={(e) => setEmail(e.target.value)}
+        />
+        <InputField
+          label={t(S.position)}
+          help={t(S.positionHelp)}
+          autoComplete="off"
+          value={position}
+          onChange={(e) => setPosition(e.target.value)}
         />
         <fieldset className="portal-checklist-wrap">
           <legend>{t(S.portals)}</legend>

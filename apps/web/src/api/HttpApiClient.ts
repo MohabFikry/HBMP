@@ -2842,6 +2842,9 @@ export class HttpApiClient implements ApiClient {
         // of every reset link, so an administrator who cannot read it cannot tell whether the button they
         // are about to press will reach the person — which is the whole question that button asks.
         email: u.email ?? null,
+        // Absent normalised to null, never "": the table branches on "is there a title", and a blank string
+        // would render an empty cell where the honest answer is "none recorded".
+        position: u.position ? String(u.position) : null,
         tenantId: u.tenantId ? `•••${String(u.tenantId).replace(/-/g, "").slice(-4)}` : undefined,
         isActive: u.isActive !== false,
         twoFactorEnabled: u.twoFactorEnabled === true,
@@ -2858,13 +2861,24 @@ export class HttpApiClient implements ApiClient {
 
   async createIdentityUser(input: {
     username: string; displayName: string; email: string; tenantId: string; roles: string[]; lang?: "en" | "ar";
+    position?: string;
   }) {
     const r = (await postAbsolute(`${GATEWAY_BASE}/identity/admin/users`, input)) as any;
     return { id: String(r?.id ?? ""), resetLinkSent: r?.resetLinkSent === true };
   }
 
-  async updateIdentityUser(id: string, input: { displayName?: string; email?: string }) {
+  async updateIdentityUser(id: string, input: { displayName?: string; email?: string; position?: string }) {
     await postAbsolute(`${GATEWAY_BASE}/identity/admin/users/${encodeURIComponent(id)}`, input);
+  }
+
+  async myProfile() {
+    const r = (await getAbsolute(`${GATEWAY_BASE}/identity/me/profile`)) as any;
+    return {
+      displayName: String(r?.displayName ?? ""),
+      // Normalised to null rather than left as undefined: the app bar branches on "is there a title", and
+      // two falsy shapes for one absence is how that branch eventually gets written wrong.
+      position: r?.position ? String(r.position) : null,
+    };
   }
 
   async setIdentityUserRoles(id: string, roles: string[]) {

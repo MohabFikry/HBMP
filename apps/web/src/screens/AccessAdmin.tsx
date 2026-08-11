@@ -66,6 +66,10 @@ const S = {
   accountsEmpty: { en: "No accounts yet. Add one to get started.", ar: "لا توجد حسابات بعد. أضف حسابًا للبدء." },
   email: { en: "Email", ar: "البريد الإلكتروني" },
   noEmail: { en: "No address", ar: "بلا بريد" },
+  position: { en: "Position", ar: "المسمى الوظيفي" },
+  // Said rather than left blank. An empty cell reads as a rendering fault; "Not recorded" reads as a fact,
+  // and it is the correct fact for a service account, which has no job title because it is not a person.
+  noPosition: { en: "Not recorded", ar: "غير مسجّل" },
   portalsCol: { en: "Portals", ar: "البوابات" },
   twoFactor: { en: "Second factor", ar: "التحقق بخطوتين" },
   mfaOn: { en: "Enrolled", ar: "مُفعّل" },
@@ -333,6 +337,19 @@ function AccountsTab() {
       ),
       sortable: true,
       sortValue: (u) => u.displayName,
+    },
+    {
+      /*
+        28.13 — the POSITION, and it sits next to the roles on purpose so the difference between them is
+        visible rather than explained. A position is what the organisation calls the job; a role is what the
+        platform will let the account do. They do not have to agree, and when they disagree this column is
+        the only place that says so.
+      */
+      key: "position",
+      header: t(S.position),
+      cell: (u) => (u.position ? u.position : <span className="muted">{t(S.noPosition)}</span>),
+      sortable: true,
+      sortValue: (u) => u.position ?? "",
     },
     {
       key: "email",

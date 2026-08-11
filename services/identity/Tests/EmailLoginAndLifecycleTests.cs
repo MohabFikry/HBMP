@@ -236,6 +236,71 @@ public class EmailLoginAndLifecycleTests : IClassFixture<IdentityAppFactory>
         finally { await TestFlow.DeleteUser(_factory, id); }
     }
 
+    /// <summary>
+    /// 28.13 — the POSITION: the person's job title, carried beside their name and authorizing nothing.
+    ///
+    /// <para>The risk this pins is that it becomes a second role. It is free text, it is not in the frozen
+    /// token contract, and no gate reads it — so the test that matters is that setting one changes what the
+    /// admin surface reports and changes nothing about what the account can reach.</para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_job_title_can_be_recorded_and_corrected_without_touching_authority()
+    {
+        Skip.If(IdentityTestDb.Conn is null);
+        await using var admin = await Admin("position");
+        var client = await AdminClient(admin);
+        var name = $"titled-{Guid.NewGuid():N}";
+        var (id, _) = await TestFlow.SeedUser(_factory, name, Pass, ["reception"]);
+        try
+        {
+            (await client.PostAsJsonAsync($"/identity/admin/users/{id}", new { position = "Senior Pharmacist" }))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+
+            var listed = await client.GetStringAsync($"/identity/admin/users?query={name}");
+            listed.Should().Contain("Senior Pharmacist");
+            // The ROLE is untouched by a title change. These two live next to each other on the screen and
+            // the whole column is a mistake if one can move the other.
+            listed.Should().Contain("reception");
+
+            // Blank CLEARS it. A title that no longer applies has to be removable, or the record is one
+            // nobody can correct.
+            (await client.PostAsJsonAsync($"/identity/admin/users/{id}", new { position = "" }))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+            (await client.GetStringAsync($"/identity/admin/users?query={name}"))
+                .Should().NotContain("Senior Pharmacist");
+        }
+        finally { await TestFlow.DeleteUser(_factory, id); }
+    }
+
+    /// <summary>A person reads their own title from `/identity/me/profile` — self-scoped, subject from the
+    /// token. It is NOT a claim: see the endpoint's header for why a caption does not belong in a token
+    /// nineteen services validate.</summary>
+    [SkippableFact]
+    public async Task A_person_reads_their_own_job_title_from_their_own_profile()
+    {
+        Skip.If(IdentityTestDb.Conn is null);
+        await using var admin = await Admin("me-position");
+        var adminClient = await AdminClient(admin);
+        var name = $"selfread-{Guid.NewGuid():N}";
+        var (id, _) = await TestFlow.SeedUser(_factory, name, Pass, ["reception"]);
+        try
+        {
+            (await adminClient.PostAsJsonAsync($"/identity/admin/users/{id}", new { position = "Head of Reception" }))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+
+            var token = await TestFlow.AuthCodeToken(_factory, name, Pass, null, "openid");
+            var mine = _factory.CreateClient();
+            mine.DefaultRequestHeaders.Authorization = new("Bearer", token);
+
+            var body = await mine.GetStringAsync("/identity/me/profile");
+            body.Should().Contain("Head of Reception");
+
+            // And it is NOT in the token, which is the half that would otherwise go unnoticed.
+            token.Should().NotContain("Head of Reception");
+        }
+        finally { await TestFlow.DeleteUser(_factory, id); }
+    }
+
     // ---- self-service ----------------------------------------------------------------------------------
 
     [SkippableFact]

@@ -38,6 +38,27 @@ public static class SessionEndpoints
         // Caught by UiGatingIsCosmeticTests.
         var me = app.MapGroup("/identity/me").RequireAuthorization(IdentityAdminPolicies.Authenticated);
 
+        /*
+           The signed-in person's own display identity — 28.13.
+
+           WHY THIS IS NOT A TOKEN CLAIM. `docs/security/token-contract.md` is frozen, and every claim in it
+           is one that `libs/auth` or the SPA reads to make a DECISION. A job title is a caption. Putting it
+           in the token would ship a display string to the nineteen services that validate one, and would
+           make correcting a typo in somebody's title wait for their access token to expire.
+
+           Self-scoped: the subject comes from the token, never from the query, so there is no id to tamper
+           with and this discloses nothing the caller does not already hold.
+        */
+        me.MapGet("/profile", async (HttpContext http, IdentityStoreDbContext db) =>
+        {
+            if (SubjectOf(http) is not { } userId) return Results.Unauthorized();
+            var row = await db.Users.AsNoTracking()
+                .Where(u => u.Id == userId)
+                .Select(u => new { displayName = u.DisplayName, position = u.Position })
+                .FirstOrDefaultAsync(http.RequestAborted);
+            return row is null ? Results.Problem(statusCode: 404, title: "not-found") : Results.Ok(row);
+        });
+
         me.MapGet("/sessions", async (HttpContext http, SessionService sessions) =>
         {
             if (SubjectOf(http) is not { } userId) return Results.Unauthorized();

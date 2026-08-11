@@ -219,6 +219,18 @@ export const zIdentityUser = z.object({
    * and it cannot sign in by address. Creation now requires one, so the set can only shrink.
    */
   email: z.string().nullable().optional(),
+  /**
+   * 28.13 — the person's JOB TITLE, as the organisation states it.
+   *
+   * NOT a role, and nothing authorizes on it. The two sit next to each other in the accounts table and are
+   * easy to conflate, so: a role is drawn from a frozen vocabulary and decides what the platform permits; a
+   * position is free text and decides nothing. Somebody can be a "Senior Pharmacist" holding the `reception`
+   * role, and every gate must keep answering to the role.
+   *
+   * Nullable because most accounts have none recorded, and that is a legitimate state rather than a gap to
+   * fill — the app bar falls back to the portal's own label.
+   */
+  position: z.string().nullable().optional(),
   /** Masked in the UI — the console administers ACCESS, not identities. */
   tenantId: z.string().optional(),
   isActive: z.boolean(),

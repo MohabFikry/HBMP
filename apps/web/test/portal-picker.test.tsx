@@ -103,12 +103,21 @@ describe("the portal model", () => {
 });
 
 describe("the picker", () => {
-  it("is skipped entirely by somebody who holds one portal", async () => {
-    renderAt("/portals", "reception");
-    // Redirected into the portal rather than shown a page with one card: a choice with one answer is not a
-    // choice, and the click costs every single-portal user in the system.
-    await waitFor(() => expect(screen.queryByRole("heading", { name: /welcome back/i })).toBeNull());
+  it("is not where a single-portal sign-in LANDS", async () => {
+    // The click still is not spent: `useHomePath` sends somebody to /portals only above one portal, so a
+    // reception sign-in goes straight to the desk exactly as before.
+    renderAt("/", "reception");
     expect(await screen.findByRole("navigation")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /welcome back/i })).toBeNull();
+  });
+
+  it("still ANSWERS for a single-portal caller who asks for it", async () => {
+    // 28.13 — it used to redirect them back into their portal. That was right while the switcher was hidden
+    // from them; now the rail offers "Change portal" to everybody, and bouncing the request would make the
+    // button they just pressed look broken. One card is an honest answer: it is the whole of what they hold.
+    renderAt("/portals", "reception");
+    expect(await screen.findByRole("heading", { name: /welcome back/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Reception/ })).toBeInTheDocument();
   });
 
   it("offers exactly the portals the caller holds, grouped by zone", async () => {
@@ -173,12 +182,14 @@ describe("the in-app switcher", () => {
     }
   });
 
-  it("is absent for somebody with nowhere to switch to", async () => {
+  it("is present even for somebody who holds exactly one portal", async () => {
+    // 28.13 — it used to be hidden from them, on the reasoning that a control offering one choice is not a
+    // choice. That reasoning was about the PICKER. This block is also the only thing on screen naming which
+    // workspace you are in, so hiding it left most of the platform with a rail whose heading was the
+    // product's name and nothing about their own context.
     renderAt("/reception", "reception");
     await screen.findByRole("navigation");
-    // A control that says "Change portal" and leads to a screen with one card is a promise made to the
-    // majority of users, who hold exactly one portal and have nowhere else to go.
-    expect(screen.queryByRole("button", { name: /Current portal:/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Current portal:/ })).toBeInTheDocument();
   });
 
   it("returns to the picker", async () => {

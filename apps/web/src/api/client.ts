@@ -673,9 +673,20 @@ export interface ApiClient {
     tenantId: string;
     roles: string[];
     lang?: "en" | "ar";
+    /** The person's job title. Display only — see `zIdentityUser.position`. */
+    position?: string;
   }): Promise<{ id: string; resetLinkSent: boolean }>;
-  /** Correct a name or an address. Roles are deliberately NOT settable here — see setIdentityUserRoles. */
-  updateIdentityUser(id: string, input: { displayName?: string; email?: string }): Promise<void>;
+  /**
+   * Correct a name, an address or a job title. Roles are deliberately NOT settable here — see
+   * setIdentityUserRoles.
+   *
+   * <p>An omitted field is left alone. `position: ""` CLEARS it, which is why the type is not
+   * `position?: string | undefined` collapsed with the others: removing a job title that no longer applies
+   * is an ordinary edit, and a field that can only ever gain a value is one nobody can correct.</p>
+   */
+  updateIdentityUser(id: string, input: { displayName?: string; email?: string; position?: string }): Promise<void>;
+  /** The signed-in person's own display identity — name and job title (28.13). */
+  myProfile(): Promise<{ displayName: string; position: string | null }>;
   /**
    * Set the roles — and therefore the PORTALS — this account holds.
    *

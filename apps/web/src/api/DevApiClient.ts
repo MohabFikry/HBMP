@@ -1084,12 +1084,18 @@ export class DevApiClient implements ApiClient {
    * rows forever would pass a test that proved nothing.
    */
   private identityStore: IdentityUser[] = [
-    { id: "u-1", username: "org.admin", displayName: "Org Admin", email: "org.admin@mersal.org", tenantId: "•••1111", isActive: true, twoFactorEnabled: true, roles: ["org_admin"] },
-    { id: "u-2", username: "dr.hala", displayName: "Dr. Hala", email: "hala@mersal.org", tenantId: "•••1111", isActive: true, twoFactorEnabled: false, roles: ["doctor"] },
-    { id: "u-3", username: "left.staff", displayName: "Former Staff", email: "former@mersal.org", tenantId: "•••1111", isActive: false, twoFactorEnabled: true, roles: ["reception"] },
+    // 28.13 — POSITIONS that deliberately do not track the roles beside them, because that is the whole
+    // point of the column: `dr.hala` is a Consultant holding `doctor`, and `left.staff` is an Office
+    // Administrator holding `reception`. A fixture where every title paraphrases its role would let a screen
+    // that rendered the ROLE in this column look correct.
+    { id: "u-1", username: "org.admin", displayName: "Org Admin", email: "org.admin@mersal.org", position: "Operations Director", tenantId: "•••1111", isActive: true, twoFactorEnabled: true, roles: ["org_admin"] },
+    { id: "u-2", username: "dr.hala", displayName: "Dr. Hala", email: "hala@mersal.org", position: "Consultant Physician", tenantId: "•••1111", isActive: true, twoFactorEnabled: false, roles: ["doctor"] },
+    { id: "u-3", username: "left.staff", displayName: "Former Staff", email: "former@mersal.org", position: "Office Administrator", tenantId: "•••1111", isActive: false, twoFactorEnabled: true, roles: ["reception"] },
     // Predates 28.8, which required an address on creation: it can neither sign in by address nor be sent a
     // reset link, and the console must say so rather than offer a button that fails.
-    { id: "u-4", username: "svc.reporting", displayName: "Reporting Service", email: null, tenantId: "•••1111", isActive: true, twoFactorEnabled: false, roles: ["finance"] },
+    // No position, and that is a state the table has to render honestly rather than blank: a service account
+    // has no job title because it is not a person.
+    { id: "u-4", username: "svc.reporting", displayName: "Reporting Service", email: null, position: null, tenantId: "•••1111", isActive: true, twoFactorEnabled: false, roles: ["finance"] },
   ];
 
   async identityUsers(query?: string): Promise<IdentityUser[]> {
@@ -1099,12 +1105,13 @@ export class DevApiClient implements ApiClient {
       (u) =>
         u.username.toLowerCase().includes(q) ||
         u.displayName.toLowerCase().includes(q) ||
-        (u.email ?? "").toLowerCase().includes(q),
+        (u.email ?? "").toLowerCase().includes(q) ||
+        (u.position ?? "").toLowerCase().includes(q),
     );
   }
 
   async createIdentityUser(input: {
-    username: string; displayName: string; email: string; tenantId: string; roles: string[];
+    username: string; displayName: string; email: string; tenantId: string; roles: string[]; position?: string;
   }) {
     // The duplicate check is here as well as on the server, because the fixture build is where the screen's
     // conflict path gets exercised — a 409 that only a live issuer can produce is a branch nothing tests.
@@ -1120,6 +1127,7 @@ export class DevApiClient implements ApiClient {
       username: input.username,
       displayName: input.displayName,
       email: input.email,
+      position: input.position?.trim() || null,
       tenantId: "•••1111",
       isActive: true,
       // A new account has no second factor until its owner enrols one — showing it as enrolled would hide
@@ -1130,11 +1138,20 @@ export class DevApiClient implements ApiClient {
     return { id, resetLinkSent: true };
   }
 
-  async updateIdentityUser(id: string, input: { displayName?: string; email?: string }) {
+  async updateIdentityUser(id: string, input: { displayName?: string; email?: string; position?: string }) {
     const u = this.identityStore.find((x) => x.id === id);
     if (!u) throw new Error("not-found");
     if (input.displayName) u.displayName = input.displayName;
     if (input.email) u.email = input.email;
+    // `undefined` leaves it alone; `""` CLEARS it — the server draws the same distinction, and a fixture
+    // that could only ever set a title would leave the "remove it" path untested.
+    if (input.position !== undefined) u.position = input.position.trim() || null;
+  }
+
+  async myProfile() {
+    // The dev session is `org.admin`, so the app bar has a title to render without any wiring of its own.
+    const me = this.identityStore[0];
+    return { displayName: me.displayName, position: me.position ?? null };
   }
 
   async setIdentityUserRoles(id: string, roles: string[]) {

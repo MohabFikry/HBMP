@@ -54,6 +54,10 @@ public sealed class IdentityStoreDbContext(DbContextOptions<IdentityStoreDbConte
             e.ToTable("user");
             e.Property(u => u.TenantId).HasDefaultValue(string.Empty);
             e.Property(u => u.DisplayName).HasDefaultValue(string.Empty);
+            // Bounded because it is free text an administrator types and it renders in a fixed-width app-bar
+            // slot. Nullable rather than defaulted to "": an account whose title nobody has recorded is a
+            // different thing from one whose title is blank, and the app bar falls back for the first.
+            e.Property(u => u.Position).HasMaxLength(120);
             e.Property(u => u.IsActive).HasDefaultValue(true);
         });
         builder.Entity<ApplicationRole>(e =>

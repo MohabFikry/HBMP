@@ -52,6 +52,9 @@ public static class AdminEndpoints
                 views.Add(new
                 {
                     id = u.Id, username = u.UserName, displayName = u.DisplayName,
+                    // 28.13 — the job title. Display only; nothing authorizes on it, and it is deliberately
+                    // absent from the token for that reason (see ApplicationUser.Position).
+                    position = u.Position,
                     // Returned since 28.8: the console could not show an address, so an administrator could
                     // not tell whether "send a reset link" would reach anybody before pressing it.
                     email = u.Email,
@@ -92,7 +95,8 @@ public static class AdminEndpoints
             var user = new ApplicationUser
             {
                 Id = Guid.NewGuid(), UserName = req.Username, NormalizedUserName = req.Username.ToUpperInvariant(),
-                Email = req.Email, DisplayName = req.DisplayName, TenantId = req.TenantId, ProviderId = req.ProviderId,
+                Email = req.Email, DisplayName = req.DisplayName, Position = Trimmed(req.Position),
+                TenantId = req.TenantId, ProviderId = req.ProviderId,
                 CreatedAt = clock.GetUtcNow(), IsActive = true,
             };
             // ------------------------------------------------------------------------------------------------
@@ -179,6 +183,10 @@ public static class AdminEndpoints
                 await users.SetEmailAsync(user, req.Email);
             }
             if (!string.IsNullOrWhiteSpace(req.DisplayName)) user.DisplayName = req.DisplayName;
+            // `null` leaves it alone, `""` CLEARS it. The two have to be distinguishable: an administrator
+            // removing a job title that no longer applies is an ordinary edit, and a record that can only
+            // ever gain a value is one nobody can correct.
+            if (req.Position is not null) user.Position = Trimmed(req.Position);
 
             var saved = await users.UpdateAsync(user);
             if (!saved.Succeeded)
@@ -186,8 +194,8 @@ public static class AdminEndpoints
                     detail: string.Join("; ", saved.Errors.Select(e => e.Description)));
 
             await Audit(audit, me, "identity.user", id.ToString(), AuditAction.Update, "UserUpdated",
-                $"{{\"displayName\":\"{user.DisplayName}\",\"email\":\"{user.Email}\"}}");
-            return Results.Ok(new { id, displayName = user.DisplayName, email = user.Email });
+                $"{{\"displayName\":\"{user.DisplayName}\",\"email\":\"{user.Email}\",\"position\":\"{user.Position}\"}}");
+            return Results.Ok(new { id, displayName = user.DisplayName, email = user.Email, position = user.Position });
         });
 
         g.MapPost("/users/{id:guid}/roles", async (HttpContext http, Guid id, SetRolesRequest req,
@@ -940,6 +948,16 @@ public static class AdminEndpoints
     /// undeliverable ones. The only proof an address works is a message arriving at it, which is what the
     /// reset link is; this check exists to catch a typo before that, not to be an authority.</para>
     /// </summary>
+    /// <summary>
+    /// Trim a free-text field, collapsing "blank" to null.
+    ///
+    /// <para>A job title of <c>" "</c> is not a job title, and storing it would give the app bar a value that
+    /// is present, renders as nothing, and suppresses the fallback — a caption slot that is mysteriously
+    /// empty for one account. Absent and blank must be the same state here.</para>
+    /// </summary>
+    private static string? Trimmed(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
     private static bool IsPlausibleEmail(string? value)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Any(char.IsWhiteSpace)) return false;
@@ -1012,13 +1030,14 @@ public static class AdminEndpoints
     public sealed record CreateUserRequest(
         string Username, string DisplayName, string TenantId, string Email,
         string? Password = null, Guid? ProviderId = null, string? Lang = null,
-        IReadOnlyList<string> Roles = null!)
+        IReadOnlyList<string> Roles = null!, string? Position = null)
     {
         public IReadOnlyList<string> Roles { get; init; } = Roles ?? [];
     }
     /// <summary>Correct an account's display name or address. Both optional; an omitted field is left alone
     /// rather than cleared, so a caller fixing one cannot silently erase the other.</summary>
-    public sealed record UpdateUserRequest(string? DisplayName = null, string? Email = null);
+    /// <summary>An omitted <c>Position</c> is left alone; an EMPTY one clears it. See the handler.</summary>
+    public sealed record UpdateUserRequest(string? DisplayName = null, string? Email = null, string? Position = null);
     public sealed record SetRolesRequest(IReadOnlyList<string> Roles);
     /// <summary>
     /// 28.7 — an administrative reset carries a LANGUAGE, not a password.

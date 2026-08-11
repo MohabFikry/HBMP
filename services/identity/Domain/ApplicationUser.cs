@@ -21,6 +21,27 @@ public sealed class ApplicationUser : IdentityUser<Guid>
     /// <summary>Min-necessary display name (never clinical). Surfaced as the token's <c>name</c> claim.</summary>
     public string DisplayName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// 28.13 — the person's JOB TITLE. "Senior Pharmacist", "Head of Reception", "Regional Coordinator".
+    ///
+    /// <para><b>It is not a role, and nothing authorizes on it.</b> The two are easy to conflate because both
+    /// are short strings next to a person's name, so the distinction is worth stating plainly: a ROLE decides
+    /// what the platform will let this account do and is drawn from a frozen vocabulary; a POSITION is what
+    /// the organisation calls the job and is free text somebody types. An account can be a "Senior
+    /// Pharmacist" holding the `reception` role, and the platform must keep answering to the role.</para>
+    ///
+    /// <para>Deliberately NOT a token claim. docs/security/token-contract.md is frozen and every claim in it
+    /// is one that `libs/auth` or the SPA reads to make a DECISION; this is a caption. Putting it in the
+    /// token would ship a display string to nineteen services that validate it, and make correcting a typo in
+    /// somebody's job title wait for their access token to expire. The SPA reads it from
+    /// <c>GET /identity/me/profile</c> instead.</para>
+    ///
+    /// <para>On the USER rather than the membership: the requirement is that it reads the same whichever
+    /// portal the person is working in, and a membership-scoped title would by construction differ between
+    /// two of them.</para>
+    /// </summary>
+    public string? Position { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     /// <summary>Soft-deactivation: a disabled account cannot authenticate (deprovisioning keeps the audit trail;

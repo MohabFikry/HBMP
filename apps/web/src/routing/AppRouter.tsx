@@ -117,10 +117,20 @@ function ScreenBoundary({ children }: { children: ReactNode }) {
  * it, however they arrived: a bookmark, a back button and the rail's own switcher all resolve the same way.
  */
 function PortalPickerRoute() {
-  const { session, can } = useAuth();
+  const { session } = useAuth();
   const mine = portalsForRoles(session?.roles ?? []);
-  if (mine.length === 1) return <Navigate to={homePathFor(mine[0], can)} replace />;
   if (mine.length === 0) return <NoPortal />;
+  /*
+    28.13 — a single-portal caller is NO LONGER redirected away from here.
+
+    They still LAND in their portal: `useHomePath` only sends somebody to /portals when they hold more than
+    one, so nobody gains a click on sign-in. What changed is that the switcher is now on every rail, so
+    /portals became a place somebody can deliberately ask for — and answering that request with a redirect
+    straight back made the button they had just pressed look broken.
+
+    What they get is a page with one card. That is honest: it is the whole of what they hold, and seeing it
+    is the answer to the question the button asks.
+  */
   return <PortalPicker />;
 }
 
