@@ -734,6 +734,63 @@ public static class AppointmentsModule
             });
         });
 
+        // GET /appointments/licence-impact — what a PROPOSED licence expiry would strand (design 42 §3).
+        //
+        // The roster makes an impact preview mandatory before a clinic day is closed, and a licence brought
+        // forward strands appointments in exactly the same way — a doctor whose expiry moves from December to
+        // September cannot lawfully see anybody in October or November. The licence screen applied that change
+        // with no preview at all, so the person making it learned the consequence afterwards, from the flagged
+        // worklist, if they thought to look.
+        //
+        // It lives HERE and not on the licence endpoint because provider-service holds no appointments. That
+        // also settles what kind of guard this is: informational, not a server-side veto. The licence write
+        // does NOT call this to verify an acknowledged count the way the roster's apply does, because it would
+        // make renewing a licence fail whenever emr is unreachable — and refusing a renewal that keeps a
+        // doctor bookable is worse than the thing it would prevent. The real guarantee is downstream and
+        // already exists: shortening an expiry emits PractitionerLicenceExpired, and emr flags every affected
+        // appointment. Nothing is silently lost either way; this is so the operator SEES it first.
+        read.MapGet("/appointments/licence-impact", async (
+            Guid doctorId, DateOnly expiry, Guid? branchId, BranchScopeState branch, IHbmpPrincipalAccessor me,
+            EmrDbContext db, TimeProvider clock, CancellationToken ct) =>
+        {
+            var now = clock.GetUtcNow();
+
+            // Everything after the last day the licence covers. INCLUSIVE of the expiry date itself, matching
+            // PractitionerLicence.IsValidAt and SlotGeneration's bookableUntil: a doctor is not unlicensed on
+            // the last day printed on their own certificate, and an off-by-one here would put that day's
+            // patients on a list telling a coordinator to ring them for nothing.
+            var firstUncovered = expiry.AddDays(1).ToDateTime(TimeOnly.MinValue);
+            var cutoff = new DateTimeOffset(firstUncovered, CairoOffset(expiry.AddDays(1))).ToUniversalTime();
+
+            var q = db.Appointments.AsNoTracking()
+                .Where(a => a.DoctorId == doctorId
+                            && a.ScheduledStart >= cutoff
+                            // Future only, and live only. A cancelled appointment needs no reassigning, and a
+                            // past one is not affected — expiry is never retroactive (design 42 §7 rule 6).
+                            && a.ScheduledStart > now
+                            && (a.Status == AppointmentStatus.Booked || a.Status == AppointmentStatus.CheckedIn));
+
+            q = q.ApplyBranchScope(a => a.BranchId, BranchModeOf(me), branch.Context, branchId);
+
+            var rows = await q.OrderBy(a => a.ScheduledStart).Take(500).ToListAsync(ct);
+            return Results.Ok(new
+            {
+                asOf = now,
+                doctorId,
+                proposedExpiry = expiry.ToString("yyyy-MM-dd"),
+                affectedCount = rows.Count,
+                // The LIST, not just the count — the same reasoning as the roster's preview. "8 appointments"
+                // is a number; the list is what lets a coordinator recognise the two who cannot easily travel
+                // again. Contact affordances only: this is a scheduling problem and carries no clinical
+                // content.
+                affected = rows.Select(a => new
+                {
+                    a.AppointmentId, a.BeneficiaryId, a.BeneficiaryName,
+                    a.BranchId, a.DoctorId, a.ScheduledStart,
+                }),
+            });
+        });
+
         // GET /appointments/summary — the three counts the reception dashboard's cards show.
         //
         // Counted HERE rather than by tallying the board client-side. The board is capped at 200 rows, so a
