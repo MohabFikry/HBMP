@@ -6,6 +6,11 @@ import {
   zBookableSlot,
   zBookingResult,
   zApprovalItem,
+  zAdjudicationRow,
+  zClaimDetail,
+  zClaimAdjustment,
+  zClaimDecisionResult,
+  zRetrospectiveItem,
   zApprovalReview,
   zBreakGlassGrant,
   zMasterDataVersion,
@@ -125,6 +130,7 @@ import {
   zClaimsCostView,
 } from "@mersal/contracts";
 import type { Period, ServiceAxis } from "@mersal/contracts";
+import type { ClaimDecisionRequest, RetrospectiveReviewInput } from "@mersal/contracts";
 import type {
   BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, CreatePractitionerInput, PractitionerAttachFailure,
   MasterDataEdit,
@@ -143,7 +149,9 @@ import type { CptSection, InvestigationDraftLine, InvestigationOrderType, OrderA
 import type { SubstitutionRequest, WithdrawResult } from "@mersal/contracts";
 import { zAllergenOption, zAllergyRecord, zMemberClinicalRecord } from "@mersal/contracts";
 import type { ApiClient } from "./client";
-import { ApiError, getRaw, postRaw, putRaw, patchRaw, deleteRaw, postForm, parseOr, getAbsolute, postAbsolute, deleteAbsolute } from "./http";
+import { ApiError, getRaw, getRawCounted, postRaw, putRaw, patchRaw, deleteRaw, postForm, parseOr, getAbsolute, postAbsolute, deleteAbsolute } from "./http";
+import { newIdempotencyKey } from "./http";
+import type { ApprovalQueueFilter } from "./client";
 import { GATEWAY_BASE } from "../config";
 
 /* This client is a deliberate adapter between loosely-typed service JSON and the strict portal contracts;
@@ -378,32 +386,87 @@ function toPractitioner(p: any) {
 function attachReason(e: unknown): string {
   return e instanceof ApiError ? e.reason : String(e);
 }
-/** Map a claim lifecycle status (36 §3) → a non-color StatusKind chip. */
-const claimStatusChip = (s: unknown): { kind: "ok" | "info" | "part" | "warn" | "bad" | "neu"; label: { en: string; ar: string } } => {
+type Chip = { kind: "ok" | "info" | "part" | "warn" | "bad" | "neu"; label: { en: string; ar: string } };
+
+/**
+ * A claim lifecycle status → a non-colour StatusKind chip.
+ *
+ * FOUR OF THE ELEVEN REAL STATUSES WERE MISSING AND FOUR OF THE EIGHT ENTRIES NAMED NOTHING. The map listed
+ * `UnderReview`, `Adjudicated`, `Rejected` and `Cancelled`; `ClaimStatus` has none of those. Meanwhile
+ * `UnderAdjudication`, `Approved`, `Denied`, `PendingInfo`, `ClinicalReview`, `Appealed` and `Void` — the
+ * statuses claims actually hold — all fell through to the neutral fallback, which puts the raw English token
+ * in the Arabic slot. An Arabic reader saw "Denied" in Latin script on a denied claim.
+ */
+const claimStatusChip = (s: unknown): Chip => {
   const k = String(s ?? "");
-  const map: Record<string, { kind: "ok" | "info" | "part" | "warn" | "bad" | "neu"; label: { en: string; ar: string } }> = {
+  const map: Record<string, Chip> = {
     Draft: { kind: "neu", label: { en: "Draft", ar: "مسودة" } },
     Submitted: { kind: "info", label: { en: "Submitted", ar: "مُقدّمة" } },
-    UnderReview: { kind: "info", label: { en: "Under review", ar: "قيد المراجعة" } },
-    Adjudicated: { kind: "ok", label: { en: "Adjudicated", ar: "تمت المراجعة" } },
+    UnderAdjudication: { kind: "info", label: { en: "Under adjudication", ar: "قيد البتّ" } },
+    PendingInfo: { kind: "warn", label: { en: "Awaiting information", ar: "بانتظار معلومات" } },
+    ClinicalReview: { kind: "warn", label: { en: "Clinical review", ar: "مراجعة سريرية" } },
+    Approved: { kind: "ok", label: { en: "Approved", ar: "معتمدة" } },
     PartiallyApproved: { kind: "part", label: { en: "Partially approved", ar: "موافقة جزئية" } },
-    Rejected: { kind: "bad", label: { en: "Rejected", ar: "مرفوضة" } },
+    Denied: { kind: "bad", label: { en: "Denied", ar: "مرفوضة" } },
     Settled: { kind: "ok", label: { en: "Settled", ar: "مُسوّاة" } },
-    Cancelled: { kind: "neu", label: { en: "Cancelled", ar: "ملغاة" } },
+    Appealed: { kind: "warn", label: { en: "Appealed", ar: "مستأنَفة" } },
+    Void: { kind: "neu", label: { en: "Void", ar: "ملغاة" } },
   };
   return map[k] ?? { kind: "neu", label: { en: k || "—", ar: k || "—" } };
 };
-/** Map a reconciliation bucket (36 §7) → a non-color StatusKind chip. */
-const reconBucketChip = (s: unknown): { kind: "ok" | "info" | "warn" | "bad" | "neu"; label: { en: string; ar: string } } => {
+
+/** A claim LINE status (`ClaimLineStatus`) → a chip. Distinct vocabulary from the claim's own. */
+const claimLineStatusChip = (s: unknown): Chip => {
   const k = String(s ?? "");
-  const map: Record<string, { kind: "ok" | "info" | "warn" | "bad" | "neu"; label: { en: string; ar: string } }> = {
+  const map: Record<string, Chip> = {
+    Pending: { kind: "info", label: { en: "Pending", ar: "معلّق" } },
+    Approved: { kind: "ok", label: { en: "Approved", ar: "معتمد" } },
+    PartiallyApproved: { kind: "part", label: { en: "Partially approved", ar: "موافقة جزئية" } },
+    Denied: { kind: "bad", label: { en: "Denied", ar: "مرفوض" } },
+    Adjusted: { kind: "warn", label: { en: "Adjusted", ar: "معدَّل" } },
+    Void: { kind: "neu", label: { en: "Void", ar: "ملغى" } },
+  };
+  return map[k] ?? { kind: "neu", label: { en: k || "—", ar: k || "—" } };
+};
+
+/**
+ * A reconciliation bucket → a chip. All SIX, including the two that carry the money.
+ *
+ * `Duplicate` is the double-billing signal and `QuantityVariance` is a provider billing more units than were
+ * delivered. Both were classified server-side, neither had a chip, so both rendered as their raw English token
+ * in both languages — and neither could be filtered to.
+ */
+const reconBucketChip = (s: unknown): Chip => {
+  const k = String(s ?? "");
+  const map: Record<string, Chip> = {
     Matched: { kind: "ok", label: { en: "Matched", ar: "مطابقة" } },
     PriceVariance: { kind: "warn", label: { en: "Price variance", ar: "فرق سعر" } },
+    QuantityVariance: { kind: "warn", label: { en: "Quantity variance", ar: "فرق كمية" } },
     BilledNotDelivered: { kind: "bad", label: { en: "Billed, not delivered", ar: "فوترة بلا تنفيذ" } },
     DeliveredNotBilled: { kind: "info", label: { en: "Delivered, not billed", ar: "تنفيذ بلا فوترة" } },
+    Duplicate: { kind: "bad", label: { en: "Duplicate", ar: "مكرّرة" } },
   };
   return map[k] ?? { kind: "neu", label: { en: k || "—", ar: k || "—" } };
 };
+
+/**
+ * Who asked, from the request's SOURCE.
+ *
+ * This was the literal string "Provider" on every row of the approval queue — including manual
+ * authorizations, which the approval team raises itself and which carry no requesting provider at all. A
+ * constant that is true of some rows and false of others is worse than an empty column: it cannot be
+ * questioned, because it never looks missing.
+ */
+const requesterLabel = (source: unknown): { en: string; ar: string } => {
+  const map: Record<string, { en: string; ar: string }> = {
+    OrderLine: { en: "Clinician order", ar: "طلب طبيب" },
+    Prescription: { en: "Prescription", ar: "وصفة" },
+    Manual: { en: "Raised by the approval team", ar: "من فريق الموافقات" },
+    ValidityExtension: { en: "Validity extension request", ar: "طلب تمديد صلاحية" },
+  };
+  return map[String(source ?? "")] ?? { en: "—", ar: "—" };
+};
+
 /** Map an emr encounter status → a resolved bilingual StatusKind for the doctor worklist chip. */
 const encounterStatus = (s: unknown) => {
   const k = String(s ?? "InProgress");
@@ -2336,33 +2399,65 @@ export class HttpApiClient implements ApiClient {
   // Approvals (Phase 7, US-060) — the worklist is GET /authorizations/ (min-necessary: codes + SLA, NO clinical
   // payload — that is /review only, audited as a PHI read). Decisions are per-type endpoints, not one /decision;
   // a decision needs the request UnderReview, so decide assigns first (idempotent-ish) then routes by kind.
-  async approvalWorklist(kind: "Review" | "Fulfilment" | "All" = "Review") {
+  async approvalWorklist(
+    kind: "Review" | "Fulfilment" | "All" = "Review",
+    filter?: ApprovalQueueFilter,
+  ) {
     // Defaulting to Review matches the server's default and is the same argument (ADR-0034): the inbox is a
     // work queue, and a few hundred dispenses a day landing in it would drown the requests that need a
     // decision. The register is asked for deliberately.
-    const r = (await getRaw(`/authorizations/?kind=${encodeURIComponent(kind)}`)) as any[];
+    //
+    // THE FILTERS NOW REACH THE SERVER. `status`, `priority`, `slaBreached` and `unassigned` have always been
+    // accepted by this endpoint and none of them was ever sent: the client took the server's 200-row page and
+    // filtered it in the browser, so a tenant with three hundred pending requests narrowing to "breached" was
+    // narrowing a truncated list and was told nothing. `assignedTo` is new on both sides — the queue had no
+    // notion of ownership at all, which is the first question a queue worked by several people is read with.
+    const q = new URLSearchParams({ kind });
+    if (filter?.status) q.set("status", filter.status);
+    if (filter?.priority) q.set("priority", filter.priority);
+    if (filter?.slaBreached) q.set("slaBreached", "true");
+    if (filter?.assignedTo === "unassigned") q.set("unassigned", "true");
+    else if (filter?.assignedTo === "me") q.set("assignedTo", "me");
+
+    const { body, total } = await getRawCounted(`/authorizations/?${q.toString()}`);
+    const r = (body ?? []) as any[];
     const now = Date.now();
-    return (r ?? []).map((a: any) => {
+    const rows = (r ?? []).map((a: any) => {
       const dueMs = a.slaDueAt ? Date.parse(a.slaDueAt) : now;
-      const submittedAt = new Date(now - Number(a.tatElapsedSeconds ?? 0) * 1000).toISOString();
-      const code = (a.serviceCodes ?? [])[0] ?? "—";
+      const codes: string[] = Array.isArray(a.serviceCodes) ? a.serviceCodes : [];
+      const code = codes[0] ?? "—";
       return parseOr(zApprovalItem, {
         id: a.authorizationId,
         patient: { id: a.beneficiaryId, token: caseToken({ beneficiaryId: a.beneficiaryId }) },
+        // `service` stays the first code because a table cell holds one thing; `serviceCodes` below carries
+        // all of them, and the review panel lists the whole set rather than calling the tail "supporting".
         service: { system: "CPT", code, label: neutral(code) },
-        requestedBy: t("Provider", "مقدم الخدمة"),
+        serviceCodes: codes,
+        // The SOURCE, not the literal string "Provider" this used to be on every row — including the manual
+        // authorizations, which by definition have no requesting provider at all.
+        requestedBy: requesterLabel(a.source),
+        requestingProviderId: a.requestingProviderId ?? null,
+        assignedReviewerId: a.assignedReviewerId ?? null,
         priority: String(a.priority ?? "routine").toLowerCase(),
-        // A fulfilment authorization has no SLA — nothing waited on anybody. The due date used to be
-        // fabricated from the submission time when the server sent none, which put a countdown on settled
-        // work: a clock ticking towards a deadline that does not exist.
+        /*
+          NO DUE DATE MEANS NO SLA, whatever kind of row this is.
+
+          A fulfilment authorization never had one — nothing waited on anybody, the medicine is already in the
+          patient's hand. A review request that has not been picked up has not started its clock either: the
+          timer is set by `assign`, so `slaDueAt` is null until somebody takes it.
+
+          Previously only the fulfilment case answered null, and every other row with no due date got one
+          fabricated from the submission time — a countdown towards a deadline that does not exist, on a
+          request nobody has accepted. The screen renders null as an em-dash and the "breached" filter counts
+          it as neither breached nor in time, which is what it is.
+        */
         sla: a.slaDueAt
           ? { dueAt: a.slaDueAt, breached: !!a.slaBreached, minutesRemaining: Math.round((dueMs - now) / 60000) }
-          : a.kind === "Fulfilment"
-            ? null
-            : { dueAt: submittedAt, breached: !!a.slaBreached, minutesRemaining: Math.round((dueMs - now) / 60000) },
+          : null,
         status: authStatus(a.status),
-        submittedAt,
-        estimatedCost: "—",
+        // The server's own timestamp. This was `now - tatElapsedSeconds`, recomputed on every render, so a
+        // row's submission time crept forward while the page sat open.
+        submittedAt: a.submittedAt ?? new Date(now - Number(a.tatElapsedSeconds ?? 0) * 1000).toISOString(),
         source: a.source ?? "Manual",
         itemReference: a.itemReference ?? null,
         extensionReason: a.extensionReason ?? null,
@@ -2370,6 +2465,51 @@ export class HttpApiClient implements ApiClient {
         // so the fallback is the truth for that server rather than a guess.
         kind: a.kind === "Fulfilment" ? "Fulfilment" : "Review",
       });
+    });
+    return { rows, total: total ?? rows.length };
+  }
+
+  async retrospectiveQueue(closed?: boolean) {
+    const r = (await getRaw(`/authorizations/retrospective-queue${closed ? "?closed=true" : ""}`)) as any[];
+    return (r ?? []).map((a: any) =>
+      parseOr(zRetrospectiveItem, {
+        authorizationId: a.authorizationId,
+        authNo: a.authNo ?? "",
+        beneficiaryId: a.beneficiaryId,
+        serviceCodes: Array.isArray(a.serviceCodes) ? a.serviceCodes : [],
+        source: String(a.source ?? "Manual"),
+        status: authStatus(a.status),
+        decidedAt: a.decidedAt ?? null,
+        ageDays: Number(a.ageDays ?? 0),
+        reviewed: !!a.reviewed,
+        outcome: a.outcome ?? null,
+        reviewedAt: a.reviewedAt ?? null,
+        reviewedBy: a.reviewedBy ?? null,
+        rationale: a.rationale ?? null,
+      }),
+    );
+  }
+
+  async completeRetrospectiveReview(input: RetrospectiveReviewInput, idempotencyKey?: string) {
+    const r = (await postRaw(
+      `/authorizations/${encodeURIComponent(input.authorizationId)}/retrospective-review`,
+      { outcome: input.outcome, rationale: input.rationale },
+      idempotencyKey ?? `retro:${input.authorizationId}`,
+    )) as any;
+    return parseOr(zRetrospectiveItem, {
+      authorizationId: r?.authorizationId ?? input.authorizationId,
+      authNo: r?.authNo ?? "",
+      beneficiaryId: r?.beneficiaryId,
+      serviceCodes: Array.isArray(r?.serviceCodes) ? r.serviceCodes : [],
+      source: String(r?.source ?? "Manual"),
+      status: authStatus(r?.status),
+      decidedAt: r?.decidedAt ?? null,
+      ageDays: Number(r?.ageDays ?? 0),
+      reviewed: true,
+      outcome: r?.outcome ?? input.outcome,
+      reviewedAt: r?.reviewedAt ?? null,
+      reviewedBy: r?.reviewedBy ?? null,
+      rationale: r?.rationale ?? input.rationale,
     });
   }
 
@@ -2401,9 +2541,11 @@ export class HttpApiClient implements ApiClient {
       patient: { id: required(a?.beneficiaryId, "approval.beneficiaryId"), token: caseToken({ beneficiaryId: a?.beneficiaryId }) },
       service: { system: "CPT", code: codes[0] ?? "—", label: neutral(codes[0] ?? "") },
       clinicalJustification: a?.emrSummary ?? "clinical context unavailable",
-      supportingCodes: codes.slice(1).map((c) => ({ system: "CPT" as const, code: c, label: neutral(c) })),
+      // EVERY requested service, including the first. `slice(1)` labelled the rest of the request
+      // "supporting codes", which they never were — a three-service request read as one service with two
+      // attachments, and a reviewer deciding on it was deciding on a third of what was asked.
+      requestedServices: codes.map((c) => ({ system: "CPT" as const, code: c, label: neutral(c) })),
       documents: (a?.documents ?? []).map((d: any) => ({ id: d.id ?? d.documentId ?? "", name: d.name ?? d.title ?? "document" })),
-      requestedAmount: "—",
     });
   }
   async decide(req: DecisionRequest) {
@@ -2841,8 +2983,23 @@ export class HttpApiClient implements ApiClient {
 
   // Claims management (Phase 10b) — codes + amounts only, never a diagnosis. The service isolates provider
   // users to their own claims and audits every read; the portal maps status/bucket → non-color StatusKind chips.
-  async claimsWorklist(status?: string) {
-    const r = (await getRaw(`/claims/worklist${status ? `?status=${encodeURIComponent(status)}` : ""}`)) as any[];
+  async claimsWorklist(status?: string, take?: number) {
+    /*
+      `/claims`, NOT `/claims/worklist`.
+
+      The old call went to the per-LINE adjudication queue: hard-filtered to UnderAdjudication + Pending, with
+      no `status` query parameter at all. ASP.NET bound nothing and answered 200, so all four segments of the
+      screen's status control returned identical rows — none of them in any of the statuses named. And the
+      payload is a LINE, so `origin`, `claimedAmount`, `netPayable` and `submittedAt` were all absent: every
+      money column on the claims worklist rendered zero or blank, on every row, always.
+
+      `GET /api/v1/claims` is the claim-level list. It parses `status` into a real ClaimStatus and returns the
+      amounts. The line queue still has a screen — `adjudicationQueue` below — because that is what it is for.
+    */
+    const q = new URLSearchParams();
+    if (status) q.set("status", status);
+    q.set("take", String(take ?? 200));
+    const r = (await getRaw(`/claims?${q.toString()}`)) as any[];
     return (r ?? []).map((c: any) =>
       parseOr(zClaimRow, {
         id: c.claimId ?? c.id,
@@ -2858,11 +3015,149 @@ export class HttpApiClient implements ApiClient {
     );
   }
 
-  async claimsReconciliation(bucket?: string) {
-    const r = (await getRaw(`/reconciliation${bucket ? `?bucket=${encodeURIComponent(bucket)}` : ""}`)) as any[];
+  async claimDetail(claimId: string) {
+    const c = (await getRaw(`/claims/${encodeURIComponent(claimId)}`)) as any;
+    return parseOr(zClaimDetail, {
+      id: c?.claimId ?? claimId,
+      claimNo: c?.claimNo ?? "",
+      origin: String(c?.origin ?? ""),
+      status: claimStatusChip(c?.status),
+      currency: c?.currencyCode ?? "EGP",
+      claimedAmount: Number(c?.claimedAmount ?? 0),
+      approvedAmount: c?.approvedAmount ?? null,
+      adjustedAmount: c?.adjustedAmount ?? null,
+      netPayable: c?.netPayable ?? null,
+      serviceDateFrom: String(c?.serviceDateFrom ?? ""),
+      submittedAt: c?.submittedAt ?? undefined,
+      lines: (c?.lines ?? []).map((l: any) => ({
+        claimLineId: l.claimLineId,
+        codeSystem: String(l.codeSystem ?? ""),
+        code: String(l.code ?? "—"),
+        description: l.description ?? null,
+        quantity: Number(l.quantity ?? 0),
+        billedAmount: Number(l.billedAmount ?? 0),
+        contractPrice: l.contractPrice ?? null,
+        allowedAmount: l.allowedAmount ?? null,
+        status: claimLineStatusChip(l.status),
+        reasonCodes: Array.isArray(l.reasonCodes) ? l.reasonCodes : [],
+      })),
+    });
+  }
+
+  async claimAdjustments(claimId: string) {
+    const r = (await getRaw(`/claims/${encodeURIComponent(claimId)}/adjustments`)) as any[];
+    return (r ?? []).map((a: any) =>
+      parseOr(zClaimAdjustment, {
+        adjustmentId: a.adjustmentId,
+        claimLineId: a.claimLineId ?? null,
+        type: String(a.type ?? a.adjustmentType ?? ""),
+        amountDelta: Number(a.amountDelta ?? 0),
+        beforeAmount: a.beforeAmount ?? null,
+        afterAmount: a.afterAmount ?? null,
+        reasonCode: a.reasonCode ?? null,
+        adjustedAt: a.adjustedAt ?? new Date().toISOString(),
+      }),
+    );
+  }
+
+  async adjudicationQueue(filter?: { recommendation?: string; reasonCode?: string; minValue?: number; maxValue?: number }) {
+    // The line queue, called with the parameters it actually accepts. Every one of these was served and
+    // unreachable: the only caller this endpoint ever had was passing it a `status` it does not take.
+    const q = new URLSearchParams();
+    if (filter?.recommendation) q.set("recommendation", filter.recommendation);
+    if (filter?.reasonCode) q.set("reasonCode", filter.reasonCode);
+    if (filter?.minValue !== undefined) q.set("minValue", String(filter.minValue));
+    if (filter?.maxValue !== undefined) q.set("maxValue", String(filter.maxValue));
+    const r = (await getRaw(`/claims/worklist${q.toString() ? `?${q.toString()}` : ""}`)) as any[];
+    return (r ?? []).map((l: any) =>
+      parseOr(zAdjudicationRow, {
+        claimId: l.claimId,
+        claimNo: l.claimNo ?? "",
+        claimLineId: l.claimLineId,
+        serviceDate: String(l.serviceDate ?? ""),
+        codeSystem: String(l.codeSystem ?? ""),
+        code: String(l.code ?? "—"),
+        description: l.description ?? null,
+        quantity: Number(l.quantity ?? 0),
+        billedAmount: Number(l.billedAmount ?? 0),
+        contractPrice: l.contractPrice ?? null,
+        allowedAmount: l.allowedAmount ?? null,
+        status: claimLineStatusChip(l.status),
+        systemRecommendation: l.systemRecommendation ?? null,
+        reasonCodes: Array.isArray(l.reasonCodes) ? l.reasonCodes : [],
+        authorizationId: l.authorizationId ?? null,
+        // A BOOLEAN, derived server-side from the fulfilment linkage. The officer confirms the service was
+        // rendered without reading what it found — the min-necessary boundary this whole portal rests on.
+        resultExists: !!l.resultExists,
+      }),
+    );
+  }
+
+  async decideClaimLine(req: ClaimDecisionRequest, idempotencyKey?: string) {
+    const r = (await postRaw(
+      `/claims/${encodeURIComponent(req.claimId)}/lines/${encodeURIComponent(req.claimLineId)}/decisions`,
+      {
+        decision: req.decision,
+        allowedAmount: req.allowedAmount ?? null,
+        reasonCodes: req.reasonCodes,
+        rationale: req.rationale,
+        confirmsDecisionId: req.confirmsDecisionId ?? null,
+      },
+      idempotencyKey ?? newIdempotencyKey(),
+    )) as any;
+    // 202 PendingSecondApproval comes back through the same success path — it is an OUTCOME, not a failure.
+    // The decision exceeded the dual-control threshold and waits for a second, distinct approver; showing it
+    // as an error would teach reviewers that the threshold is a malfunction.
+    return parseOr(zClaimDecisionResult, {
+      outcome: String(r?.outcome ?? "Recorded"),
+      decisionId: r?.decisionId ?? "",
+      lineStatus: r?.lineStatus ?? undefined,
+      claimStatus: r?.claimStatus ?? undefined,
+      allowedAmount: r?.allowedAmount ?? null,
+    });
+  }
+
+  async raiseClaimAdjustment(
+    input: { claimId: string; claimLineId: string; type: string; amountDelta: number; reasonCode?: string; rationale?: string },
+    idempotencyKey?: string,
+  ) {
+    const r = (await postRaw(
+      `/claims/${encodeURIComponent(input.claimId)}/lines/${encodeURIComponent(input.claimLineId)}/adjustments`,
+      {
+        type: input.type,
+        amountDelta: input.amountDelta,
+        reasonCode: input.reasonCode ?? null,
+        rationale: input.rationale ?? null,
+      },
+      idempotencyKey ?? newIdempotencyKey(),
+    )) as any;
+    return parseOr(zClaimAdjustment, {
+      adjustmentId: r?.adjustmentId ?? "",
+      claimLineId: input.claimLineId,
+      type: input.type,
+      amountDelta: input.amountDelta,
+      beforeAmount: r?.beforeAmount ?? null,
+      afterAmount: r?.afterAmount ?? null,
+      reasonCode: input.reasonCode ?? null,
+      adjustedAt: new Date().toISOString(),
+    });
+  }
+
+  async claimsReconciliation(bucket?: string, period?: Period) {
+    // The window now travels. This endpoint has always defaulted to the last 90 CAIRO days and the screen sent
+    // nothing and displayed nothing, so a reconciliation list silently ended 90 days back with no indication
+    // that anything preceded it.
+    const q = new URLSearchParams();
+    if (bucket) q.set("bucket", bucket);
+    if (period?.from) q.set("from", period.from);
+    if (period?.to) q.set("to", period.to);
+    const r = (await getRaw(`/reconciliation${q.toString() ? `?${q.toString()}` : ""}`)) as any[];
     return (r ?? []).map((l: any) =>
       parseOr(zReconciliationRow, {
         claimId: l.claimId,
+        // The row's real identity, which the server always sent and this mapper dropped. Keying on
+        // claimId + code collided for two lines of one claim on the same code — the QuantityVariance case.
+        claimLineId: l.claimLineId,
         claimNo: l.claimNo ?? "",
         origin: String(l.origin ?? ""),
         code: l.code ?? "—",
@@ -2875,8 +3170,11 @@ export class HttpApiClient implements ApiClient {
     );
   }
 
-  async claimsKpis() {
-    const r = (await getRaw(`/claims/kpis`)) as any;
+  async claimsKpis(period?: Period) {
+    const q = new URLSearchParams();
+    if (period?.from) q.set("from", period.from);
+    if (period?.to) q.set("to", period.to);
+    const r = (await getRaw(`/claims/kpis${q.toString() ? `?${q.toString()}` : ""}`)) as any;
     return parseOr(zClaimsKpis, {
       averageTatHours: Number(r?.averageTatHours ?? 0),
       approvalRate: Number(r?.approvalRate ?? 0),

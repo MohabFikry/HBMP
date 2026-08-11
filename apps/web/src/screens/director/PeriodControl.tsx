@@ -73,21 +73,27 @@ export function periodFor(preset: PresetKey): Period {
 const STORAGE_KEY = "director-period";
 
 /**
- * The portal's shared period.
+ * A portal's shared period.
  *
  * Persisted for the session so moving between Oversight and Utilization does not silently change the
  * question — a supervisor who narrowed to this month and then clicked a different section used to get
  * thirty days again, with no indication that the comparison they were about to make was invalid.
+ *
+ * <b>The key is per-portal.</b> Claims uses this control too — reconciliation and the KPI tiles both run on a
+ * hidden ninety-Cairo-day window that neither screen sent nor displayed — and its window is a different
+ * question from the director's. Sharing one key would mean a claims officer's choice silently retuned an
+ * oversight dashboard in the same browser, which is the exact confusion this hook exists to prevent, only
+ * across portals instead of across screens. The default remains 30d for both.
  */
-export function usePeriod(): [PresetKey, Period, (p: PresetKey) => void] {
+export function usePeriod(storageKey: string = STORAGE_KEY): [PresetKey, Period, (p: PresetKey) => void] {
   const [preset, setPresetState] = useState<PresetKey>(() => {
-    const saved = typeof sessionStorage !== "undefined" ? sessionStorage.getItem(STORAGE_KEY) : null;
+    const saved = typeof sessionStorage !== "undefined" ? sessionStorage.getItem(storageKey) : null;
     return (PRESETS as readonly string[]).includes(saved ?? "") ? (saved as PresetKey) : "30d";
   });
   const setPreset = useCallback((p: PresetKey) => {
     setPresetState(p);
-    try { sessionStorage.setItem(STORAGE_KEY, p); } catch { /* private mode — the default is fine */ }
-  }, []);
+    try { sessionStorage.setItem(storageKey, p); } catch { /* private mode — the default is fine */ }
+  }, [storageKey]);
   const period = useMemo(() => periodFor(preset), [preset]);
   return [preset, period, setPreset];
 }

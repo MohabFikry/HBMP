@@ -69,6 +69,7 @@ Read [`0A-DESIGN-FOUNDATIONS.md`](0A-DESIGN-FOUNDATIONS.md) **first** — it def
 | 45 | Encounter, Service History & Chronic Prescribing — Radiology rename, OP Procedures, per-line service history, acute/chronic refill windows, prescribing units, lowest-price & availability (Phase 29) | [45-encounter-and-prescription-adjustments.md](45-encounter-and-prescription-adjustments.md) | D |
 | 46 | Order & Prescription Amendment and Cancellation — supersede-not-edit, the guarded transition, chronic duration/frequency edits, authorisation scope, propagation, order notes, the timeline from check-in (Phase 30) | [46-order-amendment-and-cancellation.md](46-order-amendment-and-cancellation.md) | D |
 | 47 | Oversight & Analytics — the Medical Director's plane: the projection seam as a machine seam, tenant-on-envelope as the condition of a fact existing, cost at two grains, why oversight reads from reporting and never from the operational services, and the period every figure states (2026-08-11 audit) | [47-oversight-and-analytics.md](47-oversight-and-analytics.md) | D |
+| 48 | Approvals & Claims Workbench — the claims worklist that read the wrong endpoint, the officer's write scopes with no screen, line adjudication with dual control and SoD, all six reconciliation buckets, and the break-glass retrospective review that could be entered and never exited (2026-08-11 audit) | [48-approvals-and-claims-workbench.md](48-approvals-and-claims-workbench.md) | D |
 
 ---
 

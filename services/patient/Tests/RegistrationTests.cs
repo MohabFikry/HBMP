@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Mersal.Patient.Domain;
+using Mersal.Time;
 
 namespace Mersal.Patient.Tests;
 
@@ -164,7 +165,12 @@ public class RegistrationTests
     public async Task A_birth_date_in_the_future_is_refused()
     {
         var reg = new BeneficiaryRegistrar(new FakeLookup(), TimeProvider.System);
-        var tomorrow = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1));
+        // Tomorrow on the CLINIC's calendar, which is what the rule compares against
+        // (`BusinessCalendar.DateIn`). Africa/Cairo runs two or three hours ahead of UTC, so
+        // `DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1))` is merely TODAY in Cairo for the last few hours
+        // of every UTC day — the registration is correctly accepted and this test failed, roughly one hour in
+        // eight, for reasons having nothing to do with the code under test.
+        var tomorrow = BusinessCalendar.DateIn(DateTimeOffset.UtcNow).AddDays(1);
 
         var result = await reg.RegisterAsync(Req(AnId()) with { BirthDate = tomorrow }, "o");
 

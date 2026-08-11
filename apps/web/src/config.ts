@@ -94,7 +94,11 @@ export const OIDC = {
     "audit:read auth:configure auth:decide auth:emergency auth:manual auth:override auth:read auth:request-extension " +
     // ADR-0034 — the bench asks whether another examination may stand in. Granted to lab_tech/imaging_tech
     // only; a pharmacist resolves the same question against the formulary without asking anyone.
-    "auth:request-substitution auth:review " +
+    "auth:request-substitution " +
+    // The break-glass retrospective review. Requested for everyone and granted only to medical_director /
+    // super_admin — the approval team raises manual and emergency authorizations, so giving them the review
+    // would make one team both the actor and the auditor of its own exceptions.
+    "auth:retrospective auth:review " +
     // 25.1 — the branch-management authorities (design 42 §1). Requested for everyone, granted only to
     // branch_coordinator / clinics_manager: asking is not receiving. Sized to a clinic precisely so that a
     // coordinator never needs provider:write, which is network-wide and also unmasks licence numbers.

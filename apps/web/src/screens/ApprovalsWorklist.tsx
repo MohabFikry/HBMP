@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   Button,
   Card,
@@ -11,7 +11,7 @@ import {
   useToast,
   useTableQuery,
 } from "@mersal/design-system";
-import type { Column, TableFilterSpec } from "@mersal/design-system";
+import type { Column } from "@mersal/design-system";
 import {
   zDecisionRequest,
   type ApprovalItem,
@@ -24,7 +24,7 @@ import { useApi } from "../api/ApiProvider";
 import { useAsync } from "../api/useAsync";
 import { newIdempotencyKey } from "../api/http";
 import { PatientContextBar } from "./PatientProfile";
-import { AsyncSection, PageHeader, useLoc } from "./_shared";
+import { AsyncSection, extraCodes, PageHeader, useLoc } from "./_shared";
 
 const S = {
   title: { en: "Approval Worklist", ar: "قائمة الموافقات" },
@@ -33,7 +33,15 @@ const S = {
   service: { en: "Service", ar: "الخدمة" },
   priority: { en: "Priority", ar: "الأولوية" },
   sla: { en: "SLA", ar: "المهلة" },
-  cost: { en: "Est. cost", ar: "التكلفة" },
+  owner: { en: "Reviewer", ar: "المراجع" },
+  unowned: { en: "Unassigned", ar: "غير مُسند" },
+  mine: { en: "Mine", ar: "لي" },
+  fOwner: { en: "Assignment", ar: "الإسناد" },
+  fAny: { en: "Anyone", ar: "الجميع" },
+  truncated: {
+    en: "Showing the first {shown} of {total} matching requests. Narrow the filters to see the rest.",
+    ar: "يتم عرض أول {shown} من {total} طلباً مطابقاً. ضيّق عوامل التصفية لعرض الباقي.",
+  },
   kindExtension: { en: "Validity extension", ar: "تمديد صلاحية" },
   extTitle: { en: "Validity extension", ar: "تمديد صلاحية" },
   extWhat: { en: "Expired item", ar: "العنصر المنتهي" },
@@ -60,9 +68,8 @@ const S = {
   review: { en: "Review", ar: "مراجعة" },
   pick: { en: "Select a request to review its clinical justification and decide.", ar: "اختر طلباً لمراجعة مبرره السريري واتخاذ القرار." },
   justification: { en: "Clinical justification", ar: "المبرر السريري" },
-  codes: { en: "Supporting codes", ar: "الرموز الداعمة" },
+  codes: { en: "Requested services", ar: "الخدمات المطلوبة" },
   documents: { en: "Documents", ar: "المستندات" },
-  requested: { en: "Requested amount", ar: "المبلغ المطلوب" },
   decision: { en: "Decision", ar: "القرار" },
   approve: { en: "Approve", ar: "موافقة" },
   partial: { en: "Partial", ar: "جزئي" },
@@ -89,6 +96,7 @@ const S = {
     en: "No requests match. Change the search or clear the filters.",
     ar: "لا توجد طلبات مطابقة. عدّل البحث أو أزل عوامل التصفية.",
   },
+  more: { en: "+{n} more", ar: "+{n} أخرى" },
   fPriority: { en: "Priority", ar: "الأولوية" },
   fRoutine: { en: "Routine", ar: "عادي" },
   fUrgent: { en: "Urgent", ar: "عاجل" },
@@ -106,10 +114,32 @@ const PRIORITY_KIND = { routine: "neu", urgent: "warn", emergency: "bad" } as co
 export function ApprovalsWorklist() {
   const api = useApi();
   const t = useLoc();
-  const worklist = useAsync<ApprovalItem[]>(() => api.approvalWorklist(), []);
+  /*
+    THE FILTERS THAT NARROW THE SERVER'S QUERY, versus the ones that narrow what is already on screen.
+
+    Priority, SLA and assignment are sent to the endpoint — it has always accepted all three and the client
+    sent none of them, taking the server's 200-row page and filtering that in the browser. A tenant with three
+    hundred pending requests choosing "breached" was filtering a truncated list and was told nothing about it.
+
+    Search stays client-side: it spans the member token and the item reference, which the endpoint does not
+    index, and a round trip per keystroke would be worse than filtering the page in hand.
+  */
+  const [priority, setPriority] = useState<string>("");
+  const [slaOnly, setSlaOnly] = useState(false);
+  const [owner, setOwner] = useState<"any" | "me" | "unassigned">("any");
+  const worklist = useAsync(
+    () => api.approvalWorklist("Review", {
+      priority: priority || undefined,
+      slaBreached: slaOnly || undefined,
+      assignedTo: owner,
+    }),
+    [priority, slaOnly, owner],
+  );
+  const rows = worklist.data?.rows ?? [];
+  const total = worklist.data?.total ?? rows.length;
   const [selected, setSelected] = useState<string | null>(null);
   /** The selected ROW, not just its id — an extension is decided from what the queue already carries. */
-  const selectedRow = (worklist.data ?? []).find((r) => r.id === selected) ?? null;
+  const selectedRow = rows.find((r) => r.id === selected) ?? null;
 
   const cols: Column<ApprovalItem>[] = [
     { key: "patient", header: t(S.patient), cell: (r) => <span className="tnum">{r.patient.token}</span>, sortable: true, sortValue: (r) => r.patient.token },
@@ -126,7 +156,14 @@ export function ApprovalsWorklist() {
             <span className="tnum">{r.itemReference ?? "—"}</span>
           </span>
         ) : (
-          <span><span className="tnum">{r.service.code}</span> · {t(r.service.label)}</span>
+          // Every requested code. A three-service authorization used to render as its first code alone, with
+          // the rest relabelled "supporting codes" in the panel — so the queue understated what was asked.
+          <span>
+            <span className="tnum">{r.service.code}</span> · {t(r.service.label)}
+            {extraCodes(r.serviceCodes) > 0 && (
+              <> · <span className="muted">{t(S.more).replace("{n}", String(extraCodes(r.serviceCodes)))}</span></>
+            )}
+          </span>
         ),
     },
     { key: "priority", header: t(S.priority), cell: (r) => <StatusChip kind={PRIORITY_KIND[r.priority]} label={r.priority} />, sortable: true, sortValue: (r) => r.priority },
@@ -144,7 +181,26 @@ export function ApprovalsWorklist() {
           <span className="tnum">{t(S.dueIn)} {r.sla.minutesRemaining} {t(S.min)}</span>
         ),
     },
-    { key: "cost", header: t(S.cost), cell: (r) => r.estimatedCost, numeric: true, sortable: true, sortValue: (r) => r.estimatedCost },
+    /*
+      THERE IS NO "EST. COST" COLUMN, and its absence is deliberate.
+
+      It used to be here, declared `numeric: true, sortable: true` over a value the client set to the literal
+      string "—" on every row: the column sorted a constant. approvals-service holds no prices — there is no
+      amount on the Authorization aggregate, no tariff client, and no column in its schema to source one from.
+
+      A column headed "Est. cost" that is always blank tells a reviewer the platform knows the cost and is
+      declining to show it. Removing it says the true thing: this system does not price a request at review
+      time. A real one would come from the tariff service, and that is a different change with a real cost.
+    */
+    {
+      key: "owner",
+      header: t(S.owner),
+      // The queue is shared. Whether anyone is holding a row is the second thing a reviewer needs after how
+      // urgent it is, and the projection carried no ownership at all until now.
+      cell: (r) => (r.assignedReviewerId ? <StatusChip kind="info" label={t(S.mine)} /> : <span className="muted">{t(S.unowned)}</span>),
+      sortable: true,
+      sortValue: (r) => (r.assignedReviewerId ? 0 : 1),
+    },
     { key: "state", header: t(S.state), cell: (r) => <StatusChip kind={r.status.kind} label={t(r.status.label)} />, sortable: true, sortValue: (r) => t(r.status.label) },
     {
       key: "review",
@@ -158,42 +214,9 @@ export function ApprovalsWorklist() {
     },
   ];
 
-  /*
-    ============================================================================================================
-    THE QUEUE IS SEARCHABLE, FILTERABLE AND PAGED
-    ============================================================================================================
-    This is the busiest queue in the product and it had none of the three: a reviewer holding a member token
-    could only scroll. Two filter groups rather than a dozen, because these are the two questions asked of an
-    approval queue — how urgent, and is the clock already up.
-
-    Read OUTSIDE AsyncSection's render prop: a hook called in there would be conditional on the load finishing.
-  */
-  const filters: TableFilterSpec<ApprovalItem>[] = useMemo(() => [
-    {
-      key: "priority",
-      label: t(S.fPriority),
-      options: [
-        { value: "emergency", label: t(S.fEmergency) },
-        { value: "urgent", label: t(S.fUrgent) },
-        { value: "routine", label: t(S.fRoutine) },
-      ],
-      match: (r, value) => r.priority === value,
-    },
-    {
-      key: "sla",
-      label: t(S.fSla),
-      // A fulfilment authorization has no SLA at all — it is neither breached nor in time, so it belongs to
-      // neither chip rather than being quietly counted as "still in time".
-      options: [
-        { value: "breached", label: t(S.fBreached) },
-        { value: "due", label: t(S.fDue) },
-      ],
-      match: (r, value) => (value === "breached" ? r.sla?.breached === true : r.sla?.breached === false),
-    },
-  ], [t]);
-
+  /* Read OUTSIDE AsyncSection's render prop: a hook called in there would be conditional on the load. */
   const query = useTableQuery<ApprovalItem>({
-    rows: worklist.data ?? [],
+    rows,
     columns: cols,
     // The three things a reviewer arrives holding: the member's token, the service code, or the reference of
     // the order or prescription the request was raised against.
@@ -201,7 +224,6 @@ export function ApprovalsWorklist() {
       .filter(Boolean).join(" "),
     searchLabel: t(S.search),
     searchPlaceholder: t(S.searchHint),
-    filters,
     pageSize: 25,
     persistKey: "approvals-worklist",
   });
@@ -209,9 +231,44 @@ export function ApprovalsWorklist() {
   return (
     <>
       <PageHeader title={t(S.title)} />
+      {/* The three questions the SERVER answers. They were all served and none was ever asked. */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--sp3)", marginBottom: "var(--sp3)" }}>
+        <SegmentedControl
+          aria-label={t(S.fPriority)}
+          value={priority}
+          onChange={setPriority}
+          segments={[
+            { value: "", label: t(S.fAny) },
+            { value: "Emergency", label: t(S.fEmergency) },
+            { value: "Urgent", label: t(S.fUrgent) },
+            { value: "Routine", label: t(S.fRoutine) },
+          ]}
+        />
+        <SegmentedControl<"any" | "me" | "unassigned">
+          aria-label={t(S.fOwner)}
+          value={owner}
+          onChange={setOwner}
+          segments={[
+            { value: "any", label: t(S.fAny) },
+            { value: "me", label: t(S.mine) },
+            { value: "unassigned", label: t(S.unowned) },
+          ]}
+        />
+        <label className="check">
+          <input type="checkbox" checked={slaOnly} onChange={(e) => setSlaOnly(e.currentTarget.checked)} />
+          <span>{t(S.fBreached)}</span>
+        </label>
+      </div>
+      {/* THE CAP SAYS SO. The endpoint pages at 200 and the screen used to present that page as the whole
+          answer; a reviewer narrowing a truncated list had no way to know they were doing it. */}
+      {total > rows.length && (
+        <InlineAlert tone="info">
+          {t(S.truncated).replace("{shown}", String(rows.length)).replace("{total}", String(total))}
+        </InlineAlert>
+      )}
       <div className="split split-wide">
         <Card as="section" style={{ padding: "var(--sp3)" }}>
-          <AsyncSection state={worklist} isEmpty={(d) => d.length === 0} emptyLabel={S.empty}>
+          <AsyncSection state={worklist} isEmpty={(d) => d.rows.length === 0} emptyLabel={S.empty}>
             {() => (
               // 18.D3 (U6): rows were focusable (interactive) with NO onSelect, so a keyboard user could
               // tab to a row, press Enter, and nothing happened — the worklist was reachable but not
@@ -416,13 +473,15 @@ function DecisionForm({ review, t, onDone }: { review: ApprovalReview; t: (l: Lo
       {/* Field-scoped review (min-necessary): coded reason + justification + docs — not the full EMR. */}
       <div>
         <h2 style={{ margin: 0 }}>{review.service.code} · {t(review.service.label)}</h2>
-        <p className="muted" style={{ margin: "4px 0 0" }}>{review.patient.token} · {t(S.requested)}: <span className="tnum">{review.requestedAmount}</span></p>
+        {/* No "requested amount": approvals-service does not price a request. See the note on the removed
+            cost column above — a field that is always "—" reads as missing data rather than as absent data. */}
+        <p className="muted" style={{ margin: "4px 0 0" }}>{review.patient.token}</p>
       </div>
       <dl className="kv-grid">
         <div><dt>{t(S.justification)}</dt><dd>{review.clinicalJustification}</dd></div>
         <div>
           <dt>{t(S.codes)}</dt>
-          <dd><ul className="chip-list">{review.supportingCodes.map((c) => <li key={c.code}><StatusChip kind="info" label={`${c.code} · ${t(c.label)}`} /></li>)}</ul></dd>
+          <dd><ul className="chip-list">{review.requestedServices.map((c) => <li key={c.code}><StatusChip kind="info" label={`${c.code} · ${t(c.label)}`} /></li>)}</ul></dd>
         </div>
         <div>
           <dt>{t(S.documents)}</dt>

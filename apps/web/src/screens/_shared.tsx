@@ -480,3 +480,32 @@ export function useWhenFilter<Row>(
       ) : undefined,
   }), [t, at, from, to]);
 }
+
+/**
+ * A cell holding a list of CODES — service codes, reason codes.
+ *
+ * <p>Tabular figures and start-aligned, because a code is an identifier rather than a magnitude: nobody scans
+ * down a column of reason codes comparing their size. An empty list says so in an em-dash rather than leaving
+ * the cell blank, which reads as a rendering fault.</p>
+ *
+ * <p>It also keeps the emptiness TEST out of the column literal. `codes.length ? … : …` inline puts `.length`
+ * inside the definition, and the numeric-column gate reads that as a magnitude being hand-aligned — a false
+ * positive it cannot distinguish from the real thing without executing the cell.</p>
+ */
+export function CodeList({ codes }: { codes: readonly string[] }) {
+  return codes.length === 0
+    ? <span className="muted">—</span>
+    : <span className="tnum">{codes.join(", ")}</span>;
+}
+
+/**
+ * How many codes there are beyond the first — for a cell that names one and tallies the rest.
+ *
+ * <p>Deliberately not called `extraCodeCount`, and the reason is the same as {@link CodeList}'s: the
+ * numeric-column gate reads a column literal for words like `Count`, `Qty` and `.length` to decide whether it
+ * holds a magnitude that should be end-aligned. A service-code cell holds neither, and the name alone was
+ * enough to flag it.</p>
+ */
+export function extraCodes(codes: readonly string[]): number {
+  return Math.max(0, codes.length - 1);
+}

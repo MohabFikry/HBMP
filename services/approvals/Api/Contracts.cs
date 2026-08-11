@@ -98,7 +98,21 @@ public sealed record WorklistItemView(
     /// triaging a row needs to know which of them they are looking at before anything else on it means
     /// something.
     /// </summary>
-    string Kind = "Review")
+    string Kind = "Review",
+    /// <summary>Who is holding this, or null if nobody has picked it up.</summary>
+    /// <remarks>The projection carried no ownership at all, so a queue worked by several reviewers could not
+    /// answer "is this mine" or "has anyone taken it" — and the client compensated by showing every row to
+    /// everyone. It is a staff id, not patient data.</remarks>
+    Guid? AssignedReviewerId = null,
+    /// <summary>The provider that asked, or null on a manual authorization — which by definition has none.</summary>
+    /// <remarks>The client rendered the literal string "Provider" as the requester on every row, including the
+    /// manual ones where it was flatly untrue. Carrying the real field lets the screen say what it knows and
+    /// say nothing where it knows nothing.</remarks>
+    Guid? RequestingProviderId = null,
+    /// <summary>When the request was actually submitted.</summary>
+    /// <remarks>The client derived this as <c>now - tatElapsedSeconds</c>, recomputed on every render, so a
+    /// row's submission time drifted forward as the page sat open. The server holds the real timestamp.</remarks>
+    DateTimeOffset? SubmittedAt = null)
 {
     public static WorklistItemView From(Authorization a, DateTimeOffset now)
     {
@@ -116,7 +130,8 @@ public sealed record WorklistItemView(
             Codes.Parse(a.ServiceCodes), a.Priority.ToString(), a.Status.ToString(),
             a.SlaDueAt, a.SlaBreached,
             (long)((a.DecidedAt ?? now) - a.SubmittedAt).TotalSeconds,
-            a.Source.ToString(), itemRef, reason, a.Kind.ToString());
+            a.Source.ToString(), itemRef, reason, a.Kind.ToString(),
+            a.AssignedReviewerId, a.RequestingProviderId, a.SubmittedAt);
     }
 
     /// <summary>Reads the reference and reason back out of the request's stored scope. A malformed scope
@@ -265,6 +280,46 @@ public sealed record ManualAuthorizationRequest(
     IReadOnlyList<string>? ApprovedScope,
     string Justification,
     string? Rationale);
+
+/// <summary>Complete the post-hoc review of a break-glass decision (approvals/0016).</summary>
+/// <remarks><c>Outcome</c> is <c>Upheld</c> or <c>NotJustified</c>; the rationale is mandatory, because a
+/// review that records no reasoning is a checkbox, and a checkbox is what this control already was.</remarks>
+public sealed record RetrospectiveReviewRequest(string Outcome, string? Rationale);
+
+/// <summary>
+/// A row of the break-glass retrospective-review queue — the worklist projection plus the review itself.
+/// </summary>
+/// <remarks>
+/// <para>No clinical payload, same as <see cref="WorklistItemView"/>: this is an accountability question about
+/// a decision, not a question about the patient.</para>
+/// <para><see cref="AgeDays"/> is carried rather than left to the client to subtract because the question asked
+/// of a compliance backlog is not "how many" but "how long has the oldest been sitting there" — a count alone
+/// looks the same whether it turned over yesterday or has been stuck since March.</para>
+/// </remarks>
+public sealed record RetrospectiveItemView(
+    Guid AuthorizationId,
+    string AuthNo,
+    Guid BeneficiaryId,
+    IReadOnlyList<string> ServiceCodes,
+    string Source,
+    string Status,
+    DateTimeOffset? DecidedAt,
+    int AgeDays,
+    bool Reviewed,
+    string? Outcome,
+    DateTimeOffset? ReviewedAt,
+    /// <summary>The reviewer's user id — a staff identity, not patient data. It is the whole point of the
+    /// record: a sign-off nobody is named on cannot be asked about.</summary>
+    string? ReviewedBy,
+    string? Rationale)
+{
+    public static RetrospectiveItemView From(Authorization a, DateTimeOffset now) => new(
+        a.AuthorizationId, a.AuthNo, a.BeneficiaryId, Codes.Parse(a.ServiceCodes),
+        a.Source.ToString(), a.Status.ToString(), a.DecidedAt,
+        (int)Math.Max(0, (now - (a.DecidedAt ?? a.SubmittedAt)).TotalDays),
+        a.RetrospectiveReviewed, a.RetrospectiveOutcome, a.RetrospectiveReviewedAt,
+        a.RetrospectiveReviewedBy, a.RetrospectiveRationale);
+}
 
 /// <summary>Tiny JSON helper for the <c>service_codes</c> jsonb string array (avoids a serializer dependency in
 /// the projection path; the codes are simple tokens).</summary>

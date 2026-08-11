@@ -183,11 +183,13 @@ describe("14.6/14.8 — results inbox wires the sensitivity gate", () => {
   });
 });
 
-/** Claims portal smoke — the newly-created officer portal renders its worklist against the live contract. */
+/** Claims portal smoke — the officer portal renders its worklist against the live contract. */
 describe("Claims portal (Phase 10b UI)", () => {
   it("renders the claims worklist for the claims officer", async () => {
     renderApp("/claims/worklist", "claims_officer", new DevApiClient({ latencyMs: 0 }));
-    expect(await screen.findByRole("heading", { name: /claims worklist/i })).toBeInTheDocument();
+    // "Claims", not "Claims Worklist": the line-level queue is now its own screen, "Adjudication", and the
+    // old title claimed both jobs for a screen that was reading the line endpoint and rendering claim columns.
+    expect(await screen.findByRole("heading", { name: /^claims$/i })).toBeInTheDocument();
     // A claim row from the fixture is present (masked claim number, amounts — no diagnosis).
     expect(await screen.findByText(/CLM-2026-004411/)).toBeInTheDocument();
   });

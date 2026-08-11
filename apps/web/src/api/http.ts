@@ -172,6 +172,43 @@ export function deleteAbsolute(url: string, signal?: AbortSignal): Promise<unkno
 export function getRaw(path: string, signal?: AbortSignal): Promise<unknown> {
   return request(path, { method: "GET" }, false, signal);
 }
+
+/**
+ * A GET that also reports `X-Total-Count`.
+ *
+ * <p>Some list endpoints cap their page and say how many rows matched in the header. The body shape is
+ * unchanged, so every existing caller of {@link getRaw} keeps working; a caller that needs to tell the user
+ * "showing 200 of 314" reaches for this one instead. `total` falls back to the page length when the header is
+ * absent, which is the truth for an endpoint that does not cap.</p>
+ */
+export async function getRawCounted(
+  path: string, signal?: AbortSignal,
+): Promise<{ body: unknown; total: number | null }> {
+  let res: Response;
+  const token = getToken();
+  const auth: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const branch = activeBranchHeader();
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json", Accept: "application/json", ...auth, ...branch },
+      signal,
+    });
+  } catch (e) {
+    if (isAbort(e)) throw new ApiError("aborted", `Request to ${path} was cancelled`);
+    throw new ApiError("network", e instanceof Error ? e.message : "Network request failed");
+  }
+  if (!res.ok) {
+    const problem = await readProblem(res);
+    throw new ApiError("http", problem?.detail ?? problem?.title ?? `Request to ${path} failed`, res.status, problem);
+  }
+  const raw = res.headers.get("X-Total-Count");
+  const total = raw === null ? null : Number.parseInt(raw, 10);
+  return {
+    body: res.status === 204 ? null : await res.json(),
+    total: total === null || Number.isNaN(total) ? null : total,
+  };
+}
 export function postRaw(
   path: string,
   body: unknown,

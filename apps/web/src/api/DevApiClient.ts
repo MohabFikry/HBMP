@@ -1,6 +1,11 @@
 import { z } from "zod";
 import {
   zApprovalItem,
+  zAdjudicationRow,
+  zClaimDetail,
+  zClaimAdjustment,
+  zClaimDecisionResult,
+  zRetrospectiveItem,
   zAuthorizationItem,
   zInvestigationOrder,
   zApprovalReview,
@@ -132,7 +137,8 @@ import type { PrescriptionDraftLine, LineAcknowledgement, Finding, PrescriptionK
 import type { WithdrawResult } from "@mersal/contracts";
 import type { AddAllergyRequest, AllergenOption, BloodGroup, MemberClinicalRecord } from "@mersal/contracts";
 import type { InvestigationOrder, OrderPricing, SubstitutionRequest } from "@mersal/contracts";
-import type { ApiClient, ApiScenario } from "./client";
+import type { ApiClient, ApiScenario, ApprovalQueueFilter } from "./client";
+import type { ApprovalItem, ClaimDecisionRequest, Period, RetrospectiveReviewInput } from "@mersal/contracts";
 import { sectionStateFor } from "../dev/profileSectionMatrix";
 import { ApiError } from "./http";
 
@@ -164,6 +170,38 @@ const NOTIFICATION_FIXTURE = [
   },
 ];
 const NOW = "2026-07-22T08:30:00Z";
+
+/** The claim / line / bucket vocabularies, resolved once. Each key is a real enum member (`ClaimStatus`,
+ *  `ClaimLineStatus`, `ReconBucket`) — the previous fixture invented three that were not. */
+const CLAIM_STATUS_CHIP: Record<string, { kind: "ok" | "info" | "part" | "warn" | "bad" | "neu"; label: Localized }> = {
+  Draft: { kind: "neu", label: loc("Draft", "مسودة") },
+  Submitted: { kind: "info", label: loc("Submitted", "مُقدّمة") },
+  UnderAdjudication: { kind: "info", label: loc("Under adjudication", "قيد البتّ") },
+  PendingInfo: { kind: "warn", label: loc("Awaiting information", "بانتظار معلومات") },
+  ClinicalReview: { kind: "warn", label: loc("Clinical review", "مراجعة سريرية") },
+  Approved: { kind: "ok", label: loc("Approved", "معتمدة") },
+  PartiallyApproved: { kind: "part", label: loc("Partially approved", "موافقة جزئية") },
+  Denied: { kind: "bad", label: loc("Denied", "مرفوضة") },
+  Settled: { kind: "ok", label: loc("Settled", "مُسوّاة") },
+  Appealed: { kind: "warn", label: loc("Appealed", "مستأنَفة") },
+  Void: { kind: "neu", label: loc("Void", "ملغاة") },
+};
+const CLAIM_LINE_CHIP: Record<string, { kind: "ok" | "info" | "part" | "warn" | "bad" | "neu"; label: Localized }> = {
+  Pending: { kind: "info", label: loc("Pending", "معلّق") },
+  Approved: { kind: "ok", label: loc("Approved", "معتمد") },
+  PartiallyApproved: { kind: "part", label: loc("Partially approved", "موافقة جزئية") },
+  Denied: { kind: "bad", label: loc("Denied", "مرفوض") },
+  Adjusted: { kind: "warn", label: loc("Adjusted", "معدَّل") },
+  Void: { kind: "neu", label: loc("Void", "ملغى") },
+};
+const RECON_CHIP: Record<string, { kind: "ok" | "info" | "part" | "warn" | "bad" | "neu"; label: Localized }> = {
+  Matched: { kind: "ok", label: loc("Matched", "مطابقة") },
+  PriceVariance: { kind: "warn", label: loc("Price variance", "فرق سعر") },
+  QuantityVariance: { kind: "warn", label: loc("Quantity variance", "فرق كمية") },
+  BilledNotDelivered: { kind: "bad", label: loc("Billed, not delivered", "فوترة بلا تنفيذ") },
+  DeliveredNotBilled: { kind: "info", label: loc("Delivered, not billed", "تنفيذ بلا فوترة") },
+  Duplicate: { kind: "bad", label: loc("Duplicate", "مكرّرة") },
+};
 
 /** The masterdata allergen seed (its migration 0002), abbreviated to the categories the picker groups by. */
 const DEV_ALLERGENS: AllergenOption[] = [
@@ -2492,18 +2530,23 @@ export class DevApiClient implements ApiClient {
    * treats them: `kind` defaults to Review so a few hundred dispenses a day cannot drown the handful of
    * requests that need a decision.</p>
    */
+  /** The fixture's own signed-in reviewer, so "assigned to me" has something to be true of. */
+  private static readonly ME = "usr-reviewer-1";
+
   private static readonly FULFILMENTS = [
     {
       id: "AUTH-7101",
       patient: { id: "MRS-M-10231", token: "A.H · •••4821" },
       service: { system: "ATC", code: "J01CR02", label: loc("Augmentin 1g", "أوجمنتين 1جم") },
-      requestedBy: loc("Nile Pharmacy", "صيدلية النيل"),
+      requestedBy: loc("Prescription", "وصفة"),
       priority: "routine" as const,
       // No SLA on a fulfilment: nothing waited on anybody.
       sla: null,
       status: { kind: "ok" as const, label: loc("Issued", "صادرة") },
       submittedAt: NOW,
-      estimatedCost: "—",
+      serviceCodes: [],
+      assignedReviewerId: null,
+      requestingProviderId: null,
       source: "Prescription" as const,
       itemReference: "RX-2026-000410",
       extensionReason: null,
@@ -2513,13 +2556,15 @@ export class DevApiClient implements ApiClient {
       id: "AUTH-7102",
       patient: { id: "MRS-M-10555", token: "Y.H · •••7702" },
       service: { system: "LOINC", code: "58410-2", label: loc("Complete blood count", "تعداد دم كامل") },
-      requestedBy: loc("Cairo Central Lab", "معمل القاهرة المركزي"),
+      requestedBy: loc("Clinician order", "طلب طبيب"),
       priority: "routine" as const,
       // No SLA on a fulfilment: nothing waited on anybody.
       sla: null,
       status: { kind: "ok" as const, label: loc("Issued", "صادرة") },
       submittedAt: NOW,
-      estimatedCost: "—",
+      serviceCodes: [],
+      assignedReviewerId: null,
+      requestingProviderId: null,
       source: "OrderLine" as const,
       itemReference: "ORD-2026-055012",
       extensionReason: null,
@@ -2580,25 +2625,47 @@ export class DevApiClient implements ApiClient {
     return this.gate(() => ok(z.array(zAuthorizationItem), byAuth[authorizationId] ?? []), []);
   }
 
-  approvalWorklist(kind: "Review" | "Fulfilment" | "All" = "Review") {
+  approvalWorklist(kind: "Review" | "Fulfilment" | "All" = "Review", filter?: ApprovalQueueFilter) {
+    /*
+      The fixture applies the SAME filters the server does, so a screen that reaches the server correctly is
+      also the screen the fixtures exercise. A fixture that ignores a filter lets a broken query pass — which
+      is how the claims worklist came to be calling an endpoint that has no `status` parameter.
+
+      `filter.status` is the one exception, and it is a limitation rather than an omission: an ApprovalItem
+      carries a resolved status CHIP, not the raw `AuthStatus` the server filters on, so there is nothing here
+      to compare against. Every review row in this fixture is awaiting a decision, so `status=Submitted` — the
+      only value any screen sends — is already true of all of them.
+    */
+    const narrow = (rows: ApprovalItem[]) =>
+      rows.filter((r) =>
+        (!filter?.priority || r.priority === filter.priority)
+        && (!filter?.slaBreached || r.sla?.breached === true)
+        && (filter?.assignedTo !== "unassigned" || !r.assignedReviewerId)
+        && (filter?.assignedTo !== "me" || r.assignedReviewerId === DevApiClient.ME));
+    const page = (rows: ApprovalItem[]) => ({ rows: narrow(rows), total: narrow(rows).length });
+
     if (kind === "Fulfilment") {
-      return this.gate(() => ok(z.array(zApprovalItem), DevApiClient.FULFILMENTS), []);
+      return this.gate(() => page(ok(z.array(zApprovalItem), DevApiClient.FULFILMENTS)), { rows: [], total: 0 });
     }
     const extra = kind === "All" ? DevApiClient.FULFILMENTS : [];
     return this.gate(
       () =>
-        ok(z.array(zApprovalItem), [
+        page(ok(z.array(zApprovalItem), [
           ...extra,
           {
             id: "AUTH-9001",
             patient: { id: "MRS-M-10231", token: "A.H · •••4821" },
             service: { system: "CPT", code: "70553", label: loc("MRI brain w/ contrast", "رنين مغناطيسي للمخ") },
-            requestedBy: loc("Nile Imaging Center", "مركز النيل للأشعة"),
+            requestedBy: loc("Clinician order", "طلب طبيب"),
             priority: "urgent",
             sla: { dueAt: "2026-07-22T12:00:00Z", breached: false, minutesRemaining: 210 },
             status: { kind: "info", label: loc("Awaiting review", "بانتظار المراجعة") },
             submittedAt: NOW,
-            estimatedCost: "EGP 6,500",
+            // Three requested services on one authorization. The queue used to show only the first and call
+            // the other two "supporting codes", so a reviewer decided on a third of what was asked.
+            serviceCodes: ["70553", "70551", "76377"],
+            assignedReviewerId: null,
+            requestingProviderId: "prv-nile-imaging",
             source: "OrderLine" as const,
             itemReference: null,
             extensionReason: null,
@@ -2608,12 +2675,14 @@ export class DevApiClient implements ApiClient {
             id: "AUTH-9002",
             patient: { id: "MRS-M-10555", token: "Y.H · •••7702" },
             service: { system: "CPT", code: "29881", label: loc("Knee arthroscopy", "منظار الركبة") },
-            requestedBy: loc("Cairo Ortho Clinic", "عيادة القاهرة للعظام"),
+            requestedBy: loc("Clinician order", "طلب طبيب"),
             priority: "routine",
             sla: { dueAt: "2026-07-22T06:00:00Z", breached: true, minutesRemaining: -150 },
             status: { kind: "warn", label: loc("SLA breached", "تجاوز المهلة") },
             submittedAt: "2026-07-21T09:00:00Z",
-            estimatedCost: "EGP 18,000",
+            serviceCodes: ["29881"],
+            assignedReviewerId: "usr-reviewer-1",
+            requestingProviderId: "prv-cairo-ortho",
             source: "OrderLine" as const,
             itemReference: null,
             extensionReason: null,
@@ -2625,19 +2694,21 @@ export class DevApiClient implements ApiClient {
             id: "AUTH-9003",
             patient: { id: "MRS-M-10231", token: "A.H · •••4821" },
             service: { system: "CPT", code: "—", label: loc("Validity extension", "تمديد الصلاحية") },
-            requestedBy: loc("Nile Pharmacy", "صيدلية النيل"),
+            requestedBy: loc("Validity extension request", "طلب تمديد صلاحية"),
             priority: "routine",
             sla: { dueAt: "2026-07-22T16:00:00Z", breached: false, minutesRemaining: 420 },
             status: { kind: "info", label: loc("Awaiting review", "بانتظار المراجعة") },
             submittedAt: NOW,
-            estimatedCost: "—",
+            serviceCodes: [],
+            assignedReviewerId: null,
+            requestingProviderId: null,
             source: "ValidityExtension" as const,
             itemReference: "RX-2026-000312",
             extensionReason: "Patient is mid-course and could not travel before it lapsed.",
             kind: "Review" as const,
           },
-        ]),
-      [],
+        ])),
+      { rows: [], total: 0 },
     );
   }
   approvalReview(approvalId: string) {
@@ -2648,14 +2719,15 @@ export class DevApiClient implements ApiClient {
         service: { system: "CPT", code: "70553", label: loc("MRI brain w/ contrast", "رنين مغناطيسي للمخ") },
         clinicalJustification:
           "Progressive headache with focal neurological signs; rule out intracranial lesion.",
-        supportingCodes: [
-          { system: "ICD-10", code: "R51.9", label: loc("Headache, unspecified", "صداع غير محدد") },
+        requestedServices: [
+          { system: "CPT", code: "70553", label: loc("MRI brain w/ contrast", "رنين مغناطيسي للمخ") },
+          { system: "CPT", code: "70551", label: loc("MRI brain w/o contrast", "رنين مغناطيسي للمخ بدون صبغة") },
+          { system: "CPT", code: "76377", label: loc("3D rendering", "معالجة ثلاثية الأبعاد") },
         ],
         documents: [
           { id: "DOC-1", name: "neuro-exam.pdf" },
           { id: "DOC-2", name: "referral-letter.pdf" },
         ],
-        requestedAmount: "EGP 6,500",
       }),
     );
   }
@@ -3091,50 +3163,247 @@ export class DevApiClient implements ApiClient {
   }
 
   // ---- Claims management (Phase 10b) — codes + amounts only, no diagnosis (finance-parity) --------------
-  claimsWorklist(status?: string) {
+  claimsWorklist(status?: string, take?: number) {
+    // THE STATUSES ARE THE REAL ONES. This fixture served "Adjudicated" and "Rejected", which are not members
+    // of ClaimStatus — the same wrong vocabulary the screen's filter and the chip map used, which is how a
+    // worklist reading the wrong endpoint entirely went unnoticed: nothing in the client, the fixtures or the
+    // tests ever spoke the service's language.
     const rows = [
-      { id: "clm-1", claimNo: "CLM-2026-004411", origin: "Provider", key: "Submitted", st: { kind: "info" as const, label: loc("Submitted", "مُقدّمة") }, claimed: 3200, net: null, from: "2026-07-18", at: "2026-07-19T09:00:00Z" },
-      { id: "clm-2", claimNo: "CLM-2026-004412", origin: "AutoDerived", key: "Adjudicated", st: { kind: "ok" as const, label: loc("Adjudicated", "تمت المراجعة") }, claimed: 1450, net: 1305, from: "2026-07-15", at: "2026-07-16T11:30:00Z" },
-      { id: "clm-3", claimNo: "CLM-2026-004413", origin: "Reimbursement", key: "Rejected", st: { kind: "bad" as const, label: loc("Rejected", "مرفوضة") }, claimed: 900, net: 0, from: "2026-07-12", at: "2026-07-13T08:15:00Z" },
-    ].filter((r) => !status || r.key === status);
+      { id: "clm-1", claimNo: "CLM-2026-004411", origin: "ProviderSubmitted", key: "Submitted", claimed: 3200, net: null, from: "2026-07-18", at: "2026-07-19T09:00:00Z" },
+      { id: "clm-2", claimNo: "CLM-2026-004412", origin: "AutoDerived", key: "UnderAdjudication", claimed: 1450, net: null, from: "2026-07-15", at: "2026-07-16T11:30:00Z" },
+      { id: "clm-3", claimNo: "CLM-2026-004413", origin: "Reimbursement", key: "Denied", claimed: 900, net: 0, from: "2026-07-12", at: "2026-07-13T08:15:00Z" },
+      { id: "clm-4", claimNo: "CLM-2026-004414", origin: "ProviderSubmitted", key: "PartiallyApproved", claimed: 5400, net: 4100, from: "2026-07-10", at: "2026-07-11T14:00:00Z" },
+      { id: "clm-5", claimNo: "CLM-2026-004415", origin: "AutoDerived", key: "Settled", claimed: 780, net: 780, from: "2026-07-04", at: "2026-07-05T10:20:00Z" },
+    ].filter((r) => !status || r.key === status).slice(0, take ?? 200);
     return this.gate(
       () =>
         ok(z.array(zClaimRow), rows.map((r) => ({
-          id: r.id, claimNo: r.claimNo, origin: r.origin, status: r.st, currency: "EGP",
+          id: r.id, claimNo: r.claimNo, origin: r.origin, status: CLAIM_STATUS_CHIP[r.key], currency: "EGP",
           claimedAmount: r.claimed, netPayable: r.net, serviceDateFrom: r.from, submittedAt: r.at,
         }))),
       [],
     );
   }
 
-  claimsReconciliation(bucket?: string) {
-    const rows = [
-      { claimId: "clm-1", claimNo: "CLM-2026-004411", origin: "Provider", code: "80053", date: "2026-07-18", billed: 320, allowed: 300, bucket: "PriceVariance", st: { kind: "warn" as const, label: loc("Price variance", "فرق سعر") } },
-      { claimId: "clm-4", claimNo: "CLM-2026-004420", origin: "AutoDerived", code: "71046", date: "2026-07-17", billed: 800, allowed: null, bucket: "BilledNotDelivered", st: { kind: "bad" as const, label: loc("Billed, not delivered", "فوترة بلا تنفيذ") } },
-      { claimId: "clm-5", claimNo: "CLM-2026-004421", origin: "Provider", code: "85025", date: "2026-07-16", billed: 150, allowed: 150, bucket: "Matched", st: { kind: "ok" as const, label: loc("Matched", "مطابقة") } },
-    ].filter((r) => !bucket || r.bucket === bucket);
+  claimDetail(claimId: string) {
+    return this.gate(() =>
+      ok(zClaimDetail, {
+        id: claimId,
+        claimNo: "CLM-2026-004412",
+        origin: "AutoDerived",
+        status: CLAIM_STATUS_CHIP.UnderAdjudication,
+        currency: "EGP",
+        claimedAmount: 1450,
+        approvedAmount: null,
+        adjustedAmount: null,
+        netPayable: null,
+        serviceDateFrom: "2026-07-15",
+        submittedAt: "2026-07-16T11:30:00Z",
+        lines: [
+          {
+            claimLineId: "cl-1", codeSystem: "CPT", code: "80053",
+            description: "Comprehensive metabolic panel", quantity: 1,
+            billedAmount: 320, contractPrice: 300, allowedAmount: null,
+            status: CLAIM_LINE_CHIP.Pending, reasonCodes: [],
+          },
+          {
+            claimLineId: "cl-2", codeSystem: "CPT", code: "71046",
+            description: "Chest X-ray, 2 views", quantity: 1,
+            billedAmount: 800, contractPrice: 640, allowedAmount: null,
+            status: CLAIM_LINE_CHIP.Pending, reasonCodes: ["NO_PRIOR_AUTH"],
+          },
+          {
+            claimLineId: "cl-3", codeSystem: "CPT", code: "85025",
+            description: "Complete blood count", quantity: 2,
+            billedAmount: 330, contractPrice: 150, allowedAmount: 150,
+            status: CLAIM_LINE_CHIP.Adjusted, reasonCodes: ["LIMIT_EXCEEDED"],
+          },
+        ],
+      }),
+    );
+  }
+
+  claimAdjustments(_claimId: string) {
     return this.gate(
       () =>
-        ok(z.array(zReconciliationRow), rows.map((r) => ({
-          claimId: r.claimId, claimNo: r.claimNo, origin: r.origin, code: r.code, serviceDate: r.date,
-          billedAmount: r.billed, allowedAmount: r.allowed, bucket: r.bucket, status: r.st,
+        ok(z.array(zClaimAdjustment), [
+          {
+            adjustmentId: "adj-1", claimLineId: "cl-3", type: "QuantityCorrection",
+            amountDelta: -180, beforeAmount: 330, afterAmount: 150,
+            reasonCode: "LIMIT_EXCEEDED", adjustedAt: "2026-07-17T09:40:00Z",
+          },
+        ]),
+      [],
+    );
+  }
+
+  adjudicationQueue(filter?: { recommendation?: string; reasonCode?: string; minValue?: number; maxValue?: number }) {
+    const rows = [
+      { claimId: "clm-2", claimNo: "CLM-2026-004412", claimLineId: "cl-1", date: "2026-07-15", sys: "CPT", code: "80053", desc: "Comprehensive metabolic panel", qty: 1, billed: 320, contract: 300, rec: "Approve", reasons: [] as string[], res: true },
+      { claimId: "clm-2", claimNo: "CLM-2026-004412", claimLineId: "cl-2", date: "2026-07-15", sys: "CPT", code: "71046", desc: "Chest X-ray, 2 views", qty: 1, billed: 800, contract: 640, rec: "RequiresManualReview", reasons: ["NO_PRIOR_AUTH"], res: true },
+      // No fulfilment record: the officer can see the service was never rendered without reading anything
+      // clinical, which is the whole point of `resultExists` being a boolean.
+      { claimId: "clm-6", claimNo: "CLM-2026-004430", claimLineId: "cl-9", date: "2026-07-14", sys: "CPT", code: "93000", desc: "Electrocardiogram", qty: 1, billed: 450, contract: 400, rec: "Deny", reasons: ["NO_FULFILLMENT_RECORD"], res: false },
+    ].filter((r) =>
+      (!filter?.recommendation || r.rec === filter.recommendation)
+      && (!filter?.reasonCode || r.reasons.includes(filter.reasonCode))
+      && (filter?.minValue === undefined || r.billed >= filter.minValue)
+      && (filter?.maxValue === undefined || r.billed <= filter.maxValue));
+    return this.gate(
+      () =>
+        ok(z.array(zAdjudicationRow), rows.map((r) => ({
+          claimId: r.claimId, claimNo: r.claimNo, claimLineId: r.claimLineId, serviceDate: r.date,
+          codeSystem: r.sys, code: r.code, description: r.desc, quantity: r.qty,
+          billedAmount: r.billed, contractPrice: r.contract, allowedAmount: null,
+          status: CLAIM_LINE_CHIP.Pending, systemRecommendation: r.rec, reasonCodes: r.reasons,
+          authorizationId: null, resultExists: r.res,
         }))),
       [],
     );
   }
 
-  claimsKpis() {
+  decideClaimLine(req: ClaimDecisionRequest, idempotencyKey?: string) {
+    return this.gate(() => {
+      const key = idempotencyKey ?? `${req.claimId}:${req.claimLineId}:${req.decision}`;
+      if (this.seenKeys.has(key)) {
+        return ok(zClaimDecisionResult, { outcome: "Replayed", decisionId: `dec-${req.claimLineId}` });
+      }
+      this.seenKeys.add(key);
+      // Dual control above the threshold. Modelled here because it is an OUTCOME the screen has to render as
+      // "waiting for a second approver" rather than as a failure — a fixture that never produces it would let
+      // the screen ship treating a 202 as an error.
+      const amount = req.allowedAmount ?? 0;
+      if (amount > 5000 && !req.confirmsDecisionId) {
+        return ok(zClaimDecisionResult, { outcome: "PendingSecondApproval", decisionId: `dec-${req.claimLineId}` });
+      }
+      return ok(zClaimDecisionResult, {
+        outcome: req.confirmsDecisionId ? "Confirmed" : "Recorded",
+        decisionId: `dec-${req.claimLineId}`,
+        lineStatus: req.decision === "Deny" ? "Denied" : req.decision === "Approve" ? "Approved" : "PartiallyApproved",
+        claimStatus: "UnderAdjudication",
+        allowedAmount: req.allowedAmount ?? null,
+      });
+    });
+  }
+
+  raiseClaimAdjustment(
+    input: { claimId: string; claimLineId: string; type: string; amountDelta: number; reasonCode?: string; rationale?: string },
+    _idempotencyKey?: string,
+  ) {
+    return this.gate(() =>
+      ok(zClaimAdjustment, {
+        adjustmentId: `adj-${input.claimLineId}`,
+        claimLineId: input.claimLineId,
+        type: input.type,
+        amountDelta: input.amountDelta,
+        beforeAmount: null,
+        afterAmount: null,
+        reasonCode: input.reasonCode ?? null,
+        adjustedAt: NOW,
+      }),
+    );
+  }
+
+  claimsReconciliation(bucket?: string, _period?: Period) {
+    // ALL SIX BUCKETS have a row. Three of them — Duplicate, DeliveredNotBilled, QuantityVariance — were being
+    // classified by the server and could not be selected in the portal or produced by this fixture, so the
+    // double-billing signal and the revenue-leakage signal had never once been rendered.
+    const rows = [
+      { claimId: "clm-1", claimLineId: "cl-11", claimNo: "CLM-2026-004411", origin: "ProviderSubmitted", code: "80053", date: "2026-07-18", billed: 320, allowed: 300, bucket: "PriceVariance" },
+      { claimId: "clm-4", claimLineId: "cl-12", claimNo: "CLM-2026-004420", origin: "AutoDerived", code: "71046", date: "2026-07-17", billed: 800, allowed: null, bucket: "BilledNotDelivered" },
+      { claimId: "clm-5", claimLineId: "cl-13", claimNo: "CLM-2026-004421", origin: "ProviderSubmitted", code: "85025", date: "2026-07-16", billed: 150, allowed: 150, bucket: "Matched" },
+      { claimId: "clm-7", claimLineId: "cl-14", claimNo: "CLM-2026-004425", origin: "ProviderSubmitted", code: "85025", date: "2026-07-16", billed: 330, allowed: 150, bucket: "QuantityVariance" },
+      { claimId: "clm-8", claimLineId: "cl-15", claimNo: "CLM-2026-004428", origin: "AutoDerived", code: "93000", date: "2026-07-15", billed: 0, allowed: 400, bucket: "DeliveredNotBilled" },
+      { claimId: "clm-9", claimLineId: "cl-16", claimNo: "CLM-2026-004429", origin: "ProviderSubmitted", code: "80053", date: "2026-07-18", billed: 320, allowed: null, bucket: "Duplicate" },
+    ].filter((r) => !bucket || r.bucket === bucket);
+    return this.gate(
+      () =>
+        ok(z.array(zReconciliationRow), rows.map((r) => ({
+          claimId: r.claimId, claimLineId: r.claimLineId, claimNo: r.claimNo, origin: r.origin,
+          code: r.code, serviceDate: r.date, billedAmount: r.billed, allowedAmount: r.allowed,
+          bucket: r.bucket, status: RECON_CHIP[r.bucket],
+        }))),
+      [],
+    );
+  }
+
+  claimsKpis(_period?: Period) {
     return this.gate(() =>
       ok(zClaimsKpis, {
         averageTatHours: 34.5, approvalRate: 0.82, denialRate: 0.11, ocrAutoMatchRate: 0.74,
         agedUnbilledCount: 12, agedUnbilledValue: 41250, recoveryOutstanding: 8900,
         topDenialReasons: [
-          { reason: "Missing authorization", count: 7 },
-          { reason: "Non-covered service", count: 4 },
-          { reason: "Duplicate claim", count: 3 },
+          { reason: "NO_PRIOR_AUTH", count: 7 },
+          { reason: "NOT_COVERED_CATEGORY", count: 4 },
+          { reason: "DUPLICATE_CLAIM", count: 3 },
         ],
       }),
     );
+  }
+
+  // ---- Break-glass retrospective review ------------------------------------------------------------------
+  //
+  // The queue this backs has existed since 7.3 with no screen and no way to close a case: nothing anywhere
+  // assigned `retrospectiveReviewed`. The fixture below deliberately includes one case FOUR MONTHS OLD,
+  // because the failure this control had was not that the list was wrong — it was that nobody could see it
+  // ageing.
+  private retroReviewed = new Map<string, { outcome: "Upheld" | "NotJustified"; rationale: string }>();
+
+  private static readonly RETRO_OPEN = [
+    {
+      authorizationId: "AUTH-8801", authNo: "AUTH-2026-000881",
+      beneficiaryId: "MRS-M-10231", serviceCodes: ["70553"], source: "Manual",
+      decidedAt: "2026-04-02T08:00:00Z", ageDays: 131,
+    },
+    {
+      authorizationId: "AUTH-8802", authNo: "AUTH-2026-000902",
+      beneficiaryId: "MRS-M-10555", serviceCodes: ["29881", "29880"], source: "OrderLine",
+      decidedAt: "2026-08-04T15:20:00Z", ageDays: 7,
+    },
+    {
+      authorizationId: "AUTH-8803", authNo: "AUTH-2026-000915",
+      beneficiaryId: "MRS-M-10902", serviceCodes: ["93000"], source: "Manual",
+      decidedAt: "2026-08-09T11:05:00Z", ageDays: 2,
+    },
+  ];
+
+  retrospectiveQueue(closed?: boolean) {
+    const chip = { kind: "warn" as const, label: loc("Emergency approved", "اعتماد طارئ") };
+    const open = DevApiClient.RETRO_OPEN.filter((r) => !this.retroReviewed.has(r.authorizationId));
+    const done = DevApiClient.RETRO_OPEN.filter((r) => this.retroReviewed.has(r.authorizationId));
+    const rows = (closed ? done : open).map((r) => {
+      const review = this.retroReviewed.get(r.authorizationId);
+      return {
+        ...r, status: chip, reviewed: !!review,
+        outcome: review?.outcome ?? null,
+        reviewedAt: review ? NOW : null,
+        reviewedBy: review ? DevApiClient.ME : null,
+        rationale: review?.rationale ?? null,
+      };
+    });
+    return this.gate(() => ok(z.array(zRetrospectiveItem), rows), []);
+  }
+
+  completeRetrospectiveReview(input: RetrospectiveReviewInput, _idempotencyKey?: string) {
+    return this.gate(() => {
+      this.retroReviewed.set(input.authorizationId, { outcome: input.outcome, rationale: input.rationale });
+      const row = DevApiClient.RETRO_OPEN.find((r) => r.authorizationId === input.authorizationId);
+      return ok(zRetrospectiveItem, {
+        authorizationId: input.authorizationId,
+        authNo: row?.authNo ?? "",
+        beneficiaryId: row?.beneficiaryId ?? "MRS-M-10231",
+        serviceCodes: row?.serviceCodes ?? [],
+        source: row?.source ?? "Manual",
+        status: { kind: "warn" as const, label: loc("Emergency approved", "اعتماد طارئ") },
+        decidedAt: row?.decidedAt ?? null,
+        ageDays: row?.ageDays ?? 0,
+        reviewed: true,
+        outcome: input.outcome,
+        reviewedAt: NOW,
+        reviewedBy: DevApiClient.ME,
+        rationale: input.rationale,
+      });
+    });
   }
 
   // ---- Notifications (Phase 8.1) — the caller's own in-app inbox, cross-portal --------------------------

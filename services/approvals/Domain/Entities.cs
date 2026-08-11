@@ -108,6 +108,20 @@ public sealed class Authorization
     public bool SlaBreached { get; set; }
     public bool RetrospectiveReviewRequired { get; set; }       // set by a break-glass decision (7.3)
     public bool RetrospectiveReviewed { get; set; }
+    /// <summary>Who completed the post-hoc review, when, what they concluded and why.</summary>
+    /// <remarks>
+    /// <para>Until migration 0016 there was no way to set <see cref="RetrospectiveReviewed"/> at all — no
+    /// endpoint, service or job assigned it anywhere in the repository. The queue was write-only, so the flag
+    /// recorded that a review was OWED and never that one happened, and the trail could not tell "reviewed and
+    /// upheld" apart from "nobody ever looked".</para>
+    /// <para><see cref="RetrospectiveOutcome"/> is <c>Upheld</c> or <c>NotJustified</c>. NotJustified does not
+    /// reverse the authorization: the care was delivered under it, and unwinding it retroactively would refuse
+    /// a service that has already happened to a beneficiary who had no part in the decision. It is a finding.</para>
+    /// </remarks>
+    public string? RetrospectiveReviewedBy { get; set; }
+    public DateTimeOffset? RetrospectiveReviewedAt { get; set; }
+    public string? RetrospectiveOutcome { get; set; }
+    public string? RetrospectiveRationale { get; set; }
     public string? IdempotencyKey { get; set; }
     public string? CreatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; }

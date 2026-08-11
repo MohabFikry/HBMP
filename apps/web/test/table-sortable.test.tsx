@@ -90,6 +90,15 @@ describe("a sortable header actually sorts", () => {
     ).toEqual([]);
   });
 
+  /**
+   * The claims worklist is ROW-SELECTABLE — a row opens the claim's lines and adjustments beside it — so the
+   * design system renders it as a `grid` rather than a plain `table`. That is the correct ARIA role for a
+   * table whose rows are operable, and it is what a screen reader needs to announce the selection. The two
+   * tests below reach for the grid; what they are asserting — that pressing a header actually reorders the
+   * rows — is unchanged.
+   */
+  const table = () => screen.getByRole("grid");
+
   it("reorders the rows when the header is pressed", async () => {
     // The static check above cannot see whether the wiring works. This one presses a real header on a real
     // screen and reads the order back out of the DOM.
@@ -109,7 +118,7 @@ describe("a sortable header actually sorts", () => {
     renderNode(<ClaimsWorklist />, new Api());
 
     const claimNos = () =>
-      within(screen.getByRole("table"))
+      within(table())
         .getAllByText(/^CLM-\d$/)
         .map((el) => el.textContent);
 
@@ -117,11 +126,11 @@ describe("a sortable header actually sorts", () => {
     // The fixture order, untouched.
     expect(claimNos()).toEqual(["CLM-3", "CLM-1", "CLM-2"]);
 
-    await user.click(within(screen.getByRole("table")).getByRole("button", { name: "Claim" }));
+    await user.click(within(table()).getByRole("button", { name: "Claim" }));
     expect(claimNos()).toEqual(["CLM-1", "CLM-2", "CLM-3"]);
 
     // A second press reverses it; a fresh column would start ascending again.
-    await user.click(within(screen.getByRole("table")).getByRole("button", { name: "Claim" }));
+    await user.click(within(table()).getByRole("button", { name: "Claim" }));
     expect(claimNos()).toEqual(["CLM-3", "CLM-2", "CLM-1"]);
   });
 
@@ -141,8 +150,8 @@ describe("a sortable header actually sorts", () => {
     renderNode(<ClaimsWorklist />, new Api());
     await screen.findByText("CLM-A");
 
-    await user.click(within(screen.getByRole("table")).getByRole("button", { name: "Service date" }));
-    const order = within(screen.getByRole("table")).getAllByText(/^CLM-[AB]$/).map((e) => e.textContent);
+    await user.click(within(table()).getByRole("button", { name: "Service date" }));
+    const order = within(table()).getAllByText(/^CLM-[AB]$/).map((e) => e.textContent);
     // February first. Sorting the rendered strings would put March first.
     expect(order).toEqual(["CLM-B", "CLM-A"]);
   });

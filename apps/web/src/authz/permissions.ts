@@ -59,6 +59,7 @@ export type Permission =
   | "approvals.manual"
   | "approvals.emergency"
   | "approvals.sla"
+  | "director.breakglass"
   // 2026-08-11 audit — the two oversight sections the director portal gained.
   | "director.utilization"
   | "director.cost"
@@ -82,6 +83,7 @@ export type Permission =
   // Claims (Phase 10b) — codes + amounts only, NO diagnosis by construction (finance-parity)
   | "claims.worklist"
   | "claims.reconciliation"
+  | "claims.adjudicate"
   | "claims.insights"
   // Finance (NO clinical/diagnosis by construction)
   | "finance.utilization"
@@ -272,7 +274,7 @@ export const rolePermissions: Record<Role, Permission[]> = {
   // server refuses check-in regardless of what the nav shows.
   call_center: ["callcentre.workspace", "callcentre.history", "appointments.read", "appointments.book"],
   // Claims officer — worklist + reconciliation + PHI-free KPIs. No clinical/diagnosis permission (finance-parity).
-  claims_officer: ["claims.worklist", "claims.reconciliation", "claims.insights"],
+  claims_officer: ["claims.worklist", "claims.adjudicate", "claims.reconciliation", "claims.insights"],
   // Finance gets the analytics section too: the financial and network views are exactly the money questions
   // this role exists to answer, and reporting-service gates those two views on the FINANCIAL zone anyway —
   // so the section is visible and the views a finance user may not read are refused by the server, not hidden
@@ -321,7 +323,7 @@ export const rolePermissions: Record<Role, Permission[]> = {
    * authority behind them is unchanged: `reporting:read` and `reporting:read-financial`, both of which
    * medical_director has held since the 0001 seed. Nothing here grants anything.
    */
-  medical_director: ["director.dashboards", "director.utilization", "director.cost", "director.oversight", "director.quality", "director.escalations", "director.masterlists", "director.engine", "approvals.sla"],
+  medical_director: ["director.dashboards", "director.utilization", "director.cost", "director.oversight", "director.quality", "director.escalations", "director.masterlists", "director.engine", "approvals.sla", "director.breakglass"],
 };
 
 /**

@@ -331,6 +331,7 @@ export const PORTALS: PortalDef[] = [
       { key: "manual", path: "manual", label: { en: "Manual Authorization", ar: "تفويض يدوي" }, group: G.approvals, icon: "plus", permission: "approvals.manual" },
       { key: "emergency", path: "emergency", label: { en: "Emergency / Override", ar: "طارئ / تجاوز" }, group: G.approvals, icon: "triangle", permission: "approvals.emergency" },
       { key: "sla", path: "sla", label: { en: "SLA / TAT Board", ar: "لوحة الاستجابة" }, group: G.insights, icon: "chart", permission: "approvals.sla" },
+
     ],
   },
   {
@@ -466,7 +467,21 @@ export const PORTALS: PortalDef[] = [
     },
     // No clinical/diagnosis routes exist here — min-necessary (claims sees codes + amounts, never a diagnosis).
     sections: [
-      { key: "worklist", path: "worklist", label: { en: "Claims Worklist", ar: "قائمة المطالبات" }, group: G.claims, icon: "doc", permission: "claims.worklist" },
+      { key: "worklist", path: "worklist", label: { en: "Claims", ar: "المطالبات" }, group: G.claims, icon: "doc", permission: "claims.worklist" },
+      /*
+       * 2026-08-11 audit — the officer's actual job, which had no screen.
+       *
+       * `claims_officer` holds claims:decide, :adjudicate, :adjust and :appeal — every write scope the role
+       * needs — and the portal was three read surfaces. The line queue, the reason codes, the dual-control
+       * hand-off and the three segregation-of-duties refusals were all implemented server-side and none of
+       * them was reachable from anywhere in the application.
+       *
+       * It is a SEPARATE entry from "Claims" above, not a tab inside it, because the two ask different
+       * questions of different rows: one is a claim and its money, the other is a LINE and its verdict. The
+       * old worklist tried to be both by calling the line endpoint and rendering claim columns, which is how
+       * every money column on it came to read zero.
+       */
+      { key: "adjudication", path: "adjudication", label: { en: "Adjudication", ar: "البتّ في البنود" }, group: G.claims, icon: "check2", permission: "claims.adjudicate" },
       { key: "reconciliation", path: "reconciliation", label: { en: "Reconciliation", ar: "التسوية" }, group: G.claims, icon: "check2", permission: "claims.reconciliation" },
       { key: "insights", path: "insights", label: { en: "Claims Insights", ar: "مؤشرات المطالبات" }, group: G.insights, icon: "chart", permission: "claims.insights" },
     ],
@@ -642,6 +657,20 @@ export const PORTALS: PortalDef[] = [
        * directions — one wastes trust, this one wasted the work.
        */
       { key: "sla", path: "sla", label: { en: "SLA / TAT Board", ar: "لوحة الاستجابة" }, group: G.insights, icon: "chart", permission: "approvals.sla" },
+      /*
+       * 2026-08-11 audit — the break-glass retrospective-review queue.
+       *
+       * Every emergency approval, director override and manual authorization is flagged for post-hoc review.
+       * The queue endpoint has been served since phase 7.3, nothing ever called it, and nothing anywhere
+       * could CLOSE a case: `RetrospectiveReviewed` appeared twice in the whole repository — its declaration
+       * and the `NOT` predicate reading it. So the flag recorded that a review was owed and never that one
+       * happened, and the trail could not tell "reviewed and upheld" from "nobody looked".
+       *
+       * On the DIRECTOR's portal, not the approval team's, and that is the point: `medical_approval` raises
+       * manual authorizations, so granting them the review would make one team both actor and auditor as a
+       * class. The server enforces the per-person half of the same rule.
+       */
+      { key: "break-glass", path: "break-glass", label: { en: "Break-glass Review", ar: "مراجعة التجاوزات" }, group: G.oversight, icon: "triangle", permission: "director.breakglass" },
       { key: "quality", path: "quality", label: { en: "Quality & Outcomes", ar: "الجودة والنتائج" }, group: G.oversight, icon: "doc", permission: "director.quality" },
       { key: "escalations", path: "escalations", label: { en: "Escalations", ar: "التصعيدات" }, group: G.oversight, icon: "triangle", permission: "director.escalations" },
       // 18.C2 (W4): the ESCALATION path for sensitive-result release — 37 §6 lets the Medical Director decide
