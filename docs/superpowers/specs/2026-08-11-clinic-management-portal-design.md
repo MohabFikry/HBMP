@@ -210,6 +210,22 @@ consume/dispense proofs.
 
 ### 2.4 Change history — domain tables, not the audit spine
 
+> **Revised during implementation.** This section originally specified a bespoke
+> `before`/`after`/`reason`/`actor_name` row shape. The platform already had a convention for exactly this —
+> an `AFTER INSERT OR UPDATE` trigger snapshotting `to_jsonb(NEW)` into a `*_history` twin
+> (`provider.provider_history` since 0001, `emr.roster_exception_history` since 0016) — so the
+> implementation follows it instead. The snapshot survives a table gaining a column without anyone
+> remembering to widen the history table, which is the failure mode of a hand-maintained column set.
+>
+> Two consequences of that choice, both kept: the **actor** is stamped on the row itself (`updated_by`,
+> `updated_by_name`) rather than into the history row, because the database does not know who holds the
+> token; and **diffs are computed in the client**, from the values each entry returns, so one implementation
+> of "what changed" serves all three timelines.
+>
+> The roster's history table already existed and **had no reader** — the trigger had been writing snapshots
+> since 0016 and nothing on the platform could show one to anybody. Only one of the three tables was
+> genuinely new (`emr.provider_availability_history`), plus `provider.practitioner_history`.
+
 Three append-only tables, written in the same transaction as the change they describe:
 
 | table | migration |
@@ -263,10 +279,20 @@ naming it would be a decision they do not have. This is a reach distinction, mat
 in the portal catalog, and it introduces no new permission.
 
 **Practitioners** — renewal moves into `Modal` with focus trap, Esc, and focus restored to the invoking
-row (C4). Shortening an expiry first calls `GET /practitioners/{id}/licence-impact?expiry=…`, which
-returns the appointments beyond the new date; the save is then gated on the same acknowledged-count guard
-the roster uses, and refuses `409 urn:hbmp:impact-acknowledgement-required` if the count moved (C6). A
-"History" action per row opens the licence timeline.
+row (C4). Shortening an expiry first previews the appointments beyond the new date, and the save is gated
+on acknowledgement (C6). A "History" action per row opens the licence timeline.
+
+> **Revised during implementation.** The endpoint is `GET /api/v1/appointments/licence-impact` on **emr**,
+> not `GET /practitioners/{id}/licence-impact` on provider — provider-service holds no appointments.
+>
+> That placement settles what kind of guard this is. The licence write does **not** call emr to verify an
+> acknowledged count the way the roster's apply does: it would make renewing a licence fail whenever emr is
+> unreachable, and refusing a renewal that keeps a doctor bookable is worse than the thing it prevents. The
+> guarantee is downstream and already exists — shortening an expiry emits `PractitionerLicenceExpired` and
+> emr flags every affected appointment. So the preview is **informational and client-gated**: nothing is
+> silently lost either way, and this is so the operator sees it before choosing the date rather than
+> afterwards. The acknowledgement is only demanded when the date moves *earlier*; requiring it on every
+> routine renewal is how an acknowledgement becomes a reflex click.
 
 **Licence Alerts** — a renew action on every row, opening the same modal (C5).
 
@@ -285,7 +311,14 @@ with two implementations:
   appointment data, so a demo shows one coherent clinic rather than two.
 
 Selected through the existing `@dev/fixtures` alias, exactly as `ApiProvider` selects `DevApiClient`. No
-new mechanism, and a live build still excludes the fixtures from the bundle.
+new mechanism, and a live build still excludes the fixtures from the bundle — with markers added to
+`check-live-bundle-clean.py`, per the contract `src/dev/fixtures.ts` states for anything put behind that
+door. A fixture subtree the gate does not know about ships looking exactly as clean as one that was
+eliminated.
+
+> **Note.** Inventory gets fixtures too, though it is otherwise untouched by this pass. `BranchApis`
+> resolves all four surfaces together so a half-supplied fixture is impossible, and a portal where four
+> screens work and the fifth throws is the state this change exists to end.
 
 This is what makes the portal usable in the demo bundle and testable at screen level; the axe route ×
 locale × theme sweep then covers these five screens automatically.

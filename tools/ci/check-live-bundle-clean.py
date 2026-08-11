@@ -54,6 +54,12 @@ MARKERS = [
     # src/auth/devAuthClient.ts — the any-six-digits sign-in's display names.
     ("Reham (Reception)", "fixture session display name"),
     ("Nadia (Maadi Coordinator)", "fixture session display name"),
+    # src/dev/devBranchApis.ts — the Clinic Management portal's demo clinic. Added WITH the module, per the
+    # contract stated in src/dev/fixtures.ts: import it behind the door, add a refusal to the twin, add a
+    # marker here. A fixture subtree the gate does not know about is a subtree the gate cannot report on, and
+    # it would ship looking exactly as clean as one that had been eliminated.
+    ("EG-DOC-44182", "fixture practitioner licence number"),
+    ("Nadia Rashed", "fixture practitioner name"),
 ]
 
 # Strings from the LIVE sign-in path (src/auth/oidcClient.ts, src/auth/sessionApi.ts, the live login layout).
