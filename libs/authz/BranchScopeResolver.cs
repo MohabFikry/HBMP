@@ -24,6 +24,22 @@ public sealed class BranchScopeState
     /// <summary>True when a BranchScoped caller supplied an X-Active-Branch outside their permitted set →
     /// the request must be rejected 403 + audited BranchScopeDenied (THE INVARIANT: never trust the header).</summary>
     public bool Denied { get; set; }
+
+    /// <summary>
+    /// The caller's reach mode, carried rather than re-derived.
+    ///
+    /// <para><see cref="BranchScopeResolver.ResolveAsync"/> computes this to decide what to put in
+    /// <see cref="Context"/>, and used to discard it — so every consumer re-derived it from the principal
+    /// through its own private <c>BranchModeOf</c> helper (there were three copies in emr alone). That is
+    /// tolerable for a read, which passes the mode explicitly to <see cref="BranchQueryScope"/>. It is not
+    /// tolerable for a write: <see cref="BranchWriteScope"/> has to know the mode, and a guard whose
+    /// correctness depends on each of eleven call sites remembering to look it up is a guard that will be
+    /// wrong at one of them.</para>
+    ///
+    /// <para>Defaults to <see cref="ScopeMode.MemberScoped"/> to match <see cref="BranchContext.Unrestricted"/>
+    /// — the two halves of the default state agree.</para>
+    /// </summary>
+    public ScopeMode Mode { get; set; } = ScopeMode.MemberScoped;
 }
 
 /// <summary>Resolves the active-branch context for a request (design 37 §3). MemberScoped/ProviderScoped
@@ -39,7 +55,7 @@ public static class BranchScopeResolver
 
         var mode = BranchScopeModes.ModeFor(principal);
         if (!BranchScopeModes.IsBranchRestricted(mode))
-            return new BranchScopeState { Context = BranchContext.Unrestricted };
+            return new BranchScopeState { Context = BranchContext.Unrestricted, Mode = mode };
 
         var pb = await directory.GetAsync(principal, ct);
         Guid? requested = Guid.TryParse(activeBranchHeader, out var h) ? h : null;
@@ -55,16 +71,22 @@ public static class BranchScopeResolver
         if (mode == ScopeMode.BranchSetScoped)
         {
             if (requested is { } filter && !pb.Permitted.Contains(filter))
-                return new BranchScopeState { Denied = true };
-            return new BranchScopeState { Context = new BranchContext(requested, pb.Permitted, IsBranchUnrestricted: false) };
+                return new BranchScopeState { Denied = true, Mode = mode };
+            return new BranchScopeState
+            {
+                Context = new BranchContext(requested, pb.Permitted, IsBranchUnrestricted: false), Mode = mode,
+            };
         }
 
         var active = requested ?? pb.Home;
 
         // A requested (or defaulted) branch outside the permitted set is denied — never silently widened.
         if (active is { } a && !pb.Permitted.Contains(a))
-            return new BranchScopeState { Denied = true };
+            return new BranchScopeState { Denied = true, Mode = mode };
 
-        return new BranchScopeState { Context = new BranchContext(active, pb.Permitted, IsBranchUnrestricted: false) };
+        return new BranchScopeState
+        {
+            Context = new BranchContext(active, pb.Permitted, IsBranchUnrestricted: false), Mode = mode,
+        };
     }
 }

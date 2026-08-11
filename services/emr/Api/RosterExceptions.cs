@@ -84,6 +84,13 @@ public static class RosterExceptionEndpoints
 
             // The branch is resolved server-side exactly as a booking's is: a branch-scoped coordinator closes
             // their OWN clinic and may not name another.
+            //
+            // A PRACTITIONER-ONLY exception (branch null) means "away wherever they were due to work", which
+            // is a claim about clinics the author may not run. So it is available only to a branch-unrestricted
+            // caller: a coordinator's exception is stamped with their own clinic, and a clinics manager is
+            // asked which of theirs it applies to (400 branch-target-required). Recording "away from Maadi"
+            // and "away from Dokki" as two rows is more typing and exactly one fewer way to close a clinic
+            // nobody supervising it agreed to close.
             var (targetBranch, denied) = AppointmentEndpointsShared.ResolveBookingBranch(branch, req.BranchId);
             if (denied is not null) return denied;
             if (targetBranch is null && req.PractitionerId is null)
