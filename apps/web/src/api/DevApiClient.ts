@@ -1148,10 +1148,13 @@ export class DevApiClient implements ApiClient {
     if (input.position !== undefined) u.position = input.position.trim() || null;
   }
 
-  async myProfile() {
-    // The dev session is `org.admin`, so the app bar has a title to render without any wiring of its own.
+  myProfile() {
+    // THROUGH `gate`, like every other method here. It originally returned directly, which made it the one
+    // read in the fixture client that could not be slow and could not fail — so the app bar's loading path
+    // was unreachable in the dev build and in tests, which is precisely where the caption flicker (28.14)
+    // hid. A fixture that cannot be slow cannot exercise the states a real network produces.
     const me = this.identityStore[0];
-    return { displayName: me.displayName, position: me.position ?? null };
+    return this.gate(() => ({ displayName: me.displayName, position: me.position ?? null }));
   }
 
   async setIdentityUserRoles(id: string, roles: string[]) {

@@ -39,7 +39,7 @@ export function PortalPicker() {
   const [userPaneOpen, setUserPaneOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const avatarRef = useRef<HTMLButtonElement>(null);
-  const profile = useMyProfile();
+  const { profile, loaded: profileLoaded } = useMyProfile(session?.userId);
 
   const portals = useMemo(() => portalsForRoles(session?.roles ?? []), [session?.roles]);
 
@@ -151,7 +151,9 @@ export function PortalPicker() {
           <AppUserButton
             ref={avatarRef}
             displayName={session?.displayName ?? ""}
-            secondary={profile?.position ?? L.portalPickerTitle[lang]}
+            // Same rule as the shell: nothing until the answer is final, so the caption never changes
+            // under the reader. See `useMyProfile`.
+            secondary={profileLoaded ? (profile?.position ?? L.portalPickerTitle[lang]) : ""}
             expanded={userPaneOpen}
             label={L.accountOpen[lang]}
             onClick={() => setUserPaneOpen((v) => !v)}

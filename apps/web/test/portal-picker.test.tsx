@@ -11,6 +11,7 @@ import { PORTALS, ZONES, portalsForRoles } from "../src/portals/catalog";
 import { firstNameOf } from "../src/portals/PortalPicker";
 import { ROLE_MAP, issuerRoleFor, rolesFromClaimRoles } from "../src/config";
 import { permissionsForRole, unionPermissions } from "../src/authz/permissions";
+import { clearMyProfile } from "../src/shell/useMyProfile";
 import { seedSession } from "./helpers";
 
 /**
@@ -30,10 +31,17 @@ import { seedSession } from "./helpers";
 
 afterEach(cleanup);
 
-function renderAt(path: string, role: Parameters<typeof seedSession>[0], extra: Parameters<typeof seedSession>[1] = []) {
+function renderAt(
+  path: string,
+  role: Parameters<typeof seedSession>[0],
+  extra: Parameters<typeof seedSession>[1] = [],
+  // A latency knob, because one defect below is only observable WHILE a request is in flight: at 0ms it
+  // settles inside the first act() and the bug is invisible, which is how it shipped.
+  latencyMs = 0,
+) {
   seedSession(role, extra);
   return render(
-    <AppProviders authClient={new DevAuthClient()} apiClient={new DevApiClient({ latencyMs: 0 })}>
+    <AppProviders authClient={new DevAuthClient()} apiClient={new DevApiClient({ latencyMs })}>
       <MemoryRouter initialEntries={[path]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <AppRouter />
       </MemoryRouter>
@@ -314,5 +322,42 @@ describe("searching the portal cards", () => {
     const results = await axe(container);
     const serious = results.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
     expect(serious).toEqual([]);
+  });
+});
+
+/**
+ * 28.14 — the app-bar caption must not change under the reader.
+ *
+ * <p>The line under somebody's name is their POSITION, and it falls back to the portal's label when no title
+ * is recorded. The first implementation could not tell "still loading" from "no title", so it rendered the
+ * fallback during the fetch and swapped it for the real title a moment later: every page load showed the
+ * PORTAL's name where the PERSON's should be, which is precisely what moving to a position was meant to
+ * stop. It reappeared as a flicker instead of a wrong value.</p>
+ *
+ * <p>This is exactly the kind of defect that comes back silently — the fallback is correct code, in the right
+ * place, for the wrong moment — so the assertion is on the moment rather than on the final value.</p>
+ */
+describe("the person's caption in the app bar", () => {
+  it("never shows the portal label before the job title arrives", async () => {
+    // The cache is module-level and survives between tests in this file — which is the feature, and which
+    // also means the in-flight window only exists on a cold start. Cleared here so this test observes the
+    // first load rather than a cache hit; `clearMyProfile` is the same call sign-out makes.
+    clearMyProfile();
+    renderAt("/admin/access", "org_admin", [], 40);
+
+    // Asserted on the SLOT rather than on a role query, because the thing under test is what that one line
+    // contains at a moment in time — and while loading it must contain nothing rather than a portal label
+    // that is about to be replaced.
+    const caption = () => document.querySelector(".app-userbtn-role");
+    await waitFor(() => expect(caption()).not.toBeNull());
+    expect(caption()!.textContent).toBe("");
+
+    // And once it settles, the title arrives — into that same empty slot, never over a portal label.
+    expect(await screen.findByText("Operations Director")).toBeInTheDocument();
+  });
+
+  it("shows the job title, which does not change as portals do", async () => {
+    renderAt("/admin/access", "org_admin");
+    expect(await screen.findByText("Operations Director")).toBeInTheDocument();
   });
 });

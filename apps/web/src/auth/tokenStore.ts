@@ -4,6 +4,7 @@
  * redirect. Fixture mode never sets a token, so `getToken()` returns null and `http.ts` sends no bearer.
  */
 import { clearDrafts } from "../screens/draftStore";
+import { clearMyProfile } from "../shell/useMyProfile";
 
 const KEY = "mersal-access-token";
 const REFRESH_KEY = "mersal-refresh-token";
@@ -104,4 +105,8 @@ export function clearTokens(): void {
   setRefreshToken(null);
   setScopeRequest(null);
   clearDrafts();
+  // 28.14 — the cached display caption goes with the session. It is keyed by subject so a second person
+  // signing into this tab could not read the first one's title anyway, but leaving somebody's name and job
+  // title in storage after they have signed out is not a thing to rely on a key check for.
+  clearMyProfile();
 }

@@ -1071,6 +1071,15 @@ nav.mrs-rail {
   line-height: 1.15;
   text-transform: capitalize;
   white-space: nowrap;
+  /*
+    28.14 — the line KEEPS ITS HEIGHT while empty.
+
+    The caption renders as "" until the profile request settles, so that the person's job title never
+    replaces a portal label under the reader's eye. Without a reserved height the empty span collapses, the
+    button shrinks, and the app bar reflows a frame later — trading a text flicker for a layout one, which is
+    the more annoying of the two. `1.15em` is the line-height above, stated as a floor.
+  */
+  min-height: 1.15em;
 }
 @media (max-width: 560px) {
   /* `.vt-step` used to be collapsed here as well as in its own section 1000 lines below — two rules, two

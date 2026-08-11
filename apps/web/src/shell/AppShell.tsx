@@ -110,8 +110,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const canNotify = !!portal && can("notification.read");
   // 14.8 — branch context for the app-bar switcher (fail-soft: renders only when the caller has branches).
   const branchCtx = useBranchContext(session?.role ?? undefined);
-  // 28.13 — the job title under the name in the app bar. Fails soft to null; see the hook.
-  const profile = useMyProfile();
+  // 28.13 — the job title under the name in the app bar. Fails soft; see the hook.
+  const { profile, loaded: profileLoaded } = useMyProfile(session?.userId);
   const [paneOpen, setPaneOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);   // 18.F2 — ⌘K / Ctrl+K
   const [searchText, setSearchText] = useState("");
@@ -270,7 +270,16 @@ export function AppShell({ children }: { children: ReactNode }) {
           <AppUserButton
             ref={avatarRef}
             displayName={session.displayName}
-            secondary={profile?.position ?? tr(portal.eyebrow)}
+            /*
+              28.14 — the fallback waits for the answer.
+
+              This read `profile?.position ?? tr(portal.eyebrow)`, and `profile` is null while the request is
+              in flight as well as when no title exists. So every load painted the PORTAL's label and then
+              replaced it with the person's title a moment later — reintroducing, as a flicker, the very
+              thing moving to `position` was meant to stop. An empty caption for one frame is invisible; a
+              wrong one that changes under the reader is not.
+            */
+            secondary={profileLoaded ? (profile?.position ?? tr(portal.eyebrow)) : ""}
             expanded={userPaneOpen}
             label={L.accountOpen[lang]}
             onClick={() => setUserPaneOpen((v) => !v)}
