@@ -1,4 +1,5 @@
 import { forwardRef } from "react";
+import { StaffAvatar } from "./StaffAvatar";
 
 /**
  * The person, in the app bar: initials, name, and the line under it.
@@ -21,6 +22,8 @@ export function initials(name: string): string {
 
 export const AppUserButton = forwardRef<HTMLButtonElement, {
   displayName: string;
+  /** The signed-in account, for their photograph. Initials until one is set. */
+  userId?: string;
   /**
    * The line under the name — the person's POSITION where one is recorded, and the portal's own label where
    * none is. The caller decides, because only it knows which fallback is available.
@@ -29,7 +32,7 @@ export const AppUserButton = forwardRef<HTMLButtonElement, {
   expanded: boolean;
   label: string;
   onClick: () => void;
-}>(function AppUserButton({ displayName, secondary, expanded, label, onClick }, ref) {
+}>(function AppUserButton({ displayName, userId, secondary, expanded, label, onClick }, ref) {
   return (
     <button
       ref={ref}
@@ -40,9 +43,9 @@ export const AppUserButton = forwardRef<HTMLButtonElement, {
       onClick={onClick}
       aria-label={`${label} — ${displayName}`}
     >
-      <span className="app-avatar" aria-hidden="true">
-        {initials(displayName)}
-      </span>
+      {/* 28.15 — the person's photograph where one is set, their initials until then. `StaffAvatar` owns
+          that decision so the app bar, the account pane and the admin dialog cannot disagree about it. */}
+      <StaffAvatar userId={userId} name={displayName} size={36} className="app-avatar" />
       <span className="app-userbtn-text">
         <span className="app-userbtn-name">{displayName}</span>
         <span className="app-userbtn-role">{secondary}</span>

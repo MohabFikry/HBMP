@@ -151,6 +151,7 @@ export function PortalPicker() {
           <AppUserButton
             ref={avatarRef}
             displayName={session?.displayName ?? ""}
+            userId={session?.userId}
             // Same rule as the shell: nothing until the answer is final, so the caption never changes
             // under the reader. See `useMyProfile`.
             secondary={profileLoaded ? (profile?.position ?? L.portalPickerTitle[lang]) : ""}
@@ -165,9 +166,11 @@ export function PortalPicker() {
         open={userPaneOpen}
         onClose={() => setUserPaneOpen(false)}
         displayName={session?.displayName ?? ""}
+        userId={session?.userId}
         // No portal has been chosen, so there is no portal label to caption them with — the page's own
         // heading is the honest answer to "where am I".
         roleLabel={{ en: "Choose a portal", ar: "اختر بوابة" }}
+        position={profileLoaded ? profile?.position : undefined}
         onSignOut={() => void logout("user")}
       />
 

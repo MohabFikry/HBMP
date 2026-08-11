@@ -5,6 +5,7 @@ import { useApi } from "../api/ApiProvider";
 import { useWrite } from "../api/useWrite";
 import { issuerRoleFor } from "../config";
 import { PORTALS, ZONES } from "../portals/catalog";
+import { PhotoPicker, PHOTO_PICKER_STRINGS } from "../shell/PhotoPicker";
 import { useLoc } from "./_shared";
 
 /**
@@ -454,6 +455,23 @@ export function EditUserDialog({
           value={position}
           onChange={(e) => setPosition(e.target.value)}
         />
+        {/*
+          28.15 — an administrator sets somebody's photograph. Ordinary: a headshot arrives at HR from a
+          person who does not administer their own account.
+
+          It writes IMMEDIATELY, not on Save, and that is deliberate. The photo is a separate resource with
+          its own endpoint; folding it into this dialog's Save would mean a failed photo upload rolling back
+          a name change that succeeded, or the reverse. The picker reports its own outcome, and the avatar
+          beside it is the confirmation.
+        */}
+        <fieldset className="portal-checklist-wrap">
+          <legend>{t(PHOTO_PICKER_STRINGS.photo)}</legend>
+          {/* `buttons`, not the pane's hover overlay: every other row in this dialog is a labelled control,
+              and a picture that only reveals its verb on hover would be the one thing here that hides it. */}
+          {user && (
+            <PhotoPicker userId={user.id} name={user.displayName} adminForUserId={user.id} variant="buttons" t={t} />
+          )}
+        </fieldset>
         <fieldset className="portal-checklist-wrap">
           <legend>{t(S.portals)}</legend>
           <p className="muted portal-checklist-help">{t(S.portalsHelp)}</p>

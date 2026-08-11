@@ -203,6 +203,9 @@ app.MapSessionApi();
 app.MapPasswordReset();
 app.MapAdmin();    // 17.4 — /identity/admin/* user+role+scope admin (bearer admin scope + MFA, audited)
 app.MapSessions(); // 21.5 — /identity/me/sessions + /identity/admin/users/{id}/sessions|login-history
+// 28.15 — staff avatars. Self-service on /identity/me/photo, administrative on /identity/admin/users/{id}/photo,
+// and a read any authenticated caller may make. NOT the beneficiary photo path — see PhotoEndpoints' header.
+app.MapUserPhotos();
 app.MapAccessReview(); // 21.5 — /identity/admin/access-review/{tenant} (JSON + CSV, audited as an export)
 
 // Read-only roles/scopes-as-data catalog (verification of the 17.1 seed). The mutating admin surface is in

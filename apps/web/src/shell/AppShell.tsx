@@ -270,6 +270,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <AppUserButton
             ref={avatarRef}
             displayName={session.displayName}
+            userId={session.userId}
             /*
               28.14 — the fallback waits for the answer.
 
@@ -344,7 +345,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           avatarRef.current?.focus();
         }}
         displayName={session.displayName}
+        userId={session.userId}
         roleLabel={portal.eyebrow}
+        position={profileLoaded ? profile?.position : undefined}
         onSignOut={() => void logout("user")}
       />
 

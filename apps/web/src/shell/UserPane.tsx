@@ -4,6 +4,7 @@ import type { Localized } from "../portals/catalog";
 import { useApi } from "../api/ApiProvider";
 import { useWrite } from "../api/useWrite";
 import { L } from "../i18n/strings";
+import { PhotoPicker } from "./PhotoPicker";
 
 /**
  * Change your own password.
@@ -104,17 +105,10 @@ function ChangePasswordForm() {
   );
 }
 
-/** Two-letter initials from a display name, for the avatar placeholder (e.g. "Reception Desk" → "RD"). */
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
 /**
  * The account pane — a sliding drawer (same pattern as the notification pane) opened from the app-bar
- * avatar. It shows a circular photo placeholder (initials), the employee name and their role/position,
+ * avatar. It shows the person's PHOTOGRAPH (initials until one is set, and changeable here since 28.15), their
+ * name and their job title,
  * a Settings section (appearance + language preferences), and Sign out. Traps focus, closes on Escape,
  * and returns focus to the avatar on close.
  */
@@ -122,13 +116,20 @@ export function UserPane({
   open,
   onClose,
   displayName,
+  userId,
   roleLabel,
+  position,
   onSignOut,
 }: {
   open: boolean;
   onClose: () => void;
   displayName: string;
+  /** The signed-in account, so the pane can show and change its photograph. */
+  userId: string | undefined;
+  /** The fallback caption: the portal's own label, used when no job title is recorded. */
   roleLabel: Localized;
+  /** The person's job title, when they have one. Takes precedence over `roleLabel`. */
+  position?: string | null;
   onSignOut: () => void;
 }) {
   const { theme, lang, toggleTheme, toggleLang } = useTheme();
@@ -169,7 +170,7 @@ export function UserPane({
     <div className="npane-overlay" onMouseDown={onClose}>
       <div
         ref={panelRef}
-        className="npane mrs-glass"
+        className="npane upane mrs-glass"
         role="dialog"
         aria-modal="true"
         aria-label={L.account[lang]}
@@ -184,12 +185,15 @@ export function UserPane({
 
         <div className="npane-body mrs-scroll">
           <div className="upane-profile">
-            <span className="upane-avatar" aria-hidden="true">
-              {initialsOf(displayName)}
-            </span>
+            {/* 28.15 — the person can change their own picture from the place they already come to act on
+                their own account, which is the only such place in the app. */}
+            <PhotoPicker userId={userId} name={displayName} t={(l) => l[lang]} />
             <span className="upane-identity">
               <span className="upane-name">{displayName}</span>
-              <span className="upane-role">{roleLabel[lang]}</span>
+              {/* The person's POSITION where one is recorded — the same line the app bar shows, for the
+                  same reason: it is a fact about them, not about the portal they happen to be in. This read
+                  `roleLabel`, so the pane repeated the portal's name directly under the person's own. */}
+              <span className="upane-role">{position ?? roleLabel[lang]}</span>
             </span>
           </div>
 

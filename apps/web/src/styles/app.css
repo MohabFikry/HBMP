@@ -1088,11 +1088,26 @@ nav.mrs-rail {
     display: none;
   }
 }
+/*
+ * The ACCOUNT pane is wider than the notification pane it shares `.npane` with.
+ *
+ * They looked alike and hold different things: notifications are one-line summaries that read fine in a
+ * narrow column, while this pane pairs a label with a control on every row ("Appearance" / "Dark theme"),
+ * and at 380px those pairs were close enough to touch. The extra 60px is what lets the row read as two
+ * things rather than one crowded one — and it is a modifier rather than a change to `.npane`, because
+ * widening the notification pane would only make its short lines ragged.
+ */
+.npane.upane {
+  inline-size: min(440px, calc(100vw - 24px));
+}
 .upane-profile {
   display: flex;
   align-items: center;
   gap: var(--sp4);
-  padding: var(--sp5);
+  /* Tightened from `--sp5` all round. The pane was taller than it needed to be for six rows, which on a
+     laptop pushed Sign out towards the fold. Vertical only — the horizontal inset is what keeps it aligned
+     with the sections below. */
+  padding: var(--sp4) var(--sp5);
   border-bottom: 1px solid var(--border);
 }
 .upane-avatar {
@@ -1108,6 +1123,90 @@ nav.mrs-rail {
   color: var(--on-accent, #fff);
   font-weight: 700;
   font-size: 20px;
+}
+/*
+ * A staff photograph, or the initials that stand in for one — 28.15.
+ *
+ * The SAME silhouette either way: a circle of the requested size, with `object-fit: cover` so a square
+ * upload and a stray non-square one both fill it rather than one of them letter-boxing. The size comes
+ * through the style attribute because one component serves a 36px app-bar avatar and a 64px pane one, and a
+ * class per size is a class per call site.
+ */
+.staff-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  object-fit: cover;
+  /* Decorative `--brand` fails contrast under white text; `--accent` is the one that passes (18.D2 U9). */
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  font-weight: 700;
+  overflow: hidden;
+}
+.photo-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--sp4);
+}
+.photo-picker-controls {
+  display: grid;
+  gap: var(--sp2);
+  min-inline-size: 0;
+}
+/*
+ * THE AVATAR AS A BUTTON — the icon appears on hover AND on keyboard focus.
+ *
+ * Hover alone would make the only control in the account pane invisible to anyone not using a pointer. The
+ * button carries its verb in `aria-label` regardless, so the overlay is a hint rather than the affordance;
+ * revealing it on `:focus-visible` is what makes the hint reach a keyboard.
+ */
+.photo-drop {
+  position: relative;
+  display: inline-flex;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: 999px;
+  cursor: pointer;
+  /* The avatar is 64px, comfortably past the 44px target floor, so the button needs no padding to reach it. */
+}
+.photo-drop-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  /* Dark scrim so a white glyph reads over ANY photograph — a light one would vanish against a pale shirt. */
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 120ms ease-in-out;
+}
+/* `Icon` sets no intrinsic size — it is an SVG sized by whatever rule reaches it, and with none it filled
+   the whole 64px circle. 20px is a glyph over a face rather than a glyph instead of one. */
+.photo-drop-overlay svg {
+  inline-size: 20px;
+  block-size: 20px;
+}
+.photo-drop:hover .photo-drop-overlay,
+.photo-drop:focus-visible .photo-drop-overlay {
+  opacity: 1;
+}
+.photo-drop:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .photo-drop-overlay { transition: none; }
+}
+.photo-picker--hover {
+  /* No control column beside the avatar in this variant, so the row is just the avatar (and an error, when
+     there is one) rather than a two-column layout with an empty second column. */
+  display: grid;
+  gap: var(--sp2);
+  justify-items: start;
 }
 .upane-identity {
   display: grid;
@@ -1125,7 +1224,7 @@ nav.mrs-rail {
   text-transform: capitalize;
 }
 .upane-section {
-  padding: var(--sp5);
+  padding: var(--sp3) var(--sp5) var(--sp4);
   display: grid;
   gap: var(--sp1);
 }
@@ -1134,7 +1233,10 @@ nav.mrs-rail {
   align-items: center;
   justify-content: space-between;
   gap: var(--sp3);
-  min-block-size: 48px;
+  /* 44px, not 48 — and NOT lower. The row is only as tall as the control inside it, and `.mrs-btn` is 44px
+     because that is the minimum hit target (21-accessibility). Trimming the row is free; trimming the
+     button would not be. */
+  min-block-size: 44px;
 }
 /* Equal-width controls on the settings rail: two adjacent rows with differently-sized buttons read as
    ragged rather than as a column of settings (QA follow-up). */
