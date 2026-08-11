@@ -98,7 +98,22 @@ public sealed class EventProjector(
                 AddCode(ev, period, CodeKind.Diagnosis, Field(ev, "icd"));
                 return true;
 
-            case "ServiceValued":
+            /*
+             * The cost of one settled service line — what `financial-summary` and the executive dashboard's
+             * financial widget are made of.
+             *
+             * THIS CASE USED TO BE `ServiceValued`, AND NOTHING PUBLISHED IT. It sat in
+             * ProjectionFeedTests.KnownUnfed since phase 8.2 with an accurate reason: finance publishes
+             * `SettlementApproved`, which is a provider's settlement total, and reporting a settlement as a
+             * service valuation would be the wrong grain. That reasoning never stopped being true — what
+             * changed is that claims-service began publishing the terminal decision, and a claim LINE at the
+             * moment it settles is exactly "this service line was worth this much".
+             *
+             * So the gap did not close because the objection was wrong. It closed because a different event
+             * turned out to be the right grain, which is why the KnownUnfed entry is deleted rather than
+             * merely relaxed.
+             */
+            case "ClaimLineSettled":
                 AddFinancial(ev, period);
                 return true;
 

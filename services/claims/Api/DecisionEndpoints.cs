@@ -102,6 +102,46 @@ public static class DecisionEndpoints
                                 claim.ClaimedAmount, claim.ApprovedAmount, claim.AdjustedAmount,
                                 claim.CurrencyCode, providerId = claim.ProviderId, claimCount = 1,
                             }, c);
+                    /*
+                     * And the same money BY SERVICE LINE, one event per settled line.
+                     *
+                     * The claim-level event above is the right grain for a cost TOTAL and the wrong grain for
+                     * a breakdown: a claim has many lines with different codes, and the reporting projector
+                     * reads scalar fields only, so a nested array on that payload would be invisible to it.
+                     *
+                     * This closes `reporting.financial_fact`, which was fed by `ServiceValued` — an event no
+                     * service publishes, recorded as a known gap in ProjectionFeedTests since phase 8.2. The
+                     * consequence was that `/reports/financial-summary` and the Medical Director's financial
+                     * dashboard widget returned zero, always, by construction rather than because there was
+                     * no money.
+                     *
+                     * The service line is the line's CODING SYSTEM — CPT, LOINC, DRUG, LOCAL — and not its
+                     * fulfillment type, which was the first thing tried. FulfillmentType is
+                     * OrderFulfillment / DispenseEvent / None: it records HOW a line was fulfilled, so lab
+                     * and radiology share one value and the breakdown would have had two rows for the whole
+                     * benefit. The coding system separates drugs from labs from procedures, which is the
+                     * distinction a cost question is actually about.
+                     *
+                     * It is a proxy, not a clinical taxonomy, and it is sent RAW for the same reason
+                     * RxDispensed sends a drug id rather than an ATC class: resolving a true service line
+                     * means a masterdata lookup, and this transaction moves money. Classing the code is a
+                     * reporting-side enrichment, and reporting is where the enrichment table already lives.
+                     *
+                     * ALLOWED, not billed. A financial summary of what providers ASKED for is not a summary
+                     * of what the benefit cost. A denied line settles at zero and is still emitted, so the
+                     * denominator is every line that reached a decision.
+                     */
+                    if (terminal)
+                        foreach (var settled in claim.Lines.Where(l => l.Status != ClaimLineStatus.Void))
+                            await deps.Outbox.EnqueueAsync("ClaimLineSettled.v1", "claims.events", new
+                            {
+                                claimId, settled.ClaimLineId,
+                                serviceLine = settled.CodeSystem.ToString(),
+                                serviceCode = settled.Code,
+                                fulfillment = settled.FulfillmentType.ToString(),
+                                amount = settled.AllowedAmount ?? 0m,
+                                claim.CurrencyCode, tenantId = deps.Tenant,
+                            }, c);
                 },
                 ct);
 

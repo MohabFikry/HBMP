@@ -40,10 +40,12 @@ public class ProjectionFeedTests
             + "top-diagnoses report needs an emr publisher carrying tenant + ICD code and nothing else — the "
             + "fact is a code COUNT, so it must not carry the beneficiary it came from.",
 
-        ["ServiceValued"] = "nothing values a service as an event. finance-service publishes "
-            + "`SettlementApproved`, which is a settlement total for a provider — a different grain from "
-            + "'this service line was worth this much', and mapping one to the other would report a "
-            + "settlement as a service valuation.",
+        // `ServiceValued` WAS here, and its reason still reads true: finance publishes `SettlementApproved`,
+        // a provider's settlement total, which is a different grain from "this service line was worth this
+        // much". The entry is gone because claims-service now publishes `ClaimLineSettled.v1` — a claim line
+        // at the moment it settles IS that grain — and `financial_fact` is fed from there instead. Recorded
+        // rather than silently deleted: a register entry that disappears with no trace looks the same as one
+        // that was never taken seriously.
     };
 
     [Fact]

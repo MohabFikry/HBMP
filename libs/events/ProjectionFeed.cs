@@ -71,6 +71,14 @@ public static class ProjectionFeed
         // terminal statuses are listed rather than pattern-matched: a `.v1` suffix wildcard would also catch
         // ClaimSubmitted.v1 and ClaimCreated.v1, which are not costs.
         "ClaimApproved.v1", "ClaimPartiallyApproved.v1", "ClaimDenied.v1",
+
+        // The same settlement BY SERVICE LINE — one event per settled line, feeding
+        // `reporting.financial_fact`, which the phase-8.2 financial summary and the executive dashboard's
+        // financial widget both read. That table was fed by `ServiceValued`, which nothing publishes, so
+        // both returned zero from the day they were built. A claim-level event cannot serve the breakdown:
+        // the grain is one claim and the question is per service line, and the projector reads scalars, so a
+        // nested array would be invisible to it.
+        "ClaimLineSettled.v1",
     };
 
     public static bool Includes(string? eventType) => eventType is not null && Types.Contains(eventType);
