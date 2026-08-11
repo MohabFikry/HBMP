@@ -206,3 +206,102 @@ describe("routing", () => {
     expect(screen.queryByText(/Provider Settlements/)).toBeNull();
   });
 });
+
+/**
+ * The app-bar search — 28.12.
+ *
+ * <p>The picker used to carry its own header, a flex row inside the page column that stopped short of the
+ * window edge and scrolled away, so the one screen in the product without a proper app bar was the first one
+ * anybody saw. It now uses the system bar, and the search in it filters the CARDS — it is not the command
+ * palette, which searches the sections inside a portal and has nothing to search until one is chosen.</p>
+ */
+describe("searching the portal cards", () => {
+  it("narrows the grid to the cards that match", async () => {
+    const user = userEvent.setup();
+    renderAt("/portals", "doctor", ["org_admin", "pharmacy"]);
+    await screen.findByRole("heading", { name: /welcome back/i });
+
+    await user.type(screen.getByRole("searchbox", { name: /search portals/i }), "pharmacy");
+
+    expect(screen.getByRole("button", { name: /Pharmacy/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Administration/ })).toBeNull();
+  });
+
+  it("finds a portal by a SECTION it contains, not only by its own name", async () => {
+    // The question behind a search is usually a task rather than a portal name. "Eligibility" is how somebody
+    // looks for Reception, and the word appears nowhere in that portal's title or description.
+    const user = userEvent.setup();
+    renderAt("/portals", "reception", ["org_admin"]);
+    await screen.findByRole("heading", { name: /welcome back/i });
+
+    await user.type(screen.getByRole("searchbox", { name: /search portals/i }), "eligibility");
+
+    expect(screen.getByRole("button", { name: /Reception/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Administration/ })).toBeNull();
+  });
+
+  it("matches the other language too, so a term learned in English still finds an Arabic screen", async () => {
+    // Half this platform's vocabulary is learned in English from colleagues while the interface is read in
+    // Arabic. Making somebody switch language to find a portal is the failure this avoids.
+    const user = userEvent.setup();
+    renderAt("/portals", "doctor", ["org_admin", "pharmacy"]);
+    await screen.findByRole("heading", { name: /welcome back/i });
+
+    await user.type(screen.getByRole("searchbox", { name: /search portals/i }), "الصيدلية");
+
+    expect(screen.getByRole("button", { name: /Pharmacy/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Administration/ })).toBeNull();
+  });
+
+  it("drops a zone heading whose cards have all been filtered out", async () => {
+    const user = userEvent.setup();
+    renderAt("/portals", "doctor", ["org_admin", "pharmacy"]);
+    await screen.findByRole("heading", { name: /Operations & administration/i });
+
+    await user.type(screen.getByRole("searchbox", { name: /search portals/i }), "pharmacy");
+
+    // An empty heading over an empty grid says a portal exists that the filter is hiding, which is exactly
+    // the thing the zone grouping is not for.
+    expect(screen.queryByRole("heading", { name: /Operations & administration/i })).toBeNull();
+  });
+
+  it("says so when nothing matches, rather than showing an empty page", async () => {
+    const user = userEvent.setup();
+    renderAt("/portals", "doctor", ["org_admin"]);
+    await screen.findByRole("heading", { name: /welcome back/i });
+
+    await user.type(screen.getByRole("searchbox", { name: /search portals/i }), "zzzznothing");
+
+    // Announced as well as rendered: filtering a card grid changes the page silently for anyone not looking
+    // at it, and "no matches" is the outcome most worth hearing.
+    expect(await screen.findByRole("status")).toHaveTextContent(/no portals match/i);
+    expect(screen.getByText(/clear the search/i)).toBeInTheDocument();
+  });
+
+  it("opens the last card standing on Enter, and only when one is left", async () => {
+    const user = userEvent.setup();
+    renderAt("/portals", "doctor", ["org_admin", "pharmacy"]);
+    await screen.findByRole("heading", { name: /welcome back/i });
+    const box = screen.getByRole("searchbox", { name: /search portals/i });
+
+    // Two matches: Enter must NOT guess. "The first match" would make the key mean something different on
+    // every keystroke.
+    await user.type(box, "a{Enter}");
+    expect(screen.getByRole("heading", { name: /welcome back/i })).toBeInTheDocument();
+
+    await user.clear(box);
+    await user.type(box, "pharmacy{Enter}");
+    await waitFor(() => expect(screen.queryByRole("heading", { name: /welcome back/i })).toBeNull());
+  });
+
+  it("has no serious accessibility violations with the bar and a filtered grid", async () => {
+    const user = userEvent.setup();
+    const { container } = renderAt("/portals", "doctor", ["org_admin", "pharmacy"]);
+    await screen.findByRole("heading", { name: /welcome back/i });
+    await user.type(screen.getByRole("searchbox", { name: /search portals/i }), "pharmacy");
+
+    const results = await axe(container);
+    const serious = results.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
+    expect(serious).toEqual([]);
+  });
+});

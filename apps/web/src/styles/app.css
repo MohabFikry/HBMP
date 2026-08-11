@@ -5803,29 +5803,56 @@ html[dir="rtl"] .dash-daypop { transform: translateX(50%); }
  * system for this screen: the zone dots are `--accent`, `--st-info-fg` and `--st-part-fg`, the surfaces and
  * hairlines are the same ones every card in the product uses, and the type sizes are the existing scale.
  */
-.picker-page {
+/*
+ * The picker is a BAR plus a page, so the bar can be full-bleed while the cards stay in a reading column.
+ *
+ * `.picker-page` used to be the whole screen and carried the header inside its own 1240px column, which is
+ * why the bar stopped short of the window edge and scrolled away — the one screen in the product whose
+ * header did not behave like a header. The shell owns the background and the full width now; the page keeps
+ * the column.
+ */
+.picker-shell {
   min-height: 100vh;
   min-height: 100dvh;
   background: var(--page-wash);
-  padding: var(--sp6) clamp(var(--sp4), 5vw, var(--sp12)) var(--sp12);
+}
+.picker-page {
+  padding: var(--sp8) clamp(var(--sp4), 5vw, var(--sp12)) var(--sp12);
   /* The grid is capped rather than the viewport: on a wide monitor `auto-fill` would otherwise run six or
      seven 268px cards across a single row and the zone groupings would stop reading as groups. */
   max-width: 1240px;
   margin-inline: auto;
 }
-.picker-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp4);
-  margin-bottom: var(--sp10);
+/*
+ * `.app-bar` carries `grid-column: 1 / 3` for the AppShell's two-column grid; this shell is not a grid, so
+ * the declaration is inert here and no override is needed. What DOES need saying is the sizing the shell
+ * does not inherit from that grid.
+ */
+.picker-appbar {
+  min-height: 64px;
 }
 /* `margin-inline-start: auto` and not `justify-content: flex-end` — the logical property is what moves the
    controls to the LEFT under RTL without a second rule. */
-.picker-bar-actions {
+.picker-appbar .app-actions {
   margin-inline-start: auto;
-  display: flex;
-  align-items: center;
-  gap: var(--sp2);
+}
+.picker-status {
+  /* Reserves no space when empty: a status line that is always in the layout pushes the first zone down by a
+     row for the whole time nobody is searching. */
+  color: var(--text-2);
+  font-size: var(--fs-body);
+}
+.picker-status:not(:empty) {
+  margin-top: var(--sp4);
+}
+.picker-empty {
+  margin-top: var(--sp6);
+  padding: var(--sp6);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  color: var(--text-2);
+  text-align: center;
 }
 .picker-signout {
   min-height: 44px;

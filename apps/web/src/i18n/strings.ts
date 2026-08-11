@@ -219,6 +219,15 @@ export const L = {
   portalPickerTitle: { en: "Choose a portal", ar: "اختر بوابة" },
   portalSections: { en: "{n} sections", ar: "{n} أقسام" },
   portalSectionsOne: { en: "1 section", ar: "قسم واحد" },
+  // The picker's app-bar search. It filters the CARDS — it is not the command palette, which searches the
+  // sections inside a portal and therefore has nothing to search until one is chosen.
+  searchPortals: { en: "Search portals", ar: "ابحث في البوابات" },
+  portalsMatch: { en: "{n} portals match", ar: "{n} بوابات مطابقة" },
+  portalsNoMatch: { en: "No portals match", ar: "لا توجد بوابات مطابقة" },
+  portalsNoMatchHelp: {
+    en: "Nothing here matches that. Clear the search to see every portal you hold.",
+    ar: "لا يوجد ما يطابق ذلك. امسح البحث لعرض كل البوابات التي تملكها.",
+  },
   currentPortal: { en: "Current portal", ar: "البوابة الحالية" },
   changePortal: { en: "Change portal", ar: "تغيير البوابة" },
   openPortal: { en: "Open", ar: "فتح" },
