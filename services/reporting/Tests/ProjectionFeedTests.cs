@@ -231,8 +231,28 @@ public class ProjectionFeedTests
                  "providerId":"{{Guid.NewGuid()}}","lines":[{"orderLineId":"x","quantity":1}],"idempotencyKey":"k"}
                 """;
 
+            /*
+             * The two events this pass added, in the exact shape their publishers emit.
+             *
+             * COPIED FROM THE PUBLISHER, not written to suit the projector. That direction is the whole point
+             * of this test: `financial_fact` sat empty for the life of the platform behind a projector case
+             * for `ServiceValued`, which had a passing unit test and no publisher — the read side was covered
+             * and the write side was never asserted to exist. A test that invents a payload proves the two
+             * halves agree with the test, not with each other.
+             */
+            var settledLine = $$"""
+                {"claimId":"{{Guid.NewGuid()}}","claimLineId":"{{Guid.NewGuid()}}","serviceLine":"CPT",
+                 "serviceCode":"80053","fulfillment":"OrderFulfillment","amount":120.00,
+                 "currencyCode":"EGP","tenantId":"{{tenant}}"}
+                """;
+            var branch = $$"""
+                {"tenantId":"{{tenant}}","branchId":"{{Guid.NewGuid()}}","branchCode":"MAADI",
+                 "nameEn":"Maadi Clinic","nameAr":"عيادة المعادي"}
+                """;
+
             foreach (var (type, payload) in new[]
-                     { ("MemberEnrolled", enrolment), ("AuthApproved", decision), ("OrderLinesConsumed", consume) })
+                     { ("MemberEnrolled", enrolment), ("AuthApproved", decision), ("OrderLinesConsumed", consume),
+                       ("ClaimLineSettled.v1", settledLine), ("BranchCreated", branch) })
             {
                 var ev = ProjectionMapping.TryMap(Guid.NewGuid(), type, payload, at);
                 ev.Should().NotBeNull($"{type} is on the feed and must map");
@@ -254,6 +274,20 @@ public class ProjectionFeedTests
                 .Where(f => f.TenantId == tenant).ToListAsync();
             util.Should().Contain(f => f.Dimension == "Radiology" && f.Code == "RAD");
             util.Should().Contain(f => f.Dimension == "Provider");
+
+            // The cost fact, from the line claims actually publishes. `serviceLine`/`serviceCode`/`amount`
+            // are the names AddFinancial reads; a rename on either side lands here rather than as a report
+            // that renders a confident zero.
+            var financial = await ctx.FinancialFacts.AsNoTracking().SingleAsync(f => f.TenantId == tenant);
+            financial.ServiceLine.Should().Be("CPT");
+            financial.ServiceCode.Should().Be("80053");
+            financial.Amount.Should().Be(120.00m, "the ALLOWED amount, not what was billed");
+
+            // And the clinic's name, so a per-clinic report can say "Maadi" rather than a location GUID.
+            var label = await ctx.DimensionLabels.AsNoTracking().SingleAsync(d => d.TenantId == tenant);
+            label.Kind.Should().Be("branch");
+            label.LabelEn.Should().Be("Maadi Clinic");
+            label.LabelAr.Should().Be("عيادة المعادي");
         }
         finally
         {
@@ -263,6 +297,8 @@ public class ProjectionFeedTests
             await ctx.Database.ExecuteSqlRawAsync("DELETE FROM reporting.fact_enrolment WHERE tenant_id = {0}", tenant);
             await ctx.Database.ExecuteSqlRawAsync("DELETE FROM reporting.authorization_fact WHERE tenant_id = {0}", tenant);
             await ctx.Database.ExecuteSqlRawAsync("DELETE FROM reporting.utilization_fact WHERE tenant_id = {0}", tenant);
+            await ctx.Database.ExecuteSqlRawAsync("DELETE FROM reporting.financial_fact WHERE tenant_id = {0}", tenant);
+            await ctx.Database.ExecuteSqlRawAsync("DELETE FROM reporting.dim_label WHERE tenant_id = {0}", tenant);
         }
     }
 
