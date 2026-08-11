@@ -619,7 +619,29 @@ export const PORTALS: PortalDef[] = [
     },
     sections: [
       { key: "dashboards", path: "dashboards", label: { en: "Clinical Dashboards", ar: "لوحات سريرية" }, group: G.insights, icon: "chart", permission: "director.dashboards" },
+      // 2026-08-11 audit — all four axes `/reports/utilization` supports. The dashboard pinned it to
+      // `provider` under a heading promising service lines, so drug, lab and radiology were reachable from
+      // no screen in the application and the one that rendered was labelled as a different axis.
+      { key: "utilization", path: "utilization", label: { en: "Utilization", ar: "الاستخدام" }, group: G.insights, icon: "chart", permission: "director.utilization" },
+      // 2026-08-11 audit — what the clinics claimed and what it cost, from the reporting FINANCIAL zone the
+      // director already holds. Deliberately not a claims-service read: they hold no claims scope, and
+      // widening one to render a chart is how an analytical need becomes an operational authority.
+      { key: "claims-cost", path: "claims-cost", label: { en: "Claims & Cost", ar: "المطالبات والتكلفة" }, group: G.insights, icon: "doc", permission: "director.cost" },
       { key: "oversight", path: "oversight", label: { en: "Approval Oversight / TAT", ar: "الإشراف على الموافقات" }, group: G.oversight, icon: "check2", permission: "director.oversight" },
+      /*
+       * 2026-08-11 audit — the SLA / TAT board, on the portal of the person who supervises the SLA.
+       *
+       * `medical_director` has always held `approvals.sla`, and `/approvals/sla` has always RENDERED for
+       * them: `ResolveRoute` looks a path up in the whole route catalog and then checks the permission,
+       * which passed. But the section was declared only on the approvals portal, and `portalsForRoles`
+       * never returns that one for a director — so a working screen they were entitled to appeared in no
+       * navigation they could see, and was reachable only by typing the URL.
+       *
+       * The mirror image of the org-admin "Tenants" entry design 40 removed: that one was a link that could
+       * only ever 403. Both are the join between authority and affordance coming apart, in opposite
+       * directions — one wastes trust, this one wasted the work.
+       */
+      { key: "sla", path: "sla", label: { en: "SLA / TAT Board", ar: "لوحة الاستجابة" }, group: G.insights, icon: "chart", permission: "approvals.sla" },
       { key: "quality", path: "quality", label: { en: "Quality & Outcomes", ar: "الجودة والنتائج" }, group: G.oversight, icon: "doc", permission: "director.quality" },
       { key: "escalations", path: "escalations", label: { en: "Escalations", ar: "التصعيدات" }, group: G.oversight, icon: "triangle", permission: "director.escalations" },
       // 18.C2 (W4): the ESCALATION path for sensitive-result release — 37 §6 lets the Medical Director decide

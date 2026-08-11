@@ -28,9 +28,13 @@ export * from "./prescribing";
 export * from "./investigations";
 export * from "./approvals-extra";
 export * from "./report-view";
+export * from "./director";
 export * from "./provider";
 export * from "./beneficiary";
 export * from "./claims";
 export * from "./profile";
 export * from "./access";
 export * from "./procedures";
+
+// 2026-08-11 audit — the Medical Director's oversight reads (utilization, SLA breaches, claims & cost).
+export * from "./director";

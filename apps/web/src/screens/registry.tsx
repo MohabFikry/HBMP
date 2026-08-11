@@ -52,6 +52,8 @@ const ApprovalsSla = lazy(() => import("./ApprovalsExtra").then((m) => ({ defaul
 const ExecutiveDashboard = lazy(() => import("./ExecutiveDashboard").then((m) => ({ default: m.ExecutiveDashboard })));
 // Director oversight / quality / escalations (Phase 8.3) — one generic report screen, parameterised.
 const DirectorReport = lazy(() => import("./ReportView").then((m) => ({ default: m.DirectorReport })));
+const ServiceUse = lazy(() => import("./director/ServiceUse").then((m) => ({ default: m.ServiceUse })));
+const ClaimsCost = lazy(() => import("./director/ClaimsCost").then((m) => ({ default: m.ClaimsCost })));
 // Provider network portal (Phase 2b) — directory / performance / contracts / locations / onboarding share one chunk.
 const NetworkDirectory = lazy(() => import("./NetworkPortal").then((m) => ({ default: m.NetworkDirectory })));
 const NetworkPerformance = lazy(() => import("./NetworkPortal").then((m) => ({ default: m.NetworkPerformance })));
@@ -196,6 +198,12 @@ export const SCREENS: Record<string, () => ReactNode> = {
   "/director/engine": () => <ApprovalEngineAdmin />,
   // 6. Executive dashboard (US-073) — director scope.
   "/director/dashboards": () => <ExecutiveDashboard scope="director" />,
+  // 2026-08-11 audit — utilization on every axis, and claims/cost from the reporting financial zone.
+  "/director/utilization": () => <ServiceUse />,
+  "/director/claims-cost": () => <ClaimsCost />,
+  // The SLA board reached from the director's OWN nav. Same component as /approvals/sla — one board, two
+  // doors, because the reviewer who works the queue and the supervisor who answers for it both need it.
+  "/director/sla": () => <ApprovalsSla />,
   "/director/oversight": () => <DirectorReport section="oversight" />,
   "/director/quality": () => <DirectorReport section="quality" />,
   "/director/escalations": () => <DirectorReport section="escalations" />,

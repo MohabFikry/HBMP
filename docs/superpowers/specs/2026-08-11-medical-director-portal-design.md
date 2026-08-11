@@ -326,3 +326,88 @@ notes.
 - The claims portal's own gaps: claims-service exposes appeals, batches, settlement advice, reimbursement
   and submissions, and the `claims_officer` portal surfaces three screens. That is a claims-portal audit,
   not a director-portal one.
+
+---
+
+## 7. Revised during implementation
+
+Six places where the design above did not survive contact with the code. Recorded rather than quietly
+corrected, because in each case the original reasoning is the thing worth arguing with.
+
+### 7.1 There is no service principal to name on the projection rule (§4.1)
+
+The design said to "name a service principal on the rule so an empty role set stops meaning anyone". There is
+no such role. Machine callers on this platform authenticate with client credentials and carry **no role claim
+at all** — which is precisely why `auth:ingest`, `claims:ingest` and `notification:ingest` are all guarded by
+roleless rules. Naming a role would have denied the only legitimate caller.
+
+The platform's actual mechanism is the other half of a pair the two projection seams were missing: mark the
+scope `service_only` so no person can hold it, and let the empty role set mean what it says. So the fix is the
+catalogue flag plus revocation of the seeded grants, and the invariant asserts the **pairing** — a roleless
+rule must guard a machine key — rather than asserting a role list.
+
+That turned out to be a better invariant than the one designed. Three other roleless rules exist
+(`document:write`, `policy:read`, `eligibility:check`) and all three are legitimate: a scope grant can be the
+whole authority. They are now registered with their reasons, so the check is "no roleless rule appears without
+somebody writing down why" rather than a rule nobody can satisfy.
+
+### 7.2 The MFA gate in front of the seam points the wrong way
+
+Found while writing the test and **not fixed**. `ProtectedScopeRequiresMfa` is on for reporting-service, and
+`MfaEvaluator` is satisfied only by an `acr`/`amr` an interactive login produces. A Medical Director signs in
+with MFA and passes it; a client credential cannot. So the transport check in front of `POST /projections`
+admitted exactly the caller the authorization rule needed to exclude and refused the only one it exists for.
+
+Left alone deliberately. Exempting client credentials from MFA is a platform-wide change to
+`ScopeAuthorizationHandler`, and it is a poor trade to make for a seam whose production path is the queue
+consumer rather than HTTP at all. Recorded at the test client and here.
+
+### 7.3 The cost fact needed a new event, at a different grain (§4.2)
+
+The design said to feed `FinancialFact` from `ClaimSettled`, the event `AnalyticsProjector` already consumes.
+That does not work: `financial_fact` is keyed on **service line**, a claim has many lines with different
+codes, and `ProjectionMapping` reads scalar fields only — so a nested breakdown on the claim-level payload
+would be invisible to the projector. Feeding it directly would have produced one row called "General",
+which is the same defect in a new place.
+
+claims-service now publishes `ClaimLineSettled.v1` per settled line, inside the decision's own transaction.
+The two events are different grains feeding different tables (`fact_cost` per claim, `financial_fact` per
+line), and a test asserts neither projector learns the other's event — if one did, every settled claim would
+count twice and the financial summary would quietly double, which looks like growth.
+
+**And the service line is the coding system, not the fulfillment type.** `FulfillmentType` is
+`OrderFulfillment | DispenseEvent | None` — it records how a line was fulfilled, so lab and radiology share a
+value and the breakdown would have had two rows for the whole benefit. `ClaimCodeSystem` (CPT / LOINC / DRUG /
+LOCAL) separates drugs from labs from procedures, which is the distinction a cost question is about.
+
+### 7.4 D6 was worse than the audit found: the facts were not unlabelled, they were never written
+
+The design treated the clinic dimension as a labelling problem plus one missing field on `EncounterStarted`.
+The truth is larger. **All four of emr's publishers on the projection feed omitted `tenantId`** — `ApptBooked`,
+`ApptCheckedIn`, `ApptNoShow` and `EncounterStarted` — and `ProjectionConsumer` dead-letters a message it
+cannot attribute to a tenant. So every appointment and encounter fact was nacked on arrival. Clinic workload
+and the no-show rate had no data at all, not merely no names, and the only trace was a log line in a
+background loop.
+
+approvals-service's break-glass path had the same gap, which meant the approval-TAT report was missing exactly
+the manual and emergency decisions a supervisor most wants to see.
+
+`TenantOnEnvelopeArchitectureTests` exists to prevent this and missed it twice: its register never listed
+`emr.events` or `claims.events`, and its regex required the event-type argument to be a bare string literal,
+so approvals' break-glass site — which builds the name with a ternary — was invisible while the queue sat in
+the register looking checked. Both are fixed, and its guard-the-guard now counts publish sites **per queue**
+rather than in total, because a sum stays healthy while one queue goes dark.
+
+### 7.5 `finance:project` came into scope
+
+Not in the original plan. It is the identical defect — same roleless rule, same `service_only = false`, granted
+to `finance` — and the invariant that catches one has to catch both or it is not an invariant. Fixing
+reporting's alone would have meant reporting a finding that the new gate does not detect.
+
+### 7.6 `utilization` was already taken
+
+`@mersal/contracts` exports a `UtilizationView` for finance's member-benefit sense of the word (how much of a
+cap somebody has consumed), and `ApiClient` already has a `utilization()` method for it. The oversight axis is
+the other sense — which services the network used. Two contracts sharing a name across one barrel export, or
+two methods sharing one on the client, is how a screen imports the wrong one and type-checks anyway. The new
+surfaces are `ServiceAxis` / `ServiceUseView` / `serviceUse()`.

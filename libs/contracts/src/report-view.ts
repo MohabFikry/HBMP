@@ -23,5 +23,7 @@ export type ReportTable = z.infer<typeof zReportTable>;
 export const zReportView = z.object({
   kpis: z.array(zReportKpi),
   tables: z.array(zReportTable),
+  /** The window these figures cover — see `zPeriod` in ./dashboard for why an unstated one is a defect. */
+  period: z.object({ from: z.string(), to: z.string() }).optional(),
 });
 export type ReportView = z.infer<typeof zReportView>;

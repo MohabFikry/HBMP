@@ -60,6 +60,12 @@ MARKERS = [
     # it would ship looking exactly as clean as one that had been eliminated.
     ("EG-DOC-44182", "fixture practitioner licence number"),
     ("Nadia Rashed", "fixture practitioner name"),
+    # src/api/DevApiClient.ts — the Medical Director oversight fixtures (2026-08-11 audit). Added WITH the
+    # data, per the same contract: a fixture the gate does not know about is one it cannot report on, and it
+    # would ship looking exactly as clean as one that had been eliminated.
+    ("AUTH-2026-0418", "fixture breached authorization number"),
+    ("Hala Mansour", "fixture reviewer name"),
+    ("Yusra (Medical Director)", "fixture session display name"),
 ]
 
 # Strings from the LIVE sign-in path (src/auth/oidcClient.ts, src/auth/sessionApi.ts, the live login layout).

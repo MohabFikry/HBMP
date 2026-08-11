@@ -101,6 +101,9 @@ import {
   zEmergencyResult,
   type ManualAuthInput,
   zReportView,
+  zServiceUseView,
+  zSlaBreachView,
+  zClaimsCostView,
   type VitalInput,
   zExportResult,
   zFinancialSummary,
@@ -2736,6 +2739,80 @@ export class DevApiClient implements ApiClient {
       },
     };
     return this.gate(() => ok(zReportView, views[section]));
+  }
+
+  /*
+   * ---- The oversight reads (2026-08-11 audit) ----------------------------------------------------------
+   *
+   * Demo data with the SHAPE of a real clinic's month, not round numbers: a no-show rate that varies by
+   * clinic, denial reasons with a long tail, an SLA queue whose oldest case is the urgent one. A fixture
+   * where every figure is tidy teaches nobody what the screen is for.
+   */
+  serviceUse(axis: "provider" | "drug" | "lab" | "radiology", period?: { from: string; to: string }) {
+    const rows: Record<string, Array<{ code: string; count: number }>> = {
+      provider: [
+        { code: "Nile Central Hospital", count: 412 },
+        { code: "Maadi Family Clinic", count: 388 },
+        { code: "Shubra Polyclinic", count: 241 },
+        { code: "Helwan Diagnostic Centre", count: 96 },
+      ],
+      drug: [
+        { code: "A10BA02 metformin", count: 604 },
+        { code: "C09AA05 ramipril", count: 331 },
+        { code: "J01CA04 amoxicillin", count: 288 },
+        { code: "N02BE01 paracetamol", count: 173 },
+      ],
+      lab: [
+        { code: "80053 comprehensive metabolic", count: 517 },
+        { code: "85025 full blood count", count: 494 },
+        { code: "83036 HbA1c", count: 208 },
+      ],
+      radiology: [
+        { code: "71046 chest x-ray, 2 views", count: 129 },
+        { code: "76700 abdominal ultrasound", count: 74 },
+        { code: "70450 CT head", count: 19 },
+      ],
+    };
+    return this.gate(() => ok(zServiceUseView, {
+      dimension: axis,
+      period: period ?? { from: "", to: "" },
+      rows: rows[axis] ?? [],
+    }));
+  }
+
+  slaBreaches() {
+    return this.gate(() => ok(zSlaBreachView, {
+      total: 3,
+      rows: [
+        { authNo: "AUTH-2026-0418", priority: "Emergency", status: "Submitted", ageBucket: ">3d", ageSeconds: 291_600, reviewerId: null },
+        { authNo: "AUTH-2026-0455", priority: "Urgent", status: "UnderReview", ageBucket: "1-3d", ageSeconds: 154_800, reviewerId: "Hala Mansour" },
+        { authNo: "AUTH-2026-0491", priority: "Urgent", status: "InfoRequested", ageBucket: "4-24h", ageSeconds: 61_200, reviewerId: "Hala Mansour" },
+      ],
+    }));
+  }
+
+  claimsCost(period?: { from: string; to: string }) {
+    return this.gate(() => ok(zClaimsCostView, {
+      period: period ?? { from: "", to: "" },
+      decided: 284,
+      totalAllowed: 418_930.5,
+      byOutcome: [
+        { outcome: "Approved", count: 201 },
+        { outcome: "PartiallyApproved", count: 58 },
+        { outcome: "Denied", count: 25 },
+      ],
+      byServiceLine: [
+        { serviceLine: "CPT", amount: 236_400, count: 152 },
+        { serviceLine: "DRUG", amount: 121_180.5, count: 96 },
+        { serviceLine: "LOINC", amount: 61_350, count: 36 },
+      ],
+      topDenialReasons: [
+        { reasonCode: "NOT_COVERED", count: 9 },
+        { reasonCode: "NO_PRIOR_AUTH", count: 7 },
+        { reasonCode: "INSUFFICIENT_DOCS", count: 5 },
+        { reasonCode: "DUPLICATE_CLAIM", count: 4 },
+      ],
+    }));
   }
 
   // ---- Dashboard ---------------------------------------------------------

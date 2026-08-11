@@ -149,6 +149,12 @@ import type {
   SetAutoDecision,
   AmendReasonOption,
   WithdrawResult,
+  // 2026-08-11 audit — the director oversight reads.
+  Period,
+  ServiceAxis,
+  ServiceUseView,
+  SlaBreachView,
+  ClaimsCostView,
 } from "@mersal/contracts";
 
 /**
@@ -620,10 +626,24 @@ export interface ApiClient {
   createManualAuth(input: ManualAuthInput, idempotencyKey?: string): Promise<ManualAuthResult>;
   emergencyApprove(authId: string, justification: string): Promise<EmergencyResult>;
 
-  // Executive dashboard (Phase 8)
-  executiveDashboard(scope: "executive" | "finance" | "director"): Promise<ExecutiveDashboard>;
+  /*
+   * Executive dashboard (Phase 8).
+   *
+   * `period` is now sent, and `scope` now REACHES the server. Both were defects rather than omissions: every
+   * reporting endpoint has always accepted from/to and the portal sent neither, and the scope argument was
+   * taken here, never put on the wire, and used only to pick a page heading — so the executive, finance and
+   * director dashboards were byte-identical payloads.
+   */
+  executiveDashboard(scope: "executive" | "finance" | "director", period?: Period): Promise<ExecutiveDashboard>;
   // Director oversight / quality / escalations — de-identified reporting aggregates (Phase 8.3).
-  directorReport(section: "oversight" | "quality" | "escalations"): Promise<ReportView>;
+  directorReport(section: "oversight" | "quality" | "escalations", period?: Period): Promise<ReportView>;
+
+  // 2026-08-11 audit — the three oversight reads the director portal had no way to ask for.
+  /** Which services the network used, on any of the four axes. Distinct from finance's
+   *  `utilization()`, which is how much of a member's CAP was consumed — same word, other sense. */
+  serviceUse(axis: ServiceAxis, period?: Period): Promise<ServiceUseView>;
+  slaBreaches(): Promise<SlaBreachView>;
+  claimsCost(period?: Period): Promise<ClaimsCostView>;
 
   // Case management — assignment-scoped (Phase 10.1). 360 is a coordination SUMMARY.
   myCases(): Promise<CaseListItem[]>;

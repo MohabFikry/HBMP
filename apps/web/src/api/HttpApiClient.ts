@@ -119,7 +119,12 @@ import {
   zAppointmentDay,
   zAppointmentCounts,
   zAmendReasonOption,
+  // 2026-08-11 audit — the director oversight reads. VALUE imports: the payload is validated at the seam.
+  zServiceUseView,
+  zSlaBreachView,
+  zClaimsCostView,
 } from "@mersal/contracts";
+import type { Period, ServiceAxis } from "@mersal/contracts";
 import type {
   BeneficiaryEdit, BookingRequest, BulkDecisionOutcome, CreatePractitionerInput, PractitionerAttachFailure,
   MasterDataEdit,
@@ -302,6 +307,28 @@ function cairoToday(): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit",
   }).format(new Date());
+}
+
+/**
+ * `?from=&to=` for the reporting reads, plus whatever else the caller needs on the same query.
+ *
+ * <p>Returns an EMPTY string when there is no period, rather than `?from=&to=`. An empty `from` is not the
+ * same request as an absent one: the server parses what it is given and falls back to its own default only
+ * when the parameter is missing, so sending blanks would have every director screen silently asking for
+ * whatever `DateOnly.TryParse("")` decided.</p>
+ *
+ * <p>The period reaches the server at all because it never used to. Every reporting endpoint has accepted
+ * `from`/`to` since phase 8.2 and the director portal sent neither, so two KPIs built from two endpoints
+ * with different server defaults — thirty days and ninety — sat in the same row with nothing on screen
+ * saying they covered different windows.</p>
+ */
+function periodQuery(period?: Period, extra?: Record<string, string | undefined>): string {
+  const params = new URLSearchParams();
+  if (period?.from) params.set("from", period.from);
+  if (period?.to) params.set("to", period.to);
+  for (const [k, v] of Object.entries(extra ?? {})) if (v) params.set(k, v);
+  const q = params.toString();
+  return q ? `?${q}` : "";
 }
 
 /**
@@ -2448,8 +2475,11 @@ export class HttpApiClient implements ApiClient {
   // /dashboards/executive (zone-tagged widgets, each with chart series + a mandatory accessible dataTable +
   // bilingual labels, PHI-free). The zod contract splits widgets into kpis + charts, so we map gauge/summary
   // widgets to KPI cards and the rest to charts (every chart keeps its required dataTable — US-073).
-  async executiveDashboard(scope: "executive" | "finance" | "director") {
-    const d = (await getRaw(`/dashboards/executive`)) as any;
+  async executiveDashboard(scope: "executive" | "finance" | "director", period?: Period) {
+    // `scope` and the period REACH THE SERVER now. Both used to stop here: the scope picked a page heading
+    // and the period did not exist, so three portals rendered the same payload over whatever window the
+    // server happened to default to.
+    const d = (await getRaw(`/dashboards/executive${periodQuery(period, { scope })}`)) as any;
     const widgets: any[] = d?.widgets ?? [];
     const bi = (x: any) => ({ en: String(x?.en ?? ""), ar: String(x?.ar ?? "") });
     const points = (w: any) => (w.series?.[0]?.points ?? []) as any[];
@@ -2461,7 +2491,19 @@ export class HttpApiClient implements ApiClient {
         kind: "kpi",
         id: w.key,
         title: bi(w.title),
+        // MONEY IS MONEY. This was `String(sum)` for every KPI, and one of the two KPI widgets is the
+        // financial summary — so the director's only cost figure rendered as a bare decimal with no currency,
+        // no locale grouping and whatever float artefact the sum produced, in an application that formats
+        // every other amount through `useFormat().money` precisely because `ar-EG` must not read as `en-US`.
+        // The raw total travels as `value`; the screen formats it, because only the screen knows the locale.
         value: String(points(w).reduce((acc: number, p: any) => acc + Number(p.value ?? 0), 0)),
+        // The breakdown the server already computed and this client used to throw away. Pending-approvals
+        // ships status x priority x age x SLA breach; the financial summary ships cost by service line.
+        // Neither rendered anywhere in the product.
+        dataTable: {
+          columns: (w.dataTable?.columns ?? []).map(bi),
+          rows: (w.dataTable?.rows ?? []).map((row: any[]) => row.map((c) => String(c))),
+        },
       }),
     );
     const charts = widgets.filter((w) => !isKpi(w)).map((w) =>
@@ -2481,6 +2523,12 @@ export class HttpApiClient implements ApiClient {
       version: d?.contractVersion ?? "1.0",
       generatedAt: d?.generatedAt ?? new Date().toISOString(),
       scope,
+      // Echoed from the widgets rather than from what we asked for: the server resolves the window on the
+      // Cairo calendar and may not have used our dates at all. Stating the request back would be stating a
+      // question, and what the screen has to show is the answer.
+      period: widgets[0]?.from && widgets[0]?.to
+        ? { from: String(widgets[0].from), to: String(widgets[0].to) }
+        : period,
       kpis,
       charts,
     });
@@ -2488,12 +2536,13 @@ export class HttpApiClient implements ApiClient {
 
   // Director oversight / quality / escalations (Phase 8.3) — de-identified reporting aggregates (no PHI). Each
   // section fetches the relevant /reports/* endpoints and normalises them to KPI headlines + accessible tables.
-  async directorReport(section: "oversight" | "quality" | "escalations") {
+  async directorReport(section: "oversight" | "quality" | "escalations", period?: Period) {
+    const q = periodQuery(period);
     const min = (s: unknown) => `${Math.round(Number(s ?? 0) / 60)}`;
     const pct = (n: unknown) => `${Math.round(Number(n ?? 0) * 100)}%`;
     if (section === "oversight") {
       const pend = (await getRaw(`/reports/pending-approvals`)) as any;
-      const tat = (await getRaw(`/reports/approval-tat`)) as any;
+      const tat = (await getRaw(`/reports/approval-tat${q}`)) as any;
       return parseOr(zReportView, {
         kpis: [
           { label: { en: "Pending", ar: "معلّقة" }, value: String(pend?.total ?? 0) },
@@ -2516,9 +2565,9 @@ export class HttpApiClient implements ApiClient {
       });
     }
     if (section === "quality") {
-      const dx = (await getRaw(`/reports/top-diagnoses`)) as any;
-      const rx = (await getRaw(`/reports/top-medications`)) as any;
-      const ns = (await getRaw(`/reports/no-show`)) as any;
+      const dx = (await getRaw(`/reports/top-diagnoses${q}`)) as any;
+      const rx = (await getRaw(`/reports/top-medications${q}`)) as any;
+      const ns = (await getRaw(`/reports/no-show${q}`)) as any;
       return parseOr(zReportView, {
         kpis: [
           { label: { en: "Booked", ar: "محجوزة" }, value: String(ns?.booked ?? 0) },
@@ -2546,7 +2595,7 @@ export class HttpApiClient implements ApiClient {
       });
     }
     // escalations → rejected/flagged authorization requests by reason (de-identified).
-    const rej = (await getRaw(`/reports/rejected-requests`)) as any;
+    const rej = (await getRaw(`/reports/rejected-requests${q}`)) as any;
     return parseOr(zReportView, {
       kpis: [{ label: { en: "Rejected", ar: "مرفوضة" }, value: String(rej?.total ?? 0) }],
       tables: [
@@ -2556,6 +2605,66 @@ export class HttpApiClient implements ApiClient {
           rows: (rej?.byReason ?? []).map((r: any) => [String(r.reasonCode), String(r.count)]),
         },
       ],
+    });
+  }
+
+  /*
+   * ── The 2026-08-11 oversight reads ──────────────────────────────────────────────────────────────────
+   *
+   * All three sit in reporting-service's PHI-free zone. The claims one is deliberately NOT a claims-service
+   * call: the Medical Director holds `reporting:read-financial` and holds neither `claims:read` nor
+   * `claims:reconcile`, and reaching a chart by widening an operational scope is how an analytical need
+   * quietly becomes an operational authority.
+   */
+  /*
+   * Named `serviceUse`, not `utilization`.
+   *
+   * `utilization()` is already taken on this client, by finance's member-benefit sense of the word: how much
+   * of a cap somebody has consumed. This is the other sense — which services the network is using and how
+   * often. Two methods with one name, distinguished only by which overload the caller picked, is how a
+   * screen ends up rendering the wrong report and type-checking on the way.
+   */
+  async serviceUse(axis: ServiceAxis, period?: Period) {
+    const r = (await getRaw(`/reports/utilization${periodQuery(period, { dimension: axis })}`)) as any;
+    return parseOr(zServiceUseView, {
+      dimension: axis,
+      period: period ?? { from: "", to: "" },
+      rows: (r?.rows ?? []).map((row: any) => ({ code: String(row.code ?? ""), count: Number(row.count ?? 0) })),
+    });
+  }
+
+  async slaBreaches() {
+    const r = (await getRaw(`/reports/sla-breaches`)) as any;
+    return parseOr(zSlaBreachView, {
+      total: Number(r?.total ?? 0),
+      rows: (r?.rows ?? []).map((row: any) => ({
+        authNo: String(row.authNo ?? ""),
+        priority: String(row.priority ?? "Routine"),
+        status: String(row.status ?? ""),
+        ageBucket: String(row.ageBucket ?? ""),
+        ageSeconds: Number(row.ageSeconds ?? 0),
+        reviewerId: row.reviewerId ?? null,
+      })),
+    });
+  }
+
+  async claimsCost(period?: Period) {
+    const r = (await getRaw(`/reports/claims-summary${periodQuery(period)}`)) as any;
+    return parseOr(zClaimsCostView, {
+      period: period ?? { from: "", to: "" },
+      decided: Number(r?.decided ?? 0),
+      // `money()` rather than Number(): it is the one place in this client that refuses a value it cannot
+      // read as an amount, so a malformed total fails loudly instead of rendering as NaN in a currency field.
+      totalAllowed: money(r?.totalAllowed ?? 0, "claimsCost.totalAllowed"),
+      byOutcome: (r?.byOutcome ?? []).map((x: any) => ({ outcome: String(x.outcome ?? ""), count: Number(x.count ?? 0) })),
+      byServiceLine: (r?.byServiceLine ?? []).map((x: any) => ({
+        serviceLine: String(x.serviceLine ?? ""),
+        amount: money(x.amount ?? 0, "claimsCost.amount"),
+        count: Number(x.count ?? 0),
+      })),
+      topDenialReasons: (r?.topDenialReasons ?? []).map((x: any) => ({
+        reasonCode: String(x.reasonCode ?? ""), count: Number(x.count ?? 0),
+      })),
     });
   }
 

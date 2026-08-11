@@ -40,7 +40,7 @@ const DISPLAY_NAMES: Record<Role, string> = {
   super_admin: "Super Admin",
   branch_coordinator: "Nadia (Maadi Coordinator)",
   clinics_manager: "Tarek (Clinics Manager)",
-  medical_director: "Medical Director",
+  medical_director: "Yusra (Medical Director)",
 };
 
 /**
