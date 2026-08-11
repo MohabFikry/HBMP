@@ -109,6 +109,12 @@ public static class BreakGlass
             await db.SaveChangesAsync(ct);
             await outbox.EnqueueAsync(req.Decision == AuthDecision.Approved ? "AuthApproved" : "AuthPartiallyApproved", "approvals.events", new
             {
+                // `tenantId` — the ordinary decision path in Decisions.cs carries it and this one did not, so
+                // every manual and emergency approval was dead-lettered by the reporting consumer and by
+                // emr's care-episode consumer, both of which refuse a message they cannot attribute. The
+                // approval-TAT report was therefore missing exactly the decisions a supervisor most wants to
+                // see, and missing them silently.
+                tenantId = auth.TenantId,
                 authorizationId = auth.AuthorizationId, auth.AuthNo, beneficiaryId = auth.BeneficiaryId,
                 source = "Manual", approvedScope = approvedScopeJson is null ? null : Codes.Parse(approvedScopeJson),
                 releasesDownstream = true, breakGlass = true,

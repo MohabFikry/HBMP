@@ -553,6 +553,11 @@ public static class AppointmentsModule
                     if (b.AppointmentId != appt.AppointmentId) return;   // replay: no new side-effects
                     await outbox.EnqueueAsync("ApptBooked", "emr.events", new
                     {
+                        // `tenantId` — this event is on `ProjectionFeed`, and the reporting consumer binds
+                        // its RLS session from the envelope: a payload it cannot attribute is dead-lettered,
+                        // never projected under a guess. Without this the booking half of the no-show rate
+                        // was nacked on arrival and the report divided by a denominator that never arrived.
+                        tenantId = me.Principal?.TenantId,
                         appointmentId = b.AppointmentId, beneficiaryId = b.BeneficiaryId,
                         providerId = b.ProviderId, locationId = b.LocationId,
                         slotId = b.SlotId, appointmentType = type.ToString(),
@@ -560,7 +565,7 @@ public static class AppointmentsModule
                     }, c);
                     if (type == AppointmentType.Referral && b.ReferralRef is { Length: > 0 } r)
                         await outbox.EnqueueAsync("ReferralScheduled", "emr.events",
-                            new { referralRef = r, appointmentId = b.AppointmentId }, c);
+                            new { referralRef = r, appointmentId = b.AppointmentId, tenantId = me.Principal?.TenantId }, c);
                 },
                 capacity,
                 ct);
@@ -855,7 +860,7 @@ public static class AppointmentsModule
                 insideTransaction: async (appt, c) =>
                 {
                     await outbox.EnqueueAsync("ApptRescheduled", "emr.events",
-                        new { appointmentId = id, newSlotId = appt.SlotId, scheduledStart = appt.ScheduledStart }, c);
+                        new { appointmentId = id, newSlotId = appt.SlotId, scheduledStart = appt.ScheduledStart, tenantId = me.Principal?.TenantId }, c);
                 },
                 ct);
             var problem = MapFailure(result.Outcome);
@@ -893,12 +898,12 @@ public static class AppointmentsModule
                 insideTransaction: async (_, promoted, c) =>
                 {
                     await outbox.EnqueueAsync("ApptCancelled", "emr.events",
-                        new { appointmentId = id, reason = req.Reason }, c);
+                        new { appointmentId = id, reason = req.Reason, tenantId = me.Principal?.TenantId }, c);
                     // The waitlist promotion happened inside this same transaction, so its event belongs
                     // here too — a promoted patient nobody was told about keeps waiting.
                     if (promoted is { } w)
                         await outbox.EnqueueAsync("ApptWaitlistPromoted", "emr.events",
-                            new { waitlistId = w.WaitlistId, beneficiaryId = w.BeneficiaryId, providerId = w.ProviderId }, c);
+                            new { waitlistId = w.WaitlistId, beneficiaryId = w.BeneficiaryId, providerId = w.ProviderId, tenantId = me.Principal?.TenantId }, c);
                 },
                 ct);
             var problem = MapFailure(result.Outcome);
@@ -985,15 +990,18 @@ public static class AppointmentsModule
                     await outbox.EnqueueAsync("ApptNoShow", "emr.events",
                         // `locationId` — the clinic the slot belonged to, for the read model's no-show rate
                         // per clinic. A no-show count with no clinic cannot answer the question it exists for.
-                        new { appointmentId = id, beneficiaryId = a.BeneficiaryId, noShowCount, locationId = a.LocationId }, c);
+                        // `tenantId` — and without THAT the fact never arrived at all: the reporting consumer
+                        // refuses a message it cannot attribute to a tenant, so the no-show rate had neither
+                        // numerator nor denominator and reported a clean 0%.
+                        new { tenantId = me.Principal?.TenantId, appointmentId = id, beneficiaryId = a.BeneficiaryId, noShowCount, locationId = a.LocationId }, c);
                     // Repeat no-shows → Case Manager follow-up (05 X3). Same commit: a beneficiary who
                     // crossed the threshold and whose event was lost is one nobody follows up.
                     if (noShowCount >= RepeatNoShowThreshold)
                         await outbox.EnqueueAsync("BeneficiaryNoShowThresholdReached", "emr.events",
-                            new { beneficiaryId = a.BeneficiaryId, noShowCount }, c);
+                            new { beneficiaryId = a.BeneficiaryId, noShowCount, tenantId = me.Principal?.TenantId }, c);
                     if (promoted is { } w)
                         await outbox.EnqueueAsync("ApptWaitlistPromoted", "emr.events",
-                            new { waitlistId = w.WaitlistId, beneficiaryId = w.BeneficiaryId, providerId = w.ProviderId }, c);
+                            new { waitlistId = w.WaitlistId, beneficiaryId = w.BeneficiaryId, providerId = w.ProviderId, tenantId = me.Principal?.TenantId }, c);
                 },
                 ct);
             var problem = MapFailure(result.Outcome);

@@ -115,7 +115,7 @@ public static class ClaimsEndpoints
                         await deps.Outbox.EnqueueAsync("ClaimCreated.v1", "claims.events",
                             new { claimId = claim.ClaimId, claim.ClaimNo, origin = claim.Origin.ToString(), tenantId = claim.TenantId }, c);
                     await deps.Outbox.EnqueueAsync("ClaimLineCreated.v1", "claims.events",
-                        new { claimId = claim.ClaimId, claimLineId = line.ClaimLineId, line.Code, line.FulfillmentRef }, c);
+                        new { claimId = claim.ClaimId, claimLineId = line.ClaimLineId, line.Code, line.FulfillmentRef, tenantId = claim.TenantId }, c);
                 }, ct);
 
             switch (result.Outcome)

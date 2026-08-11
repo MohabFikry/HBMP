@@ -167,6 +167,7 @@ v1.MapPost("", async (
         return Results.Ok(EncounterResponse.From(existing));
 
     var actor = me.Principal?.Subject;
+    var tenant = me.Principal?.TenantId;
 
     // A visit started FROM an appointment carries two rules that belong here rather than on the button: this is
     // where an encounter comes into existence, so a caller going straight to POST /encounters is bound by them
@@ -262,18 +263,39 @@ v1.MapPost("", async (
         ActorUserId = actor, DecisionOutcome = "EncounterStarted", AfterState = $"{{\"encounterNo\":\"{encounter.EncounterNo}\"}}",
     }, ct);
 
+    /*
+     * `tenantId` ON BOTH EVENTS BELOW, and it is not cosmetic.
+     *
+     * Both are on `ProjectionFeed`, and the reporting consumer resolves its RLS tenant from the envelope —
+     * `ProjectionMapping.TryMap` returns null for a payload it cannot attribute, and the consumer DEAD-LETTERS
+     * it rather than guessing. Neither event carried the field, so every encounter and every check-in was
+     * nacked on arrival: the Clinic Workload report and the no-show rate were empty in production, and the
+     * only trace was a log line. A dropped fact and a clinic with no visits look identical on a dashboard.
+     */
+    var encounterLocationId = req.AppointmentId is { } locAppt
+        ? await db.Appointments.AsNoTracking()
+            .Where(a => a.AppointmentId == locAppt).Select(a => (Guid?)a.LocationId).FirstOrDefaultAsync(ct)
+        : null;
+
     if (req.AppointmentId is { } apptId)
     {
         // The clinic, for the read model's per-clinic encounter counts — read off the appointment, which is
         // the only thing here that knows where the visit was booked. `EncounterFact.ClinicId` falls back to
         // "unknown" without it, and a per-clinic chart where every row says unknown is a chart of nothing.
-        var locationId = await db.Appointments.AsNoTracking()
-            .Where(a => a.AppointmentId == apptId).Select(a => (Guid?)a.LocationId).FirstOrDefaultAsync(ct);
         await outbox.EnqueueAsync("ApptCheckedIn", "emr.events",
-            new { appointmentId = apptId, encounterId = encounter.EncounterId, locationId }, ct);
+            new { tenantId = tenant, appointmentId = apptId, encounterId = encounter.EncounterId, locationId = encounterLocationId }, ct);
     }
+    /*
+     * `locationId` here too — this is the event `ClinicWorkloadAsync` actually reads.
+     *
+     * That query filters `Kind == "Encounter"`, which only `EncounterStarted` produces, and this payload named
+     * no location at all. So even once the tenant was fixed, every workload fact would have been written under
+     * `ClinicId = "unknown"` and the per-clinic report would have had exactly one row, forever. A walk-in has
+     * no appointment and so still has no clinic; that is honest rather than guessed, and it is a much smaller
+     * gap than every booked visit.
+     */
     await outbox.EnqueueAsync("EncounterStarted", "emr.events",
-        new { encounterId = encounter.EncounterId, encounter.EncounterNo, beneficiaryId = req.BeneficiaryId }, ct);
+        new { tenantId = tenant, encounterId = encounter.EncounterId, encounter.EncounterNo, beneficiaryId = req.BeneficiaryId, locationId = encounterLocationId }, ct);
     await tx.CommitAsync(ct);
 
     return Results.Created($"/api/v1/encounters/{encounter.EncounterId}", EncounterResponse.From(encounter));
