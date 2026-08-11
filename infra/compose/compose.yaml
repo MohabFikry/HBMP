@@ -71,6 +71,16 @@ services:
       Issuer__PublicUrl: "http://localhost:8090/"
       Issuer__WebRedirectUri: "http://localhost:5173/"
       Issuer__WebPostLogoutUri: "http://localhost:5173/"
+      # 28.11 — how long a SPENT OAuth token's row is kept before TokenPruner deletes it.
+      #
+      # Stated here rather than left to the code default so the number is visible to whoever is asked what
+      # the retention actually is. 30 days is the conservative end of the 30–90 day "transient" class in
+      # 20-compliance-checklist §6; the DPO can move it without a rebuild.
+      #
+      # It cannot sign anybody out at any value: OpenIddict prunes only what is already expired or spent, so
+      # this governs how far back the token table can answer a forensic question — and `identity.login_attempt`
+      # plus the hash-chained audit store answer that better, for 6–7 years.
+      Issuer__TokenRetentionDays: "30"
       # 28.1 — how many proxies sit between the browser and this service. Kong alone today, so 1.
       #
       # Stated rather than defaulted, because it is the number the credential rate limiter counts back through

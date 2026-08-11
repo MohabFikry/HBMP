@@ -134,6 +134,62 @@ public class TestFixtureSweepTests(IdentityHostFixture host) : IClassFixture<Ide
         }
     }
 
+    /// <summary>
+    /// The tokens a swept account leaves behind — which outnumber the accounts by three orders of magnitude,
+    /// because `OpenIddictTokens.subject` is a plain string with no foreign key to the user it names.
+    /// </summary>
+    [SkippableFact]
+    public async Task It_removes_the_tokens_a_deleted_account_left_behind()
+    {
+        Skip.If(IdentityTestDb.Conn is null);
+        var name = $"sweeptokens-{Guid.NewGuid():N}";
+        var (id, _) = await TestFlow.SeedUser(host.Factory, name, "Test-Passw0rd!", ["reception"]);
+        await TestFlow.AuthCodeToken(host.Factory, name, "Test-Passw0rd!", null, "openid offline_access");
+
+        await using (var seeded = IdentityTestDb.NewContext())
+        {
+            (await Tokens(seeded, id.ToString())).Should().BeGreaterThan(0, "signing in mints tokens");
+        }
+
+        TestFixtureSweep.Run("a test");
+
+        await using var db = IdentityTestDb.NewContext();
+        (await db.Users.AsNoTracking().AnyAsync(u => u.Id == id)).Should().BeFalse();
+        (await Tokens(db, id.ToString())).Should().Be(0, "the account is gone, so its tokens name nobody");
+    }
+
+    /// <summary>
+    /// A client-credentials token carries the CLIENT id as its subject, so it is "not a user" and always will
+    /// be. Sweeping on unresolved-subject alone would delete live service tokens out from under a running
+    /// Compose stack — which is why the predicate also requires the subject to LOOK like a uuid.
+    /// </summary>
+    [SkippableFact]
+    public async Task It_leaves_a_service_token_alone_even_though_its_subject_is_not_a_user()
+    {
+        Skip.If(IdentityTestDb.Conn is null);
+        var client = host.Factory.CreateClient();
+        // The service client is narrowed to ServiceScopes (18.B1) — a background worker ingests events and
+        // rebuilds projections, it is never an admin — so asking for admin:read here would be refused for a
+        // reason this test is not about.
+        await TestFlow.ClientCredentialsToken(
+            client, IdentityContractRef.ServiceClientId, IdentityAppFactory.ServiceSecret,
+            "notification:ingest reporting:project");
+
+        await using var before = IdentityTestDb.NewContext();
+        var count = await Tokens(before, IdentityContractRef.ServiceClientId);
+        count.Should().BeGreaterThan(0, "the client-credentials grant mints a token row like any other");
+
+        TestFixtureSweep.Run("a test");
+
+        await using var after = IdentityTestDb.NewContext();
+        (await Tokens(after, IdentityContractRef.ServiceClientId)).Should().Be(count);
+    }
+
+    private static async Task<int> Tokens(Mersal.Identity.Infrastructure.IdentityStoreDbContext db, string subject) =>
+        await db.Database
+            .SqlQuery<int>($"""SELECT count(*)::int AS "Value" FROM identity."OpenIddictTokens" WHERE subject = {subject}""")
+            .SingleAsync();
+
     [Fact]
     public void It_is_a_no_op_rather_than_a_failure_when_there_is_no_database()
     {

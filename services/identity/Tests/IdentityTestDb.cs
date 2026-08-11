@@ -67,6 +67,15 @@ internal static class TestFixtureSweep
     private const string MintedRoleSuffix = "_[0-9a-f]{8,}$";
 
     /// <summary>
+    /// A subject that is a uuid — i.e. an account, rather than a client id.
+    ///
+    /// <para>The narrowing that keeps the orphan sweep safe: a client-credentials token carries the CLIENT
+    /// id as its subject, so it can never resolve to a user and an unresolved-subject rule on its own would
+    /// delete live service tokens out from under a running stack.</para>
+    /// </summary>
+    private const string UuidSubject = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$";
+
+    /// <summary>
     /// Delete every fixture account and every test-minted custom role, and report what went.
     ///
     /// <para>Raw SQL rather than EF: this runs before any host is built and must not depend on one, and the
@@ -113,11 +122,41 @@ internal static class TestFixtureSweep
         var accounts = db.Database.ExecuteSqlRaw(
             """DELETE FROM identity."user" WHERE email LIKE {0}""", $"%{TestEmailDomain}");
 
+        /*
+           THE TOKENS THOSE ACCOUNTS LEFT BEHIND, which outnumber the accounts by three orders of magnitude.
+
+           `OpenIddictTokens.subject` is a plain string — there is no foreign key to `identity."user"` — so
+           deleting a fixture account leaves every token it was ever issued sitting in the table with a
+           subject that resolves to nothing. Eighteen thousand of them had accumulated against seven leaked
+           accounts and every account the suite HAD cleaned up correctly, because the account cleanup was
+           never the part that was incomplete.
+
+           The predicate is narrower than "orphaned" on purpose. A subject must LOOK LIKE A UUID as well as
+           fail to resolve: a client-credentials token carries the CLIENT id as its subject, which is not a
+           user and never was, so the broader rule would delete live service tokens out from under a running
+           Compose stack. Deleting tokens before authorizations because the former has a foreign key to the
+           latter.
+        */
+        // `{0}` is the ONLY brace in these statements. The uuid pattern's own `{8}` / `{4}` / `{12}`
+        // quantifiers travel as the parameter VALUE — inlining them is what made the first version of this
+        // sweep throw `FormatException` out of `string.Format`, which is the same trap the role pattern
+        // above sprang.
+        const string OrphanedBySubject =
+            """
+             WHERE subject ~ {0}
+               AND NOT EXISTS (SELECT 1 FROM identity."user" u WHERE u.id::text = subject)
+            """;
+        var orphanTokens = db.Database.ExecuteSqlRaw(
+            $"""DELETE FROM identity."OpenIddictTokens" {OrphanedBySubject}""", UuidSubject);
+        var orphanAuthz = db.Database.ExecuteSqlRaw(
+            $"""DELETE FROM identity."OpenIddictAuthorizations" {OrphanedBySubject}""", UuidSubject);
+
         // Announced rather than silent. A routine that quietly deletes rows is one nobody can debug when it
         // deletes the wrong ones, and the counts are the only evidence a leak happened at all.
-        if (accounts + roles + scopes > 0)
+        if (accounts + roles + scopes + orphanTokens + orphanAuthz > 0)
             Console.Error.WriteLine(
-                $"[identity-tests] swept {when}: {accounts} fixture account(s), {roles} role(s), {scopes} role-scope grant(s)");
+                $"[identity-tests] swept {when}: {accounts} fixture account(s), {roles} role(s), "
+                + $"{scopes} role-scope grant(s), {orphanTokens} orphaned token(s), {orphanAuthz} orphaned authorization(s)");
     }
 }
 

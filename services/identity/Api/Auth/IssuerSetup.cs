@@ -144,6 +144,10 @@ public static class IssuerSetup
                 o.UseAspNetCore();
             });
 
+        // 28.11 — OpenIddict persists a row per artefact and prunes none of them by default. Its own pruning
+        // ships as a Quartz job; this is the same work as a plain hosted service, which keeps a scheduler and
+        // its tables out of a service that has no other scheduled work. See TokenPruner.
+        services.AddHostedService<TokenPruner>();
         services.AddHostedService<ClientSeeder>();
         services.AddHostedService<UserSeeder>(); // demo staff accounts (dev-only; 17.6 cutover)
         // Registered unconditionally, not behind the demo-seeding flag: a real deployment can provision a
