@@ -14,6 +14,10 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
     public DbSet<Appointment> Appointments => Set<Appointment>();
     public DbSet<AppointmentSlot> AppointmentSlots => Set<AppointmentSlot>();
     public DbSet<ProviderAvailability> ProviderAvailabilities => Set<ProviderAvailability>();
+    /// <summary>0025 — the append-only twin the trigger writes. Read-only from the application's side: the
+    /// only writer is the database, which is what makes it a record of what happened rather than of what
+    /// somebody remembered to log.</summary>
+    public DbSet<ProviderAvailabilityHistoryRow> ProviderAvailabilityHistory => Set<ProviderAvailabilityHistoryRow>();
     public DbSet<WaitlistEntry> WaitlistEntries => Set<WaitlistEntry>();
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
     public DbSet<EmrNote> Notes => Set<EmrNote>();
@@ -82,6 +86,14 @@ public sealed class EmrDbContext(DbContextOptions<EmrDbContext> options) : DbCon
             // Retired rules stay in the table — they are what produced the slots people are already booked
             // into — and out of every query, so nothing has to remember to exclude them.
             e.HasQueryFilter(x => !x.IsDeleted);
+        });
+
+        b.Entity<ProviderAvailabilityHistoryRow>(e =>
+        {
+            e.ToTable("provider_availability_history");
+            e.HasKey(x => x.HistoryId);
+            e.Property(x => x.HistoryId).ValueGeneratedOnAdd();
+            e.Property(x => x.RowSnapshot).HasColumnName("row_snapshot").HasColumnType("jsonb");
         });
 
         b.Entity<RosterException>(e =>

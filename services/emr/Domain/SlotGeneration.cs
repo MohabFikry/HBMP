@@ -80,24 +80,47 @@ public static class SlotGeneration
 
             var subtractive = applicable.Where(e => e.IsSubtractive).ToList();
 
+            // 0025 — the DAILY CAP, applied per date and across every window the date offers.
+            //
+            // Across, not per window: a doctor capped at twenty who has both a morning pattern and an ad-hoc
+            // afternoon clinic must still end the day at twenty. Applying it per window would silently double
+            // the cap on exactly the day somebody added extra capacity, which is the day it matters most.
+            //
+            // It is applied AFTER subtraction rather than before, and the order is load-bearing: a cap of
+            // twenty on a day when leave removes the afternoon should yield the morning's slots, not the first
+            // twenty of a session that is not happening.
+            var remainingToday = availability.MaxPerDay;
+            if (remainingToday is <= 0) continue;
+
             // A WHOLE-DAY subtraction removes the day outright — including any ad-hoc clinic on it. That
             // ordering is deliberate: if the clinic is shut, an extra session at a shut clinic is not a
             // session, and the alternative (ad-hoc wins) would let a stale ad-hoc row quietly reopen a branch
             // somebody closed.
             if (subtractive.Any(e => e.IsWholeDay)) continue;
 
+            // Earliest window first, so a cap fills the day from the start rather than from whichever order
+            // the ad-hoc rows happen to arrive in. A patient offered "the last two of the morning" and a
+            // patient offered "the first two" are being offered the same count and a different clinic.
+            windows.Sort((a, b) => a.Start.CompareTo(b.Start));
+
             foreach (var (windowStartTime, windowEndTime) in windows)
             {
+                if (remainingToday is 0) break;
+
                 var windowStart = new DateTimeOffset(date.ToDateTime(windowStartTime), offset);
                 var windowEnd = new DateTimeOffset(date.ToDateTime(windowEndTime), offset);
 
                 for (var start = windowStart; start + step <= windowEnd; start += step)
                 {
+                    if (remainingToday is 0) break;
+
                     var slotFrom = TimeOnly.FromDateTime(start.DateTime);
                     var slotTo = TimeOnly.FromDateTime((start + step).DateTime);
 
                     // OVERLAP, not containment: a slot half inside a leave window is not half-bookable.
                     if (subtractive.Any(e => e.Covers(slotFrom, slotTo))) continue;
+
+                    if (remainingToday is { } left) remainingToday = left - 1;
 
                     slots.Add(new AppointmentSlot
                     {
@@ -121,6 +144,31 @@ public static class SlotGeneration
             }
         }
         return slots;
+    }
+
+    /// <summary>
+    /// How many slots the WINDOW alone yields on a normal day, before any cap or exception. A trailing
+    /// partial remainder is dropped, matching <see cref="Generate"/>: a 09:00–11:20 window at thirty minutes
+    /// is four slots, not four and a stub nobody can be booked into.
+    /// </summary>
+    public static int WindowSlotCount(TimeOnly start, TimeOnly end, int slotMinutes)
+    {
+        if (slotMinutes <= 0 || end <= start) return 0;
+        return (int)((end - start).TotalMinutes / slotMinutes);
+    }
+
+    /// <summary>
+    /// How many are actually offered — the window's count, held down by the cap.
+    ///
+    /// <para>Both numbers are shown on the roster together, because "24 slots, capped at 20" is the sentence a
+    /// coordinator is trying to read. Showing only the window's count hides the cap; showing only the capped
+    /// count makes the session look shorter than it is, and someone widens the window wondering why it did
+    /// nothing.</para>
+    /// </summary>
+    public static int EffectiveSlotsPerDay(TimeOnly start, TimeOnly end, int slotMinutes, int? maxPerDay)
+    {
+        var fromWindow = WindowSlotCount(start, end, slotMinutes);
+        return maxPerDay is { } cap && cap < fromWindow ? cap : fromWindow;
     }
 
     /// <summary>

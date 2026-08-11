@@ -55,6 +55,38 @@ public static class AppointmentsModule
     private static ScopeMode BranchModeOf(IHbmpPrincipalAccessor me) =>
         me.Principal is null ? ScopeMode.MemberScoped : BranchScopeModes.ModeFor(me.Principal);
 
+    /// <summary>The RFC 7807 type for a booking refused by the practitioner's daily limit (0025).</summary>
+    public const string DailyCapacityProblemType = "urn:hbmp:daily-capacity-reached";
+
+    /// <summary>
+    /// The daily cap that applies to this appointment, or null when none does.
+    ///
+    /// <para>Looked up from the availability rule for (doctor, branch, that day's weekday) — the rule IS where
+    /// the cap is administered, so there is one number and one place to change it. A booking with no doctor,
+    /// no branch, or no rule for the day is uncapped, which is every appointment on the platform before 0025
+    /// and every clinic that has not set a limit.</para>
+    ///
+    /// <para>The weekday comes from the CLINIC's calendar, not from UTC. For the two to three hours each
+    /// evening when Cairo has rolled over and UTC has not, the two disagree — and picking the wrong one would
+    /// read Monday's cap for a Tuesday appointment.</para>
+    /// </summary>
+    private static async Task<DailyCapacityCheck?> DailyCapAsync(
+        EmrDbContext db, Appointment appt, CancellationToken ct)
+    {
+        if (appt.DoctorId is not { } doctorId) return null;
+
+        var clinicDate = ClinicDateOf(appt.ScheduledStart);
+        var cap = await db.ProviderAvailabilities.AsNoTracking()
+            .Where(a => a.DoctorId == doctorId
+                        && a.BranchId == appt.BranchId
+                        && a.DayOfWeek == clinicDate.DayOfWeek
+                        && a.MaxPerDay != null)
+            .Select(a => a.MaxPerDay)
+            .FirstOrDefaultAsync(ct);
+
+        return cap is { } c ? new DailyCapacityCheck(doctorId, clinicDate, c) : null;
+    }
+
     public static void MapAppointments(this WebApplication app)
     {
         // Desk writes: booking's own slot administration, plus the arrival decisions (check-in, no-show) that
@@ -508,6 +540,13 @@ public static class AppointmentsModule
             // fact, a crash held the slot with nothing downstream told: a patient booked into a slot
             // no board shows, and a referral marked scheduled that the referring clinician never sees.
             // The idempotent REPLAY path must not re-enqueue, which is why the guard is inside.
+            // 0025 — the practitioner's daily cap for the day this appointment lands on, if they have one.
+            //
+            // Resolved from the SETTLED appointment rather than from the request: the slot is authoritative
+            // for both the doctor and the time (see above), so reading req.DoctorId here would miss the cap
+            // whenever the caller named only a slot — which is how the call-centre façade books.
+            var capacity = await DailyCapAsync(db, appt, ct);
+
             var result = await booking.BookAsync(appt,
                 insideTransaction: async (b, c) =>
                 {
@@ -523,6 +562,7 @@ public static class AppointmentsModule
                         await outbox.EnqueueAsync("ReferralScheduled", "emr.events",
                             new { referralRef = r, appointmentId = b.AppointmentId }, c);
                 },
+                capacity,
                 ct);
             switch (result.Outcome)
             {
@@ -533,6 +573,19 @@ public static class AppointmentsModule
                     return Results.Problem(statusCode: 409, title: "Slot already booked", type: "urn:hbmp:slot-taken",
                         detail: "That slot was taken by another booking. Choose one of the next available slots.",
                         extensions: new Dictionary<string, object?> { ["nextSlots"] = next });
+                case BookOutcome.DailyCapacityReached:
+                    // The two numbers are in the message on purpose. "Fully booked" sends an operator looking
+                    // for a system fault; "18 of 18" sends them to another day, and tells them what the cap is
+                    // in case it is the cap that is wrong.
+                    return Results.Problem(statusCode: 409, title: "daily-capacity-reached",
+                        type: DailyCapacityProblemType,
+                        detail: $"This clinician is booked to capacity on {ClinicDateOf(appt.ScheduledStart):yyyy-MM-dd} " +
+                                $"({result.Booked} of {result.Cap}). Offer another day, or raise the daily limit on the roster.",
+                        extensions: new Dictionary<string, object?>
+                        {
+                            ["booked"] = result.Booked, ["cap"] = result.Cap,
+                            ["clinicDate"] = ClinicDateOf(appt.ScheduledStart).ToString("yyyy-MM-dd"),
+                        });
             }
 
             var booked = result.Appointment!;

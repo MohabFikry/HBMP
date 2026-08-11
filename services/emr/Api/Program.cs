@@ -299,6 +299,7 @@ v1.MapGet("/queue", async (EmrDbContext db, CancellationToken ct) =>
 
 app.MapAppointments();
 app.MapQueue();
+app.MapProviderAvailability();   // 0025 — the weekly pattern and its daily cap, as an administered record
 app.MapRosterExceptions();   // 25.4 — leave/holiday/closure/ad-hoc + the impact preview
 app.MapClinical();
 app.MapProfileContext();   // 20.2 — the seam the patient profile's PMH + encounters sections read
