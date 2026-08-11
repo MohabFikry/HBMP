@@ -23,6 +23,22 @@ same-origin by definition and is the default the code now ships. Only an explici
 fails, and it is compared against the app's own redirect URI, which is the one value that must stay absolute
 (the issuer matches `redirect_uri` byte-for-byte against the registered client).
 
+THE GITIGNORED FILES ARE CHECKED TOO, AND THAT IS THE POINT
+===========================================================
+This gate passed, every run, while a developer's own `apps/web/.env.local` held
+`VITE_OIDC_AUTHORITY=http://localhost:8090` — and sign-in answered "this is not a problem with your password"
+for exactly the reason described above. The gate inspected three COMMITTED files and the defect was in an
+untracked one, so the only configuration that actually reaches a running browser was the one configuration
+nobody checked.
+
+Local env files are therefore read when present, following Vite's own cascade (`.env` → `.env.local` →
+`.env.[mode]` → `.env.[mode].local`, later winning) and checked as the MERGED result, because that is what the
+bundle is built from. A partial `.env.local` that names only an authority is a real defect and a per-file
+check would miss it.
+
+They are OPTIONAL: absent in CI, where none of them exists, so this stays a committed-files gate there and
+becomes a local-configuration gate on the machine that has a local configuration.
+
 Run: python3 tools/ci/check-login-origin.py
 """
 from __future__ import annotations
@@ -83,12 +99,62 @@ def read_pairs(path: Path) -> dict[str, str]:
     return found
 
 
-def check(path: Path) -> list[str]:
-    pairs = read_pairs(path)
+WEB = ROOT / "apps" / "web"
+
+# Vite's env cascade, lowest precedence first. `.env.example` is excluded — it is documentation, checked on its
+# own above, and is not loaded by Vite.
+_GENERIC = re.compile(r"^\.env$")
+_GENERIC_LOCAL = re.compile(r"^\.env\.local$")
+_MODE = re.compile(r"^\.env\.([A-Za-z0-9_-]+)$")
+_MODE_LOCAL = re.compile(r"^\.env\.([A-Za-z0-9_-]+)\.local$")
+
+
+def local_env_cascades() -> dict[str, list[Path]]:
+    """Every env file Vite would load, grouped by mode and ordered lowest-precedence first.
+
+    A file like `.env.local.bak` matches nothing here on purpose: it is a backup, Vite never reads it, and
+    failing a build over a file the bundle cannot see would be a gate crying about the wrong thing.
+    """
+    if not WEB.is_dir():
+        return {}
+    names = {p.name for p in WEB.iterdir() if p.is_file()}
+    modes = {m.group(1) for n in names if (m := _MODE.match(n)) and m.group(1) not in ("local", "example")}
+    modes |= {m.group(1) for n in names if (m := _MODE_LOCAL.match(n))}
+
+    def chain(mode: str | None) -> list[Path]:
+        order = [".env", ".env.local"] + ([f".env.{mode}", f".env.{mode}.local"] if mode else [])
+        return [WEB / n for n in order if n in names]
+
+    cascades = {mode: chain(mode) for mode in sorted(modes)}
+    base = chain(None)
+    if base and not cascades:
+        cascades["(no mode)"] = base
+    return {k: v for k, v in cascades.items() if v}
+
+
+def merge(paths: list[Path]) -> tuple[dict[str, str], dict[str, Path]]:
+    """The effective values after the cascade, and which file supplied each — so the message names the file
+    somebody has to edit rather than the mode it was resolved under."""
+    values: dict[str, str] = {}
+    source: dict[str, Path] = {}
+    for path in paths:
+        for key, value in read_pairs(path).items():
+            values[key] = value
+            source[key] = path
+    return values, source
+
+
+def check_pairs(pairs: dict[str, str], label: str, source: dict[str, Path] | None = None) -> list[str]:
+    """The origin comparison itself, over an already-resolved set of values."""
     if not pairs:
         return []
 
-    rel = path.relative_to(ROOT)
+    def where(key: str) -> str:
+        if source and key in source:
+            return str(source[key].relative_to(ROOT))
+        return label
+
+    rel = label
     app = origin_of(pairs.get("VITE_OIDC_REDIRECT", ""))
     problems: list[str] = []
 
@@ -102,8 +168,8 @@ def check(path: Path) -> list[str]:
         declared = pairs.get("VITE_OIDC_REDIRECT", "").strip().strip('"').strip("'")
         if declared:
             problems.append(
-                f"{rel}: VITE_OIDC_REDIRECT is {declared!r} — it must be an ABSOLUTE URL, because the issuer "
-                "matches redirect_uri against the registered client exactly."
+                f"{where('VITE_OIDC_REDIRECT')}: VITE_OIDC_REDIRECT is {declared!r} — it must be an ABSOLUTE "
+                "URL, because the issuer matches redirect_uri against the registered client exactly."
             )
         return problems
 
@@ -113,11 +179,17 @@ def check(path: Path) -> list[str]:
         other = origin_of(pairs[key])
         if other is not None and other != app:
             problems.append(
-                f"{rel}: {key} is on {other} but the app is on {app}. The SPA, the API and the issuer must "
-                "share ONE origin (ADR-0036 §4) — the app's own proxy forwards /api, /connect, /.well-known "
-                f"and /identity to the gateway. Use a relative value, or {app}."
+                f"{where(key)}: {key} is on {other} but the app is on {app}. The SPA, the API and the issuer "
+                "must share ONE origin (ADR-0036 §4) — the app's own proxy forwards /api, /connect, "
+                f"/.well-known and /identity to the gateway. Use a relative value, or {app}."
             )
     return problems
+
+
+def check(path: Path) -> list[str]:
+    """One committed file, read on its own."""
+    pairs = read_pairs(path)
+    return check_pairs(pairs, str(path.relative_to(ROOT))) if pairs else []
 
 
 def main() -> int:
@@ -129,12 +201,24 @@ def main() -> int:
         problems.extend(check(path))
 
     if checked == 0:
-        # A gate that finds nothing to check is not passing; it has lost its subject.
+        # A gate that finds nothing to check is not passing; it has lost its subject. Only the COMMITTED files
+        # count here: the local ones are absent in CI by design, so requiring them would fail every CI run.
         print("login-origin gate: FAILED — none of the expected files declared any VITE_* origin. "
               "The values moved and this gate went quiet, which is the failure it exists to prevent.")
         return 1
 
-    print(f"login-origin gate: {checked} file(s) declare browser-facing origins")
+    # The local cascade, when there is one. This is the configuration a running browser is actually built
+    # from, and until 28.16 it was the only one nobody looked at.
+    local = 0
+    for mode, paths in local_env_cascades().items():
+        values, source = merge(paths)
+        if not values:
+            continue
+        local += 1
+        problems.extend(check_pairs(values, f"apps/web (mode {mode})", source))
+
+    print(f"login-origin gate: {checked} committed file(s) declare browser-facing origins"
+          + (f", plus {local} local env cascade(s)" if local else " (no local env files on this machine)"))
     if problems:
         print("login-origin gate: FAILED")
         for p in problems:
