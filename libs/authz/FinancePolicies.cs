@@ -84,6 +84,11 @@ public static class FinancePolicies
             RequiredConditions = [AbacConditions.TenantMatch],
             Sensitive = true,
         },
+        // The projection seam. Roleless on purpose and safe only because `finance:project` is `service_only`
+        // in the identity catalogue — the same pairing, and the same history, as `reporting:project`: the
+        // scope was person-holdable and granted to `finance`, so the role the cost report is about could
+        // write the cost facts it is built from. Revoked by identity 0039; the pairing is asserted by
+        // `ProjectionSeamTests`.
         new PolicyRule
         {
             Action = Project, ResourceType = Resource,

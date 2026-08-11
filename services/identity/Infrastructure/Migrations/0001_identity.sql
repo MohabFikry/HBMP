@@ -122,7 +122,7 @@ INSERT INTO identity.scope (name, domain, service_only) VALUES
     ('document:write','document',false),
     ('case:read','case',false), ('case:write','case',false), ('case:manage','case',false),
     ('finance:read','finance',false), ('finance:write','finance',false), ('finance:approve','finance',false),
-    ('finance:export','finance',false), ('finance:project','finance',false),
+    ('finance:export','finance',false), ('finance:project','finance',true),
     ('provider:read','provider',false), ('provider:write','provider',false), ('provider:finance','provider',false),
     -- 14.5 — the clinician PICKER only (who works at this branch, in which specialty). Not the provider
     -- directory, contracts, tariffs or tiers, and never a licence number. Booking filters on specialty then
@@ -132,7 +132,7 @@ INSERT INTO identity.scope (name, domain, service_only) VALUES
     ('callcentre:read','callcentre',false), ('callcentre:act','callcentre',false),
     ('callcentre:interaction','callcentre',false), ('callcentre:verify','callcentre',false),
     ('claims:read','claims',false), ('claims:reconcile','claims',false), ('claims:export','claims',false),
-    ('reporting:read','reporting',false), ('reporting:project','reporting',false), ('reporting:export','reporting',false),
+    ('reporting:read','reporting',false), ('reporting:project','reporting',true), ('reporting:export','reporting',false),
     ('notification:read','notification',false), ('notification:ingest','notification',true),
     ('audit:read','audit',false)
 ON CONFLICT (name) DO NOTHING;
@@ -173,7 +173,11 @@ SELECT rs.role, rs.scope FROM (VALUES
     ('beneficiary_mgmt','notification:read'),
 
     ('finance','finance:read'), ('finance','finance:write'), ('finance','finance:approve'),
-    ('finance','finance:export'), ('finance','finance:project'), ('finance','provider:finance'),
+    -- `finance:project` was here and is GONE — it is a machine seam, revoked and marked service_only by
+    -- 0039. Removed at the source as well as revoked there, because this file re-runs on every migration
+    -- pass: leaving the grant would have it re-inserted and re-deleted forever, and the trigger 0039
+    -- installs would abort this statement outright.
+    ('finance','finance:export'), ('finance','provider:finance'),
     ('finance','notification:read'),
 
     ('network_team','provider:read'), ('network_team','provider:write'),
@@ -205,7 +209,9 @@ SELECT rs.role, rs.scope FROM (VALUES
     ('medical_approval','auth:manual'), ('medical_approval','auth:emergency'),
     ('medical_approval','notification:read'),
 
-    ('medical_director','reporting:read'), ('medical_director','reporting:project'),
+    -- Same removal as `finance:project` above: `reporting:project` is the read-model write seam, and a
+    -- Medical Director holding it could author the facts their own oversight numbers are computed from.
+    ('medical_director','reporting:read'),
     ('medical_director','reporting:export'), ('medical_director','auth:read'),
     ('medical_director','notification:read'),
 
@@ -213,12 +219,12 @@ SELECT rs.role, rs.scope FROM (VALUES
     ('provider_admin','notification:read'),
 
     ('org_admin','admin:read'), ('org_admin','admin:write'), ('org_admin','policy:write'),
-    ('org_admin','reporting:read'), ('org_admin','reporting:project'), ('org_admin','reporting:export'),
+    ('org_admin','reporting:read'), ('org_admin','reporting:export'),
     ('org_admin','audit:read'), ('org_admin','notification:read'),
 
     ('super_admin','admin:read'), ('super_admin','admin:write'), ('super_admin','admin:break-glass'),
     ('super_admin','policy:write'), ('super_admin','auth:override'), ('super_admin','audit:read'),
-    ('super_admin','reporting:read'), ('super_admin','reporting:project'), ('super_admin','reporting:export'),
+    ('super_admin','reporting:read'), ('super_admin','reporting:export'),
     ('super_admin','notification:read')
 ) AS rs(role, scope)
 -- Conflict target left UNNAMED deliberately. This named `(role_name, scope_name)` — role_scope's primary key

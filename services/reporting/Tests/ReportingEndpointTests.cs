@@ -160,6 +160,36 @@ public sealed class ReportingApiFactory : WebApplicationFactory<Program>
     public HttpClient ManagerClient() => As("33333333-3333-3333-3333-333333333333", "manager",
         "reporting:read reporting:read-financial reporting:export reporting:project");
 
+    /// <summary>
+    /// The event relay: a scope and NO ROLE, which is what a client-credentials principal actually looks like.
+    ///
+    /// <para>Deliberately not built through <see cref="As"/>, which always attaches a role. The projection
+    /// rule names no roles precisely so this caller can satisfy it, and a test that exercised it as a person
+    /// would prove the seam works for the one principal it must never work for. <c>reporting:project</c> is
+    /// <c>service_only</c> in the identity catalogue, so no human token can carry this scope at all.</para>
+    /// </summary>
+    public HttpClient ProjectionClient()
+    {
+        var c = CreateClient();
+        c.DefaultRequestHeaders.Add("X-Test-Sub", "svc-projection-relay");
+        c.DefaultRequestHeaders.Add("X-Test-Scope", "reporting:project");
+        c.DefaultRequestHeaders.Add("X-Test-Tenant", Tenant);
+        // The MFA header is here under protest, and the reason is worth writing down.
+        //
+        // `ProtectedScopeRequiresMfa` is true for this service, and `MfaEvaluator` is satisfied only by an
+        // `acr`/`amr` a human interactive login produces. A client-credentials principal has neither, so the
+        // transport gate in front of this endpoint admits exactly the callers the authorization rule is
+        // trying to exclude and refuses the only one it exists for: a Medical Director signs in with MFA and
+        // passes it; the event relay cannot. The gate was pointing the wrong way round.
+        //
+        // Not fixed here. Exempting client credentials from MFA is a platform-wide change to
+        // ScopeAuthorizationHandler, and it would be a poor trade to make it for a seam whose production
+        // path is the queue consumer rather than HTTP at all. Recorded in the design notes instead; this
+        // header keeps the test about the handler's own rules rather than about the gate in front of it.
+        c.DefaultRequestHeaders.Add("X-Test-Mfa", "1");
+        return c;
+    }
+
     public HttpClient As(string sub, string role, string scopes)
     {
         var c = CreateClient();
@@ -169,6 +199,17 @@ public sealed class ReportingApiFactory : WebApplicationFactory<Program>
         c.DefaultRequestHeaders.Add("X-Test-Tenant", Tenant);
         c.DefaultRequestHeaders.Add("X-Test-Mfa", "1");
         return c;
+    }
+
+    /// <summary>Drop the facts and the dedupe rows one projection test created, so a rerun is not a replay.</summary>
+    public static async Task CleanupProjectionsAsync(string authNo)
+    {
+        if (Db is null) return;
+        await using var db = Ctx();
+        await db.Database.ExecuteSqlRawAsync(
+            "DELETE FROM reporting.processed_event pe USING reporting.authorization_fact af "
+            + "WHERE af.event_id = pe.event_id AND af.auth_no = {0};", authNo);
+        await db.Database.ExecuteSqlRawAsync("DELETE FROM reporting.authorization_fact WHERE auth_no = {0};", authNo);
     }
 
     public async Task CleanupAsync()

@@ -59,7 +59,21 @@ public static class ReportingPolicies
             Roles = Set("finance", "manager", "medical_director"), Scopes = Set("reporting:read-financial"),
             RequiredConditions = [AbacConditions.TenantMatch],
         },
-        // The projection seam — service identity holding the project scope.
+        // The projection seam — a service identity holding the project scope.
+        //
+        // NO ROLES, AND THAT IS LOAD-BEARING RATHER THAN AN OMISSION. `IAuthorizationEngine` reads an empty
+        // role set as "any authenticated principal holding the scope", which is right for a machine caller
+        // (the event relay authenticates as a client and carries no role at all, so naming one here would
+        // deny the only legitimate caller) and catastrophic for a human one. What makes it safe is the OTHER
+        // half of the pair: `reporting:project` is marked `service_only` in the identity scope catalogue, so
+        // no person can hold it — the role editor refuses to attach it and identity 0039 revoked the seeded
+        // grants that predated the rule.
+        //
+        // It did not used to be safe. The scope was `service_only = false` and granted to `medical_director`,
+        // which meant a Medical Director's own browser token authorized a write into the six fact tables
+        // their own turnaround, breach, no-show and cost figures are computed from. `ProjectionSeamTests`
+        // asserts the pairing now, for every rule in every bundle, so the two halves cannot drift apart
+        // again — a roleless rule over a person-holdable scope fails the build.
         new PolicyRule
         {
             Action = Project, ResourceType = Resource,

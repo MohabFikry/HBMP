@@ -194,12 +194,34 @@ public static class FinanceEndpoints
         .Produces<byte[]>(StatusCodes.Status200OK, contentType: "text/csv");
 
         // --- Projection seam (system) ----------------------------------------------------------------------
+        //
+        // The same pairing as reporting's: the policy rule names no roles, which is right for a client
+        // credential and wrong for a person, so `finance:project` is `service_only` in the identity
+        // catalogue (identity 0039) and the `finance` role's seeded grant is revoked. The tenant comes from
+        // the principal, not the body, so a caller cannot write cost facts into another tenant's ledger.
         v1.MapPost("/projections", async (ProjectRequest req, FinanceDeps deps, FinanceEventProjector projector, CancellationToken ct) =>
         {
             var denied = await deps.Gate.CheckAsync(FinancePolicies.Project, ct);
             if (denied is not null) return denied;
+
+            if (!string.IsNullOrWhiteSpace(req.TenantId) && !string.Equals(req.TenantId, deps.Tenant, StringComparison.Ordinal))
+                return Unprocessable("tenant-mismatch",
+                    "A projection may only be written for the tenant the caller is authenticated for.");
+
             var handled = await projector.ProjectAsync(
-                new FinanceEvent(req.EventId, req.EventType, req.TenantId, req.Fields, req.OccurredAt), ct);
+                new FinanceEvent(req.EventId, req.EventType, deps.Tenant, req.Fields, req.OccurredAt), ct);
+
+            // Audited for the same reason reporting's is: a cost fact nobody can trace is a number on a
+            // finance report with no provenance.
+            await deps.Audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "finance_projection", EntityId = req.EventId.ToString(), Action = AuditAction.Create,
+                ActorUserId = deps.Subject, ActorRole = deps.Roles, TenantId = deps.Tenant,
+                DecisionReasonCode = req.EventType,
+                AfterState = handled ? "projected" : "deduplicated",
+                Severity = AuditSeverity.Notice,
+            }, ct);
+
             return Results.Ok(new { handled });
         }).RequireAuthorization(HbmpPolicies.Scope("finance:project"));
     }

@@ -151,13 +151,41 @@ public static class ReportsEndpoints
             .Produces<ExecutiveDashboard>();
 
         // ── System projection seam ───────────────────────────────────────────────────────────────────────
+        // A MACHINE seam, and the only write in this service. `ProjectionConsumer` is the production path;
+        // this endpoint has no caller in the repository and is kept as the synchronous seam the projection
+        // tests and a replay would use.
+        //
+        // Two things guard it that did not before. `reporting:project` is `service_only` in the identity
+        // catalogue (identity 0039), so no person can hold it — the policy rule names no roles, which is
+        // correct for a client credential and was catastrophic while a Medical Director could hold the scope.
+        // And the tenant now comes from the PRINCIPAL rather than the body: the gate's TenantMatch is
+        // evaluated against a resource built from the caller's own principal, so it was vacuous here, and a
+        // caller authenticated for one tenant could write facts into another's dashboard.
         v1.MapPost("/projections", async (ProjectionRequest req, ReportContext cx, CancellationToken ct) =>
         {
             var denied = await cx.Gate.CheckAsync(ReportingPolicies.Project, ct);
             if (denied is not null) return denied;
-            var ev = new ReportingEvent(req.EventId, req.EventType, req.TenantId, req.Fields ?? [],
+
+            if (!string.IsNullOrWhiteSpace(req.TenantId) && !string.Equals(req.TenantId, cx.Tenant, StringComparison.Ordinal))
+                return Results.Problem(statusCode: 400, title: "tenant-mismatch", type: "urn:hbmp:validation",
+                    detail: "A projection may only be written for the tenant the caller is authenticated for.");
+
+            var ev = new ReportingEvent(req.EventId, req.EventType, cx.Tenant, req.Fields ?? [],
                 req.OccurredAt ?? cx.Clock.GetUtcNow());
             var projected = await cx.Projector.ProjectAsync(ev, ct);
+
+            // Every write into the read model is audited, because the read model is what this platform's
+            // oversight is MADE of. An unaudited write here is a figure on a supervisor's dashboard with no
+            // record of where it came from, and the dashboard offers no way to tell.
+            await cx.Audit.EmitAsync(new AuditEventDraft
+            {
+                EntityType = "reporting_projection", EntityId = req.EventId.ToString(), Action = AuditAction.Create,
+                ActorUserId = cx.Me.Principal?.Subject, TenantId = cx.Tenant,
+                DecisionReasonCode = req.EventType,
+                AfterState = projected ? "projected" : "deduplicated",
+                Severity = AuditSeverity.Notice,
+            }, ct);
+
             return Results.Ok(new { projected });
         }).RequireAuthorization(HbmpPolicies.Scope("reporting:project"));
     }
