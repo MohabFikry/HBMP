@@ -15,7 +15,7 @@ import { initials } from "./AppUserButton";
  * side, on the same screen. Two sources of truth for one fact, disagreeing in the most visible place
  * possible.
  *
- * Everything now reads from the module-level map below and re-renders together through
+ * Everything now reads from the single store below and re-renders together through
  * `useSyncExternalStore`. `invalidateStaffPhoto` is the only way a photo changes, and when it fires every
  * avatar for that person changes at once because there is only one value for them to read.
  *
@@ -37,12 +37,34 @@ import { initials } from "./AppUserButton";
  * towards the stricter ones or, far worse, the other way.
  */
 
-/** userId → object url, or null for "fetched, and there is no photo". */
-const photos = new Map<string, string | null>();
-/** Which ids have been asked about at all — `null` in `photos` means "no photo", not "not yet asked". */
-const fetched = new Set<string>();
-const inFlight = new Set<string>();
-const listeners = new Set<() => void>();
+/**
+ * The store, parked on `globalThis` so it SURVIVES a hot reload.
+ *
+ * <p>This is not defensive tidiness, it is the bug that made a photo change look like it needed a refresh.
+ * Module-level state and Vite HMR do not mix: when this module is hot-replaced, its `listeners` set is
+ * recreated empty while the components already on screen are still subscribed to the OLD one — so
+ * `invalidateStaffPhoto` notifies nobody, and only a full reload puts the two back in the same module. Keying
+ * the store off `globalThis` means re-evaluation finds the SAME maps and the same listener set, which is the
+ * property the whole "one source of truth" claim rests on.</p>
+ *
+ * <p>Harmless in production, where a module is evaluated once.</p>
+ */
+interface PhotoStore {
+  /** userId → object url, or null for "fetched, and there is no photo". */
+  photos: Map<string, string | null>;
+  /** Which ids have been asked about at all — `null` in `photos` means "no photo", not "not yet asked". */
+  fetched: Set<string>;
+  inFlight: Set<string>;
+  listeners: Set<() => void>;
+}
+const g = globalThis as unknown as { __mersalStaffPhotos?: PhotoStore };
+const store: PhotoStore = (g.__mersalStaffPhotos ??= {
+  photos: new Map(),
+  fetched: new Set(),
+  inFlight: new Set(),
+  listeners: new Set(),
+});
+const { photos, fetched, inFlight, listeners } = store;
 
 function emit() {
   for (const l of listeners) l();
@@ -61,12 +83,12 @@ function subscribe(l: () => void) {
  * their picture would keep seeing the old one for five minutes and conclude it had not worked.</p>
  */
 export function invalidateStaffPhoto(userId: string): void {
-  const old = photos.get(userId);
-  if (old) URL.revokeObjectURL(old);
-  photos.delete(userId);
+  // The CURRENT picture stays on screen until the replacement arrives. Clearing first would blank every
+  // avatar to initials for the length of a round trip on every upload — a flash that reads as the photo
+  // having been deleted, immediately after somebody chose one.
   fetched.delete(userId);
   inFlight.delete(userId);
-  emit();
+  void load(userId);
 }
 
 /** Drop every cached face. Called on sign-out — the next person in this tab inherits nothing. */
@@ -90,7 +112,11 @@ async function load(userId: string): Promise<void> {
     );
     // 404 is the ordinary answer for somebody who has not set one. Initials are a complete response, so
     // there is nothing to report to the operator here or on a network failure.
-    photos.set(userId, res.ok ? URL.createObjectURL(await res.blob()) : null);
+    const next = res.ok ? URL.createObjectURL(await res.blob()) : null;
+    // Revoked AFTER the replacement is in hand, so there is never a frame pointing at a dead url.
+    const old = photos.get(userId);
+    photos.set(userId, next);
+    if (old && old !== next) URL.revokeObjectURL(old);
   } catch {
     photos.set(userId, null);
   } finally {
