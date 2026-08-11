@@ -31,10 +31,18 @@ public sealed class DashboardBuilder(ReportQueries q, TimeProvider clock)
         ["director"] = ["approval-tat-trend", "pending-approvals-gauge", "clinic-workload-bars", "no-show-trend",
                         "rejected-request-breakdown", "utilization-by-provider", "top-diagnoses", "top-medications",
                         "financial-summary"],
-        // Money and the things that move it. No clinical codes: the finance role cannot read that zone at
-        // all, so listing them here would be a promise the authorization layer refuses.
+        /*
+         * Money first, and then everything else finance may already see.
+         *
+         * ORDERING, NOT REMOVAL, and the distinction is deliberate. The finance dashboard is outside the
+         * scope of the 2026-08-11 oversight audit, and dropping widgets a finance officer opens every
+         * morning would be a behaviour change nobody asked for — so every operational key is listed, just
+         * behind the cost ones. The two clinical keys are absent because the finance role cannot read that
+         * zone at all: the zone check above already excludes them, and listing them would be a promise the
+         * authorization layer refuses.
+         */
         ["finance"] = ["financial-summary", "utilization-by-provider", "rejected-request-breakdown",
-                       "clinic-workload-bars"],
+                       "approval-tat-trend", "pending-approvals-gauge", "clinic-workload-bars", "no-show-trend"],
     };
 
     /// <summary>Build the dashboard for the zones the caller may read, narrowed to what their scope is about.</summary>
